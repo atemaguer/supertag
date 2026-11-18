@@ -232,16 +232,22 @@ pub(crate) fn lane_requirement(
             .iter()
             .any(|action| action == "commands:execute"))
     .then(|| {
+        let label = match harness {
+            HarnessKind::ClaudeCode => "Claude Code",
+            HarnessKind::Opencode => "OpenCode",
+            _ => "Cursor",
+        };
         (
             "unsandboxed-commands".into(),
-            format!(
-                "{} runs commands without a sandbox, and no bound Worker Host allows it; add {name} to allow-unsandboxed-commands in a Worker Host's supertag.yaml service, or remove commands:execute",
-                match harness {
-                    HarnessKind::ClaudeCode => "Claude Code",
-                    HarnessKind::Opencode => "OpenCode",
-                    _ => "Cursor",
-                }
-            ),
+            if harness == HarnessKind::Opencode {
+                format!(
+                    "{label} runs commands without a sandbox, and no bound Worker Host allows it; add {name} to allow-unsandboxed-commands in a Worker Host's supertag.yaml service, or remove commands:execute"
+                )
+            } else {
+                format!(
+                    "{label} runs commands without a sandbox, and no bound Worker Host runs them in one; set environment: local-vm on a Worker Host's supertag.yaml service to run them in a container, add {name} to its allow-unsandboxed-commands, or remove commands:execute"
+                )
+            },
         )
     })
 }

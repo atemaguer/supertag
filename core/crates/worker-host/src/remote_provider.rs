@@ -80,7 +80,33 @@ pub enum ProviderAuthority {
     /// An operator's own provider (`--workspace-provider`): exactly the named Worker Host
     /// variables pass through, as `(name, value)`, and nothing else.
     Generic { variables: Vec<(String, String)> },
+    /// The `local-vm` environment: containers on this machine's own runtime. `settings` are the
+    /// provider's `SUPERTAG_LOCAL_VM_*` variables; `runtime_variables` are the ones the runtime's
+    /// CLI reads to find its daemon, as `(name, value)`.
+    LocalVm {
+        settings: Vec<(String, String)>,
+        runtime_variables: Vec<(String, String)>,
+    },
 }
+
+/// The settings the local-vm provider reads, besides the runtime's own variables.
+const LOCAL_VM_SETTINGS: [&str; 4] = [
+    "SUPERTAG_LOCAL_VM_RUNTIME",
+    "SUPERTAG_LOCAL_VM_IMAGE",
+    "SUPERTAG_LOCAL_VM_USER",
+    "SUPERTAG_LOCAL_VM_MEMORY",
+];
+
+/// What a container runtime's CLI reads to find its daemon and its own configuration. Never
+/// `DOCKER_DEFAULT_PLATFORM`: the provider runs the host's own platform, never an emulated one.
+const LOCAL_VM_RUNTIME_VARIABLES: [&str; 6] = [
+    "HOME",
+    "DOCKER_HOST",
+    "DOCKER_CONTEXT",
+    "DOCKER_CONFIG",
+    "CONTAINER_HOST",
+    "XDG_RUNTIME_DIR",
+];
 
 impl ProviderAuthority {
     /// An operator's own provider, given exactly the Worker Host variables `names`, read now. A
@@ -116,10 +142,38 @@ impl ProviderAuthority {
         }
         Ok(Self::Generic { variables })
     }
+
+    /// Every variable the local-vm provider reads, so a supervisor can pass them to its host.
+    pub fn local_vm_variables() -> impl Iterator<Item = &'static str> {
+        LOCAL_VM_SETTINGS
+            .into_iter()
+            .chain(LOCAL_VM_RUNTIME_VARIABLES)
+            .filter(|name| *name != "HOME")
+    }
+
+    /// The `local-vm` environment, read from this Worker Host's environment now.
+    pub fn local_vm() -> Self {
+        let read = |names: &[&str]| {
+            names
+                .iter()
+                .filter_map(|name| {
+                    std::env::var(name)
+                        .ok()
+                        .filter(|value| !value.is_empty())
+                        .map(|value| ((*name).to_owned(), value))
+                })
+                .collect()
+        };
+        Self::LocalVm {
+            settings: read(&LOCAL_VM_SETTINGS),
+            runtime_variables: read(&LOCAL_VM_RUNTIME_VARIABLES),
+        }
+    }
 }
 
 impl ProviderConfig {
-    /// Whether SuperTag has verified this provider: E2B and Modal are, an operator's own is not.
+    /// Whether SuperTag has verified this provider: E2B, Modal, and local-vm are, an operator's own
+    /// is not.
     pub fn verified(&self) -> bool {
         !matches!(self.authority, ProviderAuthority::Generic { .. })
     }
@@ -130,6 +184,15 @@ impl ProviderConfig {
             ProviderAuthority::E2b { .. } => "E2B",
             ProviderAuthority::Modal { .. } => "Modal",
             ProviderAuthority::Generic { .. } => "Workspace provider",
+            ProviderAuthority::LocalVm { .. } => "local-vm",
+        }
+    }
+
+    /// How long a fresh allocation may take: local-vm builds its base image on the first one.
+    fn allocate_timeout(&self) -> Duration {
+        match self.authority {
+            ProviderAuthority::LocalVm { .. } => BUILD_TIMEOUT,
+            _ => ALLOCATE_TIMEOUT,
         }
     }
 
@@ -143,6 +206,7 @@ impl ProviderConfig {
             ProviderAuthority::Generic { .. } => {
                 b"supertag-workspace-provider-authority-v1\0".as_slice()
             }
+            ProviderAuthority::LocalVm { .. } => b"supertag-local-vm-authority-v1\0".as_slice(),
         });
         let mut add = |value: &[u8]| {
             hash.update((value.len() as u64).to_be_bytes());
@@ -175,6 +239,23 @@ impl ProviderConfig {
             ProviderAuthority::Generic { variables } => {
                 add(&(variables.len() as u64).to_be_bytes());
                 for (name, value) in variables {
+                    add(name.as_bytes());
+                    add(value.as_bytes());
+                }
+            }
+            // The runtime and the daemon it reaches; the image, user, and memory may change
+            // without losing the containers already running.
+            ProviderAuthority::LocalVm {
+                settings,
+                runtime_variables,
+            } => {
+                let runtime = settings
+                    .iter()
+                    .find(|(name, _)| name == "SUPERTAG_LOCAL_VM_RUNTIME")
+                    .map_or("docker", |(_, value)| value.as_str());
+                add(runtime.as_bytes());
+                add(&(runtime_variables.len() as u64).to_be_bytes());
+                for (name, value) in runtime_variables {
                     add(name.as_bytes());
                     add(value.as_bytes());
                 }
@@ -227,14 +308,72 @@ impl ProviderConfig {
             ProviderAuthority::Generic { variables } => {
                 command.envs(variables.iter().map(|(name, value)| (name, value)));
             }
+            ProviderAuthority::LocalVm {
+                settings,
+                runtime_variables,
+            } => {
+                command.envs(
+                    settings
+                        .iter()
+                        .chain(runtime_variables)
+                        .map(|(name, value)| (name, value)),
+                );
+            }
         }
     }
+}
+
+/// The prefix of a provider's progress line, the only standard error the Worker Host logs.
+const PROGRESS_PREFIX: &[u8] = b"supertag-progress: ";
+const MAX_PROGRESS_LINE: usize = 512;
+
+/// Logs a provider's progress lines, such as an image build, and drains the rest of its standard
+/// error so a chatty provider never blocks.
+fn log_progress(label: &'static str, stderr: tokio::process::ChildStderr) {
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr);
+        let mut line = Vec::new();
+        loop {
+            line.clear();
+            let Ok(read) = (&mut reader)
+                .take(MAX_PROGRESS_LINE as u64 + 1)
+                .read_until(b'\n', &mut line)
+                .await
+            else {
+                return;
+            };
+            if read == 0 {
+                return;
+            }
+            let complete = line.last() == Some(&b'\n');
+            if complete && let Some(text) = line[..line.len() - 1].strip_prefix(PROGRESS_PREFIX) {
+                let text: String = String::from_utf8_lossy(text)
+                    .chars()
+                    .filter(|character| !character.is_control())
+                    .collect();
+                tracing::info!("{label} Workspace provider: {text}");
+            }
+            // The rest of an overlong line is discarded up to its end.
+            while !complete && line.last() != Some(&b'\n') {
+                line.clear();
+                match (&mut reader)
+                    .take(MAX_PROGRESS_LINE as u64)
+                    .read_until(b'\n', &mut line)
+                    .await
+                {
+                    Ok(0) | Err(_) => return,
+                    Ok(_) => {}
+                }
+            }
+        }
+    });
 }
 
 pub(crate) struct RemoteProvider {
     child: Option<Child>,
     channel: Channel,
     token: String,
+    allocate_timeout: Duration,
 }
 
 impl RemoteProvider {
@@ -280,12 +419,15 @@ impl RemoteProvider {
             .env("TMPDIR", scratch)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .kill_on_drop(true);
         config.configure_environment(&mut command);
         let mut child = command
             .spawn()
             .context("provider process could not start")?;
+        if let Some(stderr) = child.stderr.take() {
+            log_progress(config.label(), stderr);
+        }
         let startup = bounded(START_TIMEOUT, cancel, async {
             let mut input = child
                 .stdin
@@ -317,6 +459,7 @@ impl RemoteProvider {
                 child: Some(child),
                 channel,
                 token,
+                allocate_timeout: config.allocate_timeout(),
             }),
             Err(error) => {
                 reap(&mut child)
@@ -377,7 +520,7 @@ impl RemoteProvider {
         {
             BUILD_TIMEOUT
         } else {
-            ALLOCATE_TIMEOUT
+            self.allocate_timeout
         };
         bounded(deadline, cancel, async {
             let response = self
@@ -1131,6 +1274,70 @@ mod tests {
         ] {
             assert!(ProviderAuthority::generic(&refused).is_err(), "{refused:?}");
         }
+    }
+
+    #[test]
+    fn local_vm_passes_only_its_settings_and_binds_the_runtime_it_reaches() {
+        let config = |settings: &[(&str, &str)], runtime: &[(&str, &str)]| ProviderConfig {
+            executable: "/fixture/node".into(),
+            arguments: vec!["main.js".into()],
+            authority: ProviderAuthority::LocalVm {
+                settings: settings
+                    .iter()
+                    .map(|(name, value)| ((*name).into(), (*value).into()))
+                    .collect(),
+                runtime_variables: runtime
+                    .iter()
+                    .map(|(name, value)| ((*name).into(), (*value).into()))
+                    .collect(),
+            },
+        };
+        let local = config(
+            &[("SUPERTAG_LOCAL_VM_IMAGE", "first:1")],
+            &[("HOME", "/home/a"), ("DOCKER_HOST", "unix:///a.sock")],
+        );
+        assert!(local.verified());
+        assert_eq!(local.label(), "local-vm");
+        assert_eq!(local.allocate_timeout(), BUILD_TIMEOUT);
+        let mut command = Command::new("/bin/true");
+        command.env_clear();
+        local.configure_environment(&mut command);
+        let passed: Vec<_> = command
+            .as_std()
+            .get_envs()
+            .map(|(name, _)| name.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(passed, ["DOCKER_HOST", "HOME", "SUPERTAG_LOCAL_VM_IMAGE"]);
+        // Another image is the same authority; another daemon or runtime is not.
+        let scope = local.authority_fingerprint();
+        assert_eq!(
+            config(
+                &[("SUPERTAG_LOCAL_VM_IMAGE", "second:2")],
+                &[("HOME", "/home/a"), ("DOCKER_HOST", "unix:///a.sock")],
+            )
+            .authority_fingerprint(),
+            scope
+        );
+        assert_ne!(
+            config(
+                &[],
+                &[("HOME", "/home/a"), ("DOCKER_HOST", "unix:///b.sock")]
+            )
+            .authority_fingerprint(),
+            scope
+        );
+        assert_ne!(
+            config(
+                &[("SUPERTAG_LOCAL_VM_RUNTIME", "podman")],
+                &[("HOME", "/home/a"), ("DOCKER_HOST", "unix:///a.sock")],
+            )
+            .authority_fingerprint(),
+            scope
+        );
+        // The platform is always the host's own: an emulated one is never passed through.
+        assert!(
+            ProviderAuthority::local_vm_variables().all(|name| name != "DOCKER_DEFAULT_PLATFORM")
+        );
     }
 
     #[test]

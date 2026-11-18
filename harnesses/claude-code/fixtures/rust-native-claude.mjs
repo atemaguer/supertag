@@ -892,6 +892,19 @@ async function turn(message) {
       text: written.content[0]?.text,
     });
   }
+  if (prompt === "local-vm-command") {
+    // A local-vm container: the command reports who and where it ran, through the workspace server.
+    const input = {
+      command:
+        "{ id -u; uname -s; ls /sys/class/net; } > command-output.txt; cat command-output.txt",
+    };
+    const metadata = { mcp_server: { name: "workspace", source: "sdk" } };
+    if (!(await hook("mcp__workspace__command", input, metadata)))
+      throw new Error("Admitted workspace command was denied");
+    const called = (await sdkMcp("tools/call", { name: "command", arguments: input }, "workspace"))
+      .result;
+    result = JSON.stringify({ text: called.content[0].text, isError: called.isError });
+  }
   if (prompt === "run-command") {
     // Claude Code's Bash runs as the host user; the fixture runs the admitted command the same way.
     const command = "echo ran > command-output.txt";

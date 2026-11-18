@@ -1116,8 +1116,10 @@ impl Store {
         };
         *claimed_scope = Some(scope.clone());
         let sticky = self.live.claims.sticky(&host.principal, now);
+        let sandboxed = self.live.claims.sandboxed();
         let Some((id, attempt_execution)) =
-            authority::claim_candidate(&mut transaction, now, &scope, &sticky).await?
+            authority::claim_candidate(&mut transaction, now, &scope, (&sticky, &sandboxed))
+                .await?
         else {
             // Commit maintenance transitions. An empty poll retains no claim receipt.
             transaction.commit().await?;

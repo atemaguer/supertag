@@ -2340,6 +2340,15 @@ Options:
       --workspace-provider-env <NAME>
           A Worker Host variable passed to your own sandbox provider, such as its API key. Repeat for more; no other variable reaches it
 
+      --local-vm
+          Run each Task's commands and file tools in a container on this machine's Docker or Podman, through the installed local-vm provider
+
+      --local-vm-workspace-provider <LOCAL_VM_WORKSPACE_PROVIDER>
+          Executable for the local-vm provider instead of the installed one, such as Node from a source checkout
+
+      --local-vm-workspace-provider-arg <LOCAL_VM_WORKSPACE_PROVIDER_ARG>
+          Argument to the local-vm provider executable, such as its entrypoint
+
       --mcp-catalog <MCP_CATALOG>
           Owner-only JSON catalog of HTTP and stdio MCP tools for Claude Code Tasks.
           

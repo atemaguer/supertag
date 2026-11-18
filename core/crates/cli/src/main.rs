@@ -528,10 +528,29 @@ enum Command {
         /// A Worker Host variable passed to your own sandbox provider, such as its API key. Repeat for more; no other variable reaches it.
         #[arg(long, requires = "workspace_provider", value_name = "NAME")]
         workspace_provider_env: Vec<String>,
+        /// Run each Task's commands and file tools in a container on this machine's Docker or Podman, through the installed local-vm provider.
+        #[arg(
+            long,
+            conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider", "workspace_provider"]
+        )]
+        local_vm: bool,
+        /// Executable for the local-vm provider instead of the installed one, such as Node from a source checkout.
+        #[arg(
+            long,
+            conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider", "workspace_provider", "local_vm"]
+        )]
+        local_vm_workspace_provider: Option<PathBuf>,
+        /// Argument to the local-vm provider executable, such as its entrypoint.
+        #[arg(
+            long,
+            requires = "local_vm_workspace_provider",
+            allow_hyphen_values = true
+        )]
+        local_vm_workspace_provider_arg: Vec<std::ffi::OsString>,
         /// Owner-only JSON catalog of HTTP and stdio MCP tools for Claude Code Tasks.
         #[arg(
             long,
-            conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider", "workspace_provider"],
+            conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider", "workspace_provider", "local_vm", "local_vm_workspace_provider"],
             long_help = r#"Owner-only JSON catalog of HTTP and stdio MCP tools for Claude Code Tasks.
 
 Use {"version":1,"servers":[{"name":"catalog","url":"https://example.com/mcp","headerEnv":{"Authorization":"CATALOG_AUTH"}}]}. Set CATALOG_AUTH to the full header value in the Worker Host environment, or use "headerFile":{"Authorization":"/PATH"} to read it from a file. An HTTP server with "oauth":true instead uses the login `supertag mcp login NAME --mcp-catalog PATH` stores on this host.
@@ -550,7 +569,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         )]
         mcp_catalog: Option<PathBuf>,
         /// gRPC origin of a standalone shared execution provider for Cursor.
-        #[arg(long, requires = "shared_execution_environment", conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider", "workspace_provider", "mcp_catalog", "workspace_id", "allow_unsandboxed_commands"])]
+        #[arg(long, requires = "shared_execution_environment", conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider", "workspace_provider", "local_vm", "local_vm_workspace_provider", "mcp_catalog", "workspace_id", "allow_unsandboxed_commands"])]
         shared_execution_endpoint: Option<String>,
         /// Environment ID expected from the provider. Set SUPERTAG_EXECUTION_ADMIN_TOKEN separately.
         #[arg(long, requires = "shared_execution_endpoint")]
@@ -1125,6 +1144,9 @@ async fn run(command: Command) -> Result<()> {
             workspace_provider,
             workspace_provider_arg,
             workspace_provider_env,
+            local_vm,
+            local_vm_workspace_provider,
+            local_vm_workspace_provider_arg,
             mcp_catalog,
             shared_execution_endpoint,
             shared_execution_environment,
@@ -1210,6 +1232,19 @@ async fn run(command: Command) -> Result<()> {
                     executable,
                     arguments: workspace_provider_arg,
                     authority: ProviderAuthority::generic(&workspace_provider_env)?,
+                })
+            } else if let Some(executable) = local_vm_workspace_provider {
+                Some(ProviderConfig {
+                    executable,
+                    arguments: local_vm_workspace_provider_arg,
+                    authority: ProviderAuthority::local_vm(),
+                })
+            } else if local_vm {
+                let (executable, entry) = harness::local_vm_bridge()?;
+                Some(ProviderConfig {
+                    executable,
+                    arguments: vec![entry.into_os_string()],
+                    authority: ProviderAuthority::local_vm(),
                 })
             } else {
                 None

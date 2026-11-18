@@ -1118,6 +1118,12 @@ impl ManagedHost {
         {
             host.arg("--skill-catalog").arg(path);
         }
+        if self.definition.local_vm {
+            let names: Vec<&str> =
+                supertag_worker_host::ProviderAuthority::local_vm_variables().collect();
+            host.arg("--local-vm")
+                .envs(self.environment.selected(names.iter().copied()));
+        }
         // Only this lane's harness credentials, from the shell or env_file. Service tokens and
         // other harnesses' credentials never reach the lane or its harness children.
         host.envs(

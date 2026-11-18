@@ -32,6 +32,8 @@ PACKAGES = {
     "local-vm": "@supertag/worker-environment-local-vm",
 }
 HARNESS_BRIDGES = {"claude-code", "cursor", "opencode"}
+# The installed CLI starts these itself, so the manifest names them; the others need a path.
+MANIFEST_BRIDGES = HARNESS_BRIDGES | {"local-vm"}
 STARTUP_ERRORS = {
     "claude-code": "Claude adapter could not complete its execution safely.",
     "cursor": "Cursor adapter could not complete its execution safely.",
@@ -214,7 +216,7 @@ def stage_workspace(output, kinds, repo, env=None):
             smoke_entry(node, kind, target)
         manifest = {"format": FORMAT, "version": version_from_repo(repo), "protocol": PROTOCOL,
                     "platform": platform, "node_major": NODE_MAJOR,
-                    "bridges": [kind for kind in selected if kind in HARNESS_BRIDGES]}
+                    "bridges": [kind for kind in selected if kind in MANIFEST_BRIDGES]}
         (staging / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         require(not output.exists(), "Node bridge output already exists")
         staging.rename(output)

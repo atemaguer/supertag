@@ -585,6 +585,13 @@ impl AdapterOptions {
     }
 }
 
+/// The packaged local-vm Workspace provider: its Node runtime and entry.
+pub fn local_vm_bridge() -> Result<(PathBuf, PathBuf)> {
+    node_adapter(NodeBridge::LocalVm, None, None, || {
+        std::env::current_exe().context("locate installed SuperTag executable")
+    })
+}
+
 /// The packaged Cursor bridge: its Node runtime and adapter entry.
 pub fn cursor_bridge() -> Result<(PathBuf, PathBuf)> {
     node_adapter(NodeBridge::Cursor, None, None, || {

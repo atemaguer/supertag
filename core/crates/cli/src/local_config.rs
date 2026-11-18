@@ -111,6 +111,10 @@ enum Service {
         /// it there directly.
         #[serde(default)]
         volumes: BTreeMap<String, PathBuf>,
+        /// Where Tasks' commands and file tools run: `local-vm` runs them in a container on this
+        /// machine's Docker or Podman; unset runs them on the host itself.
+        #[serde(default)]
+        environment: Option<String>,
     },
 }
 /// `network-credentials.NAME`: the named secret holding the value, and the variable the sandbox
@@ -310,6 +314,8 @@ pub struct Host {
     /// Only a Host of this file's own Control Plane has them; the supervisor imports with the
     /// local operator credential.
     pub session_branches: crate::delivery_branches::Repositories,
+    /// `environment: local-vm`: every lane runs Tasks in a container on this machine.
+    pub local_vm: bool,
 }
 /// The largest per-harness concurrency a Worker Host may declare.
 pub const MAX_CONCURRENCY: u32 = 16;
@@ -631,10 +637,36 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             labels,
             network_credentials,
             volumes,
+            environment: execution_environment,
         } = service
         else {
             continue;
         };
+        let local_vm = match execution_environment.as_deref() {
+            None => false,
+            Some("local-vm") => true,
+            Some(other) => anyhow::bail!(
+                "host {name}: environment {other:?} is unknown; use local-vm, or leave it unset to run Tasks on the host"
+            ),
+        };
+        if local_vm {
+            ensure!(
+                adapter.is_none()
+                    && !harnesses.is_empty()
+                    && harnesses
+                        .iter()
+                        .all(|harness| matches!(harness.as_str(), "claude-code" | "cursor")),
+                "host {name}: environment local-vm runs Claude Code and Cursor"
+            );
+            ensure!(
+                unsandboxed.is_empty(),
+                "host {name}: environment local-vm runs commands in a container; remove allow-unsandboxed-commands"
+            );
+            ensure!(
+                !workspaces.is_empty(),
+                "host {name}: environment local-vm needs a Workspace to copy into the container"
+            );
+        }
         ensure!(hosts.len() < 32, "configure at most 32 named Worker Hosts");
         // These name the supervisor's own logs and `ps` rows.
         ensure!(
@@ -875,6 +907,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
                 .into_iter()
                 .map(|(id, path)| Ok((id, resolve_path(base, &path)?)))
                 .collect::<Result<_>>()?,
+            local_vm,
         });
     }
     ensure!(
@@ -996,6 +1029,11 @@ pub fn unit_check(config: &Config, unit: &[(String, String)]) -> Result<Vec<Stri
         }
         if let Some(Secret::Environment(secret)) = &host.key {
             names.push(&secret.environment);
+        }
+        if host.local_vm {
+            for name in supertag_worker_host::ProviderAuthority::local_vm_variables() {
+                names.push(name);
+            }
         }
         for name in names {
             if shell(name).is_some()
@@ -1852,6 +1890,39 @@ secrets:
                 .expect("must reject");
             assert!(!error.to_string().contains("literal-secret"));
         }
+    }
+    #[test]
+    fn local_vm_hosts_run_claude_code_and_cursor_with_a_workspace() {
+        let host = |fields: &str| {
+            let input = format!(
+                "services: {{vm: {{type: host, control-plane: https://example.com, environment: local-vm{fields}}}}}"
+            );
+            parse(input.as_bytes(), Path::new("/trusted"), |_| None)
+        };
+        let config =
+            host(", harnesses: [claude-code, cursor], workspaces: {repo: ./source}").unwrap();
+        assert!(config.hosts[0].local_vm);
+        for (fields, reason) in [
+            (", harnesses: [claude-code]", "needs a Workspace"),
+            (
+                ", harnesses: [opencode], workspaces: {repo: ./source}",
+                "runs Claude Code and Cursor",
+            ),
+            (
+                ", harnesses: [claude-code], workspaces: {repo: ./source}, allow-unsandboxed-commands: [claude-code]",
+                "remove allow-unsandboxed-commands",
+            ),
+        ] {
+            let error = host(fields).err().expect("must reject");
+            assert!(format!("{error:#}").contains(reason), "{error:#}");
+        }
+        let plain = parse(
+            b"services: {laptop: {type: host, control-plane: https://example.com, harnesses: [codex]}}",
+            Path::new("/trusted"),
+            |_| None,
+        )
+        .unwrap();
+        assert!(!plain.hosts[0].local_vm);
     }
     #[test]
     fn claude_code_accepts_unsandboxed_command_consent_only_when_named() {

@@ -32,6 +32,7 @@ pub enum NodeBridge {
     ClaudeCode,
     Cursor,
     Opencode,
+    LocalVm,
 }
 
 impl NodeBridge {
@@ -42,6 +43,9 @@ impl NodeBridge {
             }
             Self::Cursor => "node_modules/@supertag/worker-cursor/dist/rust-adapter/entry.js",
             Self::Opencode => "node_modules/@supertag/worker-opencode/dist/rust-adapter/entry.js",
+            Self::LocalVm => {
+                "node_modules/@supertag/worker-environment-local-vm/dist/rust-provider/main.js"
+            }
         }
     }
 }

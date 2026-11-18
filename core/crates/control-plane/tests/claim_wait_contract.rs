@@ -248,11 +248,106 @@ async fn exercise_sticky(database: &str) {
     store.close().await;
 }
 
+fn lane(operation: &str, wait_ms: u32, profile: HarnessExecutionProfile) -> ClaimTaskRequest {
+    ClaimTaskRequest {
+        harness_kind: HarnessKind::ClaudeCode as i32,
+        workspace_ids: vec!["repo".into()],
+        execution_profile: Some(profile),
+        ..claim(operation, wait_ms)
+    }
+}
+
+async fn submit(store: &Store, operation: &str) -> String {
+    store
+        .submit_task(
+            "operator:alice",
+            &SubmitTaskRequest {
+                tag_id: "builder".into(),
+                session_id: operation.into(),
+                operation_id: operation.into(),
+                prompt: "Run the tests".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .task_id
+}
+
+/// A Task that runs commands goes to a sandboxed lane, such as a local-vm one, waiting to claim
+/// rather than to a lane that runs commands unsandboxed; a busy sandboxed lane leaves it to them.
+async fn exercise_sandboxed(database: &str) {
+    let store = Store::open(database).await.unwrap();
+    store
+        .put_tag_spec(PutTagRequest {
+            tag_id: "builder".into(),
+            instructions: "Build".into(),
+            harness_kind: HarnessKind::ClaudeCode.into(),
+            allowed_actions: vec![
+                "files:read".into(),
+                "files:write".into(),
+                "commands:execute".into(),
+            ],
+            workspace: Some(WorkspaceSpec {
+                workspace_id: "repo".into(),
+                base_commit: "1111111111111111111111111111111111111111".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let sandboxed = HarnessExecutionProfile {
+        remote_file_workspace: true,
+        ..Default::default()
+    };
+    let unsandboxed = HarnessExecutionProfile {
+        allow_unsandboxed_commands: true,
+        ..Default::default()
+    };
+    let vm = support::register_host(&store, "local-vm-host").await;
+    let laptop = support::register_host(&store, "unsandboxed-host").await;
+
+    let waiting = lane("vm-1", 6_000, sandboxed.clone());
+    let held = store.claim_task_waiting(&vm, &waiting, Duration::from_secs(6));
+    let race = async {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let task = submit(&store, "first").await;
+        let taken = store
+            .claim_task_waiting(
+                &laptop,
+                &lane("laptop-1", 0, unsandboxed.clone()),
+                Duration::ZERO,
+            )
+            .await
+            .unwrap();
+        (task, taken)
+    };
+    let (assignment, (task, taken)) = tokio::join!(held, race);
+    assert!(taken.is_none(), "the unsandboxed lane took a command Task");
+    let assignment = assignment.unwrap().expect("the sandboxed lane took it");
+    assert_eq!(assignment.task.unwrap().task_id, task);
+
+    // With no sandboxed lane waiting, the unsandboxed lane runs it at once.
+    let task = submit(&store, "second").await;
+    let taken = store
+        .claim_task_waiting(
+            &laptop,
+            &lane("laptop-2", 0, unsandboxed.clone()),
+            Duration::ZERO,
+        )
+        .await
+        .unwrap();
+    assert_eq!(taken.unwrap().task.unwrap().task_id, task);
+    store.close().await;
+}
+
 #[tokio::test]
 async fn sqlite_claim_wait_contract() {
     let local = tokio::task::LocalSet::new();
     local.run_until(exercise("sqlite::memory:")).await;
     local.run_until(exercise_sticky("sqlite::memory:")).await;
+    local.run_until(exercise_sandboxed("sqlite::memory:")).await;
 }
 
 #[tokio::test]
@@ -275,6 +370,7 @@ async fn postgres_claim_wait_contract() {
             tokio::task::spawn_local(async move {
                 exercise(url.as_str()).await;
                 exercise_sticky(url.as_str()).await;
+                exercise_sandboxed(url.as_str()).await;
             })
             .await
         })

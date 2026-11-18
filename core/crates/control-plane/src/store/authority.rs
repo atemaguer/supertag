@@ -557,7 +557,7 @@ pub(super) async fn claim_candidate(
     transaction: &mut Transaction<'_, Any>,
     now: i64,
     scope: &ClaimScope,
-    sticky: &[Sticky],
+    (sticky, sandboxed): (&[Sticky], &[ClaimScope]),
 ) -> Result<Option<(String, AttemptExecutionSelection)>> {
     let mut placement = scope.placement(transaction).await?;
     let mut after = 0_i64;
@@ -585,6 +585,11 @@ pub(super) async fn claim_candidate(
             if crate::checkpoints::holder_wait_in(transaction, &task, Some(&scope.host_id), now)
                 .await?
                 .is_some()
+            {
+                continue;
+            }
+            if left_for_sandboxed_lane(transaction, now, scope, &task, accepted_order, sandboxed)
+                .await?
             {
                 continue;
             }
@@ -619,7 +624,40 @@ async fn left_for_warm_host(
     if accepted_at.is_none_or(|at| at + STICKY_MS <= now) {
         return Ok(false);
     }
-    for scope in &warm.scopes {
+    any_admits(transaction, now, task, accepted_order, &warm.scopes).await
+}
+
+/// Whether a Task that runs commands is left to a sandboxed lane waiting to claim now, rather
+/// than taken by a lane that runs commands unsandboxed on its Worker Host. A busy sandboxed
+/// lane leaves it to the unsandboxed one.
+async fn left_for_sandboxed_lane(
+    transaction: &mut Transaction<'_, Any>,
+    now: i64,
+    scope: &ClaimScope,
+    task: &Task,
+    accepted_order: i64,
+    sandboxed: &[ClaimScope],
+) -> Result<bool> {
+    if !scope.profile.allow_unsandboxed_commands
+        || !task
+            .allowed_actions
+            .iter()
+            .any(|action| action == "commands:execute")
+    {
+        return Ok(false);
+    }
+    any_admits(transaction, now, task, accepted_order, sandboxed).await
+}
+
+/// Whether any of `scopes`, waiting claims, would claim `task` now.
+async fn any_admits(
+    transaction: &mut Transaction<'_, Any>,
+    now: i64,
+    task: &Task,
+    accepted_order: i64,
+    scopes: &[ClaimScope],
+) -> Result<bool> {
+    for scope in scopes {
         if (task.harness_kind == 0 || task.harness_kind == scope.harness as i32)
             && scope.serves(transaction, &task.tag_id).await?
         {

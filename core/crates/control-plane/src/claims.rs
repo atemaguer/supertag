@@ -104,6 +104,18 @@ impl HeldClaims {
             .collect()
     }
 
+    /// The waiting claims of lanes that run commands in a sandbox away from their Worker Host,
+    /// such as a local-vm lane: a lane that runs them unsandboxed leaves them those Tasks.
+    pub(crate) fn sandboxed(&self) -> Vec<ClaimScope> {
+        self.scopes
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|(_, scope)| scope.profile.remote_file_workspace)
+            .map(|(_, scope)| scope.clone())
+            .collect()
+    }
+
     fn hold(&self, principal: &str) -> Option<Held<'_>> {
         let mut held = self.held.lock().unwrap();
         let count = held.entry(principal.to_owned()).or_default();

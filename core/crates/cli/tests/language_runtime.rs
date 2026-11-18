@@ -129,6 +129,9 @@ database_tests! {
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
     claude_runs_remote_workspace_commands_in_the_sandbox_without_the_opt_in;
     #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE, a built Claude Code language adapter and local-vm provider, and SUPERTAG_TEST_LOCAL_VM=1 with Docker"]
+    claude_runs_commands_in_a_local_vm_container;
+    #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
     claude_keeps_its_remote_task_output;
     #[tokio::test]
@@ -1359,6 +1362,148 @@ async fn claude_keeps_its_remote_task_output(database: String) -> Result<()> {
         "{artifact}"
     );
     remote.services.stop().await
+}
+
+/// Claude Code on a local-vm host: its commands run in a container on this machine's Docker,
+/// as the container's unprivileged user with no network, and the container is gone afterwards.
+async fn claude_runs_commands_in_a_local_vm_container(database: String) -> Result<()> {
+    let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
+        return Ok(());
+    };
+    if std::env::var("SUPERTAG_TEST_LOCAL_VM").as_deref() != Ok("1") {
+        return Ok(());
+    }
+    let docker = |args: &[&str]| {
+        std::process::Command::new("docker")
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+    };
+    anyhow::ensure!(
+        docker(&["info"]).is_ok_and(|output| output.status.success()),
+        "SUPERTAG_TEST_LOCAL_VM=1 needs Docker"
+    );
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let provider = repo_path("harnesses/environments/local-vm/dist/rust-provider/main.js")?;
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().canonicalize()?;
+    let native = claude_fixture(&root)?;
+    let source = root.join("source");
+    std::fs::create_dir(&source)?;
+    let git = |args: &[&str]| {
+        let mut command = Command::new("git");
+        command
+            .current_dir(&source)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .arg("-c")
+            .arg("user.name=SuperTag Fixture")
+            .arg("-c")
+            .arg("user.email=fixture@example.invalid")
+            .args(args);
+        command
+    };
+    success(git(&["init", "--quiet"])).await?;
+    std::fs::write(source.join("workspace.txt"), b"initial-content\n")?;
+    success(git(&["add", "workspace.txt"])).await?;
+    success(git(&["commit", "--quiet", "-m", "Fixture source"])).await?;
+    let base = String::from_utf8(success(git(&["rev-parse", "HEAD"])).await?)?;
+    let services = LanguageServices::start(&root, &database).await?;
+    services
+        .operator(&[
+            "tag",
+            "put",
+            "runner",
+            "--instructions",
+            "Run the requested command.",
+            "--harness",
+            "claude-code",
+            "--allow",
+            "files:read",
+            "--allow",
+            "files:write",
+            "--allow",
+            "commands:execute",
+            "--workspace-id",
+            "local",
+            "--workspace-base",
+            base.trim(),
+        ])
+        .await?;
+    let task = services
+        .operator(&[
+            "task",
+            "submit",
+            "--tag",
+            "runner",
+            "--session",
+            "local-vm",
+            "local-vm-command",
+        ])
+        .await?;
+    let task_id = task["task_id"].as_str().context("Task ID missing")?;
+    let mut host = services.worker(
+        "claude-code",
+        &root.join("host"),
+        Path::new(&interpreter),
+        &entry,
+    );
+    host.arg("--claude-path")
+        .arg(&native)
+        .arg("--workspace-id")
+        .arg("local")
+        .arg("--workspace-source")
+        .arg(&source)
+        .arg("--local-vm-workspace-provider")
+        .arg(&interpreter)
+        .arg("--local-vm-workspace-provider-arg")
+        .arg(&provider)
+        .env("ANTHROPIC_API_KEY", "fixture-provider-key");
+    // The provider runs the docker CLI from the host's PATH.
+    let docker_directory = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .find(|directory| directory.join("docker").is_file())
+        .context("docker is not on PATH")?;
+    host.env(
+        "PATH",
+        format!("{}:/usr/bin:/bin", docker_directory.display()),
+    );
+    for name in ["HOME", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG"] {
+        if let Some(value) = std::env::var_os(name) {
+            host.env(name, value);
+        }
+    }
+    // The first allocation on a machine builds the base image.
+    let output = timeout(Duration::from_secs(1_200), host.output()).await??;
+    let task = services.operator(&["get", "task", task_id]).await?;
+    anyhow::ensure!(
+        output.status.success(),
+        "{}; task: {task}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+    let result: Value = serde_json::from_str(task["result"].as_str().context("result")?)?;
+    assert_eq!(result["isError"], false, "{task}");
+    let text = result["text"].as_str().context("command output")?;
+    let lines: Vec<&str> = text.lines().collect();
+    assert!(
+        lines.starts_with(&["1000", "Linux", "lo"]),
+        "the command ran outside an unprivileged, offline container: {text}"
+    );
+    assert!(!source.join("command-output.txt").exists());
+    let left = docker(&[
+        "ps",
+        "-aq",
+        "--filter",
+        &format!("label=supertag.taskId={task_id}"),
+    ])?;
+    assert!(
+        left.stdout.is_empty(),
+        "the Task's container was left running"
+    );
+    services.stop().await
 }
 
 async fn claude_captures_selected_workspace_files_for_the_operator(database: String) -> Result<()> {
