@@ -124,6 +124,10 @@ migrated database belongs to the new release: an older release refuses to start 
 naming the schema version it found. To go back, restore the backup you took before the upgrade.
 See [Back up](control-plane.md#back-up) for the local database.
 
+Upgrading from a release that kept Session checkpoints on the Control Plane drops them: those
+Sessions continue from their recap, and you can delete `~/.supertag/checkpoints`, which nothing
+reads any more.
+
 `supertag down` also stops services from another release, without draining when it must. For a
 hosted deployment, follow [Upgrade a deployment](control-plane.md#upgrade-a-deployment).
 

@@ -1796,7 +1796,9 @@ fn stable_listen(directory: &Path, configured: SocketAddr) -> Result<SocketAddr>
             ensure!(
                 address.ip() == configured.ip()
                     && (configured.port() == 0 || configured.port() == address.port()),
-                "stored local Control Plane address differs from configured listener"
+                "the local Control Plane listens on {address}, which its Worker Hosts were enrolled \
+                 with, but supertag.yaml now names {configured} in the control-plane service's \
+                 ports; set them back to {address}"
             );
             Ok(address)
         }
