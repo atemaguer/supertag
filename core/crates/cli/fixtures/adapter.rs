@@ -503,7 +503,15 @@ async fn main() -> Result<()> {
             )?)
             .await
             .expect_err("message to an ungranted Tag");
-        ensure!(denied.code() == Code::PermissionDenied);
+        // A refused direct message names both Tags and the grant that allows it.
+        ensure!(
+            denied.code() == Code::FailedPrecondition,
+            "ungranted message refused with {denied:?}"
+        );
+        ensure!(
+            denied.message().contains("observer"),
+            "the refusal names the recipient: {denied:?}"
+        );
     }
     if std::env::args().any(|arg| arg == "--objective-question")
         && task.prompt.contains("Ask which branch to release")
