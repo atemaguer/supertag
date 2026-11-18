@@ -340,9 +340,11 @@ async function runCursorSdk(
     // local runs can call. https://cursor.com/docs/sdk/typescript.md#custom-tools
     tools: [...request.tools] as ToolName[],
     disallowedTools: [...request.disallowedTools] as ToolName[],
-    // No systemPrompt: the 1.0.37 local runtime rejects it with
-    // "[invalid_argument] unknown option '--system-prompt'". The harness prepends
-    // its Worker policy to each Attempt's message instead.
+    // No systemPrompt, by design rather than as a workaround: through @cursor/sdk 1.4.1 it
+    // replaces Cursor's whole built-in prompt (its tool-use protocol included) instead of
+    // adding to it, and needs custom system prompts enabled per account, without which
+    // the first send fails. The 1.0.37 runtime pinned here rejects the option outright.
+    // The harness prepends its Worker policy to each Attempt's message instead.
     // https://cursor.com/docs/sdk/typescript.md
     local: {
       cwd: request.workspace,
