@@ -272,6 +272,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- The terminal UI shows a Schedule's reply as soon as the turn finishes, and updates the Tag list
+  and sends its notification then, instead of only after a restart. A client device's Tag list
+  also updates when its own turn finishes.
 - A Codex turn that asks a read tool for an out-of-range page, such as `limit: 50`, gets a tool
   error it can retry instead of failing with "invalid coordination page".
 - A Codex turn that called `stay_quiet` and then wrote no final text no longer fails with

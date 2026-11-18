@@ -938,6 +938,9 @@ func (m model) changed(change *views.WatchChange) tea.Cmd {
 		if id := change.GetSessionId(); m.expanded[id] {
 			work = m.reloadWork(id)
 		}
+		if conversation := m.conversationTurnChanged(change); conversation != nil {
+			work = tea.Batch(work, conversation)
+		}
 		// A Task's end changes its Objective's spend and Sessions; other Tasks change neither.
 		if change.GetObjectiveId() == "" {
 			return work
@@ -958,6 +961,27 @@ func (m model) changed(change *views.WatchChange) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// conversationTurnChanged rereads the conversation list when one of a conversation's turns
+// changed, such as finishing with its reply, so the rail's preview, working mark and unread
+// count follow. It rereads the conversation itself only for a turn nothing follows: a
+// Schedule's turn shows only once it finishes, and no follow or message notice brings it.
+func (m model) conversationTurnChanged(change *views.WatchChange) tea.Cmd {
+	tag := change.GetTag()
+	if change.GetReason() == "created" || tag == "" || !strings.HasPrefix(change.GetSessionId(), "conversation/") {
+		return nil
+	}
+	if c, ok := m.conversations[tag]; ok {
+		if turn := c.runtime.turns[change.GetId()]; turn != nil && !turn.hidden {
+			return m.reloadConversations()
+		}
+	}
+	var history tea.Cmd
+	if m.showsConversation(tag) {
+		history = m.reloadShownHistory()
+	}
+	return tea.Batch(m.reloadConversations(), history)
 }
 
 // shownTeam is the ID of the shown Objective's Team, or empty.

@@ -414,6 +414,18 @@ func TestRuntimeHistoryHidesAScheduledTurnUntilItFinishes(t *testing.T) {
 	if last := snapshot.Turns[len(snapshot.Turns)-1]; !last.Hidden || last.ID != "woken" {
 		t.Fatalf("the cache does not keep it hidden: %+v", last)
 	}
+	// Nothing follows the hidden turn, so its Task's change on the Watch rereads the
+	// conversation and the list; a Task just created does neither.
+	changed := func(id, reason string) tea.Cmd {
+		return m.conversationTurnChanged(&views.WatchChange{Kind: views.WatchKind_WATCH_KIND_TASK, Id: id,
+			Tag: "lead", SessionId: "conversation/" + runtimeConversationID, Reason: reason})
+	}
+	if changed("woken", "created") != nil {
+		t.Fatal("a created Task reread the conversation")
+	}
+	if changed("woken", "changed") == nil {
+		t.Fatal("the hidden turn's change did not reread the conversation")
+	}
 
 	finished := ordered(runtimeHistoryMessage("woken", "", "CI is red on main."), 2)
 	finished.ScheduleId = "sch_1"
