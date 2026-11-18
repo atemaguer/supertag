@@ -555,6 +555,51 @@ describe.skipIf(!answers)("local-vm provider", () => {
   );
 
   it(
+    "installs a Codex host's own Codex version on its base image",
+    async () => {
+      const session = createLocalVmWorkspaceSession(
+        {
+          ...options,
+          codexVersion: CODEX_TEST_VERSION,
+        },
+        () => {},
+        testing,
+      );
+      const who = owner();
+      try {
+        // Allocation checks the image's codex is exactly this version, as the Workspace user.
+        await session.allocate(
+          {
+            owner: who,
+            timeoutMs: 60_000,
+            allowedActions: ["files:read", "commands:execute"],
+            codexVersion: CODEX_TEST_VERSION,
+          },
+          AbortSignal.timeout(BUILD_MS),
+        );
+      } finally {
+        await session.stop({ owner: who });
+      }
+      // Another version's host gets an image of its own, so a mismatch is refused.
+      const other = createLocalVmWorkspaceSession(options, () => {}, testing);
+      const next = owner();
+      try {
+        await expect(
+          other.allocate({
+            owner: next,
+            timeoutMs: 60_000,
+            allowedActions: ["files:read", "commands:execute"],
+            codexVersion: CODEX_TEST_VERSION,
+          }),
+        ).rejects.toThrow(/must contain codex 0\.163\.0 .* found none/u);
+      } finally {
+        await other.stop({ owner: next });
+      }
+    },
+    BUILD_MS,
+  );
+
+  it(
     "keeps every Codex configuration layer out of Codex's exec-server, whatever the Task plants",
     async () => {
       const session = createLocalVmWorkspaceSession(options, () => {}, testing);

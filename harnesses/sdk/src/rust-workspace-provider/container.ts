@@ -91,6 +91,54 @@ export interface ContainerProviderOptions {
    * exec each (see exec-server.ts); on by default.
    */
   readonly execServer?: boolean;
+  /**
+   * The Worker Host's Codex version, for a Codex host: every image this provider runs gets a
+   * last layer installing exactly that `codex` (see `codexLayer`), so its sandboxes can run
+   * Codex's exec-server.
+   */
+  readonly codexVersion?: string;
+}
+
+/**
+ * Installs one Codex release from npm's Linux package for the image's architecture into
+ * `/usr/local/bin/codex`, owned by root: the release's metadata names its tarball and SHA-512,
+ * and the tarball must match.
+ */
+const CODEX_INSTALL = `import base64, hashlib, io, json, os, platform, sys, tarfile, urllib.request
+version = sys.argv[1]
+arch, triple = {"aarch64": ("arm64", "aarch64"), "x86_64": ("x64", "x86_64")}[platform.machine()]
+registry = "https://registry.npmjs.org/@openai/codex/"
+with urllib.request.urlopen(f"{registry}{version}-linux-{arch}", timeout=60) as answer:
+    dist = json.load(answer)["dist"]
+algorithm, _, digest = dist["integrity"].partition("-")
+if algorithm != "sha512" or not dist["tarball"].startswith(registry):
+    sys.exit("unexpected Codex package metadata")
+with urllib.request.urlopen(dist["tarball"], timeout=600) as answer:
+    data = answer.read()
+if base64.b64encode(hashlib.sha512(data).digest()).decode() != digest:
+    sys.exit("the Codex package does not match its integrity")
+member = f"package/vendor/{triple}-unknown-linux-musl/bin/codex"
+binary = tarfile.open(fileobj=io.BytesIO(data)).extractfile(member).read()
+with open("/usr/local/bin/codex", "wb") as target:
+    target.write(binary)
+os.chmod("/usr/local/bin/codex", 0o755)
+`;
+
+/** A Codex version as `codex --version` prints it, without its `codex-cli ` prefix. */
+export function validCodexVersion(version: string): boolean {
+  return /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.]{1,32})?$/u.test(version);
+}
+
+/** A last image layer installing Codex `version` on `image`, ending as `user` again. */
+export function codexLayer(image: string, user: string, version: string): string {
+  if (!validCodexVersion(version)) throw new Error("The Codex version is invalid");
+  return [
+    `FROM ${image}`,
+    "USER root",
+    `RUN ${JSON.stringify(["python3", "-I", "-S", "-c", CODEX_INSTALL, version])}`,
+    `USER ${user}`,
+    "",
+  ].join("\n");
 }
 
 /** Where a dependency cache volume is mounted, and what points package managers at it. */
@@ -774,9 +822,11 @@ export function containerSandboxProvider(
   ): Promise<string> {
     const own = await base(signal);
     const dockerfile = environment ? containerDockerfile(environment, own.tag) : "";
-    if (dockerfile === "") return own.id;
-    if (!options.buildImages) throw new Error("This provider builds no image");
-    return (await build(dockerfile, signal)).id;
+    if (dockerfile !== "" && !options.buildImages) throw new Error("This provider builds no image");
+    const built = dockerfile === "" ? own : await build(dockerfile, signal);
+    if (options.codexVersion === undefined) return built.id;
+    const user = environment?.user || options.user;
+    return (await build(codexLayer(built.tag, user, options.codexVersion), signal)).id;
   }
 
   return {

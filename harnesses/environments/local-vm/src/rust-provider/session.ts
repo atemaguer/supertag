@@ -10,6 +10,7 @@ import {
   createContainerWorkspaceSession,
   nativePlatform,
   type SandboxWorkspaceSession,
+  validCodexVersion,
   WorkspaceConfigurationError,
 } from "@supertag/worker-sdk/internal/rust-workspace-provider";
 
@@ -45,6 +46,8 @@ export interface LocalVmOptions {
   readonly image: ContainerProviderOptions["image"];
   readonly user: string;
   readonly memory: string;
+  /** For a Codex Worker Host, its Codex version: every image gets that `codex` on top. */
+  readonly codexVersion?: string;
 }
 
 /** Docker when its CLI is on PATH, then Podman; Docker otherwise, to name in the error. */
@@ -71,7 +74,16 @@ export function localVmOptions(environment: NodeJS.ProcessEnv = process.env): Lo
   if (!/^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$/u.test(user))
     throw new Error("The local-vm user is invalid");
   if (!/^[1-9][0-9]{0,5}[kmg]$/u.test(memory)) throw new Error("The local-vm memory is invalid");
-  return { runtime, image: image ?? { dockerfile: BASE_DOCKERFILE }, user, memory };
+  const codexVersion = environment["SUPERTAG_LOCAL_VM_CODEX_VERSION"] || undefined;
+  if (codexVersion !== undefined && !validCodexVersion(codexVersion))
+    throw new Error("The local-vm Codex version is invalid");
+  return {
+    runtime,
+    image: image ?? { dockerfile: BASE_DOCKERFILE },
+    user,
+    memory,
+    ...(codexVersion === undefined ? {} : { codexVersion }),
+  };
 }
 
 /**
@@ -98,6 +110,7 @@ export function createLocalVmWorkspaceSession(
     buildImages: true,
     dependencyCaches: true,
     runFlags: ["--memory", options.memory],
+    ...(options.codexVersion === undefined ? {} : { codexVersion: options.codexVersion }),
     log,
   });
   if (options.runtime === "podman" && !testing.allowPodman)

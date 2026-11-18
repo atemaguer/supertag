@@ -203,7 +203,8 @@ relay in the sandbox, for the Task's commands; see [Run a harness in a sandbox](
 A Codex host can use the same providers. Codex itself, with its keys, stays on the host. Its
 commands and file operations run in the sandbox, through Codex's own exec-server there:
 - **Image:** the sandbox image must contain a `codex` of exactly the host's version on
-  `/usr/local/bin:/usr/bin:/bin`. Allocation fails otherwise, naming the version.
+  `/usr/local/bin:/usr/bin:/bin`. Allocation fails otherwise, naming the version. A local-vm host
+  installs it in every image it builds; E2B templates and Modal images need it added.
 - **Configuration:** Codex reads its configuration from an empty, read-only directory in the
   sandbox, so nothing a Task writes there, such as `~/.codex` or a repository's
   `.codex/config.toml`, adds MCP servers or hooks.

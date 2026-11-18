@@ -1298,7 +1298,13 @@ async fn run(command: Command) -> Result<()> {
                 );
                 // Codex's exec-server in each sandbox must be exactly this host's Codex.
                 if harness == HarnessKind::Codex {
-                    config.codex_version = Some(adapter.codex_version()?);
+                    let version = adapter.codex_version()?;
+                    // local-vm builds its images itself, so it installs that Codex in each.
+                    if let ProviderAuthority::LocalVm { settings, .. } = &mut config.authority {
+                        settings.retain(|(name, _)| name != "SUPERTAG_LOCAL_VM_CODEX_VERSION");
+                        settings.push(("SUPERTAG_LOCAL_VM_CODEX_VERSION".into(), version.clone()));
+                    }
+                    config.codex_version = Some(version);
                 }
                 execution_profile.remote_file_workspace = true;
                 execution_profile.declared_task_outputs = true;

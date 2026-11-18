@@ -714,9 +714,10 @@ class CodexLocalVmJourney(Stack):
     branch lands on the git server.
 
     Run with `--provider codex-local-vm`; it spends one small Codex turn. It needs Docker, the
-    local-vm provider built, Codex signed in with a file-backed login, and
-    SUPERTAG_E2E_CODEX_LINUX naming a Linux `codex` binary of exactly this machine's Codex
-    version for the container's architecture (from npm's `@openai/codex@VERSION-linux-ARCH`).
+    local-vm provider built, and Codex signed in with a file-backed login. The provider installs
+    this machine's Codex version in its own image; SUPERTAG_E2E_CODEX_LINUX instead names a Linux
+    `codex` binary of that version for an image of the journey's own
+    (`SUPERTAG_LOCAL_VM_IMAGE`).
     """
 
     timeout = 900
@@ -725,20 +726,22 @@ class CodexLocalVmJourney(Stack):
     def setUpClass(cls):
         if not (BINARY and PROVIDER == "codex-local-vm"):
             raise unittest.SkipTest("run with --provider codex-local-vm; it spends a Codex turn")
-        linux_codex = Path(os.environ.get("SUPERTAG_E2E_CODEX_LINUX", ""))
+        linux_codex = os.environ.get("SUPERTAG_E2E_CODEX_LINUX")
         node = shutil.which("node")
-        if not (docker_runs() and LOCAL_VM_PROVIDER.exists() and node and linux_codex.is_file()):
-            raise unittest.SkipTest("needs Docker, the local-vm provider, Node, and SUPERTAG_E2E_CODEX_LINUX")
+        if not (docker_runs() and LOCAL_VM_PROVIDER.exists() and node):
+            raise unittest.SkipTest("needs Docker, the local-vm provider, and Node")
         cls.binary = Path(BINARY).resolve()
         cls.temporary = tempfile.TemporaryDirectory(prefix="st-e2e-codex-")
         cls.root = Path(cls.temporary.name)
-        # The sandbox image: the local-vm base's essentials, plus this host's Codex version.
-        version = subprocess.run(["codex", "--version"], capture_output=True, text=True,
-                                 check=True).stdout.strip().removeprefix("codex-cli ")
-        context = cls.root / "image"
-        context.mkdir()
-        shutil.copy(linux_codex, context / "codex")
-        (context / "Dockerfile").write_text("""FROM debian:bookworm-slim
+        cls.image = None
+        if linux_codex:
+            # The sandbox image: the local-vm base's essentials, plus this host's Codex version.
+            version = subprocess.run(["codex", "--version"], capture_output=True, text=True,
+                                     check=True).stdout.strip().removeprefix("codex-cli ")
+            context = cls.root / "image"
+            context.mkdir()
+            shutil.copy(Path(linux_codex), context / "codex")
+            (context / "Dockerfile").write_text("""FROM debian:bookworm-slim
 RUN apt-get update \\
  && apt-get install -y --no-install-recommends ca-certificates git procps python3 \\
  && rm -rf /var/lib/apt/lists/* \\
@@ -748,15 +751,15 @@ COPY --chmod=755 codex /usr/local/bin/codex
 USER user
 WORKDIR /home/user
 """)
-        cls.image = f"supertag-e2e-codex:{version}"
-        # The machine's own platform, as the local-vm provider runs its containers.
-        native = "linux/arm64" if os.uname().machine in ("arm64", "aarch64") else "linux/amd64"
-        subprocess.run(["docker", "build", "-q", "--platform", native, "-t", cls.image, str(context)],
-                       check=True, capture_output=True)
-        found = subprocess.run(["docker", "run", "--rm", "--platform", native, cls.image, "codex", "--version"],
-                               capture_output=True, text=True).stdout.strip()
-        if found != f"codex-cli {version}":
-            raise unittest.SkipTest(f"SUPERTAG_E2E_CODEX_LINUX is {found or 'not runnable'}, not codex-cli {version}")
+            cls.image = f"supertag-e2e-codex:{version}"
+            # The machine's own platform, as the local-vm provider runs its containers.
+            native = "linux/arm64" if os.uname().machine in ("arm64", "aarch64") else "linux/amd64"
+            subprocess.run(["docker", "build", "-q", "--platform", native, "-t", cls.image, str(context)],
+                           check=True, capture_output=True)
+            found = subprocess.run(["docker", "run", "--rm", "--platform", native, cls.image, "codex", "--version"],
+                                   capture_output=True, text=True).stdout.strip()
+            if found != f"codex-cli {version}":
+                raise unittest.SkipTest(f"SUPERTAG_E2E_CODEX_LINUX is {found or 'not runnable'}, not codex-cli {version}")
         cls.state = cls.root / "state"
         cls.state.mkdir(mode=0o700)
         repository = cls.root / "app"
@@ -812,8 +815,10 @@ spec:
                 "--state-directory", str(cls.host_state), "--auth-key", key)
         docker = Path(shutil.which("docker")).parent
         codex = Path(shutil.which("codex")).parent
-        environment = {**cls.environment(), "SUPERTAG_LOCAL_VM_IMAGE": cls.image,
+        environment = {**cls.environment(),
                        "PATH": f"{codex}:{Path(node).parent}:{docker}:/usr/bin:/bin"}
+        if cls.image:
+            environment["SUPERTAG_LOCAL_VM_IMAGE"] = cls.image
         cls.host_log = open(cls.root / "host.log", "w")
         cls.host = subprocess.Popen(
             [str(cls.binary), "worker-host", "--control-plane", control_plane,
@@ -824,8 +829,9 @@ spec:
              "--local-vm-workspace-provider-arg", str(LOCAL_VM_PROVIDER)],
             env=environment, stdout=cls.host_log, stderr=subprocess.STDOUT)
         cls.addClassCleanup(cls.stop_host)
-        cls.addClassCleanup(lambda: subprocess.run(["docker", "image", "rm", "-f", cls.image],
-                                                   capture_output=True))
+        if cls.image:
+            cls.addClassCleanup(lambda: subprocess.run(["docker", "image", "rm", "-f", cls.image],
+                                                       capture_output=True))
 
     @classmethod
     def stop_host(cls):

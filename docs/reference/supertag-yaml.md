@@ -154,7 +154,7 @@ echoing secret values.
 | `workspaces` | none | Up to 128 Workspace names, each to a repository path or `{ path, land, setup }`. See [Workspaces](#workspaces) |
 | `skills` | none | Local Skill directory or JSON catalog file selected by Context Sets. Relative paths resolve from this file |
 | `labels` | none | Placement labels the host carries, such as `[gpu]`, for a Tag's `runsOn`. See [Worker Host labels](resource-model.md#worker-host-labels) |
-| `environment` | none | `local-vm` runs Claude Code, Cursor, and OpenCode Tasks' commands and file tools in containers on this machine. See [local-vm containers](#local-vm-containers) |
+| `environment` | none | `local-vm` runs Claude Code, Cursor, OpenCode, and Codex Tasks' commands and file tools in containers on this machine. See [local-vm containers](#local-vm-containers) |
 | `allow-unsandboxed-commands` | none | `claude-code`, `cursor`, or `opencode` from `harnesses`. See [Unsandboxed harnesses](#unsandboxed-harnesses) |
 | `network-credentials` | none | Credential name to `{ secret, environment }`, added to a Task's requests by the egress proxy. Codex, or every harness on a local-vm host. See [Network credentials](#network-credentials) |
 | `volumes` | none | Volume ID to an absolute, owner-only directory: a file Volume this host maps and writes directly, such as the copies of a Tag's captures. Tags on that Volume run only on hosts that map it. See [Keep every capture on a Volume](artifacts.md#keep-every-capture-on-a-volume) |
@@ -244,6 +244,13 @@ shell or `env_file`, change the container:
 A repository's `.devcontainer` settings add to the image; see
 [Devcontainer settings](devcontainer-subset.md). A host started without supertag.yaml takes
 `supertag worker-host --local-vm`.
+
+A Codex host can use local-vm too, for Tasks with `commands:execute` and no path scope. Codex
+stays on the host with its keys, and runs its commands and file edits in the container through
+its own exec-server; see [Remote sandboxes](worker.md#remote-sandboxes-and-shared-execution).
+Each image gets a last layer that installs exactly the host's Codex version from npm's Linux
+package, checked against its SHA-512, so the first Task Attempt after a Codex upgrade builds the
+image again.
 
 ### Unsandboxed harnesses
 

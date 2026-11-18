@@ -1,4 +1,7 @@
-import { WorkspaceConfigurationError } from "@supertag/worker-sdk/internal/rust-workspace-provider";
+import {
+  codexLayer,
+  WorkspaceConfigurationError,
+} from "@supertag/worker-sdk/internal/rust-workspace-provider";
 import { describe, expect, it } from "vitest";
 import {
   BASE_DOCKERFILE,
@@ -44,6 +47,26 @@ describe("local-vm options", () => {
       user: "dev",
       memory: "4g",
     });
+  });
+
+  it("installs a Codex host's own Codex version on every image", () => {
+    expect(
+      localVmOptions({ PATH: "", SUPERTAG_LOCAL_VM_CODEX_VERSION: "0.163.0" }).codexVersion,
+    ).toBe("0.163.0");
+    expect(() =>
+      localVmOptions({ PATH: "", SUPERTAG_LOCAL_VM_CODEX_VERSION: "0.163.0; rm -rf /" }),
+    ).toThrow(/Codex version is invalid/u);
+    // A last layer, as root, from npm's package checked against its SHA-512, back to the user.
+    const layer = codexLayer("supertag-workspace:base", "user", "0.163.0").split("\n");
+    expect(layer[0]).toBe("FROM supertag-workspace:base");
+    expect(layer[1]).toBe("USER root");
+    const run = JSON.parse((layer[2] as string).slice("RUN ".length)) as string[];
+    expect(run.slice(0, 4)).toEqual(["python3", "-I", "-S", "-c"]);
+    expect(run[4]).toContain("hashlib.sha512(data)");
+    expect(run[4]).toContain('"/usr/local/bin/codex"');
+    expect(run[5]).toBe("0.163.0");
+    expect(layer[3]).toBe("USER user");
+    expect(() => codexLayer("base", "user", "latest")).toThrow(/Codex version is invalid/u);
   });
 
   it("finds Podman on PATH when Docker is absent", async () => {

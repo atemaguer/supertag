@@ -667,9 +667,12 @@ pub(crate) fn parse(
                 adapter.is_none()
                     && !harnesses.is_empty()
                     && harnesses.iter().all(|harness| {
-                        matches!(harness.as_str(), "claude-code" | "cursor" | "opencode")
+                        matches!(
+                            harness.as_str(),
+                            "claude-code" | "cursor" | "opencode" | "codex"
+                        )
                     }),
-                "host {name}: environment local-vm runs Claude Code, Cursor, and OpenCode"
+                "host {name}: environment local-vm runs Claude Code, Cursor, OpenCode, and Codex"
             );
             ensure!(
                 unsandboxed.is_empty(),
@@ -2009,8 +2012,8 @@ services: {vm: {type: host, control-plane: https://example.com, environment: loc
         for (fields, reason) in [
             (", harnesses: [claude-code]", "needs a Workspace"),
             (
-                ", harnesses: [codex], workspaces: {repo: ./source}",
-                "runs Claude Code, Cursor, and OpenCode",
+                ", harnesses: [openai-agents], workspaces: {repo: ./source}",
+                "runs Claude Code, Cursor, OpenCode, and Codex",
             ),
             (
                 ", harnesses: [claude-code], workspaces: {repo: ./source}, allow-unsandboxed-commands: [claude-code]",

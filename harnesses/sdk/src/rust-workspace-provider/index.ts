@@ -1,10 +1,12 @@
 export {
   CONTAINER_ALLOCATE_TIMEOUT_MS,
   type ContainerProviderOptions,
+  codexLayer,
   containerDockerfile,
   containerSandboxProvider,
   createContainerWorkspaceSession,
   nativePlatform,
+  validCodexVersion,
 } from "./container.js";
 export { type CopySandbox, createWorkspaceCopies } from "./copies.js";
 export {
