@@ -1100,15 +1100,17 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
         .split(',')
         .filter(|name| *name != "__CF_USER_TEXT_ENCODING")
         .collect::<Vec<_>>();
-    assert_eq!(
-        reported,
-        [
-            "PATH",
-            "SUPERTAG_ADAPTER_STATE_DIRECTORY",
-            "SUPERTAG_WORKSPACE_DIRECTORY",
-            "TMPDIR"
-        ]
-    );
+    // On Linux the guardian also names itself as the adapter's subreaper (a PID, no secret).
+    let mut expected = vec!["PATH"];
+    if cfg!(target_os = "linux") {
+        expected.push("SUPERTAG_ADAPTER_REAPER");
+    }
+    expected.extend([
+        "SUPERTAG_ADAPTER_STATE_DIRECTORY",
+        "SUPERTAG_WORKSPACE_DIRECTORY",
+        "TMPDIR",
+    ]);
+    assert_eq!(reported, expected);
     let log = fs::read_to_string(&supervisor.log)?;
     for value in [
         "file-openai",
