@@ -46,7 +46,30 @@ export function TagDetails({
 }) {
   const close = useRef<HTMLButtonElement>(null);
   useEffect(() => {
+    // Focus moves into the panel, and back to what opened it once the panel closes.
+    const opener = document.activeElement;
     close.current?.focus();
+    return () => {
+      if (
+        opener instanceof HTMLElement &&
+        opener.isConnected &&
+        document.activeElement === document.body
+      ) {
+        opener.focus();
+      }
+    };
+  }, []);
+  // Esc closes the panel, unless a dialog or menu is open: that one takes Esc first.
+  const closing = useRef(onClose);
+  closing.current = onClose;
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+      if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"]')) return;
+      closing.current();
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
   }, []);
   const name = tag.name ?? tag.tagId;
   return (

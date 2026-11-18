@@ -223,3 +223,22 @@ it("shows the Tag's activity first and rereads it when one of its turns ends", a
   expect(section?.textContent).toContain("6 posted · 4 read · 2 answered · 19 stayed quiet");
   expect(section?.textContent).toContain("At most 10 per hour · 3 started in the last hour");
 });
+
+it("closes on Esc, unless a dialog or menu is open and takes it first", async () => {
+  const onClose = vi.fn();
+  const gateway = { notes: async () => [] } as unknown as Gateway;
+  act(() => root.render(createElement(TagDetails, { gateway, tag, onClose })));
+  await settle();
+  const dialog = document.createElement("div");
+  dialog.setAttribute("role", "dialog");
+  document.body.append(dialog);
+  act(() => {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  expect(onClose).not.toHaveBeenCalled();
+  dialog.remove();
+  act(() => {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
