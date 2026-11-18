@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import {
   createExecServer,
@@ -86,14 +89,23 @@ it("streams input and output, kills a process group, and runs requests at once",
   expect((await large.done).stdout.length).toBe(3_000_001);
 }, 30_000);
 
-it("starts another server after one stops, and fails what was running then", async () => {
+it("starts another server after one stops, fails what was running then, and never reruns it", async () => {
   const { server, starts } = local();
-  const running = await run(server, { argv: ["sh", "-c", "kill -9 $PPID; sleep 30"] });
-  // The command killed the server: what ran through it ends without an exit code.
-  expect((await running.done).exitCode).toBeNull();
-  const next = await run(server, { argv: ["echo", "again"] });
-  expect(await next.done).toMatchObject({ exitCode: 0, stdout: "again\n" });
-  expect(starts()).toBe(2);
+  const marks = await mkdtemp(join(tmpdir(), "exec-server-"));
+  // The command stops its server at once, before or after the server reports it started, and
+  // later; either way it ends without an exit code and runs exactly once.
+  for (const [index, delay] of ["0", "0.3"].entries()) {
+    const mark = join(marks, `ran-${index}`);
+    const running = await run(server, {
+      argv: ["sh", "-c", `echo ran >> ${mark}; sleep ${delay}; kill -9 $PPID; sleep 30`],
+    });
+    expect((await running.done).exitCode).toBeNull();
+    expect(await readFile(mark, "utf8")).toBe("ran\n");
+    const next = await run(server, { argv: ["echo", "again"] });
+    expect(await next.done).toMatchObject({ exitCode: 0, stdout: "again\n" });
+    expect(starts()).toBe(index + 2);
+  }
+  await rm(marks, { recursive: true, force: true });
 });
 
 it("resolves undefined when no server can start, so the caller runs the command itself", async () => {

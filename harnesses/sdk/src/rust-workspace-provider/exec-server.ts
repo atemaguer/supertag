@@ -249,7 +249,8 @@ export function createExecServer(open: () => ChildProcessWithoutNullStreams) {
       request: ExecRequest,
       output: (stream: "stdout" | "stderr", bytes: Uint8Array) => void,
     ): Promise<ExecProcess | undefined> {
-      // A server found gone on the way gets one replacement before the caller falls back.
+      // A server found gone before it took the request gets one replacement before the caller
+      // falls back; a request it took is never sent again.
       return (await this.once(request, output)) ?? this.once(request, output);
     },
     /** One try at `spawn`, on the running server or a new one. */
@@ -273,6 +274,11 @@ export function createExecServer(open: () => ChildProcessWithoutNullStreams) {
       const started = new Promise<number | undefined>((resolve, reject) => {
         pending.set(id, { started: resolve, failed: reject, exited, output });
       });
+      const forget = () => {
+        current.alive = false;
+        if (server === current) server = undefined;
+        current.child.kill("SIGKILL");
+      };
       try {
         await send({
           op: "spawn",
@@ -284,6 +290,14 @@ export function createExecServer(open: () => ChildProcessWithoutNullStreams) {
           stdin: request.stdin === undefined ? null : Buffer.from(request.stdin).toString("base64"),
           stream: request.streamInput === true,
         });
+      } catch {
+        // The server's input broke before the request reached it: nothing started, so a new
+        // server, or the caller itself, may start it.
+        pending.delete(id);
+        forget();
+        return undefined;
+      }
+      try {
         const pid = await started;
         return {
           ...(pid === undefined ? {} : { pid }),
@@ -293,13 +307,17 @@ export function createExecServer(open: () => ChildProcessWithoutNullStreams) {
           exited: exit,
         };
       } catch {
+        // The server stopped after it took the request, so the process may have started, and
+        // even stopped the server itself: it is never started again. It ends without an exit
+        // code, as one the server stopped under does.
         pending.delete(id);
-        // The server stopped, or its input broke, before the process started: it is gone, and
-        // a later call starts another.
-        current.alive = false;
-        if (server === current) server = undefined;
-        current.child.kill("SIGKILL");
-        return undefined;
+        forget();
+        return {
+          write: () => Promise.reject(new Error("Exec server stopped")),
+          endInput: () => {},
+          kill: () => {},
+          exited: Promise.resolve(null),
+        };
       }
     },
     /** Stops the server; its processes stop with it. */
