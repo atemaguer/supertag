@@ -11,8 +11,10 @@ describe("local-vm options", () => {
     const stages = BASE_DOCKERFILE.split("\n").filter((line) => line.startsWith("FROM "));
     expect(stages).toHaveLength(2);
     for (const stage of stages)
-      expect(stage).toMatch(/^FROM [a-z0-9:.-]+@sha256:[0-9a-f]{64}( AS node)?$/u);
-    expect(stages[0]).toMatch(/^FROM node:22-/u);
+      expect(stage).toMatch(
+        /^FROM docker\.io\/library\/[a-z0-9:.-]+@sha256:[0-9a-f]{64}( AS node)?$/u,
+      );
+    expect(stages[0]).toMatch(/^FROM docker\.io\/library\/node:22-/u);
     // The Workspace user has no sudo, so the seal stays a boundary.
     expect(BASE_DOCKERFILE).not.toMatch(/sudo/u);
     // Nor any setuid or setgid program, which would hand a Task process another identity.

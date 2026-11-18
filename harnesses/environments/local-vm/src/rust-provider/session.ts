@@ -17,10 +17,11 @@ import {
  * a coding agent expects, and an unprivileged `user` with no sudo and no setuid or setgid program. Node and npm come from a pinned
  * official Node 22 image: Debian's npm 9 never exits after an install through an HTTPS proxy,
  * which is how a Task's commands reach the network here. It is built once per host, on the first
- * allocation, for the host's own platform.
+ * allocation, for the host's own platform. Image names are fully qualified: Podman refuses a short
+ * name it would have to resolve without a terminal.
  */
-export const BASE_DOCKERFILE = `FROM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS node
-FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+export const BASE_DOCKERFILE = `FROM docker.io/library/node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS node
+FROM docker.io/library/debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
 RUN apt-get update \\
  && apt-get install -y --no-install-recommends \\
     ca-certificates curl git procps python3 python3-venv ripgrep \\

@@ -25,6 +25,7 @@ for (const check of sandboxProviderConformance(
       user: USER,
       runtime,
       label: "supertag.reference",
+      log: (line) => console.error(line),
     });
     return {
       session,

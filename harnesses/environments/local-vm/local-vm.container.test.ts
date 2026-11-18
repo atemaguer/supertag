@@ -54,6 +54,8 @@ describe.skipIf(!answers)("local-vm provider", () => {
     buildImages: true,
     dependencyCaches: true,
     runFlags: ["--memory", options.memory],
+    // Image builds report their progress, and a failed build its output, in the test log.
+    log: (line) => console.error(line),
   });
 
   beforeAll(async () => {
