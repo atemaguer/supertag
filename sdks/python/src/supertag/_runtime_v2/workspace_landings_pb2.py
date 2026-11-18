@@ -26,45 +26,47 @@ from . import runtime_pb2 as supertag_dot_runtime_dot_v2_dot_runtime__pb2
 from . import workspaces_pb2 as supertag_dot_runtime_dot_v2_dot_workspaces__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n,supertag/runtime/v2/workspace_landings.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\x1a$supertag/runtime/v2/workspaces.proto\"\xb4\x04\n\x10WorkspaceLanding\x12\x12\n\nlanding_id\x18\x01 \x01(\t\x12\x0f\n\x07task_id\x18\x02 \x01(\t\x12\x0e\n\x06tag_id\x18\x03 \x01(\t\x12\x12\n\nsession_id\x18\x04 \x01(\t\x12\x14\n\x0cworkspace_id\x18\x05 \x01(\t\x12\x0e\n\x06remote\x18\x06 \x01(\t\x12\x37\n\x04mode\x18\x07 \x01(\x0e\x32).supertag.runtime.v2.WorkspaceLandingMode\x12\x0e\n\x06\x62ranch\x18\x08 \x01(\t\x12\x0e\n\x06target\x18\t \x01(\t\x12\x41\n\x08\x64\x65livery\x18\n \x01(\x0b\x32/.supertag.runtime.v2.WorkspaceDeliveryReference\x12\x39\n\x05state\x18\x0b \x01(\x0e\x32*.supertag.runtime.v2.WorkspaceLandingState\x12\x0e\n\x06reason\x18\x0c \x01(\t\x12\x15\n\rlanded_commit\x18\r \x01(\t\x12\x15\n\rtarget_commit\x18\x0e \x01(\t\x12\x11\n\tconflicts\x18\x0f \x03(\t\x12\x1e\n\x11\x66ollow_up_task_id\x18\x10 \x01(\tH\x00\x88\x01\x01\x12\x15\n\rcreated_order\x18\x11 \x01(\x03\x12\x13\n\x0b\x61uthor_name\x18\x12 \x01(\t\x12\x14\n\x0c\x61uthor_email\x18\x13 \x01(\t\x12\x11\n\tco_author\x18\x14 \x01(\tB\x14\n\x12_follow_up_task_id\"0\n\x1aGetWorkspaceLandingRequest\x12\x12\n\nlanding_id\x18\x01 \x01(\t\"\x92\x01\n\x1cReturnLandingConflictRequest\x12\x14\n\x0coperation_id\x18\x01 \x01(\t\x12\x0e\n\x06tag_id\x18\x02 \x01(\t\x12\x12\n\nsession_id\x18\x03 \x01(\t\x12\x0e\n\x06target\x18\x04 \x01(\t\x12\x15\n\rtarget_commit\x18\x05 \x01(\t\x12\x11\n\tconflicts\x18\x06 \x03(\t\"h\n\x1cListWorkspaceLandingsRequest\x12\x0f\n\x07task_id\x18\x01 \x01(\t\x12\r\n\x05limit\x18\x02 \x01(\r\x12\x14\n\x0c\x62\x65\x66ore_order\x18\x03 \x01(\x03\x12\x12\n\nsession_id\x18\x04 \x01(\t\"s\n\x1dListWorkspaceLandingsResponse\x12\x37\n\x08landings\x18\x01 \x03(\x0b\x32%.supertag.runtime.v2.WorkspaceLanding\x12\x19\n\x11next_before_order\x18\x02 \x01(\x03\"\xdc\x01\n\x12WorkspaceSourcePin\x12\x0e\n\x06pin_id\x18\x01 \x01(\t\x12\x0e\n\x06tag_id\x18\x02 \x01(\t\x12\x12\n\nsession_id\x18\x03 \x01(\t\x12\x30\n\x08selector\x18\x04 \x01(\x0b\x32\x1e.supertag.runtime.v2.Workspace\x12\x17\n\x0fselector_digest\x18\x05 \x01(\t\x12\x30\n\x08resolved\x18\x06 \x01(\x0b\x32\x1e.supertag.runtime.v2.Workspace\x12\x15\n\rcreated_order\x18\x07 \x01(\x04\"H\n\"ListPendingWorkspaceSourcesRequest\x12\x13\n\x0b\x61\x66ter_order\x18\x01 \x01(\x04\x12\r\n\x05limit\x18\x02 \x01(\r\"v\n#ListPendingWorkspaceSourcesResponse\x12\x35\n\x04pins\x18\x01 \x03(\x0b\x32\'.supertag.runtime.v2.WorkspaceSourcePin\x12\x18\n\x10next_after_order\x18\x02 \x01(\x04\"y\n\x19PinWorkspaceSourceRequest\x12\x0e\n\x06pin_id\x18\x01 \x01(\t\x12\x17\n\x0fselector_digest\x18\x02 \x01(\t\x12\x14\n\x0cresolved_ref\x18\x03 \x01(\t\x12\x0e\n\x06\x63ommit\x18\x04 \x01(\t\x12\r\n\x05\x65rror\x18\x05 \x01(\t\"4\n\x1c\x43laimWorkspaceLandingRequest\x12\x14\n\x0coperation_id\x18\x01 \x01(\t\"@\n\x15WorkspaceLandingLease\x12\x12\n\nlanding_id\x18\x01 \x01(\t\x12\x13\n\x0blease_token\x18\x02 \x01(\t\"\xc7\x01\n\x1d\x43laimWorkspaceLandingResponse\x12\x36\n\x07landing\x18\x01 \x01(\x0b\x32%.supertag.runtime.v2.WorkspaceLanding\x12\x13\n\x0blease_token\x18\x02 \x01(\t\x12\x14\n\x0cvalid_for_ms\x18\x03 \x01(\x04\x12/\n\x06holder\x18\x04 \x01(\x0b\x32\x1f.supertag.runtime.v2.BlobHolder\x12\x12\n\ncredential\x18\x05 \x01(\t\"\x94\x02\n\x1dRecordWorkspaceLandingRequest\x12\x39\n\x05lease\x18\x01 \x01(\x0b\x32*.supertag.runtime.v2.WorkspaceLandingLease\x12\x14\n\x0coperation_id\x18\x02 \x01(\t\x12\x39\n\x05state\x18\x03 \x01(\x0e\x32*.supertag.runtime.v2.WorkspaceLandingState\x12\x0e\n\x06reason\x18\x04 \x01(\t\x12\x15\n\rlanded_commit\x18\x05 \x01(\t\x12\x15\n\rtarget_commit\x18\x06 \x01(\t\x12\x11\n\tconflicts\x18\x07 \x03(\t\x12\x16\n\x0eretry_after_ms\x18\x08 \x01(\x04*\x83\x01\n\x14WorkspaceLandingMode\x12&\n\"WORKSPACE_LANDING_MODE_UNSPECIFIED\x10\x00\x12!\n\x1dWORKSPACE_LANDING_MODE_BRANCH\x10\x01\x12 \n\x1cWORKSPACE_LANDING_MODE_MERGE\x10\x02*\x9d\x02\n\x15WorkspaceLandingState\x12\'\n#WORKSPACE_LANDING_STATE_UNSPECIFIED\x10\x00\x12\"\n\x1eWORKSPACE_LANDING_STATE_QUEUED\x10\x01\x12#\n\x1fWORKSPACE_LANDING_STATE_CLAIMED\x10\x02\x12\"\n\x1eWORKSPACE_LANDING_STATE_LANDED\x10\x03\x12$\n WORKSPACE_LANDING_STATE_CONFLICT\x10\x04\x12 \n\x1cWORKSPACE_LANDING_STATE_HELD\x10\x05\x12&\n\"WORKSPACE_LANDING_STATE_SUPERSEDED\x10\x06\x32\xc1\x02\n\x11WorkspaceLandings\x12]\n\x03Get\x12/.supertag.runtime.v2.GetWorkspaceLandingRequest\x1a%.supertag.runtime.v2.WorkspaceLanding\x12m\n\x04List\x12\x31.supertag.runtime.v2.ListWorkspaceLandingsRequest\x1a\x32.supertag.runtime.v2.ListWorkspaceLandingsResponse\x12^\n\x0eReturnConflict\x12\x31.supertag.runtime.v2.ReturnLandingConflictRequest\x1a\x19.supertag.runtime.v2.Task2\xbb\x04\n\x0bGitDelivery\x12\x87\x01\n\x12ListPendingSources\x12\x37.supertag.runtime.v2.ListPendingWorkspaceSourcesRequest\x1a\x38.supertag.runtime.v2.ListPendingWorkspaceSourcesResponse\x12\x64\n\tPinSource\x12..supertag.runtime.v2.PinWorkspaceSourceRequest\x1a\'.supertag.runtime.v2.WorkspaceSourcePin\x12n\n\x05\x43laim\x12\x31.supertag.runtime.v2.ClaimWorkspaceLandingRequest\x1a\x32.supertag.runtime.v2.ClaimWorkspaceLandingResponse\x12g\n\x05Renew\x12*.supertag.runtime.v2.WorkspaceLandingLease\x1a\x32.supertag.runtime.v2.ClaimWorkspaceLandingResponse\x12\x63\n\x06Record\x12\x32.supertag.runtime.v2.RecordWorkspaceLandingRequest\x1a%.supertag.runtime.v2.WorkspaceLandingb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n,supertag/runtime/v2/workspace_landings.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\x1a$supertag/runtime/v2/workspaces.proto\"\x92\x05\n\x10WorkspaceLanding\x12\x12\n\nlanding_id\x18\x01 \x01(\t\x12\x0f\n\x07task_id\x18\x02 \x01(\t\x12\x0e\n\x06tag_id\x18\x03 \x01(\t\x12\x12\n\nsession_id\x18\x04 \x01(\t\x12\x14\n\x0cworkspace_id\x18\x05 \x01(\t\x12\x0e\n\x06remote\x18\x06 \x01(\t\x12\x37\n\x04mode\x18\x07 \x01(\x0e\x32).supertag.runtime.v2.WorkspaceLandingMode\x12\x0e\n\x06\x62ranch\x18\x08 \x01(\t\x12\x0e\n\x06target\x18\t \x01(\t\x12\x41\n\x08\x64\x65livery\x18\n \x01(\x0b\x32/.supertag.runtime.v2.WorkspaceDeliveryReference\x12\x39\n\x05state\x18\x0b \x01(\x0e\x32*.supertag.runtime.v2.WorkspaceLandingState\x12\x0e\n\x06reason\x18\x0c \x01(\t\x12\x15\n\rlanded_commit\x18\r \x01(\t\x12\x15\n\rtarget_commit\x18\x0e \x01(\t\x12\x11\n\tconflicts\x18\x0f \x03(\t\x12\x1e\n\x11\x66ollow_up_task_id\x18\x10 \x01(\tH\x00\x88\x01\x01\x12\x15\n\rcreated_order\x18\x11 \x01(\x03\x12\x13\n\x0b\x61uthor_name\x18\x12 \x01(\t\x12\x14\n\x0c\x61uthor_email\x18\x13 \x01(\t\x12\x11\n\tco_author\x18\x14 \x01(\t\x12\r\n\x05title\x18\x15 \x01(\t\x12\x0c\n\x04\x62ody\x18\x16 \x01(\t\x12?\n\x0cpull_request\x18\x17 \x01(\x0b\x32).supertag.runtime.v2.WorkspacePullRequestB\x14\n\x12_follow_up_task_id\"^\n\x14WorkspacePullRequest\x12\x12\n\nrepository\x18\x01 \x01(\t\x12\x15\n\rrepository_id\x18\x02 \x01(\x04\x12\x0e\n\x06number\x18\x03 \x01(\x04\x12\x0b\n\x03url\x18\x04 \x01(\t\"0\n\x1aGetWorkspaceLandingRequest\x12\x12\n\nlanding_id\x18\x01 \x01(\t\"\x92\x01\n\x1cReturnLandingConflictRequest\x12\x14\n\x0coperation_id\x18\x01 \x01(\t\x12\x0e\n\x06tag_id\x18\x02 \x01(\t\x12\x12\n\nsession_id\x18\x03 \x01(\t\x12\x0e\n\x06target\x18\x04 \x01(\t\x12\x15\n\rtarget_commit\x18\x05 \x01(\t\x12\x11\n\tconflicts\x18\x06 \x03(\t\"h\n\x1cListWorkspaceLandingsRequest\x12\x0f\n\x07task_id\x18\x01 \x01(\t\x12\r\n\x05limit\x18\x02 \x01(\r\x12\x14\n\x0c\x62\x65\x66ore_order\x18\x03 \x01(\x03\x12\x12\n\nsession_id\x18\x04 \x01(\t\"s\n\x1dListWorkspaceLandingsResponse\x12\x37\n\x08landings\x18\x01 \x03(\x0b\x32%.supertag.runtime.v2.WorkspaceLanding\x12\x19\n\x11next_before_order\x18\x02 \x01(\x03\"\xdc\x01\n\x12WorkspaceSourcePin\x12\x0e\n\x06pin_id\x18\x01 \x01(\t\x12\x0e\n\x06tag_id\x18\x02 \x01(\t\x12\x12\n\nsession_id\x18\x03 \x01(\t\x12\x30\n\x08selector\x18\x04 \x01(\x0b\x32\x1e.supertag.runtime.v2.Workspace\x12\x17\n\x0fselector_digest\x18\x05 \x01(\t\x12\x30\n\x08resolved\x18\x06 \x01(\x0b\x32\x1e.supertag.runtime.v2.Workspace\x12\x15\n\rcreated_order\x18\x07 \x01(\x04\"H\n\"ListPendingWorkspaceSourcesRequest\x12\x13\n\x0b\x61\x66ter_order\x18\x01 \x01(\x04\x12\r\n\x05limit\x18\x02 \x01(\r\"v\n#ListPendingWorkspaceSourcesResponse\x12\x35\n\x04pins\x18\x01 \x03(\x0b\x32\'.supertag.runtime.v2.WorkspaceSourcePin\x12\x18\n\x10next_after_order\x18\x02 \x01(\x04\"y\n\x19PinWorkspaceSourceRequest\x12\x0e\n\x06pin_id\x18\x01 \x01(\t\x12\x17\n\x0fselector_digest\x18\x02 \x01(\t\x12\x14\n\x0cresolved_ref\x18\x03 \x01(\t\x12\x0e\n\x06\x63ommit\x18\x04 \x01(\t\x12\r\n\x05\x65rror\x18\x05 \x01(\t\"4\n\x1c\x43laimWorkspaceLandingRequest\x12\x14\n\x0coperation_id\x18\x01 \x01(\t\"@\n\x15WorkspaceLandingLease\x12\x12\n\nlanding_id\x18\x01 \x01(\t\x12\x13\n\x0blease_token\x18\x02 \x01(\t\"\xc7\x01\n\x1d\x43laimWorkspaceLandingResponse\x12\x36\n\x07landing\x18\x01 \x01(\x0b\x32%.supertag.runtime.v2.WorkspaceLanding\x12\x13\n\x0blease_token\x18\x02 \x01(\t\x12\x14\n\x0cvalid_for_ms\x18\x03 \x01(\x04\x12/\n\x06holder\x18\x04 \x01(\x0b\x32\x1f.supertag.runtime.v2.BlobHolder\x12\x12\n\ncredential\x18\x05 \x01(\t\"\xd5\x02\n\x1dRecordWorkspaceLandingRequest\x12\x39\n\x05lease\x18\x01 \x01(\x0b\x32*.supertag.runtime.v2.WorkspaceLandingLease\x12\x14\n\x0coperation_id\x18\x02 \x01(\t\x12\x39\n\x05state\x18\x03 \x01(\x0e\x32*.supertag.runtime.v2.WorkspaceLandingState\x12\x0e\n\x06reason\x18\x04 \x01(\t\x12\x15\n\rlanded_commit\x18\x05 \x01(\t\x12\x15\n\rtarget_commit\x18\x06 \x01(\t\x12\x11\n\tconflicts\x18\x07 \x03(\t\x12\x16\n\x0eretry_after_ms\x18\x08 \x01(\x04\x12?\n\x0cpull_request\x18\t \x01(\x0b\x32).supertag.runtime.v2.WorkspacePullRequest*\xa6\x01\n\x14WorkspaceLandingMode\x12&\n\"WORKSPACE_LANDING_MODE_UNSPECIFIED\x10\x00\x12!\n\x1dWORKSPACE_LANDING_MODE_BRANCH\x10\x01\x12 \n\x1cWORKSPACE_LANDING_MODE_MERGE\x10\x02\x12!\n\x1dWORKSPACE_LANDING_MODE_REVIEW\x10\x03*\x9d\x02\n\x15WorkspaceLandingState\x12\'\n#WORKSPACE_LANDING_STATE_UNSPECIFIED\x10\x00\x12\"\n\x1eWORKSPACE_LANDING_STATE_QUEUED\x10\x01\x12#\n\x1fWORKSPACE_LANDING_STATE_CLAIMED\x10\x02\x12\"\n\x1eWORKSPACE_LANDING_STATE_LANDED\x10\x03\x12$\n WORKSPACE_LANDING_STATE_CONFLICT\x10\x04\x12 \n\x1cWORKSPACE_LANDING_STATE_HELD\x10\x05\x12&\n\"WORKSPACE_LANDING_STATE_SUPERSEDED\x10\x06\x32\xc1\x02\n\x11WorkspaceLandings\x12]\n\x03Get\x12/.supertag.runtime.v2.GetWorkspaceLandingRequest\x1a%.supertag.runtime.v2.WorkspaceLanding\x12m\n\x04List\x12\x31.supertag.runtime.v2.ListWorkspaceLandingsRequest\x1a\x32.supertag.runtime.v2.ListWorkspaceLandingsResponse\x12^\n\x0eReturnConflict\x12\x31.supertag.runtime.v2.ReturnLandingConflictRequest\x1a\x19.supertag.runtime.v2.Task2\xbb\x04\n\x0bGitDelivery\x12\x87\x01\n\x12ListPendingSources\x12\x37.supertag.runtime.v2.ListPendingWorkspaceSourcesRequest\x1a\x38.supertag.runtime.v2.ListPendingWorkspaceSourcesResponse\x12\x64\n\tPinSource\x12..supertag.runtime.v2.PinWorkspaceSourceRequest\x1a\'.supertag.runtime.v2.WorkspaceSourcePin\x12n\n\x05\x43laim\x12\x31.supertag.runtime.v2.ClaimWorkspaceLandingRequest\x1a\x32.supertag.runtime.v2.ClaimWorkspaceLandingResponse\x12g\n\x05Renew\x12*.supertag.runtime.v2.WorkspaceLandingLease\x1a\x32.supertag.runtime.v2.ClaimWorkspaceLandingResponse\x12\x63\n\x06Record\x12\x32.supertag.runtime.v2.RecordWorkspaceLandingRequest\x1a%.supertag.runtime.v2.WorkspaceLandingb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'supertag._runtime_v2.workspace_landings_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_WORKSPACELANDINGMODE']._serialized_start=2273
-  _globals['_WORKSPACELANDINGMODE']._serialized_end=2404
-  _globals['_WORKSPACELANDINGSTATE']._serialized_start=2407
-  _globals['_WORKSPACELANDINGSTATE']._serialized_end=2692
+  _globals['_WORKSPACELANDINGMODE']._serialized_start=2528
+  _globals['_WORKSPACELANDINGMODE']._serialized_end=2694
+  _globals['_WORKSPACELANDINGSTATE']._serialized_start=2697
+  _globals['_WORKSPACELANDINGSTATE']._serialized_end=2982
   _globals['_WORKSPACELANDING']._serialized_start=143
-  _globals['_WORKSPACELANDING']._serialized_end=707
-  _globals['_GETWORKSPACELANDINGREQUEST']._serialized_start=709
-  _globals['_GETWORKSPACELANDINGREQUEST']._serialized_end=757
-  _globals['_RETURNLANDINGCONFLICTREQUEST']._serialized_start=760
-  _globals['_RETURNLANDINGCONFLICTREQUEST']._serialized_end=906
-  _globals['_LISTWORKSPACELANDINGSREQUEST']._serialized_start=908
-  _globals['_LISTWORKSPACELANDINGSREQUEST']._serialized_end=1012
-  _globals['_LISTWORKSPACELANDINGSRESPONSE']._serialized_start=1014
-  _globals['_LISTWORKSPACELANDINGSRESPONSE']._serialized_end=1129
-  _globals['_WORKSPACESOURCEPIN']._serialized_start=1132
-  _globals['_WORKSPACESOURCEPIN']._serialized_end=1352
-  _globals['_LISTPENDINGWORKSPACESOURCESREQUEST']._serialized_start=1354
-  _globals['_LISTPENDINGWORKSPACESOURCESREQUEST']._serialized_end=1426
-  _globals['_LISTPENDINGWORKSPACESOURCESRESPONSE']._serialized_start=1428
-  _globals['_LISTPENDINGWORKSPACESOURCESRESPONSE']._serialized_end=1546
-  _globals['_PINWORKSPACESOURCEREQUEST']._serialized_start=1548
-  _globals['_PINWORKSPACESOURCEREQUEST']._serialized_end=1669
-  _globals['_CLAIMWORKSPACELANDINGREQUEST']._serialized_start=1671
-  _globals['_CLAIMWORKSPACELANDINGREQUEST']._serialized_end=1723
-  _globals['_WORKSPACELANDINGLEASE']._serialized_start=1725
-  _globals['_WORKSPACELANDINGLEASE']._serialized_end=1789
-  _globals['_CLAIMWORKSPACELANDINGRESPONSE']._serialized_start=1792
-  _globals['_CLAIMWORKSPACELANDINGRESPONSE']._serialized_end=1991
-  _globals['_RECORDWORKSPACELANDINGREQUEST']._serialized_start=1994
-  _globals['_RECORDWORKSPACELANDINGREQUEST']._serialized_end=2270
-  _globals['_WORKSPACELANDINGS']._serialized_start=2695
-  _globals['_WORKSPACELANDINGS']._serialized_end=3016
-  _globals['_GITDELIVERY']._serialized_start=3019
-  _globals['_GITDELIVERY']._serialized_end=3590
+  _globals['_WORKSPACELANDING']._serialized_end=801
+  _globals['_WORKSPACEPULLREQUEST']._serialized_start=803
+  _globals['_WORKSPACEPULLREQUEST']._serialized_end=897
+  _globals['_GETWORKSPACELANDINGREQUEST']._serialized_start=899
+  _globals['_GETWORKSPACELANDINGREQUEST']._serialized_end=947
+  _globals['_RETURNLANDINGCONFLICTREQUEST']._serialized_start=950
+  _globals['_RETURNLANDINGCONFLICTREQUEST']._serialized_end=1096
+  _globals['_LISTWORKSPACELANDINGSREQUEST']._serialized_start=1098
+  _globals['_LISTWORKSPACELANDINGSREQUEST']._serialized_end=1202
+  _globals['_LISTWORKSPACELANDINGSRESPONSE']._serialized_start=1204
+  _globals['_LISTWORKSPACELANDINGSRESPONSE']._serialized_end=1319
+  _globals['_WORKSPACESOURCEPIN']._serialized_start=1322
+  _globals['_WORKSPACESOURCEPIN']._serialized_end=1542
+  _globals['_LISTPENDINGWORKSPACESOURCESREQUEST']._serialized_start=1544
+  _globals['_LISTPENDINGWORKSPACESOURCESREQUEST']._serialized_end=1616
+  _globals['_LISTPENDINGWORKSPACESOURCESRESPONSE']._serialized_start=1618
+  _globals['_LISTPENDINGWORKSPACESOURCESRESPONSE']._serialized_end=1736
+  _globals['_PINWORKSPACESOURCEREQUEST']._serialized_start=1738
+  _globals['_PINWORKSPACESOURCEREQUEST']._serialized_end=1859
+  _globals['_CLAIMWORKSPACELANDINGREQUEST']._serialized_start=1861
+  _globals['_CLAIMWORKSPACELANDINGREQUEST']._serialized_end=1913
+  _globals['_WORKSPACELANDINGLEASE']._serialized_start=1915
+  _globals['_WORKSPACELANDINGLEASE']._serialized_end=1979
+  _globals['_CLAIMWORKSPACELANDINGRESPONSE']._serialized_start=1982
+  _globals['_CLAIMWORKSPACELANDINGRESPONSE']._serialized_end=2181
+  _globals['_RECORDWORKSPACELANDINGREQUEST']._serialized_start=2184
+  _globals['_RECORDWORKSPACELANDINGREQUEST']._serialized_end=2525
+  _globals['_WORKSPACELANDINGS']._serialized_start=2985
+  _globals['_WORKSPACELANDINGS']._serialized_end=3306
+  _globals['_GITDELIVERY']._serialized_start=3309
+  _globals['_GITDELIVERY']._serialized_end=3880
 # @@protoc_insertion_point(module_scope)

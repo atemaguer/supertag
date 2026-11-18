@@ -540,7 +540,8 @@ enum WorkSessionCloseReason {
   // Closed after 14 days without activity: no turn, continuation, or delivery change.
   // Continuing it reopens it when the Tag is under its limit.
   WORK_SESSION_CLOSE_REASON_IDLE = 6;
-  reserved 7;
+  // The pull request its review landing opened was merged.
+  WORK_SESSION_CLOSE_REASON_MERGED = 7;
 }
 
 // An operator or client closes a Work Session it may see. `delivery_pulled` records that its

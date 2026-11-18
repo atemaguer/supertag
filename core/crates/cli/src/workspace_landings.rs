@@ -87,6 +87,11 @@ fn describe(value: WorkspaceLanding) -> Value {
         "target_commit": value.target_commit,
         "conflicts": value.conflicts,
         "follow_up_task_id": value.follow_up_task_id,
+        "pull_request": value.pull_request.map(|pull_request| json!({
+            "repository": pull_request.repository,
+            "number": pull_request.number,
+            "url": pull_request.url,
+        })),
         "created_order": value.created_order,
     })
 }

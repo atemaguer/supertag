@@ -4,6 +4,8 @@
 //!
 //! - `branch`: every delivered Task queues a landing of the Session's branch. A newer delivery
 //!   of the same Session supersedes one not yet claimed, since its commit contains the older.
+//! - `review`: like `branch`, and git delivery then opens or updates the branch's draft pull
+//!   request; the landing records it, and its merge closes the Work Session.
 //! - `merge`: a Session lands once its work is reported done (its Work Session closes for its
 //!   Tag, an operator, or its Objective), and again after a merge follow-up Task succeeds. A
 //!   conflict is never resolved here: the landing ends in Conflict and the Session receives a
@@ -98,6 +100,11 @@ async fn insert_in(
     target: &str,
 ) -> Result<()> {
     let (author_name, author_email, co_author) = author_in(tx, task).await?;
+    let (title, body) = if mode == WorkspaceLandingMode::Review {
+        review_text_in(tx, task).await?
+    } else {
+        Default::default()
+    };
     let value = WorkspaceLanding {
         landing_id: Uuid::new_v4().to_string(),
         task_id: task.task_id.clone(),
@@ -114,6 +121,8 @@ async fn insert_in(
         author_name,
         author_email,
         co_author,
+        title,
+        body,
         ..Default::default()
     };
     sqlx::query("INSERT INTO supertag_v2_workspace_landings(landing_id,task_id,tag_id,session_id,created_order,state,payload) VALUES($1,$2,$3,$4,$5,$6,$7)")
@@ -121,6 +130,44 @@ async fn insert_in(
         .bind(value.created_order).bind(i64::from(value.state)).bind(value.encode_to_vec())
         .execute(&mut **tx).await?;
     Ok(())
+}
+
+/// A review landing's pull request title and description: the Work Session's title, else the
+/// first line of the Task's prompt, and the Task's result.
+async fn review_text_in(tx: &mut Transaction<'_, Any>, task: &Task) -> Result<(String, String)> {
+    let session_title: Option<String> = sqlx::query_scalar(
+        "SELECT title FROM supertag_v2_work_sessions WHERE work_session_id=$1 AND tag_id=$2",
+    )
+    .bind(&task.session_id)
+    .bind(&task.tag_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let title = session_title
+        .filter(|title| !title.trim().is_empty())
+        .or_else(|| {
+            task.prompt
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "Workspace update".into())
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(120)
+        .collect::<String>();
+    let body = format!(
+        "{}\n\nSuperTag Session {} of Tag {}, Task {}.",
+        task.result.as_deref().unwrap_or("").trim(),
+        task.session_id,
+        task.tag_id,
+        task.task_id
+    )
+    .trim()
+    .chars()
+    .take(16_000)
+    .collect::<String>();
+    Ok((title, body))
 }
 
 /// Called once inside Finish after the Workspace receipt was validated.
@@ -138,21 +185,28 @@ pub(crate) async fn finish_in(tx: &mut Transaction<'_, Any>, task: &Task) -> Res
     let Some(remote) = &spec.remote else {
         return Ok(());
     };
-    match remote.land.as_ref().and_then(|land| land.mode.as_ref()) {
-        Some(workspace_land::Mode::Branch(_)) => {
+    let mode = remote.land.as_ref().and_then(|land| land.mode.as_ref());
+    match mode {
+        Some(workspace_land::Mode::Branch(_) | workspace_land::Mode::Review(_)) => {
+            let (mode, target) = match mode {
+                Some(workspace_land::Mode::Review(review)) => {
+                    (WorkspaceLandingMode::Review, review.base.as_str())
+                }
+                _ => (WorkspaceLandingMode::Branch, ""),
+            };
             // A newer delivery contains the older one: an unclaimed landing of it is superseded.
             let pending = sqlx::query("SELECT * FROM supertag_v2_workspace_landings WHERE tag_id=$1 AND session_id=$2 AND state=$3 AND lease_token IS NULL")
                 .bind(&task.tag_id).bind(&task.session_id).bind(WorkspaceLandingState::Queued as i64)
                 .fetch_all(&mut **tx).await?;
             for row in pending {
                 let mut prior = decode(&row)?;
-                if prior.mode() == WorkspaceLandingMode::Branch {
+                if prior.mode() == mode {
                     prior.state = WorkspaceLandingState::Superseded as i32;
                     prior.reason = format!("Task {} delivered a newer commit", task.task_id);
                     save(tx, &prior).await?;
                 }
             }
-            insert_in(tx, task, remote, delivery, WorkspaceLandingMode::Branch, "").await
+            insert_in(tx, task, remote, delivery, mode, target).await
         }
         // A merge follow-up resolved its conflicts: the Session lands again at once.
         Some(workspace_land::Mode::Merge(merge)) if !spec.merge_commit.is_empty() => {
@@ -239,6 +293,39 @@ pub(crate) async fn session_done_in(
         &merge.target,
     )
     .await
+}
+
+/// Records the pull request a review landing opened for its Session, after checking it is one
+/// SuperTag can show and match: `WEB/OWNER/NAME/pull/NUMBER` on the Workspace's own repository.
+async fn review_session_in(
+    tx: &mut Transaction<'_, Any>,
+    landing: &WorkspaceLanding,
+    pull_request: &WorkspacePullRequest,
+) -> Result<()> {
+    let github = git_remote::github_remote(&landing.remote);
+    let valid = github.as_ref().is_some_and(|github| {
+        pull_request
+            .repository
+            .eq_ignore_ascii_case(&github.repository)
+            && pull_request.url
+                == format!(
+                    "{}/{}/pull/{}",
+                    github.web, github.repository, pull_request.number
+                )
+    }) && [pull_request.repository_id, pull_request.number]
+        .iter()
+        .all(|id| *id > 0 && *id <= i64::MAX as u64);
+    if !valid {
+        return Err(invalid(
+            "a pull request names the Workspace's repository, its number, and its link",
+        ));
+    }
+    // A Session reviews in one pull request; a later one replaces the record.
+    sqlx::query("INSERT INTO supertag_v2_workspace_review_sessions(tag_id,session_id,repository,repository_id,number) VALUES($1,$2,$3,$4,$5) ON CONFLICT(tag_id,session_id) DO UPDATE SET repository=excluded.repository,repository_id=excluded.repository_id,number=excluded.number")
+        .bind(&landing.tag_id).bind(&landing.session_id).bind(pull_request.repository.to_ascii_lowercase())
+        .bind(pull_request.repository_id as i64).bind(pull_request.number as i64)
+        .execute(&mut **tx).await?;
+    Ok(())
 }
 
 /// Landings queued while their holding Worker Host was away retry once it reports Ready.
@@ -527,6 +614,21 @@ impl Store {
                     return Err(invalid("a landing records the commit the remote now names"));
                 }
                 value.landed_commit = input.landed_commit.clone();
+                match (value.mode(), &input.pull_request) {
+                    (WorkspaceLandingMode::Review, Some(pull_request)) => {
+                        review_session_in(&mut tx, &value, pull_request).await?;
+                        value.pull_request = Some(pull_request.clone());
+                    }
+                    (WorkspaceLandingMode::Review, None) => {
+                        return Err(invalid(
+                            "a review landing records the pull request it opened",
+                        ));
+                    }
+                    (_, Some(_)) => {
+                        return Err(invalid("only a review landing opens a pull request"));
+                    }
+                    (_, None) => {}
+                }
             }
             WorkspaceLandingState::Conflict => {
                 if value.mode() != WorkspaceLandingMode::Merge

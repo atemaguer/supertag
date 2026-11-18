@@ -30,6 +30,15 @@ pub enum Land {
     Branch,
     /// Finished Sessions merge into --target, which is pushed.
     Merge,
+    /// Each delivered Task updates its Session's branch and a draft pull request against
+    /// --base. Needs a GitHub remote.
+    Review,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub enum Forge {
+    /// GitHub or GitHub Enterprise Server.
+    Github,
 }
 
 #[derive(Subcommand)]
@@ -59,6 +68,12 @@ pub enum WorkspaceCommand {
         /// The branch finished Sessions merge into, with --land merge.
         #[arg(long, required_if_eq("land", "merge"))]
         target: Option<String>,
+        /// The branch pull requests target, with --land review.
+        #[arg(long, required_if_eq("land", "review"))]
+        base: Option<String>,
+        /// The forge that reviews changes, for a self-hosted forge. A github.com remote is GitHub.
+        #[arg(long, value_enum)]
+        forge: Option<Forge>,
         /// The revision you last read. If given, the change is refused when the resource has changed since.
         #[arg(long)]
         expected_revision: Option<u64>,
@@ -96,6 +111,20 @@ pub enum CredentialCommand {
         /// `!/usr/local/bin/mint-token`.
         #[arg(long, value_name = "HELPER", group = "kind")]
         credential_helper: Option<String>,
+        /// A GitHub App installation: git delivery mints a token for one repository, narrowed
+        /// to each operation, from the App's private key.
+        #[arg(long, group = "kind", requires_all = ["app_id", "installation_id", "private_key"])]
+        github_app: bool,
+        /// The GitHub App's ID, with --github-app.
+        #[arg(long, value_name = "ID", requires = "github_app")]
+        app_id: Option<u64>,
+        /// The ID of the App's installation on the repositories' owner, with --github-app.
+        #[arg(long, value_name = "ID", requires = "github_app")]
+        installation_id: Option<u64>,
+        /// The GitHub App's private key file (.pem), with --github-app. Stored in this
+        /// machine's credential vault, apart from any copy the GitHub surface keeps.
+        #[arg(long, value_name = "PATH", requires = "github_app")]
+        private_key: Option<PathBuf>,
     },
     /// List Workspace Credentials, without their secrets.
     List,
@@ -206,6 +235,8 @@ pub async fn run(connection: Connection, command: WorkspaceCommand) -> Result<()
             push_credential,
             land,
             target,
+            base,
+            forge,
             expected_revision,
             operation_id,
         } => {
@@ -214,14 +245,25 @@ pub async fn run(connection: Connection, command: WorkspaceCommand) -> Result<()
                 target.is_none() || matches!(land, Some(Land::Merge)),
                 "--target names the branch of --land merge"
             );
+            ensure!(
+                base.is_none() || matches!(land, Some(Land::Review)),
+                "--base names the pull request base of --land review"
+            );
             let land = land.map(|land| WorkspaceLand {
                 mode: Some(match land {
                     Land::Branch => workspace_land::Mode::Branch(WorkspaceLandBranch {}),
                     Land::Merge => workspace_land::Mode::Merge(WorkspaceLandMerge {
                         target: target.unwrap_or_default(),
                     }),
+                    Land::Review => workspace_land::Mode::Review(WorkspaceLandReview {
+                        base: base.unwrap_or_default(),
+                    }),
                 }),
             });
+            let forge = match forge {
+                Some(Forge::Github) => WorkspaceForge::Github,
+                None => WorkspaceForge::Unspecified,
+            };
             let credentials = WorkspaceCredentialNames {
                 read: credential.clone().or(read_credential).unwrap_or_default(),
                 push: credential.or(push_credential).unwrap_or_default(),
@@ -239,6 +281,7 @@ pub async fn run(connection: Connection, command: WorkspaceCommand) -> Result<()
                             r#ref: reference.unwrap_or_default(),
                             credentials: Some(credentials),
                             land,
+                            forge: forge as i32,
                             ..Default::default()
                         }),
                     },
@@ -279,6 +322,10 @@ async fn credential(connection: Connection, command: CredentialCommand) -> Resul
             https_token,
             username,
             credential_helper,
+            github_app,
+            app_id,
+            installation_id,
+            private_key,
         } => {
             ensure!(
                 valid_credential_name(&name),
@@ -325,8 +372,26 @@ async fn credential(connection: Connection, command: CredentialCommand) -> Resul
                     WorkspaceCredentialKind::CredentialHelper,
                     command,
                 )
+            } else if github_app {
+                let (Some(app_id), Some(installation_id), Some(path)) =
+                    (app_id, installation_id, private_key)
+                else {
+                    bail!("--github-app needs --app-id, --installation-id, and --private-key");
+                };
+                let private_key_pem = read_secret_file(&path, "GitHub App private key")?;
+                (
+                    Credential::GithubApp {
+                        app_id,
+                        installation_id,
+                        private_key_pem,
+                    },
+                    WorkspaceCredentialKind::GithubApp,
+                    Credential::github_app_identifier(app_id, installation_id),
+                )
             } else {
-                bail!("choose one of --ssh-key, --https-token, or --credential-helper");
+                bail!(
+                    "choose one of --ssh-key, --https-token, --credential-helper, or --github-app"
+                );
             };
             secret.validate()?;
             // The secret is stored before the Control Plane names it, so no Workspace can name a
@@ -420,10 +485,10 @@ fn read_secret_file(path: &Path, what: &str) -> Result<String> {
         metadata.is_file() && metadata.len() <= 65_536,
         "the {what} file must be a regular file of at most 64 KiB"
     );
-    if what == "SSH key" {
+    if what != "known_hosts" {
         ensure!(
             metadata.mode() & 0o077 == 0,
-            "the SSH key file must be readable only by you (chmod 600 {})",
+            "the {what} file must be readable only by you (chmod 600 {})",
             path.display()
         );
     }
@@ -486,13 +551,20 @@ fn read_token() -> Result<String> {
 }
 
 pub(crate) fn describe(value: Workspace) -> Value {
+    let forge = value.forge();
     let land = match value.land.and_then(|land| land.mode) {
         Some(workspace_land::Mode::Branch(_)) => json!("branch"),
         Some(workspace_land::Mode::Merge(merge)) => json!({"merge": merge.target}),
+        Some(workspace_land::Mode::Review(review)) => json!({"review": {"base": review.base}}),
         None => Value::Null,
+    };
+    let forge = match forge {
+        WorkspaceForge::Github => json!("github"),
+        WorkspaceForge::Unspecified => Value::Null,
     };
     let credentials = value.credentials.unwrap_or_default();
     json!({
+        "forge": forge,
         "workspace_id": value.workspace_id,
         "revision": value.revision,
         "remote": value.remote,

@@ -139,9 +139,9 @@ async fn mint(State(api): State<Arc<FakeApi>>, headers: HeaderMap, body: Bytes) 
     assert_eq!(
         serde_json::from_slice::<Value>(&body).unwrap(),
         if api.publication.load(Ordering::SeqCst) {
-            json!({"repository_ids":[123],"permissions":{"contents":"write","pull_requests":"write"}})
+            json!({"repositories":["project"],"permissions":{"contents":"write","pull_requests":"write"}})
         } else if api.source_read.load(Ordering::SeqCst) {
-            json!({"repository_ids":[123],"permissions":{"contents":"read"}})
+            json!({"repositories":["project"],"permissions":{"contents":"read"}})
         } else {
             json!({"repository_ids":[123],"permissions":{"issues":"write"}})
         }
@@ -594,47 +594,55 @@ async fn lease_fixture() -> Result<(tonic::transport::Channel, tokio::task::Join
 }
 
 #[tokio::test]
-async fn source_read_token_is_scoped_and_never_reuses_comment_authority() -> Result<()> {
+async fn repository_tokens_are_minted_per_use_with_only_their_permissions() -> Result<()> {
     let api = Arc::new(FakeApi::new(now()?));
     api.source_read.store(true, Ordering::SeqCst);
     api.response.lock().await["permissions"] = json!({"contents":"read","metadata":"read"});
     let (url, server) = serve(api.clone()).await?;
-    let auth = Authentication::source_reader(&app(), 123, "acme/project")?;
+    let GithubAuthentication::App(config) = app() else {
+        unreachable!()
+    };
+    let app = supertag_github::auth::GithubApp::new(&config)?;
     let client = client();
-    assert_eq!(
-        auth.access_token(&client, &url).await?.expose(),
-        "ghs_fixture-installation-token"
-    );
-    auth.access_token(&client, &url).await?;
-    assert_eq!(api.mints.load(Ordering::SeqCst), 1);
-    auth.invalidate().await;
+    let read = [("contents", "read")];
+    let token = app
+        .repository_token(&client, &url, "acme/project", &read)
+        .await?;
+    assert_eq!(token.token.expose(), "ghs_fixture-installation-token");
+    assert_eq!(token.repository_id, 123);
+    // Never cached: each operation mints its own.
+    app.repository_token(&client, &url, "acme/project", &read)
+        .await?;
+    assert_eq!(api.mints.load(Ordering::SeqCst), 2);
+    // A response broader than asked is refused.
     api.response.lock().await["permissions"] = json!({"contents":"write","metadata":"read"});
-    assert!(auth.access_token(&client, &url).await.is_err());
-    api.response.lock().await["permissions"] = json!({"issues":"write","metadata":"read"});
-    assert!(auth.access_token(&client, &url).await.is_err());
-    server.abort();
-    Ok(())
-}
-
-#[tokio::test]
-async fn publication_token_has_exact_repository_and_write_permissions() -> Result<()> {
-    let timestamp = now()?;
-    let api = Arc::new(FakeApi::new(timestamp));
+    assert!(
+        app.repository_token(&client, &url, "acme/project", &read)
+            .await
+            .is_err()
+    );
+    api.source_read.store(false, Ordering::SeqCst);
     api.publication.store(true, Ordering::SeqCst);
     api.response.lock().await["permissions"] =
         json!({"contents":"write","pull_requests":"write","metadata":"read"});
-    let (url, server) = serve(api.clone()).await?;
-    let client = Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .no_proxy()
-        .build()?;
-    let auth = Authentication::publisher(&app(), 123, "acme/project")?;
-    auth.access_token(&client, &url).await?;
-    auth.access_token(&client, &url).await?;
-    assert_eq!(api.mints.load(Ordering::SeqCst), 1);
-    auth.invalidate().await;
+    let write = [("contents", "write"), ("pull_requests", "write")];
+    app.repository_token(&client, &url, "acme/project", &write)
+        .await?;
     api.response.lock().await["permissions"]["issues"] = "write".into();
-    assert!(auth.access_token(&client, &url).await.is_err());
+    assert!(
+        app.repository_token(&client, &url, "acme/project", &write)
+            .await
+            .is_err()
+    );
+    // A token for another repository is refused.
+    api.response.lock().await["permissions"] =
+        json!({"contents":"write","pull_requests":"write","metadata":"read"});
+    api.response.lock().await["repositories"] = json!([{"id":124,"full_name":"acme/other"}]);
+    assert!(
+        app.repository_token(&client, &url, "acme/project", &write)
+            .await
+            .is_err()
+    );
     server.abort();
     Ok(())
 }

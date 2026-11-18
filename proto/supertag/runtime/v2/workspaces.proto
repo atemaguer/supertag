@@ -30,6 +30,16 @@ message Workspace {
   // Control Plane read it from.
   string commit = 7;
   string resolved_ref = 8;
+  // The forge whose API reviews changes. Unspecified is inferred from the remote: github.com is
+  // GitHub, and any other remote is a plain git server, which has no review.
+  WorkspaceForge forge = 9;
+}
+
+enum WorkspaceForge {
+  WORKSPACE_FORGE_UNSPECIFIED = 0;
+  // GitHub or GitHub Enterprise Server: pull requests through its REST API, at
+  // `https://api.github.com/` for github.com and `/api/v3/` on the remote's host otherwise.
+  WORKSPACE_FORGE_GITHUB = 1;
 }
 
 // The Workspace Credentials git delivery uses. Empty names a remote that needs none, such as a
@@ -46,10 +56,14 @@ message WorkspaceLand {
     WorkspaceLandBranch branch = 1;
     // A Session's finished work is merged into `target`, which is pushed.
     WorkspaceLandMerge merge = 2;
+    // Each delivered Task updates the Session's branch, and a draft pull request from it
+    // against `base` is opened or updated. Needs a forge.
+    WorkspaceLandReview review = 3;
   }
 }
 message WorkspaceLandBranch {}
 message WorkspaceLandMerge { string target = 1; }
+message WorkspaceLandReview { string base = 1; }
 
 message PutWorkspaceRequest {
   string operation_id = 1;
@@ -111,12 +125,16 @@ enum WorkspaceCredentialKind {
   WORKSPACE_CREDENTIAL_KIND_HTTPS_TOKEN = 2;
   // A git credential helper that git delivery asks for each remote.
   WORKSPACE_CREDENTIAL_KIND_CREDENTIAL_HELPER = 3;
+  // A GitHub App installation: git delivery mints a one-repository token for each operation,
+  // narrowed to the permissions it needs.
+  WORKSPACE_CREDENTIAL_KIND_GITHUB_APP = 4;
 }
 
 message WorkspaceCredential {
   string name = 1;
   WorkspaceCredentialKind kind = 2;
-  // An SSH key's SHA256 fingerprint, an HTTPS user name, or a helper's command name.
+  // An SSH key's SHA256 fingerprint, an HTTPS user name, a helper's command name, or a GitHub
+  // App's `app:ID/installation:ID`.
   string identifier = 3;
   uint64 revision = 4;
 }

@@ -78,6 +78,7 @@ class WorkSessionCloseReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     WORK_SESSION_CLOSE_REASON_OBJECTIVE_CLOSED: _ClassVar[WorkSessionCloseReason]
     WORK_SESSION_CLOSE_REASON_UPGRADE: _ClassVar[WorkSessionCloseReason]
     WORK_SESSION_CLOSE_REASON_IDLE: _ClassVar[WorkSessionCloseReason]
+    WORK_SESSION_CLOSE_REASON_MERGED: _ClassVar[WorkSessionCloseReason]
 
 class TagMessageOrigin(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -366,6 +367,7 @@ WORK_SESSION_CLOSE_REASON_DELIVERY_PULLED: WorkSessionCloseReason
 WORK_SESSION_CLOSE_REASON_OBJECTIVE_CLOSED: WorkSessionCloseReason
 WORK_SESSION_CLOSE_REASON_UPGRADE: WorkSessionCloseReason
 WORK_SESSION_CLOSE_REASON_IDLE: WorkSessionCloseReason
+WORK_SESSION_CLOSE_REASON_MERGED: WorkSessionCloseReason
 TAG_MESSAGE_ORIGIN_UNSPECIFIED: TagMessageOrigin
 TAG_MESSAGE_ORIGIN_DIRECT: TagMessageOrigin
 TAG_MESSAGE_ORIGIN_WORKSTREAM: TagMessageOrigin

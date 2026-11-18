@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/workspace_landings.proto.
  */
 export const file_supertag_runtime_v2_workspace_landings: GenFile = /*@__PURE__*/
-  fileDesc("CixzdXBlcnRhZy9ydW50aW1lL3YyL3dvcmtzcGFjZV9sYW5kaW5ncy5wcm90bxITc3VwZXJ0YWcucnVudGltZS52MiK0BAoQV29ya3NwYWNlTGFuZGluZxISCgpsYW5kaW5nX2lkGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkSDgoGdGFnX2lkGAMgASgJEhIKCnNlc3Npb25faWQYBCABKAkSFAoMd29ya3NwYWNlX2lkGAUgASgJEg4KBnJlbW90ZRgGIAEoCRI3CgRtb2RlGAcgASgOMikuc3VwZXJ0YWcucnVudGltZS52Mi5Xb3Jrc3BhY2VMYW5kaW5nTW9kZRIOCgZicmFuY2gYCCABKAkSDgoGdGFyZ2V0GAkgASgJEkEKCGRlbGl2ZXJ5GAogASgLMi8uc3VwZXJ0YWcucnVudGltZS52Mi5Xb3Jrc3BhY2VEZWxpdmVyeVJlZmVyZW5jZRI5CgVzdGF0ZRgLIAEoDjIqLnN1cGVydGFnLnJ1bnRpbWUudjIuV29ya3NwYWNlTGFuZGluZ1N0YXRlEg4KBnJlYXNvbhgMIAEoCRIVCg1sYW5kZWRfY29tbWl0GA0gASgJEhUKDXRhcmdldF9jb21taXQYDiABKAkSEQoJY29uZmxpY3RzGA8gAygJEh4KEWZvbGxvd191cF90YXNrX2lkGBAgASgJSACIAQESFQoNY3JlYXRlZF9vcmRlchgRIAEoAxITCgthdXRob3JfbmFtZRgSIAEoCRIUCgxhdXRob3JfZW1haWwYEyABKAkSEQoJY29fYXV0aG9yGBQgASgJQhQKEl9mb2xsb3dfdXBfdGFza19pZCIwChpHZXRXb3Jrc3BhY2VMYW5kaW5nUmVxdWVzdBISCgpsYW5kaW5nX2lkGAEgASgJIpIBChxSZXR1cm5MYW5kaW5nQ29uZmxpY3RSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRIOCgZ0YWdfaWQYAiABKAkSEgoKc2Vzc2lvbl9pZBgDIAEoCRIOCgZ0YXJnZXQYBCABKAkSFQoNdGFyZ2V0X2NvbW1pdBgFIAEoCRIRCgljb25mbGljdHMYBiADKAkiaAocTGlzdFdvcmtzcGFjZUxhbmRpbmdzUmVxdWVzdBIPCgd0YXNrX2lkGAEgASgJEg0KBWxpbWl0GAIgASgNEhQKDGJlZm9yZV9vcmRlchgDIAEoAxISCgpzZXNzaW9uX2lkGAQgASgJInMKHUxpc3RXb3Jrc3BhY2VMYW5kaW5nc1Jlc3BvbnNlEjcKCGxhbmRpbmdzGAEgAygLMiUuc3VwZXJ0YWcucnVudGltZS52Mi5Xb3Jrc3BhY2VMYW5kaW5nEhkKEW5leHRfYmVmb3JlX29yZGVyGAIgASgDItwBChJXb3Jrc3BhY2VTb3VyY2VQaW4SDgoGcGluX2lkGAEgASgJEg4KBnRhZ19pZBgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJEjAKCHNlbGVjdG9yGAQgASgLMh4uc3VwZXJ0YWcucnVudGltZS52Mi5Xb3Jrc3BhY2USFwoPc2VsZWN0b3JfZGlnZXN0GAUgASgJEjAKCHJlc29sdmVkGAYgASgLMh4uc3VwZXJ0YWcucnVudGltZS52Mi5Xb3Jrc3BhY2USFQoNY3JlYXRlZF9vcmRlchgHIAEoBCJICiJMaXN0UGVuZGluZ1dvcmtzcGFjZVNvdXJjZXNSZXF1ZXN0EhMKC2FmdGVyX29yZGVyGAEgASgEEg0KBWxpbWl0GAIgASgNInYKI0xpc3RQZW5kaW5nV29ya3NwYWNlU291cmNlc1Jlc3BvbnNlEjUKBHBpbnMYASADKAsyJy5zdXBlcnRhZy5ydW50aW1lLnYyLldvcmtzcGFjZVNvdXJjZVBpbhIYChBuZXh0X2FmdGVyX29yZGVyGAIgASgEInkKGVBpbldvcmtzcGFjZVNvdXJjZVJlcXVlc3QSDgoGcGluX2lkGAEgASgJEhcKD3NlbGVjdG9yX2RpZ2VzdBgCIAEoCRIUCgxyZXNvbHZlZF9yZWYYAyABKAkSDgoGY29tbWl0GAQgASgJEg0KBWVycm9yGAUgASgJIjQKHENsYWltV29ya3NwYWNlTGFuZGluZ1JlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAEgASgJIkAKFVdvcmtzcGFjZUxhbmRpbmdMZWFzZRISCgpsYW5kaW5nX2lkGAEgASgJEhMKC2xlYXNlX3Rva2VuGAIgASgJIscBCh1DbGFpbVdvcmtzcGFjZUxhbmRpbmdSZXNwb25zZRI2CgdsYW5kaW5nGAEgASgLMiUuc3VwZXJ0YWcucnVudGltZS52Mi5Xb3Jrc3BhY2VMYW5kaW5nEhMKC2xlYXNlX3Rva2VuGAIgASgJEhQKDHZhbGlkX2Zvcl9tcxgDIAEoBBIvCgZob2xkZXIYBCABKAsyHy5zdXBlcnRhZy5ydW50aW1lLnYyLkJsb2JIb2xkZXISEgoKY3JlZGVudGlhbBgFIAEoCSKUAgodUmVjb3JkV29ya3NwYWNlTGFuZGluZ1JlcXVlc3QSOQoFbGVhc2UYASABKAsyKi5zdXBlcnRhZy5ydW50aW1lLnYyLldvcmtzcGFjZUxhbmRpbmdMZWFzZRIUCgxvcGVyYXRpb25faWQYAiABKAkSOQoFc3RhdGUYAyABKA4yKi5zdXBlcnRhZy5ydW50aW1lLnYyLldvcmtzcGFjZUxhbmRpbmdTdGF0ZRIOCgZyZWFzb24YBCABKAkSFQoNbGFuZGVkX2NvbW1pdBgFIAEoCRIVCg10YXJnZXRfY29tbWl0GAYgASgJEhEKCWNvbmZsaWN0cxgHIAMoCRIWCg5yZXRyeV9hZnRlcl9tcxgIIAEoBCqDAQoUV29ya3NwYWNlTGFuZGluZ01vZGUSJgoiV09SS1NQQUNFX0xBTkRJTkdfTU9ERV9VTlNQRUNJRklFRBAAEiEKHVdPUktTUEFDRV9MQU5ESU5HX01PREVfQlJBTkNIEAESIAocV09SS1NQQUNFX0xBTkRJTkdfTU9ERV9NRVJHRRACKp0CChVXb3Jrc3BhY2VMYW5kaW5nU3RhdGUSJwojV09SS1NQQUNFX0xBTkRJTkdfU1RBVEVfVU5TUEVDSUZJRUQQABIiCh5XT1JLU1BBQ0VfTEFORElOR19TVEFURV9RVUVVRUQQARIjCh9XT1JLU1BBQ0VfTEFORElOR19TVEFURV9DTEFJTUVEEAISIgoeV09SS1NQQUNFX0xBTkRJTkdfU1RBVEVfTEFOREVEEAMSJAogV09SS1NQQUNFX0xBTkRJTkdfU1RBVEVfQ09ORkxJQ1QQBBIgChxXT1JLU1BBQ0VfTEFORElOR19TVEFURV9IRUxEEAUSJgoiV09SS1NQQUNFX0xBTkRJTkdfU1RBVEVfU1VQRVJTRURFRBAGMsECChFXb3Jrc3BhY2VMYW5kaW5ncxJdCgNHZXQSLy5zdXBlcnRhZy5ydW50aW1lLnYyLkdldFdvcmtzcGFjZUxhbmRpbmdSZXF1ZXN0GiUuc3VwZXJ0YWcucnVudGltZS52Mi5Xb3Jrc3BhY2VMYW5kaW5nEm0KBExpc3QSMS5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RXb3Jrc3BhY2VMYW5kaW5nc1JlcXVlc3QaMi5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RXb3Jrc3BhY2VMYW5kaW5nc1Jlc3BvbnNlEl4KDlJldHVybkNvbmZsaWN0EjEuc3VwZXJ0YWcucnVudGltZS52Mi5SZXR1cm5MYW5kaW5nQ29uZmxpY3RSZXF1ZXN0Ghkuc3VwZXJ0YWcucnVudGltZS52Mi5UYXNrMrsECgtHaXREZWxpdmVyeRKHAQoSTGlzdFBlbmRpbmdTb3VyY2VzEjcuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0UGVuZGluZ1dvcmtzcGFjZVNvdXJjZXNSZXF1ZXN0Gjguc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0UGVuZGluZ1dvcmtzcGFjZVNvdXJjZXNSZXNwb25zZRJkCglQaW5Tb3VyY2USLi5zdXBlcnRhZy5ydW50aW1lLnYyLlBpbldvcmtzcGFjZVNvdXJjZVJlcXVlc3QaJy5zdXBlcnRhZy5ydW50aW1lLnYyLldvcmtzcGFjZVNvdXJjZVBpbhJuCgVDbGFpbRIxLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2xhaW1Xb3Jrc3BhY2VMYW5kaW5nUmVxdWVzdBoyLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2xhaW1Xb3Jrc3BhY2VMYW5kaW5nUmVzcG9uc2USZwoFUmVuZXcSKi5zdXBlcnRhZy5ydW50aW1lLnYyLldvcmtzcGFjZUxhbmRpbmdMZWFzZRoyLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2xhaW1Xb3Jrc3BhY2VMYW5kaW5nUmVzcG9uc2USYwoGUmVjb3JkEjIuc3VwZXJ0YWcucnVudGltZS52Mi5SZWNvcmRXb3Jrc3BhY2VMYW5kaW5nUmVxdWVzdBolLnN1cGVydGFnLnJ1bnRpbWUudjIuV29ya3NwYWNlTGFuZGluZ2IGcHJvdG8z", [file_supertag_runtime_v2_runtime, file_supertag_runtime_v2_workspaces]);
+  fileDesc("CixzdXBlcnRhZy9ydW50aW1lL3YyL3dvcmtzcGFjZV9sYW5kaW5ncy5wcm90bxITc3VwZXJ0YWcucnVudGltZS52MiKSBQoQV29ya3NwYWNlTGFuZGluZxISCgpsYW5kaW5nX2lkGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkSDgoGdGFnX2lkGAMgASgJEhIKCnNlc3Npb25faWQYBCABKAkSFAoMd29ya3NwYWNlX2lkGAUgASgJEg4KBnJlbW90ZRgGIAEoCRI3CgRtb2RlGAcgASgOMikuc3VwZXJ0YWcucnVudGltZS52Mi5Xb3Jrc3BhY2VMYW5kaW5nTW9kZRIOCgZicmFuY2gYCCABKAkSDgoGdGFyZ2V0GAkgASgJEkEKCGRlbGl2ZXJ5GAogASgLMi8uc3VwZXJ0YWcucnVudGltZS52Mi5Xb3Jrc3BhY2VEZWxpdmVyeVJlZmVyZW5jZRI5CgVzdGF0ZRgLIAEoDjIqLnN1cGVydGFnLnJ1bnRpbWUudjIuV29ya3NwYWNlTGFuZGluZ1N0YXRlEg4KBnJlYXNvbhgMIAEoCRIVCg1sYW5kZWRfY29tbWl0GA0gASgJEhUKDXRhcmdldF9jb21taXQYDiABKAkSEQoJY29uZmxpY3RzGA8gAygJEh4KEWZvbGxvd191cF90YXNrX2lkGBAgASgJSACIAQESFQoNY3JlYXRlZF9vcmRlchgRIAEoAxITCgthdXRob3JfbmFtZRgSIAEoCRIUCgxhdXRob3JfZW1haWwYEyABKAkSEQoJY29fYXV0aG9yGBQgASgJEg0KBXRpdGxlGBUgASgJEgwKBGJvZHkYFiABKAkSPwoMcHVsbF9yZXF1ZXN0GBcgASgLMikuc3VwZXJ0YWcucnVudGltZS52Mi5Xb3Jrc3BhY2VQdWxsUmVxdWVzdEIUChJfZm9sbG93X3VwX3Rhc2tfaWQiXgoUV29ya3NwYWNlUHVsbFJlcXVlc3QSEgoKcmVwb3NpdG9yeRgBIAEoCRIVCg1yZXBvc2l0b3J5X2lkGAIgASgEEg4KBm51bWJlchgDIAEoBBILCgN1cmwYBCABKAkiMAoaR2V0V29ya3NwYWNlTGFuZGluZ1JlcXVlc3QSEgoKbGFuZGluZ19pZBgBIAEoCSKSAQocUmV0dXJuTGFuZGluZ0NvbmZsaWN0UmVxdWVzdBIUCgxvcGVyYXRpb25faWQYASABKAkSDgoGdGFnX2lkGAIgASgJEhIKCnNlc3Npb25faWQYAyABKAkSDgoGdGFyZ2V0GAQgASgJEhUKDXRhcmdldF9jb21taXQYBSABKAkSEQoJY29uZmxpY3RzGAYgAygJImgKHExpc3RXb3Jrc3BhY2VMYW5kaW5nc1JlcXVlc3QSDwoHdGFza19pZBgBIAEoCRINCgVsaW1pdBgCIAEoDRIUCgxiZWZvcmVfb3JkZXIYAyABKAMSEgoKc2Vzc2lvbl9pZBgEIAEoCSJzCh1MaXN0V29ya3NwYWNlTGFuZGluZ3NSZXNwb25zZRI3CghsYW5kaW5ncxgBIAMoCzIlLnN1cGVydGFnLnJ1bnRpbWUudjIuV29ya3NwYWNlTGFuZGluZxIZChFuZXh0X2JlZm9yZV9vcmRlchgCIAEoAyLcAQoSV29ya3NwYWNlU291cmNlUGluEg4KBnBpbl9pZBgBIAEoCRIOCgZ0YWdfaWQYAiABKAkSEgoKc2Vzc2lvbl9pZBgDIAEoCRIwCghzZWxlY3RvchgEIAEoCzIeLnN1cGVydGFnLnJ1bnRpbWUudjIuV29ya3NwYWNlEhcKD3NlbGVjdG9yX2RpZ2VzdBgFIAEoCRIwCghyZXNvbHZlZBgGIAEoCzIeLnN1cGVydGFnLnJ1bnRpbWUudjIuV29ya3NwYWNlEhUKDWNyZWF0ZWRfb3JkZXIYByABKAQiSAoiTGlzdFBlbmRpbmdXb3Jrc3BhY2VTb3VyY2VzUmVxdWVzdBITCgthZnRlcl9vcmRlchgBIAEoBBINCgVsaW1pdBgCIAEoDSJ2CiNMaXN0UGVuZGluZ1dvcmtzcGFjZVNvdXJjZXNSZXNwb25zZRI1CgRwaW5zGAEgAygLMicuc3VwZXJ0YWcucnVudGltZS52Mi5Xb3Jrc3BhY2VTb3VyY2VQaW4SGAoQbmV4dF9hZnRlcl9vcmRlchgCIAEoBCJ5ChlQaW5Xb3Jrc3BhY2VTb3VyY2VSZXF1ZXN0Eg4KBnBpbl9pZBgBIAEoCRIXCg9zZWxlY3Rvcl9kaWdlc3QYAiABKAkSFAoMcmVzb2x2ZWRfcmVmGAMgASgJEg4KBmNvbW1pdBgEIAEoCRINCgVlcnJvchgFIAEoCSI0ChxDbGFpbVdvcmtzcGFjZUxhbmRpbmdSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCSJAChVXb3Jrc3BhY2VMYW5kaW5nTGVhc2USEgoKbGFuZGluZ19pZBgBIAEoCRITCgtsZWFzZV90b2tlbhgCIAEoCSLHAQodQ2xhaW1Xb3Jrc3BhY2VMYW5kaW5nUmVzcG9uc2USNgoHbGFuZGluZxgBIAEoCzIlLnN1cGVydGFnLnJ1bnRpbWUudjIuV29ya3NwYWNlTGFuZGluZxITCgtsZWFzZV90b2tlbhgCIAEoCRIUCgx2YWxpZF9mb3JfbXMYAyABKAQSLwoGaG9sZGVyGAQgASgLMh8uc3VwZXJ0YWcucnVudGltZS52Mi5CbG9iSG9sZGVyEhIKCmNyZWRlbnRpYWwYBSABKAki1QIKHVJlY29yZFdvcmtzcGFjZUxhbmRpbmdSZXF1ZXN0EjkKBWxlYXNlGAEgASgLMiouc3VwZXJ0YWcucnVudGltZS52Mi5Xb3Jrc3BhY2VMYW5kaW5nTGVhc2USFAoMb3BlcmF0aW9uX2lkGAIgASgJEjkKBXN0YXRlGAMgASgOMiouc3VwZXJ0YWcucnVudGltZS52Mi5Xb3Jrc3BhY2VMYW5kaW5nU3RhdGUSDgoGcmVhc29uGAQgASgJEhUKDWxhbmRlZF9jb21taXQYBSABKAkSFQoNdGFyZ2V0X2NvbW1pdBgGIAEoCRIRCgljb25mbGljdHMYByADKAkSFgoOcmV0cnlfYWZ0ZXJfbXMYCCABKAQSPwoMcHVsbF9yZXF1ZXN0GAkgASgLMikuc3VwZXJ0YWcucnVudGltZS52Mi5Xb3Jrc3BhY2VQdWxsUmVxdWVzdCqmAQoUV29ya3NwYWNlTGFuZGluZ01vZGUSJgoiV09SS1NQQUNFX0xBTkRJTkdfTU9ERV9VTlNQRUNJRklFRBAAEiEKHVdPUktTUEFDRV9MQU5ESU5HX01PREVfQlJBTkNIEAESIAocV09SS1NQQUNFX0xBTkRJTkdfTU9ERV9NRVJHRRACEiEKHVdPUktTUEFDRV9MQU5ESU5HX01PREVfUkVWSUVXEAMqnQIKFVdvcmtzcGFjZUxhbmRpbmdTdGF0ZRInCiNXT1JLU1BBQ0VfTEFORElOR19TVEFURV9VTlNQRUNJRklFRBAAEiIKHldPUktTUEFDRV9MQU5ESU5HX1NUQVRFX1FVRVVFRBABEiMKH1dPUktTUEFDRV9MQU5ESU5HX1NUQVRFX0NMQUlNRUQQAhIiCh5XT1JLU1BBQ0VfTEFORElOR19TVEFURV9MQU5ERUQQAxIkCiBXT1JLU1BBQ0VfTEFORElOR19TVEFURV9DT05GTElDVBAEEiAKHFdPUktTUEFDRV9MQU5ESU5HX1NUQVRFX0hFTEQQBRImCiJXT1JLU1BBQ0VfTEFORElOR19TVEFURV9TVVBFUlNFREVEEAYywQIKEVdvcmtzcGFjZUxhbmRpbmdzEl0KA0dldBIvLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0V29ya3NwYWNlTGFuZGluZ1JlcXVlc3QaJS5zdXBlcnRhZy5ydW50aW1lLnYyLldvcmtzcGFjZUxhbmRpbmcSbQoETGlzdBIxLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdFdvcmtzcGFjZUxhbmRpbmdzUmVxdWVzdBoyLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdFdvcmtzcGFjZUxhbmRpbmdzUmVzcG9uc2USXgoOUmV0dXJuQ29uZmxpY3QSMS5zdXBlcnRhZy5ydW50aW1lLnYyLlJldHVybkxhbmRpbmdDb25mbGljdFJlcXVlc3QaGS5zdXBlcnRhZy5ydW50aW1lLnYyLlRhc2syuwQKC0dpdERlbGl2ZXJ5EocBChJMaXN0UGVuZGluZ1NvdXJjZXMSNy5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RQZW5kaW5nV29ya3NwYWNlU291cmNlc1JlcXVlc3QaOC5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RQZW5kaW5nV29ya3NwYWNlU291cmNlc1Jlc3BvbnNlEmQKCVBpblNvdXJjZRIuLnN1cGVydGFnLnJ1bnRpbWUudjIuUGluV29ya3NwYWNlU291cmNlUmVxdWVzdBonLnN1cGVydGFnLnJ1bnRpbWUudjIuV29ya3NwYWNlU291cmNlUGluEm4KBUNsYWltEjEuc3VwZXJ0YWcucnVudGltZS52Mi5DbGFpbVdvcmtzcGFjZUxhbmRpbmdSZXF1ZXN0GjIuc3VwZXJ0YWcucnVudGltZS52Mi5DbGFpbVdvcmtzcGFjZUxhbmRpbmdSZXNwb25zZRJnCgVSZW5ldxIqLnN1cGVydGFnLnJ1bnRpbWUudjIuV29ya3NwYWNlTGFuZGluZ0xlYXNlGjIuc3VwZXJ0YWcucnVudGltZS52Mi5DbGFpbVdvcmtzcGFjZUxhbmRpbmdSZXNwb25zZRJjCgZSZWNvcmQSMi5zdXBlcnRhZy5ydW50aW1lLnYyLlJlY29yZFdvcmtzcGFjZUxhbmRpbmdSZXF1ZXN0GiUuc3VwZXJ0YWcucnVudGltZS52Mi5Xb3Jrc3BhY2VMYW5kaW5nYgZwcm90bzM", [file_supertag_runtime_v2_runtime, file_supertag_runtime_v2_workspaces]);
 
 /**
  * @generated from message supertag.runtime.v2.WorkspaceLanding
@@ -63,7 +63,7 @@ export type WorkspaceLanding = Message<"supertag.runtime.v2.WorkspaceLanding"> &
   branch: string;
 
   /**
-   * The merge target; empty for branch mode.
+   * The merge target, or the pull request's base in review mode; empty for branch mode.
    *
    * @generated from field: string target = 9;
    */
@@ -131,6 +131,25 @@ export type WorkspaceLanding = Message<"supertag.runtime.v2.WorkspaceLanding"> &
    * @generated from field: string co_author = 20;
    */
   coAuthor: string;
+
+  /**
+   * Review mode: the pull request's title and description for this delivery.
+   *
+   * @generated from field: string title = 21;
+   */
+  title: string;
+
+  /**
+   * @generated from field: string body = 22;
+   */
+  body: string;
+
+  /**
+   * Review mode, once landed: the pull request the Session's branch is reviewed in.
+   *
+   * @generated from field: supertag.runtime.v2.WorkspacePullRequest pull_request = 23;
+   */
+  pullRequest?: WorkspacePullRequest | undefined;
 };
 
 /**
@@ -139,6 +158,42 @@ export type WorkspaceLanding = Message<"supertag.runtime.v2.WorkspaceLanding"> &
  */
 export const WorkspaceLandingSchema: GenMessage<WorkspaceLanding> = /*@__PURE__*/
   messageDesc(file_supertag_runtime_v2_workspace_landings, 0);
+
+/**
+ * A pull request a review landing opened or updated.
+ *
+ * @generated from message supertag.runtime.v2.WorkspacePullRequest
+ */
+export type WorkspacePullRequest = Message<"supertag.runtime.v2.WorkspacePullRequest"> & {
+  /**
+   * The forge's repository, as `OWNER/NAME`, and its numeric ID.
+   *
+   * @generated from field: string repository = 1;
+   */
+  repository: string;
+
+  /**
+   * @generated from field: uint64 repository_id = 2;
+   */
+  repositoryId: bigint;
+
+  /**
+   * @generated from field: uint64 number = 3;
+   */
+  number: bigint;
+
+  /**
+   * @generated from field: string url = 4;
+   */
+  url: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.WorkspacePullRequest.
+ * Use `create(WorkspacePullRequestSchema)` to create a new message.
+ */
+export const WorkspacePullRequestSchema: GenMessage<WorkspacePullRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_workspace_landings, 1);
 
 /**
  * @generated from message supertag.runtime.v2.GetWorkspaceLandingRequest
@@ -155,7 +210,7 @@ export type GetWorkspaceLandingRequest = Message<"supertag.runtime.v2.GetWorkspa
  * Use `create(GetWorkspaceLandingRequestSchema)` to create a new message.
  */
 export const GetWorkspaceLandingRequestSchema: GenMessage<GetWorkspaceLandingRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_workspace_landings, 1);
+  messageDesc(file_supertag_runtime_v2_workspace_landings, 2);
 
 /**
  * @generated from message supertag.runtime.v2.ReturnLandingConflictRequest
@@ -199,7 +254,7 @@ export type ReturnLandingConflictRequest = Message<"supertag.runtime.v2.ReturnLa
  * Use `create(ReturnLandingConflictRequestSchema)` to create a new message.
  */
 export const ReturnLandingConflictRequestSchema: GenMessage<ReturnLandingConflictRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_workspace_landings, 2);
+  messageDesc(file_supertag_runtime_v2_workspace_landings, 3);
 
 /**
  * @generated from message supertag.runtime.v2.ListWorkspaceLandingsRequest
@@ -231,7 +286,7 @@ export type ListWorkspaceLandingsRequest = Message<"supertag.runtime.v2.ListWork
  * Use `create(ListWorkspaceLandingsRequestSchema)` to create a new message.
  */
 export const ListWorkspaceLandingsRequestSchema: GenMessage<ListWorkspaceLandingsRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_workspace_landings, 3);
+  messageDesc(file_supertag_runtime_v2_workspace_landings, 4);
 
 /**
  * @generated from message supertag.runtime.v2.ListWorkspaceLandingsResponse
@@ -253,7 +308,7 @@ export type ListWorkspaceLandingsResponse = Message<"supertag.runtime.v2.ListWor
  * Use `create(ListWorkspaceLandingsResponseSchema)` to create a new message.
  */
 export const ListWorkspaceLandingsResponseSchema: GenMessage<ListWorkspaceLandingsResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_workspace_landings, 4);
+  messageDesc(file_supertag_runtime_v2_workspace_landings, 5);
 
 /**
  * A Session's source, pinned once: every Task of the Session starts from the same commit.
@@ -302,7 +357,7 @@ export type WorkspaceSourcePin = Message<"supertag.runtime.v2.WorkspaceSourcePin
  * Use `create(WorkspaceSourcePinSchema)` to create a new message.
  */
 export const WorkspaceSourcePinSchema: GenMessage<WorkspaceSourcePin> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_workspace_landings, 5);
+  messageDesc(file_supertag_runtime_v2_workspace_landings, 6);
 
 /**
  * @generated from message supertag.runtime.v2.ListPendingWorkspaceSourcesRequest
@@ -324,7 +379,7 @@ export type ListPendingWorkspaceSourcesRequest = Message<"supertag.runtime.v2.Li
  * Use `create(ListPendingWorkspaceSourcesRequestSchema)` to create a new message.
  */
 export const ListPendingWorkspaceSourcesRequestSchema: GenMessage<ListPendingWorkspaceSourcesRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_workspace_landings, 6);
+  messageDesc(file_supertag_runtime_v2_workspace_landings, 7);
 
 /**
  * @generated from message supertag.runtime.v2.ListPendingWorkspaceSourcesResponse
@@ -346,7 +401,7 @@ export type ListPendingWorkspaceSourcesResponse = Message<"supertag.runtime.v2.L
  * Use `create(ListPendingWorkspaceSourcesResponseSchema)` to create a new message.
  */
 export const ListPendingWorkspaceSourcesResponseSchema: GenMessage<ListPendingWorkspaceSourcesResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_workspace_landings, 7);
+  messageDesc(file_supertag_runtime_v2_workspace_landings, 8);
 
 /**
  * @generated from message supertag.runtime.v2.PinWorkspaceSourceRequest
@@ -386,7 +441,7 @@ export type PinWorkspaceSourceRequest = Message<"supertag.runtime.v2.PinWorkspac
  * Use `create(PinWorkspaceSourceRequestSchema)` to create a new message.
  */
 export const PinWorkspaceSourceRequestSchema: GenMessage<PinWorkspaceSourceRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_workspace_landings, 8);
+  messageDesc(file_supertag_runtime_v2_workspace_landings, 9);
 
 /**
  * @generated from message supertag.runtime.v2.ClaimWorkspaceLandingRequest
@@ -403,7 +458,7 @@ export type ClaimWorkspaceLandingRequest = Message<"supertag.runtime.v2.ClaimWor
  * Use `create(ClaimWorkspaceLandingRequestSchema)` to create a new message.
  */
 export const ClaimWorkspaceLandingRequestSchema: GenMessage<ClaimWorkspaceLandingRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_workspace_landings, 9);
+  messageDesc(file_supertag_runtime_v2_workspace_landings, 10);
 
 /**
  * @generated from message supertag.runtime.v2.WorkspaceLandingLease
@@ -425,7 +480,7 @@ export type WorkspaceLandingLease = Message<"supertag.runtime.v2.WorkspaceLandin
  * Use `create(WorkspaceLandingLeaseSchema)` to create a new message.
  */
 export const WorkspaceLandingLeaseSchema: GenMessage<WorkspaceLandingLease> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_workspace_landings, 10);
+  messageDesc(file_supertag_runtime_v2_workspace_landings, 11);
 
 /**
  * @generated from message supertag.runtime.v2.ClaimWorkspaceLandingResponse
@@ -466,7 +521,7 @@ export type ClaimWorkspaceLandingResponse = Message<"supertag.runtime.v2.ClaimWo
  * Use `create(ClaimWorkspaceLandingResponseSchema)` to create a new message.
  */
 export const ClaimWorkspaceLandingResponseSchema: GenMessage<ClaimWorkspaceLandingResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_workspace_landings, 11);
+  messageDesc(file_supertag_runtime_v2_workspace_landings, 12);
 
 /**
  * @generated from message supertag.runtime.v2.RecordWorkspaceLandingRequest
@@ -515,6 +570,13 @@ export type RecordWorkspaceLandingRequest = Message<"supertag.runtime.v2.RecordW
    * @generated from field: uint64 retry_after_ms = 8;
    */
   retryAfterMs: bigint;
+
+  /**
+   * Landed in review mode: the pull request opened or updated.
+   *
+   * @generated from field: supertag.runtime.v2.WorkspacePullRequest pull_request = 9;
+   */
+  pullRequest?: WorkspacePullRequest | undefined;
 };
 
 /**
@@ -522,7 +584,7 @@ export type RecordWorkspaceLandingRequest = Message<"supertag.runtime.v2.RecordW
  * Use `create(RecordWorkspaceLandingRequestSchema)` to create a new message.
  */
 export const RecordWorkspaceLandingRequestSchema: GenMessage<RecordWorkspaceLandingRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_workspace_landings, 12);
+  messageDesc(file_supertag_runtime_v2_workspace_landings, 13);
 
 /**
  * @generated from enum supertag.runtime.v2.WorkspaceLandingMode
@@ -542,6 +604,11 @@ export enum WorkspaceLandingMode {
    * @generated from enum value: WORKSPACE_LANDING_MODE_MERGE = 2;
    */
   MERGE = 2,
+
+  /**
+   * @generated from enum value: WORKSPACE_LANDING_MODE_REVIEW = 3;
+   */
+  REVIEW = 3,
 }
 
 /**

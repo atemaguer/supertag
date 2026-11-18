@@ -1,8 +1,9 @@
 //! Landing verified Session commits on a Workspace's remote, fast-forward only.
 //!
 //! `branch` pushes the Session's branch `supertag/session/ID`. `merge` also merges the Session
-//! into the Workspace's target with a merge commit and pushes the target. A conflict is never
-//! resolved here: it is recorded, and the Control Plane gives the Session a follow-up Task.
+//! into the Workspace's target with a merge commit and pushes the target. `review` pushes the
+//! branch and opens or updates its draft pull request through the review adapter. A conflict is
+//! never resolved here: it is recorded, and the Control Plane gives the Session a follow-up Task.
 use std::{path::Path, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, ensure};
@@ -13,7 +14,8 @@ use supertag_protocol::{
     v2::{
         ClaimWorkspaceLandingRequest, ClaimWorkspaceLandingResponse, RecordWorkspaceLandingRequest,
         Workspace, WorkspaceCredentialNames, WorkspaceLanding, WorkspaceLandingLease,
-        WorkspaceLandingMode, WorkspaceLandingState, git_delivery_client::GitDeliveryClient,
+        WorkspaceLandingMode, WorkspaceLandingState, WorkspacePullRequest,
+        git_delivery_client::GitDeliveryClient,
     },
     valid_git_commit,
 };
@@ -23,7 +25,7 @@ use tokio_util::sync::CancellationToken;
 use tonic::{Code, Request, Status};
 use uuid::Uuid;
 
-use crate::{Access, BundleReader, GitDelivery, Session, git, source::list_refs};
+use crate::{Access, BundleReader, GitDelivery, Session, git, review::Reviewed, source::list_refs};
 
 const PUSH_TIMEOUT: Duration = Duration::from_secs(120);
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -34,6 +36,11 @@ const MERGE_ATTEMPTS: usize = 3;
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     Landed(String),
+    /// Review mode: the Session's branch names the commit, and the pull request is open.
+    Reviewed {
+        commit: String,
+        pull_request: WorkspacePullRequest,
+    },
     Conflict {
         target_commit: String,
         conflicts: Vec<String>,
@@ -170,11 +177,22 @@ impl GitDelivery {
                 )));
             }
         }
-        if landing.mode() != WorkspaceLandingMode::Merge {
-            return Ok(Outcome::Landed(head));
+        match landing.mode() {
+            WorkspaceLandingMode::Merge => {
+                self.merge(landing, &session, &repository, &head, cancel)
+                    .await
+            }
+            WorkspaceLandingMode::Review => {
+                Ok(match self.review(landing, credential, &head).await? {
+                    Reviewed::Done(pull_request) => Outcome::Reviewed {
+                        commit: head,
+                        pull_request,
+                    },
+                    Reviewed::Held(reason) => Outcome::Held(reason),
+                })
+            }
+            _ => Ok(Outcome::Landed(head)),
         }
-        self.merge(landing, &session, &repository, &head, cancel)
-            .await
     }
 
     async fn merge(
@@ -431,6 +449,14 @@ impl Runner {
             Outcome::Landed(commit) => {
                 record.state = WorkspaceLandingState::Landed as i32;
                 record.landed_commit = commit;
+            }
+            Outcome::Reviewed {
+                commit,
+                pull_request,
+            } => {
+                record.state = WorkspaceLandingState::Landed as i32;
+                record.landed_commit = commit;
+                record.pull_request = Some(pull_request);
             }
             Outcome::Conflict {
                 target_commit,

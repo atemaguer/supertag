@@ -27,6 +27,7 @@ enum WorkspaceLandingMode {
   WORKSPACE_LANDING_MODE_UNSPECIFIED = 0;
   WORKSPACE_LANDING_MODE_BRANCH = 1;
   WORKSPACE_LANDING_MODE_MERGE = 2;
+  WORKSPACE_LANDING_MODE_REVIEW = 3;
 }
 
 enum WorkspaceLandingState {
@@ -54,7 +55,7 @@ message WorkspaceLanding {
   WorkspaceLandingMode mode = 7;
   // The Session's branch, `supertag/session/ID`.
   string branch = 8;
-  // The merge target; empty for branch mode.
+  // The merge target, or the pull request's base in review mode; empty for branch mode.
   string target = 9;
   WorkspaceDeliveryReference delivery = 10;
   WorkspaceLandingState state = 11;
@@ -71,6 +72,20 @@ message WorkspaceLanding {
   string author_email = 19;
   // The requester, as a `Co-authored-by` trailer value. Empty when there is none.
   string co_author = 20;
+  // Review mode: the pull request's title and description for this delivery.
+  string title = 21;
+  string body = 22;
+  // Review mode, once landed: the pull request the Session's branch is reviewed in.
+  WorkspacePullRequest pull_request = 23;
+}
+
+// A pull request a review landing opened or updated.
+message WorkspacePullRequest {
+  // The forge's repository, as `OWNER/NAME`, and its numeric ID.
+  string repository = 1;
+  uint64 repository_id = 2;
+  uint64 number = 3;
+  string url = 4;
 }
 
 message GetWorkspaceLandingRequest { string landing_id = 1; }
@@ -144,4 +159,6 @@ message RecordWorkspaceLandingRequest {
   repeated string conflicts = 7;
   // Queued only: how long to wait before the next try.
   uint64 retry_after_ms = 8;
+  // Landed in review mode: the pull request opened or updated.
+  WorkspacePullRequest pull_request = 9;
 }

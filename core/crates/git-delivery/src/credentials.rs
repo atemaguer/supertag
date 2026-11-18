@@ -30,6 +30,14 @@ pub enum Credential {
     HttpsToken { username: String, token: String },
     /// A git credential helper, as git's `credential.helper` setting names it.
     Helper { helper: String },
+    /// A GitHub App installation. Git delivery mints a one-repository token from it for each
+    /// operation, narrowed to that operation's permissions, and presents it as HTTPS Basic
+    /// `x-access-token:TOKEN`.
+    GithubApp {
+        app_id: u64,
+        installation_id: u64,
+        private_key_pem: String,
+    },
 }
 
 impl Credential {
@@ -38,7 +46,13 @@ impl Credential {
             Self::SshKey { .. } => "ssh-key",
             Self::HttpsToken { .. } => "https-token",
             Self::Helper { .. } => "credential-helper",
+            Self::GithubApp { .. } => "github-app",
         }
+    }
+
+    /// The non-secret identifier the Control Plane records for a GitHub App credential.
+    pub fn github_app_identifier(app_id: u64, installation_id: u64) -> String {
+        format!("app:{app_id}/installation:{installation_id}")
     }
 
     pub fn to_vault_value(&self) -> CredentialValue {
@@ -60,6 +74,15 @@ impl Credential {
             }
             Self::Helper { helper } => {
                 value.insert("helper".into(), helper.clone());
+            }
+            Self::GithubApp {
+                app_id,
+                installation_id,
+                private_key_pem,
+            } => {
+                value.insert("appId".into(), app_id.to_string());
+                value.insert("installationId".into(), installation_id.to_string());
+                value.insert("privateKey".into(), private_key_pem.clone());
             }
         }
         value
@@ -89,6 +112,18 @@ impl Credential {
             Some("credential-helper") => Self::Helper {
                 helper: field("helper")?,
             },
+            Some("github-app") => {
+                let id = |name: &str| -> Result<u64> {
+                    field(name)?.parse().ok().with_context(|| {
+                        format!("the stored Workspace Credential's {name} is not a number")
+                    })
+                };
+                Self::GithubApp {
+                    app_id: id("appId")?,
+                    installation_id: id("installationId")?,
+                    private_key_pem: field("privateKey")?,
+                }
+            }
             _ => bail!("the stored Workspace Credential has an unknown kind"),
         };
         credential.validate()?;
@@ -142,6 +177,20 @@ impl Credential {
                     "a credential helper is one line of at most 1024 characters"
                 );
             }
+            Self::GithubApp {
+                app_id,
+                installation_id,
+                private_key_pem,
+            } => {
+                ensure!(
+                    supertag_github::valid_id(*app_id)
+                        && supertag_github::valid_id(*installation_id),
+                    "a GitHub App Workspace Credential needs the App ID and installation ID"
+                );
+                // Signing proves the key is a usable RSA key without contacting GitHub.
+                supertag_github::setup_app_jwt(private_key_pem, *app_id)
+                    .context("the GitHub App private key is unusable")?;
+            }
         }
         Ok(())
     }
@@ -164,6 +213,9 @@ impl Credential {
                         STANDARD.encode(format!("{username}:{token}"))
                     ),
                 ));
+            }
+            (Self::GithubApp { .. }, _) => {
+                bail!("a GitHub App Workspace Credential presents a token minted per operation")
             }
             (Self::Helper { helper }, RemoteTransport::Http) => {
                 settings
@@ -235,6 +287,7 @@ impl Credential {
             Self::SshKey { .. } => "SSH key",
             Self::HttpsToken { .. } => "HTTPS token",
             Self::Helper { .. } => "credential helper",
+            Self::GithubApp { .. } => "GitHub App",
         }
     }
 }

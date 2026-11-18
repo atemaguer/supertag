@@ -14,6 +14,7 @@ class WorkspaceLandingMode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     WORKSPACE_LANDING_MODE_UNSPECIFIED: _ClassVar[WorkspaceLandingMode]
     WORKSPACE_LANDING_MODE_BRANCH: _ClassVar[WorkspaceLandingMode]
     WORKSPACE_LANDING_MODE_MERGE: _ClassVar[WorkspaceLandingMode]
+    WORKSPACE_LANDING_MODE_REVIEW: _ClassVar[WorkspaceLandingMode]
 
 class WorkspaceLandingState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -27,6 +28,7 @@ class WorkspaceLandingState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
 WORKSPACE_LANDING_MODE_UNSPECIFIED: WorkspaceLandingMode
 WORKSPACE_LANDING_MODE_BRANCH: WorkspaceLandingMode
 WORKSPACE_LANDING_MODE_MERGE: WorkspaceLandingMode
+WORKSPACE_LANDING_MODE_REVIEW: WorkspaceLandingMode
 WORKSPACE_LANDING_STATE_UNSPECIFIED: WorkspaceLandingState
 WORKSPACE_LANDING_STATE_QUEUED: WorkspaceLandingState
 WORKSPACE_LANDING_STATE_CLAIMED: WorkspaceLandingState
@@ -36,7 +38,7 @@ WORKSPACE_LANDING_STATE_HELD: WorkspaceLandingState
 WORKSPACE_LANDING_STATE_SUPERSEDED: WorkspaceLandingState
 
 class WorkspaceLanding(_message.Message):
-    __slots__ = ("landing_id", "task_id", "tag_id", "session_id", "workspace_id", "remote", "mode", "branch", "target", "delivery", "state", "reason", "landed_commit", "target_commit", "conflicts", "follow_up_task_id", "created_order", "author_name", "author_email", "co_author")
+    __slots__ = ("landing_id", "task_id", "tag_id", "session_id", "workspace_id", "remote", "mode", "branch", "target", "delivery", "state", "reason", "landed_commit", "target_commit", "conflicts", "follow_up_task_id", "created_order", "author_name", "author_email", "co_author", "title", "body", "pull_request")
     LANDING_ID_FIELD_NUMBER: _ClassVar[int]
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
@@ -57,6 +59,9 @@ class WorkspaceLanding(_message.Message):
     AUTHOR_NAME_FIELD_NUMBER: _ClassVar[int]
     AUTHOR_EMAIL_FIELD_NUMBER: _ClassVar[int]
     CO_AUTHOR_FIELD_NUMBER: _ClassVar[int]
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    BODY_FIELD_NUMBER: _ClassVar[int]
+    PULL_REQUEST_FIELD_NUMBER: _ClassVar[int]
     landing_id: str
     task_id: str
     tag_id: str
@@ -77,7 +82,22 @@ class WorkspaceLanding(_message.Message):
     author_name: str
     author_email: str
     co_author: str
-    def __init__(self, landing_id: _Optional[str] = ..., task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., remote: _Optional[str] = ..., mode: _Optional[_Union[WorkspaceLandingMode, str]] = ..., branch: _Optional[str] = ..., target: _Optional[str] = ..., delivery: _Optional[_Union[_runtime_pb2.WorkspaceDeliveryReference, _Mapping]] = ..., state: _Optional[_Union[WorkspaceLandingState, str]] = ..., reason: _Optional[str] = ..., landed_commit: _Optional[str] = ..., target_commit: _Optional[str] = ..., conflicts: _Optional[_Iterable[str]] = ..., follow_up_task_id: _Optional[str] = ..., created_order: _Optional[int] = ..., author_name: _Optional[str] = ..., author_email: _Optional[str] = ..., co_author: _Optional[str] = ...) -> None: ...
+    title: str
+    body: str
+    pull_request: WorkspacePullRequest
+    def __init__(self, landing_id: _Optional[str] = ..., task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., remote: _Optional[str] = ..., mode: _Optional[_Union[WorkspaceLandingMode, str]] = ..., branch: _Optional[str] = ..., target: _Optional[str] = ..., delivery: _Optional[_Union[_runtime_pb2.WorkspaceDeliveryReference, _Mapping]] = ..., state: _Optional[_Union[WorkspaceLandingState, str]] = ..., reason: _Optional[str] = ..., landed_commit: _Optional[str] = ..., target_commit: _Optional[str] = ..., conflicts: _Optional[_Iterable[str]] = ..., follow_up_task_id: _Optional[str] = ..., created_order: _Optional[int] = ..., author_name: _Optional[str] = ..., author_email: _Optional[str] = ..., co_author: _Optional[str] = ..., title: _Optional[str] = ..., body: _Optional[str] = ..., pull_request: _Optional[_Union[WorkspacePullRequest, _Mapping]] = ...) -> None: ...
+
+class WorkspacePullRequest(_message.Message):
+    __slots__ = ("repository", "repository_id", "number", "url")
+    REPOSITORY_FIELD_NUMBER: _ClassVar[int]
+    REPOSITORY_ID_FIELD_NUMBER: _ClassVar[int]
+    NUMBER_FIELD_NUMBER: _ClassVar[int]
+    URL_FIELD_NUMBER: _ClassVar[int]
+    repository: str
+    repository_id: int
+    number: int
+    url: str
+    def __init__(self, repository: _Optional[str] = ..., repository_id: _Optional[int] = ..., number: _Optional[int] = ..., url: _Optional[str] = ...) -> None: ...
 
 class GetWorkspaceLandingRequest(_message.Message):
     __slots__ = ("landing_id",)
@@ -198,7 +218,7 @@ class ClaimWorkspaceLandingResponse(_message.Message):
     def __init__(self, landing: _Optional[_Union[WorkspaceLanding, _Mapping]] = ..., lease_token: _Optional[str] = ..., valid_for_ms: _Optional[int] = ..., holder: _Optional[_Union[_runtime_pb2.BlobHolder, _Mapping]] = ..., credential: _Optional[str] = ...) -> None: ...
 
 class RecordWorkspaceLandingRequest(_message.Message):
-    __slots__ = ("lease", "operation_id", "state", "reason", "landed_commit", "target_commit", "conflicts", "retry_after_ms")
+    __slots__ = ("lease", "operation_id", "state", "reason", "landed_commit", "target_commit", "conflicts", "retry_after_ms", "pull_request")
     LEASE_FIELD_NUMBER: _ClassVar[int]
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     STATE_FIELD_NUMBER: _ClassVar[int]
@@ -207,6 +227,7 @@ class RecordWorkspaceLandingRequest(_message.Message):
     TARGET_COMMIT_FIELD_NUMBER: _ClassVar[int]
     CONFLICTS_FIELD_NUMBER: _ClassVar[int]
     RETRY_AFTER_MS_FIELD_NUMBER: _ClassVar[int]
+    PULL_REQUEST_FIELD_NUMBER: _ClassVar[int]
     lease: WorkspaceLandingLease
     operation_id: str
     state: WorkspaceLandingState
@@ -215,4 +236,5 @@ class RecordWorkspaceLandingRequest(_message.Message):
     target_commit: str
     conflicts: _containers.RepeatedScalarFieldContainer[str]
     retry_after_ms: int
-    def __init__(self, lease: _Optional[_Union[WorkspaceLandingLease, _Mapping]] = ..., operation_id: _Optional[str] = ..., state: _Optional[_Union[WorkspaceLandingState, str]] = ..., reason: _Optional[str] = ..., landed_commit: _Optional[str] = ..., target_commit: _Optional[str] = ..., conflicts: _Optional[_Iterable[str]] = ..., retry_after_ms: _Optional[int] = ...) -> None: ...
+    pull_request: WorkspacePullRequest
+    def __init__(self, lease: _Optional[_Union[WorkspaceLandingLease, _Mapping]] = ..., operation_id: _Optional[str] = ..., state: _Optional[_Union[WorkspaceLandingState, str]] = ..., reason: _Optional[str] = ..., landed_commit: _Optional[str] = ..., target_commit: _Optional[str] = ..., conflicts: _Optional[_Iterable[str]] = ..., retry_after_ms: _Optional[int] = ..., pull_request: _Optional[_Union[WorkspacePullRequest, _Mapping]] = ...) -> None: ...

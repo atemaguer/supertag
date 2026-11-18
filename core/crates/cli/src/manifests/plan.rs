@@ -418,6 +418,11 @@ impl<'a> Catalog<'a> {
                         prior.as_ref().map(|v| message(&v.land)),
                         message(&value.land),
                     ),
+                    field(
+                        "spec.forge",
+                        prior.as_ref().map(|v| v.forge.to_le_bytes().to_vec()),
+                        value.forge.to_le_bytes().to_vec(),
+                    ),
                 ];
                 (prior.as_ref() != Some(&value)).then(|| {
                     (

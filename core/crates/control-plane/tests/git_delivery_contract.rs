@@ -8,6 +8,9 @@
 //! - `merge` lands once the Session's work is reported done, and a conflict gives the Session a
 //!   follow-up Task that merges the target, which lands again when it succeeds.
 //! - Only git delivery claims landings, and the claim names the push credential and the holder.
+//! - `review` needs a GitHub forge and a credential that can call its API, lands every delivered
+//!   Task with the pull request's title and description, records the pull request it opened,
+//!   and that pull request's merge closes the Work Session.
 
 mod support;
 
@@ -730,6 +733,246 @@ async fn merge_contract(url: String) {
     store.close().await;
 }
 
+const GITHUB_REMOTE: &str = "https://github.com/acme/handbook.git";
+
+fn merged(number: u64, delivery: &str) -> AcceptGithubEventRequest {
+    AcceptGithubEventRequest {
+        account_id: "github/surface".into(),
+        delivery_id: delivery.into(),
+        repository_id: 42,
+        repository: "acme/handbook".into(),
+        number,
+        source_id: 5_000 + number,
+        kind: GithubEventKind::PullRequest.into(),
+        action: GithubEventAction::Merged.into(),
+        prompt: String::new(),
+        tag_id: "engineer".into(),
+        is_pull_request: true,
+    }
+}
+
+async fn review_contract(url: String) {
+    let store = Store::open(&url).await.unwrap();
+    let review = |base: &str| {
+        Some(workspace_land::Mode::Review(WorkspaceLandReview {
+            base: base.into(),
+        }))
+    };
+    // An SSH key cannot call the forge's API; a plain git remote has no review at all.
+    credential(&store, "handbook").await;
+    let refused = put(
+        &store,
+        Workspace {
+            remote: GITHUB_REMOTE.into(),
+            ..workspace(review("main"))
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(&refused, StoreError::FailedPrecondition(reason) if reason.contains("GitHub App or HTTPS token")),
+        "{refused:?}"
+    );
+    store
+        .put_workspace_credential(
+            OP,
+            &PutWorkspaceCredentialRequest {
+                operation_id: Uuid::new_v4().to_string(),
+                credential: Some(WorkspaceCredential {
+                    name: "acme-github".into(),
+                    kind: WorkspaceCredentialKind::GithubApp as i32,
+                    identifier: "app:7/installation:8".into(),
+                    revision: 0,
+                }),
+                expected_revision: None,
+            },
+        )
+        .await
+        .unwrap();
+    let app = Some(WorkspaceCredentialNames {
+        read: "acme-github".into(),
+        push: "acme-github".into(),
+    });
+    let refused = put(
+        &store,
+        Workspace {
+            credentials: app.clone(),
+            ..workspace(review("main"))
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(&refused, StoreError::InvalidArgument(reason) if reason.contains("--forge github")),
+        "{refused:?}"
+    );
+    // A GitHub App reaches only https:// GitHub remotes.
+    let refused = put(
+        &store,
+        Workspace {
+            remote: "git@github.com:acme/handbook.git".into(),
+            credentials: app.clone(),
+            ..workspace(None)
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(&refused, StoreError::FailedPrecondition(reason) if reason.contains("GitHub App")),
+        "{refused:?}"
+    );
+    for base in ["supertag/session/x", "bad..base"] {
+        assert!(matches!(
+            put(
+                &store,
+                Workspace {
+                    remote: GITHUB_REMOTE.into(),
+                    credentials: app.clone(),
+                    ..workspace(review(base))
+                },
+            )
+            .await,
+            Err(StoreError::InvalidArgument(_))
+        ));
+    }
+    // github.com is GitHub without --forge; a self-hosted host needs it.
+    let stored = put(
+        &store,
+        Workspace {
+            remote: GITHUB_REMOTE.into(),
+            credentials: app.clone(),
+            ..workspace(review("main"))
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(stored.forge(), WorkspaceForge::Github);
+    let enterprise = put(
+        &store,
+        Workspace {
+            workspace_id: "enterprise".into(),
+            remote: "https://ghe.acme.internal/acme/handbook.git".into(),
+            credentials: app.clone(),
+            forge: WorkspaceForge::Github as i32,
+            ..workspace(review("main"))
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(enterprise.forge(), WorkspaceForge::Github);
+
+    store
+        .put_tag_spec(PutTagRequest {
+            tag_id: "engineer".into(),
+            name: Some("Docs Writer".into()),
+            instructions: "Change the handbook".into(),
+            allowed_actions: vec!["files:write".into()],
+            workspace: Some(WorkspaceSpec {
+                workspace_id: "project".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let host = support::register_host(&store, "docs-host").await;
+    support::hold_artifacts(&store, &host).await;
+    let head = "2".repeat(40);
+    let work = work_session(&store, &host, &head).await;
+    // Every delivered Task lands at once, without waiting for the Session to finish.
+    let claimed = claim_landing(&store).await;
+    assert_eq!(claimed.credential, "acme-github");
+    let landing = claimed.landing.clone().unwrap();
+    assert_eq!(landing.mode(), WorkspaceLandingMode::Review);
+    assert_eq!(landing.target, "main");
+    assert_eq!(landing.session_id, work.work_session_id);
+    assert_eq!(landing.title, "Notes");
+    assert!(
+        landing.body.starts_with("Changed the handbook") && landing.body.contains(&landing.task_id),
+        "{}",
+        landing.body
+    );
+    // A review landing names its pull request, on the Workspace's own repository.
+    let pull_request = WorkspacePullRequest {
+        repository: "acme/handbook".into(),
+        repository_id: 42,
+        number: 7,
+        url: "https://github.com/acme/handbook/pull/7".into(),
+    };
+    for wrong in [
+        None,
+        Some(WorkspacePullRequest {
+            url: "https://github.com/acme/other/pull/7".into(),
+            ..pull_request.clone()
+        }),
+        Some(WorkspacePullRequest {
+            repository: "acme/other".into(),
+            ..pull_request.clone()
+        }),
+    ] {
+        let refused = store
+            .record_workspace_landing(
+                GIT_DELIVERY_PRINCIPAL,
+                &RecordWorkspaceLandingRequest {
+                    lease: Some(WorkspaceLandingLease {
+                        landing_id: landing.landing_id.clone(),
+                        lease_token: claimed.lease_token.clone(),
+                    }),
+                    operation_id: Uuid::new_v4().to_string(),
+                    state: WorkspaceLandingState::Landed as i32,
+                    landed_commit: head.clone(),
+                    pull_request: wrong,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(refused, StoreError::InvalidArgument(_)),
+            "{refused:?}"
+        );
+    }
+    let landed = record(
+        &store,
+        &claimed,
+        RecordWorkspaceLandingRequest {
+            state: WorkspaceLandingState::Landed as i32,
+            landed_commit: head.clone(),
+            pull_request: Some(pull_request.clone()),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(landed.pull_request.as_ref(), Some(&pull_request));
+    // Closing another pull request, or replaying the merge, changes nothing else.
+    store
+        .accept_github_event("connector:github/surface", &merged(8, "other"))
+        .await
+        .unwrap();
+    assert!(
+        store
+            .get_work_session(OP, &work.work_session_id)
+            .await
+            .unwrap()
+            .closed_at_ms
+            .is_none()
+    );
+    // A merge of its pull request closes the Work Session that opened it.
+    for _ in 0..2 {
+        let response = store
+            .accept_github_event("connector:github/surface", &merged(7, "merged"))
+            .await
+            .unwrap();
+        assert!(response.task.is_none());
+        let closed = store
+            .get_work_session(OP, &work.work_session_id)
+            .await
+            .unwrap();
+        assert_eq!(closed.close_reason(), WorkSessionCloseReason::Merged);
+    }
+    store.close().await;
+}
+
 fn sqlite(directory: &tempfile::TempDir, name: &str) -> String {
     format!(
         "sqlite://{}?mode=rwc",
@@ -779,6 +1022,18 @@ async fn sqlite_branch_landing() {
 async fn sqlite_merge_landing() {
     let directory = tempfile::tempdir().unwrap();
     Box::pin(merge_contract(sqlite(&directory, "merge.db"))).await;
+}
+
+#[tokio::test]
+async fn sqlite_review_landing() {
+    let directory = tempfile::tempdir().unwrap();
+    Box::pin(review_contract(sqlite(&directory, "review.db"))).await;
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_review_landing() {
+    postgres(|url| Box::pin(review_contract(url))).await;
 }
 
 #[tokio::test]

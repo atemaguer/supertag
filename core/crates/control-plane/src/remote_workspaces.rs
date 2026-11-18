@@ -4,7 +4,7 @@ use prost::Message;
 use sqlx::{Any, Row, Transaction};
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
-    git_remote::{remote_transport, valid_credential_name, valid_merge_target},
+    git_remote::{self, remote_transport, valid_credential_name, valid_merge_target},
     v2::*,
     valid_git_branch, valid_workspace_id,
 };
@@ -82,9 +82,31 @@ pub fn validate_manifest_workspace(value: &mut Workspace) -> Result<()> {
             return Err(invalid("invalid Workspace Credential name"));
         }
     }
+    // github.com is GitHub; any other host is a GitHub forge only when the operator says so.
+    if value.forge() == WorkspaceForge::Unspecified && git_remote::on_github_com(&value.remote) {
+        value.set_forge(WorkspaceForge::Github);
+    }
+    if value.forge() == WorkspaceForge::Github && git_remote::github_remote(&value.remote).is_none()
+    {
+        return Err(invalid(
+            "a GitHub Workspace remote names a host and OWNER/NAME, such as https://github.com/acme/app.git",
+        ));
+    }
     match value.land.as_ref().and_then(|land| land.mode.as_ref()) {
         None => value.land = None,
         Some(workspace_land::Mode::Branch(_)) => {}
+        Some(workspace_land::Mode::Review(review)) => {
+            if value.forge() != WorkspaceForge::Github {
+                return Err(invalid(
+                    "review opens pull requests through a forge; a plain git remote offers branch and merge. For a self-hosted GitHub, add --forge github",
+                ));
+            }
+            if !valid_git_branch(&review.base) || review.base.starts_with("supertag/") {
+                return Err(invalid(
+                    "a review base is a branch name outside supertag/, such as main",
+                ));
+            }
+        }
         Some(workspace_land::Mode::Merge(merge)) => {
             if !valid_merge_target(&merge.target) {
                 return Err(invalid(
@@ -106,14 +128,46 @@ async fn require_credentials_in(tx: &mut Transaction<'_, Any>, value: &Workspace
         return Ok(());
     };
     for credential in [&credentials.read, &credentials.push] {
-        if !credential.is_empty()
-            && crate::workspace_credentials::catalog_in(tx, credential)
-                .await?
-                .is_none()
-        {
+        if credential.is_empty() {
+            continue;
+        }
+        let Some(stored) = crate::workspace_credentials::catalog_in(tx, credential).await? else {
             return Err(StoreError::FailedPrecondition(format!(
                 "Workspace Credential {credential} was not found; add it with supertag workspace credential add"
             )));
+        };
+        if stored.kind() == WorkspaceCredentialKind::GithubApp
+            && (value.forge() != WorkspaceForge::Github
+                || remote_transport(&value.remote) != Ok(git_remote::RemoteTransport::Http))
+        {
+            return Err(StoreError::FailedPrecondition(format!(
+                "Workspace Credential {credential} is a GitHub App, which reaches only https:// GitHub remotes"
+            )));
+        }
+    }
+    // The review adapter calls the forge's API with the push credential.
+    if let Some(workspace_land::Mode::Review(_)) =
+        value.land.as_ref().and_then(|land| land.mode.as_ref())
+    {
+        let name = if credentials.push.is_empty() {
+            &credentials.read
+        } else {
+            &credentials.push
+        };
+        let kind = if name.is_empty() {
+            None
+        } else {
+            crate::workspace_credentials::catalog_in(tx, name)
+                .await?
+                .map(|stored| stored.kind())
+        };
+        if !matches!(
+            kind,
+            Some(WorkspaceCredentialKind::GithubApp | WorkspaceCredentialKind::HttpsToken)
+        ) {
+            return Err(StoreError::FailedPrecondition(
+                "review calls the GitHub API with the push credential: use a GitHub App or HTTPS token Workspace Credential".into(),
+            ));
         }
     }
     Ok(())

@@ -28,9 +28,9 @@ impl Store {
         }
         name("GitHub delivery ID", &input.delivery_id)?;
         name("Tag ID", &input.tag_id)?;
-        // A merged pull request starts no work. Routing it back to the Session that opened it
-        // belongs to the review adapter, which does not exist yet.
+        // A merged pull request starts no work: it closes the Work Session that opened it.
         if input.action == GithubEventAction::Merged as i32 {
+            self.close_merged(account, input).await?;
             return Ok(AcceptGithubEventResponse { task: None });
         }
         text("GitHub prompt", &input.prompt, 128 * 1024)?;
@@ -187,6 +187,54 @@ impl Store {
         .await?;
         tx.commit().await?;
         Ok(AcceptGithubEventResponse { task: Some(task) })
+    }
+}
+
+impl Store {
+    /// A merged pull request closes each open Work Session whose review landing opened it. A
+    /// GitHub repository ID and pull request number name one pull request, and a Session
+    /// reviews in at most one, so the match is exact. Replays and Sessions already closed
+    /// change nothing.
+    async fn close_merged(&self, account: &str, input: &AcceptGithubEventRequest) -> Result<()> {
+        if input.kind != GithubEventKind::PullRequest as i32
+            || !input.is_pull_request
+            || !input.prompt.is_empty()
+            || !repository(&input.repository)
+            || [input.repository_id, input.number]
+                .iter()
+                .any(|id| *id == 0 || *id > i64::MAX as u64)
+        {
+            return Err(invalid("invalid merged GitHub pull request event"));
+        }
+        let (mut tx, _) = self.write().await?;
+        let route: Option<String> = sqlx::query_scalar("SELECT repository FROM supertag_v2_github_repositories WHERE account_id=$1 AND repository_id=$2")
+            .bind(account).bind(input.repository_id as i64).fetch_optional(&mut *tx).await?;
+        if route.is_some_and(|repository| repository != input.repository.to_ascii_lowercase()) {
+            return Err(StoreError::Conflict(
+                "GitHub repository route is already bound to a different repository name".into(),
+            ));
+        }
+        let sessions: Vec<String> = sqlx::query_scalar(
+            "SELECT ws.work_session_id FROM supertag_v2_workspace_review_sessions rs
+             JOIN supertag_v2_work_sessions ws ON ws.work_session_id=rs.session_id AND ws.tag_id=rs.tag_id
+             WHERE rs.repository_id=$1 AND rs.number=$2 AND ws.closed_at_ms IS NULL",
+        )
+        .bind(input.repository_id as i64)
+        .bind(input.number as i64)
+        .fetch_all(&mut *tx)
+        .await?;
+        let now = self.execution_now_ms();
+        for work_session_id in sessions {
+            crate::work_sessions::close_in(
+                &mut tx,
+                &work_session_id,
+                supertag_protocol::v2::WorkSessionCloseReason::Merged,
+                now,
+            )
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
     }
 }
 

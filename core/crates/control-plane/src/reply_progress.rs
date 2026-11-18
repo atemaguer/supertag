@@ -315,7 +315,8 @@ pub(crate) async fn present_in(tx: &mut Transaction<'_, Any>, reply: &mut Reply)
 }
 
 /// The verified delivery of the completed work Session a report Task reports on: the branch its
-/// latest landing put the Session's changes on, the Session's own branch or the merge target.
+/// latest landing put the Session's changes on, the Session's own branch or the merge target,
+/// and in review mode the pull request it opened.
 pub(crate) async fn result_card_in(
     tx: &mut Transaction<'_, Any>,
     report_task_id: &str,
@@ -351,13 +352,29 @@ pub(crate) async fn result_card_in(
         return Ok(None);
     };
     let landing: WorkspaceLanding = policy::decode(&payload)?;
+    // Only a pull request the review landing recorded, on the Workspace's own repository.
+    let pull_request_url = landing
+        .pull_request
+        .as_ref()
+        .filter(|_| landing.mode() == WorkspaceLandingMode::Review)
+        .filter(|pull_request| {
+            supertag_protocol::git_remote::github_remote(&landing.remote).is_some_and(|github| {
+                pull_request.number > 0
+                    && pull_request.url
+                        == format!(
+                            "{}/{}/pull/{}",
+                            github.web, github.repository, pull_request.number
+                        )
+            })
+        })
+        .map(|pull_request| pull_request.url.clone());
     let branch = match landing.mode() {
         WorkspaceLandingMode::Merge => landing.target,
         _ => landing.branch,
     };
     Ok((!branch.is_empty()).then_some(ReplyResultCard {
         branch: Some(branch),
-        pull_request_url: None,
+        pull_request_url,
     }))
 }
 
@@ -701,6 +718,55 @@ mod tests {
             pull_request_url: None,
         });
         assert_eq!(card(&store, &report.task_id).await, complete);
+
+        // A review landing shows its pull request, only with the exact link to the repository.
+        let reviewed = |url: &str| WorkspaceLanding {
+            mode: WorkspaceLandingMode::Review as i32,
+            remote: "https://github.com/acme/app.git".into(),
+            target: "main".into(),
+            state: WorkspaceLandingState::Landed as i32,
+            pull_request: Some(WorkspacePullRequest {
+                repository: "acme/app".into(),
+                repository_id: 9,
+                number: 7,
+                url: url.into(),
+            }),
+            ..landing.clone()
+        };
+        for (url, shown) in [
+            ("https://github.com/acme/app/pull/7", true),
+            ("https://github.com.evil.example/acme/app/pull/7", false),
+            ("https://github.com/acme/app/pull/8", false),
+        ] {
+            sqlx::query(
+                "UPDATE supertag_v2_workspace_landings SET payload=$1 WHERE landing_id='landing'",
+            )
+            .bind(reviewed(url).encode_to_vec())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+            assert_eq!(
+                card(&store, &report.task_id).await,
+                Some(ReplyResultCard {
+                    branch: Some("supertag/session/<!channel>".into()),
+                    pull_request_url: shown.then(|| url.to_owned()),
+                }),
+                "{url}"
+            );
+        }
+        sqlx::query(
+            "UPDATE supertag_v2_workspace_landings SET payload=$1 WHERE landing_id='landing'",
+        )
+        .bind(
+            WorkspaceLanding {
+                state: WorkspaceLandingState::Landed as i32,
+                ..landing.clone()
+            }
+            .encode_to_vec(),
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
 
         // The claimed final reply carries the card; no other reply does.
         sqlx::query("INSERT INTO supertag_v2_replies (reply_id,task_id,account_id,conversation_id,thread_id,text,state,ready_order) VALUES ('report-reply',$1,'slack-test','CCHANNEL1','1794470000.000001','Reported.',$2,900004)")

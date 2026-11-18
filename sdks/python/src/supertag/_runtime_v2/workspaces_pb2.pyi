@@ -7,6 +7,11 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class WorkspaceForge(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    WORKSPACE_FORGE_UNSPECIFIED: _ClassVar[WorkspaceForge]
+    WORKSPACE_FORGE_GITHUB: _ClassVar[WorkspaceForge]
+
 class WorkspaceCheckStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     WORKSPACE_CHECK_STATUS_UNSPECIFIED: _ClassVar[WorkspaceCheckStatus]
@@ -22,6 +27,9 @@ class WorkspaceCredentialKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper)
     WORKSPACE_CREDENTIAL_KIND_SSH_KEY: _ClassVar[WorkspaceCredentialKind]
     WORKSPACE_CREDENTIAL_KIND_HTTPS_TOKEN: _ClassVar[WorkspaceCredentialKind]
     WORKSPACE_CREDENTIAL_KIND_CREDENTIAL_HELPER: _ClassVar[WorkspaceCredentialKind]
+    WORKSPACE_CREDENTIAL_KIND_GITHUB_APP: _ClassVar[WorkspaceCredentialKind]
+WORKSPACE_FORGE_UNSPECIFIED: WorkspaceForge
+WORKSPACE_FORGE_GITHUB: WorkspaceForge
 WORKSPACE_CHECK_STATUS_UNSPECIFIED: WorkspaceCheckStatus
 WORKSPACE_CHECK_STATUS_OK: WorkspaceCheckStatus
 WORKSPACE_CHECK_STATUS_FAILED: WorkspaceCheckStatus
@@ -32,9 +40,10 @@ WORKSPACE_CREDENTIAL_KIND_UNSPECIFIED: WorkspaceCredentialKind
 WORKSPACE_CREDENTIAL_KIND_SSH_KEY: WorkspaceCredentialKind
 WORKSPACE_CREDENTIAL_KIND_HTTPS_TOKEN: WorkspaceCredentialKind
 WORKSPACE_CREDENTIAL_KIND_CREDENTIAL_HELPER: WorkspaceCredentialKind
+WORKSPACE_CREDENTIAL_KIND_GITHUB_APP: WorkspaceCredentialKind
 
 class Workspace(_message.Message):
-    __slots__ = ("workspace_id", "remote", "ref", "credentials", "land", "revision", "commit", "resolved_ref")
+    __slots__ = ("workspace_id", "remote", "ref", "credentials", "land", "revision", "commit", "resolved_ref", "forge")
     WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
     REMOTE_FIELD_NUMBER: _ClassVar[int]
     REF_FIELD_NUMBER: _ClassVar[int]
@@ -43,6 +52,7 @@ class Workspace(_message.Message):
     REVISION_FIELD_NUMBER: _ClassVar[int]
     COMMIT_FIELD_NUMBER: _ClassVar[int]
     RESOLVED_REF_FIELD_NUMBER: _ClassVar[int]
+    FORGE_FIELD_NUMBER: _ClassVar[int]
     workspace_id: str
     remote: str
     ref: str
@@ -51,7 +61,8 @@ class Workspace(_message.Message):
     revision: int
     commit: str
     resolved_ref: str
-    def __init__(self, workspace_id: _Optional[str] = ..., remote: _Optional[str] = ..., ref: _Optional[str] = ..., credentials: _Optional[_Union[WorkspaceCredentialNames, _Mapping]] = ..., land: _Optional[_Union[WorkspaceLand, _Mapping]] = ..., revision: _Optional[int] = ..., commit: _Optional[str] = ..., resolved_ref: _Optional[str] = ...) -> None: ...
+    forge: WorkspaceForge
+    def __init__(self, workspace_id: _Optional[str] = ..., remote: _Optional[str] = ..., ref: _Optional[str] = ..., credentials: _Optional[_Union[WorkspaceCredentialNames, _Mapping]] = ..., land: _Optional[_Union[WorkspaceLand, _Mapping]] = ..., revision: _Optional[int] = ..., commit: _Optional[str] = ..., resolved_ref: _Optional[str] = ..., forge: _Optional[_Union[WorkspaceForge, str]] = ...) -> None: ...
 
 class WorkspaceCredentialNames(_message.Message):
     __slots__ = ("read", "push")
@@ -62,12 +73,14 @@ class WorkspaceCredentialNames(_message.Message):
     def __init__(self, read: _Optional[str] = ..., push: _Optional[str] = ...) -> None: ...
 
 class WorkspaceLand(_message.Message):
-    __slots__ = ("branch", "merge")
+    __slots__ = ("branch", "merge", "review")
     BRANCH_FIELD_NUMBER: _ClassVar[int]
     MERGE_FIELD_NUMBER: _ClassVar[int]
+    REVIEW_FIELD_NUMBER: _ClassVar[int]
     branch: WorkspaceLandBranch
     merge: WorkspaceLandMerge
-    def __init__(self, branch: _Optional[_Union[WorkspaceLandBranch, _Mapping]] = ..., merge: _Optional[_Union[WorkspaceLandMerge, _Mapping]] = ...) -> None: ...
+    review: WorkspaceLandReview
+    def __init__(self, branch: _Optional[_Union[WorkspaceLandBranch, _Mapping]] = ..., merge: _Optional[_Union[WorkspaceLandMerge, _Mapping]] = ..., review: _Optional[_Union[WorkspaceLandReview, _Mapping]] = ...) -> None: ...
 
 class WorkspaceLandBranch(_message.Message):
     __slots__ = ()
@@ -78,6 +91,12 @@ class WorkspaceLandMerge(_message.Message):
     TARGET_FIELD_NUMBER: _ClassVar[int]
     target: str
     def __init__(self, target: _Optional[str] = ...) -> None: ...
+
+class WorkspaceLandReview(_message.Message):
+    __slots__ = ("base",)
+    BASE_FIELD_NUMBER: _ClassVar[int]
+    base: str
+    def __init__(self, base: _Optional[str] = ...) -> None: ...
 
 class PutWorkspaceRequest(_message.Message):
     __slots__ = ("operation_id", "workspace", "expected_revision")

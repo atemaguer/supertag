@@ -1,4 +1,7 @@
 //! GitHub App credentials remain in process memory. Tokens are never persisted.
+//!
+//! Every installation token is minted for one repository with only the permissions one use
+//! needs, and the response is checked to be scoped exactly as asked.
 use crate::{REQUEST_TIMEOUT, valid_id};
 use anyhow::{Result, anyhow, ensure};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -29,36 +32,19 @@ pub struct GithubAppConfig {
 
 enum Credential {
     Token(String),
-    App {
-        app_id: u64,
-        installation_id: u64,
-        key: Box<RsaKeyPair>,
-    },
+    App(GithubApp),
 }
 
+/// The Gateway's GitHub connector authentication for its one repository.
 pub struct Authentication {
     credential: Credential,
     repository_id: u64,
     repository: String,
     cached: Mutex<Option<CachedToken>>,
-    scope: TokenScope,
 }
 
-#[derive(Clone, Copy)]
-enum TokenScope {
-    Comments,
-    SourceRead,
-    Publication,
-}
-impl TokenScope {
-    fn permissions(self) -> &'static [(&'static str, &'static str)] {
-        match self {
-            Self::Comments => &[("issues", "write")],
-            Self::SourceRead => &[("contents", "read")],
-            Self::Publication => &[("contents", "write"), ("pull_requests", "write")],
-        }
-    }
-}
+/// What the Gateway's GitHub connector may do: comment on issues and pull requests.
+const COMMENTS: &[(&str, &str)] = &[("issues", "write")];
 
 struct CachedToken {
     value: String,
@@ -79,6 +65,77 @@ const MAX_TOKEN_BYTES: usize = 16 * 1024;
 pub const MAX_RESPONSE_BYTES: usize = 128 * 1024;
 const REFRESH_MARGIN: i64 = 60;
 
+/// A GitHub App installation that mints tokens for any repository it covers. Intentionally has
+/// neither Debug nor Serialize: it holds the App's private key.
+pub struct GithubApp {
+    app_id: u64,
+    installation_id: u64,
+    key: RsaKeyPair,
+}
+
+/// An installation token for one repository, and that repository's numeric ID as GitHub
+/// reported it with the token.
+pub struct RepositoryToken {
+    pub token: AccessToken,
+    pub repository_id: u64,
+}
+
+impl GithubApp {
+    pub fn new(config: &GithubAppConfig) -> Result<Self> {
+        ensure!(
+            valid_id(config.app_id) && valid_id(config.installation_id),
+            "invalid GitHub App or installation ID"
+        );
+        Ok(Self {
+            app_id: config.app_id,
+            installation_id: config.installation_id,
+            key: rsa_key(&config.private_key_pem)?,
+        })
+    }
+
+    /// Mints a token for `repository` (`OWNER/NAME`) with exactly `permissions`, such as
+    /// `[("contents", "write")]`. The installation must be this App's, not suspended, and owned by
+    /// the repository's owner. The token is never cached: each operation mints its own.
+    pub async fn repository_token(
+        &self,
+        client: &Client,
+        api: &Url,
+        repository: &str,
+        permissions: &[(&str, &str)],
+    ) -> Result<RepositoryToken> {
+        ensure!(
+            crate::valid_repository(repository),
+            "invalid GitHub repository {repository}"
+        );
+        let now = now()?;
+        let jwt = app_jwt(&self.key, self.app_id, now)?;
+        check_installation(
+            client,
+            api,
+            &jwt,
+            self.app_id,
+            self.installation_id,
+            repository,
+        )
+        .await?;
+        let name = repository.split_once('/').map_or("", |(_, name)| name);
+        let value = mint(
+            client,
+            api,
+            &jwt,
+            self.installation_id,
+            json!({"repositories":[name],"permissions":permission_map(permissions)}),
+        )
+        .await?;
+        let (token, repository_id) =
+            validate_scoped_token_response(&value, None, repository, now, permissions)?;
+        Ok(RepositoryToken {
+            token: AccessToken(token.to_owned()),
+            repository_id,
+        })
+    }
+}
+
 impl Authentication {
     pub fn new(
         configuration: &GithubAuthentication,
@@ -90,46 +147,14 @@ impl Authentication {
                 ensure!(valid_token(value), "invalid GitHub token");
                 Credential::Token(value.clone())
             }
-            GithubAuthentication::App(app) => {
-                ensure!(
-                    valid_id(app.app_id) && valid_id(app.installation_id),
-                    "invalid GitHub App or installation ID"
-                );
-                let key = rsa_key(&app.private_key_pem)?;
-                Credential::App {
-                    app_id: app.app_id,
-                    installation_id: app.installation_id,
-                    key: Box::new(key),
-                }
-            }
+            GithubAuthentication::App(app) => Credential::App(GithubApp::new(app)?),
         };
         Ok(Self {
             credential,
             repository_id,
             repository: repository.into(),
             cached: Mutex::new(None),
-            scope: TokenScope::Comments,
         })
-    }
-
-    pub fn source_reader(
-        configuration: &GithubAuthentication,
-        repository_id: u64,
-        repository: &str,
-    ) -> Result<Self> {
-        let mut value = Self::new(configuration, repository_id, repository)?;
-        value.scope = TokenScope::SourceRead;
-        Ok(value)
-    }
-
-    pub fn publisher(
-        configuration: &GithubAuthentication,
-        repository_id: u64,
-        repository: &str,
-    ) -> Result<Self> {
-        let mut value = Self::new(configuration, repository_id, repository)?;
-        value.scope = TokenScope::Publication;
-        Ok(value)
     }
 
     pub async fn access_token(&self, client: &Client, api: &Url) -> Result<AccessToken> {
@@ -148,16 +173,9 @@ impl Authentication {
     }
 
     async fn access_token_at(&self, client: &Client, api: &Url, now: i64) -> Result<AccessToken> {
-        let Credential::App {
-            app_id,
-            installation_id,
-            key,
-        } = &self.credential
-        else {
-            let Credential::Token(value) = &self.credential else {
-                unreachable!()
-            };
-            return Ok(AccessToken(value.clone()));
+        let app = match &self.credential {
+            Credential::Token(value) => return Ok(AccessToken(value.clone())),
+            Credential::App(app) => app,
         };
         let mut cached = self.cached.lock().await;
         if let Some(token) = cached.as_ref()
@@ -168,54 +186,30 @@ impl Authentication {
             return Ok(AccessToken(token.value.clone()));
         }
         *cached = None;
-        let jwt = app_jwt(key, *app_id, now)?;
-        let installation_url = api.join(&format!("repos/{}/installation", self.repository))?;
-        let response = client
-            .get(installation_url)
-            .bearer_auth(&jwt)
-            .headers(headers())
-            .send()
-            .await
-            .map_err(|_| anyhow!("GitHub installation validation unavailable"))?;
-        let installation = response_json(response, StatusCode::OK).await?;
-        ensure!(
-            installation.get("id").and_then(Value::as_u64) == Some(*installation_id)
-                && installation.get("app_id").and_then(Value::as_u64) == Some(*app_id)
-                && installation.get("suspended_at").is_some_and(Value::is_null),
-            "GitHub repository installation does not match the configured App"
-        );
-        let owner = self.repository.split('/').next().unwrap_or_default();
-        ensure!(
-            installation
-                .pointer("/account/login")
-                .and_then(Value::as_str)
-                .is_some_and(|login| login.eq_ignore_ascii_case(owner)),
-            "GitHub installation owner does not match the repository"
-        );
-        let target = api.join(&format!(
-            "app/installations/{installation_id}/access_tokens"
-        ))?;
-        let permissions: serde_json::Map<String, Value> = self
-            .scope
-            .permissions()
-            .iter()
-            .map(|(key, value)| (key.to_string(), Value::String(value.to_string())))
-            .collect();
-        let response = client
-            .post(target)
-            .bearer_auth(&jwt)
-            .headers(headers())
-            .json(&json!({"repository_ids":[self.repository_id],"permissions":permissions}))
-            .send()
-            .await
-            .map_err(|_| anyhow!("GitHub installation token acquisition unavailable"))?;
-        let value = response_json(response, StatusCode::CREATED).await?;
-        let token = validate_scoped_token_response(
+        let jwt = app_jwt(&app.key, app.app_id, now)?;
+        check_installation(
+            client,
+            api,
+            &jwt,
+            app.app_id,
+            app.installation_id,
+            &self.repository,
+        )
+        .await?;
+        let value = mint(
+            client,
+            api,
+            &jwt,
+            app.installation_id,
+            json!({"repository_ids":[self.repository_id],"permissions":permission_map(COMMENTS)}),
+        )
+        .await?;
+        let (token, _) = validate_scoped_token_response(
             &value,
-            self.repository_id,
+            Some(self.repository_id),
             &self.repository,
             now,
-            self.scope,
+            COMMENTS,
         )?;
         let expires_at =
             DateTime::parse_from_rfc3339(value["expires_at"].as_str().unwrap_or_default())
@@ -238,6 +232,70 @@ impl Authentication {
     }
 }
 
+fn permission_map(permissions: &[(&str, &str)]) -> serde_json::Map<String, Value> {
+    permissions
+        .iter()
+        .map(|(key, value)| (key.to_string(), Value::String(value.to_string())))
+        .collect()
+}
+
+/// Asks GitHub which installation covers `repository`, and refuses unless it is this App's
+/// configured, unsuspended installation on the repository's owner.
+async fn check_installation(
+    client: &Client,
+    api: &Url,
+    jwt: &str,
+    app_id: u64,
+    installation_id: u64,
+    repository: &str,
+) -> Result<()> {
+    let installation_url = api.join(&format!("repos/{repository}/installation"))?;
+    let response = client
+        .get(installation_url)
+        .bearer_auth(jwt)
+        .headers(headers())
+        .send()
+        .await
+        .map_err(|_| anyhow!("GitHub installation validation unavailable"))?;
+    let installation = response_json(response, StatusCode::OK).await?;
+    ensure!(
+        installation.get("id").and_then(Value::as_u64) == Some(installation_id)
+            && installation.get("app_id").and_then(Value::as_u64) == Some(app_id)
+            && installation.get("suspended_at").is_some_and(Value::is_null),
+        "GitHub repository installation does not match the configured App"
+    );
+    let owner = repository.split('/').next().unwrap_or_default();
+    ensure!(
+        installation
+            .pointer("/account/login")
+            .and_then(Value::as_str)
+            .is_some_and(|login| login.eq_ignore_ascii_case(owner)),
+        "GitHub installation owner does not match the repository"
+    );
+    Ok(())
+}
+
+async fn mint(
+    client: &Client,
+    api: &Url,
+    jwt: &str,
+    installation_id: u64,
+    body: Value,
+) -> Result<Value> {
+    let target = api.join(&format!(
+        "app/installations/{installation_id}/access_tokens"
+    ))?;
+    let response = client
+        .post(target)
+        .bearer_auth(jwt)
+        .headers(headers())
+        .json(&body)
+        .send()
+        .await
+        .map_err(|_| anyhow!("GitHub installation token acquisition unavailable"))?;
+    response_json(response, StatusCode::CREATED).await
+}
+
 fn rsa_key(pem: &str) -> Result<RsaKeyPair> {
     ensure!(
         pem.len() <= 32 * 1024,
@@ -258,7 +316,7 @@ fn rsa_key(pem: &str) -> Result<RsaKeyPair> {
     Ok(key)
 }
 
-/// A short-lived App JWT for verifying an installation during `supertag setup surface github`.
+/// A short-lived App JWT, for verifying an App's key and installation during setup.
 pub fn setup_app_jwt(private_key_pem: &str, app_id: u64) -> Result<String> {
     ensure!(valid_id(app_id), "invalid GitHub App ID");
     app_jwt(&rsa_key(private_key_pem)?, app_id, now()?)
@@ -291,13 +349,16 @@ fn valid_token(value: &str) -> bool {
         && value.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
 }
 
+/// The token of a mint response scoped to exactly one repository (`repository_id` when known)
+/// and exactly `required` permissions (plus `metadata: read`, which GitHub always adds), and
+/// that repository's ID.
 fn validate_scoped_token_response<'a>(
     value: &'a Value,
-    repository_id: u64,
+    repository_id: Option<u64>,
     repository: &str,
     now: i64,
-    scope: TokenScope,
-) -> Result<&'a str> {
+    required: &[(&str, &str)],
+) -> Result<(&'a str, u64)> {
     let token = value
         .get("token")
         .and_then(Value::as_str)
@@ -318,7 +379,6 @@ fn validate_scoped_token_response<'a>(
         .get("permissions")
         .and_then(Value::as_object)
         .ok_or_else(|| anyhow!("GitHub installation token has no permission scope"))?;
-    let required = scope.permissions();
     ensure!(
         required
             .iter()
@@ -333,17 +393,23 @@ fn validate_scoped_token_response<'a>(
         .get("repositories")
         .and_then(Value::as_array)
         .ok_or_else(|| anyhow!("GitHub installation token has no repository scope"))?;
+    let scoped = repositories
+        .first()
+        .and_then(|entry| entry.get("id"))
+        .and_then(Value::as_u64)
+        .filter(|id| valid_id(*id));
     ensure!(
         value.get("repository_selection").and_then(Value::as_str) == Some("selected")
             && repositories.len() == 1
-            && repositories[0].get("id").and_then(Value::as_u64) == Some(repository_id)
+            && scoped.is_some()
+            && repository_id.is_none_or(|id| scoped == Some(id))
             && repositories[0]
                 .get("full_name")
                 .and_then(Value::as_str)
                 .is_some_and(|name| name.eq_ignore_ascii_case(repository)),
         "GitHub installation token repository scope does not match"
     );
-    Ok(token)
+    Ok((token, scoped.unwrap_or_default()))
 }
 
 fn headers() -> reqwest::header::HeaderMap {
@@ -353,7 +419,7 @@ fn headers() -> reqwest::header::HeaderMap {
             ACCEPT,
             HeaderValue::from_static("application/vnd.github+json"),
         ),
-        (USER_AGENT, HeaderValue::from_static("supertag-gateway")),
+        (USER_AGENT, HeaderValue::from_static("supertag")),
         (
             reqwest::header::HeaderName::from_static("x-github-api-version"),
             HeaderValue::from_static("2022-11-28"),
@@ -364,7 +430,8 @@ fn headers() -> reqwest::header::HeaderMap {
 async fn response_json(mut response: reqwest::Response, expected: StatusCode) -> Result<Value> {
     ensure!(
         response.status() == expected,
-        "GitHub authentication request was not accepted"
+        "GitHub authentication request was not accepted (HTTP {})",
+        response.status().as_u16()
     );
     let mut bytes = Vec::new();
     while let Some(chunk) = response

@@ -6,7 +6,10 @@ use std::time::Duration;
 use anyhow::Result;
 use supertag_protocol::{
     git_remote::RemoteTransport,
-    v2::{Workspace, WorkspaceCheck, WorkspaceCheckStatus, WorkspaceCheckStep, workspace_land},
+    v2::{
+        Workspace, WorkspaceCheck, WorkspaceCheckStatus, WorkspaceCheckStep, WorkspaceForge,
+        workspace_land,
+    },
 };
 use tokio_util::sync::CancellationToken;
 
@@ -106,6 +109,14 @@ impl GitDelivery {
                 "a local repository: anyone who can write it can change any branch; SuperTag pushes only supertag/** and the merge target",
             ),
             Ok(Remote {
+                credential: Some((_, Credential::GithubApp { .. })),
+                ..
+            }) if pushing_ok => step(
+                "scope",
+                WorkspaceCheckStatus::Warning,
+                "one repository: each push uses a token minted for this repository with contents:write, which can still push any of its branches; protect your default branch (a ruleset can confine the App to supertag/**). SuperTag pushes only supertag/** and the merge target",
+            ),
+            Ok(Remote {
                 credential: Some((_, Credential::Helper { .. })),
                 ..
             }) => step(
@@ -137,21 +148,67 @@ impl GitDelivery {
                 WorkspaceCheckStatus::Ok,
                 "each delivered Task updates its Session's branch supertag/session/...",
             ),
+            Some(workspace_land::Mode::Review(review)) => step(
+                "land",
+                WorkspaceCheckStatus::Ok,
+                format!(
+                    "each delivered Task updates its Session's branch and its draft pull request against {}",
+                    review.base
+                ),
+            ),
             None => step(
                 "land",
                 WorkspaceCheckStatus::NotApplicable,
                 "changes stay with SuperTag; download them with supertag fetch",
             ),
         });
-        steps.push(step(
-            "review",
-            WorkspaceCheckStatus::NotApplicable,
-            "plain git remote: branch and merge only",
-        ));
+        let github = workspace.forge() == WorkspaceForge::Github;
+        steps.push(match land {
+            Some(workspace_land::Mode::Review(review)) => {
+                let credential = workspace
+                    .credentials
+                    .as_ref()
+                    .map(|names| {
+                        if names.push.is_empty() {
+                            names.read.clone()
+                        } else {
+                            names.push.clone()
+                        }
+                    })
+                    .unwrap_or_default();
+                match self.probe_review(&workspace.remote, &credential).await {
+                    Ok(repository) => step(
+                        "review",
+                        WorkspaceCheckStatus::Ok,
+                        format!(
+                            "GitHub: draft pull requests against {} on {repository}",
+                            review.base
+                        ),
+                    ),
+                    Err(error) => {
+                        step("review", WorkspaceCheckStatus::Failed, format!("{error:#}"))
+                    }
+                }
+            }
+            _ if github => step(
+                "review",
+                WorkspaceCheckStatus::NotApplicable,
+                "GitHub: available with --land review",
+            ),
+            _ => step(
+                "review",
+                WorkspaceCheckStatus::NotApplicable,
+                "plain git remote: branch and merge only",
+            ),
+        });
         steps.push(step(
             "ci",
             WorkspaceCheckStatus::Unknown,
-            "not a forge SuperTag can inspect",
+            if github {
+                "GitHub checks are not read yet"
+            } else {
+                "not a forge SuperTag can inspect"
+            },
         ));
         Ok(WorkspaceCheck {
             workspace_id: workspace.workspace_id.clone(),

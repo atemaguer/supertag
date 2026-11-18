@@ -90,12 +90,19 @@ struct WorkspaceCredentialsSpec {
     push: String,
 }
 
-/// `land: branch` or `land: { merge: TARGET }`.
+/// `land: branch`, `land: { merge: TARGET }`, or `land: { review: { base: BRANCH } }`.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum LandSpec {
     Mode(String),
     Merge { merge: String },
+    Review { review: ReviewSpec },
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReviewSpec {
+    base: String,
 }
 
 #[derive(Deserialize)]
@@ -108,6 +115,8 @@ struct WorkspaceSpecInput {
     credential: Option<String>,
     credentials: Option<WorkspaceCredentialsSpec>,
     land: Option<LandSpec>,
+    /// `github` for a self-hosted GitHub; a github.com remote is GitHub without it.
+    forge: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -261,8 +270,8 @@ fn manifest(value: Value, source: &str) -> Result<Manifest> {
         Kind::Volume => Resource::Volume(typed::<VolumeSpec>(spec, kind)?.source),
         Kind::Workspace => {
             use supertag_protocol::v2::{
-                Workspace, WorkspaceCredentialNames, WorkspaceLand, WorkspaceLandBranch,
-                WorkspaceLandMerge, workspace_land,
+                Workspace, WorkspaceCredentialNames, WorkspaceForge, WorkspaceLand,
+                WorkspaceLandBranch, WorkspaceLandMerge, WorkspaceLandReview, workspace_land,
             };
             let value: WorkspaceSpecInput = typed(spec, kind)?;
             ensure!(
@@ -286,13 +295,25 @@ fn manifest(value: Value, source: &str) -> Result<Manifest> {
                     mode: Some(workspace_land::Mode::Branch(WorkspaceLandBranch {})),
                 }),
                 Some(LandSpec::Mode(mode)) => {
-                    anyhow::bail!("land is branch or {{merge: TARGET}}, not {mode}")
+                    anyhow::bail!(
+                        "land is branch, {{merge: TARGET}}, or {{review: {{base: BRANCH}}}}, not {mode}"
+                    )
                 }
                 Some(LandSpec::Merge { merge }) => Some(WorkspaceLand {
                     mode: Some(workspace_land::Mode::Merge(WorkspaceLandMerge {
                         target: merge,
                     })),
                 }),
+                Some(LandSpec::Review { review }) => Some(WorkspaceLand {
+                    mode: Some(workspace_land::Mode::Review(WorkspaceLandReview {
+                        base: review.base,
+                    })),
+                }),
+            };
+            let forge = match value.forge.as_deref() {
+                None => WorkspaceForge::Unspecified,
+                Some("github") => WorkspaceForge::Github,
+                Some(other) => anyhow::bail!("forge is github, not {other}"),
             };
             Resource::Workspace(Workspace {
                 workspace_id: name.clone(),
@@ -300,6 +321,7 @@ fn manifest(value: Value, source: &str) -> Result<Manifest> {
                 r#ref: value.reference,
                 credentials: Some(credentials),
                 land,
+                forge: forge as i32,
                 ..Default::default()
             })
         }

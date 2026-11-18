@@ -11,6 +11,7 @@ pub mod check;
 pub mod credentials;
 mod git;
 pub mod landing;
+pub mod review;
 pub mod source;
 
 use std::{
@@ -58,6 +59,7 @@ pub struct GitDelivery(Arc<Inner>);
 struct Inner {
     directory: PathBuf,
     credentials: Credentials,
+    http: reqwest::Client,
 }
 
 /// One remote, with the credential an operation presents to it.
@@ -65,6 +67,8 @@ pub(crate) struct Remote {
     pub(crate) url: String,
     pub(crate) transport: RemoteTransport,
     pub(crate) credential: Option<(String, Credential)>,
+    /// A GitHub App credential's token, minted for this operation's repository and access.
+    pub(crate) minted: Option<String>,
 }
 
 /// A private scratch directory for one operation, with the git settings that reach its remote.
@@ -101,9 +105,18 @@ impl GitDelivery {
         );
         let directory = directory.canonicalize()?;
         credentials::sweep(&directory, SCRATCH_PREFIX)?;
+        let http = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(20))
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
+            .no_proxy()
+            .build()
+            .context("build git delivery's HTTP client")?;
         Ok(Self(Arc::new(Inner {
             directory,
             credentials,
+            http,
         })))
     }
 
@@ -127,11 +140,65 @@ impl GitDelivery {
         } else {
             Some((name.clone(), self.0.credentials.resolve(&name).await?))
         };
+        let minted = match &credential {
+            Some((name, credential @ Credential::GithubApp { .. })) => {
+                let permission = match access {
+                    Access::Read => ("contents", "read"),
+                    Access::Push => ("contents", "write"),
+                };
+                let (token, _) = self
+                    .github_token(&workspace.remote, credential, &[permission])
+                    .await
+                    .with_context(|| format!("Workspace Credential {name}"))?;
+                Some(token)
+            }
+            _ => None,
+        };
         Ok(Remote {
             url: workspace.remote.clone(),
             transport,
             credential,
+            minted,
         })
+    }
+
+    /// A token for the GitHub repository `remote` names, from a GitHub App credential, with
+    /// exactly `permissions`, and the repository's ID.
+    pub(crate) async fn github_token(
+        &self,
+        remote: &str,
+        credential: &Credential,
+        permissions: &[(&str, &str)],
+    ) -> Result<(String, u64)> {
+        let Credential::GithubApp {
+            app_id,
+            installation_id,
+            private_key_pem,
+        } = credential
+        else {
+            anyhow::bail!("not a GitHub App credential");
+        };
+        let github = supertag_protocol::git_remote::github_remote(remote).context(
+            "a GitHub App Workspace Credential reaches only GitHub repositories, named OWNER/NAME",
+        )?;
+        ensure!(
+            remote_transport(remote).map_err(anyhow::Error::msg)? == RemoteTransport::Http,
+            "a GitHub App Workspace Credential reaches only https:// remotes"
+        );
+        let app = supertag_github::auth::GithubApp::new(&supertag_github::GithubAppConfig {
+            app_id: *app_id,
+            installation_id: *installation_id,
+            private_key_pem: private_key_pem.clone(),
+        })?;
+        let token = app
+            .repository_token(
+                &self.0.http,
+                &github.api.parse()?,
+                &github.repository,
+                permissions,
+            )
+            .await?;
+        Ok((token.token.expose().to_owned(), token.repository_id))
     }
 
     /// A private scratch directory and the settings that reach `remote` from it.
@@ -142,6 +209,11 @@ impl GitDelivery {
         let private = directory.path().join("credential");
         std::fs::DirBuilder::new().mode(0o700).create(&private)?;
         let settings = match (&remote.credential, remote.transport) {
+            (Some(_), transport) if remote.minted.is_some() => Credential::HttpsToken {
+                username: "x-access-token".into(),
+                token: remote.minted.clone().unwrap_or_default(),
+            }
+            .settings(transport, &private, &self.trusted_hosts())?,
             (Some((_, credential)), transport) => {
                 credential.settings(transport, &private, &self.trusted_hosts())?
             }

@@ -196,6 +196,93 @@ pub fn author_name(name: &str) -> String {
     }
 }
 
+/// A GitHub repository a Workspace remote names, and where its forge answers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GithubRemote {
+    /// The REST API root, ending in `/`: `https://api.github.com/` for github.com, else
+    /// `/api/v3/` on the remote's host, as GitHub Enterprise Server serves it.
+    pub api: String,
+    /// The web origin pull request links use, without a trailing `/`.
+    pub web: String,
+    /// `OWNER/NAME`, lowercase.
+    pub repository: String,
+}
+
+/// Whether a remote is on github.com, so its forge is inferred as GitHub.
+pub fn on_github_com(remote: &str) -> bool {
+    remote_parts(remote).is_some_and(|(_, host, _, _)| host.eq_ignore_ascii_case("github.com"))
+}
+
+/// The GitHub repository `remote` names: a host and a path of exactly `OWNER/NAME`, with an
+/// optional `.git`. `None` for a `file://` remote or any other path shape.
+pub fn github_remote(remote: &str) -> Option<GithubRemote> {
+    let (scheme, host, port, path) = remote_parts(remote)?;
+    let path = path.trim_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let parts: Vec<&str> = path.split('/').collect();
+    let valid = parts.len() == 2
+        && parts.iter().all(|part| {
+            !part.is_empty()
+                && part.len() <= 100
+                && *part != "."
+                && *part != ".."
+                && part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+        });
+    if !valid {
+        return None;
+    }
+    let repository = path.to_ascii_lowercase();
+    let host = host.to_ascii_lowercase();
+    if host == "github.com" {
+        return Some(GithubRemote {
+            api: "https://api.github.com/".into(),
+            web: "https://github.com".into(),
+            repository,
+        });
+    }
+    // An SSH remote's forge answers over HTTPS on the same host.
+    let origin = match (scheme, port) {
+        ("http" | "https", Some(port)) => format!("{scheme}://{host}:{port}"),
+        ("http" | "https", None) => format!("{scheme}://{host}"),
+        _ => format!("https://{host}"),
+    };
+    Some(GithubRemote {
+        api: format!("{origin}/api/v3/"),
+        web: origin,
+        repository,
+    })
+}
+
+/// A remote's scheme (`ssh` for scp-style), host, port, and path.
+fn remote_parts(remote: &str) -> Option<(&'static str, String, Option<u16>, String)> {
+    match remote_transport(remote).ok()? {
+        RemoteTransport::File => None,
+        _ if remote.contains("://") => {
+            let url = url::Url::parse(remote).ok()?;
+            let scheme = match url.scheme() {
+                "https" => "https",
+                "http" => "http",
+                _ => "ssh",
+            };
+            Some((
+                scheme,
+                url.host_str()?.to_owned(),
+                url.port(),
+                url.path().to_owned(),
+            ))
+        }
+        _ => {
+            let (authority, path) = remote.split_once(':')?;
+            let host = authority
+                .rsplit_once('@')
+                .map_or(authority, |(_, host)| host);
+            Some(("ssh", host.to_owned(), None, path.to_owned()))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,6 +328,35 @@ mod tests {
         assert!(!may_push("supertag/session/short", None));
         assert!(!may_push("supertag/x", Some("supertag/x")));
         assert!(!valid_merge_target("supertag/session/abc"));
+    }
+
+    #[test]
+    fn github_remotes_name_their_api_and_repository() {
+        let github = github_remote("https://github.com/Acme/App.git").unwrap();
+        assert_eq!(github.api, "https://api.github.com/");
+        assert_eq!(github.web, "https://github.com");
+        assert_eq!(github.repository, "acme/app");
+        assert_eq!(
+            github_remote("git@github.com:acme/app.git")
+                .unwrap()
+                .repository,
+            "acme/app"
+        );
+        let enterprise = github_remote("ssh://git@ghe.acme.internal/acme/app.git").unwrap();
+        assert_eq!(enterprise.api, "https://ghe.acme.internal/api/v3/");
+        let local = github_remote("http://127.0.0.1:8080/acme/app.git").unwrap();
+        assert_eq!(local.api, "http://127.0.0.1:8080/api/v3/");
+        assert_eq!(local.web, "http://127.0.0.1:8080");
+        for remote in [
+            "file:///srv/acme/app.git",
+            "https://github.com/acme/app/extra.git",
+            "https://github.com/acme",
+            "https://gitlab.com/group/sub/app.git",
+        ] {
+            assert_eq!(github_remote(remote), None, "{remote}");
+        }
+        assert!(on_github_com("git@github.com:acme/app.git"));
+        assert!(!on_github_com("https://ghe.acme.internal/acme/app.git"));
     }
 
     #[test]
