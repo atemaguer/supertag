@@ -123,6 +123,65 @@ jobs:
       # Documentation and script checks under scripts/, which Vitest does not collect.
       - run: node --test scripts/*.test.mjs
 
+  # The local-vm provider and the container reference provider against real containers, on
+  # Docker and on Podman: the seal, the exec server, the relay, the dependency cache, and the
+  # refusals of root, writable root programs, and setuid programs.
+  local-vm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [docker, podman]
+    env:
+      SUPERTAG_TEST_LOCAL_VM: "1"
+      SUPERTAG_TEST_REQUIRE_CONTAINER: "1"
+      SUPERTAG_TEST_CONTAINER_RUNTIME: ${{ matrix.runtime }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter "@supertag/worker-environment-local-vm..." build
+      - run: ${{ matrix.runtime }} info
+      # The reference provider's conformance test runs on this image and never pulls it.
+      - run: |
+          ${{ matrix.runtime }} pull docker.io/library/node@sha256:9d266751ca3d7fdbe651c878ffd5ad0a42fed49a18c283509267c97f025b7496
+          ${{ matrix.runtime }} tag docker.io/library/node@sha256:9d266751ca3d7fdbe651c878ffd5ad0a42fed49a18c283509267c97f025b7496 node:24-bookworm
+      # The base image's tag is a digest of its Dockerfile and platform: a cached build is reused
+      # only while both are unchanged, and the provider builds it otherwise.
+      - name: Name the local-vm base image
+        id: base
+        run: |
+          # shellcheck disable=SC2016 # The single-quoted JavaScript expands its own template strings.
+          tag=$(node --input-type=module -e '
+            const { createHash } = await import("node:crypto");
+            const { BASE_DOCKERFILE } = await import("./harnesses/environments/local-vm/dist/index.js");
+            const platform = `linux/${process.arch === "arm64" ? "arm64" : "amd64"}`;
+            const digest = createHash("sha256").update(`${platform}\n${BASE_DOCKERFILE}`).digest("hex");
+            console.log(`supertag-workspace:${digest.slice(0, 32)}`);')
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: ${{ runner.temp }}/local-vm-base.tar
+          key: local-vm-base-${{ matrix.runtime }}-${{ steps.base.outputs.tag }}
+      - if: steps.cache.outputs.cache-hit == 'true'
+        run: ${{ matrix.runtime }} load -i "$RUNNER_TEMP/local-vm-base.tar"
+      - run: >-
+          pnpm exec vitest run
+          harnesses/environments/local-vm
+          harnesses/sdk/container-provider.container.test.ts
+          harnesses/sdk/process-seal.container.test.ts
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: ${{ matrix.runtime }} save -o "$RUNNER_TEMP/local-vm-base.tar" "${{ steps.base.outputs.tag }}"
+
   tui:
     runs-on: ${{ matrix.os }}
     strategy:
