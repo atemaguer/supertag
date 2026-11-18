@@ -18,7 +18,7 @@ use tokio::time;
 use tokio_util::sync::CancellationToken;
 use tonic::Request;
 
-use crate::{Access, GitDelivery, Session, git};
+use crate::{Access, Credential, GitDelivery, Session, git};
 
 const LS_REMOTE_LIMIT: usize = 4 * 1024 * 1024;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(90);
@@ -146,15 +146,17 @@ impl GitDelivery {
         Ok((workspace.r#ref.clone(), commit))
     }
 
-    /// Fetches `commit` of `workspace` into private scratch and bundles exactly its history.
+    /// Fetches `commit` of `workspace` into private scratch with the credential the Control
+    /// Plane granted, and bundles exactly its history.
     pub async fn fetch(
         &self,
         workspace: &Workspace,
         commit: &str,
+        credential: Option<Credential>,
         cancel: &CancellationToken,
     ) -> Result<FetchedSource> {
         ensure!(valid_git_commit(commit), "invalid source commit");
-        let remote = self.remote(workspace, Access::Read).await?;
+        let remote = Self::granted(workspace, credential)?;
         let session = self.session(&remote)?;
         let repository = session.directory.path().join("fetched.git");
         git::init_bare(&repository, cancel).await?;

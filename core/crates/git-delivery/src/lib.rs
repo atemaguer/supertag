@@ -1,11 +1,11 @@
-//! Git delivery: SuperTag's only component that talks to a Workspace's git remote. It reads each
-//! Session's source for the Control Plane to relay to Worker Hosts, and lands verified Session
-//! commits: the Session's branch, or a merge into the Workspace's target, pushed fast-forward
-//! only. It needs nothing beyond fetch, push, refs, and bundles, so it works with any git server.
+//! Git delivery: SuperTag's code that talks to a Workspace's git remote. On the Control Plane it
+//! resolves each Session's source, grants Worker Hosts a credential for one operation, and lands
+//! verified Session commits: the Session's branch, or a merge into the Workspace's target, pushed
+//! fast-forward only. On a Worker Host it fetches the source with that grant. It needs nothing
+//! beyond fetch, push, refs, and bundles, so it works with any git server.
 //!
-//! Workspace Credentials stay with git delivery. A Worker Host never holds one, and a harness
-//! never sees one: hosts receive source as relayed bundles, and pushing happens after the Task,
-//! from its verified delivery bundle.
+//! Workspace Credentials are kept in the Control Plane machine's credential vault. A Worker Host
+//! holds one only in memory, for the one operation it was granted, and a harness never sees one.
 
 pub mod check;
 pub mod credentials;
@@ -58,8 +58,18 @@ pub struct GitDelivery(Arc<Inner>);
 
 struct Inner {
     directory: PathBuf,
-    credentials: Credentials,
+    /// The credential vault, on the Control Plane. A Worker Host has none: it uses granted
+    /// credentials.
+    credentials: Option<Credentials>,
     http: reqwest::Client,
+}
+
+/// A credential the Control Plane hands a Worker Host for one operation on a Workspace's remote:
+/// a token minted for the repository and permission, or the Workspace Credential itself.
+pub struct Grant {
+    pub credential: Option<Credential>,
+    /// When a minted token expires, in milliseconds since the epoch; 0 when it does not.
+    pub expires_at_ms: i64,
 }
 
 /// One remote, with the credential an operation presents to it.
@@ -72,6 +82,14 @@ pub(crate) struct Remote {
 }
 
 /// A private scratch directory for one operation, with the git settings that reach its remote.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+        })
+}
+
 pub(crate) struct Session {
     pub(crate) directory: TempDir,
     pub(crate) settings: git::Settings,
@@ -88,6 +106,15 @@ impl Session {
 impl GitDelivery {
     /// `directory` is created private if missing. Scratch a stopped process left is removed.
     pub fn new(directory: &Path, credentials: Credentials) -> Result<Self> {
+        Self::open(directory, Some(credentials))
+    }
+
+    /// Git on a Worker Host, which has no credential vault: it reads with granted credentials.
+    pub fn for_host(directory: &Path) -> Result<Self> {
+        Self::open(directory, None)
+    }
+
+    fn open(directory: &Path, credentials: Option<Credentials>) -> Result<Self> {
         if !directory.exists() {
             std::fs::DirBuilder::new()
                 .recursive(true)
@@ -120,6 +147,14 @@ impl GitDelivery {
         })))
     }
 
+    /// The credential vault; only the Control Plane has one.
+    pub(crate) fn vault(&self) -> Result<&Credentials> {
+        self.0
+            .credentials
+            .as_ref()
+            .context("Workspace Credentials are kept on the Control Plane, not on this Worker Host")
+    }
+
     fn trusted_hosts(&self) -> PathBuf {
         self.0.directory.join("known_hosts")
     }
@@ -138,7 +173,7 @@ impl GitDelivery {
         let credential = if name.is_empty() {
             None
         } else {
-            Some((name.clone(), self.0.credentials.resolve(&name).await?))
+            Some((name.clone(), self.vault()?.resolve(&name).await?))
         };
         let minted = match &credential {
             Some((name, credential @ Credential::GithubApp { .. })) => {
@@ -159,6 +194,41 @@ impl GitDelivery {
             transport,
             credential,
             minted,
+        })
+    }
+
+    /// The credential a Worker Host presents for one `access` to `workspace`'s remote. A GitHub
+    /// App credential is minted down to a token for the one repository and permission; an HTTPS
+    /// token or SSH key is handed over as it is. A credential helper names a program on the Control
+    /// Plane's machine, so a Worker Host cannot use it.
+    pub async fn grant(&self, workspace: &Workspace, access: Access) -> Result<Grant> {
+        let remote = self.remote(workspace, access).await?;
+        Ok(match (remote.minted, remote.credential) {
+            (Some(token), _) => Grant {
+                credential: Some(Credential::HttpsToken {
+                    username: "x-access-token".into(),
+                    token,
+                }),
+                // GitHub's installation tokens last an hour; leave a margin for clock skew.
+                expires_at_ms: now_ms().saturating_add(55 * 60 * 1000),
+            },
+            (None, Some((name, Credential::Helper { .. }))) => anyhow::bail!(
+                "Workspace Credential {name} is a credential helper, which runs only on the Control Plane's machine; Worker Hosts read and push with an HTTPS token, an SSH key, or a GitHub App"
+            ),
+            (None, credential) => Grant {
+                credential: credential.map(|(_, credential)| credential),
+                expires_at_ms: 0,
+            },
+        })
+    }
+
+    /// The remote of `workspace` with a credential the Control Plane granted.
+    pub(crate) fn granted(workspace: &Workspace, credential: Option<Credential>) -> Result<Remote> {
+        Ok(Remote {
+            url: workspace.remote.clone(),
+            transport: remote_transport(&workspace.remote).map_err(anyhow::Error::msg)?,
+            credential: credential.map(|credential| ("granted".to_owned(), credential)),
+            minted: None,
         })
     }
 

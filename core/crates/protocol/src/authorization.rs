@@ -157,6 +157,7 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     // One object on the Tag's Volume, for a live Attempt of the calling Worker Host.
     ("VolumeObjects", "*", HOST),
     ("Transfers", "*", HOST),
+    ("WorkspaceGitAccess", "*", HOST),
     ("Transfers", "DownloadWorkspaceArtifact", OC),
     // A Worker Host serving the artifact and Workspace bytes it holds to the Control Plane's
     // relay: only the host the relay asked.

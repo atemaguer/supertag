@@ -402,9 +402,9 @@ or land on a git server. A Workspace has one of two sources:
   Several hosts may map the same name to their own clones. The Control Plane stores no record of
   it.
 - **A remote Workspace**: a repository on any git server, declared as a `Workspace` resource.
-  The Control Plane reads it with its read Workspace Credential and relays each Session's source to
-  the hosts that serve it with `--workspace-from-control-plane`, so hosts need no clone and no
-  credentials.
+  Hosts that serve it with `--workspace-from-control-plane` read each Session's source from the
+  server themselves, with the read Workspace Credential the Control Plane grants for that one
+  read, so they need no clone and store no credential.
 
 ```yaml
 apiVersion: supertag/v1
@@ -421,7 +421,7 @@ spec:
 
 | Field | Rules |
 | --- | --- |
-| `remote` | `https://` or `ssh://` URL, scp-style `user@host:path`, `file:///absolute/path` for a bare repository on the Control Plane's machine, or `http://` to a loopback address. Never a password, token, or `ext::` helper |
+| `remote` | `https://` or `ssh://` URL, scp-style `user@host:path`, `file:///absolute/path` for a bare repository on the Control Plane's machine (readable only by hosts that share its filesystem), or `http://` to a loopback address. Never a password, token, or `ext::` helper |
 | `ref` | A branch name. Each new Session pins the commit it names once; every Task of the Session starts there |
 | `credential`, `credentials` | Names of [Workspace Credentials](#workspace-credentials) that must exist. `read` reads the source; `push` lands changes |
 | `land` | `branch` updates the Session's branch `supertag/session/HASH` on every delivered Task. `{merge: TARGET}` also merges a finished Session into `TARGET`, a branch outside `supertag/`. `{review: {base: BRANCH}}` also opens or updates the Session's draft pull request against `BRANCH`; it needs a GitHub forge and a GitHub App or HTTPS token push credential. Omit it to keep changes with SuperTag |
@@ -469,9 +469,11 @@ mints a token for the one repository with only what that operation needs: `conte
 Tokens are never stored. The key is a separate copy from any the GitHub surface keeps.
 
 The secret goes to the credential vault the Control Plane reads (`SUPERTAG_CREDENTIAL_VAULT`,
-in `SUPERTAG_STATE_DIR` by default) under `workspace-credential/NAME`, never to the database, a
-Worker Host, or a harness. An SSH key without `--known-hosts` trusts the server's first host key
-and remembers it. `supertag workspace credential remove NAME` refuses while a Workspace names it.
+in `SUPERTAG_STATE_DIR` by default) under `workspace-credential/NAME`, never to the database or a
+harness. A Worker Host that reads the Workspace gets it, or a minted GitHub App token, for that one
+read and keeps it only in memory; a credential helper is never handed to a host, so hosts can't
+read with one. An SSH key without `--known-hosts` trusts the server's first host key and
+remembers it, on the Control Plane and on each Worker Host separately. `supertag workspace credential remove NAME` refuses while a Workspace names it.
 
 ### Landing
 

@@ -17,7 +17,8 @@ your repository  <──  branch supertag/session/HASH  <── delivery
 ```
 
 1. A Worker Host maps the Workspace to a source: a local Git repository, or a **remote
-   Workspace**, a repository on any git server that the Control Plane reads and relays.
+   Workspace**, a repository on any git server that Worker Hosts read with a credential the
+   Control Plane grants.
 2. A Tag is bound to the Workspace.
 3. Each Task Attempt gets a separate checkout at the pinned commit. Later Tasks of the same
    Session continue on the Session's own branch, on top of the earlier ones.
@@ -159,9 +160,14 @@ checkout and the conflicting files marked, and it merges again once that Task su
 
 A **remote Workspace** keeps its repository on a git server: GitHub, GitLab, Gitea or Forgejo,
 Bitbucket, any server you reach over SSH or HTTPS, or a bare repository on the Control Plane's
-machine. The Control Plane reads it and relays each Session's source to Worker Hosts, so hosts need
-no clone and no credentials. **Git delivery**, the part of the Control Plane that talks to the
-server, pushes each Session's changes back.
+machine. Each Worker Host that serves it reads the Session's source from the server itself, so it
+needs no clone and stores no credential: the Control Plane grants a credential for each read, and
+the host keeps it only in memory, never in a harness or sandbox. A GitHub App credential is
+narrowed to a token for the one repository, which expires within an hour; an HTTPS token or SSH
+key is handed over as it is. A credential helper runs only on the Control Plane's machine, so a
+Workspace whose read credential is a helper can't run Tasks. A `file://` remote is a path on the
+Control Plane's machine, so only hosts that share that filesystem can read it. **Git delivery**,
+the part of the Control Plane that talks to the server, pushes each Session's changes back.
 
 1. Store a **Workspace Credential**: what git delivery presents to the server. Run this on the
    machine that runs the Control Plane, because the secret stays in that machine's credential vault
@@ -176,9 +182,10 @@ server, pushes each Session's changes back.
 
    `--https-token` reads the token from `SUPERTAG_WORKSPACE_TOKEN` or a hidden prompt.
    `--ssh-key` takes a key without a passphrase; add `--known-hosts FILE` to pin the server's host
-   key, or SuperTag trusts the first key it sees and remembers it. `--credential-helper` names a
-   git [credential helper](https://git-scm.com/docs/gitcredentials), which may mint short-lived
-   tokens. `--github-app` stores a GitHub App's private key: for each read or push, git delivery
+   key; without it, the Control Plane and each Worker Host trust the first key they see and
+   remember it. `--credential-helper` names a git
+   [credential helper](https://git-scm.com/docs/gitcredentials), which may mint short-lived tokens;
+   it runs only on the Control Plane's machine, so Worker Hosts can't read with it. `--github-app` stores a GitHub App's private key: for each read or push, git delivery
    mints a token for that one repository with only `contents: read` or `contents: write`.
 
 2. Declare the Workspace: its remote, the branch Sessions start from, its credentials, and where
@@ -361,7 +368,7 @@ gets at most two replacements; after a third stop, the turn fails.
 | Task checkouts | The Worker Host's state directory, one per Task Attempt |
 | Deliveries | Bundles and patches, kept on the Worker Host that ran the Task and relayed by the Control Plane to `fetch` |
 | Landed changes | A remote Workspace's server, on `supertag/session/...` branches and the merge target |
-| Workspace Credentials | The credential vault of the machine that runs the Control Plane; never on a Worker Host or in a harness |
+| Workspace Credentials | The credential vault of the machine that runs the Control Plane. A Worker Host holds one only in memory, for a read the Control Plane granted; never in a harness or sandbox |
 | Captured artifacts | The Worker Host that captured them; see [Artifacts](../reference/artifacts.md) |
 
 ## Current limits

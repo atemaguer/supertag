@@ -202,7 +202,7 @@ impl GitDelivery {
                 "review needs a Workspace Credential that can call the GitHub API: a GitHub App or an HTTPS token".into(),
             ));
         } else {
-            match self.0.credentials.resolve(credential).await {
+            match self.vault()?.resolve(credential).await {
                 Ok(app @ Credential::GithubApp { .. }) => {
                     let (token, id) = self
                         .github_token(&landing.remote, &app, PULL_REQUESTS)
@@ -310,7 +310,7 @@ impl GitDelivery {
             !credential.is_empty(),
             "review needs a GitHub App or HTTPS token Workspace Credential"
         );
-        let token = match self.0.credentials.resolve(credential).await? {
+        let token = match self.vault()?.resolve(credential).await? {
             app @ Credential::GithubApp { .. } => {
                 self.github_token(remote, &app, PULL_REQUESTS).await?.0
             }

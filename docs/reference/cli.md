@@ -1864,7 +1864,7 @@ Options:
           ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of a Workspace. It runs on this host, outside any harness sandbox, in the checkout on the Workspace's base commit, with a 10-minute limit
 
       --workspace-from-control-plane
-          Serve each --workspace-id as a remote Workspace whose source the Control Plane relays
+          Serve each --workspace-id as a remote Workspace, read from its server with a credential the Control Plane grants for each read
 
       --skill-catalog <SKILL_CATALOG>
           Private host allowlist of Skill packages.
@@ -2293,7 +2293,7 @@ Options:
           ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of a Workspace. It runs on this host, outside any harness sandbox, in the checkout on the Workspace's base commit, with a 10-minute limit
 
       --workspace-from-control-plane
-          Serve each --workspace-id as a remote Workspace whose source the Control Plane relays
+          Serve each --workspace-id as a remote Workspace, read from its server with a credential the Control Plane grants for each read
 
       --workspace-mount-mappings <WORKSPACE_MOUNT_MAPPINGS>
           Owner-controlled JSON mappings for Workspace Volume copies: each maps a Volume to a destination root, and an S3 Volume's credential name to an endpoint, region, and key variables

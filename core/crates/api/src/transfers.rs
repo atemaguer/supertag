@@ -1,7 +1,4 @@
-use std::{
-    fs::OpenOptions, io::ErrorKind, os::unix::fs::OpenOptionsExt, path::Path, sync::Arc,
-    time::Duration,
-};
+use std::{path::Path, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, ensure};
 use sha2::{Digest, Sha256};
@@ -17,7 +14,7 @@ use supertag_protocol::{
     validate_workspace_delivery,
 };
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncWriteExt,
     sync::{Semaphore, mpsc},
     time::timeout,
 };
@@ -39,18 +36,18 @@ const WORKSPACE_TRANSFER_TIMEOUT: Duration = Duration::from_secs(120);
 #[path = "transfers_review_tests.rs"]
 mod review_tests;
 
-/// Git delivery as the API tier uses it: reads remote Workspace sources for Worker Hosts and
-/// checks Workspaces. The process that runs this tier supplies it, with the Workspace
-/// Credentials it holds; no credential reaches a Worker Host.
+/// Git delivery as the API tier uses it: grants Worker Hosts a credential to read a remote
+/// Workspace themselves, and checks Workspaces. The process that runs this tier supplies it,
+/// with the Workspace Credentials it holds. A Worker Host gets a credential only for one
+/// operation of a live Attempt, and keeps it in memory.
 #[tonic::async_trait]
 pub trait WorkspaceGit: Send + Sync + 'static {
-    /// Fetches `commit` of `workspace`'s remote as a verified git bundle.
-    async fn fetch(
+    /// The credential a Worker Host presents to read `workspace`'s remote, with its expiry in
+    /// milliseconds since the epoch (0 when it does not expire). None for a remote that needs none.
+    async fn grant_read(
         &self,
         workspace: &Workspace,
-        commit: &str,
-        cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<FetchedSource>;
+    ) -> Result<(Option<workspace_git_grant::Credential>, i64)>;
 
     /// The remote URL when it advertises `commit` on a branch or tag, if any.
     async fn advertised_output_remote(
@@ -66,12 +63,6 @@ pub trait WorkspaceGit: Send + Sync + 'static {
         workspace: &Workspace,
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<WorkspaceCheck>;
-}
-
-/// A fetched source bundle and the private state that must outlive its download.
-pub struct FetchedSource {
-    pub bundle: supertag_workspaces::TransferArtifact,
-    pub keep: Box<dyn std::any::Any + Send + Sync>,
 }
 
 /// Serves the Control Plane's byte transfers. It stores nothing: artifact and Workspace delivery
@@ -370,8 +361,6 @@ impl ApiTransfers {
 
 #[tonic::async_trait]
 impl Transfers for ApiTransfers {
-    type DownloadWorkspaceSourceStream = Download<WorkspaceSourceDownload>;
-
     async fn verify_workspace_output_remote(
         &self,
         request: Request<VerifyWorkspaceOutputRemoteRequest>,
@@ -415,79 +404,6 @@ impl Transfers for ApiTransfers {
         Ok(Response::new(VerifyWorkspaceOutputRemoteResponse {
             remote,
         }))
-    }
-
-    async fn download_workspace_source(
-        &self,
-        request: Request<DownloadWorkspaceSourceRequest>,
-    ) -> Result<Response<Self::DownloadWorkspaceSourceStream>, Status> {
-        let input = request.get_ref().clone();
-        let metadata = request.metadata().clone();
-        // This authoritative check precedes credential resolution or remote I/O.
-        let source = self.get_source(request).await?;
-        let workspace = source
-            .workspace
-            .clone()
-            .ok_or_else(|| Status::internal("Workspace source is incomplete"))?;
-        let git = self.git()?;
-        let permit = self.acquire()?;
-        let cancel = tokio_util::sync::CancellationToken::new();
-        let _cancel_on_drop = cancel.clone().drop_guard();
-        let fetched = Arc::new(
-            timeout(
-                WORKSPACE_TRANSFER_TIMEOUT,
-                git.fetch(&workspace, &source.commit, &cancel),
-            )
-            .await
-            .map_err(|_| Status::deadline_exceeded("Workspace source retrieval timed out"))?
-            .map_err(|error| {
-                Status::unavailable(format!("Workspace source could not be read: {error:#}"))
-            })?,
-        );
-        let reference = BlobReference {
-            sha256: fetched.bundle.sha256.clone(),
-            byte_length: fetched.bundle.byte_length,
-        };
-        let header = WorkspaceSourceDownload {
-            part: Some(workspace_source_download::Part::Reference(
-                WorkspaceSourceBundle {
-                    workspace: Some(workspace),
-                    bundle: Some(reference.clone()),
-                    commit: source.commit.clone(),
-                },
-            )),
-        };
-        let file = Source::File(open_blob(&fetched.bundle.path).await?);
-        let service = self.clone();
-        let authorize = move || {
-            let service = service.clone();
-            let source = source.clone();
-            let keep = fetched.clone();
-            let mut request = Request::new(input.clone());
-            *request.metadata_mut() = metadata.clone();
-            async move {
-                let _keep = keep;
-                if service.get_source(request).await? == source {
-                    Ok(())
-                } else {
-                    Err(Status::permission_denied(
-                        "Workspace source is no longer authorized",
-                    ))
-                }
-            }
-        };
-        authorize().await?;
-        Ok(Response::new(download_stream(
-            file,
-            permit,
-            reference,
-            header,
-            |bytes| WorkspaceSourceDownload {
-                part: Some(workspace_source_download::Part::Chunk(bytes)),
-            },
-            authorize,
-            WORKSPACE_TRANSFER_TIMEOUT,
-        )))
     }
 
     async fn commit_workspace(
@@ -693,21 +609,26 @@ fn relay_status(error: RelayError, host: &str, what: &str) -> Status {
     }
 }
 
-/// Where a download's bytes come from: a local file this process reads (a GitHub source bundle,
-/// or a transient Volume snapshot), or the Worker Host relaying them.
+/// Where a download's bytes come from: the Worker Host relaying them, or in tests a local file.
 pub(crate) enum Source {
-    File(tokio::fs::File),
     Relay(Incoming),
+    #[cfg(test)]
+    File(tokio::fs::File),
 }
 
 impl Source {
-    async fn next(&mut self, buffer: &mut [u8]) -> Result<Option<Vec<u8>>, Status> {
+    async fn next(&mut self, _buffer: &mut [u8]) -> Result<Option<Vec<u8>>, Status> {
         match self {
-            Self::File(file) => {
-                let size = file.read(buffer).await.map_err(storage_error)?;
-                Ok((size > 0).then(|| buffer[..size].to_vec()))
-            }
             Self::Relay(incoming) => incoming.next().await,
+            #[cfg(test)]
+            Self::File(file) => {
+                use tokio::io::AsyncReadExt as _;
+                let size = file
+                    .read(_buffer)
+                    .await
+                    .map_err(|_| Status::internal("test file read failed"))?;
+                Ok((size > 0).then(|| _buffer[..size].to_vec()))
+            }
         }
     }
 }
@@ -808,43 +729,57 @@ where
     download
 }
 
-async fn open_blob(path: &Path) -> Result<tokio::fs::File, Status> {
-    open_optional_blob(path)
-        .await?
-        .ok_or_else(|| Status::data_loss("stored blob is missing"))
+#[tonic::async_trait]
+impl workspace_git_access_server::WorkspaceGitAccess for ApiTransfers {
+    /// Grants a live Attempt's Worker Host the credential to read its Workspace's source itself.
+    async fn mint(
+        &self,
+        request: Request<MintWorkspaceGitAccessRequest>,
+    ) -> Result<Response<WorkspaceGitGrant>, Status> {
+        let (metadata, _, input) = request.into_parts();
+        if input.permission() != WorkspaceGitPermission::Read {
+            return Err(Status::invalid_argument(
+                "a Worker Host is granted only read access to a Workspace's remote",
+            ));
+        }
+        // This authoritative check precedes credential resolution.
+        let mut source = Request::new(DownloadWorkspaceSourceRequest {
+            attempt: input.attempt,
+            merge: input.merge,
+        });
+        *source.metadata_mut() = metadata;
+        let source = self.get_source(source).await?;
+        let workspace = source
+            .workspace
+            .ok_or_else(|| Status::internal("Workspace source is incomplete"))?;
+        let (credential, expires_at_ms) =
+            timeout(Duration::from_secs(30), self.git()?.grant_read(&workspace))
+                .await
+                .map_err(|_| Status::deadline_exceeded("Workspace Credential lookup timed out"))?
+                .map_err(|error| {
+                    Status::failed_precondition(format!(
+                        "Workspace source cannot be read from a Worker Host: {error:#}"
+                    ))
+                })?;
+        Ok(Response::new(WorkspaceGitGrant {
+            workspace: Some(workspace),
+            commit: source.commit,
+            credential,
+            expires_at_ms,
+        }))
+    }
 }
 
-async fn open_optional_blob(path: &Path) -> Result<Option<tokio::fs::File>, Status> {
-    let path = path.to_owned();
-    tokio::task::spawn_blocking(move || {
-        let file = match OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-            .open(path)
-        {
-            Ok(file) => file,
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(storage_error(error)),
-        };
-        if !file.metadata().map_err(storage_error)?.is_file() {
-            return Err(Status::data_loss("blob storage entry is not a file"));
-        }
-        Ok(Some(tokio::fs::File::from_std(file)))
-    })
-    .await
-    .map_err(|_| Status::internal("blob file open failed"))?
+impl ApiTransfers {
+    pub fn workspace_git_access_service(
+        &self,
+    ) -> workspace_git_access_server::WorkspaceGitAccessServer<Self> {
+        workspace_git_access_server::WorkspaceGitAccessServer::new(self.clone())
+    }
 }
 
 fn workspace_client(channel: ProtocolChannel) -> WorkspaceDirectoryClient<ProtocolChannel> {
     WorkspaceDirectoryClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)
-}
-
-fn storage_error(error: std::io::Error) -> Status {
-    supertag_protocol::terminal_text::warn(&format!(
-        "Control Plane Volume storage error: {}",
-        error.kind()
-    ));
-    Status::internal("blob storage operation failed")
 }

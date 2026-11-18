@@ -1769,17 +1769,39 @@ impl supertag_git_delivery::BundleReader for RelayedBundles {
 
 #[tonic::async_trait]
 impl supertag_api::transfers::WorkspaceGit for WorkspaceGit {
-    async fn fetch(
+    async fn grant_read(
         &self,
         workspace: &supertag_protocol::v2::Workspace,
-        commit: &str,
-        cancel: &CancellationToken,
-    ) -> Result<supertag_api::transfers::FetchedSource> {
-        let fetched = self.0.fetch(workspace, commit, cancel).await?;
-        Ok(supertag_api::transfers::FetchedSource {
-            bundle: fetched.bundle,
-            keep: Box::new(fetched.directory),
-        })
+    ) -> Result<(
+        Option<supertag_protocol::v2::workspace_git_grant::Credential>,
+        i64,
+    )> {
+        use supertag_git_delivery::Credential;
+        use supertag_protocol::v2::{
+            HttpsGitCredential, SshGitCredential, workspace_git_grant::Credential as Granted,
+        };
+        let grant = self
+            .0
+            .grant(workspace, supertag_git_delivery::Access::Read)
+            .await?;
+        let credential = match grant.credential {
+            None => None,
+            Some(Credential::HttpsToken { username, token }) => {
+                Some(Granted::Https(HttpsGitCredential { username, token }))
+            }
+            Some(Credential::SshKey {
+                private_key,
+                known_hosts,
+            }) => Some(Granted::Ssh(SshGitCredential {
+                private_key,
+                known_hosts: known_hosts.unwrap_or_default(),
+            })),
+            // `grant` never hands these to a Worker Host.
+            Some(Credential::Helper { .. } | Credential::GithubApp { .. }) => {
+                anyhow::bail!("this Workspace Credential cannot be granted to a Worker Host")
+            }
+        };
+        Ok((credential, grant.expires_at_ms))
     }
 
     async fn advertised_output_remote(

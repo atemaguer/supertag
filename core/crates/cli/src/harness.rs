@@ -119,7 +119,8 @@ pub struct AdapterOptions {
     /// Workspace's base commit, with a 10-minute limit.
     #[arg(long, value_name = "ID=COMMAND", requires = "workspace_id")]
     workspace_setup: Vec<String>,
-    /// Serve each --workspace-id as a remote Workspace whose source the Control Plane relays.
+    /// Serve each --workspace-id as a remote Workspace, read from its server with a credential
+    /// the Control Plane grants for each read.
     #[arg(
         long,
         requires = "workspace_id",

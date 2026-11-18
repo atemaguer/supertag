@@ -55,6 +55,8 @@ const (
 	ConnectorName = "supertag.runtime.v2.Connector"
 	// TransfersName is the fully-qualified name of the Transfers service.
 	TransfersName = "supertag.runtime.v2.Transfers"
+	// WorkspaceGitAccessName is the fully-qualified name of the WorkspaceGitAccess service.
+	WorkspaceGitAccessName = "supertag.runtime.v2.WorkspaceGitAccess"
 	// WorkspaceDirectoryName is the fully-qualified name of the WorkspaceDirectory service.
 	WorkspaceDirectoryName = "supertag.runtime.v2.WorkspaceDirectory"
 	// HostRelayName is the fully-qualified name of the HostRelay service.
@@ -388,12 +390,11 @@ const (
 	// TransfersDownloadReviewArtifactProcedure is the fully-qualified name of the Transfers's
 	// DownloadReviewArtifact RPC.
 	TransfersDownloadReviewArtifactProcedure = "/supertag.runtime.v2.Transfers/DownloadReviewArtifact"
-	// TransfersDownloadWorkspaceSourceProcedure is the fully-qualified name of the Transfers's
-	// DownloadWorkspaceSource RPC.
-	TransfersDownloadWorkspaceSourceProcedure = "/supertag.runtime.v2.Transfers/DownloadWorkspaceSource"
 	// TransfersVerifyWorkspaceOutputRemoteProcedure is the fully-qualified name of the Transfers's
 	// VerifyWorkspaceOutputRemote RPC.
 	TransfersVerifyWorkspaceOutputRemoteProcedure = "/supertag.runtime.v2.Transfers/VerifyWorkspaceOutputRemote"
+	// WorkspaceGitAccessMintProcedure is the fully-qualified name of the WorkspaceGitAccess's Mint RPC.
+	WorkspaceGitAccessMintProcedure = "/supertag.runtime.v2.WorkspaceGitAccess/Mint"
 	// WorkspaceDirectoryGetSourceProcedure is the fully-qualified name of the WorkspaceDirectory's
 	// GetSource RPC.
 	WorkspaceDirectoryGetSourceProcedure = "/supertag.runtime.v2.WorkspaceDirectory/GetSource"
@@ -4191,9 +4192,6 @@ type TransfersClient interface {
 	DownloadCompleteWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
 	DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
 	DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
-	// The Task's Workspace source, or with `merge` the commit its merge follow-up must merge,
-	// read from the remote by the Control Plane and relayed as a bundle.
-	DownloadWorkspaceSource(context.Context, *connect.Request[runtimev2.DownloadWorkspaceSourceRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceSourceDownload], error)
 	VerifyWorkspaceOutputRemote(context.Context, *connect.Request[runtimev2.VerifyWorkspaceOutputRemoteRequest]) (*connect.Response[runtimev2.VerifyWorkspaceOutputRemoteResponse], error)
 }
 
@@ -4238,12 +4236,6 @@ func NewTransfersClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(transfersMethods.ByName("DownloadReviewArtifact")),
 			connect.WithClientOptions(opts...),
 		),
-		downloadWorkspaceSource: connect.NewClient[runtimev2.DownloadWorkspaceSourceRequest, runtimev2.WorkspaceSourceDownload](
-			httpClient,
-			baseURL+TransfersDownloadWorkspaceSourceProcedure,
-			connect.WithSchema(transfersMethods.ByName("DownloadWorkspaceSource")),
-			connect.WithClientOptions(opts...),
-		),
 		verifyWorkspaceOutputRemote: connect.NewClient[runtimev2.VerifyWorkspaceOutputRemoteRequest, runtimev2.VerifyWorkspaceOutputRemoteResponse](
 			httpClient,
 			baseURL+TransfersVerifyWorkspaceOutputRemoteProcedure,
@@ -4260,7 +4252,6 @@ type transfersClient struct {
 	downloadCompleteWorkspace   *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload]
 	downloadWorkspaceArtifact   *connect.Client[runtimev2.GetWorkspaceArtifactRequest, runtimev2.WorkspaceDownload]
 	downloadReviewArtifact      *connect.Client[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDownload]
-	downloadWorkspaceSource     *connect.Client[runtimev2.DownloadWorkspaceSourceRequest, runtimev2.WorkspaceSourceDownload]
 	verifyWorkspaceOutputRemote *connect.Client[runtimev2.VerifyWorkspaceOutputRemoteRequest, runtimev2.VerifyWorkspaceOutputRemoteResponse]
 }
 
@@ -4289,11 +4280,6 @@ func (c *transfersClient) DownloadReviewArtifact(ctx context.Context, req *conne
 	return c.downloadReviewArtifact.CallServerStream(ctx, req)
 }
 
-// DownloadWorkspaceSource calls supertag.runtime.v2.Transfers.DownloadWorkspaceSource.
-func (c *transfersClient) DownloadWorkspaceSource(ctx context.Context, req *connect.Request[runtimev2.DownloadWorkspaceSourceRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceSourceDownload], error) {
-	return c.downloadWorkspaceSource.CallServerStream(ctx, req)
-}
-
 // VerifyWorkspaceOutputRemote calls supertag.runtime.v2.Transfers.VerifyWorkspaceOutputRemote.
 func (c *transfersClient) VerifyWorkspaceOutputRemote(ctx context.Context, req *connect.Request[runtimev2.VerifyWorkspaceOutputRemoteRequest]) (*connect.Response[runtimev2.VerifyWorkspaceOutputRemoteResponse], error) {
 	return c.verifyWorkspaceOutputRemote.CallUnary(ctx, req)
@@ -4309,9 +4295,6 @@ type TransfersHandler interface {
 	DownloadCompleteWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
 	DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
 	DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
-	// The Task's Workspace source, or with `merge` the commit its merge follow-up must merge,
-	// read from the remote by the Control Plane and relayed as a bundle.
-	DownloadWorkspaceSource(context.Context, *connect.Request[runtimev2.DownloadWorkspaceSourceRequest], *connect.ServerStream[runtimev2.WorkspaceSourceDownload]) error
 	VerifyWorkspaceOutputRemote(context.Context, *connect.Request[runtimev2.VerifyWorkspaceOutputRemoteRequest]) (*connect.Response[runtimev2.VerifyWorkspaceOutputRemoteResponse], error)
 }
 
@@ -4352,12 +4335,6 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(transfersMethods.ByName("DownloadReviewArtifact")),
 		connect.WithHandlerOptions(opts...),
 	)
-	transfersDownloadWorkspaceSourceHandler := connect.NewServerStreamHandler(
-		TransfersDownloadWorkspaceSourceProcedure,
-		svc.DownloadWorkspaceSource,
-		connect.WithSchema(transfersMethods.ByName("DownloadWorkspaceSource")),
-		connect.WithHandlerOptions(opts...),
-	)
 	transfersVerifyWorkspaceOutputRemoteHandler := connect.NewUnaryHandler(
 		TransfersVerifyWorkspaceOutputRemoteProcedure,
 		svc.VerifyWorkspaceOutputRemote,
@@ -4376,8 +4353,6 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 			transfersDownloadWorkspaceArtifactHandler.ServeHTTP(w, r)
 		case TransfersDownloadReviewArtifactProcedure:
 			transfersDownloadReviewArtifactHandler.ServeHTTP(w, r)
-		case TransfersDownloadWorkspaceSourceProcedure:
-			transfersDownloadWorkspaceSourceHandler.ServeHTTP(w, r)
 		case TransfersVerifyWorkspaceOutputRemoteProcedure:
 			transfersVerifyWorkspaceOutputRemoteHandler.ServeHTTP(w, r)
 		default:
@@ -4409,12 +4384,79 @@ func (UnimplementedTransfersHandler) DownloadReviewArtifact(context.Context, *co
 	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadReviewArtifact is not implemented"))
 }
 
-func (UnimplementedTransfersHandler) DownloadWorkspaceSource(context.Context, *connect.Request[runtimev2.DownloadWorkspaceSourceRequest], *connect.ServerStream[runtimev2.WorkspaceSourceDownload]) error {
-	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadWorkspaceSource is not implemented"))
-}
-
 func (UnimplementedTransfersHandler) VerifyWorkspaceOutputRemote(context.Context, *connect.Request[runtimev2.VerifyWorkspaceOutputRemoteRequest]) (*connect.Response[runtimev2.VerifyWorkspaceOutputRemoteResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.VerifyWorkspaceOutputRemote is not implemented"))
+}
+
+// WorkspaceGitAccessClient is a client for the supertag.runtime.v2.WorkspaceGitAccess service.
+type WorkspaceGitAccessClient interface {
+	Mint(context.Context, *connect.Request[runtimev2.MintWorkspaceGitAccessRequest]) (*connect.Response[runtimev2.WorkspaceGitGrant], error)
+}
+
+// NewWorkspaceGitAccessClient constructs a client for the supertag.runtime.v2.WorkspaceGitAccess
+// service. By default, it uses the Connect protocol with the binary Protobuf Codec, asks for
+// gzipped responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply
+// the connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewWorkspaceGitAccessClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) WorkspaceGitAccessClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	workspaceGitAccessMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("WorkspaceGitAccess").Methods()
+	return &workspaceGitAccessClient{
+		mint: connect.NewClient[runtimev2.MintWorkspaceGitAccessRequest, runtimev2.WorkspaceGitGrant](
+			httpClient,
+			baseURL+WorkspaceGitAccessMintProcedure,
+			connect.WithSchema(workspaceGitAccessMethods.ByName("Mint")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// workspaceGitAccessClient implements WorkspaceGitAccessClient.
+type workspaceGitAccessClient struct {
+	mint *connect.Client[runtimev2.MintWorkspaceGitAccessRequest, runtimev2.WorkspaceGitGrant]
+}
+
+// Mint calls supertag.runtime.v2.WorkspaceGitAccess.Mint.
+func (c *workspaceGitAccessClient) Mint(ctx context.Context, req *connect.Request[runtimev2.MintWorkspaceGitAccessRequest]) (*connect.Response[runtimev2.WorkspaceGitGrant], error) {
+	return c.mint.CallUnary(ctx, req)
+}
+
+// WorkspaceGitAccessHandler is an implementation of the supertag.runtime.v2.WorkspaceGitAccess
+// service.
+type WorkspaceGitAccessHandler interface {
+	Mint(context.Context, *connect.Request[runtimev2.MintWorkspaceGitAccessRequest]) (*connect.Response[runtimev2.WorkspaceGitGrant], error)
+}
+
+// NewWorkspaceGitAccessHandler builds an HTTP handler from the service implementation. It returns
+// the path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewWorkspaceGitAccessHandler(svc WorkspaceGitAccessHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	workspaceGitAccessMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("WorkspaceGitAccess").Methods()
+	workspaceGitAccessMintHandler := connect.NewUnaryHandler(
+		WorkspaceGitAccessMintProcedure,
+		svc.Mint,
+		connect.WithSchema(workspaceGitAccessMethods.ByName("Mint")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.WorkspaceGitAccess/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case WorkspaceGitAccessMintProcedure:
+			workspaceGitAccessMintHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedWorkspaceGitAccessHandler returns CodeUnimplemented from all methods.
+type UnimplementedWorkspaceGitAccessHandler struct{}
+
+func (UnimplementedWorkspaceGitAccessHandler) Mint(context.Context, *connect.Request[runtimev2.MintWorkspaceGitAccessRequest]) (*connect.Response[runtimev2.WorkspaceGitGrant], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkspaceGitAccess.Mint is not implemented"))
 }
 
 // WorkspaceDirectoryClient is a client for the supertag.runtime.v2.WorkspaceDirectory service.

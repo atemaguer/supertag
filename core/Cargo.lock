@@ -3177,6 +3177,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "supertag-git-delivery",
  "supertag-local-state",
  "supertag-protocol",
  "supertag-shared-execution",

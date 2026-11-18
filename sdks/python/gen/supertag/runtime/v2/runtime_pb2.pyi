@@ -263,6 +263,11 @@ class WorkspaceMountWriteStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrappe
     WORKSPACE_MOUNT_WRITE_STATUS_PARTIAL: _ClassVar[WorkspaceMountWriteStatus]
     WORKSPACE_MOUNT_WRITE_STATUS_REFUSED: _ClassVar[WorkspaceMountWriteStatus]
 
+class WorkspaceGitPermission(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    WORKSPACE_GIT_PERMISSION_UNSPECIFIED: _ClassVar[WorkspaceGitPermission]
+    WORKSPACE_GIT_PERMISSION_READ: _ClassVar[WorkspaceGitPermission]
+
 class WorkspaceArtifactKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     WORKSPACE_ARTIFACT_KIND_UNSPECIFIED: _ClassVar[WorkspaceArtifactKind]
@@ -485,6 +490,8 @@ WORKSPACE_MOUNT_WRITE_STATUS_UNSPECIFIED: WorkspaceMountWriteStatus
 WORKSPACE_MOUNT_WRITE_STATUS_COMPLETE: WorkspaceMountWriteStatus
 WORKSPACE_MOUNT_WRITE_STATUS_PARTIAL: WorkspaceMountWriteStatus
 WORKSPACE_MOUNT_WRITE_STATUS_REFUSED: WorkspaceMountWriteStatus
+WORKSPACE_GIT_PERMISSION_UNSPECIFIED: WorkspaceGitPermission
+WORKSPACE_GIT_PERMISSION_READ: WorkspaceGitPermission
 WORKSPACE_ARTIFACT_KIND_UNSPECIFIED: WorkspaceArtifactKind
 WORKSPACE_ARTIFACT_KIND_PATCH: WorkspaceArtifactKind
 WORKSPACE_ARTIFACT_KIND_BUNDLE: WorkspaceArtifactKind
@@ -3621,13 +3628,45 @@ class VerifyWorkspaceOutputRemoteResponse(_message.Message):
     remote: str
     def __init__(self, remote: _Optional[str] = ...) -> None: ...
 
-class WorkspaceSourceDownload(_message.Message):
-    __slots__ = ("reference", "chunk")
-    REFERENCE_FIELD_NUMBER: _ClassVar[int]
-    CHUNK_FIELD_NUMBER: _ClassVar[int]
-    reference: WorkspaceSourceBundle
-    chunk: bytes
-    def __init__(self, reference: _Optional[_Union[WorkspaceSourceBundle, _Mapping]] = ..., chunk: _Optional[bytes] = ...) -> None: ...
+class MintWorkspaceGitAccessRequest(_message.Message):
+    __slots__ = ("attempt", "merge", "permission")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    MERGE_FIELD_NUMBER: _ClassVar[int]
+    PERMISSION_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    merge: bool
+    permission: WorkspaceGitPermission
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., merge: _Optional[bool] = ..., permission: _Optional[_Union[WorkspaceGitPermission, str]] = ...) -> None: ...
+
+class WorkspaceGitGrant(_message.Message):
+    __slots__ = ("workspace", "commit", "https", "ssh", "expires_at_ms")
+    WORKSPACE_FIELD_NUMBER: _ClassVar[int]
+    COMMIT_FIELD_NUMBER: _ClassVar[int]
+    HTTPS_FIELD_NUMBER: _ClassVar[int]
+    SSH_FIELD_NUMBER: _ClassVar[int]
+    EXPIRES_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    workspace: _workspaces_pb2.Workspace
+    commit: str
+    https: HttpsGitCredential
+    ssh: SshGitCredential
+    expires_at_ms: int
+    def __init__(self, workspace: _Optional[_Union[_workspaces_pb2.Workspace, _Mapping]] = ..., commit: _Optional[str] = ..., https: _Optional[_Union[HttpsGitCredential, _Mapping]] = ..., ssh: _Optional[_Union[SshGitCredential, _Mapping]] = ..., expires_at_ms: _Optional[int] = ...) -> None: ...
+
+class HttpsGitCredential(_message.Message):
+    __slots__ = ("username", "token")
+    USERNAME_FIELD_NUMBER: _ClassVar[int]
+    TOKEN_FIELD_NUMBER: _ClassVar[int]
+    username: str
+    token: str
+    def __init__(self, username: _Optional[str] = ..., token: _Optional[str] = ...) -> None: ...
+
+class SshGitCredential(_message.Message):
+    __slots__ = ("private_key", "known_hosts")
+    PRIVATE_KEY_FIELD_NUMBER: _ClassVar[int]
+    KNOWN_HOSTS_FIELD_NUMBER: _ClassVar[int]
+    private_key: str
+    known_hosts: str
+    def __init__(self, private_key: _Optional[str] = ..., known_hosts: _Optional[str] = ...) -> None: ...
 
 class BlobReference(_message.Message):
     __slots__ = ("sha256", "byte_length")

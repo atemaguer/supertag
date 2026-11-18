@@ -5382,11 +5382,6 @@ class TransfersStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReviewArtifactRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
                 _registered_method=True)
-        self.DownloadWorkspaceSource = channel.unary_stream(
-                '/supertag.runtime.v2.Transfers/DownloadWorkspaceSource',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.DownloadWorkspaceSourceRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceSourceDownload.FromString,
-                _registered_method=True)
         self.VerifyWorkspaceOutputRemote = channel.unary_unary(
                 '/supertag.runtime.v2.Transfers/VerifyWorkspaceOutputRemote',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.VerifyWorkspaceOutputRemoteRequest.SerializeToString,
@@ -5431,14 +5426,6 @@ class TransfersServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def DownloadWorkspaceSource(self, request, context):
-        """The Task's Workspace source, or with `merge` the commit its merge follow-up must merge,
-        read from the remote by the Control Plane and relayed as a bundle.
-        """
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
     def VerifyWorkspaceOutputRemote(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -5472,11 +5459,6 @@ def add_TransfersServicer_to_server(servicer, server):
                     servicer.DownloadReviewArtifact,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReviewArtifactRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.SerializeToString,
-            ),
-            'DownloadWorkspaceSource': grpc.unary_stream_rpc_method_handler(
-                    servicer.DownloadWorkspaceSource,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.DownloadWorkspaceSourceRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceSourceDownload.SerializeToString,
             ),
             'VerifyWorkspaceOutputRemote': grpc.unary_unary_rpc_method_handler(
                     servicer.VerifyWorkspaceOutputRemote,
@@ -5631,33 +5613,6 @@ class Transfers:
             _registered_method=True)
 
     @staticmethod
-    def DownloadWorkspaceSource(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_stream(
-            request,
-            target,
-            '/supertag.runtime.v2.Transfers/DownloadWorkspaceSource',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.DownloadWorkspaceSourceRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceSourceDownload.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
     def VerifyWorkspaceOutputRemote(request,
             target,
             options=(),
@@ -5674,6 +5629,84 @@ class Transfers:
             '/supertag.runtime.v2.Transfers/VerifyWorkspaceOutputRemote',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.VerifyWorkspaceOutputRemoteRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.VerifyWorkspaceOutputRemoteResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class WorkspaceGitAccessStub:
+    """A Worker Host reads a remote Workspace itself, with a credential the Control Plane hands it for
+    one Attempt and one operation. The Control Plane passes no source bytes.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Mint = channel.unary_unary(
+                '/supertag.runtime.v2.WorkspaceGitAccess/Mint',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.MintWorkspaceGitAccessRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceGitGrant.FromString,
+                _registered_method=True)
+
+
+class WorkspaceGitAccessServicer:
+    """A Worker Host reads a remote Workspace itself, with a credential the Control Plane hands it for
+    one Attempt and one operation. The Control Plane passes no source bytes.
+    """
+
+    def Mint(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_WorkspaceGitAccessServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Mint': grpc.unary_unary_rpc_method_handler(
+                    servicer.Mint,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.MintWorkspaceGitAccessRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceGitGrant.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.WorkspaceGitAccess', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.WorkspaceGitAccess', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class WorkspaceGitAccess:
+    """A Worker Host reads a remote Workspace itself, with a credential the Control Plane hands it for
+    one Attempt and one operation. The Control Plane passes no source bytes.
+    """
+
+    @staticmethod
+    def Mint(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkspaceGitAccess/Mint',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.MintWorkspaceGitAccessRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceGitGrant.FromString,
             options,
             channel_credentials,
             insecure,

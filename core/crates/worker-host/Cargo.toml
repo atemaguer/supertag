@@ -28,6 +28,7 @@ supertag-local-state.workspace = true
 supertag-transport.workspace = true
 supertag-shared-execution = { path = "../shared-execution" }
 supertag-workspaces = { path = "../workspaces" }
+supertag-git-delivery = { path = "../git-delivery" }
 tempfile.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true

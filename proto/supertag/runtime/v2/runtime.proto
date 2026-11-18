@@ -1041,10 +1041,13 @@ service Transfers {
   rpc DownloadCompleteWorkspace(InspectAttemptRequest) returns (stream WorkspaceDownload);
   rpc DownloadWorkspaceArtifact(GetWorkspaceArtifactRequest) returns (stream WorkspaceDownload);
   rpc DownloadReviewArtifact(GetReviewArtifactRequest) returns (stream WorkspaceDownload);
-  // The Task's Workspace source, or with `merge` the commit its merge follow-up must merge,
-  // read from the remote by the Control Plane and relayed as a bundle.
-  rpc DownloadWorkspaceSource(DownloadWorkspaceSourceRequest) returns (stream WorkspaceSourceDownload);
   rpc VerifyWorkspaceOutputRemote(VerifyWorkspaceOutputRemoteRequest) returns (VerifyWorkspaceOutputRemoteResponse);
+}
+
+// A Worker Host reads a remote Workspace itself, with a credential the Control Plane hands it for
+// one Attempt and one operation. The Control Plane passes no source bytes.
+service WorkspaceGitAccess {
+  rpc Mint(MintWorkspaceGitAccessRequest) returns (WorkspaceGitGrant);
 }
 
 // Internal authorization and commit for work product the API tier stores.
@@ -2852,11 +2855,44 @@ message VerifyWorkspaceOutputRemoteResponse {
   optional string remote = 1;
 }
 
-message WorkspaceSourceDownload {
-  oneof part {
-    WorkspaceSourceBundle reference = 1;
-    bytes chunk = 2;
+enum WorkspaceGitPermission {
+  WORKSPACE_GIT_PERMISSION_UNSPECIFIED = 0;
+  WORKSPACE_GIT_PERMISSION_READ = 1;
+}
+
+message MintWorkspaceGitAccessRequest {
+  InspectAttemptRequest attempt = 1;
+  // The Task's `merge_commit` instead of its base commit.
+  bool merge = 2;
+  WorkspaceGitPermission permission = 3;
+}
+
+// What a Worker Host needs to read one commit of a remote Workspace. The credential lives only in
+// the Worker Host's memory for the operation; it never reaches a harness or a sandbox.
+message WorkspaceGitGrant {
+  // The Workspace as the Task recorded it, and the commit this Attempt may read.
+  Workspace workspace = 1;
+  string commit = 2;
+  // Absent for a remote that needs none, such as a `file://` repository.
+  oneof credential {
+    HttpsGitCredential https = 3;
+    SshGitCredential ssh = 4;
   }
+  // When a minted token expires, in milliseconds since the epoch; 0 for a credential that does not.
+  int64 expires_at_ms = 5;
+}
+
+// An HTTPS user name and token: a GitHub App token minted for this one repository and permission,
+// or the Workspace Credential's own token.
+message HttpsGitCredential {
+  string username = 1;
+  string token = 2;
+}
+
+// The Workspace Credential's SSH private key, and the server host keys to trust when it names them.
+message SshGitCredential {
+  string private_key = 1;
+  string known_hosts = 2;
 }
 
 message BlobReference {

@@ -7,7 +7,7 @@ use std::{
 
 use sha2::{Digest, Sha256};
 use supertag_credential_vault::CredentialVault;
-use supertag_git_delivery::{Credentials, GitDelivery, landing::Outcome};
+use supertag_git_delivery::{Access, Credentials, GitDelivery, landing::Outcome};
 use supertag_protocol::v2::{
     BlobReference, Workspace, WorkspaceCheckStatus, WorkspaceDeliveryReference, WorkspaceLand,
     WorkspaceLandBranch, WorkspaceLandMerge, WorkspaceLanding, WorkspaceLandingMode,
@@ -36,6 +36,7 @@ fn git(directory: &Path, args: &[&str]) -> String {
 }
 
 struct Fixture {
+    state: PathBuf,
     _root: tempfile::TempDir,
     remote: PathBuf,
     work: PathBuf,
@@ -74,6 +75,7 @@ impl Fixture {
         let delivery =
             GitDelivery::new(&state.join("git-delivery"), Credentials::new(vault)).unwrap();
         Self {
+            state,
             _root: root,
             remote,
             work,
@@ -214,9 +216,16 @@ async fn sessions_start_from_a_pinned_commit_relayed_as_a_bundle() {
 
     workspace.r#ref = "main".into();
     workspace.resolved_ref = "main".into();
-    let fetched = fixture
+    // The Control Plane grants the read; the Worker Host, with no credential vault, fetches.
+    let grant = fixture
         .delivery
-        .fetch(&workspace, &fixture.base, &cancel)
+        .grant(&workspace, Access::Read)
+        .await
+        .unwrap();
+    let host_directory = tempfile::tempdir().unwrap();
+    let host = GitDelivery::for_host(&host_directory.path().join("git")).unwrap();
+    let fetched = host
+        .fetch(&workspace, &fixture.base, grant.credential.clone(), &cancel)
         .await
         .unwrap();
     let heads = git(
@@ -250,9 +259,8 @@ async fn sessions_start_from_a_pinned_commit_relayed_as_a_bundle() {
         &["push", "--quiet", fixture.remote.to_str().unwrap(), "main"],
     );
     let lfs = git(&fixture.work, &["rev-parse", "HEAD"]);
-    let error = fixture
-        .delivery
-        .fetch(&workspace, &lfs, &cancel)
+    let error = host
+        .fetch(&workspace, &lfs, grant.credential, &cancel)
         .await
         .err()
         .unwrap();
@@ -448,4 +456,86 @@ async fn check_reports_each_step_without_changing_the_remote() {
     missing.remote = "file:///nonexistent/remote.git".into();
     let check = fixture.delivery.check(&missing, &cancel).await.unwrap();
     assert_eq!(check.steps[0].status(), WorkspaceCheckStatus::Failed);
+}
+
+/// The Control Plane hands a Worker Host the credential for one operation: an HTTPS token or SSH
+/// key as it is, nothing for a remote that needs none, and never a credential helper, which runs
+/// only on the Control Plane's machine. A Worker Host has no vault to read one from.
+#[tokio::test]
+async fn grants_hand_hosts_static_credentials_but_never_a_helper() {
+    use supertag_git_delivery::Credential;
+    use supertag_protocol::{git_remote::credential_vault_id, v2::WorkspaceCredentialNames};
+    let fixture = Fixture::new();
+    let named = |name: &str| {
+        let mut workspace = fixture.workspace(None);
+        workspace.credentials = Some(WorkspaceCredentialNames {
+            read: name.into(),
+            push: String::new(),
+        });
+        workspace
+    };
+    // The same vault directory the fixture's git delivery reads.
+    let state = fixture.state.display().to_string();
+    let vault = CredentialVault::from_environment(|key| {
+        (key == "SUPERTAG_STATE_DIR").then(|| state.clone())
+    })
+    .unwrap();
+    let store = |name: &str, credential: Credential| {
+        let id = credential_vault_id(name);
+        let vault = &vault;
+        async move {
+            vault
+                .store(&id, &credential.to_vault_value())
+                .await
+                .unwrap()
+        }
+    };
+    let none = fixture
+        .delivery
+        .grant(&fixture.workspace(None), Access::Read)
+        .await
+        .unwrap();
+    assert!(none.credential.is_none() && none.expires_at_ms == 0);
+
+    let token = Credential::HttpsToken {
+        username: "deploy".into(),
+        token: "static-token".into(),
+    };
+    store("token", token.clone()).await;
+    let granted = fixture
+        .delivery
+        .grant(&named("token"), Access::Read)
+        .await
+        .unwrap();
+    assert!(granted.credential == Some(token) && granted.expires_at_ms == 0);
+
+    store(
+        "helper",
+        Credential::Helper {
+            helper: "store".into(),
+        },
+    )
+    .await;
+    let refused = fixture
+        .delivery
+        .grant(&named("helper"), Access::Read)
+        .await
+        .err()
+        .unwrap();
+    assert!(
+        format!("{refused:#}").contains("credential helper"),
+        "{refused:#}"
+    );
+
+    let host_directory = tempfile::tempdir().unwrap();
+    let host = GitDelivery::for_host(&host_directory.path().join("git")).unwrap();
+    let error = host
+        .grant(&named("token"), Access::Read)
+        .await
+        .err()
+        .unwrap();
+    assert!(
+        format!("{error:#}").contains("kept on the Control Plane"),
+        "{error:#}"
+    );
 }

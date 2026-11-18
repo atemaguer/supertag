@@ -209,6 +209,7 @@ impl Api {
             self.mailbox_service(),
             self.inbox_service(),
             transfers.workspaces_service(),
+            transfers.workspace_git_access_service(),
             self.workspace_credentials_service(),
             self.workspace_landings_service(),
             self.artifact_publications_service(),

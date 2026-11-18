@@ -12,7 +12,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use supertag_protocol::{
     CHECKPOINT_CHUNK_BYTES, MAX_MESSAGE_BYTES, MAX_WORKSPACE_BLOB_BYTES,
-    v2::{transfers_client::TransfersClient, workspace_download, *},
+    v2::{
+        transfers_client::TransfersClient, workspace_download,
+        workspace_git_access_client::WorkspaceGitAccessClient, *,
+    },
     valid_workspace_id, validate_workspace_delivery,
 };
 use supertag_workspaces::{
@@ -46,7 +49,8 @@ impl WorkspaceMapping {
 #[derive(Clone, Debug)]
 pub enum WorkspaceSource {
     Local(PathBuf),
-    /// A remote Workspace whose source the Control Plane relays.
+    /// A remote Workspace, which this host reads itself with a credential the Control Plane
+    /// grants for each read.
     ControlPlane,
 }
 
@@ -70,7 +74,12 @@ pub(crate) struct PendingWorkspace {
 pub(crate) struct Workspaces {
     directory: PathBuf,
     mappings: Vec<WorkspaceMapping>,
+    /// Git for remote Workspaces, opened on first use: its private scratch is swept when it opens.
+    git: std::sync::OnceLock<supertag_git_delivery::GitDelivery>,
 }
+
+/// How long reading one commit of a remote Workspace may take.
+const SOURCE_READ_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// A Worker Host advertises at most this many Workspaces, as the Control Plane accepts.
 const MAX_WORKSPACE_MAPPINGS: usize = 128;
@@ -113,6 +122,54 @@ impl Workspaces {
         Ok(Self {
             directory: directory.join("workspaces"),
             mappings,
+            git: std::sync::OnceLock::new(),
+        })
+    }
+
+    fn git(&self) -> Result<&supertag_git_delivery::GitDelivery> {
+        if let Some(git) = self.git.get() {
+            return Ok(git);
+        }
+        let git = supertag_git_delivery::GitDelivery::for_host(&self.directory.join("git"))?;
+        Ok(self.git.get_or_init(|| git))
+    }
+
+    /// Reads `commit` of a remote Workspace with the credential the Control Plane granted for it.
+    async fn fetch_granted(
+        &self,
+        grant: WorkspaceGitGrant,
+        cancel: &CancellationToken,
+    ) -> Result<supertag_git_delivery::source::FetchedSource> {
+        let workspace = grant
+            .workspace
+            .context("Workspace grant has no Workspace")?;
+        let credential = grant.credential.map(|credential| match credential {
+            workspace_git_grant::Credential::Https(https) => {
+                supertag_git_delivery::Credential::HttpsToken {
+                    username: https.username,
+                    token: https.token,
+                }
+            }
+            workspace_git_grant::Credential::Ssh(ssh) => {
+                supertag_git_delivery::Credential::SshKey {
+                    private_key: ssh.private_key,
+                    known_hosts: (!ssh.known_hosts.is_empty()).then_some(ssh.known_hosts),
+                }
+            }
+        });
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&self.directory)?;
+        tokio::time::timeout(
+            SOURCE_READ_TIMEOUT,
+            self.git()?
+                .fetch(&workspace, &grant.commit, credential, cancel),
+        )
+        .await
+        .map_err(|_| Status::deadline_exceeded("reading the Workspace remote timed out"))?
+        .map_err(|error| {
+            Status::unavailable(format!("Workspace source could not be read: {error:#}")).into()
         })
     }
 
@@ -226,32 +283,21 @@ impl Workspaces {
             .context("Task workspace is not configured on this Worker Host")?;
         match (&mapping.source, &spec.remote) {
             (WorkspaceSource::ControlPlane, Some(expected)) => {
-                let (reference, bytes) = tokio::select! {
-                    result = transfers.download_source(attempt, token, false) => result?,
-                    _ = cancel.cancelled() => return Err(Status::cancelled("source download cancelled").into()),
+                let grant = tokio::select! {
+                    result = transfers.grant_source(attempt, token, false) => result?,
+                    _ = cancel.cancelled() => return Err(Status::cancelled("source read cancelled").into()),
                 };
                 ensure!(
-                    reference.workspace.as_ref() == Some(expected)
+                    grant.workspace.as_ref() == Some(expected)
                         && expected.workspace_id == spec.workspace_id
                         && expected.commit == spec.base_commit
-                        && reference.commit == spec.base_commit,
-                    "Control Plane returned a different Workspace source"
+                        && grant.commit == spec.base_commit,
+                    "Control Plane granted a different Workspace source"
                 );
-                fs::DirBuilder::new()
-                    .recursive(true)
-                    .mode(0o700)
-                    .create(&self.directory)?;
-                let mut file = NamedTempFile::new_in(self.directory.canonicalize()?)?;
-                file.write_all(&bytes)?;
-                file.as_file().sync_all()?;
-                let blob = reference.bundle.context("source download has no bundle")?;
+                let fetched = self.fetch_granted(grant, cancel).await?;
                 supertag_workspaces::source::materialize(
                     &self.source_directory(&spec.workspace_id, &spec.base_commit),
-                    &TransferArtifact {
-                        path: file.path().to_owned(),
-                        sha256: blob.sha256,
-                        byte_length: blob.byte_length,
-                    },
+                    &fetched.bundle,
                     &spec.base_commit,
                     cancel,
                 )
@@ -333,20 +379,22 @@ impl Workspaces {
         if let Some(commit) = &merge_commit {
             match &mapping.source {
                 WorkspaceSource::ControlPlane => {
-                    let (reference, bytes) = tokio::select! {
-                        result = transfers.download_source(attempt, token, true) => result?,
-                        _ = cancel.cancelled() => return Err(Status::cancelled("merge source download cancelled").into()),
+                    let grant = tokio::select! {
+                        result = transfers.grant_source(attempt, token, true) => result?,
+                        _ = cancel.cancelled() => return Err(Status::cancelled("merge source read cancelled").into()),
                     };
                     ensure!(
-                        &reference.commit == commit,
-                        "Control Plane returned a different merge commit"
+                        &grant.commit == commit,
+                        "Control Plane granted a different merge commit"
                     );
-                    let blob = reference.bundle.context("merge download has no bundle")?;
-                    let mut file = NamedTempFile::new_in(self.directory.canonicalize()?)?;
-                    file.write_all(&bytes)?;
-                    file.as_file().sync_all()?;
+                    let fetched = self.fetch_granted(grant, cancel).await?;
                     workspace
-                        .import_merge_bundle(file.path(), &blob.sha256, commit, cancel)
+                        .import_merge_bundle(
+                            &fetched.bundle.path,
+                            &fetched.bundle.sha256,
+                            commit,
+                            cancel,
+                        )
                         .await?;
                 }
                 WorkspaceSource::Local(_) => {
@@ -673,64 +721,37 @@ impl Transfers {
         }))
     }
 
-    async fn download_source(
+    /// A credential to read this Attempt's Workspace source, or with `merge` its merge commit,
+    /// from the remote: the Control Plane passes no source bytes.
+    async fn grant_source(
         &self,
         attempt: &Attempt,
         token: &str,
         merge: bool,
-    ) -> Result<(WorkspaceSourceBundle, Vec<u8>), Status> {
-        let input = DownloadWorkspaceSourceRequest {
-            attempt: Some(attempt.inspect()),
-            merge,
-        };
-        let mut request = request(input, token).map_err(|error| {
+    ) -> Result<WorkspaceGitGrant, Status> {
+        let mut request = request(
+            MintWorkspaceGitAccessRequest {
+                attempt: Some(attempt.inspect()),
+                merge,
+                permission: WorkspaceGitPermission::Read as i32,
+            },
+            token,
+        )
+        .map_err(|error| {
             crate::failures::noted(
-                Status::internal("cannot authenticate source download"),
+                Status::internal("cannot authenticate the Workspace read"),
                 &error,
             )
         })?;
-        request.set_timeout(Duration::from_secs(120));
-        let mut stream =
-            TransfersClient::with_interceptor(self.channel.clone(), self.headers.clone())
-                .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                .download_workspace_source(request)
+        request.set_timeout(Duration::from_secs(35));
+        Ok(
+            WorkspaceGitAccessClient::with_interceptor(self.channel.clone(), self.headers.clone())
+                .mint(request)
                 .await?
-                .into_inner();
-        let reference = match stream.message().await? {
-            Some(WorkspaceSourceDownload {
-                part: Some(workspace_source_download::Part::Reference(reference)),
-            }) => reference,
-            _ => return Err(Status::data_loss("source download has no receipt")),
-        };
-        let blob = reference
-            .bundle
-            .as_ref()
-            .ok_or_else(|| Status::data_loss("source receipt has no bundle"))?;
-        if blob.byte_length == 0 || blob.byte_length > MAX_WORKSPACE_BLOB_BYTES as u64 {
-            return Err(Status::data_loss("source bundle size is invalid"));
-        }
-        let mut bytes = Vec::new();
-        while let Some(message) = stream.message().await? {
-            let Some(workspace_source_download::Part::Chunk(chunk)) = message.part else {
-                return Err(Status::data_loss("unexpected source download record"));
-            };
-            if chunk.is_empty()
-                || chunk.len() > CHECKPOINT_CHUNK_BYTES
-                || bytes.len() as u64 + chunk.len() as u64 > blob.byte_length
-            {
-                return Err(Status::data_loss("invalid source bundle chunk"));
-            }
-            bytes.extend_from_slice(&chunk);
-        }
-        if bytes.len() as u64 != blob.byte_length
-            || format!("{:x}", Sha256::digest(&bytes)) != blob.sha256
-        {
-            return Err(Status::data_loss(
-                "source bundle does not match its receipt",
-            ));
-        }
-        Ok((reference, bytes))
+                .into_inner(),
+        )
     }
+
     /// Keeps the delivery's patch and bundle in this host's artifact storage, then records the
     /// delivery. The Control Plane stores neither: it relays them from this host to readers.
     pub(crate) async fn upload_workspace(

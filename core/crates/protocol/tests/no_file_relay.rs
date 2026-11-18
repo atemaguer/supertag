@@ -17,7 +17,6 @@ use supertag_protocol::authorization::{PEER_LOCAL, access};
 /// removes each. Unary RPCs are not checked: the only ones carrying `bytes` carry credentials.
 const REMAINING: &[(&str, &str, u8)] = &[
     // Slice 2: hosts fetch sources, continuations, and review patches from the git remote.
-    ("Transfers", "DownloadWorkspaceSource", 2),
     ("Transfers", "DownloadWorkspace", 2),
     ("Transfers", "DownloadCompleteWorkspace", 2),
     ("Transfers", "DownloadReviewArtifact", 2),
