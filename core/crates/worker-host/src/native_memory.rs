@@ -27,6 +27,9 @@ pub(crate) const MAX_BYTES: u64 = 4 * 1024 * 1024;
 pub(crate) const MAX_FILE_BYTES: u64 = 256 * 1024;
 /// Harness bookkeeping that is not memory and never merges.
 const IGNORED: &[&str] = &[".consolidate-lock"];
+/// Directories a harness keeps beside its memory that never merge: Codex makes its memory folder
+/// a git repository of its own.
+const IGNORED_DIRECTORIES: &[&str] = &[".git"];
 /// Index files list one memory per line; concurrent changes keep both sides' lines.
 const INDEXES: &[&str] = &["MEMORY.md"];
 
@@ -34,6 +37,7 @@ const INDEXES: &[&str] = &["MEMORY.md"];
 pub(crate) fn harness_directory(harness: HarnessKind) -> Option<&'static str> {
     match harness {
         HarnessKind::ClaudeCode => Some("claude-code"),
+        HarnessKind::Codex => Some("codex"),
         _ => None,
     }
 }
@@ -161,7 +165,9 @@ fn snapshot(root: &Path) -> Result<Files> {
             let path = relative.join(&name);
             let kind = entry.file_type()?;
             if kind.is_dir() {
-                pending.push(path);
+                if !IGNORED_DIRECTORIES.contains(&name.as_str()) {
+                    pending.push(path);
+                }
             } else if kind.is_file() {
                 if IGNORED.contains(&name.as_str()) {
                     continue;
@@ -559,6 +565,23 @@ mod tests {
                 .join("native-memory-attempts/attempt-a")
                 .exists()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn a_harness_git_repository_never_merges() -> Result<()> {
+        let state = tempfile::tempdir()?;
+        let turn = Prepared::prepare(state.path(), "tag", "codex", "attempt-g", &grant(0))?;
+        let work = turn.working_directory();
+        fs::create_dir_all(work.join(".git/objects"))?;
+        fs::write(work.join(".git/HEAD"), "ref: refs/heads/main")?;
+        fs::create_dir_all(work.join("extensions/ad_hoc/notes"))?;
+        fs::write(work.join("extensions/ad_hoc/notes/region.md"), "eu-north-1")?;
+        let summary = turn.finish()?;
+        assert_eq!(summary.files, 1);
+        let current = state.path().join("native-memory/tag/codex/shared/current");
+        assert!(current.join("extensions/ad_hoc/notes/region.md").is_file());
+        assert!(!current.join(".git").exists());
         Ok(())
     }
 

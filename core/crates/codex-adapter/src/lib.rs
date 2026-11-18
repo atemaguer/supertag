@@ -8,6 +8,7 @@ mod coordination;
 mod events;
 pub mod launcher;
 mod memory;
+mod native_memory;
 mod pricing;
 mod questions;
 mod recap;
@@ -304,10 +305,15 @@ async fn execute(
         .as_ref()
         .and_then(|attempt| attempt.selection.as_ref())
         .and_then(|selection| selection.effort.as_deref());
+    let native_memory = native_memory::directory(&options.environment)?;
+    policy.memory = native_memory.is_some();
     let arguments = config::arguments(&workspace, model, effort, &policy)?;
     let thread_parameters = config::thread_parameters(&workspace, &policy, &arguments)?;
     let authentication = auth::Prepared::new(&options.environment, &options.state_directory)?;
     let skills = skills::prepare(task, resolved_skills, authentication.home())?;
+    if let Some(directory) = &native_memory {
+        native_memory::copy_in(directory, authentication.home())?;
+    }
     let previous_checkpoint = previous_checkpoint.filter(|checkpoint| {
         checkpoint::resumes(checkpoint, &questions.manifest(), &skills.manifest)
     });
@@ -459,6 +465,10 @@ async fn execute(
         child.kill().await.context("could not stop Codex process")?;
     }
     child.wait().await.context("could not reap Codex process")?;
+    // Whatever the outcome, the Worker Host decides what of the turn's memory to keep.
+    if let Some(directory) = &native_memory {
+        native_memory::copy_out(authentication.home(), directory)?;
+    }
     outcome.context("Codex execution timed out")?
 }
 

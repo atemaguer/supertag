@@ -14,6 +14,8 @@ pub(crate) struct Policy {
     pub(crate) scope: Option<Scope>,
     /// The Worker Host's egress proxy for the Task's network scope.
     pub(crate) egress: Option<Egress>,
+    /// The Tag's Codex memory is staged in CODEX_HOME: Codex reads it and keeps notes.
+    pub(crate) memory: bool,
 }
 
 /// The Attempt's egress proxy, from the Worker Host.
@@ -138,6 +140,7 @@ impl Policy {
             writable_roots: vec![],
             scope: None,
             egress: None,
+            memory: false,
         };
         ensure!(
             !policy.write || disposable,
@@ -233,9 +236,17 @@ pub(crate) fn arguments(
         "project_doc_max_bytes=0".into(),
         "analytics.enabled=false".into(),
         // A model may select code-mode-only even when the feature is disabled.
-        // Keep the admitted SuperTag namespace directly callable in that mode.
+        // Keep the admitted SuperTag namespace directly callable in that mode, and Codex's own
+        // memory tools, which it otherwise offers only through the code-mode host.
         "features.code_mode.enabled=false".into(),
-        "features.code_mode.direct_only_tool_namespaces=[\"supertag\"]".into(),
+        format!(
+            "features.code_mode.direct_only_tool_namespaces={}",
+            if policy.memory {
+                "[\"supertag\",\"memories\"]"
+            } else {
+                "[\"supertag\"]"
+            }
+        ),
     ];
     for feature in [
         "multi_agent",
@@ -254,10 +265,19 @@ pub(crate) fn arguments(
         "hooks",
         "code_mode_only",
         "code_mode_only_strict_3p_tools",
-        "memories",
         "image_generation",
     ] {
         configuration.push(format!("features.{feature}=false"));
+    }
+    // Codex reads the Tag's memory and keeps notes with its memory tools, but never runs its own
+    // extraction and consolidation agents: they spend model calls the Task's budget does not see.
+    configuration.push(format!("features.memories={}", policy.memory));
+    if policy.memory {
+        configuration.extend([
+            "memories.use_memories=true".into(),
+            "memories.dedicated_tools=true".into(),
+            "memories.generate_memories=false".into(),
+        ]);
     }
     configuration.push(format!(
         "features.code_mode_host={}",
@@ -649,6 +669,32 @@ mod tests {
 
     fn actions(names: &[&str]) -> Vec<String> {
         names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    #[test]
+    fn codex_memory_reads_and_keeps_notes_but_never_generates() -> Result<()> {
+        let workspace = tempfile::tempdir()?;
+        let mut policy = Policy::from_actions(&actions(&["files:read"]), false)?;
+        let without = arguments(workspace.path(), None, None, &policy)?;
+        assert!(without.contains(&"features.memories=false".to_owned()));
+        assert!(
+            !without
+                .iter()
+                .any(|argument| argument.starts_with("memories."))
+        );
+        policy.memory = true;
+        let with = arguments(workspace.path(), None, None, &policy)?;
+        for setting in [
+            "features.memories=true",
+            "memories.use_memories=true",
+            "memories.dedicated_tools=true",
+            "memories.generate_memories=false",
+            "features.code_mode.direct_only_tool_namespaces=[\"supertag\",\"memories\"]",
+        ] {
+            assert!(with.contains(&setting.to_owned()), "{setting}");
+        }
+        assert!(!with.contains(&"features.memories=false".to_owned()));
+        Ok(())
     }
 
     #[test]

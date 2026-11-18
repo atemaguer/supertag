@@ -893,6 +893,7 @@ pub(crate) async fn execute(
         .filter(|id| crate::checkpoint::thread_identity(id))
         .context("Codex thread identity is invalid")?
         .to_owned();
+    let memory = policy.memory;
     let mut stream = Stream::new(
         policy,
         thread,
@@ -925,6 +926,9 @@ pub(crate) async fn execute(
     // No turn guidance: Codex opens a longer turn with a short message on its own (measured
     // 2026-11-18: 10 of 10 turns with and without it), unlike Claude Code.
     let mut prompt = format!("Tag instructions:\n{}\n\n", task.instructions);
+    if memory {
+        prompt.push_str(&format!("{}\n\n", crate::native_memory::NUDGE));
+    }
     if !portfolio.is_empty() {
         prompt.push_str(&format!("SuperTag context:\n{portfolio}\n\n"));
     }

@@ -699,9 +699,19 @@ memory too, beside its [notes](#memory), across Tasks:
   host starts from that host's copy, or from none, and a host that is removed takes its copy with
   it. The Tag's notes and Sessions stay; harness memory is a convenience on top of them.
 
-Today Claude Code keeps harness memory this way. A read-only turn may still write to its memory
-folder, and nowhere else. `supertag describe tag` lists the copies Worker Hosts hold
-(`native_memory`), and `supertag delete memory --native TAG` drops all of them: each host deletes
+Claude Code and Codex keep harness memory this way:
+
+- **Claude Code** keeps its auto-memory folder. A read-only turn may still write to its memory
+  folder, and nowhere else.
+- **Codex** keeps its memory folder: notes it saves with its memory tools, and the summary it
+  reads at the start of each turn. Each turn is told to search its notes before answering
+  anything that may depend on earlier work. Codex's own extraction and consolidation, which run
+  extra model calls at startup, stay off, so a note is found by searching, not added to the
+  summary. Codex's git repository inside the folder is not kept.
+
+OpenCode and Cursor keep no memory of their own on the Worker Host.
+
+`supertag describe tag` lists the copies Worker Hosts hold (`native_memory`), and `supertag delete memory --native TAG` drops all of them: each host deletes
 its copies before it next runs one of the Tag's Tasks. A Tag with `memory: false` keeps no harness
 memory either.
 
