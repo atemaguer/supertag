@@ -289,7 +289,7 @@ and commits the change. TypeScript uses the official Codex SDK's streaming execu
 Python uses the official asynchronous Codex SDK and app-server. Rust owns both adapter
 processes and receives their events and results through the same gRPC contract.
 
-Install Codex CLI and sign in with `codex login`, then run:
+Install Codex CLI and sign in with `codex -c 'cli_auth_credentials_store="file"' login`, then run:
 
 ```sh
 bash tests/fixtures/rust-harness-interop/run-live.sh /tmp/supertag-rust-live

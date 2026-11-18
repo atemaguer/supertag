@@ -149,7 +149,7 @@ a label, or they are busy or draining. `describe task` includes the same explana
 
 | Harness | Needs on the host | Sign-in |
 | --- | --- | --- |
-| `codex` | `codex` on `PATH` | `CODEX_API_KEY`, `OPENAI_API_KEY`, or a file-backed `codex login` |
+| `codex` | `codex` on `PATH` | `CODEX_API_KEY`, `OPENAI_API_KEY`, or a sign-in file from `codex -c 'cli_auth_credentials_store="file"' login` |
 | `claude-code` | Node.js; `claude` on `PATH` for `init` and `sign-in`. Tasks run the Claude Code bundled with the release unless `--claude-path` names another | `ANTHROPIC_API_KEY`, or `claude` signed in as the host's user |
 | `cursor` | Node.js | `CURSOR_API_KEY` |
 | `opencode` | `opencode` on `PATH`, and Node.js; a `provider/model` model | The provider's API key variable, or `--opencode-auth-file` |
