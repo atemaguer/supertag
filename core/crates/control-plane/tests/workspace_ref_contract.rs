@@ -143,6 +143,16 @@ async fn exercise(url: &str) {
         .unwrap();
     assert_eq!(base(&resolved), FIRST);
     assert_eq!(resolved.workspace.as_ref().unwrap().base_ref, "main");
+    // The host commits the first Attempt from this copy, so it carries the Tag's authorship.
+    let spec = resolved.workspace.as_ref().unwrap();
+    assert!(
+        spec.author_email.ends_with("@noreply.supertag.invalid"),
+        "{spec:?}"
+    );
+    assert_eq!(
+        spec.co_author,
+        "workspace-ref-test <workspace-ref-test@noreply.supertag.invalid>"
+    );
     // The first resolution wins: a repeated report after the branch moved changes nothing.
     let repeated = store
         .resolve_workspace_ref(&host, &resolve(&attempt, MOVED))

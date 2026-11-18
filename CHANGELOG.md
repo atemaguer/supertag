@@ -359,6 +359,13 @@ within the pre-1.0 compatibility policy described in
 
 - A Modal Workspace whose `SUPERTAG_MODAL_WORKSPACE_APP` names no existing app, or that is missing
   its configuration, now fails naming it, instead of "Remote workspace operation failed".
+- A Codex turn no longer fails with `Codex emitted an unsupported event type: turn/diff/updated`
+  when Codex 0.163.0 reports its running diff, or other progress it restates elsewhere.
+- The first commit of a Session that follows a branch is authored by its Tag, with the person who
+  asked as co-author, instead of by `SuperTag <supertag@localhost>`. Commits and merges of a
+  Work Session credit the person who asked in the Session that started it.
+- Commit subjects keep a Markdown link's text and drop its target, so a harness's link to its
+  checkout path no longer lands in the repository's history.
 - A client device that opens a Tag's network log is told that only operators can see it, in the
   desktop app and the terminal UI, instead of a raw refusal.
 - The terminal UI shows a Schedule's reply as soon as the turn finishes, and updates the Tag list

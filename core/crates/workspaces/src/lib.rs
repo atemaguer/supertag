@@ -1184,10 +1184,40 @@ fn commit_subject(summary: &str) -> String {
         .map(str::trim)
         .or_else(|| summary.lines().map(str::trim).find(|line| !line.is_empty()))
         .unwrap_or("Capture workspace changes");
-    line.chars()
+    without_link_targets(line)
+        .chars()
         .filter(|ch| !ch.is_control())
         .take(72)
         .collect()
+}
+
+/// A Markdown link `[text](target)` as its text: harnesses link the files they changed to their
+/// checkout's absolute path, which means nothing in the repository's history.
+fn without_link_targets(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(open) = rest.find('[') {
+        let after = &rest[open + 1..];
+        let link = after.find("](").and_then(|close| {
+            let target = &after[close + 2..];
+            target
+                .find(')')
+                .map(|end| (&after[..close], &target[end + 1..]))
+        });
+        match link {
+            Some((text, tail)) if !text.contains('[') => {
+                out.push_str(&rest[..open]);
+                out.push_str(text);
+                rest = tail;
+            }
+            _ => {
+                out.push_str(&rest[..=open]);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>> {
@@ -1327,6 +1357,18 @@ fn hidden_links(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn commit_subjects_keep_link_text_and_drop_checkout_paths() {
+        assert_eq!(
+            commit_subject(
+                "Added `farewell(name)` to [app.py](/private/tmp/host/checkouts/9391/app.py), returning it."
+            ),
+            "Added `farewell(name)` to app.py, returning it."
+        );
+        assert_eq!(commit_subject("Fix a[0] and [b]"), "Fix a[0] and [b]");
+        assert_eq!(commit_subject("[x](y"), "[x](y");
+    }
 
     #[test]
     fn released_workspace_is_immediately_reopenable_while_children_spawn() -> Result<()> {

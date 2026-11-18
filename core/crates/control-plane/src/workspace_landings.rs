@@ -61,15 +61,33 @@ pub(crate) async fn author_in(
             .fetch_optional(&mut **tx)
             .await?
             .flatten();
-    // The conversation's person, else whoever submitted this Task or its Session's first one.
-    let mut owner = crate::conversations::task_owner_in(tx, &task.task_id)
-        .await?
-        .unwrap_or_default();
-    if owner.is_empty() {
-        owner = sqlx::query_scalar("SELECT a.principal FROM supertag_v2_admissions a JOIN supertag_v2_tasks t ON t.task_id=a.task_id WHERE t.tag_id=$1 AND t.session_id=$2 ORDER BY (a.task_id=$3) DESC, t.accepted_order LIMIT 1")
-            .bind(&task.tag_id).bind(&task.session_id).bind(&task.task_id)
-            .fetch_optional(&mut **tx).await?
+    // The conversation's person, else whoever submitted this Task or its Session's first one. A
+    // Work Session was started by its Tag, so the person is the one who asked in the Session
+    // that started it, followed up a bounded number of levels.
+    let (mut task_id, mut tag_id, mut session_id) = (
+        task.task_id.clone(),
+        task.tag_id.clone(),
+        task.session_id.clone(),
+    );
+    let mut owner = String::new();
+    for _ in 0..8 {
+        owner = crate::conversations::task_owner_in(tx, &task_id)
+            .await?
             .unwrap_or_default();
+        if owner.is_empty() {
+            owner = sqlx::query_scalar("SELECT a.principal FROM supertag_v2_admissions a JOIN supertag_v2_tasks t ON t.task_id=a.task_id WHERE t.tag_id=$1 AND t.session_id=$2 ORDER BY (a.task_id=$3) DESC, t.accepted_order LIMIT 1")
+                .bind(&tag_id).bind(&session_id).bind(&task_id)
+                .fetch_optional(&mut **tx).await?
+                .unwrap_or_default();
+        }
+        if !git_remote::requester_co_author(&owner).is_empty() {
+            break;
+        }
+        let starter: Option<(String, String, String)> = sqlx::query_as("SELECT t.task_id,t.tag_id,t.session_id FROM supertag_v2_work_sessions w JOIN supertag_v2_tasks t ON t.task_id=w.starter_task_id WHERE w.work_session_id=$1 AND w.tag_id=$2")
+            .bind(&session_id).bind(&tag_id)
+            .fetch_optional(&mut **tx).await?;
+        let Some(starter) = starter else { break };
+        (task_id, tag_id, session_id) = starter;
     }
     Ok((
         git_remote::author_name(tag_name.as_deref().unwrap_or(&task.tag_id)),

@@ -424,7 +424,7 @@ spec:
 | `remote` | `https://` or `ssh://` URL, scp-style `user@host:path`, `file:///absolute/path` for a bare repository on the Control Plane's machine (readable only by hosts that share its filesystem), or `http://` to a loopback address. Never a password, token, or `ext::` helper |
 | `ref` | A branch name. Each new Session pins the commit it names once; every Task of the Session starts there |
 | `credential`, `credentials` | Names of [Workspace Credentials](#workspace-credentials) that must exist. `read` reads the source; `push` lands changes |
-| `land` | `branch` updates the Session's branch `supertag/session/HASH` on every delivered Task. `{merge: TARGET}` also merges a finished Session into `TARGET`, a branch outside `supertag/`. `{review: {base: BRANCH}}` also opens or updates the Session's draft pull request against `BRANCH`; it needs a GitHub forge and a GitHub App or HTTPS token push credential. Omit it to keep changes with SuperTag |
+| `land` | `branch` updates the Session's branch `supertag/session/HASH` on every delivered Task. `{merge: TARGET}` pushes a Session's branch only once the Session is finished, and merges it into `TARGET`, a branch outside `supertag/`. `{review: {base: BRANCH}}` also opens or updates the Session's draft pull request against `BRANCH`; it needs a GitHub forge and a GitHub App or HTTPS token push credential. Omit it to keep changes with SuperTag |
 | `forge` | `github` for GitHub Enterprise Server, whose API is `/api/v3/` on the remote's host. A github.com remote is GitHub without it; any other remote is a plain git server, which has no review |
 
 A Tag names its Workspace in `spec.workspace`:

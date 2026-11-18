@@ -236,7 +236,7 @@ Without `ref`, it follows the server's default branch.
 | --- | --- |
 | omitted | Changes stay with SuperTag; import them with `supertag fetch` |
 | `branch` | Each delivered Task updates the Session's branch `supertag/session/HASH` on the server |
-| `merge` | The Session's branch is pushed, and once its work is reported done it is merged into the target branch with a merge commit, which is pushed |
+| `merge` | Once the Session's work is reported done, its branch is pushed and merged into the target branch with a merge commit, which is pushed. Nothing is pushed before then |
 | `review` | As `branch`, and the Session's draft pull request against `base` is opened or updated (GitHub) |
 
 Git delivery pushes only `supertag/session/...` branches and the Workspace's merge target, and

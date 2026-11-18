@@ -629,6 +629,7 @@ impl Stream {
             }
             // Other output deltas are represented by the authoritative completed item.
             method if streamed_item_delta(method) => {}
+            method if informational(method) => {}
             method
                 if method.starts_with("codex/")
                     || method.starts_with("thread/")
@@ -1136,6 +1137,32 @@ fn streamed_item_delta(method: &str) -> bool {
     method.starts_with("item/") && (method.ends_with("/delta") || method.ends_with("Delta"))
 }
 
+/// Progress Codex reports alongside a turn that SuperTag doesn't show: each is restated by an
+/// authoritative completed item or by the turn's own result, and none asks for a reply. Codex
+/// 0.163.0 sends `turn/diff/updated` with the turn's running diff whenever a file changes; the
+/// Worker Host computes the delivered diff from the checkout itself. An unknown method still
+/// fails the turn, so a new kind of work can't pass unseen.
+fn informational(method: &str) -> bool {
+    matches!(
+        method,
+        "turn/diff/updated"
+            | "item/fileChange/patchUpdated"
+            | "item/commandExecution/terminalInteraction"
+            | "item/reasoning/summaryPartAdded"
+            | "item/mcpToolCall/progress"
+            | "item/autoApprovalReview/started"
+            | "item/autoApprovalReview/completed"
+            | "serverRequest/resolved"
+            | "hook/started"
+            | "hook/completed"
+            | "mcpServer/startupStatus/updated"
+            | "skills/changed"
+            | "app/list/updated"
+            | "deprecationNotice"
+            | "configWarning"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1161,6 +1188,26 @@ mod tests {
             "item/Delta/completed",
         ] {
             assert!(!streamed_item_delta(method), "{method}");
+        }
+    }
+
+    #[test]
+    fn progress_codex_restates_elsewhere_is_ignored_and_unknown_work_is_not() {
+        // Codex 0.163.0 sends the turn's running diff after each file change.
+        for method in [
+            "turn/diff/updated",
+            "item/fileChange/patchUpdated",
+            "serverRequest/resolved",
+        ] {
+            assert!(informational(method), "{method}");
+        }
+        for method in [
+            "turn/completed",
+            "item/completed",
+            "item/tool/call",
+            "turn/new/kind",
+        ] {
+            assert!(!informational(method), "{method}");
         }
     }
 

@@ -60,7 +60,9 @@ impl Store {
             .execute(&mut *tx)
             .await?;
         }
-        let task = crate::store::task_in(&mut tx, &attempt.task_id).await?;
+        let mut task = crate::store::task_in(&mut tx, &attempt.task_id).await?;
+        // The host commits from this copy, so it carries the Tag's authorship like every other.
+        crate::workspace_landings::with_author_in(&mut tx, &mut task).await?;
         tx.commit().await?;
         Ok(task)
     }

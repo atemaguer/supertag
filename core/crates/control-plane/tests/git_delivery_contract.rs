@@ -669,6 +669,8 @@ async fn merge_contract(url: String) {
     assert_eq!(landing.target, "drafts");
     assert_eq!(landing.session_id, work.work_session_id);
     assert_eq!(landing.author_name, "Docs Writer");
+    // The Tag started the Work Session, so the person who asked in its parent co-authors.
+    assert_eq!(landing.co_author, "ada <ada@noreply.supertag.invalid>");
     // A conflict is never resolved here: the Session gets a follow-up Task.
     let target = "4".repeat(40);
     let conflict = record(
