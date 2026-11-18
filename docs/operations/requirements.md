@@ -205,6 +205,20 @@ For shared or unattended Worker Hosts, prefer scoped `CODEX_API_KEY` or `ANTHROP
 credentials with appropriate provider limits. `CODEX_API_KEY` takes precedence over copying
 the Codex sign-in file; `OPENAI_API_KEY` is only a fallback when that file is missing.
 
+On a Worker Host with `allow-unsandboxed-commands` for Claude Code, an `ANTHROPIC_API_KEY`,
+`ANTHROPIC_AUTH_TOKEN`, or `CLAUDE_CODE_OAUTH_TOKEN` in the host's environment stays in the Worker
+Host. Each Task's Claude Code gets a stand-in value and the address of a proxy on `127.0.0.1` that
+puts the real key on its requests to `api.anthropic.com`, and on nothing else. Claude Code also
+removes its credentials from the environment of the commands it runs. A command can still call
+Anthropic through that proxy while its Task runs, but it can't read the key from Claude Code or
+the adapter. This isn't a boundary against a command set on stealing it: such a command runs as the
+Worker Host's user and can read the host's own environment and its `env_file`. Only a sandbox,
+such as `environment: local-vm`, keeps the key out of reach.
+
+A sign-in made with `/login` lives in the system's secure store (the macOS Keychain) and can't go
+behind the proxy, so commands Claude Code runs without a sandbox can reach it. The Worker Host
+warns about this when it starts.
+
 ## Telemetry and network traffic
 
 SuperTag does not send product analytics or usage telemetry to SuperTag maintainers.

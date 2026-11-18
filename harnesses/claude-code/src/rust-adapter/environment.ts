@@ -22,6 +22,10 @@ async function ownedDirectory(path: string): Promise<string> {
   return realpath(path);
 }
 
+/** The Worker Host's provider proxy, which holds the real credential; Claude Code gets it as
+ * `ANTHROPIC_BASE_URL`. An `ANTHROPIC_BASE_URL` of the adapter's own is never passed on. */
+export const PROVIDER_PROXY_URL = "SUPERTAG_PROVIDER_BASE_URL";
+
 /** The Worker Host's copy of the Tag's native memory for this Attempt. */
 export const NATIVE_MEMORY_DIRECTORY = "SUPERTAG_NATIVE_MEMORY_DIRECTORY";
 
@@ -65,6 +69,17 @@ export async function nativeEnvironment(environment: NodeJS.ProcessEnv, declared
     env["CLAUDE_COWORK_MEMORY_PATH_OVERRIDE"] = memory;
   }
   for (const key of CREDENTIAL_KEYS) if (environment[key]) env[key] = environment[key];
+  // On a host that runs commands unsandboxed, the Worker Host holds the real credential in a
+  // loopback proxy and the variables above are placeholders; Claude Code sends its requests there.
+  const base = environment[PROVIDER_PROXY_URL];
+  if (base) {
+    const url = new URL(base);
+    if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" || url.search || url.hash)
+      throw new Error("Provider proxy URL must be a loopback HTTP URL");
+    env["ANTHROPIC_BASE_URL"] = base;
+  }
+  // Claude Code removes its credentials from the environment of the commands it runs.
+  env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] = "1";
   if (!CREDENTIAL_KEYS.some((key) => env[key])) {
     const sourceHome = await ownedDirectory(environment["HOME"] ?? "");
     const explicit = environment["CLAUDE_SECURESTORAGE_CONFIG_DIR"];

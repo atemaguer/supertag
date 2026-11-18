@@ -724,6 +724,11 @@ fn unsandboxed(harness: Found, ask: Option<&mut Prompter>) -> Result<Commands> {
                 &format!("Allow {name} to run commands without a sandbox?"),
                 true,
             )? {
+                if matches!(harness, Found::ClaudeCode) {
+                    outln!(
+                        "  Those commands can read a Claude Code sign-in made with /login. With ANTHROPIC_API_KEY in ~/.supertag/.env instead, the key stays in the Worker Host and Claude Code gets a stand-in."
+                    );
+                }
                 Commands::Unsandboxed
             } else {
                 outln!(

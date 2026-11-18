@@ -627,6 +627,7 @@ async fn run(
     // A remote sandbox's harness also stops in time to leave the sandbox's cleanup margin.
     let attempt_ends = Instant::now() + options.attempt_timeout;
     let execution_ends = sandbox_execution_ends.map_or(attempt_ends, |ends| ends.min(attempt_ends));
+    let provider = start_provider_proxy(options).await?;
     let result = supervise(
         options,
         &bridge,
@@ -641,9 +642,12 @@ async fn run(
                 .map(NativeMemory::working_directory)
                 .as_deref(),
         ),
-        (&processes, &egress_environment),
+        (&processes, &egress_environment, provider.as_ref()),
     )
     .await;
+    if let Some(provider) = provider {
+        provider.stop().await;
+    }
     bridge.inputs.close();
     if let Some(prepared) = native_memory {
         finish_native_memory(&bridge, prepared).await;
@@ -806,6 +810,54 @@ async fn finish_native_memory(bridge: &Bridge, memory: NativeMemory) {
     }
 }
 
+/// The variable the Claude Code adapter reads the provider proxy's URL from; it gives it to
+/// Claude Code as `ANTHROPIC_BASE_URL`.
+const PROVIDER_PROXY_URL: &str = "SUPERTAG_PROVIDER_BASE_URL";
+/// The Anthropic credentials Claude Code reads from its environment.
+pub(crate) const ANTHROPIC_CREDENTIALS: [&str; 3] = [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+];
+
+/// The Anthropic origin a provider proxy forwards to. Test builds may point it at a fixture.
+fn anthropic_origin() -> String {
+    #[cfg(feature = "test-fixtures")]
+    if let Ok(origin) = std::env::var("SUPERTAG_TEST_ANTHROPIC_ORIGIN") {
+        return origin;
+    }
+    "https://api.anthropic.com".to_owned()
+}
+
+/// On a host that runs commands unsandboxed, a Claude Code Attempt's credentials stay in this
+/// process: the harness talks to the provider through a proxy that holds them (see
+/// `provider_proxy`). `None` elsewhere, and when the host has no credential in its environment
+/// (a sign-in kept in the macOS Keychain), which the harness then reads itself.
+async fn start_provider_proxy(
+    options: &HostOptions,
+) -> Result<Option<crate::provider_proxy::ProviderProxy>> {
+    if options.harness != HarnessKind::ClaudeCode
+        || !options.execution_profile.allow_unsandboxed_commands
+    {
+        return Ok(None);
+    }
+    let swaps: Vec<_> = ANTHROPIC_CREDENTIALS
+        .iter()
+        .filter_map(|&variable| {
+            std::env::var(variable)
+                .ok()
+                .filter(|value| !value.is_empty())
+                .map(|value| crate::provider_proxy::Swap::new(variable, value))
+        })
+        .collect();
+    if swaps.is_empty() {
+        return Ok(None);
+    }
+    crate::provider_proxy::ProviderProxy::start(&anthropic_origin(), swaps)
+        .await
+        .map(Some)
+}
+
 async fn supervise(
     options: &HostOptions,
     bridge: &Bridge,
@@ -813,7 +865,11 @@ async fn supervise(
     (valid_until, execution_ends): (Instant, Instant),
     shutdown: &CancellationToken,
     (workspace, output_directory, native_memory): (Option<&Path>, Option<&Path>, Option<&Path>),
-    (processes, egress_environment): (&crate::journal::Processes, &[(String, std::ffi::OsString)]),
+    (processes, egress_environment, provider): (
+        &crate::journal::Processes,
+        &[(String, std::ffi::OsString)],
+        Option<&crate::provider_proxy::ProviderProxy>,
+    ),
 ) -> Result<HarnessCompleteRequest> {
     if shutdown.is_cancelled() {
         return Ok(not_launched(bridge, "Worker Host is shutting down"));
@@ -876,6 +932,13 @@ async fn supervise(
             .iter()
             .filter_map(|&name| std::env::var_os(name).map(|value| (OsStr::new(name), value))),
     );
+    // Behind the provider proxy the adapter gets placeholders and the proxy's URL, never the key.
+    if let Some(provider) = provider {
+        for (variable, placeholder) in provider.placeholders() {
+            command.env(variable, placeholder);
+        }
+        command.env(PROVIDER_PROXY_URL, provider.base_url());
+    }
     // Record the spawn before it happens, so a host killed at any point leaves either no
     // adapter or a record a restart can check.
     let pending = processes.prepare()?;

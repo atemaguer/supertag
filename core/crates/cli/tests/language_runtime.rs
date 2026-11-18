@@ -199,6 +199,12 @@ database_tests! {
     claude_runs_commands_only_with_the_hosts_unsandboxed_opt_in;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+    claude_holds_only_a_placeholder_key_on_an_unsandboxed_host;
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE, SUPERTAG_TEST_REAL_CLAUDE=1, and a built Claude Code language adapter"]
+    real_claude_code_sends_its_requests_through_the_provider_proxy;
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
     claude_runs_remote_workspace_commands_in_the_sandbox_without_the_opt_in;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE, a built Claude Code language adapter and local-vm provider, and SUPERTAG_TEST_LOCAL_VM=1 with Docker"]
@@ -1594,6 +1600,227 @@ async fn claude_keeps_native_memory_on_its_host_across_tasks(database: String) -
         .await?["native_memory"]
         .clone();
     assert_eq!(stores[0]["files"], 0, "{stores}");
+    services.stop().await
+}
+
+/// On a host that runs commands unsandboxed, Claude Code's API key stays in the Worker Host: the
+/// harness and the adapter hold a placeholder and the provider proxy's URL, and the proxy puts the
+/// real key on the request it forwards to the provider.
+async fn claude_holds_only_a_placeholder_key_on_an_unsandboxed_host(
+    database: String,
+) -> Result<()> {
+    const SECRET: &str = "sk-ant-runtime-fixture-real-secret";
+    let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
+        return Ok(());
+    };
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let directory = tempfile::tempdir()?;
+    let native = claude_fixture(directory.path())?;
+    // The provider: answers whether a request carried the real key.
+    let provider = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let origin = format!("http://{}", provider.local_addr()?);
+    let provider = tokio::spawn(async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        while let Ok((mut stream, _)) = provider.accept().await {
+            let mut head = Vec::new();
+            let mut byte = [0_u8; 1];
+            while !head.ends_with(b"\r\n\r\n") && stream.read(&mut byte).await.unwrap_or(0) == 1 {
+                head.push(byte[0]);
+            }
+            let head = String::from_utf8_lossy(&head).to_lowercase();
+            let answer = if head.contains(&format!("x-api-key: {SECRET}")) {
+                "real key"
+            } else {
+                "no key"
+            };
+            let _ = stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{answer}",
+                        answer.len()
+                    )
+                    .as_bytes(),
+                )
+                .await;
+        }
+    });
+    let services = LanguageServices::start(directory.path(), &database).await?;
+    services
+        .operator(&[
+            "tag",
+            "put",
+            "runner",
+            "--instructions",
+            "Report the environment.",
+            "--harness",
+            "claude-code",
+            "--allow",
+            "files:read",
+            "--allow",
+            "commands:execute",
+        ])
+        .await?;
+    let task = services
+        .operator(&[
+            "task",
+            "submit",
+            "--tag",
+            "runner",
+            "--session",
+            "keys",
+            "provider-env",
+        ])
+        .await?;
+    let task_id = task["task_id"].as_str().context("Task ID missing")?;
+    let mut host = services.worker(
+        "claude-code",
+        &directory.path().join("host"),
+        Path::new(&interpreter),
+        &entry,
+    );
+    host.arg("--claude-path")
+        .arg(&native)
+        .arg("--allow-unsandboxed-commands")
+        .env("ANTHROPIC_API_KEY", SECRET)
+        .env("SUPERTAG_TEST_ANTHROPIC_ORIGIN", &origin);
+    success(host).await?;
+    let task = services.operator(&["get", "task", task_id]).await?;
+    assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+    let result = task["result"].as_str().context("result")?;
+    assert!(
+        !result.contains(SECRET),
+        "the key reached the harness: {result}"
+    );
+    let seen: Value = serde_json::from_str(result)?;
+    // The harness holds a placeholder, which the adapter also redacts from what the Tag reports.
+    assert!(
+        seen["apiKey"]
+            .as_str()
+            .is_some_and(|key| key == "[REDACTED]" || key.starts_with("supertag-provider-")),
+        "{seen}"
+    );
+    assert!(
+        seen["base"]
+            .as_str()
+            .is_some_and(|base| base.starts_with("http://127.0.0.1:")),
+        "{seen}"
+    );
+    assert_eq!(seen["scrub"], "1", "{seen}");
+    // The adapter, the harness's parent, holds no key either.
+    assert!(
+        seen["parent"]
+            .as_str()
+            .is_some_and(|parent| !parent.is_empty())
+    );
+    // Through the proxy, the provider got the real key.
+    assert_eq!(seen["answer"], "real key", "{seen}");
+    provider.abort();
+    services.stop().await
+}
+
+/// The real, bundled Claude Code on an unsandboxed host sends its model requests to the provider
+/// proxy, which reaches the provider with the real key. The fixture provider refuses each request,
+/// so nothing is spent and the turn fails; what matters is what the provider received.
+async fn real_claude_code_sends_its_requests_through_the_provider_proxy(
+    database: String,
+) -> Result<()> {
+    const SECRET: &str = "sk-ant-runtime-fixture-real-secret";
+    let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
+        return Ok(());
+    };
+    if std::env::var("SUPERTAG_TEST_REAL_CLAUDE").as_deref() != Ok("1") {
+        return Ok(());
+    }
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let directory = tempfile::tempdir()?;
+    let provider = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let origin = format!("http://{}", provider.local_addr()?);
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let recorded = seen.clone();
+    let provider = tokio::spawn(async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        while let Ok((mut stream, _)) = provider.accept().await {
+            let mut head = Vec::new();
+            let mut byte = [0_u8; 1];
+            while !head.ends_with(b"\r\n\r\n") && stream.read(&mut byte).await.unwrap_or(0) == 1 {
+                head.push(byte[0]);
+            }
+            let head = String::from_utf8_lossy(&head).to_lowercase();
+            let first = head.lines().next().unwrap_or_default().to_owned();
+            recorded.lock().unwrap().push(format!(
+                "{first} real-key={}",
+                head.contains(&format!("x-api-key: {SECRET}"))
+                    || head.contains(&format!("authorization: bearer {SECRET}"))
+            ));
+            let body =
+                r#"{"type":"error","error":{"type":"authentication_error","message":"fixture"}}"#;
+            let _ = stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 401 Unauthorized\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await;
+        }
+    });
+    let services = LanguageServices::start(directory.path(), &database).await?;
+    services
+        .operator(&[
+            "tag",
+            "put",
+            "runner",
+            "--instructions",
+            "Reply briefly.",
+            "--harness",
+            "claude-code",
+            "--allow",
+            "files:read",
+            "--allow",
+            "commands:execute",
+        ])
+        .await?;
+    services
+        .operator(&[
+            "task",
+            "submit",
+            "--tag",
+            "runner",
+            "--session",
+            "real",
+            "Say hi.",
+        ])
+        .await?;
+    let mut host = services.worker(
+        "claude-code",
+        &directory.path().join("host"),
+        Path::new(&interpreter),
+        &entry,
+    );
+    host.arg("--allow-unsandboxed-commands")
+        .env("ANTHROPIC_API_KEY", SECRET)
+        .env("SUPERTAG_TEST_ANTHROPIC_ORIGIN", &origin);
+    // The turn fails at the provider's refusal, retried for a while; what the provider received
+    // is all this test needs, so it stops the host once that is known.
+    let mut running = host.stdout(Stdio::null()).stderr(Stdio::null()).spawn()?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(150);
+    let reached = loop {
+        let reached = seen.lock().unwrap().iter().any(|request| {
+            request.starts_with("post /v1/messages") && request.ends_with("real-key=true")
+        });
+        if reached || tokio::time::Instant::now() >= deadline {
+            break reached;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+    let _ = running.kill().await;
+    let seen = seen.lock().unwrap().clone();
+    assert!(
+        reached,
+        "Claude Code never reached the provider through the proxy with the real key: {seen:?}"
+    );
+    provider.abort();
     services.stop().await
 }
 

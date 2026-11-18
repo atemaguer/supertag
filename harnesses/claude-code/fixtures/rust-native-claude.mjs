@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Protocol fixture for the REAL Anthropic Agent SDK. No model or provider is contacted.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -970,6 +970,33 @@ async function turn(message) {
       autoDreamEnabled: settings.autoDreamEnabled,
       autoMemoryDirectory: settings.autoMemoryDirectory,
       memoryOverride: process.env.CLAUDE_COWORK_MEMORY_PATH_OVERRIDE ?? null,
+    });
+  }
+  if (prompt === "provider-env") {
+    // What a command could read on an unsandboxed host: this process's environment and the
+    // adapter's (its parent), and what the provider receives through the proxy.
+    const parent = spawnSync("ps", ["eww", "-o", "command=", "-p", String(process.ppid)], {
+      encoding: "utf8",
+    }).stdout;
+    const base = process.env.ANTHROPIC_BASE_URL;
+    const answer = base
+      ? await (
+          await fetch(`${base}/v1/messages`, {
+            method: "POST",
+            headers: { "x-api-key": process.env.ANTHROPIC_API_KEY ?? "" },
+            body: "{}",
+          })
+        ).text()
+      : null;
+    result = JSON.stringify({
+      apiKey: process.env.ANTHROPIC_API_KEY ?? null,
+      base: base ?? null,
+      scrub: process.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB ?? null,
+      environment: Object.entries(process.env)
+        .map(([name, value]) => `${name}=${value}`)
+        .join("\n"),
+      parent,
+      answer,
     });
   }
   if (prompt === "recall-native") {
