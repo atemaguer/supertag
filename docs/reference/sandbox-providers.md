@@ -3,7 +3,7 @@
 A sandbox provider runs a Task's Workspace in a sandbox away from the
 [Worker Host](worker.md), while the harness and its credentials stay on the host. SuperTag calls
 this split execution. E2B and Modal are the built-in providers. This page is the contract a new
-provider, such as Fly, Firecracker, or Docker, implements.
+provider, such as Fly, Firecracker, or Docker, implements, and the conformance suite it passes.
 
 What moves and what stays:
 
@@ -144,7 +144,8 @@ back to the host.
 
 ## Security requirements
 
-A provider must meet every rule here.
+A provider must meet every rule here. The [conformance suite](#conformance-suite) checks each one
+an outside caller can observe.
 
 1. **No host fallback.** When the sandbox is unreachable, lost, or stopped, every tool call and
    command fails. Nothing ever runs on the Worker Host instead.
@@ -185,3 +186,42 @@ them.
   [network scope](iam.md#network-scopes). The sandbox will deny every other connection.
 - **Lost-sandbox signal.** When a sandbox dies mid-turn, the provider will report it as lost, so
   the harness sees a failed tool call instead of the Task Attempt failing.
+
+## Conformance suite
+
+`sandboxProviderConformance` in `@supertag/worker-sdk/internal/rust-workspace-provider/conformance`
+drives a provider through the production handlers and the real gRPC transport, as the Worker Host
+does. It returns named cases whose `run` throws on a failure, so any test runner can register
+them. With Vitest:
+
+```ts
+import { sandboxProviderConformance } from "@supertag/worker-sdk/internal/rust-workspace-provider/conformance";
+import { it } from "vitest";
+import { createMyWorkspaceSession } from "./src/session.js";
+
+for (const check of sandboxProviderConformance(
+  async () => ({ session: createMyWorkspaceSession() }),
+  { commands: true, snapshots: false, isolated: true },
+))
+  it(check.name, check.run, check.timeoutMs);
+```
+
+Each case gets a fresh session and a scratch `directory`. The options:
+
+| Option | Means |
+| --- | --- |
+| `commands` | The provider can seal its sandboxes and admits `commands:execute`. Without it, the suite checks that Allocate refuses commands |
+| `snapshots` | The provider keeps prepared artifacts |
+| `isolated` | The sandbox is a separate machine or container. Set it for a real provider. A test double that runs on the test machine leaves it unset, and the host-reach and seal cases then check the protocol only |
+
+A session may also offer `lose()`, which ends its sandbox out of band, to run the lost-sandbox
+case.
+
+The cases check allocation and ownership, Stage's digest check and its refusal of links that leave
+the checkout, file tools within the checkout, Capture and its exclusions, Stop, rule 1 after Stop
+and after a lost sandbox, and that a host directory the suite watches never changes. With
+`commands`, they check bounded commands and their time limit, and Capture after a command left a
+process running. The cases need `git` on the machine running them.
+
+A provider must pass the suite with `isolated` set. E2B and Modal run it against their test
+doubles.

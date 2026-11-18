@@ -24,6 +24,11 @@
       "development": "./src/rust-workspace-provider/index.ts",
       "default": "./dist/rust-workspace-provider/index.js"
     },
+    "./internal/rust-workspace-provider/conformance": {
+      "types": "./dist/rust-workspace-provider/conformance.d.ts",
+      "development": "./src/rust-workspace-provider/conformance.ts",
+      "default": "./dist/rust-workspace-provider/conformance.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "development": "./src/index.ts",
