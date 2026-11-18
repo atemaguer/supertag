@@ -2,29 +2,18 @@ use super::*;
 use aws_credential_types::Credentials;
 use aws_sigv4::{
     http_request::{
-        PayloadChecksumKind, PercentEncodingMode, SignableBody, SignableRequest, SigningSettings,
-        UriPathNormalizationMode, sign,
+        PayloadChecksumKind, PercentEncodingMode, SignableBody, SignableRequest, SignatureLocation,
+        SigningSettings, UriPathNormalizationMode, sign,
     },
     sign::v4,
 };
-use reqwest::{Body, Client, Method, RequestBuilder, StatusCode, Url, header};
-use serde::Deserialize;
-use std::{io::SeekFrom, time::SystemTime};
+use base64::Engine;
+use reqwest::{Client, Method, RequestBuilder, StatusCode, Url, header};
+use std::time::SystemTime;
 use supertag_protocol::volumes::s3_volume_source;
-use tokio::io::AsyncSeekExt;
+use supertag_workspaces::artifact_volumes::key_parts;
 
-const MAX_CONFIG_BYTES: u64 = 64 * 1024;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(25);
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Config {
-    volume_id: String,
-    source: String,
-    endpoint: String,
-    region: String,
-    credential_env_prefix: String,
-}
 
 #[derive(Clone)]
 pub(super) struct S3Mapping {
@@ -35,115 +24,61 @@ pub(super) struct S3Mapping {
     client: Client,
 }
 
-pub(super) fn load(path: &Path) -> Result<BTreeMap<String, S3Mapping>> {
-    let mut bytes = Vec::new();
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NONBLOCK)
-        .open(path)
-        .context("open S3 Volume configuration")?;
-    ensure!(
-        file.metadata()?.is_file(),
-        "S3 Volume configuration must be a file"
-    );
-    file.take(MAX_CONFIG_BYTES + 1).read_to_end(&mut bytes)?;
-    ensure!(
-        bytes.len() as u64 <= MAX_CONFIG_BYTES,
-        "S3 Volume configuration is too large"
-    );
-    let entries: Vec<Config> = serde_json::from_slice(&bytes)
-        .map_err(|_| anyhow::anyhow!("invalid S3 Volume configuration"))?;
-    configure(entries, |name| match std::env::var(name) {
-        Ok(value) => Ok(Some(value)),
-        Err(std::env::VarError::NotPresent) => Ok(None),
-        Err(_) => anyhow::bail!("invalid S3 Volume credential environment"),
-    })
-}
-
-fn configure(
-    entries: Vec<Config>,
-    credential: impl Fn(&str) -> Result<Option<String>>,
-) -> Result<BTreeMap<String, S3Mapping>> {
-    ensure!(entries.len() <= 64, "too many S3 Volume mappings");
-    let client = Client::builder()
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .retry(reqwest::retry::never())
-        .connect_timeout(Duration::from_secs(5))
-        .timeout(HTTP_TIMEOUT)
-        .build()
-        .map_err(|_| anyhow::anyhow!("could not initialize S3 Volume HTTP client"))?;
-    let mut mappings: BTreeMap<String, S3Mapping> = BTreeMap::new();
-    for entry in entries {
+impl S3Mapping {
+    /// A signer for the S3 Volume at `source` from its vault credential: `endpoint`, `region`,
+    /// `access_key_id`, `secret_access_key`, and optionally `session_token`. The endpoint comes
+    /// from the credential, chosen by the Control Plane's owner, never from the Volume.
+    pub(super) fn from_vault(
+        source: &str,
+        value: &supertag_credential_vault::CredentialValue,
+    ) -> Result<Self> {
+        s3_volume_source(source)?;
+        let field = |name: &str| value.get(name).map(String::as_str);
+        let endpoint = endpoint(field("endpoint").context("S3 Volume endpoint is missing")?)?;
+        let region = field("region").context("S3 Volume region is missing")?;
         ensure!(
-            !entry.volume_id.is_empty()
-                && entry.volume_id.len() <= 128
-                && !entry.volume_id.chars().any(char::is_control)
-                && !mappings.contains_key(&entry.volume_id),
-            "invalid or duplicate S3 Volume mapping"
-        );
-        let (bucket, prefix) = s3_volume_source(&entry.source)?;
-        let endpoint = endpoint(&entry.endpoint)?;
-        ensure!(
-            !entry.region.is_empty()
-                && entry.region.len() <= 64
-                && entry
-                    .region
+            !region.is_empty()
+                && region.len() <= 64
+                && region
                     .bytes()
                     .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'),
             "invalid S3 Volume region"
         );
-        ensure!(
-            !entry.credential_env_prefix.is_empty()
-                && entry.credential_env_prefix.len() <= 64
-                && entry.credential_env_prefix.as_bytes()[0].is_ascii_uppercase()
-                && entry
-                    .credential_env_prefix
-                    .bytes()
-                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_'),
-            "invalid S3 Volume credential environment prefix"
-        );
-        for prior in mappings.values().filter(|prior| prior.endpoint == endpoint) {
-            let (prior_bucket, prior_prefix) = s3_volume_source(&prior.source)?;
-            ensure!(
-                bucket != prior_bucket
-                    || !(within(prefix, prior_prefix) || within(prior_prefix, prefix)),
-                "S3 Volume mappings overlap"
-            );
-        }
-        let env = |suffix| credential(&format!("{}_{suffix}", entry.credential_env_prefix));
-        let key = env("ACCESS_KEY_ID")?.context("S3 Volume access key is missing")?;
-        let secret = env("SECRET_ACCESS_KEY")?.context("S3 Volume secret key is missing")?;
-        let token = env("SESSION_TOKEN")?;
+        let key = field("access_key_id").context("S3 Volume access key is missing")?;
+        let secret = field("secret_access_key").context("S3 Volume secret key is missing")?;
+        let token = field("session_token").filter(|token| !token.is_empty());
         ensure!(
             !key.is_empty()
                 && key.len() <= 128
                 && key
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
-                && valid_secret(&secret)
-                && token.as_deref().is_none_or(valid_secret),
+                && valid_secret(secret)
+                && token.is_none_or(valid_secret),
             "invalid S3 Volume credential"
         );
-        mappings.insert(
-            entry.volume_id,
-            S3Mapping {
-                source: entry.source,
-                endpoint,
-                region: entry.region,
-                credentials: Credentials::new(key, secret, token, None, "supertag-artifact-volume"),
-                client: client.clone(),
-            },
-        );
+        let client = Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(HTTP_TIMEOUT)
+            .build()
+            .map_err(|_| anyhow::anyhow!("could not initialize S3 Volume HTTP client"))?;
+        Ok(Self {
+            source: source.to_owned(),
+            endpoint,
+            region: region.to_owned(),
+            credentials: Credentials::new(
+                key,
+                secret,
+                token.map(str::to_owned),
+                None,
+                "supertag-volume",
+            ),
+            client,
+        })
     }
-    Ok(mappings)
-}
-
-fn within(path: &str, base: &str) -> bool {
-    path == base
-        || path
-            .strip_prefix(base)
-            .is_some_and(|tail| tail.starts_with('/'))
 }
 
 fn valid_secret(value: &str) -> bool {
@@ -202,6 +137,9 @@ impl S3Mapping {
             .into();
         let length = blob.byte_length.to_string();
         let mut headers = vec![("accept-encoding", "identity")];
+        if method == Method::HEAD {
+            headers.push(("x-amz-checksum-mode", "ENABLED"));
+        }
         let payload = if put {
             headers.extend([("if-none-match", "*"), ("content-length", &length)]);
             SignableBody::Precomputed(blob.sha256.clone())
@@ -234,103 +172,151 @@ impl S3Mapping {
         }
         Ok(request)
     }
+}
 
-    pub(super) async fn read(
-        &self,
-        key: &str,
-        blob: &BlobReference,
-    ) -> Result<Option<tokio::fs::File>> {
-        let mut response = self
-            .request(Method::GET, key, blob, false)?
-            .send()
-            .await
-            .map_err(|_| anyhow::anyhow!("S3 Volume read failed"))?;
-        if response.status() == StatusCode::NOT_FOUND {
-            return Ok(None);
-        }
-        ensure!(
-            response.status() == StatusCode::OK
-                && !response.headers().contains_key(header::CONTENT_RANGE)
-                && response
-                    .headers()
-                    .get_all(header::CONTENT_ENCODING)
-                    .iter()
-                    .all(|value| value == "identity")
-                && response
-                    .content_length()
-                    .is_none_or(|length| length == blob.byte_length),
-            "S3 Volume read did not return the exact object"
-        );
-        // An unnamed temporary file: nothing of it outlives this process, even after a crash.
-        let mut snapshot = tokio::fs::File::from_std(tempfile::tempfile()?);
-        let mut digest = Sha256::new();
-        let mut length = 0u64;
-        while let Some(bytes) = response
-            .chunk()
-            .await
-            .map_err(|_| anyhow::anyhow!("S3 Volume object read failed"))?
-        {
-            length += bytes.len() as u64;
-            ensure!(
-                length <= blob.byte_length,
-                "S3 Volume object exceeds its receipt"
-            );
-            digest.update(&bytes);
-            snapshot.write_all(&bytes).await?;
-        }
-        ensure!(
-            length == blob.byte_length && format!("{:x}", digest.finalize()) == blob.sha256,
-            "S3 Volume object differs from its receipt"
-        );
-        snapshot.flush().await?;
-        snapshot.seek(SeekFrom::Start(0)).await?;
-        Ok(Some(snapshot))
+/// The base64 SHA-256 checksum S3 records and checks for an object, from a receipt's hex digest.
+pub(super) fn checksum_sha256(blob: &BlobReference) -> Result<String> {
+    ensure!(
+        supertag_protocol::valid_sha256(&blob.sha256),
+        "invalid artifact digest"
+    );
+    let raw = (0..32)
+        .map(|index| u8::from_str_radix(&blob.sha256[index * 2..index * 2 + 2], 16))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(raw))
+}
+
+impl S3Mapping {
+    fn object_url(&self, storage_key: &str, blob: &BlobReference) -> Result<Url> {
+        key_parts(storage_key, blob)?;
+        let (bucket, prefix) = s3_volume_source(&self.source)?;
+        let mut url = self.endpoint.clone();
+        url.set_path(&format!("/{bucket}/{prefix}/{storage_key}"));
+        Ok(url)
     }
 
-    /// Writes relayed `bytes` unless the exact object is already there. Without `bytes`, only an
-    /// existing object succeeds.
-    pub(super) async fn persist(
+    /// A presigned PUT of exactly this object: `content-length`, `x-amz-checksum-sha256`, and
+    /// `if-none-match: *` are signed headers, so S3 refuses other bytes, another length, or an
+    /// overwrite. The host sends the returned headers unchanged; it never holds credentials.
+    pub(super) fn presign_put(
         &self,
-        bytes: Option<Vec<u8>>,
-        copy: &ArtifactVolumeCopy,
-    ) -> Result<()> {
-        let blob = copy
-            .file
-            .as_ref()
-            .and_then(|file| file.blob.as_ref())
-            .context("copy has no blob")?;
-        let key = &copy.storage_key;
-        if self.read(key, blob).await?.is_some() {
-            return Ok(());
-        }
-        ensure!(
-            copy.state() == ArtifactVolumeCopyState::Reserved,
-            "verified artifact Volume copy is missing"
-        );
-        let bytes = bytes.ok_or(super::SourceUnavailable)?;
-        // The relayed bytes are already in memory; they go to the bucket from there.
-        super::verify_bytes(&bytes, blob)?;
-        let body = Body::from(bytes);
-        let result = self
-            .request(Method::PUT, key, blob, true)?
-            .body(body)
-            .send()
-            .await;
-        match result {
-            Ok(response)
-                if !matches!(
-                    response.status(),
-                    StatusCode::OK | StatusCode::CONFLICT | StatusCode::PRECONDITION_FAILED
-                ) && !response.status().is_server_error() =>
-            {
-                anyhow::bail!("S3 Volume conditional write was refused")
+        storage_key: &str,
+        blob: &BlobReference,
+        lifetime: Duration,
+    ) -> Result<ArtifactVolumeUpload> {
+        let length = blob.byte_length.to_string();
+        let checksum = checksum_sha256(blob)?;
+        self.presign(
+            "PUT",
+            storage_key,
+            blob,
+            lifetime,
+            &[
+                ("content-length", length.as_str()),
+                ("if-none-match", "*"),
+                ("x-amz-checksum-sha256", checksum.as_str()),
+            ],
+        )
+    }
+
+    /// A presigned GET of this object. A GET cannot bind a checksum, so the reader verifies the
+    /// bytes' length and SHA-256 itself.
+    pub(super) fn presign_get(
+        &self,
+        storage_key: &str,
+        blob: &BlobReference,
+        lifetime: Duration,
+    ) -> Result<ArtifactVolumeUpload> {
+        self.presign("GET", storage_key, blob, lifetime, &[])
+    }
+
+    fn presign(
+        &self,
+        method: &str,
+        storage_key: &str,
+        blob: &BlobReference,
+        lifetime: Duration,
+        headers: &[(&str, &str)],
+    ) -> Result<ArtifactVolumeUpload> {
+        let mut url = self.object_url(storage_key, blob)?;
+        let identity = self.credentials.clone().into();
+        let mut settings = SigningSettings::default();
+        settings.percent_encoding_mode = PercentEncodingMode::Single;
+        settings.uri_path_normalization_mode = UriPathNormalizationMode::Disabled;
+        settings.signature_location = SignatureLocation::QueryParams;
+        settings.expires_in = Some(lifetime);
+        let now = SystemTime::now();
+        let params = v4::SigningParams::builder()
+            .identity(&identity)
+            .region(&self.region)
+            .name("s3")
+            .time(now)
+            .settings(settings)
+            .build()
+            .map_err(|_| signing_error())?
+            .into();
+        let signable = SignableRequest::new(
+            method,
+            url.as_str(),
+            headers.iter().copied(),
+            SignableBody::UnsignedPayload,
+        )
+        .map_err(|_| signing_error())?;
+        let (signed, _) = tracing::dispatcher::with_default(&tracing::Dispatch::none(), || {
+            sign(signable, &params)
+        })
+        .map_err(|_| signing_error())?
+        .into_parts();
+        {
+            let mut query = url.query_pairs_mut();
+            for (name, value) in signed.params() {
+                query.append_pair(name, value);
             }
-            _ => {}
         }
-        // A lost or contested write is successful only if independent readback proves exact bytes.
+        let expires = now
+            .checked_add(lifetime)
+            .and_then(|at| at.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .ok_or_else(signing_error)?;
+        Ok(ArtifactVolumeUpload {
+            url: url.into(),
+            headers: headers
+                .iter()
+                .map(|(name, value)| ArtifactVolumeUploadHeader {
+                    name: (*name).into(),
+                    value: (*value).into(),
+                })
+                .collect(),
+            expires_at_ms: expires.as_millis() as i64,
+        })
+    }
+
+    /// Checks that the object at this key is exactly the receipt's bytes from S3's own record: its
+    /// length and the SHA-256 checksum S3 verified when it accepted the upload. No bytes are read.
+    pub(super) async fn verify_head(&self, storage_key: &str, blob: &BlobReference) -> Result<()> {
+        let response = self
+            .request(Method::HEAD, storage_key, blob, false)?
+            .send()
+            .await
+            .map_err(|_| anyhow::anyhow!("S3 Volume check failed"))?;
         ensure!(
-            self.read(key, blob).await?.is_some(),
-            "S3 Volume object is missing after the conditional write"
+            response.status() == StatusCode::OK,
+            "the object is not on the S3 Volume"
+        );
+        let header = |name: &str| {
+            response
+                .headers()
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned)
+        };
+        ensure!(
+            header("content-length").as_deref() == Some(blob.byte_length.to_string().as_str()),
+            "the S3 Volume object has another length"
+        );
+        // A store that records no SHA-256 checksum cannot prove the bytes; the copy fails.
+        ensure!(
+            header("x-amz-checksum-sha256").as_deref() == Some(checksum_sha256(blob)?.as_str()),
+            "the S3 Volume object has no matching SHA-256 checksum"
         );
         Ok(())
     }
@@ -372,52 +358,21 @@ mod tests {
     }
 
     #[test]
-    fn config_rejects_duplicates_overlap_and_invalid_credential_names() {
-        fn config(id: &str, source: &str) -> Config {
-            Config {
-                volume_id: id.into(),
-                source: source.into(),
-                endpoint: "https://example.test".into(),
-                region: "auto".into(),
-                credential_env_prefix: "EXPLICIT".into(),
-            }
-        }
-        fn credentials(name: &str) -> Result<Option<String>> {
-            Ok(match name {
-                "EXPLICIT_ACCESS_KEY_ID" => Some("testKey".into()),
-                "EXPLICIT_SECRET_ACCESS_KEY" => Some("testSecret".into()),
-                "EXPLICIT_SESSION_TOKEN" => None,
-                _ => panic!("unexpected credential name"),
-            })
-        }
-        let first = || config("first", "s3://evidence-bucket/a/b");
-        assert!(
-            configure(
-                vec![first(), config("first", "s3://evidence-bucket/a/c")],
-                credentials,
-            )
-            .is_err()
-        );
-        assert!(
-            configure(
-                vec![first(), config("second", "s3://evidence-bucket/a/b/child")],
-                credentials,
-            )
-            .is_err()
-        );
-        assert!(
-            configure(
-                vec![
-                    first(),
-                    config("second", "s3://evidence-bucket/a/b-different")
-                ],
-                credentials,
-            )
-            .is_ok()
-        );
-        assert!(configure(vec![first()], |_| Ok(None)).is_err());
-        let mut invalid = first();
-        invalid.credential_env_prefix = "AWS=bad".into();
-        assert!(configure(vec![invalid], |_| panic!("invalid env name was used")).is_err());
+    fn a_vault_credential_needs_every_field_and_a_safe_endpoint() {
+        let value = |endpoint: &str| {
+            supertag_credential_vault::CredentialValue::from([
+                ("endpoint".to_owned(), endpoint.to_owned()),
+                ("region".to_owned(), "auto".to_owned()),
+                ("access_key_id".to_owned(), "testKey".to_owned()),
+                ("secret_access_key".to_owned(), "testSecret".to_owned()),
+            ])
+        };
+        let source = "s3://evidence-bucket/a/b";
+        assert!(S3Mapping::from_vault(source, &value("https://example.test")).is_ok());
+        assert!(S3Mapping::from_vault(source, &value("https://example.test/path")).is_err());
+        assert!(S3Mapping::from_vault("file:///srv/a", &value("https://example.test")).is_err());
+        let mut missing = value("https://example.test");
+        missing.remove("secret_access_key");
+        assert!(S3Mapping::from_vault(source, &missing).is_err());
     }
 }

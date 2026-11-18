@@ -5,8 +5,7 @@ use supertag_protocol::artifacts::{
 };
 
 const ARTIFACT_TRANSFER_TIMEOUT: Duration = Duration::from_secs(60);
-const VOLUME_SEARCH_TIMEOUT: Duration = Duration::from_secs(30);
-const VOLUME_READ_TIMEOUT: Duration = Duration::from_secs(12);
+const HOLDER_LOOKUP_TIMEOUT: Duration = Duration::from_secs(30);
 
 use locate_artifact_copies_request::Target;
 
@@ -57,46 +56,21 @@ impl ApiTransfers {
         Ok(response.into_inner())
     }
 
-    /// Opens the bytes of one authorized artifact file: a verified Volume copy this Control Plane
-    /// maps, otherwise the Worker Host holding the producing Attempt's bytes, through the relay.
+    /// Opens the bytes of one authorized artifact file from the Worker Host holding the producing
+    /// Attempt's bytes, through the relay. A Volume copy is read by hosts that use the Volume.
     async fn open_artifact(
         &self,
         metadata: &tonic::metadata::MetadataMap,
         target: Target,
         blob: &BlobReference,
     ) -> Result<Source, Status> {
-        let ids = self.volumes.candidate_ids();
-        let batches: Vec<&[String]> = if ids.is_empty() {
-            vec![&[]]
-        } else {
-            ids.chunks(32).collect()
-        };
-        let search = async {
-            let mut holder = None;
-            for batch in batches {
-                let found = self
-                    .locate_copies(metadata.clone(), target.clone(), batch)
-                    .await?;
-                holder = holder.or(found.holder);
-                for location in found.locations {
-                    if let Ok(Ok(file)) = timeout(
-                        VOLUME_READ_TIMEOUT,
-                        self.read_volume_location(&location, blob),
-                    )
-                    .await
-                    {
-                        return Ok((Some(file), holder));
-                    }
-                }
-            }
-            Ok::<_, Status>((None, holder))
-        };
-        let (file, holder) = timeout(VOLUME_SEARCH_TIMEOUT, search)
-            .await
-            .map_err(|_| Status::deadline_exceeded("artifact copy lookup timed out"))??;
-        if let Some(file) = file {
-            return Ok(Source::File(file));
-        }
+        let holder = timeout(
+            HOLDER_LOOKUP_TIMEOUT,
+            self.locate_copies(metadata.clone(), target, &[]),
+        )
+        .await
+        .map_err(|_| Status::deadline_exceeded("artifact holder lookup timed out"))??
+        .holder;
         let holder = holder.ok_or_else(|| artifact_source_unavailable(None))?;
         match self.relay.open(&holder, blob).await {
             Ok(incoming) => Ok(Source::Relay(incoming)),
@@ -119,28 +93,44 @@ impl ApiTransfers {
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 
-    /// Records a capture whose bytes the calling Worker Host already holds in its registered
-    /// artifact storage. No bytes reach the Control Plane.
-    async fn commit_held_capture(
+    /// Reserves a capture whose bytes the calling Worker Host holds in its registered artifact
+    /// storage. The reservation lists the copies the producing Tag's artifact Volume keeps.
+    async fn reserve_held_capture(
         &self,
-        request: Request<CommitArtifactCaptureRequest>,
-    ) -> Result<Response<CapturedArtifact>, Status> {
-        let (metadata, _, begin) = request.into_parts();
+        metadata: tonic::metadata::MetadataMap,
+        begin: CommitArtifactCaptureRequest,
+    ) -> Result<CapturedArtifact, Status> {
         validate_capture_manifest(&begin)?;
         if begin.source_storage_id.is_none() {
             return Err(Status::failed_precondition(
                 "artifact capture requires the Worker Host's registered artifact storage",
             ));
         }
-        let mut reserve = Request::new(begin.clone());
-        *reserve.metadata_mut() = metadata.clone();
-        let reserved = self
+        let mut reserve = Request::new(begin);
+        *reserve.metadata_mut() = metadata;
+        Ok(self
             .api
             .forward_host(reserve, true, |channel, request| async move {
                 artifact_client(channel).reserve_capture(request).await
             })
             .await?
-            .into_inner();
+            .into_inner())
+    }
+
+    /// Records a capture whose bytes the calling Worker Host already holds. Each Volume copy its
+    /// reservation listed must already be on the Volume, written there by the host; the commit
+    /// checks it and records it Verified. No bytes reach the Control Plane.
+    async fn commit_held_capture(
+        &self,
+        request: Request<CommitArtifactCaptureRequest>,
+    ) -> Result<Response<CapturedArtifact>, Status> {
+        let (metadata, _, begin) = request.into_parts();
+        let reserved = self
+            .reserve_held_capture(metadata.clone(), begin.clone())
+            .await?;
+        for copy in &reserved.volume_copies {
+            self.check_capture_copy(copy).await?;
+        }
         let mut commit = Request::new(begin);
         *commit.metadata_mut() = metadata;
         let response = self
@@ -149,7 +139,18 @@ impl ApiTransfers {
                 artifact_client(channel).commit_capture(request).await
             })
             .await?;
-        if response.get_ref() != &reserved {
+        let unverified = |artifact: &CapturedArtifact| CapturedArtifact {
+            volume_copies: vec![],
+            ..artifact.clone()
+        };
+        if unverified(response.get_ref()) != unverified(&reserved)
+            || response.get_ref().volume_copies.len() != reserved.volume_copies.len()
+            || response
+                .get_ref()
+                .volume_copies
+                .iter()
+                .any(|copy| copy.state() != ArtifactVolumeCopyState::Verified)
+        {
             return Err(Status::data_loss(
                 "artifact commit differs from its reservation",
             ));
@@ -185,6 +186,24 @@ impl artifact_catalog_server::ArtifactCatalog for ApiTransfers {
 
 #[tonic::async_trait]
 impl attempt_artifacts_server::AttemptArtifacts for ApiTransfers {
+    async fn reserve_capture(
+        &self,
+        request: Request<CommitArtifactCaptureRequest>,
+    ) -> Result<Response<CapturedArtifact>, Status> {
+        self.authorize_upload(&request).await?;
+        let (metadata, _, begin) = request.into_parts();
+        let mut reserved = timeout(
+            ARTIFACT_TRANSFER_TIMEOUT,
+            self.reserve_held_capture(metadata, begin),
+        )
+        .await
+        .map_err(|_| Status::deadline_exceeded("artifact capture reservation timed out"))??;
+        for copy in &mut reserved.volume_copies {
+            copy.upload = self.upload_grant(copy).await?;
+        }
+        Ok(Response::new(reserved))
+    }
+
     async fn commit_capture(
         &self,
         request: Request<CommitArtifactCaptureRequest>,

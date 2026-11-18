@@ -2121,7 +2121,7 @@ class HostRecord(_message.Message):
     def __init__(self, host_id: _Optional[str] = ..., generation: _Optional[int] = ..., revoked: _Optional[bool] = ...) -> None: ...
 
 class PutTagRequest(_message.Message):
-    __slots__ = ("tag_id", "instructions", "allowed_actions", "workspace", "harness_kind", "approval_rules", "execution", "name", "expected_revision", "lead", "max_work_sessions", "memory", "start_rate")
+    __slots__ = ("tag_id", "instructions", "allowed_actions", "workspace", "harness_kind", "approval_rules", "execution", "name", "expected_revision", "lead", "max_work_sessions", "memory", "start_rate", "volume")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
@@ -2135,6 +2135,7 @@ class PutTagRequest(_message.Message):
     MAX_WORK_SESSIONS_FIELD_NUMBER: _ClassVar[int]
     MEMORY_FIELD_NUMBER: _ClassVar[int]
     START_RATE_FIELD_NUMBER: _ClassVar[int]
+    VOLUME_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     instructions: str
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
@@ -2148,7 +2149,8 @@ class PutTagRequest(_message.Message):
     max_work_sessions: int
     memory: bool
     start_rate: StartRate
-    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., expected_revision: _Optional[int] = ..., lead: _Optional[bool] = ..., max_work_sessions: _Optional[int] = ..., memory: _Optional[bool] = ..., start_rate: _Optional[_Union[StartRate, _Mapping]] = ...) -> None: ...
+    volume: str
+    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., expected_revision: _Optional[int] = ..., lead: _Optional[bool] = ..., max_work_sessions: _Optional[int] = ..., memory: _Optional[bool] = ..., start_rate: _Optional[_Union[StartRate, _Mapping]] = ..., volume: _Optional[str] = ...) -> None: ...
 
 class StartRate(_message.Message):
     __slots__ = ("starts", "per_ms")
@@ -2159,7 +2161,7 @@ class StartRate(_message.Message):
     def __init__(self, starts: _Optional[int] = ..., per_ms: _Optional[int] = ...) -> None: ...
 
 class Tag(_message.Message):
-    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace", "harness_kind", "approval_rules", "execution", "name", "retired_at_ms", "runs_on", "lead", "max_work_sessions", "open_work_sessions", "memory", "memory_reviewed_at_ms", "attention", "start_rate", "starts_in_window", "native_memory")
+    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace", "harness_kind", "approval_rules", "execution", "name", "retired_at_ms", "runs_on", "lead", "max_work_sessions", "open_work_sessions", "memory", "memory_reviewed_at_ms", "attention", "start_rate", "volume", "starts_in_window", "native_memory")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
@@ -2178,6 +2180,7 @@ class Tag(_message.Message):
     MEMORY_REVIEWED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     ATTENTION_FIELD_NUMBER: _ClassVar[int]
     START_RATE_FIELD_NUMBER: _ClassVar[int]
+    VOLUME_FIELD_NUMBER: _ClassVar[int]
     STARTS_IN_WINDOW_FIELD_NUMBER: _ClassVar[int]
     NATIVE_MEMORY_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
@@ -2198,9 +2201,10 @@ class Tag(_message.Message):
     memory_reviewed_at_ms: int
     attention: AttentionSummary
     start_rate: StartRate
+    volume: str
     starts_in_window: int
     native_memory: _containers.RepeatedCompositeFieldContainer[NativeMemoryStore]
-    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., retired_at_ms: _Optional[int] = ..., runs_on: _Optional[_Iterable[str]] = ..., lead: _Optional[bool] = ..., max_work_sessions: _Optional[int] = ..., open_work_sessions: _Optional[int] = ..., memory: _Optional[bool] = ..., memory_reviewed_at_ms: _Optional[int] = ..., attention: _Optional[_Union[AttentionSummary, _Mapping]] = ..., start_rate: _Optional[_Union[StartRate, _Mapping]] = ..., starts_in_window: _Optional[int] = ..., native_memory: _Optional[_Iterable[_Union[NativeMemoryStore, _Mapping]]] = ...) -> None: ...
+    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., retired_at_ms: _Optional[int] = ..., runs_on: _Optional[_Iterable[str]] = ..., lead: _Optional[bool] = ..., max_work_sessions: _Optional[int] = ..., open_work_sessions: _Optional[int] = ..., memory: _Optional[bool] = ..., memory_reviewed_at_ms: _Optional[int] = ..., attention: _Optional[_Union[AttentionSummary, _Mapping]] = ..., start_rate: _Optional[_Union[StartRate, _Mapping]] = ..., volume: _Optional[str] = ..., starts_in_window: _Optional[int] = ..., native_memory: _Optional[_Iterable[_Union[NativeMemoryStore, _Mapping]]] = ...) -> None: ...
 
 class AttentionSummary(_message.Message):
     __slots__ = ("posted", "read", "answered", "quiet", "window_days")
@@ -2727,7 +2731,7 @@ class ExecutionSelection(_message.Message):
     def __init__(self, model: _Optional[str] = ..., effort: _Optional[str] = ...) -> None: ...
 
 class HarnessExecutionProfile(_message.Message):
-    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace", "mcp_servers", "shared_execution", "declared_task_outputs", "task_artifact_inputs", "workspace_mounts", "mcp_login_servers", "network_credentials", "network_sandbox", "unverified_workspace_provider")
+    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace", "mcp_servers", "shared_execution", "declared_task_outputs", "task_artifact_inputs", "workspace_mounts", "mcp_login_servers", "network_credentials", "network_sandbox", "unverified_workspace_provider", "volumes")
     MODEL_IDS_FIELD_NUMBER: _ClassVar[int]
     DEFAULT_MODEL_FIELD_NUMBER: _ClassVar[int]
     ALLOW_UNSANDBOXED_COMMANDS_FIELD_NUMBER: _ClassVar[int]
@@ -2741,6 +2745,7 @@ class HarnessExecutionProfile(_message.Message):
     NETWORK_CREDENTIALS_FIELD_NUMBER: _ClassVar[int]
     NETWORK_SANDBOX_FIELD_NUMBER: _ClassVar[int]
     UNVERIFIED_WORKSPACE_PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    VOLUMES_FIELD_NUMBER: _ClassVar[int]
     model_ids: _containers.RepeatedScalarFieldContainer[str]
     default_model: str
     allow_unsandboxed_commands: bool
@@ -2754,7 +2759,16 @@ class HarnessExecutionProfile(_message.Message):
     network_credentials: _containers.RepeatedScalarFieldContainer[str]
     network_sandbox: bool
     unverified_workspace_provider: bool
-    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ..., declared_task_outputs: _Optional[bool] = ..., task_artifact_inputs: _Optional[bool] = ..., workspace_mounts: _Optional[_Iterable[_Union[WorkspaceMountCapability, _Mapping]]] = ..., mcp_login_servers: _Optional[_Iterable[str]] = ..., network_credentials: _Optional[_Iterable[str]] = ..., network_sandbox: _Optional[bool] = ..., unverified_workspace_provider: _Optional[bool] = ...) -> None: ...
+    volumes: _containers.RepeatedCompositeFieldContainer[VolumeMapping]
+    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ..., declared_task_outputs: _Optional[bool] = ..., task_artifact_inputs: _Optional[bool] = ..., workspace_mounts: _Optional[_Iterable[_Union[WorkspaceMountCapability, _Mapping]]] = ..., mcp_login_servers: _Optional[_Iterable[str]] = ..., network_credentials: _Optional[_Iterable[str]] = ..., network_sandbox: _Optional[bool] = ..., unverified_workspace_provider: _Optional[bool] = ..., volumes: _Optional[_Iterable[_Union[VolumeMapping, _Mapping]]] = ...) -> None: ...
+
+class VolumeMapping(_message.Message):
+    __slots__ = ("volume_id", "source")
+    VOLUME_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
+    volume_id: str
+    source: str
+    def __init__(self, volume_id: _Optional[str] = ..., source: _Optional[str] = ...) -> None: ...
 
 class SharedExecutionCapability(_message.Message):
     __slots__ = ("environment_id", "tools", "incarnation_id")
@@ -2939,18 +2953,20 @@ class ClaimTaskResponse(_message.Message):
     def __init__(self, assignment: _Optional[_Union[Assignment, _Mapping]] = ...) -> None: ...
 
 class Assignment(_message.Message):
-    __slots__ = ("task", "attempt_id", "lease_token", "joined", "native_memory")
+    __slots__ = ("task", "attempt_id", "lease_token", "joined", "native_memory", "volume")
     TASK_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
     JOINED_FIELD_NUMBER: _ClassVar[int]
     NATIVE_MEMORY_FIELD_NUMBER: _ClassVar[int]
+    VOLUME_FIELD_NUMBER: _ClassVar[int]
     task: Task
     attempt_id: str
     lease_token: str
     joined: _containers.RepeatedCompositeFieldContainer[JoinedMessage]
     native_memory: NativeMemoryGrant
-    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., joined: _Optional[_Iterable[_Union[JoinedMessage, _Mapping]]] = ..., native_memory: _Optional[_Union[NativeMemoryGrant, _Mapping]] = ...) -> None: ...
+    volume: AssignedVolume
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., joined: _Optional[_Iterable[_Union[JoinedMessage, _Mapping]]] = ..., native_memory: _Optional[_Union[NativeMemoryGrant, _Mapping]] = ..., volume: _Optional[_Union[AssignedVolume, _Mapping]] = ...) -> None: ...
 
 class NativeMemoryStore(_message.Message):
     __slots__ = ("tag_id", "harness", "audience", "host_id", "revision", "files", "bytes", "digest", "updated_at_ms", "task_id")
@@ -2983,6 +2999,16 @@ class NativeMemoryGrant(_message.Message):
     scope: str
     reset_generation: int
     def __init__(self, scope: _Optional[str] = ..., reset_generation: _Optional[int] = ...) -> None: ...
+
+class AssignedVolume(_message.Message):
+    __slots__ = ("volume_id", "source", "revision")
+    VOLUME_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
+    REVISION_FIELD_NUMBER: _ClassVar[int]
+    volume_id: str
+    source: str
+    revision: int
+    def __init__(self, volume_id: _Optional[str] = ..., source: _Optional[str] = ..., revision: _Optional[int] = ...) -> None: ...
 
 class JoinedMessage(_message.Message):
     __slots__ = ("task_id", "text", "sent_at_ms")

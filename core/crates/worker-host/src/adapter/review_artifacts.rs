@@ -147,6 +147,7 @@ mod tests {
                 attempt_id: "review-attempt".into(),
                 lease_token: "review-lease".into(),
                 joined: vec![],
+                volume: None,
             },
             checkpoint: None,
             resolved_skills: vec![],
@@ -171,6 +172,7 @@ mod tests {
                 transfers: crate::checkpoints::Transfers::new(channel.clone(), headers.clone()),
                 artifact_source: None,
                 artifact_peers: crate::ArtifactPeers::default(),
+                volumes: Default::default(),
                 workspace_mounts: supertag_protocol::v2::attempt_workspace_mounts_client::AttemptWorkspaceMountsClient::with_interceptor(channel.clone(), headers.clone()),
                 artifacts: supertag_protocol::v2::artifact_transfers_client::ArtifactTransfersClient::with_interceptor(
                     channel.clone(),

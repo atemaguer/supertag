@@ -192,6 +192,7 @@ impl Api {
             self.worker_host_service(),
             transfers.artifact_catalog_service(),
             transfers.artifact_volumes_service(),
+            transfers.volume_objects_service(),
             self.workspace_volumes_service(),
             self.placement_service(),
             self.auth_keys_service(),

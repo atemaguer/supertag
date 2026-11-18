@@ -31,6 +31,9 @@ pub(crate) struct Attempt {
     /// The Tag's native memory store the Control Plane granted this Attempt, if any.
     #[serde(default)]
     pub native_memory: Option<NativeMemoryGrant>,
+    /// The Tag's Volume as the claim assigned it.
+    #[serde(default)]
+    pub volume: Option<AssignedVolume>,
 }
 
 /// `supertag_protocol::v2::NativeMemoryGrant`, as the journal keeps it.
@@ -38,6 +41,14 @@ pub(crate) struct Attempt {
 pub(crate) struct NativeMemoryGrant {
     pub scope: String,
     pub reset_generation: u64,
+}
+
+/// The Tag's Volume as an Attempt's assignment carries it.
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct AssignedVolume {
+    pub volume_id: String,
+    pub source: String,
+    pub revision: u64,
 }
 
 /// A person's message this Attempt answers together with its Task's own prompt.
@@ -924,6 +935,7 @@ mod tests {
             execution_selection: None,
             requires_unsandboxed_commands: false,
             joined: vec![],
+            volume: None,
         };
         let processes = journal.processes(&attempt("attempt"));
         // No record at all is no evidence.
@@ -979,6 +991,7 @@ mod tests {
             execution_selection: None,
             requires_unsandboxed_commands: false,
             joined: vec![],
+            volume: None,
         };
         let journal = Journal::open(state.path())?;
         let provider_scope = "a".repeat(64);
@@ -1088,6 +1101,7 @@ mod tests {
             workspace_ids: vec!["repository".into()],
             execution_profile: Some(HarnessExecutionProfile {
                 declared_task_outputs: false,
+                volumes: vec![],
                 model_ids: vec!["primary".into(), "secondary".into()],
                 default_model: Some("primary".into()),
                 allow_unsandboxed_commands: false,
@@ -1141,6 +1155,7 @@ mod tests {
                 execution_selection: execution_selection.clone(),
                 requires_unsandboxed_commands: false,
                 joined: vec![],
+                volume: None,
             },
             prepared: None,
         })?;

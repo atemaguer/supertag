@@ -917,6 +917,7 @@ async fn exercise_workload(workload: Workload, database: String, label: &str) ->
                 max_work_sessions: None,
                 memory: None,
                 start_rate: None,
+                volume: None,
             })?)
             .await?;
     }
@@ -1365,6 +1366,7 @@ async fn exercise_soak(database: String) -> Result<Value> {
                 max_work_sessions: None,
                 memory: None,
                 start_rate: None,
+                volume: None,
             })?)
             .await?;
         hosts.push(

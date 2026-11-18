@@ -1077,6 +1077,7 @@ mod tests {
                 execution_selection: None,
                 requires_unsandboxed_commands: false,
                 joined: vec![],
+                volume: None,
             },
             result: "Change: Capture a checked result".into(),
             succeeded: true,

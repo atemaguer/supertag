@@ -28,6 +28,12 @@ class ArtifactVolumeCopyState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper)
     ARTIFACT_VOLUME_COPY_STATE_RESERVED: _ClassVar[ArtifactVolumeCopyState]
     ARTIFACT_VOLUME_COPY_STATE_VERIFIED: _ClassVar[ArtifactVolumeCopyState]
 
+class VolumeAccess(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    VOLUME_ACCESS_UNSPECIFIED: _ClassVar[VolumeAccess]
+    VOLUME_ACCESS_WRITE: _ClassVar[VolumeAccess]
+    VOLUME_ACCESS_READ: _ClassVar[VolumeAccess]
+
 class ArtifactApprovalStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     ARTIFACT_APPROVAL_STATUS_UNSPECIFIED: _ClassVar[ArtifactApprovalStatus]
@@ -44,6 +50,9 @@ ARTIFACT_ACQUISITION_STATE_UNCERTAIN: ArtifactAcquisitionState
 ARTIFACT_VOLUME_COPY_STATE_UNSPECIFIED: ArtifactVolumeCopyState
 ARTIFACT_VOLUME_COPY_STATE_RESERVED: ArtifactVolumeCopyState
 ARTIFACT_VOLUME_COPY_STATE_VERIFIED: ArtifactVolumeCopyState
+VOLUME_ACCESS_UNSPECIFIED: VolumeAccess
+VOLUME_ACCESS_WRITE: VolumeAccess
+VOLUME_ACCESS_READ: VolumeAccess
 ARTIFACT_APPROVAL_STATUS_UNSPECIFIED: ArtifactApprovalStatus
 ARTIFACT_APPROVAL_STATUS_AVAILABLE: ArtifactApprovalStatus
 ARTIFACT_APPROVAL_STATUS_WITHDRAWN: ArtifactApprovalStatus
@@ -121,14 +130,16 @@ class ArtifactSummary(_message.Message):
     def __init__(self, artifact_id: _Optional[str] = ..., description: _Optional[_Union[ArtifactDescription, _Mapping]] = ..., producer: _Optional[_Union[ArtifactProducer, _Mapping]] = ..., file_count: _Optional[int] = ..., byte_length: _Optional[int] = ..., captured_at_ms: _Optional[int] = ..., declared_task_output: _Optional[bool] = ...) -> None: ...
 
 class CapturedArtifact(_message.Message):
-    __slots__ = ("summary", "files", "inputs")
+    __slots__ = ("summary", "files", "inputs", "volume_copies")
     SUMMARY_FIELD_NUMBER: _ClassVar[int]
     FILES_FIELD_NUMBER: _ClassVar[int]
     INPUTS_FIELD_NUMBER: _ClassVar[int]
+    VOLUME_COPIES_FIELD_NUMBER: _ClassVar[int]
     summary: ArtifactSummary
     files: _containers.RepeatedCompositeFieldContainer[ArtifactFile]
     inputs: _containers.RepeatedCompositeFieldContainer[_runtime_pb2.ArtifactSelection]
-    def __init__(self, summary: _Optional[_Union[ArtifactSummary, _Mapping]] = ..., files: _Optional[_Iterable[_Union[ArtifactFile, _Mapping]]] = ..., inputs: _Optional[_Iterable[_Union[_runtime_pb2.ArtifactSelection, _Mapping]]] = ...) -> None: ...
+    volume_copies: _containers.RepeatedCompositeFieldContainer[ArtifactVolumeCopy]
+    def __init__(self, summary: _Optional[_Union[ArtifactSummary, _Mapping]] = ..., files: _Optional[_Iterable[_Union[ArtifactFile, _Mapping]]] = ..., inputs: _Optional[_Iterable[_Union[_runtime_pb2.ArtifactSelection, _Mapping]]] = ..., volume_copies: _Optional[_Iterable[_Union[ArtifactVolumeCopy, _Mapping]]] = ...) -> None: ...
 
 class ArtifactAcquisition(_message.Message):
     __slots__ = ("acquisition_id", "operation_id", "task_id", "attempt_id", "artifact_id", "files", "delivery", "destination", "state", "created_at_ms", "updated_at_ms")
@@ -412,24 +423,8 @@ class DeleteArtifactVolumeResponse(_message.Message):
     deleted: bool
     def __init__(self, deleted: _Optional[bool] = ...) -> None: ...
 
-class CopyArtifactToVolumeRequest(_message.Message):
-    __slots__ = ("operation_id", "volume_id", "expected_revision", "artifact_id", "path", "expected_blob")
-    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
-    VOLUME_ID_FIELD_NUMBER: _ClassVar[int]
-    EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
-    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
-    PATH_FIELD_NUMBER: _ClassVar[int]
-    EXPECTED_BLOB_FIELD_NUMBER: _ClassVar[int]
-    operation_id: str
-    volume_id: str
-    expected_revision: int
-    artifact_id: str
-    path: str
-    expected_blob: _runtime_pb2.BlobReference
-    def __init__(self, operation_id: _Optional[str] = ..., volume_id: _Optional[str] = ..., expected_revision: _Optional[int] = ..., artifact_id: _Optional[str] = ..., path: _Optional[str] = ..., expected_blob: _Optional[_Union[_runtime_pb2.BlobReference, _Mapping]] = ...) -> None: ...
-
 class ArtifactVolumeCopy(_message.Message):
-    __slots__ = ("copy_id", "operation_id", "volume", "artifact_id", "file", "storage_key", "state", "created_at_ms", "verified_at_ms")
+    __slots__ = ("copy_id", "operation_id", "volume", "artifact_id", "file", "storage_key", "state", "created_at_ms", "verified_at_ms", "upload", "host_attested")
     COPY_ID_FIELD_NUMBER: _ClassVar[int]
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     VOLUME_FIELD_NUMBER: _ClassVar[int]
@@ -439,6 +434,8 @@ class ArtifactVolumeCopy(_message.Message):
     STATE_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     VERIFIED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    UPLOAD_FIELD_NUMBER: _ClassVar[int]
+    HOST_ATTESTED_FIELD_NUMBER: _ClassVar[int]
     copy_id: str
     operation_id: str
     volume: ArtifactVolume
@@ -448,15 +445,49 @@ class ArtifactVolumeCopy(_message.Message):
     state: ArtifactVolumeCopyState
     created_at_ms: int
     verified_at_ms: int
-    def __init__(self, copy_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., volume: _Optional[_Union[ArtifactVolume, _Mapping]] = ..., artifact_id: _Optional[str] = ..., file: _Optional[_Union[ArtifactFile, _Mapping]] = ..., storage_key: _Optional[str] = ..., state: _Optional[_Union[ArtifactVolumeCopyState, str]] = ..., created_at_ms: _Optional[int] = ..., verified_at_ms: _Optional[int] = ...) -> None: ...
+    upload: ArtifactVolumeUpload
+    host_attested: bool
+    def __init__(self, copy_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., volume: _Optional[_Union[ArtifactVolume, _Mapping]] = ..., artifact_id: _Optional[str] = ..., file: _Optional[_Union[ArtifactFile, _Mapping]] = ..., storage_key: _Optional[str] = ..., state: _Optional[_Union[ArtifactVolumeCopyState, str]] = ..., created_at_ms: _Optional[int] = ..., verified_at_ms: _Optional[int] = ..., upload: _Optional[_Union[ArtifactVolumeUpload, _Mapping]] = ..., host_attested: _Optional[bool] = ...) -> None: ...
 
-class CommitArtifactVolumeCopyRequest(_message.Message):
-    __slots__ = ("copy_id", "verified_blob")
-    COPY_ID_FIELD_NUMBER: _ClassVar[int]
-    VERIFIED_BLOB_FIELD_NUMBER: _ClassVar[int]
-    copy_id: str
-    verified_blob: _runtime_pb2.BlobReference
-    def __init__(self, copy_id: _Optional[str] = ..., verified_blob: _Optional[_Union[_runtime_pb2.BlobReference, _Mapping]] = ...) -> None: ...
+class VolumeObjectGrantRequest(_message.Message):
+    __slots__ = ("attempt", "checkpoint", "access")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    CHECKPOINT_FIELD_NUMBER: _ClassVar[int]
+    ACCESS_FIELD_NUMBER: _ClassVar[int]
+    attempt: _runtime_pb2.InspectAttemptRequest
+    checkpoint: _runtime_pb2.BlobReference
+    access: VolumeAccess
+    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., checkpoint: _Optional[_Union[_runtime_pb2.BlobReference, _Mapping]] = ..., access: _Optional[_Union[VolumeAccess, str]] = ...) -> None: ...
+
+class VolumeObjectGrant(_message.Message):
+    __slots__ = ("volume", "key", "blob", "presigned")
+    VOLUME_FIELD_NUMBER: _ClassVar[int]
+    KEY_FIELD_NUMBER: _ClassVar[int]
+    BLOB_FIELD_NUMBER: _ClassVar[int]
+    PRESIGNED_FIELD_NUMBER: _ClassVar[int]
+    volume: ArtifactVolume
+    key: str
+    blob: _runtime_pb2.BlobReference
+    presigned: ArtifactVolumeUpload
+    def __init__(self, volume: _Optional[_Union[ArtifactVolume, _Mapping]] = ..., key: _Optional[str] = ..., blob: _Optional[_Union[_runtime_pb2.BlobReference, _Mapping]] = ..., presigned: _Optional[_Union[ArtifactVolumeUpload, _Mapping]] = ...) -> None: ...
+
+class ArtifactVolumeUpload(_message.Message):
+    __slots__ = ("url", "headers", "expires_at_ms")
+    URL_FIELD_NUMBER: _ClassVar[int]
+    HEADERS_FIELD_NUMBER: _ClassVar[int]
+    EXPIRES_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    url: str
+    headers: _containers.RepeatedCompositeFieldContainer[ArtifactVolumeUploadHeader]
+    expires_at_ms: int
+    def __init__(self, url: _Optional[str] = ..., headers: _Optional[_Iterable[_Union[ArtifactVolumeUploadHeader, _Mapping]]] = ..., expires_at_ms: _Optional[int] = ...) -> None: ...
+
+class ArtifactVolumeUploadHeader(_message.Message):
+    __slots__ = ("name", "value")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    VALUE_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    value: str
+    def __init__(self, name: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
 
 class GetArtifactVolumeCopyRequest(_message.Message):
     __slots__ = ("copy_id",)

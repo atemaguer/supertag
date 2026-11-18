@@ -520,18 +520,6 @@ fn rule(path: &str) -> Option<Rule> {
             PutArtifactVolumeRequest,
             |value| named("ArtifactVolume", &value.volume_id)
         ),
-        ("ArtifactVolumeDirectory", "ReserveCopy") => rule!(
-            "artifact-volume.copy-reserve",
-            "ArtifactVolume",
-            CopyArtifactToVolumeRequest,
-            |value| named("ArtifactVolume", &value.volume_id)
-        ),
-        ("ArtifactVolumeDirectory", "CommitCopy") => rule!(
-            "artifact-volume.copy",
-            "ArtifactVolumeCopy",
-            CommitArtifactVolumeCopyRequest,
-            |value| named("ArtifactVolumeCopy", &value.copy_id)
-        ),
         ("ArtifactVolumeDirectory", "Delete") => rule!(
             "artifact-volume.delete",
             "ArtifactVolume",

@@ -8,12 +8,34 @@ use prost::Message;
 use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::{
-    artifacts::{MAX_ARTIFACT_FILE_BYTES, validate_artifact_path},
-    v2::*,
-    valid_sha256,
-    volumes::validate_volume_source,
+    artifacts::validate_artifact_path, v2::*, volumes::validate_volume_source,
 };
 use tonic::{Request, Response, Status};
+/// The root of everything a Tag keeps on its Volume. Hashing keeps Tag IDs out of object keys.
+pub(crate) fn tag_root(tag_id: &str) -> String {
+    format!("tags/{:x}", Sha256::digest(tag_id.as_bytes()))
+}
+
+/// Where a capture's file lives on its Tag's Volume.
+pub(crate) fn capture_key(tag_id: &str, attempt_id: &str, sha256: &str) -> String {
+    format!("{}/attempts/{attempt_id}/sha256/{sha256}", tag_root(tag_id))
+}
+
+/// Where a Session's checkpoint with these bytes lives on its Tag's Volume.
+pub(crate) fn checkpoint_key(tag_id: &str, session_id: &str, sha256: &str) -> String {
+    format!(
+        "{}/sessions/{:x}/checkpoint/{sha256}",
+        tag_root(tag_id),
+        Sha256::digest(session_id.as_bytes())
+    )
+}
+
+/// Two records of one Volume name the same storage: a new revision that only changed nothing
+/// about where it lives still holds the same objects.
+fn same_storage(left: &ArtifactVolume, right: &ArtifactVolume) -> bool {
+    left.volume_id == right.volume_id && left.source == right.source
+}
+
 fn hash(kind: &str, input: &impl Message) -> String {
     format!("{kind}:{:x}", Sha256::digest(input.encode_to_vec()))
 }
@@ -106,7 +128,7 @@ pub(crate) async fn locations_in(
     let summary = artifact.summary.as_ref().ok_or_else(missing)?;
     let producer = summary.producer.as_ref().ok_or_else(missing)?;
     let blob = file.blob.as_ref().ok_or_else(missing)?;
-    let storage_key = format!("attempts/{}/sha256/{}", producer.attempt_id, blob.sha256);
+    let storage_key = capture_key(&producer.tag_id, &producer.attempt_id, &blob.sha256);
     let mut locations = Vec::with_capacity(ids.len());
     for id in ids {
         name("Volume ID", id)?;
@@ -131,7 +153,10 @@ pub(crate) async fn locations_in(
         if copy.artifact_id != summary.artifact_id
             || copy.state() != ArtifactVolumeCopyState::Verified
             || copy.verified_at_ms.is_none()
-            || copy.volume.as_ref() != Some(&active)
+            || copy
+                .volume
+                .as_ref()
+                .is_none_or(|volume| !same_storage(volume, &active))
             || copy.file.as_ref() != Some(&file)
             || copy.storage_key != storage_key
         {
@@ -188,6 +213,161 @@ pub(crate) async fn revision_in(tx: &mut Transaction<'_, Any>, id: &str) -> Resu
     Ok(revision.map(|value| value as u64))
 }
 
+/// The principal of the copies a capture makes because its Tag names a Volume. Readers see them
+/// as they see the capture.
+pub(crate) const CAPTURE_PRINCIPAL: &str = "capture";
+
+/// A Tag's `volume` being written: as requested (empty removes it), else as it was. A
+/// named Volume must exist.
+pub(crate) async fn tag_volume_in(
+    tx: &mut Transaction<'_, Any>,
+    tag_id: &str,
+    requested: Option<String>,
+) -> Result<Option<String>> {
+    match requested {
+        Some(id) if id.is_empty() => Ok(None),
+        Some(id) => {
+            name("artifact Volume", &id)?;
+            if revision_in(tx, &id).await?.is_none() {
+                return Err(StoreError::FailedPrecondition(format!(
+                    "artifact Volume {id} does not exist"
+                )));
+            }
+            Ok(Some(id))
+        }
+        None => Ok(sqlx::query_scalar::<_, Option<String>>(
+            "SELECT volume FROM supertag_v2_tags WHERE tag_id=$1",
+        )
+        .bind(tag_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .flatten()),
+    }
+}
+
+/// The Tag's Volume as an Attempt's assignment carries it.
+pub(crate) async fn assigned_in(
+    tx: &mut Transaction<'_, Any>,
+    tag_id: &str,
+) -> Result<Option<AssignedVolume>> {
+    let Some(id) = tag_volume_in(tx, tag_id, None).await? else {
+        return Ok(None);
+    };
+    Ok(volume_in(tx, &id).await.ok().map(|volume| AssignedVolume {
+        volume_id: volume.volume_id,
+        source: volume.source,
+        revision: volume.revision,
+    }))
+}
+
+/// Reserves a copy of each file of a new capture on the artifact Volume its Tag names. None when
+/// the Tag names no Volume.
+pub(crate) async fn reserve_capture_copies_in(
+    tx: &mut Transaction<'_, Any>,
+    tag_id: &str,
+    artifact: &CapturedArtifact,
+    now: i64,
+) -> Result<Vec<ArtifactVolumeCopy>> {
+    let Some(id) = tag_volume_in(tx, tag_id, None).await? else {
+        return Ok(vec![]);
+    };
+    let volume = volume_in(tx, &id).await.map_err(|_| {
+        StoreError::FailedPrecondition(format!("the Tag's Volume {id} no longer exists"))
+    })?;
+    let summary = artifact.summary.as_ref().ok_or_else(missing)?;
+    let attempt = summary
+        .producer
+        .as_ref()
+        .map(|producer| producer.attempt_id.as_str())
+        .filter(|attempt| {
+            !attempt.is_empty()
+                && attempt
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+        })
+        .ok_or_else(|| invalid("artifact producer Attempt is invalid"))?;
+    let mut copies = Vec::with_capacity(artifact.files.len());
+    for (index, file) in artifact.files.iter().enumerate() {
+        let blob = file.blob.as_ref().ok_or_else(missing)?;
+        let copy = ArtifactVolumeCopy {
+            copy_id: uuid::Uuid::new_v4().to_string(),
+            operation_id: format!("{}/{index}", summary.artifact_id),
+            volume: Some(volume.clone()),
+            artifact_id: summary.artifact_id.clone(),
+            file: Some(file.clone()),
+            storage_key: capture_key(tag_id, attempt, &blob.sha256),
+            state: ArtifactVolumeCopyState::Reserved as i32,
+            created_at_ms: now,
+            verified_at_ms: None,
+            upload: None,
+            host_attested: false,
+        };
+        let order = crate::store::next_order(tx).await?;
+        sqlx::query("INSERT INTO supertag_v2_artifact_volume_copies (copy_id,principal,operation_id,volume_id,artifact_id,request_digest,state,payload,created_order,file_path) VALUES ($1,$2,$3,$4,$5,'',$6,$7,$8,$9)")
+            .bind(&copy.copy_id).bind(CAPTURE_PRINCIPAL).bind(&copy.operation_id).bind(&id)
+            .bind(&copy.artifact_id).bind(copy.state as i64).bind(copy.encode_to_vec()).bind(order)
+            .bind(&file.path)
+            .execute(&mut **tx).await?;
+        copies.push(copy);
+    }
+    Ok(copies)
+}
+
+/// The copies a capture reserved on its Tag's artifact Volume, in file order.
+pub(crate) async fn capture_copies_in(
+    tx: &mut Transaction<'_, Any>,
+    artifact_id: &str,
+) -> Result<Vec<ArtifactVolumeCopy>> {
+    let rows = sqlx::query(
+        "SELECT payload FROM supertag_v2_artifact_volume_copies
+         WHERE artifact_id=$1 AND principal=$2 ORDER BY created_order",
+    )
+    .bind(artifact_id)
+    .bind(CAPTURE_PRINCIPAL)
+    .fetch_all(&mut **tx)
+    .await?;
+    rows.iter()
+        .map(|row| decode(&row.try_get::<Vec<u8>, _>("payload")?))
+        .collect()
+}
+
+/// Records a capture's copies as Verified when it commits. The API tier checked each S3 copy with
+/// a HEAD before it asked to commit; a file copy is the capturing host's own attestation, as the
+/// Control Plane maps no Volume. The Volume must still be the one each copy names.
+pub(crate) async fn verify_capture_copies_in(
+    tx: &mut Transaction<'_, Any>,
+    artifact_id: &str,
+    now: i64,
+) -> Result<Vec<ArtifactVolumeCopy>> {
+    let mut copies = capture_copies_in(tx, artifact_id).await?;
+    for copy in &mut copies {
+        if copy.state() == ArtifactVolumeCopyState::Verified {
+            continue;
+        }
+        let expected = copy.volume.as_ref().ok_or_else(missing)?;
+        if !volume_in(tx, &expected.volume_id)
+            .await
+            .is_ok_and(|current| same_storage(&current, expected))
+        {
+            return Err(StoreError::Conflict(
+                "the Tag's Volume changed during the capture".into(),
+            ));
+        }
+        copy.host_attested = expected.source.starts_with("file:");
+        copy.state = ArtifactVolumeCopyState::Verified as i32;
+        copy.verified_at_ms = Some(now);
+        sqlx::query(
+            "UPDATE supertag_v2_artifact_volume_copies SET state=$1,payload=$2 WHERE copy_id=$3",
+        )
+        .bind(copy.state as i64)
+        .bind(copy.encode_to_vec())
+        .bind(&copy.copy_id)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(copies)
+}
+
 /// Deletes an unused Volume at `expected_revision`.
 pub(crate) async fn delete_in(
     tx: &mut Transaction<'_, Any>,
@@ -212,6 +392,17 @@ pub(crate) async fn delete_in(
 }
 
 async fn unused(tx: &mut Transaction<'_, Any>, id: &str) -> Result<()> {
+    let tags: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM supertag_v2_tags WHERE volume=$1 AND retired_at_ms IS NULL",
+    )
+    .bind(id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if tags != 0 {
+        return Err(StoreError::FailedPrecondition(
+            "a Tag keeps its work on this Volume".into(),
+        ));
+    }
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM supertag_v2_artifact_volume_copies WHERE volume_id=$1",
     )
@@ -243,7 +434,7 @@ async fn copy_in(
     principal: &str,
     id: &str,
 ) -> Result<ArtifactVolumeCopy> {
-    let row=sqlx::query("SELECT artifact_id,payload FROM supertag_v2_artifact_volume_copies WHERE principal=$1 AND copy_id=$2").bind(principal).bind(id).fetch_optional(&mut **tx).await?.ok_or_else(missing)?;
+    let row=sqlx::query("SELECT artifact_id,payload FROM supertag_v2_artifact_volume_copies WHERE (principal=$1 OR principal=$3) AND copy_id=$2").bind(principal).bind(id).bind(CAPTURE_PRINCIPAL).fetch_optional(&mut **tx).await?.ok_or_else(missing)?;
     access(tx, principal, &row.try_get::<String, _>("artifact_id")?).await?;
     decode(&row.try_get::<Vec<u8>, _>("payload")?)
 }
@@ -255,6 +446,56 @@ fn limit(value: u32, maximum: u32) -> Result<i64> {
     }
 }
 impl Store {
+    /// Authorizes one object on the Tag's Volume for a live Attempt of the calling host. The key
+    /// comes from the purpose and the Attempt's own Tag and Session, never from the request.
+    pub async fn grant_volume_object(
+        &self,
+        host: &crate::HostAuthority,
+        input: &VolumeObjectGrantRequest,
+    ) -> Result<VolumeObjectGrant> {
+        let attempt = input
+            .attempt
+            .as_ref()
+            .ok_or_else(|| invalid("a Volume grant names its Attempt"))?;
+        if !matches!(input.access(), VolumeAccess::Write | VolumeAccess::Read) {
+            return Err(invalid("a Volume grant is for writing or reading"));
+        }
+        let mut tx = self.pool.begin().await?;
+        let row = crate::store::owned(
+            &mut tx,
+            host,
+            &attempt.task_id,
+            &attempt.attempt_id,
+            &attempt.lease_token,
+        )
+        .await?;
+        crate::artifact_captures::running(&row, self.execution_now_ms())?;
+        let task = crate::store::task_row(&row)?;
+        let id = tag_volume_in(&mut tx, &task.tag_id, None)
+            .await?
+            .ok_or_else(|| StoreError::FailedPrecondition("the Tag names no Volume".into()))?;
+        let volume = volume_in(&mut tx, &id).await?;
+        let (key, blob) = match &input.purpose {
+            Some(volume_object_grant_request::Purpose::Checkpoint(blob))
+                if supertag_protocol::valid_sha256(&blob.sha256)
+                    && blob.byte_length <= supertag_protocol::MAX_CHECKPOINT_BYTES as u64 =>
+            {
+                (
+                    checkpoint_key(&task.tag_id, &task.session_id, &blob.sha256),
+                    blob.clone(),
+                )
+            }
+            _ => return Err(invalid("a Volume grant needs a valid purpose")),
+        };
+        tx.commit().await?;
+        Ok(VolumeObjectGrant {
+            volume: Some(volume),
+            key,
+            blob: Some(blob),
+            presigned: None,
+        })
+    }
+
     pub async fn put_artifact_volume(
         &self,
         principal: &str,
@@ -363,109 +604,6 @@ impl Store {
         tx.commit().await?;
         Ok(result)
     }
-    pub async fn reserve_artifact_volume_copy(
-        &self,
-        principal: &str,
-        input: &CopyArtifactToVolumeRequest,
-    ) -> Result<ArtifactVolumeCopy> {
-        operator(principal)?;
-        name("operation ID", &input.operation_id)?;
-        validate_artifact_path(&input.path).map_err(|e| invalid(e.message()))?;
-        let blob = input
-            .expected_blob
-            .as_ref()
-            .filter(|b| valid_sha256(&b.sha256) && b.byte_length <= MAX_ARTIFACT_FILE_BYTES)
-            .ok_or_else(|| invalid("exact artifact blob consent is required"))?;
-        let digest = hash("copy", input);
-        let (mut tx, order) = self.write().await?;
-        let artifact = access(&mut tx, principal, &input.artifact_id).await?;
-        let prior=sqlx::query("SELECT request_digest,payload FROM supertag_v2_artifact_volume_copies WHERE principal=$1 AND operation_id=$2").bind(principal).bind(&input.operation_id).fetch_optional(&mut *tx).await?;
-        if let Some(row) = prior {
-            if row.try_get::<String, _>("request_digest")? != digest {
-                return Err(conflict());
-            }
-            return decode(&row.try_get::<Vec<u8>, _>("payload")?);
-        }
-        let volume = volume_in(&mut tx, &input.volume_id).await?;
-        if volume.revision != input.expected_revision {
-            return Err(conflict());
-        }
-        let file = artifact
-            .files
-            .into_iter()
-            .find(|f| f.path == input.path)
-            .ok_or_else(missing)?;
-        if file.blob.as_ref() != Some(blob) {
-            return Err(conflict());
-        }
-        let producer = artifact
-            .summary
-            .and_then(|v| v.producer)
-            .ok_or_else(|| invalid("artifact producer is missing"))?;
-        if producer.attempt_id.is_empty()
-            || !producer
-                .attempt_id
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
-        {
-            return Err(invalid("artifact producer Attempt is invalid"));
-        }
-        let result = ArtifactVolumeCopy {
-            copy_id: uuid::Uuid::new_v4().to_string(),
-            operation_id: input.operation_id.clone(),
-            volume: Some(volume),
-            artifact_id: input.artifact_id.clone(),
-            file: Some(file),
-            storage_key: format!("attempts/{}/sha256/{}", producer.attempt_id, blob.sha256),
-            state: ArtifactVolumeCopyState::Reserved as i32,
-            created_at_ms: self.execution_now_ms(),
-            verified_at_ms: None,
-        };
-        if result.encoded_len() > supertag_protocol::MAX_MESSAGE_BYTES - 4096 {
-            return Err(invalid(
-                "artifact Volume copy receipt exceeds the transport limit",
-            ));
-        }
-        sqlx::query("INSERT INTO supertag_v2_artifact_volume_copies (copy_id,principal,operation_id,volume_id,artifact_id,request_digest,state,payload,created_order,file_path) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)").bind(&result.copy_id).bind(principal).bind(&input.operation_id).bind(&input.volume_id).bind(&input.artifact_id).bind(digest).bind(result.state as i64).bind(result.encode_to_vec()).bind(order).bind(&input.path).execute(&mut *tx).await?;
-        tx.commit().await?;
-        Ok(result)
-    }
-    pub async fn commit_artifact_volume_copy(
-        &self,
-        principal: &str,
-        input: &CommitArtifactVolumeCopyRequest,
-    ) -> Result<ArtifactVolumeCopy> {
-        operator(principal)?;
-        let (mut tx, _) = self.write().await?;
-        let mut copy = copy_in(&mut tx, principal, &input.copy_id).await?;
-        if input.verified_blob.is_none()
-            || input.verified_blob.as_ref() != copy.file.as_ref().and_then(|f| f.blob.as_ref())
-        {
-            return Err(conflict());
-        }
-        let expected = copy
-            .volume
-            .as_ref()
-            .ok_or_else(|| invalid("copy Volume is missing"))?;
-        if &volume_in(&mut tx, &expected.volume_id).await? != expected {
-            return Err(conflict());
-        }
-        if copy.state() == ArtifactVolumeCopyState::Verified {
-            return Ok(copy);
-        }
-        copy.state = ArtifactVolumeCopyState::Verified as i32;
-        copy.verified_at_ms = Some(self.execution_now_ms());
-        sqlx::query(
-            "UPDATE supertag_v2_artifact_volume_copies SET state=$1,payload=$2 WHERE copy_id=$3",
-        )
-        .bind(copy.state as i64)
-        .bind(copy.encode_to_vec())
-        .bind(&copy.copy_id)
-        .execute(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        Ok(copy)
-    }
     pub async fn get_artifact_volume_copy(
         &self,
         principal: &str,
@@ -485,7 +623,7 @@ impl Store {
         let before =
             i64::try_from(input.before_order).map_err(|_| invalid("invalid copy cursor"))?;
         let mut tx = self.pool.begin().await?;
-        let rows=sqlx::query(&format!("SELECT c.payload,c.created_order FROM supertag_v2_artifact_volume_copies c JOIN supertag_v2_artifact_captures a ON a.artifact_id=c.artifact_id JOIN supertag_v2_task_audience audience ON audience.task_id=a.task_id WHERE c.principal=$1 AND {} AND ($2='' OR c.volume_id=$2) AND ($3=0 OR c.created_order<$3) ORDER BY c.created_order DESC LIMIT $4", crate::store::sees_owner_sql("audience.owner", "$1"))).bind(principal).bind(&input.volume_id).bind(before).bind(cap+1).fetch_all(&mut *tx).await?;
+        let rows=sqlx::query(&format!("SELECT c.payload,c.created_order FROM supertag_v2_artifact_volume_copies c JOIN supertag_v2_artifact_captures a ON a.artifact_id=c.artifact_id JOIN supertag_v2_task_audience audience ON audience.task_id=a.task_id WHERE (c.principal=$1 OR c.principal=$5) AND {} AND ($2='' OR c.volume_id=$2) AND ($3=0 OR c.created_order<$3) ORDER BY c.created_order DESC LIMIT $4", crate::store::sees_owner_sql("audience.owner", "$1"))).bind(principal).bind(&input.volume_id).bind(before).bind(cap+1).bind(CAPTURE_PRINCIPAL).fetch_all(&mut *tx).await?;
         let mut copies = Vec::new();
         let mut bytes = 0usize;
         let mut last = 0u64;
@@ -556,25 +694,14 @@ impl artifact_volume_directory_server::ArtifactVolumeDirectory for ControlPlane 
                 .await?,
         ))
     }
-    async fn reserve_copy(
+    async fn grant_object(
         &self,
-        request: Request<CopyArtifactToVolumeRequest>,
-    ) -> std::result::Result<Response<ArtifactVolumeCopy>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        request: Request<VolumeObjectGrantRequest>,
+    ) -> std::result::Result<Response<VolumeObjectGrant>, Status> {
+        let host = self.host_authority(&request)?;
         Ok(Response::new(
             self.store
-                .reserve_artifact_volume_copy(&principal, request.get_ref())
-                .await?,
-        ))
-    }
-    async fn commit_copy(
-        &self,
-        request: Request<CommitArtifactVolumeCopyRequest>,
-    ) -> std::result::Result<Response<ArtifactVolumeCopy>, Status> {
-        let principal = self.principal(&request, "operator:")?;
-        Ok(Response::new(
-            self.store
-                .commit_artifact_volume_copy(&principal, request.get_ref())
+                .grant_volume_object(&host, request.get_ref())
                 .await?,
         ))
     }

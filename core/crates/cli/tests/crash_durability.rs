@@ -575,6 +575,7 @@ impl<'a> System<'a> {
                     allowed_actions: vec!["files:read".into()],
                     memory: None,
                     start_rate: None,
+                    volume: None,
                 })?)
                 .await?;
             Ok(())

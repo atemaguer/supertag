@@ -1123,6 +1123,7 @@ mod tests {
             max_work_sessions: None,
             memory: None,
             start_rate: None,
+            volume: None,
         };
         assert_eq!(
             cp.put_tag(Request::new(tag.clone()))

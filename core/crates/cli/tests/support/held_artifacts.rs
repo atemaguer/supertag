@@ -159,6 +159,66 @@ impl HeldArtifacts {
             .insert((attempt_id.to_owned(), blob.sha256.clone()), bytes.to_vec());
     }
 
+    /// Reserves a capture as a Worker Host does first, writes each Volume copy the reservation
+    /// lists (through a presigned upload, or `file_volumes` the host maps), then commits it.
+    pub async fn commit_writing(
+        &self,
+        mut manifest: CommitArtifactCaptureRequest,
+        file_volumes: &std::collections::BTreeMap<
+            String,
+            supertag_workspaces::artifact_volumes::FileVolume,
+        >,
+    ) -> std::result::Result<CapturedArtifact, tonic::Status> {
+        manifest.source_storage_id = Some(self.storage_id.clone());
+        let internal = |error: anyhow::Error| tonic::Status::internal(error.to_string());
+        let attempt = manifest
+            .attempt
+            .as_ref()
+            .map(|attempt| attempt.attempt_id.clone())
+            .unwrap_or_default();
+        let reserved = AttemptArtifactsClient::new(self.channel.clone())
+            .reserve_capture(self.request(manifest.clone()).map_err(internal)?)
+            .await?
+            .into_inner();
+        for copy in &reserved.volume_copies {
+            let blob = copy
+                .file
+                .as_ref()
+                .and_then(|file| file.blob.clone())
+                .unwrap();
+            let bytes = self
+                .held
+                .lock()
+                .unwrap()
+                .get(&(attempt.clone(), blob.sha256.clone()))
+                .cloned()
+                .ok_or_else(|| tonic::Status::internal("bytes were not held"))?;
+            match &copy.upload {
+                Some(upload) => {
+                    let mut put = reqwest::Client::new().put(&upload.url).body(bytes);
+                    for header in &upload.headers {
+                        put = put.header(&header.name, &header.value);
+                    }
+                    put.send()
+                        .await
+                        .map_err(|error| tonic::Status::internal(error.to_string()))?;
+                }
+                None => {
+                    if let Some(volume) = copy
+                        .volume
+                        .as_ref()
+                        .and_then(|volume| file_volumes.get(&volume.volume_id))
+                    {
+                        volume
+                            .persist(&copy.storage_key, &blob, Some(&bytes), true)
+                            .map_err(internal)?;
+                    }
+                }
+            }
+        }
+        self.commit(manifest).await
+    }
+
     /// Commits a capture whose `files` bytes were given to [`Self::hold`] for its Attempt.
     pub async fn commit(
         &self,

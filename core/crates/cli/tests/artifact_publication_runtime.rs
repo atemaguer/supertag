@@ -19,9 +19,7 @@ database_tests! {
 
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
-use std::{
-    net::SocketAddr, os::unix::fs::PermissionsExt, path::Path, process::Stdio, time::Duration,
-};
+use std::{net::SocketAddr, os::unix::fs::PermissionsExt, process::Stdio, time::Duration};
 use supertag_protocol::{HOST_GENERATION_HEADER, authenticated_request, v2::*};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -89,11 +87,9 @@ async fn stop(child: &mut Child) -> Result<()> {
     child.wait().await?;
     Ok(())
 }
-fn plane(credentials: &Credentials, root: &Path, database: &str, listen: &str) -> Command {
+fn plane(credentials: &Credentials, database: &str, listen: &str) -> Command {
     let mut c = credentials.command(&["control-plane", "--listen", listen]);
-    c.env("SUPERTAG_DATABASE_URL", database)
-        .arg("--artifact-volume")
-        .arg(format!("published={}", root.join("volume").display()));
+    c.env("SUPERTAG_DATABASE_URL", database);
     c
 }
 fn publication(credentials: &Credentials, public: &str, args: &[&str]) -> Command {
@@ -113,8 +109,7 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     std::fs::create_dir(&volume)?;
     std::fs::set_permissions(&volume, std::fs::Permissions::from_mode(0o700))?;
     let credentials = Credentials::new();
-    let (mut control, public) =
-        service(plane(&credentials, &root, &database, "127.0.0.1:0")).await?;
+    let (mut control, public) = service(plane(&credentials, &database, "127.0.0.1:0")).await?;
     let channel =
         protocol::negotiated(Channel::from_shared(public.clone())?.connect().await?).await?;
     let mut operator = operator_client::OperatorClient::new(channel.clone());
@@ -327,38 +322,11 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
         admitted["input_artifacts"][0]["publication"]["consumption_id"],
         "consent"
     );
-    json(credentials.command(&[
-        "volume",
-        "--gateway",
-        &public,
-        "put",
-        "published",
-        "--source",
-        &format!("file://{}", volume.display()),
-        "--operation-id",
-        "register-volume",
-    ]))
-    .await?;
-    json(credentials.command(&[
-        "volume",
-        "--gateway",
-        &public,
-        "copy",
-        "published",
-        &artifact_id,
-        "--path",
-        "report.txt",
-        "--expected-revision",
-        "1",
-        "--operation-id",
-        "copy-volume",
-    ]))
-    .await?;
     stop(&mut control).await?;
-    // The producing Worker Host goes offline; the consumer reads the Volume copy.
-    held.disconnect();
-    let (mut control, public) =
-        service(plane(&credentials, &root, &database, "127.0.0.1:0")).await?;
+    // The Control Plane restarts; the producing Worker Host reconnects and still holds the bytes.
+    let (mut control, public) = service(plane(&credentials, &database, "127.0.0.1:0")).await?;
+    held.reconnect(protocol::dial(public.clone()).await?)
+        .await?;
     let replay = json(publication(
         &credentials,
         &public,

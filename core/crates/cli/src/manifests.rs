@@ -155,6 +155,9 @@ struct TagSpec {
     /// At most how many Task Attempts start per period. Omitted keeps the current value;
     /// `starts: 0` removes it.
     start_rate: Option<StartRateSpec>,
+    /// The Volume that keeps the Tag's work. Omitted keeps the current value; an empty string
+    /// removes it.
+    volume: Option<String>,
 }
 
 #[derive(Deserialize)]

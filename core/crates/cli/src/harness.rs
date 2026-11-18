@@ -252,6 +252,7 @@ impl AdapterOptions {
             ),
             task_artifact_inputs: false,
             workspace_mounts: vec![],
+            volumes: vec![],
         })
     }
     /// Each `--network-credential` as `(name, variable)`, sorted by name, each name once.

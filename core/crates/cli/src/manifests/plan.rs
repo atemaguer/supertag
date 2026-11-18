@@ -856,6 +856,7 @@ impl<'a> Catalog<'a> {
             spec.max_work_sessions.is_some(),
             spec.memory.is_some(),
             spec.start_rate.is_some(),
+            spec.volume.is_some(),
         ];
         let mut value = PutTagRequest {
             tag_id: name.into(),
@@ -890,6 +891,7 @@ impl<'a> Catalog<'a> {
                         .map_err(|error| anyhow::anyhow!("spec.startRate: {error}"))
                 })
                 .transpose()?,
+            volume: spec.volume,
         };
         ensure!(
             value.instructions.len() <= 65_536,
@@ -1129,6 +1131,17 @@ impl<'a> Catalog<'a> {
                 old.map(|v| start_rate(v.start_rate.as_ref())),
                 start_rate(value.start_rate.as_ref().filter(|rate| rate.starts > 0)),
             ),
+            // No Volume is the unset value, which no manager owns.
+            field(
+                "spec.volume",
+                old.map(|v| v.volume.as_bytes().to_vec()),
+                value
+                    .volume
+                    .as_deref()
+                    .unwrap_or_default()
+                    .as_bytes()
+                    .to_vec(),
+            ),
         ]
         .into_iter()
         .zip(declared)
@@ -1148,6 +1161,10 @@ impl<'a> Catalog<'a> {
                 && value.start_rate.as_ref().is_none_or(|rate| {
                     Some(rate).filter(|rate| rate.starts > 0) == old.start_rate.as_ref()
                 })
+                && value
+                    .volume
+                    .as_ref()
+                    .is_none_or(|volume| *volume == old.volume)
         });
         Ok((!unchanged).then_some((prior.is_some(), Write::Tag(value))))
     }

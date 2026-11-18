@@ -259,15 +259,7 @@ struct LanguageServices {
 }
 
 impl LanguageServices {
-    async fn start(directory: &Path, database: &str) -> Result<Self> {
-        Self::start_with_volume(directory, database, None).await
-    }
-
-    async fn start_with_volume(
-        _directory: &Path,
-        database: &str,
-        volume: Option<&Path>,
-    ) -> Result<Self> {
+    async fn start(_directory: &Path, database: &str) -> Result<Self> {
         let gateway_token =
             supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
         let operator_token = Uuid::new_v4().to_string();
@@ -279,11 +271,6 @@ impl LanguageServices {
             .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
             .env("SUPERTAG_DATABASE_URL", database);
-        if let Some(volume) = volume {
-            control
-                .arg("--artifact-volume")
-                .arg(format!("inputs={}", volume.display()));
-        }
         let (control, public) = service(control).await?;
         Ok(Self {
             control,

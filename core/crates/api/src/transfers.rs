@@ -1,9 +1,5 @@
 use std::{
-    fs::{File, OpenOptions},
-    io::ErrorKind,
-    os::unix::fs::{MetadataExt, OpenOptionsExt},
-    path::{Path, PathBuf},
-    sync::Arc,
+    fs::OpenOptions, io::ErrorKind, os::unix::fs::OpenOptionsExt, path::Path, sync::Arc,
     time::Duration,
 };
 
@@ -86,7 +82,7 @@ pub struct ApiTransfers {
     api: Api,
     capacity: Arc<Semaphore>,
     git: Option<Arc<dyn WorkspaceGit>>,
-    volumes: volumes::ArtifactVolumeMappings,
+    signers: volumes::VolumeSigners,
     relay: Arc<RelayHub>,
 }
 
@@ -96,7 +92,7 @@ impl ApiTransfers {
             api,
             capacity: Arc::new(Semaphore::new(16)),
             git: None,
-            volumes: volumes::ArtifactVolumeMappings::default(),
+            signers: volumes::VolumeSigners::default(),
             relay: Arc::default(),
         }
     }

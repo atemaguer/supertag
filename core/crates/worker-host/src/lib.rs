@@ -2,6 +2,7 @@ mod adapter;
 mod artifact_direct;
 mod artifact_inputs;
 mod artifact_snapshots;
+mod capture_volumes;
 mod changed_paths;
 mod checkpoints;
 mod cleanup_failure;
@@ -23,6 +24,7 @@ mod shared_execution;
 mod shared_host;
 mod task_artifact_inputs;
 mod task_outputs;
+mod volume_objects;
 mod workspace_mounts;
 mod workspaces;
 
@@ -106,6 +108,10 @@ pub struct HostOptions {
     pub artifact_source: Option<ArtifactSourceConfig>,
     pub artifact_peers: ArtifactPeers,
     pub workspace_mounts: WorkspaceMounts,
+    /// File Volumes this host maps, by Volume ID. The work of a Tag that keeps it on one, such as
+    /// its captures, is written there directly.
+    pub volumes:
+        std::collections::BTreeMap<String, supertag_workspaces::artifact_volumes::FileVolume>,
     /// Where reports sample free disk space, normally the state directory's filesystem.
     pub disk_space: environment::DiskSpaceSource,
     /// The OS command that keeps the machine awake while an Attempt runs, if any.
@@ -165,6 +171,7 @@ pub(crate) struct CoordinationClients {
     acquisitions: AttemptArtifactsClient<InterceptedService<Channel, HostHeaders>>,
     artifact_source: Option<artifact_direct::SourceStorage>,
     artifact_peers: ArtifactPeers,
+    volumes: volume_objects::HostVolumes,
     workspace_mounts: AttemptWorkspaceMountsClient<InterceptedService<Channel, HostHeaders>>,
     artifacts: ArtifactTransfersClient<InterceptedService<Channel, HostHeaders>>,
     workstreams: AttemptWorkstreamsClient<InterceptedService<Channel, HostHeaders>>,
@@ -220,6 +227,11 @@ impl Attempt {
                     scope: grant.scope,
                     reset_generation: grant.reset_generation,
                 }),
+            volume: assignment.volume.map(|volume| journal::AssignedVolume {
+                volume_id: volume.volume_id,
+                source: volume.source,
+                revision: volume.revision,
+            }),
         })
     }
 
@@ -470,6 +482,7 @@ pub async fn run(
         acquisitions,
         artifact_source: Some(serving.storage.clone()),
         artifact_peers: options.artifact_peers.clone(),
+        volumes: std::sync::Arc::new(options.volumes.clone()),
         transfers: checkpoints::Transfers::new(channel.clone(), headers.clone())
             .with_storage(serving.storage.clone()),
         artifacts: ArtifactTransfersClient::with_interceptor(
@@ -2281,6 +2294,14 @@ async fn run_assignment(
                 reset_generation: grant.reset_generation,
             }
         }),
+        volume: attempt
+            .volume
+            .as_ref()
+            .map(|volume| supertag_protocol::v2::AssignedVolume {
+                volume_id: volume.volume_id.clone(),
+                source: volume.source.clone(),
+                revision: volume.revision,
+            }),
         task: Some(task),
         attempt_id: attempt.attempt_id.clone(),
         lease_token: attempt.lease_token.clone(),

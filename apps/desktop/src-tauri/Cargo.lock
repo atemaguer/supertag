@@ -5040,6 +5040,7 @@ dependencies = [
  "async-stream",
  "aws-credential-types",
  "aws-sigv4",
+ "base64 0.22.1",
  "http 1.5.0",
  "hyper-util",
  "libc",
@@ -5048,6 +5049,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "subtle",
+ "supertag-credential-vault",
  "supertag-protocol",
  "supertag-workspaces",
  "tempfile",
@@ -5253,6 +5255,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "url",
+ "uuid",
 ]
 
 [[package]]

@@ -330,6 +330,16 @@ impl PendingOutputs {
             Capture::Committed(receipt) => receipt,
             Capture::Pending(manifest, selected) => {
                 // This host already holds the bytes; the Control Plane records only the manifest.
+                // A Tag that keeps its captures on a Volume gets each copy written from here.
+                crate::capture_volumes::write(
+                    &coordination.acquisitions,
+                    token,
+                    &manifest,
+                    &selected,
+                    &coordination.volumes,
+                    Duration::from_secs(60),
+                )
+                .await?;
                 drop(selected);
                 let mut request = authenticated_request(manifest.clone(), token, None)?;
                 request.set_timeout(Duration::from_secs(60));
@@ -474,6 +484,7 @@ mod tests {
             execution_selection: None,
             requires_unsandboxed_commands: false,
             joined: vec![],
+            volume: None,
         };
         let mut pending =
             PendingOutputs::prepare(&task, Some(&checkout), &attempt, HarnessKind::ClaudeCode)?

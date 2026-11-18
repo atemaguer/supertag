@@ -121,11 +121,7 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
     )?;
     let native = claude_fixture(root.path())?;
     let claude = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
-    let volume = root.path().canonicalize()?.join("volume");
-    std::fs::create_dir(&volume)?;
-    std::fs::set_permissions(&volume, std::fs::Permissions::from_mode(0o700))?;
-    let services =
-        LanguageServices::start_with_volume(root.path(), &database, Some(&volume)).await?;
+    let services = LanguageServices::start(root.path(), &database).await?;
     // A fixture Task creates and submits a file through the real declared-output lifecycle.
     services
         .operator(&[
@@ -243,42 +239,9 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
     );
     assert_eq!(services.operator(&args).await?, queued);
 
-    services
-        .operator(&[
-            "volume",
-            "put",
-            "inputs",
-            "--source",
-            &format!("file://{}", volume.display()),
-            "--operation-id",
-            "register-inputs-volume",
-        ])
-        .await?;
     // The producing `--once` host exited; a host with no Workspace mapping, which claims no
-    // Task, relays the held bytes for the copy.
+    // Task, relays the held bytes to the consuming host.
     let holding = crate::holding_host::serve(host(&services.public, "claude-holder")).await?;
-    let copy = services
-        .operator(&[
-            "volume",
-            "copy",
-            "inputs",
-            artifact_id,
-            "--path",
-            "evidence.txt",
-            "--expected-revision",
-            "1",
-            "--operation-id",
-            "copy-input-evidence",
-        ])
-        .await?;
-    let digest = copy["file"]["blob"]["sha256"]
-        .as_str()
-        .context("verified Volume copy digest")?;
-    drop(holding);
-    // The Control Plane stores no artifact bytes. Removing the Worker Host's held copy leaves the
-    // verified Volume copy as the only source of the input.
-    let held = held_blob(&artifacts, digest)?;
-    std::fs::remove_file(&held)?;
     // The accepted Objective Session's harness remains pinned. Verify delivery from
     // Claude's actual manager with the input path supplied before native launch.
     let attempt = interrupt_input_receipt(&services, root.path(), worker).await?;
@@ -290,24 +253,6 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
     assert_eq!(result["result"], "verified supplied Task artifact input");
     assert_eq!(result["workspace_delivery"]["changed_files"], 0);
     assert!(!source.join("inputs").exists());
-    assert!(!held.exists());
+    drop(holding);
     services.stop().await
-}
-
-/// The one file the Worker Host's artifact storage holds for `digest`.
-fn held_blob(artifacts: &Path, digest: &str) -> Result<std::path::PathBuf> {
-    let mut pending = vec![artifacts.to_path_buf()];
-    let mut found = Vec::new();
-    while let Some(directory) = pending.pop() {
-        for entry in std::fs::read_dir(directory)? {
-            let entry = entry?;
-            if entry.file_type()?.is_dir() {
-                pending.push(entry.path());
-            } else if entry.file_name() == digest {
-                found.push(entry.path());
-            }
-        }
-    }
-    ensure!(found.len() == 1, "held copies of {digest}: {found:?}");
-    Ok(found.remove(0))
 }

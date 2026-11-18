@@ -1,5 +1,6 @@
-//! Actual split processes preserve consent and verified-copy recovery across restart, and a Volume
-//! copy stays readable while the Worker Host holding the artifact is offline.
+//! A Tag's Volume keeps every capture beyond its Worker Host: the capturing host writes each copy
+//! itself, through its own mapping of a file Volume or a presigned PUT to an S3 Volume, and the
+//! Control Plane maps no Volume and carries no Volume bytes.
 #[path = "support/children.rs"]
 mod children;
 use children::reaped;
@@ -86,13 +87,11 @@ async fn stop(child: &mut Child) -> Result<()> {
     child.wait().await?;
     Ok(())
 }
-fn plane(credentials: &Credentials, root: &Path, database: &str, mapped: bool) -> Command {
+/// A Control Plane with its credential vault in `root`, as `supertag up` gives it one.
+fn plane(credentials: &Credentials, root: &Path, database: &str) -> Command {
     let mut c = credentials.command(&["control-plane", "--listen", "127.0.0.1:0"]);
-    c.env("SUPERTAG_DATABASE_URL", database);
-    if mapped {
-        c.arg("--artifact-volume")
-            .arg(format!("durable={}", root.join("volume").display()));
-    }
+    c.env("SUPERTAG_DATABASE_URL", database)
+        .env("SUPERTAG_STATE_DIR", root);
     c
 }
 fn volume(credentials: &Credentials, public: &str, args: &[&str]) -> Command {
@@ -113,6 +112,8 @@ mod s3_artifact_volume;
 async fn capture(
     credentials: &Credentials,
     public: &str,
+    tag_volume: Option<&str>,
+    host_volume: Option<&Path>,
 ) -> Result<(
     String,
     Vec<u8>,
@@ -129,6 +130,7 @@ async fn capture(
                 tag_id: "writer".into(),
                 instructions: "Capture evidence".into(),
                 allowed_actions: vec!["files:read".into()],
+                volume: tag_volume.map(str::to_owned),
                 ..Default::default()
             },
             &credentials.operator,
@@ -163,6 +165,14 @@ async fn capture(
         .claim_task(credentials.host(
             ClaimTaskRequest {
                 operation_id: "claim".into(),
+                // A host that maps the Tag's file Volume says so; only it is placed.
+                execution_profile: host_volume.map(|path| HarnessExecutionProfile {
+                    volumes: vec![VolumeMapping {
+                        volume_id: "durable".into(),
+                        source: format!("file://{}", path.display()),
+                    }],
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
             registered.generation,
@@ -209,7 +219,23 @@ async fn capture(
         }],
         ..Default::default()
     };
-    let artifact = held.commit(capture).await?;
+    let mut file_volumes = std::collections::BTreeMap::new();
+    if let Some(path) = host_volume {
+        file_volumes.insert(
+            "durable".to_owned(),
+            supertag_workspaces::artifact_volumes::FileVolume::open(path)?,
+        );
+    }
+    let artifact = held.commit_writing(capture, &file_volumes).await?;
+    ensure!(
+        artifact.volume_copies.len() == usize::from(tag_volume.is_some())
+            && artifact
+                .volume_copies
+                .iter()
+                .all(|copy| copy.state() == ArtifactVolumeCopyState::Verified),
+        "{:?}",
+        artifact.volume_copies
+    );
     host.finish_task(credentials.host(
         FinishTaskRequest {
             task_id: attempt.task_id,
@@ -225,156 +251,55 @@ async fn capture(
     Ok((artifact.summary.unwrap().artifact_id, bytes, blob, held))
 }
 
-async fn read_dynamic(
-    credentials: &Credentials,
-    public: &str,
-    artifact_id: &str,
-    expected: &[u8],
-) -> Result<()> {
-    let channel =
-        protocol::negotiated(Channel::from_shared(public.to_owned())?.connect().await?).await?;
-    let mut operator = operator_client::OperatorClient::new(channel.clone());
-    let task = operator
-        .submit_task(authenticated_request(
-            SubmitTaskRequest {
-                tag_id: "writer".into(),
-                session_id: "source".into(),
-                operation_id: "consumer".into(),
-                prompt: "Read the captured file".into(),
-                ..Default::default()
-            },
-            &credentials.operator,
-            None,
-        )?)
-        .await?
-        .into_inner();
-    let mut host = worker_host_client::WorkerHostClient::new(channel.clone());
-    let generation = host
-        .register_host(authenticated_request(
-            RegisterHostRequest {
-                incarnation_id: "volume-fixture".into(),
-            },
-            &credentials.host,
-            None,
-        )?)
-        .await?
-        .into_inner()
-        .generation;
-    let assignment = host
-        .claim_task(credentials.host(
-            ClaimTaskRequest {
-                operation_id: "consume".into(),
-                ..Default::default()
-            },
-            generation,
-        ))
-        .await?
-        .into_inner()
-        .assignment
-        .context("no consumer assignment")?;
-    assert_eq!(assignment.task.as_ref().unwrap().task_id, task.task_id);
-    let attempt = InspectAttemptRequest {
-        task_id: task.task_id.clone(),
-        attempt_id: assignment.attempt_id,
-        lease_token: assignment.lease_token,
-    };
-    host.start_task(credentials.host(
-        StartTaskRequest {
-            task_id: attempt.task_id.clone(),
-            attempt_id: attempt.attempt_id.clone(),
-            lease_token: attempt.lease_token.clone(),
-        },
-        generation,
-    ))
-    .await?;
-    let mut artifacts = attempt_artifacts_client::AttemptArtifactsClient::new(channel.clone());
-    let acquired = artifacts
-        .acquire(credentials.host(
-            AcquireArtifactRequest {
-                attempt: Some(attempt.clone()),
-                operation_id: "read".into(),
-                artifact_id: artifact_id.into(),
-                paths: vec!["report.txt".into()],
-                delivery: ArtifactDelivery::Read.into(),
-                destination: None,
-            },
-            generation,
-        ))
-        .await?
-        .into_inner();
-    let input = GetAcquiredArtifactFileRequest {
-        attempt: Some(attempt.clone()),
-        acquisition_id: acquired.acquisition_id,
-        path: "report.txt".into(),
-    };
-    let mut transfers = artifact_transfers_client::ArtifactTransfersClient::new(channel);
-    let mut forbidden = input.clone();
-    forbidden.path = "wrong.txt".into();
-    assert_eq!(
-        transfers
-            .download_acquired_file(credentials.host(forbidden, generation))
-            .await
-            .unwrap_err()
-            .code(),
-        tonic::Code::NotFound,
-    );
-    assert_eq!(
-        transfers
-            .download_acquired_file(credentials.host(input.clone(), generation + 1))
-            .await
-            .unwrap_err()
-            .code(),
-        tonic::Code::PermissionDenied,
-    );
-    let mut stream = transfers
-        .download_acquired_file(credentials.host(input, generation))
-        .await?
-        .into_inner();
-    assert_eq!(
-        stream.message().await?.unwrap().part,
-        Some(artifact_download::Part::File(acquired.files[0].clone()))
-    );
-    let mut actual = Vec::new();
-    while let Some(message) = stream.message().await? {
-        let Some(artifact_download::Part::Chunk(chunk)) = message.part else {
-            anyhow::bail!("expected artifact bytes");
-        };
-        actual.extend_from_slice(&chunk);
-    }
-    assert_eq!(actual, expected);
-    host.finish_task(credentials.host(
-        FinishTaskRequest {
-            task_id: attempt.task_id,
-            attempt_id: attempt.attempt_id,
-            lease_token: attempt.lease_token,
-            succeeded: true,
-            result: "Read exact bytes".into(),
-            ..Default::default()
-        },
-        generation,
-    ))
-    .await?;
-    Ok(())
+/// A private, owner-only directory a Worker Host may map as a file Volume.
+fn volume_directory(root: &Path) -> Result<std::path::PathBuf> {
+    let path = root.join("volume");
+    std::fs::create_dir(&path)?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))?;
+    Ok(path)
 }
 
 database_tests! {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_bytes;
+    a_tag_volume_keeps_each_capture_written_by_the_host_that_maps_it;
 }
 
-async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_bytes(
+async fn a_tag_volume_keeps_each_capture_written_by_the_host_that_maps_it(
     database: String,
 ) -> Result<()> {
     let temporary = tempfile::tempdir()?;
     let root = temporary.path().canonicalize()?;
-    let volume_path = root.join("volume");
-    std::fs::create_dir(&volume_path)?;
-    std::fs::set_permissions(&volume_path, std::fs::Permissions::from_mode(0o700))?;
+    let volume_path = volume_directory(&root)?;
     let credentials = Credentials::new();
-    let (mut control, public) = service(plane(&credentials, &root, &database, false)).await?;
-    let (artifact_id, bytes, _, mut held) = capture(&credentials, &public).await?;
+    // The Control Plane maps no Volume: its old flags are refused, naming what replaces them.
+    let mut old = plane(&credentials, &root, &database);
+    old.arg("--artifact-volume")
+        .arg(format!("durable={}", volume_path.display()));
+    let refused = timeout(WAIT, old.output()).await??;
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    ensure!(
+        !refused.status.success() && stderr.contains("supertag worker-host --volume"),
+        "{stderr}"
+    );
+    let (mut control, public) = service(plane(&credentials, &root, &database)).await?;
+    // A Tag may name only a registered Volume.
+    let mut unknown = credentials.command(&["tag", "--gateway", &public]);
+    unknown.args([
+        "put",
+        "writer",
+        "--instructions",
+        "Capture evidence",
+        "--volume",
+        "durable",
+    ]);
+    let refused = unknown.output().await?;
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    ensure!(
+        !refused.status.success() && stderr.contains("does not exist"),
+        "{stderr}"
+    );
     let source = format!("file://{}", volume_path.display());
-    let registered = json(volume(
+    json(volume(
         &credentials,
         &public,
         &[
@@ -387,45 +312,42 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
         ],
     ))
     .await?;
-    assert_eq!(registered["revision"], 1);
-    let copy_args = [
-        "copy",
-        "durable",
-        &artifact_id,
-        "--path",
-        "report.txt",
-        "--expected-revision",
-        "1",
-        "--operation-id",
-        "copy",
-    ];
-    let denied = volume(&credentials, &public, &copy_args).output().await?;
-    assert!(!denied.status.success());
-    assert!(String::from_utf8_lossy(&denied.stderr).contains("consent"));
-    assert!(
-        json(resource(&credentials, &public, &["get", "volume-copies"])).await?["copies"]
-            .as_array()
-            .unwrap()
-            .is_empty()
+    // A host that does not map the file Volume is never placed for the Tag.
+    let unplaced = capture(&credentials, &public, Some("durable"), None)
+        .await
+        .err()
+        .context("a host without the Volume was placed")?;
+    ensure!(
+        format!("{unplaced:#}").contains("no assignment"),
+        "{unplaced:#}"
     );
-    assert_eq!(std::fs::read_dir(&volume_path)?.count(), 0);
-    stop(&mut control).await?;
-    let (next, next_public) = service(plane(&credentials, &root, &database, true)).await?;
-    control = next;
-    // The copy's bytes come from the holding Worker Host, relayed by the Control Plane.
-    held.reconnect(protocol::dial(next_public.clone()).await?)
-        .await?;
-    let receipt = json(volume(&credentials, &next_public, &copy_args)).await?;
-    assert_eq!(receipt["state"], "ARTIFACT_VOLUME_COPY_STATE_VERIFIED");
-    let destination = volume_path.join(receipt["storage_key"].as_str().unwrap());
-    assert_eq!(std::fs::read(&destination)?, bytes);
-    assert_eq!(
-        json(volume(&credentials, &next_public, &copy_args)).await?,
-        receipt
+    // The host that maps it writes the copy and attests it; the Control Plane never opens it.
+    let (_artifact_id, bytes, blob, mut held) =
+        capture(&credentials, &public, Some("durable"), Some(&volume_path)).await?;
+    let copies = json(resource(
+        &credentials,
+        &public,
+        &["get", "volume-copies", "--volume-id", "durable"],
+    ))
+    .await?;
+    let copies = copies["copies"].as_array().unwrap();
+    ensure!(copies.len() == 1, "{copies:?}");
+    ensure!(copies[0]["host_attested"] == true, "{copies:?}");
+    ensure!(copies[0]["state"] == "ARTIFACT_VOLUME_COPY_STATE_VERIFIED");
+    let key = copies[0]["storage_key"].as_str().unwrap();
+    ensure!(
+        key.starts_with(&format!("tags/{:x}/attempts/", Sha256::digest("writer"))),
+        "{key}"
     );
+    // The bytes outlive the host: they are on the Volume, for any host that maps it.
+    held.disconnect();
+    drop(held);
+    ensure!(std::fs::read(volume_path.join(key))? == bytes);
+    ensure!(format!("{:x}", Sha256::digest(&bytes)) == blob.sha256);
+    // A Volume a Tag names cannot be deleted.
     let deletion = resource(
         &credentials,
-        &next_public,
+        &public,
         &[
             "delete",
             "volume",
@@ -438,43 +360,8 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
     )
     .output()
     .await?;
-    assert!(!deletion.status.success());
-    stop(&mut control).await?;
-    // The durable Volume remains usable after service replacement while the Worker Host holding
-    // the artifact is offline.
-    held.disconnect();
-    let (next, new_public) = service(plane(&credentials, &root, &database, true)).await?;
-    control = next;
-    assert_eq!(
-        json(volume(&credentials, &new_public, &copy_args)).await?,
-        receipt
-    );
-    let listed = json(resource(
-        &credentials,
-        &new_public,
-        &["get", "volume-copies", "--volume-id", "durable"],
-    ))
-    .await?;
-    assert_eq!(listed["copies"], serde_json::json!([receipt.clone()]));
-    read_dynamic(&credentials, &new_public, &artifact_id, &bytes).await?;
-    // The Control Plane stored no artifact bytes: its checkpoint directory is empty.
-    assert_eq!(std::fs::read_dir(root.join("cas"))?.count(), 0);
-    std::fs::write(&destination, b"divergent destination")?;
-    let corrupted = volume(&credentials, &new_public, &copy_args)
-        .output()
-        .await?;
-    assert!(!corrupted.status.success());
-    assert_eq!(std::fs::read(&destination)?, b"divergent destination");
-    let copy_id = receipt["copy_id"].as_str().unwrap();
-    assert_eq!(
-        json(resource(
-            &credentials,
-            &new_public,
-            &["get", "volume-copy", copy_id]
-        ))
-        .await?,
-        receipt
-    );
+    ensure!(!deletion.status.success());
+    ensure!(String::from_utf8_lossy(&deletion.stderr).contains("a Tag keeps its work"));
     stop(&mut control).await?;
     Ok(())
 }

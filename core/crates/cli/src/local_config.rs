@@ -107,6 +107,10 @@ enum Service {
         /// Credentials the Codex egress proxy injects for Tasks whose network scope names them.
         #[serde(default, rename = "network-credentials")]
         network_credentials: BTreeMap<String, NetworkCredential>,
+        /// File Volumes this host maps, by Volume ID. The host writes the work of Tags that keep
+        /// it there directly.
+        #[serde(default)]
+        volumes: BTreeMap<String, PathBuf>,
     },
 }
 /// `network-credentials.NAME`: the named secret holding the value, and the variable the sandbox
@@ -300,6 +304,8 @@ pub struct Host {
     pub restart: Restart,
     /// Network credentials by name, with the secret holding each value. Only Codex lanes get them.
     pub network_credentials: Vec<(String, Secret)>,
+    /// File Volumes this host maps, by Volume ID.
+    pub volumes: BTreeMap<String, PathBuf>,
     /// Repositories, by Workspace ID, that receive each delivered Task as its Session branch.
     /// Only a Host of this file's own Control Plane has them; the supervisor imports with the
     /// local operator credential.
@@ -624,6 +630,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             attempt_timeout_seconds,
             labels,
             network_credentials,
+            volumes,
         } = service
         else {
             continue;
@@ -864,6 +871,10 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             restart,
             network_credentials: credential_secrets,
             session_branches,
+            volumes: volumes
+                .into_iter()
+                .map(|(id, path)| Ok((id, resolve_path(base, &path)?)))
+                .collect::<Result<_>>()?,
         });
     }
     ensure!(
@@ -1479,7 +1490,7 @@ secrets:
         for (label, message) in [
             ("-gpu", "is invalid"),
             ("mcp:notes", "is reserved"),
-            ("artifact-volume:shared", "is reserved"),
+            ("volume:shared", "is reserved"),
         ] {
             let input = format!(
                 "services: {{control-plane: {{type: control-plane}}, trainer: {{type: host, adapter: ./adapter, labels: [\"{label}\"]}}}}"

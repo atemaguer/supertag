@@ -1109,6 +1109,10 @@ impl ManagedHost {
             .arg("--attempt-timeout-seconds")
             .arg(self.definition.attempt_timeout_seconds.to_string())
             .args(adapter.worker_args());
+        for (volume, path) in &self.definition.volumes {
+            host.arg("--volume")
+                .arg(format!("{volume}={}", path.display()));
+        }
         if let Some(path) = &self.definition.skills
             && loads_skills(adapter.harness_kind())
         {

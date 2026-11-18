@@ -18,6 +18,7 @@ fn profile(models: &[&str], default: Option<&str>, commands: bool) -> HarnessExe
         network_credentials: vec![],
         network_sandbox: false,
         unverified_workspace_provider: false,
+        volumes: vec![],
         workspace_mounts: vec![],
         declared_task_outputs: false,
         model_ids: models.iter().map(|model| (*model).into()).collect(),

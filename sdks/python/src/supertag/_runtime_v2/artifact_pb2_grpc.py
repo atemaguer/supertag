@@ -750,6 +750,11 @@ class AttemptArtifactsStub:
         Args:
             channel: A grpc.Channel.
         """
+        self.ReserveCapture = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptArtifacts/ReserveCapture',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CommitArtifactCaptureRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CapturedArtifact.FromString,
+                _registered_method=True)
         self.CommitCapture = channel.unary_unary(
                 '/supertag.runtime.v2.AttemptArtifacts/CommitCapture',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CommitArtifactCaptureRequest.SerializeToString,
@@ -796,8 +801,20 @@ class AttemptArtifactsServicer:
     """Public Worker Host API. Identity and generation come from the authenticated Worker Host.
     """
 
+    def ReserveCapture(self, request, context):
+        """Reserves a capture before its commit. When the producing Tag names an artifact Volume, the
+        response lists one copy per file for the host to write directly: an S3 copy carries a
+        short-lived presigned upload; a file copy is written through the host's own mapping of the
+        Volume. Bytes never pass through the Control Plane.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def CommitCapture(self, request, context):
-        """Records a capture whose bytes the calling Worker Host already holds.
+        """Records a capture whose bytes the calling Worker Host already holds. Each Volume copy the
+        reservation listed must already be on the Volume: the Control Plane checks it (an S3 object's
+        length and SHA-256 checksum, a file's bytes) and fails the capture otherwise.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -848,6 +865,11 @@ class AttemptArtifactsServicer:
 
 def add_AttemptArtifactsServicer_to_server(servicer, server):
     rpc_method_handlers = {
+            'ReserveCapture': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReserveCapture,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CommitArtifactCaptureRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CapturedArtifact.SerializeToString,
+            ),
             'CommitCapture': grpc.unary_unary_rpc_method_handler(
                     servicer.CommitCapture,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CommitArtifactCaptureRequest.FromString,
@@ -899,6 +921,33 @@ def add_AttemptArtifactsServicer_to_server(servicer, server):
 class AttemptArtifacts:
     """Public Worker Host API. Identity and generation come from the authenticated Worker Host.
     """
+
+    @staticmethod
+    def ReserveCapture(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptArtifacts/ReserveCapture',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.CommitArtifactCaptureRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.CapturedArtifact.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
 
     @staticmethod
     def CommitCapture(request,
@@ -1443,9 +1492,9 @@ class HarnessArtifacts:
 
 
 class ArtifactVolumesStub:
-    """File Volumes are registered storage locations. Registration alone authorizes
-    no write: the Control Plane must explicitly map the exact Volume and source
-    (`--artifact-volume`).
+    """Volumes are registered storage locations that keep a Tag's work beyond any one Worker Host.
+    Worker Hosts move every byte: to an S3 Volume through presigned per-object URLs, to a file
+    Volume through their own mapping. The Control Plane never maps a Volume or carries its bytes.
     """
 
     def __init__(self, channel):
@@ -1474,11 +1523,6 @@ class ArtifactVolumesStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeResponse.FromString,
                 _registered_method=True)
-        self.Copy = channel.unary_unary(
-                '/supertag.runtime.v2.ArtifactVolumes/Copy',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CopyArtifactToVolumeRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.FromString,
-                _registered_method=True)
         self.GetCopy = channel.unary_unary(
                 '/supertag.runtime.v2.ArtifactVolumes/GetCopy',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeCopyRequest.SerializeToString,
@@ -1492,9 +1536,9 @@ class ArtifactVolumesStub:
 
 
 class ArtifactVolumesServicer:
-    """File Volumes are registered storage locations. Registration alone authorizes
-    no write: the Control Plane must explicitly map the exact Volume and source
-    (`--artifact-volume`).
+    """Volumes are registered storage locations that keep a Tag's work beyond any one Worker Host.
+    Worker Hosts move every byte: to an S3 Volume through presigned per-object URLs, to a file
+    Volume through their own mapping. The Control Plane never maps a Volume or carries its bytes.
     """
 
     def Put(self, request, context):
@@ -1516,12 +1560,6 @@ class ArtifactVolumesServicer:
         raise NotImplementedError('Method not implemented!')
 
     def Delete(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def Copy(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -1562,11 +1600,6 @@ def add_ArtifactVolumesServicer_to_server(servicer, server):
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeResponse.SerializeToString,
             ),
-            'Copy': grpc.unary_unary_rpc_method_handler(
-                    servicer.Copy,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CopyArtifactToVolumeRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.SerializeToString,
-            ),
             'GetCopy': grpc.unary_unary_rpc_method_handler(
                     servicer.GetCopy,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeCopyRequest.FromString,
@@ -1586,9 +1619,9 @@ def add_ArtifactVolumesServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class ArtifactVolumes:
-    """File Volumes are registered storage locations. Registration alone authorizes
-    no write: the Control Plane must explicitly map the exact Volume and source
-    (`--artifact-volume`).
+    """Volumes are registered storage locations that keep a Tag's work beyond any one Worker Host.
+    Worker Hosts move every byte: to an S3 Volume through presigned per-object URLs, to a file
+    Volume through their own mapping. The Control Plane never maps a Volume or carries its bytes.
     """
 
     @staticmethod
@@ -1700,33 +1733,6 @@ class ArtifactVolumes:
             _registered_method=True)
 
     @staticmethod
-    def Copy(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.ArtifactVolumes/Copy',
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.CopyArtifactToVolumeRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
     def GetCopy(request,
             target,
             options=(),
@@ -1782,8 +1788,7 @@ class ArtifactVolumes:
 
 
 class ArtifactVolumeDirectoryStub:
-    """Internal metadata authority. Only the Control Plane's API tier verifies and
-    carries copy bytes.
+    """Internal metadata authority behind the API tier.
     """
 
     def __init__(self, channel):
@@ -1812,15 +1817,10 @@ class ArtifactVolumeDirectoryStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeResponse.FromString,
                 _registered_method=True)
-        self.ReserveCopy = channel.unary_unary(
-                '/supertag.runtime.v2.ArtifactVolumeDirectory/ReserveCopy',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CopyArtifactToVolumeRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.FromString,
-                _registered_method=True)
-        self.CommitCopy = channel.unary_unary(
-                '/supertag.runtime.v2.ArtifactVolumeDirectory/CommitCopy',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CommitArtifactVolumeCopyRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.FromString,
+        self.GrantObject = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactVolumeDirectory/GrantObject',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.VolumeObjectGrantRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.VolumeObjectGrant.FromString,
                 _registered_method=True)
         self.GetCopy = channel.unary_unary(
                 '/supertag.runtime.v2.ArtifactVolumeDirectory/GetCopy',
@@ -1835,8 +1835,7 @@ class ArtifactVolumeDirectoryStub:
 
 
 class ArtifactVolumeDirectoryServicer:
-    """Internal metadata authority. Only the Control Plane's API tier verifies and
-    carries copy bytes.
+    """Internal metadata authority behind the API tier.
     """
 
     def Put(self, request, context):
@@ -1863,14 +1862,9 @@ class ArtifactVolumeDirectoryServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def ReserveCopy(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def CommitCopy(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+    def GrantObject(self, request, context):
+        """Authorizes one Volume object for a live Attempt of the calling host (VolumeObjects.Grant).
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -1910,15 +1904,10 @@ def add_ArtifactVolumeDirectoryServicer_to_server(servicer, server):
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeResponse.SerializeToString,
             ),
-            'ReserveCopy': grpc.unary_unary_rpc_method_handler(
-                    servicer.ReserveCopy,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CopyArtifactToVolumeRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.SerializeToString,
-            ),
-            'CommitCopy': grpc.unary_unary_rpc_method_handler(
-                    servicer.CommitCopy,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CommitArtifactVolumeCopyRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.SerializeToString,
+            'GrantObject': grpc.unary_unary_rpc_method_handler(
+                    servicer.GrantObject,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.VolumeObjectGrantRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.VolumeObjectGrant.SerializeToString,
             ),
             'GetCopy': grpc.unary_unary_rpc_method_handler(
                     servicer.GetCopy,
@@ -1939,8 +1928,7 @@ def add_ArtifactVolumeDirectoryServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class ArtifactVolumeDirectory:
-    """Internal metadata authority. Only the Control Plane's API tier verifies and
-    carries copy bytes.
+    """Internal metadata authority behind the API tier.
     """
 
     @staticmethod
@@ -2052,7 +2040,7 @@ class ArtifactVolumeDirectory:
             _registered_method=True)
 
     @staticmethod
-    def ReserveCopy(request,
+    def GrantObject(request,
             target,
             options=(),
             channel_credentials=None,
@@ -2065,36 +2053,9 @@ class ArtifactVolumeDirectory:
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/supertag.runtime.v2.ArtifactVolumeDirectory/ReserveCopy',
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.CopyArtifactToVolumeRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def CommitCopy(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.ArtifactVolumeDirectory/CommitCopy',
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.CommitArtifactVolumeCopyRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.FromString,
+            '/supertag.runtime.v2.ArtifactVolumeDirectory/GrantObject',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.VolumeObjectGrantRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.VolumeObjectGrant.FromString,
             options,
             channel_credentials,
             insecure,
@@ -2149,6 +2110,87 @@ class ArtifactVolumeDirectory:
             '/supertag.runtime.v2.ArtifactVolumeDirectory/ListCopies',
             supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumeCopiesRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumeCopiesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class VolumeObjectsStub:
+    """Public Worker Host API for objects a live Attempt keeps on its Tag's Volume, such as its
+    Session's checkpoint. Captures get their grants from AttemptArtifacts.ReserveCapture instead.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Grant = channel.unary_unary(
+                '/supertag.runtime.v2.VolumeObjects/Grant',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.VolumeObjectGrantRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.VolumeObjectGrant.FromString,
+                _registered_method=True)
+
+
+class VolumeObjectsServicer:
+    """Public Worker Host API for objects a live Attempt keeps on its Tag's Volume, such as its
+    Session's checkpoint. Captures get their grants from AttemptArtifacts.ReserveCapture instead.
+    """
+
+    def Grant(self, request, context):
+        """Authorizes writing or reading one object. The Control Plane derives the key from the purpose;
+        a host never names one. An S3 Volume's grant carries a presigned URL; a file Volume's is
+        written or read through the host's own mapping.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_VolumeObjectsServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Grant': grpc.unary_unary_rpc_method_handler(
+                    servicer.Grant,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.VolumeObjectGrantRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.VolumeObjectGrant.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.VolumeObjects', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.VolumeObjects', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class VolumeObjects:
+    """Public Worker Host API for objects a live Attempt keeps on its Tag's Volume, such as its
+    Session's checkpoint. Captures get their grants from AttemptArtifacts.ReserveCapture instead.
+    """
+
+    @staticmethod
+    def Grant(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.VolumeObjects/Grant',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.VolumeObjectGrantRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.VolumeObjectGrant.FromString,
             options,
             channel_credentials,
             insecure,

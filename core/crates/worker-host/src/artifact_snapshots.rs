@@ -603,6 +603,7 @@ mod tests {
 
         let receipt = CapturedArtifact {
             inputs: vec![],
+            volume_copies: vec![],
             files: replay.files,
             summary: Some(ArtifactSummary {
                 artifact_id: "immutable-artifact".into(),
@@ -632,6 +633,7 @@ mod tests {
                 execution_selection: None,
                 requires_unsandboxed_commands: false,
                 joined: vec![],
+                volume: None,
             },
             prepared: None,
         })?;

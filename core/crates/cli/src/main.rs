@@ -355,15 +355,12 @@ enum Command {
         /// is reported after the gRPC address.
         #[arg(long)]
         websocket_listen: Option<SocketAddr>,
-        /// Explicit storage-host consent: VOLUME_ID=/absolute/private/directory.
-        #[arg(long = "artifact-volume")]
-        artifact_volumes: Vec<String>,
-        /// JSON file with explicit S3-compatible Volume mappings and credential environment names.
-        #[arg(
-            long,
-            long_help = "Path to a JSON array of mappings with volumeId, source (s3://bucket/prefix), endpoint (HTTPS origin), region, and credentialEnvPrefix. The Control Plane reads <prefix>_ACCESS_KEY_ID, <prefix>_SECRET_ACCESS_KEY, and optionally <prefix>_SESSION_TOKEN. For Cloudflare R2, use region auto."
-        )]
-        artifact_s3_volumes: Option<PathBuf>,
+        /// Removed: the Control Plane maps no Volume. Refused with what replaces it.
+        #[arg(long = "artifact-volume", hide = true)]
+        removed_artifact_volumes: Vec<String>,
+        /// Removed: S3 Volume credentials live in the credential vault. Refused with what replaces it.
+        #[arg(long = "artifact-s3-volumes", hide = true)]
+        removed_artifact_s3_volumes: Option<PathBuf>,
         /// Private directory of git delivery, which reads remote Workspaces and lands Session
         /// changes on them: scratch for each operation and remembered SSH host keys. Default:
         /// git-delivery in SUPERTAG_STATE_DIR or ~/.supertag. Workspace Credentials come from the
@@ -479,6 +476,10 @@ enum Command {
         /// variables.
         #[arg(long)]
         workspace_mount_mappings: Option<PathBuf>,
+        /// A file Volume this host maps, as VOLUME_ID=/absolute/private/directory. A Tag that
+        /// keeps its work on it runs only on hosts that map it, and they write there directly.
+        #[arg(long = "volume", value_name = "VOLUME_ID=DIRECTORY")]
+        host_volumes: Vec<String>,
         /// Listen for authorized artifact reads from other Worker Hosts.
         #[arg(long)]
         artifact_transfer_listen: Option<SocketAddr>,
@@ -1023,17 +1024,25 @@ async fn run(command: Command) -> Result<()> {
         Command::ControlPlane {
             listen,
             websocket_listen,
-            artifact_volumes,
-            artifact_s3_volumes,
+            removed_artifact_volumes,
+            removed_artifact_s3_volumes,
             git_delivery_directory,
             audit_log,
         } => {
+            if !removed_artifact_volumes.is_empty() {
+                anyhow::bail!(
+                    "--artifact-volume is removed: the Control Plane maps no Volume. Map a file Volume on each Worker Host that writes it with `supertag worker-host --volume ID=DIR` (or `volumes:` on its host service)"
+                );
+            }
+            if removed_artifact_s3_volumes.is_some() {
+                anyhow::bail!(
+                    "--artifact-s3-volumes is removed: store each S3 Volume's credential with `supertag volume credential set ID --endpoint URL --region REGION` on the Control Plane's machine"
+                );
+            }
             control_plane(
                 listen,
                 websocket_listen,
                 ControlPlaneOptions {
-                    artifact_volumes,
-                    artifact_s3_volumes,
                     git_delivery: git_delivery_directory,
                     audit_log,
                 },
@@ -1126,6 +1135,7 @@ async fn run(command: Command) -> Result<()> {
             once,
             wait_for_recovery,
             workspace_mount_mappings,
+            host_volumes,
             artifact_transfer_listen,
             artifact_directory,
             artifact_transfer_tls_cert,
@@ -1269,8 +1279,10 @@ async fn run(command: Command) -> Result<()> {
                 )),
                 None => None,
             };
+            let artifact_directory_root =
+                artifact_directory.unwrap_or_else(|| state_directory.join("artifacts"));
             let artifact_source = Some(supertag_worker_host::ArtifactSourceConfig {
-                directory: artifact_directory.unwrap_or_else(|| state_directory.join("artifacts")),
+                directory: artifact_directory_root.clone(),
                 listen: artifact_transfer_listen,
                 tls,
             });
@@ -1290,6 +1302,19 @@ async fn run(command: Command) -> Result<()> {
                 .transpose()?
                 .unwrap_or_default();
             execution_profile.workspace_mounts = workspace_mounts.capabilities();
+            let host_volumes = volumes::host_mappings(
+                host_volumes,
+                &[state_directory.as_path(), artifact_directory_root.as_path()],
+            )?;
+            execution_profile.volumes = host_volumes
+                .iter()
+                .map(
+                    |(volume_id, mapping)| supertag_protocol::v2::VolumeMapping {
+                        volume_id: volume_id.clone(),
+                        source: mapping.source.clone(),
+                    },
+                )
+                .collect();
             let disk_space = supertag_worker_host::environment::DiskSpaceSource::Directory(
                 state_directory.clone(),
             );
@@ -1325,6 +1350,7 @@ async fn run(command: Command) -> Result<()> {
                 artifact_source,
                 artifact_peers,
                 workspace_mounts,
+                volumes: host_volumes,
                 disk_space,
                 keep_awake,
                 labels,
@@ -1433,8 +1459,6 @@ async fn run(command: Command) -> Result<()> {
 
 /// What the Control Plane serves beyond its listeners.
 struct ControlPlaneOptions {
-    artifact_volumes: Vec<String>,
-    artifact_s3_volumes: Option<PathBuf>,
     git_delivery: Option<PathBuf>,
     /// `--audit-log`: also write each committed audit entry to `stderr` or this file.
     audit_log: Option<String>,
@@ -1539,10 +1563,13 @@ async fn control_plane(
         required_env("SUPERTAG_OPERATOR_TOKEN")?,
         operator_principal,
     )?;
-    let mut transfers = ApiTransfers::new(api.clone()).with_artifact_volumes(volumes::mappings(
-        options.artifact_volumes,
-        options.artifact_s3_volumes,
-    )?);
+    // The Control Plane signs S3 Volume object URLs with credentials from its vault; it maps no
+    // Volume and carries no Volume bytes.
+    // Without a state directory there is no vault, and an S3 Volume's capture fails, naming why.
+    let signers = CredentialVault::from_process_environment()
+        .map(supertag_api::transfers::volumes::VolumeSigners::new)
+        .unwrap_or_default();
+    let mut transfers = ApiTransfers::new(api.clone()).with_volume_signers(signers);
     let delivery = git_delivery(options.git_delivery)?;
     if let Some(delivery) = &delivery {
         transfers =
@@ -2829,6 +2856,7 @@ fn tag_json(tag: &Tag) -> serde_json::Value {
         // What Worker Hosts hold of the Tag's harness-native memory (such as Claude Code's
         // auto-memory), newest first; only `describe tag` reads it. Counts, never contents.
         "native_memory": tag.native_memory.iter().map(memories::native_store_json).collect::<Vec<_>>(),
+        "volume": (!tag.volume.is_empty()).then_some(&tag.volume),
         // How the Tag's unprompted messages were received; only `describe tag` reads it.
         "attention": tag.attention.as_ref().map(|attention| json!({
             "window_days": attention.window_days,

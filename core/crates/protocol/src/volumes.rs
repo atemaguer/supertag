@@ -80,6 +80,11 @@ pub fn file_volume_path(source: &str) -> Result<PathBuf, Status> {
     Ok(normalized)
 }
 
+/// The credential vault entry holding an S3 Volume's signing credential on the Control Plane.
+pub fn credential_vault_id(volume_id: &str) -> String {
+    format!("volume-credential/{volume_id}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

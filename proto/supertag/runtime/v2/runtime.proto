@@ -1657,6 +1657,10 @@ message PutTagRequest {
   // At most how many of the Tag's Task Attempts start per period. Omitted keeps the current
   // value; `starts` 0 removes the limit. A new Tag has none.
   optional StartRate start_rate = 7000;
+  // The Volume that keeps the Tag's work beyond any one Worker Host: a copy of every capture of
+  // its Tasks, written by the capturing host directly. A capture fails when its copy cannot be
+  // written. Omitted keeps the current value; empty removes it. A new Tag has none.
+  optional string volume = 7100;
 }
 
 // A cap on how often a Tag's Task Attempts start: at most `starts` in any `per_ms` window. A
@@ -1697,6 +1701,8 @@ message Tag {
   AttentionSummary attention = 6900;
   // The Tag's start rate, when it has one.
   StartRate start_rate = 7000;
+  // The Volume that keeps the Tag's work (see PutTagRequest.volume); empty for none.
+  string volume = 7100;
   // How many of its Task Attempts started in the start rate's current window; read with GetTag.
   uint32 starts_in_window = 7001;
   // What Worker Hosts hold of the Tag's harness-native memory, newest first; read with GetTag.
@@ -2174,6 +2180,16 @@ message HarnessExecutionProfile {
   // (`--workspace-provider`), not E2B or Modal. SuperTag has not verified that it keeps a
   // network scope, so placement never gives it a Task with one.
   bool unverified_workspace_provider = 2000;
+  // File Volumes this host maps and writes to directly. The Control Plane derives the label
+  // `volume:ID` for each; the host checks its mapping against the registered source before it
+  // writes.
+  repeated VolumeMapping volumes = 2100;
+}
+
+message VolumeMapping {
+  string volume_id = 1;
+  // The mapped directory as a canonical `file://` source.
+  string source = 2;
 }
 
 enum SharedExecutionTool {
@@ -2318,6 +2334,9 @@ message Assignment {
   repeated JoinedMessage joined = 4;
   // The harness-native memory store this Attempt may use, if any.
   NativeMemoryGrant native_memory = 5;
+  // The Tag's Volume when it names one, as of the claim: where the host writes the Attempt's
+  // captures and, for a file Volume, which of its own mappings it uses.
+  AssignedVolume volume = 6;
 }
 
 // A Tag's harness-native memory: the files a harness keeps itself, such as Claude Code's
@@ -2351,6 +2370,13 @@ message NativeMemoryGrant {
   string scope = 1;
   // A host drops copies of this Tag's stores made before the Tag's latest reset.
   uint64 reset_generation = 2;
+}
+
+message AssignedVolume {
+  string volume_id = 1;
+  // `file:///…` or `s3://bucket/prefix`.
+  string source = 2;
+  uint64 revision = 3;
 }
 
 // A person's message joined into another Task's Attempt when that Attempt was claimed.

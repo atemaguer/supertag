@@ -437,6 +437,7 @@ async fn contract(url: &str) {
         allow_unsandboxed_commands: true,
         network_sandbox: true,
         unverified_workspace_provider: false,
+        volumes: vec![],
         ..Default::default()
     };
     report(

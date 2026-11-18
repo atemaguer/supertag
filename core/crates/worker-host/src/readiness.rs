@@ -178,14 +178,9 @@ pub fn host_labels(declared: &[String]) -> Result<Vec<String>> {
             "label {value:?} is invalid: a label is 1-63 lowercase letters, digits, dots, colons, hyphens, or underscores, starting with a letter or digit"
         );
         anyhow::ensure!(
-            ![
-                "mcp:",
-                "mcp-login:",
-                "volume-credential:",
-                "artifact-volume:"
-            ]
-            .iter()
-            .any(|prefix| label.starts_with(prefix)),
+            !["mcp:", "mcp-login:", "volume-credential:", "volume:"]
+                .iter()
+                .any(|prefix| label.starts_with(prefix)),
             "label {value:?} is reserved: the Control Plane derives it from host configuration"
         );
         labels.push(label);

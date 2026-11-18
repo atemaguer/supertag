@@ -35,6 +35,8 @@ const (
 	ArtifactVolumesName = "supertag.runtime.v2.ArtifactVolumes"
 	// ArtifactVolumeDirectoryName is the fully-qualified name of the ArtifactVolumeDirectory service.
 	ArtifactVolumeDirectoryName = "supertag.runtime.v2.ArtifactVolumeDirectory"
+	// VolumeObjectsName is the fully-qualified name of the VolumeObjects service.
+	VolumeObjectsName = "supertag.runtime.v2.VolumeObjects"
 	// WorkerArtifactTransfersName is the fully-qualified name of the WorkerArtifactTransfers service.
 	WorkerArtifactTransfersName = "supertag.runtime.v2.WorkerArtifactTransfers"
 	// ArtifactPublicationsName is the fully-qualified name of the ArtifactPublications service.
@@ -90,6 +92,9 @@ const (
 	// ArtifactDirectoryAuthorizeArtifactTransferProcedure is the fully-qualified name of the
 	// ArtifactDirectory's AuthorizeArtifactTransfer RPC.
 	ArtifactDirectoryAuthorizeArtifactTransferProcedure = "/supertag.runtime.v2.ArtifactDirectory/AuthorizeArtifactTransfer"
+	// AttemptArtifactsReserveCaptureProcedure is the fully-qualified name of the AttemptArtifacts's
+	// ReserveCapture RPC.
+	AttemptArtifactsReserveCaptureProcedure = "/supertag.runtime.v2.AttemptArtifacts/ReserveCapture"
 	// AttemptArtifactsCommitCaptureProcedure is the fully-qualified name of the AttemptArtifacts's
 	// CommitCapture RPC.
 	AttemptArtifactsCommitCaptureProcedure = "/supertag.runtime.v2.AttemptArtifacts/CommitCapture"
@@ -135,8 +140,6 @@ const (
 	ArtifactVolumesListProcedure = "/supertag.runtime.v2.ArtifactVolumes/List"
 	// ArtifactVolumesDeleteProcedure is the fully-qualified name of the ArtifactVolumes's Delete RPC.
 	ArtifactVolumesDeleteProcedure = "/supertag.runtime.v2.ArtifactVolumes/Delete"
-	// ArtifactVolumesCopyProcedure is the fully-qualified name of the ArtifactVolumes's Copy RPC.
-	ArtifactVolumesCopyProcedure = "/supertag.runtime.v2.ArtifactVolumes/Copy"
 	// ArtifactVolumesGetCopyProcedure is the fully-qualified name of the ArtifactVolumes's GetCopy RPC.
 	ArtifactVolumesGetCopyProcedure = "/supertag.runtime.v2.ArtifactVolumes/GetCopy"
 	// ArtifactVolumesListCopiesProcedure is the fully-qualified name of the ArtifactVolumes's
@@ -154,18 +157,17 @@ const (
 	// ArtifactVolumeDirectoryDeleteProcedure is the fully-qualified name of the
 	// ArtifactVolumeDirectory's Delete RPC.
 	ArtifactVolumeDirectoryDeleteProcedure = "/supertag.runtime.v2.ArtifactVolumeDirectory/Delete"
-	// ArtifactVolumeDirectoryReserveCopyProcedure is the fully-qualified name of the
-	// ArtifactVolumeDirectory's ReserveCopy RPC.
-	ArtifactVolumeDirectoryReserveCopyProcedure = "/supertag.runtime.v2.ArtifactVolumeDirectory/ReserveCopy"
-	// ArtifactVolumeDirectoryCommitCopyProcedure is the fully-qualified name of the
-	// ArtifactVolumeDirectory's CommitCopy RPC.
-	ArtifactVolumeDirectoryCommitCopyProcedure = "/supertag.runtime.v2.ArtifactVolumeDirectory/CommitCopy"
+	// ArtifactVolumeDirectoryGrantObjectProcedure is the fully-qualified name of the
+	// ArtifactVolumeDirectory's GrantObject RPC.
+	ArtifactVolumeDirectoryGrantObjectProcedure = "/supertag.runtime.v2.ArtifactVolumeDirectory/GrantObject"
 	// ArtifactVolumeDirectoryGetCopyProcedure is the fully-qualified name of the
 	// ArtifactVolumeDirectory's GetCopy RPC.
 	ArtifactVolumeDirectoryGetCopyProcedure = "/supertag.runtime.v2.ArtifactVolumeDirectory/GetCopy"
 	// ArtifactVolumeDirectoryListCopiesProcedure is the fully-qualified name of the
 	// ArtifactVolumeDirectory's ListCopies RPC.
 	ArtifactVolumeDirectoryListCopiesProcedure = "/supertag.runtime.v2.ArtifactVolumeDirectory/ListCopies"
+	// VolumeObjectsGrantProcedure is the fully-qualified name of the VolumeObjects's Grant RPC.
+	VolumeObjectsGrantProcedure = "/supertag.runtime.v2.VolumeObjects/Grant"
 	// WorkerArtifactTransfersDownloadProcedure is the fully-qualified name of the
 	// WorkerArtifactTransfers's Download RPC.
 	WorkerArtifactTransfersDownloadProcedure = "/supertag.runtime.v2.WorkerArtifactTransfers/Download"
@@ -679,7 +681,14 @@ func (UnimplementedArtifactDirectoryHandler) AuthorizeArtifactTransfer(context.C
 
 // AttemptArtifactsClient is a client for the supertag.runtime.v2.AttemptArtifacts service.
 type AttemptArtifactsClient interface {
-	// Records a capture whose bytes the calling Worker Host already holds.
+	// Reserves a capture before its commit. When the producing Tag names an artifact Volume, the
+	// response lists one copy per file for the host to write directly: an S3 copy carries a
+	// short-lived presigned upload; a file copy is written through the host's own mapping of the
+	// Volume. Bytes never pass through the Control Plane.
+	ReserveCapture(context.Context, *connect.Request[runtimev2.CommitArtifactCaptureRequest]) (*connect.Response[runtimev2.CapturedArtifact], error)
+	// Records a capture whose bytes the calling Worker Host already holds. Each Volume copy the
+	// reservation listed must already be on the Volume: the Control Plane checks it (an S3 object's
+	// length and SHA-256 checksum, a file's bytes) and fails the capture otherwise.
 	CommitCapture(context.Context, *connect.Request[runtimev2.CommitArtifactCaptureRequest]) (*connect.Response[runtimev2.CapturedArtifact], error)
 	Find(context.Context, *connect.Request[runtimev2.FindAttemptArtifactsRequest]) (*connect.Response[runtimev2.ListCapturedArtifactsResponse], error)
 	Inspect(context.Context, *connect.Request[runtimev2.InspectAttemptArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error)
@@ -701,6 +710,12 @@ func NewAttemptArtifactsClient(httpClient connect.HTTPClient, baseURL string, op
 	baseURL = strings.TrimRight(baseURL, "/")
 	attemptArtifactsMethods := runtimev2.File_supertag_runtime_v2_artifact_proto.Services().ByName("AttemptArtifacts").Methods()
 	return &attemptArtifactsClient{
+		reserveCapture: connect.NewClient[runtimev2.CommitArtifactCaptureRequest, runtimev2.CapturedArtifact](
+			httpClient,
+			baseURL+AttemptArtifactsReserveCaptureProcedure,
+			connect.WithSchema(attemptArtifactsMethods.ByName("ReserveCapture")),
+			connect.WithClientOptions(opts...),
+		),
 		commitCapture: connect.NewClient[runtimev2.CommitArtifactCaptureRequest, runtimev2.CapturedArtifact](
 			httpClient,
 			baseURL+AttemptArtifactsCommitCaptureProcedure,
@@ -754,6 +769,7 @@ func NewAttemptArtifactsClient(httpClient connect.HTTPClient, baseURL string, op
 
 // attemptArtifactsClient implements AttemptArtifactsClient.
 type attemptArtifactsClient struct {
+	reserveCapture            *connect.Client[runtimev2.CommitArtifactCaptureRequest, runtimev2.CapturedArtifact]
 	commitCapture             *connect.Client[runtimev2.CommitArtifactCaptureRequest, runtimev2.CapturedArtifact]
 	find                      *connect.Client[runtimev2.FindAttemptArtifactsRequest, runtimev2.ListCapturedArtifactsResponse]
 	inspect                   *connect.Client[runtimev2.InspectAttemptArtifactRequest, runtimev2.CapturedArtifact]
@@ -762,6 +778,11 @@ type attemptArtifactsClient struct {
 	registerArtifactSource    *connect.Client[runtimev2.RegisterArtifactSourceRequest, runtimev2.RegisterArtifactSourceResponse]
 	issueArtifactTransfer     *connect.Client[runtimev2.GetAcquiredArtifactFileRequest, runtimev2.ArtifactTransferGrant]
 	authorizeArtifactTransfer *connect.Client[runtimev2.AuthorizeArtifactTransferRequest, runtimev2.AuthorizedArtifactTransfer]
+}
+
+// ReserveCapture calls supertag.runtime.v2.AttemptArtifacts.ReserveCapture.
+func (c *attemptArtifactsClient) ReserveCapture(ctx context.Context, req *connect.Request[runtimev2.CommitArtifactCaptureRequest]) (*connect.Response[runtimev2.CapturedArtifact], error) {
+	return c.reserveCapture.CallUnary(ctx, req)
 }
 
 // CommitCapture calls supertag.runtime.v2.AttemptArtifacts.CommitCapture.
@@ -806,7 +827,14 @@ func (c *attemptArtifactsClient) AuthorizeArtifactTransfer(ctx context.Context, 
 
 // AttemptArtifactsHandler is an implementation of the supertag.runtime.v2.AttemptArtifacts service.
 type AttemptArtifactsHandler interface {
-	// Records a capture whose bytes the calling Worker Host already holds.
+	// Reserves a capture before its commit. When the producing Tag names an artifact Volume, the
+	// response lists one copy per file for the host to write directly: an S3 copy carries a
+	// short-lived presigned upload; a file copy is written through the host's own mapping of the
+	// Volume. Bytes never pass through the Control Plane.
+	ReserveCapture(context.Context, *connect.Request[runtimev2.CommitArtifactCaptureRequest]) (*connect.Response[runtimev2.CapturedArtifact], error)
+	// Records a capture whose bytes the calling Worker Host already holds. Each Volume copy the
+	// reservation listed must already be on the Volume: the Control Plane checks it (an S3 object's
+	// length and SHA-256 checksum, a file's bytes) and fails the capture otherwise.
 	CommitCapture(context.Context, *connect.Request[runtimev2.CommitArtifactCaptureRequest]) (*connect.Response[runtimev2.CapturedArtifact], error)
 	Find(context.Context, *connect.Request[runtimev2.FindAttemptArtifactsRequest]) (*connect.Response[runtimev2.ListCapturedArtifactsResponse], error)
 	Inspect(context.Context, *connect.Request[runtimev2.InspectAttemptArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error)
@@ -824,6 +852,12 @@ type AttemptArtifactsHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewAttemptArtifactsHandler(svc AttemptArtifactsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	attemptArtifactsMethods := runtimev2.File_supertag_runtime_v2_artifact_proto.Services().ByName("AttemptArtifacts").Methods()
+	attemptArtifactsReserveCaptureHandler := connect.NewUnaryHandler(
+		AttemptArtifactsReserveCaptureProcedure,
+		svc.ReserveCapture,
+		connect.WithSchema(attemptArtifactsMethods.ByName("ReserveCapture")),
+		connect.WithHandlerOptions(opts...),
+	)
 	attemptArtifactsCommitCaptureHandler := connect.NewUnaryHandler(
 		AttemptArtifactsCommitCaptureProcedure,
 		svc.CommitCapture,
@@ -874,6 +908,8 @@ func NewAttemptArtifactsHandler(svc AttemptArtifactsHandler, opts ...connect.Han
 	)
 	return "/supertag.runtime.v2.AttemptArtifacts/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case AttemptArtifactsReserveCaptureProcedure:
+			attemptArtifactsReserveCaptureHandler.ServeHTTP(w, r)
 		case AttemptArtifactsCommitCaptureProcedure:
 			attemptArtifactsCommitCaptureHandler.ServeHTTP(w, r)
 		case AttemptArtifactsFindProcedure:
@@ -898,6 +934,10 @@ func NewAttemptArtifactsHandler(svc AttemptArtifactsHandler, opts ...connect.Han
 
 // UnimplementedAttemptArtifactsHandler returns CodeUnimplemented from all methods.
 type UnimplementedAttemptArtifactsHandler struct{}
+
+func (UnimplementedAttemptArtifactsHandler) ReserveCapture(context.Context, *connect.Request[runtimev2.CommitArtifactCaptureRequest]) (*connect.Response[runtimev2.CapturedArtifact], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptArtifacts.ReserveCapture is not implemented"))
+}
 
 func (UnimplementedAttemptArtifactsHandler) CommitCapture(context.Context, *connect.Request[runtimev2.CommitArtifactCaptureRequest]) (*connect.Response[runtimev2.CapturedArtifact], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptArtifacts.CommitCapture is not implemented"))
@@ -1182,7 +1222,6 @@ type ArtifactVolumesClient interface {
 	Get(context.Context, *connect.Request[runtimev2.GetArtifactVolumeRequest]) (*connect.Response[runtimev2.ArtifactVolume], error)
 	List(context.Context, *connect.Request[runtimev2.ListArtifactVolumesRequest]) (*connect.Response[runtimev2.ListArtifactVolumesResponse], error)
 	Delete(context.Context, *connect.Request[runtimev2.DeleteArtifactVolumeRequest]) (*connect.Response[runtimev2.DeleteArtifactVolumeResponse], error)
-	Copy(context.Context, *connect.Request[runtimev2.CopyArtifactToVolumeRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error)
 	GetCopy(context.Context, *connect.Request[runtimev2.GetArtifactVolumeCopyRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error)
 	ListCopies(context.Context, *connect.Request[runtimev2.ListArtifactVolumeCopiesRequest]) (*connect.Response[runtimev2.ListArtifactVolumeCopiesResponse], error)
 }
@@ -1222,12 +1261,6 @@ func NewArtifactVolumesClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(artifactVolumesMethods.ByName("Delete")),
 			connect.WithClientOptions(opts...),
 		),
-		copy: connect.NewClient[runtimev2.CopyArtifactToVolumeRequest, runtimev2.ArtifactVolumeCopy](
-			httpClient,
-			baseURL+ArtifactVolumesCopyProcedure,
-			connect.WithSchema(artifactVolumesMethods.ByName("Copy")),
-			connect.WithClientOptions(opts...),
-		),
 		getCopy: connect.NewClient[runtimev2.GetArtifactVolumeCopyRequest, runtimev2.ArtifactVolumeCopy](
 			httpClient,
 			baseURL+ArtifactVolumesGetCopyProcedure,
@@ -1249,7 +1282,6 @@ type artifactVolumesClient struct {
 	get        *connect.Client[runtimev2.GetArtifactVolumeRequest, runtimev2.ArtifactVolume]
 	list       *connect.Client[runtimev2.ListArtifactVolumesRequest, runtimev2.ListArtifactVolumesResponse]
 	delete     *connect.Client[runtimev2.DeleteArtifactVolumeRequest, runtimev2.DeleteArtifactVolumeResponse]
-	copy       *connect.Client[runtimev2.CopyArtifactToVolumeRequest, runtimev2.ArtifactVolumeCopy]
 	getCopy    *connect.Client[runtimev2.GetArtifactVolumeCopyRequest, runtimev2.ArtifactVolumeCopy]
 	listCopies *connect.Client[runtimev2.ListArtifactVolumeCopiesRequest, runtimev2.ListArtifactVolumeCopiesResponse]
 }
@@ -1274,11 +1306,6 @@ func (c *artifactVolumesClient) Delete(ctx context.Context, req *connect.Request
 	return c.delete.CallUnary(ctx, req)
 }
 
-// Copy calls supertag.runtime.v2.ArtifactVolumes.Copy.
-func (c *artifactVolumesClient) Copy(ctx context.Context, req *connect.Request[runtimev2.CopyArtifactToVolumeRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error) {
-	return c.copy.CallUnary(ctx, req)
-}
-
 // GetCopy calls supertag.runtime.v2.ArtifactVolumes.GetCopy.
 func (c *artifactVolumesClient) GetCopy(ctx context.Context, req *connect.Request[runtimev2.GetArtifactVolumeCopyRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error) {
 	return c.getCopy.CallUnary(ctx, req)
@@ -1295,7 +1322,6 @@ type ArtifactVolumesHandler interface {
 	Get(context.Context, *connect.Request[runtimev2.GetArtifactVolumeRequest]) (*connect.Response[runtimev2.ArtifactVolume], error)
 	List(context.Context, *connect.Request[runtimev2.ListArtifactVolumesRequest]) (*connect.Response[runtimev2.ListArtifactVolumesResponse], error)
 	Delete(context.Context, *connect.Request[runtimev2.DeleteArtifactVolumeRequest]) (*connect.Response[runtimev2.DeleteArtifactVolumeResponse], error)
-	Copy(context.Context, *connect.Request[runtimev2.CopyArtifactToVolumeRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error)
 	GetCopy(context.Context, *connect.Request[runtimev2.GetArtifactVolumeCopyRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error)
 	ListCopies(context.Context, *connect.Request[runtimev2.ListArtifactVolumeCopiesRequest]) (*connect.Response[runtimev2.ListArtifactVolumeCopiesResponse], error)
 }
@@ -1331,12 +1357,6 @@ func NewArtifactVolumesHandler(svc ArtifactVolumesHandler, opts ...connect.Handl
 		connect.WithSchema(artifactVolumesMethods.ByName("Delete")),
 		connect.WithHandlerOptions(opts...),
 	)
-	artifactVolumesCopyHandler := connect.NewUnaryHandler(
-		ArtifactVolumesCopyProcedure,
-		svc.Copy,
-		connect.WithSchema(artifactVolumesMethods.ByName("Copy")),
-		connect.WithHandlerOptions(opts...),
-	)
 	artifactVolumesGetCopyHandler := connect.NewUnaryHandler(
 		ArtifactVolumesGetCopyProcedure,
 		svc.GetCopy,
@@ -1359,8 +1379,6 @@ func NewArtifactVolumesHandler(svc ArtifactVolumesHandler, opts ...connect.Handl
 			artifactVolumesListHandler.ServeHTTP(w, r)
 		case ArtifactVolumesDeleteProcedure:
 			artifactVolumesDeleteHandler.ServeHTTP(w, r)
-		case ArtifactVolumesCopyProcedure:
-			artifactVolumesCopyHandler.ServeHTTP(w, r)
 		case ArtifactVolumesGetCopyProcedure:
 			artifactVolumesGetCopyHandler.ServeHTTP(w, r)
 		case ArtifactVolumesListCopiesProcedure:
@@ -1390,10 +1408,6 @@ func (UnimplementedArtifactVolumesHandler) Delete(context.Context, *connect.Requ
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactVolumes.Delete is not implemented"))
 }
 
-func (UnimplementedArtifactVolumesHandler) Copy(context.Context, *connect.Request[runtimev2.CopyArtifactToVolumeRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactVolumes.Copy is not implemented"))
-}
-
 func (UnimplementedArtifactVolumesHandler) GetCopy(context.Context, *connect.Request[runtimev2.GetArtifactVolumeCopyRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactVolumes.GetCopy is not implemented"))
 }
@@ -1409,8 +1423,8 @@ type ArtifactVolumeDirectoryClient interface {
 	Get(context.Context, *connect.Request[runtimev2.GetArtifactVolumeRequest]) (*connect.Response[runtimev2.ArtifactVolume], error)
 	List(context.Context, *connect.Request[runtimev2.ListArtifactVolumesRequest]) (*connect.Response[runtimev2.ListArtifactVolumesResponse], error)
 	Delete(context.Context, *connect.Request[runtimev2.DeleteArtifactVolumeRequest]) (*connect.Response[runtimev2.DeleteArtifactVolumeResponse], error)
-	ReserveCopy(context.Context, *connect.Request[runtimev2.CopyArtifactToVolumeRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error)
-	CommitCopy(context.Context, *connect.Request[runtimev2.CommitArtifactVolumeCopyRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error)
+	// Authorizes one Volume object for a live Attempt of the calling host (VolumeObjects.Grant).
+	GrantObject(context.Context, *connect.Request[runtimev2.VolumeObjectGrantRequest]) (*connect.Response[runtimev2.VolumeObjectGrant], error)
 	GetCopy(context.Context, *connect.Request[runtimev2.GetArtifactVolumeCopyRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error)
 	ListCopies(context.Context, *connect.Request[runtimev2.ListArtifactVolumeCopiesRequest]) (*connect.Response[runtimev2.ListArtifactVolumeCopiesResponse], error)
 }
@@ -1451,16 +1465,10 @@ func NewArtifactVolumeDirectoryClient(httpClient connect.HTTPClient, baseURL str
 			connect.WithSchema(artifactVolumeDirectoryMethods.ByName("Delete")),
 			connect.WithClientOptions(opts...),
 		),
-		reserveCopy: connect.NewClient[runtimev2.CopyArtifactToVolumeRequest, runtimev2.ArtifactVolumeCopy](
+		grantObject: connect.NewClient[runtimev2.VolumeObjectGrantRequest, runtimev2.VolumeObjectGrant](
 			httpClient,
-			baseURL+ArtifactVolumeDirectoryReserveCopyProcedure,
-			connect.WithSchema(artifactVolumeDirectoryMethods.ByName("ReserveCopy")),
-			connect.WithClientOptions(opts...),
-		),
-		commitCopy: connect.NewClient[runtimev2.CommitArtifactVolumeCopyRequest, runtimev2.ArtifactVolumeCopy](
-			httpClient,
-			baseURL+ArtifactVolumeDirectoryCommitCopyProcedure,
-			connect.WithSchema(artifactVolumeDirectoryMethods.ByName("CommitCopy")),
+			baseURL+ArtifactVolumeDirectoryGrantObjectProcedure,
+			connect.WithSchema(artifactVolumeDirectoryMethods.ByName("GrantObject")),
 			connect.WithClientOptions(opts...),
 		),
 		getCopy: connect.NewClient[runtimev2.GetArtifactVolumeCopyRequest, runtimev2.ArtifactVolumeCopy](
@@ -1484,8 +1492,7 @@ type artifactVolumeDirectoryClient struct {
 	get         *connect.Client[runtimev2.GetArtifactVolumeRequest, runtimev2.ArtifactVolume]
 	list        *connect.Client[runtimev2.ListArtifactVolumesRequest, runtimev2.ListArtifactVolumesResponse]
 	delete      *connect.Client[runtimev2.DeleteArtifactVolumeRequest, runtimev2.DeleteArtifactVolumeResponse]
-	reserveCopy *connect.Client[runtimev2.CopyArtifactToVolumeRequest, runtimev2.ArtifactVolumeCopy]
-	commitCopy  *connect.Client[runtimev2.CommitArtifactVolumeCopyRequest, runtimev2.ArtifactVolumeCopy]
+	grantObject *connect.Client[runtimev2.VolumeObjectGrantRequest, runtimev2.VolumeObjectGrant]
 	getCopy     *connect.Client[runtimev2.GetArtifactVolumeCopyRequest, runtimev2.ArtifactVolumeCopy]
 	listCopies  *connect.Client[runtimev2.ListArtifactVolumeCopiesRequest, runtimev2.ListArtifactVolumeCopiesResponse]
 }
@@ -1510,14 +1517,9 @@ func (c *artifactVolumeDirectoryClient) Delete(ctx context.Context, req *connect
 	return c.delete.CallUnary(ctx, req)
 }
 
-// ReserveCopy calls supertag.runtime.v2.ArtifactVolumeDirectory.ReserveCopy.
-func (c *artifactVolumeDirectoryClient) ReserveCopy(ctx context.Context, req *connect.Request[runtimev2.CopyArtifactToVolumeRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error) {
-	return c.reserveCopy.CallUnary(ctx, req)
-}
-
-// CommitCopy calls supertag.runtime.v2.ArtifactVolumeDirectory.CommitCopy.
-func (c *artifactVolumeDirectoryClient) CommitCopy(ctx context.Context, req *connect.Request[runtimev2.CommitArtifactVolumeCopyRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error) {
-	return c.commitCopy.CallUnary(ctx, req)
+// GrantObject calls supertag.runtime.v2.ArtifactVolumeDirectory.GrantObject.
+func (c *artifactVolumeDirectoryClient) GrantObject(ctx context.Context, req *connect.Request[runtimev2.VolumeObjectGrantRequest]) (*connect.Response[runtimev2.VolumeObjectGrant], error) {
+	return c.grantObject.CallUnary(ctx, req)
 }
 
 // GetCopy calls supertag.runtime.v2.ArtifactVolumeDirectory.GetCopy.
@@ -1537,8 +1539,8 @@ type ArtifactVolumeDirectoryHandler interface {
 	Get(context.Context, *connect.Request[runtimev2.GetArtifactVolumeRequest]) (*connect.Response[runtimev2.ArtifactVolume], error)
 	List(context.Context, *connect.Request[runtimev2.ListArtifactVolumesRequest]) (*connect.Response[runtimev2.ListArtifactVolumesResponse], error)
 	Delete(context.Context, *connect.Request[runtimev2.DeleteArtifactVolumeRequest]) (*connect.Response[runtimev2.DeleteArtifactVolumeResponse], error)
-	ReserveCopy(context.Context, *connect.Request[runtimev2.CopyArtifactToVolumeRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error)
-	CommitCopy(context.Context, *connect.Request[runtimev2.CommitArtifactVolumeCopyRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error)
+	// Authorizes one Volume object for a live Attempt of the calling host (VolumeObjects.Grant).
+	GrantObject(context.Context, *connect.Request[runtimev2.VolumeObjectGrantRequest]) (*connect.Response[runtimev2.VolumeObjectGrant], error)
 	GetCopy(context.Context, *connect.Request[runtimev2.GetArtifactVolumeCopyRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error)
 	ListCopies(context.Context, *connect.Request[runtimev2.ListArtifactVolumeCopiesRequest]) (*connect.Response[runtimev2.ListArtifactVolumeCopiesResponse], error)
 }
@@ -1574,16 +1576,10 @@ func NewArtifactVolumeDirectoryHandler(svc ArtifactVolumeDirectoryHandler, opts 
 		connect.WithSchema(artifactVolumeDirectoryMethods.ByName("Delete")),
 		connect.WithHandlerOptions(opts...),
 	)
-	artifactVolumeDirectoryReserveCopyHandler := connect.NewUnaryHandler(
-		ArtifactVolumeDirectoryReserveCopyProcedure,
-		svc.ReserveCopy,
-		connect.WithSchema(artifactVolumeDirectoryMethods.ByName("ReserveCopy")),
-		connect.WithHandlerOptions(opts...),
-	)
-	artifactVolumeDirectoryCommitCopyHandler := connect.NewUnaryHandler(
-		ArtifactVolumeDirectoryCommitCopyProcedure,
-		svc.CommitCopy,
-		connect.WithSchema(artifactVolumeDirectoryMethods.ByName("CommitCopy")),
+	artifactVolumeDirectoryGrantObjectHandler := connect.NewUnaryHandler(
+		ArtifactVolumeDirectoryGrantObjectProcedure,
+		svc.GrantObject,
+		connect.WithSchema(artifactVolumeDirectoryMethods.ByName("GrantObject")),
 		connect.WithHandlerOptions(opts...),
 	)
 	artifactVolumeDirectoryGetCopyHandler := connect.NewUnaryHandler(
@@ -1608,10 +1604,8 @@ func NewArtifactVolumeDirectoryHandler(svc ArtifactVolumeDirectoryHandler, opts 
 			artifactVolumeDirectoryListHandler.ServeHTTP(w, r)
 		case ArtifactVolumeDirectoryDeleteProcedure:
 			artifactVolumeDirectoryDeleteHandler.ServeHTTP(w, r)
-		case ArtifactVolumeDirectoryReserveCopyProcedure:
-			artifactVolumeDirectoryReserveCopyHandler.ServeHTTP(w, r)
-		case ArtifactVolumeDirectoryCommitCopyProcedure:
-			artifactVolumeDirectoryCommitCopyHandler.ServeHTTP(w, r)
+		case ArtifactVolumeDirectoryGrantObjectProcedure:
+			artifactVolumeDirectoryGrantObjectHandler.ServeHTTP(w, r)
 		case ArtifactVolumeDirectoryGetCopyProcedure:
 			artifactVolumeDirectoryGetCopyHandler.ServeHTTP(w, r)
 		case ArtifactVolumeDirectoryListCopiesProcedure:
@@ -1641,12 +1635,8 @@ func (UnimplementedArtifactVolumeDirectoryHandler) Delete(context.Context, *conn
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactVolumeDirectory.Delete is not implemented"))
 }
 
-func (UnimplementedArtifactVolumeDirectoryHandler) ReserveCopy(context.Context, *connect.Request[runtimev2.CopyArtifactToVolumeRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactVolumeDirectory.ReserveCopy is not implemented"))
-}
-
-func (UnimplementedArtifactVolumeDirectoryHandler) CommitCopy(context.Context, *connect.Request[runtimev2.CommitArtifactVolumeCopyRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactVolumeDirectory.CommitCopy is not implemented"))
+func (UnimplementedArtifactVolumeDirectoryHandler) GrantObject(context.Context, *connect.Request[runtimev2.VolumeObjectGrantRequest]) (*connect.Response[runtimev2.VolumeObjectGrant], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactVolumeDirectory.GrantObject is not implemented"))
 }
 
 func (UnimplementedArtifactVolumeDirectoryHandler) GetCopy(context.Context, *connect.Request[runtimev2.GetArtifactVolumeCopyRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error) {
@@ -1655,6 +1645,82 @@ func (UnimplementedArtifactVolumeDirectoryHandler) GetCopy(context.Context, *con
 
 func (UnimplementedArtifactVolumeDirectoryHandler) ListCopies(context.Context, *connect.Request[runtimev2.ListArtifactVolumeCopiesRequest]) (*connect.Response[runtimev2.ListArtifactVolumeCopiesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactVolumeDirectory.ListCopies is not implemented"))
+}
+
+// VolumeObjectsClient is a client for the supertag.runtime.v2.VolumeObjects service.
+type VolumeObjectsClient interface {
+	// Authorizes writing or reading one object. The Control Plane derives the key from the purpose;
+	// a host never names one. An S3 Volume's grant carries a presigned URL; a file Volume's is
+	// written or read through the host's own mapping.
+	Grant(context.Context, *connect.Request[runtimev2.VolumeObjectGrantRequest]) (*connect.Response[runtimev2.VolumeObjectGrant], error)
+}
+
+// NewVolumeObjectsClient constructs a client for the supertag.runtime.v2.VolumeObjects service. By
+// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
+// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewVolumeObjectsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) VolumeObjectsClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	volumeObjectsMethods := runtimev2.File_supertag_runtime_v2_artifact_proto.Services().ByName("VolumeObjects").Methods()
+	return &volumeObjectsClient{
+		grant: connect.NewClient[runtimev2.VolumeObjectGrantRequest, runtimev2.VolumeObjectGrant](
+			httpClient,
+			baseURL+VolumeObjectsGrantProcedure,
+			connect.WithSchema(volumeObjectsMethods.ByName("Grant")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// volumeObjectsClient implements VolumeObjectsClient.
+type volumeObjectsClient struct {
+	grant *connect.Client[runtimev2.VolumeObjectGrantRequest, runtimev2.VolumeObjectGrant]
+}
+
+// Grant calls supertag.runtime.v2.VolumeObjects.Grant.
+func (c *volumeObjectsClient) Grant(ctx context.Context, req *connect.Request[runtimev2.VolumeObjectGrantRequest]) (*connect.Response[runtimev2.VolumeObjectGrant], error) {
+	return c.grant.CallUnary(ctx, req)
+}
+
+// VolumeObjectsHandler is an implementation of the supertag.runtime.v2.VolumeObjects service.
+type VolumeObjectsHandler interface {
+	// Authorizes writing or reading one object. The Control Plane derives the key from the purpose;
+	// a host never names one. An S3 Volume's grant carries a presigned URL; a file Volume's is
+	// written or read through the host's own mapping.
+	Grant(context.Context, *connect.Request[runtimev2.VolumeObjectGrantRequest]) (*connect.Response[runtimev2.VolumeObjectGrant], error)
+}
+
+// NewVolumeObjectsHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewVolumeObjectsHandler(svc VolumeObjectsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	volumeObjectsMethods := runtimev2.File_supertag_runtime_v2_artifact_proto.Services().ByName("VolumeObjects").Methods()
+	volumeObjectsGrantHandler := connect.NewUnaryHandler(
+		VolumeObjectsGrantProcedure,
+		svc.Grant,
+		connect.WithSchema(volumeObjectsMethods.ByName("Grant")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.VolumeObjects/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case VolumeObjectsGrantProcedure:
+			volumeObjectsGrantHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedVolumeObjectsHandler returns CodeUnimplemented from all methods.
+type UnimplementedVolumeObjectsHandler struct{}
+
+func (UnimplementedVolumeObjectsHandler) Grant(context.Context, *connect.Request[runtimev2.VolumeObjectGrantRequest]) (*connect.Response[runtimev2.VolumeObjectGrant], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.VolumeObjects.Grant is not implemented"))
 }
 
 // WorkerArtifactTransfersClient is a client for the supertag.runtime.v2.WorkerArtifactTransfers

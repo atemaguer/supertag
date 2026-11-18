@@ -2,12 +2,9 @@ use crate::{Connection, connect_operator, request};
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
-use std::{path::PathBuf, time::Duration};
-use supertag_api::transfers::volumes::ArtifactVolumeMappings;
+use std::path::PathBuf;
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
-
-const VOLUME_TRANSFER_TIMEOUT: Duration = Duration::from_secs(110);
 
 #[derive(Subcommand)]
 pub enum VolumeCommand {
@@ -24,20 +21,29 @@ pub enum VolumeCommand {
         #[arg(long, default_value_t = 0)]
         expected_revision: u64,
     },
-    /// Copy one exact artifact file. The Control Plane must separately consent to this Volume's storage.
-    Copy {
+    /// Store or remove an S3 Volume's signing credential in this machine's credential vault. Run it
+    /// on the machine that runs the Control Plane, or with its vault.
+    #[command(subcommand)]
+    Credential(CredentialCommand),
+}
+
+#[derive(Subcommand)]
+pub enum CredentialCommand {
+    /// Store the credential the Control Plane signs an S3 Volume's object URLs with. The access
+    /// key comes from SUPERTAG_VOLUME_ACCESS_KEY_ID, the secret from
+    /// SUPERTAG_VOLUME_SECRET_ACCESS_KEY, and an optional session token from
+    /// SUPERTAG_VOLUME_SESSION_TOKEN. Worker Hosts never receive it.
+    Set {
         volume_id: String,
-        artifact_id: String,
-        /// File in the artifact to copy.
+        /// The S3-compatible service's HTTPS origin, such as https://s3.us-east-1.amazonaws.com.
         #[arg(long)]
-        path: String,
-        /// The revision you last read. The change is refused when the resource has changed since.
+        endpoint: String,
+        /// The service's region, such as us-east-1, or auto.
         #[arg(long)]
-        expected_revision: u64,
-        /// Idempotency key: a retry with the same key returns the first result instead of acting twice.
-        #[arg(long)]
-        operation_id: String,
+        region: String,
     },
+    /// Remove an S3 Volume's signing credential from this machine's credential vault.
+    Remove { volume_id: String },
 }
 
 // Options for `supertag get volumes`.
@@ -173,36 +179,99 @@ pub(crate) async fn delete(
     Ok(json!({ "deleted": deleted }))
 }
 
-pub fn mappings(values: Vec<String>, s3: Option<PathBuf>) -> Result<ArtifactVolumeMappings> {
-    let mut entries = Vec::new();
+/// A Worker Host's own file Volume mappings, as `ID=/absolute/directory`. None may
+/// overlap another, or any directory in `protected`.
+pub fn host_mappings(
+    values: Vec<String>,
+    protected: &[&std::path::Path],
+) -> Result<std::collections::BTreeMap<String, supertag_workspaces::artifact_volumes::FileVolume>> {
+    let mut mappings = std::collections::BTreeMap::new();
     for value in values {
         let (id, path) = value
             .split_once('=')
-            .context("artifact Volume mapping requires ID=/absolute/directory")?;
+            .context("a Volume mapping is VOLUME_ID=/absolute/directory")?;
         let path = PathBuf::from(path);
-        if !path.is_absolute() {
-            bail!("artifact Volume mapping must use an absolute path")
-        };
-        entries.push((id.to_owned(), path));
+        if id.is_empty() || !path.is_absolute() {
+            bail!("a Volume mapping is VOLUME_ID=/absolute/directory")
+        }
+        let mapping = supertag_workspaces::artifact_volumes::FileVolume::open(&path)?;
+        for other in protected {
+            let other = other.canonicalize().unwrap_or_else(|_| other.to_path_buf());
+            if mapping.root.starts_with(&other) || other.starts_with(&mapping.root) {
+                bail!("Volume {id} overlaps this host's own state")
+            }
+        }
+        if mappings.values().any(
+            |prior: &supertag_workspaces::artifact_volumes::FileVolume| prior.overlaps(&mapping),
+        ) || mappings.insert(id.to_owned(), mapping).is_some()
+        {
+            bail!("Volume mappings overlap or repeat")
+        }
     }
-    let mappings = ArtifactVolumeMappings::new(entries)?;
-    match s3 {
-        Some(path) => mappings.with_s3_config(&path),
-        None => Ok(mappings),
-    }
+    Ok(mappings)
 }
 pub(crate) fn volume(v: &ArtifactVolume) -> Value {
     json!({"volume_id":v.volume_id,"source":v.source,"revision":v.revision})
 }
 fn copy(v: &ArtifactVolumeCopy) -> Value {
-    json!({"copy_id":v.copy_id,"operation_id":v.operation_id,"volume":v.volume.as_ref().map(volume),"artifact_id":v.artifact_id,"file":v.file.as_ref().map(|f|json!({"path":f.path,"blob":f.blob.as_ref().map(|b|json!({"sha256":b.sha256,"byte_length":b.byte_length}))})),"storage_key":v.storage_key,"state":v.state().as_str_name(),"created_at_ms":v.created_at_ms,"verified_at_ms":v.verified_at_ms})
+    json!({"copy_id":v.copy_id,"operation_id":v.operation_id,"volume":v.volume.as_ref().map(volume),"artifact_id":v.artifact_id,"file":v.file.as_ref().map(|f|json!({"path":f.path,"blob":f.blob.as_ref().map(|b|json!({"sha256":b.sha256,"byte_length":b.byte_length}))})),"storage_key":v.storage_key,"state":v.state().as_str_name(),"created_at_ms":v.created_at_ms,"verified_at_ms":v.verified_at_ms,"host_attested":v.host_attested})
 }
+async fn credential(command: CredentialCommand) -> Result<Value> {
+    let vault = supertag_credential_vault::CredentialVault::from_process_environment()?;
+    Ok(match command {
+        CredentialCommand::Set {
+            volume_id,
+            endpoint,
+            region,
+        } => {
+            let variable = |name: &str| {
+                std::env::var(name)
+                    .ok()
+                    .map(|value| value.trim().to_owned())
+                    .filter(|value| !value.is_empty())
+            };
+            let mut value = supertag_credential_vault::CredentialValue::from([
+                ("endpoint".to_owned(), endpoint),
+                ("region".to_owned(), region),
+                (
+                    "access_key_id".to_owned(),
+                    variable("SUPERTAG_VOLUME_ACCESS_KEY_ID")
+                        .context("set SUPERTAG_VOLUME_ACCESS_KEY_ID to the access key")?,
+                ),
+                (
+                    "secret_access_key".to_owned(),
+                    variable("SUPERTAG_VOLUME_SECRET_ACCESS_KEY")
+                        .context("set SUPERTAG_VOLUME_SECRET_ACCESS_KEY to the secret key")?,
+                ),
+            ]);
+            if let Some(token) = variable("SUPERTAG_VOLUME_SESSION_TOKEN") {
+                value.insert("session_token".to_owned(), token);
+            }
+            vault
+                .store(
+                    &supertag_protocol::volumes::credential_vault_id(&volume_id),
+                    &value,
+                )
+                .await
+                .context("store the Volume credential in this machine's credential vault")?;
+            json!({ "volume_id": volume_id, "credential": "stored" })
+        }
+        CredentialCommand::Remove { volume_id } => {
+            vault
+                .delete(&supertag_protocol::volumes::credential_vault_id(&volume_id))
+                .await
+                .context("remove the Volume credential from this machine's credential vault")?;
+            json!({ "volume_id": volume_id, "credential": "removed" })
+        }
+    })
+}
+
 pub async fn run(connection: Connection, command: VolumeCommand) -> Result<()> {
-    let (channel, token) = if matches!(command, VolumeCommand::Copy { .. }) {
-        crate::connect_operator_with_timeout(connection, VOLUME_TRANSFER_TIMEOUT).await?
-    } else {
-        connect_operator(connection).await?
-    };
+    if let VolumeCommand::Credential(command) = command {
+        crate::terminal::print_json(&credential(command).await?)?;
+        return Ok(());
+    }
+    let (channel, token) = connect_operator(connection).await?;
     let mut client = client(channel.clone());
     let value = match command {
         VolumeCommand::Put {
@@ -224,45 +293,7 @@ pub async fn run(connection: Connection, command: VolumeCommand) -> Result<()> {
                 .await?
                 .into_inner(),
         ),
-        VolumeCommand::Copy {
-            volume_id,
-            artifact_id,
-            path,
-            expected_revision,
-            operation_id,
-        } => {
-            let mut catalog = artifact_catalog_client::ArtifactCatalogClient::new(channel)
-                .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                .max_encoding_message_size(MAX_MESSAGE_BYTES);
-            let artifact = catalog
-                .get(request(
-                    GetCapturedArtifactRequest {
-                        artifact_id: artifact_id.clone(),
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            let expected_blob = artifact
-                .files
-                .into_iter()
-                .find(|f| f.path == path)
-                .and_then(|f| f.blob)
-                .context("selected artifact file has no stored bytes")?;
-            let mut transfer = request(
-                CopyArtifactToVolumeRequest {
-                    volume_id,
-                    artifact_id,
-                    path,
-                    expected_revision,
-                    operation_id,
-                    expected_blob: Some(expected_blob),
-                },
-                &token,
-            )?;
-            transfer.set_timeout(VOLUME_TRANSFER_TIMEOUT);
-            copy(&client.copy(transfer).await?.into_inner())
-        }
+        VolumeCommand::Credential(_) => unreachable!("handled above"),
     };
     crate::terminal::print_json(&value)?;
     Ok(())

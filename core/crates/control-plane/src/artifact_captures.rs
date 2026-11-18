@@ -91,15 +91,32 @@ impl Store {
                     .bind(&canonical.operation_id)
                     .execute(&mut *tx)
                     .await?;
-                    let capture = capture_row(&prior)?;
+                    let mut capture = capture_row(&prior)?;
                     crate::artifact_direct::commit_copy_in(&mut tx, host, &capture, &storage)
                         .await?;
+                    let artifact_id = capture
+                        .summary
+                        .as_ref()
+                        .map(|summary| summary.artifact_id.clone())
+                        .unwrap_or_default();
+                    capture.volume_copies = crate::artifact_volumes::verify_capture_copies_in(
+                        &mut tx,
+                        &artifact_id,
+                        now,
+                    )
+                    .await?;
                     tx.commit().await?;
                     return Ok(capture);
                 }
             }
+            let mut capture = capture_row(&prior)?;
+            if let Some(summary) = &capture.summary {
+                capture.volume_copies =
+                    crate::artifact_volumes::capture_copies_in(&mut tx, &summary.artifact_id)
+                        .await?;
+            }
             tx.rollback().await?;
-            return capture_row(&prior);
+            return Ok(capture);
         }
         if commit {
             return Err(StoreError::FailedPrecondition(
@@ -167,7 +184,8 @@ impl Store {
         .fetch_optional(&mut *tx)
         .await?;
         let artifact_id = Uuid::new_v4().to_string();
-        let artifact = CapturedArtifact {
+        let tag_id = task.tag_id.clone();
+        let mut artifact = CapturedArtifact {
             summary: Some(ArtifactSummary {
                 artifact_id: artifact_id.clone(),
                 description: canonical.description,
@@ -189,6 +207,7 @@ impl Store {
             }),
             files: canonical.files,
             inputs: crate::artifact_acquisitions::lineage_in(&mut tx, &attempt.attempt_id).await?,
+            volume_copies: vec![],
         };
         if artifact.encoded_len() > supertag_protocol::MAX_MESSAGE_BYTES - 4096 {
             return Err(invalid(
@@ -208,6 +227,9 @@ impl Store {
         .bind(artifact.encode_to_vec())
         .execute(&mut *tx)
         .await?;
+        artifact.volume_copies =
+            crate::artifact_volumes::reserve_capture_copies_in(&mut tx, &tag_id, &artifact, now)
+                .await?;
         tx.commit().await?;
         Ok(artifact)
     }

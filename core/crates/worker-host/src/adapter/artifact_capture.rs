@@ -124,7 +124,17 @@ impl HarnessArtifacts for Bridge {
                 Capture::Committed(capture) => return Ok(Response::new(capture)),
             };
             // The snapshot retained the bytes in this host's artifact storage; only the manifest
-            // goes to the Control Plane.
+            // goes to the Control Plane. A Tag that keeps its captures on a Volume gets each copy
+            // written from here first.
+            crate::capture_volumes::write(
+                &self.coordination.acquisitions,
+                &self.host_token,
+                &manifest,
+                &selected,
+                &self.coordination.volumes,
+                operation_deadline.saturating_duration_since(Instant::now()),
+            )
+            .await?;
             drop(selected);
             let mut upstream = authenticated_request(manifest.clone(), &self.host_token, None)?;
             upstream.set_timeout(operation_deadline.saturating_duration_since(Instant::now()));

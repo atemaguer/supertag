@@ -102,7 +102,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 101;
+        const SCHEMA_VERSION: i64 = 102;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -300,6 +300,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0099_attention_pacing.sql"),
                 include_str!("../migrations/sqlite/0100_native_memory.sql"),
                 include_str!("../migrations/sqlite/0101_checkpoints_on_hosts.sql"),
+                include_str!("../migrations/sqlite/0102_tag_volume.sql"),
             ]
         } else {
             [
@@ -406,6 +407,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0099_attention_pacing.sql"),
                 include_str!("../migrations/postgresql/0100_native_memory.sql"),
                 include_str!("../migrations/postgresql/0101_checkpoints_on_hosts.sql"),
+                include_str!("../migrations/postgresql/0102_tag_volume.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -531,6 +533,7 @@ impl Store {
             max_work_sessions: None,
             memory: None,
             start_rate: None,
+            volume: None,
         })
         .await
     }
@@ -560,6 +563,7 @@ impl Store {
             max_work_sessions,
             memory,
             start_rate,
+            volume,
         } = input;
         let tag_id = tag_id.as_str();
         let instructions = instructions.as_str();
@@ -654,7 +658,8 @@ impl Store {
                 .await?;
         let memory = crate::memories::enabled_in(transaction, tag_id, memory).await?;
         let start_rate = crate::start_rates::requested_in(transaction, tag_id, start_rate).await?;
-        let row = sqlx::query("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution, name, workspace_mounts, workspace_mcp_servers, workspace_base_ref, lead, max_work_sessions, memory, start_rate_starts, start_rate_per_ms) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules, execution = excluded.execution, name = excluded.name, workspace_mounts=excluded.workspace_mounts, workspace_mcp_servers=excluded.workspace_mcp_servers, workspace_base_ref=excluded.workspace_base_ref, lead=excluded.lead, max_work_sessions=excluded.max_work_sessions, memory=excluded.memory, start_rate_starts=excluded.start_rate_starts, start_rate_per_ms=excluded.start_rate_per_ms RETURNING revision, memory_reviewed_at_ms")
+        let volume = crate::artifact_volumes::tag_volume_in(transaction, tag_id, volume).await?;
+        let row = sqlx::query("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution, name, workspace_mounts, workspace_mcp_servers, workspace_base_ref, lead, max_work_sessions, memory, start_rate_starts, start_rate_per_ms, volume) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules, execution = excluded.execution, name = excluded.name, workspace_mounts=excluded.workspace_mounts, workspace_mcp_servers=excluded.workspace_mcp_servers, workspace_base_ref=excluded.workspace_base_ref, lead=excluded.lead, max_work_sessions=excluded.max_work_sessions, memory=excluded.memory, start_rate_starts=excluded.start_rate_starts, start_rate_per_ms=excluded.start_rate_per_ms, volume=excluded.volume RETURNING revision, memory_reviewed_at_ms")
             .bind(tag_id).bind(instructions).bind(actions)
             .bind(workspace.as_ref().map(|spec| &spec.workspace_id))
             .bind(workspace.as_ref().map(|spec| &spec.base_commit))
@@ -670,6 +675,7 @@ impl Store {
             .bind(i64::from(memory))
             .bind(start_rate.as_ref().map(|rate| i64::from(rate.starts)))
             .bind(start_rate.as_ref().map(|rate| rate.per_ms as i64))
+            .bind(volume.as_deref())
             .fetch_one(&mut **transaction).await?;
         let revision: i64 = row.try_get("revision")?;
         Ok(Tag {
@@ -695,6 +701,7 @@ impl Store {
             start_rate,
             starts_in_window: 0,
             native_memory: vec![],
+            volume: volume.unwrap_or_default(),
         })
     }
 
@@ -1075,6 +1082,11 @@ impl Store {
                                 .await?,
                             native_memory: crate::native_memory::grant_in(&mut transaction, &task)
                                 .await?,
+                            volume: crate::artifact_volumes::assigned_in(
+                                &mut transaction,
+                                &task.tag_id,
+                            )
+                            .await?,
                             task: Some(task),
                             attempt_id,
                             lease_token: prior.try_get("lease_token")?,
@@ -1127,10 +1139,12 @@ impl Store {
         sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope, execution_profile, attempt_execution, gateway_workspace_scope, claimed_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)")
             .bind(&host.principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).bind(workspace_scope).bind(harness as i64).bind(context_scope).bind(profile_bytes).bind(attempt_execution).bind(gateway_workspace_scope).bind(now).execute(&mut *transaction).await?;
         let native_memory = crate::native_memory::grant_in(&mut transaction, &task).await?;
+        let volume = crate::artifact_volumes::assigned_in(&mut transaction, &task.tag_id).await?;
         supertag_protocol::crash_point("control-plane.claim", "before-commit");
         transaction.commit().await?;
         Ok(Some(Assignment {
             native_memory,
+            volume,
             task: Some(task),
             attempt_id: attempt,
             lease_token: lease,

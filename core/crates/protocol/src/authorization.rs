@@ -152,6 +152,8 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     // A read-write Workspace copy's write-back summary, from the Attempt's own Worker Host.
     ("AttemptWorkspaceMounts", "RecordWrites", HOST),
     ("AttemptArtifacts", "*", HOST),
+    // One object on the Tag's Volume, for a live Attempt of the calling Worker Host.
+    ("VolumeObjects", "*", HOST),
     ("ArtifactTransfers", "*", HOST),
     ("Transfers", "*", HOST),
     ("Transfers", "DownloadWorkspaceArtifact", OC),

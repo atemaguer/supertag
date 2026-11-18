@@ -13,19 +13,7 @@ const KEY: &str = "testVolumeKey";
 const SECRET: &str = "fixture-only-private-key";
 const TOKEN: &str = "fixture-only-sts-token";
 const SOURCE: &str = "s3://evidence-bucket/teams/core";
-const PREFIX: &str = "/evidence-bucket/teams/core/attempts/";
-
-#[derive(Default)]
-struct Object {
-    path: String,
-    bytes: Option<Vec<u8>>,
-    reads: usize,
-    writes: usize,
-    invalid_requests: usize,
-    put_result: Option<StatusCode>,
-    competing_write: Option<Vec<u8>>,
-    redirect: Option<String>,
-}
+const PREFIX: &str = "/evidence-bucket/teams/core/tags/";
 
 fn signature_is_valid(method: &Method, path: &str, headers: &HeaderMap, bytes: &[u8]) -> bool {
     let get = |name: &str| headers.get(name)?.to_str().ok();
@@ -76,147 +64,217 @@ fn signature_is_valid(method: &Method, path: &str, headers: &HeaderMap, bytes: &
     verify().unwrap_or(false)
 }
 
-async fn object(
-    State(state): State<Arc<Mutex<Object>>>,
+/// What an S3 test double keeps for a capture uploaded straight from a Worker Host.
+#[derive(Default)]
+struct Bucket {
+    objects: std::collections::BTreeMap<String, (Vec<u8>, String)>,
+    presigned_puts: usize,
+    heads: usize,
+    gets: usize,
+    refused: usize,
+    /// Answer an upload with success but keep nothing, as a store that lost it.
+    lose_uploads: bool,
+}
+
+/// RFC 3986 encoding, as SigV4 canonicalizes query values.
+fn sigv4_encode(value: &str) -> String {
+    value
+        .bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+                (b as char).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect()
+}
+
+fn sigv4_signature(date: &str, to_sign: &str) -> Option<String> {
+    let mut key = format!("AWS4{SECRET}").into_bytes();
+    for input in [date, "auto", "s3", "aws4_request", to_sign] {
+        let mut mac = Hmac::<Sha256>::new_from_slice(&key).ok()?;
+        mac.update(input.as_bytes());
+        key = mac.finalize().into_bytes().to_vec();
+    }
+    Some(key.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// A presigned PUT, checked as S3 checks it: the query signature over the signed headers with an
+/// unsigned payload, then the body against the signed length and SHA-256 checksum.
+fn presigned_put_is_valid(path: &str, query: &str, headers: &HeaderMap, body: &[u8]) -> bool {
+    let check = || -> Option<bool> {
+        let params: std::collections::BTreeMap<String, String> =
+            url::form_urlencoded::parse(query.as_bytes())
+                .map(|(k, v)| (k.into_owned(), v.into_owned()))
+                .collect();
+        let signed = params.get("X-Amz-SignedHeaders")?;
+        let names: Vec<&str> = signed.split(';').collect();
+        for required in [
+            "content-length",
+            "host",
+            "if-none-match",
+            "x-amz-checksum-sha256",
+        ] {
+            if !names.contains(&required) {
+                return Some(false);
+            }
+        }
+        let credential = params.get("X-Amz-Credential")?;
+        let (access_key, scope) = credential.split_once('/')?;
+        let date = scope.split('/').next()?;
+        if access_key != KEY
+            || params.get("X-Amz-Algorithm")? != "AWS4-HMAC-SHA256"
+            || params.get("X-Amz-Security-Token")? != TOKEN
+        {
+            return Some(false);
+        }
+        let canonical_query = params
+            .iter()
+            .filter(|(k, _)| *k != "X-Amz-Signature")
+            .map(|(k, v)| format!("{}={}", sigv4_encode(k), sigv4_encode(v)))
+            .collect::<Vec<_>>()
+            .join("&");
+        let get = |name: &str| headers.get(name)?.to_str().ok();
+        let mut canonical_headers = String::new();
+        for name in &names {
+            canonical_headers.push_str(&format!("{name}:{}\n", get(name)?.trim()));
+        }
+        let canonical = format!(
+            "PUT\n{path}\n{canonical_query}\n{canonical_headers}\n{signed}\nUNSIGNED-PAYLOAD"
+        );
+        let to_sign = format!(
+            "AWS4-HMAC-SHA256\n{}\n{scope}\n{:x}",
+            params.get("X-Amz-Date")?,
+            Sha256::digest(canonical)
+        );
+        let checksum = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            Sha256::digest(body),
+        );
+        Some(
+            params.get("X-Amz-Signature")? == &sigv4_signature(date, &to_sign)?
+                && get("content-length")? == body.len().to_string()
+                && get("x-amz-checksum-sha256")? == checksum,
+        )
+    };
+    check().unwrap_or(false)
+}
+
+async fn bucket(
+    State(state): State<Arc<Mutex<Bucket>>>,
     request: axum::http::Request<Body>,
 ) -> Response {
     let (request, body) = request.into_parts();
-    let path = request.uri.path();
+    let path = request.uri.path().to_owned();
     let Ok(bytes) = to_bytes(body, 1024 * 1024).await else {
         return StatusCode::BAD_REQUEST.into_response();
     };
-    let mut object = state.lock().unwrap();
-    if request.uri.query().is_some()
-        || !path.starts_with(PREFIX)
-        || (!object.path.is_empty() && object.path != path)
-        || !signature_is_valid(&request.method, path, &request.headers, &bytes)
-    {
-        object.invalid_requests += 1;
+    let mut bucket = state.lock().unwrap();
+    if !path.starts_with(PREFIX) {
+        bucket.refused += 1;
         return StatusCode::FORBIDDEN.into_response();
     }
-    object.path = path.to_owned();
-    match request.method {
-        Method::GET => {
-            object.reads += 1;
-            if let Some(location) = &object.redirect {
-                return (
-                    StatusCode::TEMPORARY_REDIRECT,
-                    [("location", location.clone())],
-                )
-                    .into_response();
+    match (&request.method, request.uri.query()) {
+        (&Method::PUT, Some(query)) => {
+            if !presigned_put_is_valid(&path, query, &request.headers, &bytes) {
+                bucket.refused += 1;
+                return StatusCode::BAD_REQUEST.into_response();
             }
-            match &object.bytes {
-                Some(bytes) => (
+            bucket.presigned_puts += 1;
+            if bucket.objects.contains_key(&path) {
+                return StatusCode::PRECONDITION_FAILED.into_response();
+            }
+            if !bucket.lose_uploads {
+                let checksum = request.headers["x-amz-checksum-sha256"]
+                    .to_str()
+                    .unwrap()
+                    .to_owned();
+                bucket.objects.insert(path, (bytes.to_vec(), checksum));
+            }
+            StatusCode::OK.into_response()
+        }
+        (&Method::HEAD | &Method::GET, None)
+            if signature_is_valid(&request.method, &path, &request.headers, &[])
+                && (request.method == Method::GET
+                    || request
+                        .headers
+                        .get("x-amz-checksum-mode")
+                        .is_some_and(|mode| mode == "ENABLED")) =>
+        {
+            let head = request.method == Method::HEAD;
+            if head {
+                bucket.heads += 1;
+            } else {
+                bucket.gets += 1;
+            }
+            match bucket.objects.get(&path) {
+                Some((bytes, checksum)) if head => (
                     StatusCode::OK,
-                    [("etag", "\"not-a-sha256\"")],
-                    bytes.clone(),
+                    [
+                        ("content-length", bytes.len().to_string()),
+                        ("x-amz-checksum-sha256", checksum.clone()),
+                    ],
                 )
                     .into_response(),
+                Some((bytes, _)) => (StatusCode::OK, bytes.clone()).into_response(),
                 None => StatusCode::NOT_FOUND.into_response(),
             }
         }
-        Method::PUT => {
-            object.writes += 1;
-            if object.bytes.is_some() {
-                return StatusCode::PRECONDITION_FAILED.into_response();
-            }
-            if let Some(other) = object.competing_write.take() {
-                object.bytes = Some(other);
-                return StatusCode::PRECONDITION_FAILED.into_response();
-            }
-            object.bytes = Some(bytes.to_vec());
-            object.put_result.unwrap_or(StatusCode::OK).into_response()
+        _ => {
+            bucket.refused += 1;
+            StatusCode::FORBIDDEN.into_response()
         }
-        _ => StatusCode::METHOD_NOT_ALLOWED.into_response(),
     }
-}
-
-fn mapped_plane(
-    credentials: &Credentials,
-    root: &Path,
-    database: &str,
-    endpoint: &str,
-    source: &str,
-) -> Result<Command> {
-    let config = root.join("s3-volumes.json");
-    std::fs::write(
-        &config,
-        serde_json::to_vec(&serde_json::json!([{
-            "volumeId": "object",
-            "source": source,
-            "endpoint": endpoint,
-            "region": "auto",
-            "credentialEnvPrefix": "VOLUME_TEST"
-        }]))?,
-    )?;
-    let mut command = plane(credentials, root, database, false);
-    command
-        .arg("--artifact-volume")
-        .arg(format!("aaa-file={}", root.join("volume").display()))
-        .arg("--artifact-s3-volumes")
-        .arg(config)
-        .env("VOLUME_TEST_ACCESS_KEY_ID", KEY)
-        .env("VOLUME_TEST_SECRET_ACCESS_KEY", SECRET)
-        .env("VOLUME_TEST_SESSION_TOKEN", TOKEN)
-        .env("AWS_ACCESS_KEY_ID", "ignored-ambient-key")
-        .env("AWS_SECRET_ACCESS_KEY", "ignored-ambient-secret");
-    Ok(command)
-}
-
-async fn refused(mut command: Command, reason: &str) -> Result<()> {
-    let result = timeout(WAIT, command.output()).await??;
-    let error = String::from_utf8_lossy(&result.stderr);
-    ensure!(
-        !result.status.success() && error.contains(reason),
-        "{error}"
-    );
-    for secret in [KEY, SECRET, TOKEN] {
-        assert!(!error.contains(secret));
-    }
-    Ok(())
 }
 
 database_tests! {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    s3_volume_copy_checks_mapping_sigv4_and_immutable_readback;
+    s3_capture_copy_is_uploaded_by_the_host_with_a_presigned_put;
 }
 
-async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback(
+/// Stores the S3 Volume's signing credential in the Control Plane's vault in `root`, as an
+/// operator does with `supertag volume credential set`.
+async fn store_credential(credentials: &Credentials, root: &Path, endpoint: &str) -> Result<()> {
+    let mut command = credentials.command(&[
+        "volume",
+        "credential",
+        "set",
+        "object",
+        "--endpoint",
+        endpoint,
+        "--region",
+        "auto",
+    ]);
+    command
+        .env("SUPERTAG_STATE_DIR", root)
+        .env("SUPERTAG_VOLUME_ACCESS_KEY_ID", KEY)
+        .env("SUPERTAG_VOLUME_SECRET_ACCESS_KEY", SECRET)
+        .env("SUPERTAG_VOLUME_SESSION_TOKEN", TOKEN);
+    let stored = json(command).await?;
+    ensure!(stored["credential"] == "stored", "{stored}");
+    Ok(())
+}
+
+async fn s3_capture_copy_is_uploaded_by_the_host_with_a_presigned_put(
     database: String,
 ) -> Result<()> {
-    let object_state = Arc::new(Mutex::new(Object {
-        // A provider can persist the write and lose its successful response.
-        put_result: Some(StatusCode::SERVICE_UNAVAILABLE),
-        ..Default::default()
-    }));
+    let state = Arc::new(Mutex::new(Bucket::default()));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let endpoint = format!("http://{}", listener.local_addr()?);
     let server = tokio::spawn(
         axum::serve(
             listener,
-            Router::new()
-                .fallback(object)
-                .with_state(object_state.clone()),
+            Router::new().fallback(bucket).with_state(state.clone()),
         )
         .into_future(),
     );
-
     let temporary = tempfile::tempdir()?;
     let root = temporary.path().canonicalize()?;
-    let volume_path = root.join("volume");
-    std::fs::create_dir(&volume_path)?;
-    std::fs::set_permissions(&volume_path, std::fs::Permissions::from_mode(0o700))?;
     let credentials = Credentials::new();
-    let (mut control, public) = service(mapped_plane(
-        &credentials,
-        &root,
-        &database,
-        &endpoint,
-        "s3://evidence-bucket/wrong-prefix",
-    )?)
-    .await?;
-    let (artifact_id, bytes, blob, mut held) = capture(&credentials, &public).await?;
-    let registered = json(volume(
+    store_credential(&credentials, &root, &endpoint).await?;
+    let (mut control, public) = service(plane(&credentials, &root, &database)).await?;
+    json(volume(
         &credentials,
         &public,
         &[
@@ -229,132 +287,101 @@ async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback(
         ],
     ))
     .await?;
-    assert_eq!(registered["source"], SOURCE);
-    let copy_args = [
-        "copy",
-        "object",
-        &artifact_id,
-        "--path",
-        "report.txt",
-        "--expected-revision",
-        "1",
-        "--operation-id",
-        "copy-object",
-    ];
-    refused(volume(&credentials, &public, &copy_args), "consent").await?;
-    assert_eq!(object_state.lock().unwrap().reads, 0);
-    assert!(
-        json(resource(&credentials, &public, &["get", "volume-copies"])).await?["copies"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
-
+    // An S3 Volume needs no host mapping: the reservation carries a presigned PUT.
+    let (_artifact_id, bytes, _blob, mut held) =
+        capture(&credentials, &public, Some("object"), None).await?;
+    {
+        let bucket = state.lock().unwrap();
+        assert_eq!(bucket.objects.len(), 1);
+        let (path, (stored, _)) = bucket.objects.iter().next().unwrap();
+        assert_eq!(stored, &bytes);
+        assert!(
+            path.starts_with(&format!(
+                "/evidence-bucket/teams/core/tags/{:x}/attempts/",
+                Sha256::digest("writer")
+            )),
+            "{path}"
+        );
+        // The host uploaded once; the Control Plane checked with a HEAD and read no bytes.
+        assert_eq!(
+            (bucket.presigned_puts, bucket.gets, bucket.refused),
+            (1, 0, 0)
+        );
+        assert!(bucket.heads >= 1);
+    }
+    held.disconnect();
+    drop(held);
     stop(&mut control).await?;
-    let (mut control, public) = service(mapped_plane(
-        &credentials,
-        &root,
-        &database,
-        &endpoint,
-        SOURCE,
-    )?)
-    .await?;
-    // Copies relay the bytes from the holding Worker Host.
-    held.reconnect(super::protocol::dial(public.clone()).await?)
-        .await?;
-    let divergence = vec![b'x'; bytes.len()];
-    object_state.lock().unwrap().competing_write = Some(divergence.clone());
-    refused(volume(&credentials, &public, &copy_args), "verified").await?;
-    let pending = json(resource(&credentials, &public, &["get", "volume-copies"])).await?;
-    let pending = &pending["copies"][0];
-    assert_eq!(pending["state"], "ARTIFACT_VOLUME_COPY_STATE_RESERVED");
-    {
-        let mut state = object_state.lock().unwrap();
-        assert_eq!(state.bytes.as_ref(), Some(&divergence));
-        state.bytes = None;
-    }
-    let receipt = json(volume(&credentials, &public, &copy_args)).await?;
-    assert_eq!(receipt["copy_id"], pending["copy_id"]);
-    assert_eq!(receipt["state"], "ARTIFACT_VOLUME_COPY_STATE_VERIFIED");
-    {
-        let state = object_state.lock().unwrap();
-        assert_eq!(
-            state.path,
-            format!(
-                "/evidence-bucket/teams/core/{}",
-                receipt["storage_key"].as_str().unwrap()
-            )
-        );
-        assert_eq!(state.bytes.as_ref(), Some(&bytes));
-        assert_eq!(
-            (state.reads, state.writes, state.invalid_requests),
-            (4, 2, 0)
-        );
-    }
 
+    // Without its credential in the vault the Control Plane cannot sign, and the capture fails.
+    let unsigned_root = tempfile::tempdir()?;
+    let unsigned_root = unsigned_root.path().canonicalize()?;
+    let unsigned_database = format!(
+        "sqlite://{}?mode=rwc",
+        unsigned_root.join("store.db").display()
+    );
+    let (mut unsigned_plane, unsigned_public) =
+        service(plane(&credentials, &unsigned_root, &unsigned_database)).await?;
     json(volume(
         &credentials,
-        &public,
+        &unsigned_public,
         &[
             "put",
-            "aaa-file",
+            "object",
             "--source",
-            &format!("file://{}", volume_path.display()),
+            SOURCE,
             "--operation-id",
-            "register-file",
+            "register-object",
         ],
     ))
     .await?;
-    let file_copy = json(volume(
-        &credentials,
-        &public,
-        &[
-            "copy",
-            "aaa-file",
-            &artifact_id,
-            "--path",
-            "report.txt",
-            "--expected-revision",
-            "1",
-            "--operation-id",
-            "copy-file",
-        ],
-    ))
-    .await?;
-    let file_path = volume_path.join(file_copy["storage_key"].as_str().unwrap());
-    assert_eq!(object_state.lock().unwrap().reads, 4);
-    // A bad first candidate cannot shadow the independently verified later copy.
-    std::fs::write(&file_path, &divergence)?;
-    stop(&mut control).await?;
-    // The holding Worker Host goes offline; only the Volume copies remain reachable.
-    held.disconnect();
-    let (mut control, public) = service(mapped_plane(
-        &credentials,
-        &root,
-        &database,
-        &endpoint,
-        SOURCE,
-    )?)
-    .await?;
-    assert_eq!(
-        json(volume(&credentials, &public, &copy_args)).await?,
-        receipt
+    let unsigned = capture(&credentials, &unsigned_public, Some("object"), None)
+        .await
+        .err()
+        .context("a capture committed without a signed copy")?;
+    ensure!(
+        format!("{unsigned:#}").contains("supertag volume credential set object"),
+        "{unsigned:#}"
     );
-    read_dynamic(&credentials, &public, &artifact_id, &bytes).await?;
-    assert!(!root.join("cas").join(&blob.sha256).exists());
-    assert_eq!(std::fs::read(&file_path)?, divergence);
+    stop(&mut unsigned_plane).await?;
 
-    object_state.lock().unwrap().bytes = Some(vec![b'x'; bytes.len()]);
-    refused(volume(&credentials, &public, &copy_args), "verified").await?;
-    object_state.lock().unwrap().bytes = None;
-    refused(volume(&credentials, &public, &copy_args), "verified").await?;
-    object_state.lock().unwrap().redirect = Some(format!("{endpoint}/outside"));
-    refused(volume(&credentials, &public, &copy_args), "verified").await?;
+    // A store that loses the upload fails the capture at its commit.
+    let other = tempfile::tempdir()?;
+    let other_root = other.path().canonicalize()?;
+    let other_database = format!(
+        "sqlite://{}?mode=rwc",
+        other_root.join("store.db").display()
+    );
     {
-        let state = object_state.lock().unwrap();
-        assert_eq!((state.writes, state.invalid_requests), (2, 0));
+        let mut bucket = state.lock().unwrap();
+        bucket.objects.clear();
+        bucket.lose_uploads = true;
     }
-    stop(&mut control).await?;
+    store_credential(&credentials, &other_root, &endpoint).await?;
+    let (mut lossy, lossy_public) =
+        service(plane(&credentials, &other_root, &other_database)).await?;
+    json(volume(
+        &credentials,
+        &lossy_public,
+        &[
+            "put",
+            "object",
+            "--source",
+            SOURCE,
+            "--operation-id",
+            "register-object",
+        ],
+    ))
+    .await?;
+    let failed = capture(&credentials, &lossy_public, Some("object"), None)
+        .await
+        .err()
+        .context("a capture whose upload was lost committed")?;
+    ensure!(
+        format!("{failed:#}").contains("does not hold the captured bytes"),
+        "{failed:#}"
+    );
+    stop(&mut lossy).await?;
     server.abort();
     Ok(())
 }

@@ -66,7 +66,7 @@ pub(crate) fn parse_labels(values: &[String], field: LabelField) -> Result<Vec<S
     for label in &labels {
         let reserved = if field != LabelField::RunsOn && label.starts_with("mcp:") {
             Some("mcp: labels come from host service configuration")
-        } else if label.starts_with("volume-credential:") || label.starts_with("artifact-volume:") {
+        } else if label.starts_with("volume-credential:") || label.starts_with("volume:") {
             Some("Volume labels come from host service configuration")
         } else if label.starts_with("mcp-login:") {
             Some("mcp-login: labels come from host MCP logins")
@@ -399,6 +399,11 @@ pub(crate) fn derived_labels(
     for server in profile.map_or(&[][..], |profile| &profile.mcp_servers[..]) {
         add(format!("mcp:{}", server.name));
     }
+    // A file Volume the host maps and writes to; the host checks its mapping
+    // against the registered source before it writes.
+    for volume in profile.map_or(&[][..], |profile| &profile.volumes[..]) {
+        add(format!("volume:{}", volume.volume_id));
+    }
     labels
 }
 
@@ -449,6 +454,31 @@ pub(crate) async fn claim_labels_in(
     Ok(labels)
 }
 
+/// The labels a host must carry to run a Tag's Tasks: its `runsOn`, and `volume:ID` when
+/// the Tag keeps its captures on a file artifact Volume, which only a host mapping that directory
+/// can write.
+pub(crate) async fn required_labels_in(
+    transaction: &mut Transaction<'_, Any>,
+    tag_id: &str,
+) -> Result<Vec<String>> {
+    let mut labels = runs_on_in(transaction, tag_id).await?;
+    let file_volume: Option<String> = sqlx::query_scalar(
+        "SELECT v.volume_id FROM supertag_v2_tags t
+         JOIN supertag_v2_artifact_volumes v ON v.volume_id=t.volume AND v.deleted=0
+         WHERE t.tag_id=$1 AND v.source LIKE 'file:%'",
+    )
+    .bind(tag_id)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if let Some(volume) = file_volume
+        && let Ok(label) = parse_label(&format!("volume:{volume}"))
+        && !labels.contains(&label)
+    {
+        labels.push(label);
+    }
+    Ok(labels)
+}
+
 /// Caches each Tag's `runsOn` for one claim scan.
 #[derive(Default)]
 pub(crate) struct RunsOnCache(BTreeMap<String, Vec<String>>);
@@ -461,7 +491,7 @@ impl RunsOnCache {
         labels: &BTreeSet<String>,
     ) -> Result<bool> {
         if !self.0.contains_key(tag_id) {
-            let runs_on = runs_on_in(transaction, tag_id).await?;
+            let runs_on = required_labels_in(transaction, tag_id).await?;
             self.0.insert(tag_id.into(), runs_on);
         }
         Ok(self.0[tag_id].iter().all(|label| labels.contains(label)))
@@ -571,7 +601,7 @@ impl Store {
         name("Task ID", task_id)?;
         let mut transaction = self.pool.begin().await?;
         let task = crate::store::task_in(&mut transaction, task_id).await?;
-        let mut required = runs_on_in(&mut transaction, &task.tag_id).await?;
+        let mut required = required_labels_in(&mut transaction, &task.tag_id).await?;
         if let Some(workspace) = &task.workspace
             && let Ok(label) = parse_label(&format!("workspace:{}", workspace.workspace_id))
             && !required.contains(&label)

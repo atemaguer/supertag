@@ -105,6 +105,23 @@ pub struct PutArgs {
     /// a person's message always starts. Omit to keep it as it is; a new Tag has none.
     #[arg(long, value_parser = parse_start_rate)]
     start_rate: Option<StartRate>,
+    /// The Volume that keeps the Tag's work beyond any one Worker Host: a copy of every capture,
+    /// written by the capturing host directly. none removes it. A capture fails when its copy
+    /// cannot be written. Omit to keep it as it is; a new Tag has none.
+    #[arg(long, value_name = "VOLUME", value_parser = parse_volume)]
+    volume: Option<String>,
+}
+
+/// A Volume ID, or `none`, which removes the Tag's Volume.
+fn parse_volume(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.eq_ignore_ascii_case("none") {
+        return Ok(String::new());
+    }
+    if value.is_empty() {
+        return Err("name a Volume, or none".into());
+    }
+    Ok(value.to_owned())
 }
 
 /// `STARTS/PERIOD`, such as `10/1h`, or `none`, which removes the limit.
@@ -200,6 +217,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                 max_work_sessions,
                 memory,
                 start_rate,
+                volume,
             } = *args;
             let mounts = workspace_mounts
                 .as_deref()
@@ -258,6 +276,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                             shared_execution_environment_id: shared_execution_environment,
                         }),
                         start_rate,
+                        volume,
                     },
                     &token,
                 )?)
@@ -271,6 +290,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                 "max_work_sessions": tag.max_work_sessions,
                 "memory": tag.memory,
                 "start_rate": tag.start_rate.as_ref().map(start_rate_text),
+                "volume": (!tag.volume.is_empty()).then_some(&tag.volume),
             })
         }
         TagCommand::Retire { tag_id, dry_run } => {

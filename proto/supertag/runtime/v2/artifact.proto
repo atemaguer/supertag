@@ -31,7 +31,14 @@ service ArtifactDirectory {
 
 // Public Worker Host API. Identity and generation come from the authenticated Worker Host.
 service AttemptArtifacts {
-  // Records a capture whose bytes the calling Worker Host already holds.
+  // Reserves a capture before its commit. When the producing Tag names an artifact Volume, the
+  // response lists one copy per file for the host to write directly: an S3 copy carries a
+  // short-lived presigned upload; a file copy is written through the host's own mapping of the
+  // Volume. Bytes never pass through the Control Plane.
+  rpc ReserveCapture(CommitArtifactCaptureRequest) returns (CapturedArtifact);
+  // Records a capture whose bytes the calling Worker Host already holds. Each Volume copy the
+  // reservation listed must already be on the Volume: the Control Plane checks it (an S3 object's
+  // length and SHA-256 checksum, a file's bytes) and fails the capture otherwise.
   rpc CommitCapture(CommitArtifactCaptureRequest) returns (CapturedArtifact);
   rpc Find(FindAttemptArtifactsRequest) returns (ListCapturedArtifactsResponse);
   rpc Inspect(InspectAttemptArtifactRequest) returns (CapturedArtifact);
@@ -105,6 +112,9 @@ message CapturedArtifact {
   repeated ArtifactFile files = 2;
   // Inputs confirmed delivered to this producing Attempt, frozen at capture reservation.
   repeated ArtifactSelection inputs = 3;
+  // The copies of each file on the artifact Volume the producing Tag names, in the capture's
+  // reservation and commit responses only. A commit returns them Verified.
+  repeated ArtifactVolumeCopy volume_copies = 4;
 }
 
 enum ArtifactDelivery {
@@ -243,27 +253,25 @@ message ArtifactDownload {
   }
 }
 
-// File Volumes are registered storage locations. Registration alone authorizes
-// no write: the Control Plane must explicitly map the exact Volume and source
-// (`--artifact-volume`).
+// Volumes are registered storage locations that keep a Tag's work beyond any one Worker Host.
+// Worker Hosts move every byte: to an S3 Volume through presigned per-object URLs, to a file
+// Volume through their own mapping. The Control Plane never maps a Volume or carries its bytes.
 service ArtifactVolumes {
   rpc Put(PutArtifactVolumeRequest) returns (ArtifactVolume);
   rpc Get(GetArtifactVolumeRequest) returns (ArtifactVolume);
   rpc List(ListArtifactVolumesRequest) returns (ListArtifactVolumesResponse);
   rpc Delete(DeleteArtifactVolumeRequest) returns (DeleteArtifactVolumeResponse);
-  rpc Copy(CopyArtifactToVolumeRequest) returns (ArtifactVolumeCopy);
   rpc GetCopy(GetArtifactVolumeCopyRequest) returns (ArtifactVolumeCopy);
   rpc ListCopies(ListArtifactVolumeCopiesRequest) returns (ListArtifactVolumeCopiesResponse);
 }
-// Internal metadata authority. Only the Control Plane's API tier verifies and
-// carries copy bytes.
+// Internal metadata authority behind the API tier.
 service ArtifactVolumeDirectory {
   rpc Put(PutArtifactVolumeRequest) returns (ArtifactVolume);
   rpc Get(GetArtifactVolumeRequest) returns (ArtifactVolume);
   rpc List(ListArtifactVolumesRequest) returns (ListArtifactVolumesResponse);
   rpc Delete(DeleteArtifactVolumeRequest) returns (DeleteArtifactVolumeResponse);
-  rpc ReserveCopy(CopyArtifactToVolumeRequest) returns (ArtifactVolumeCopy);
-  rpc CommitCopy(CommitArtifactVolumeCopyRequest) returns (ArtifactVolumeCopy);
+  // Authorizes one Volume object for a live Attempt of the calling host (VolumeObjects.Grant).
+  rpc GrantObject(VolumeObjectGrantRequest) returns (VolumeObjectGrant);
   rpc GetCopy(GetArtifactVolumeCopyRequest) returns (ArtifactVolumeCopy);
   rpc ListCopies(ListArtifactVolumeCopiesRequest) returns (ListArtifactVolumeCopiesResponse);
 }
@@ -290,14 +298,6 @@ message DeleteArtifactVolumeRequest {
   bool dry_run = 4;
 }
 message DeleteArtifactVolumeResponse { bool deleted = 1; }
-message CopyArtifactToVolumeRequest {
-  string operation_id = 1;
-  string volume_id = 2;
-  uint64 expected_revision = 3;
-  string artifact_id = 4;
-  string path = 5;
-  BlobReference expected_blob = 6;
-}
 enum ArtifactVolumeCopyState {
   ARTIFACT_VOLUME_COPY_STATE_UNSPECIFIED = 0;
   ARTIFACT_VOLUME_COPY_STATE_RESERVED = 1;
@@ -313,8 +313,60 @@ message ArtifactVolumeCopy {
   ArtifactVolumeCopyState state = 7;
   int64 created_at_ms = 8;
   optional int64 verified_at_ms = 9;
+  reserved 10;
+  // A capture reservation's grant to write this copy's object directly, for an S3 Volume. Never
+  // stored.
+  ArtifactVolumeUpload upload = 11;
+  // Verified by the writing Worker Host, which reopened and checked it through its own mapping of
+  // a file Volume. The Control Plane checks an S3 copy itself, with a HEAD.
+  bool host_attested = 12;
 }
-message CommitArtifactVolumeCopyRequest { string copy_id = 1; BlobReference verified_blob = 2; }
+
+// Public Worker Host API for objects a live Attempt keeps on its Tag's Volume, such as its
+// Session's checkpoint. Captures get their grants from AttemptArtifacts.ReserveCapture instead.
+service VolumeObjects {
+  // Authorizes writing or reading one object. The Control Plane derives the key from the purpose;
+  // a host never names one. An S3 Volume's grant carries a presigned URL; a file Volume's is
+  // written or read through the host's own mapping.
+  rpc Grant(VolumeObjectGrantRequest) returns (VolumeObjectGrant);
+}
+
+message VolumeObjectGrantRequest {
+  InspectAttemptRequest attempt = 1;
+  oneof purpose {
+    // The Attempt's Session checkpoint with these bytes.
+    BlobReference checkpoint = 2;
+  }
+  VolumeAccess access = 3;
+}
+
+enum VolumeAccess {
+  VOLUME_ACCESS_UNSPECIFIED = 0;
+  VOLUME_ACCESS_WRITE = 1;
+  VOLUME_ACCESS_READ = 2;
+}
+
+message VolumeObjectGrant {
+  ArtifactVolume volume = 1;
+  // `tags/<sha256(tag)>/…`, derived by the Control Plane.
+  string key = 2;
+  BlobReference blob = 3;
+  // S3 only: a presigned PUT (length and checksum bound) or GET (the reader verifies the bytes).
+  ArtifactVolumeUpload presigned = 4;
+}
+
+// A presigned S3 PUT for exactly one object: its length and SHA-256 checksum are signed headers,
+// so the store refuses any other bytes. Send `headers` exactly as given.
+message ArtifactVolumeUpload {
+  string url = 1;
+  repeated ArtifactVolumeUploadHeader headers = 2;
+  int64 expires_at_ms = 3;
+}
+
+message ArtifactVolumeUploadHeader {
+  string name = 1;
+  string value = 2;
+}
 message GetArtifactVolumeCopyRequest { string copy_id = 1; }
 message ListArtifactVolumeCopiesRequest { string volume_id = 1; uint32 limit = 2; uint64 before_order = 3; }
 message ListArtifactVolumeCopiesResponse { repeated ArtifactVolumeCopy copies = 1; uint64 next_before_order = 2; }
