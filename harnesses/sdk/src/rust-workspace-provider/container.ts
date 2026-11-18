@@ -205,6 +205,12 @@ for directory, names, files in os.walk("/", onerror=lambda error: None):
 for path in privileged[:20]:
     print("setuid " + path)`;
 
+/**
+ * An image ID as the runtime reports it: Docker prefixes `sha256:`, Podman gives the bare digest.
+ * Either runs as reported.
+ */
+const IMAGE_ID = /^(sha256:)?[0-9a-f]{64}$/u;
+
 /** The host's own Linux platform, so a container never runs under emulation. */
 export function nativePlatform(): string {
   return `linux/${process.arch === "arm64" ? "arm64" : "amd64"}`;
@@ -568,7 +574,7 @@ export function containerSandboxProvider(
   async function imageId(reference: string): Promise<string | undefined> {
     const found = await cli(runtime, ["image", "inspect", "--format", "{{.Id}}", reference]);
     const id = found.stdout.trim();
-    return found.exitCode === 0 && /^sha256:[0-9a-f]{64}$/u.test(id) ? id : undefined;
+    return found.exitCode === 0 && IMAGE_ID.test(id) ? id : undefined;
   }
 
   /**
@@ -932,8 +938,9 @@ export function containerSandboxProvider(
         },
         async snapshot(snapshotSignal) {
           const committed = await cli(runtime, ["commit", id], { signal: snapshotSignal });
-          const image = committed.stdout.trim();
-          if (committed.exitCode !== 0 || !/^sha256:[0-9a-f]{64}$/u.test(image))
+          // The ID is the last line: Podman may report its progress before it.
+          const image = committed.stdout.trim().split("\n").at(-1) ?? "";
+          if (committed.exitCode !== 0 || !IMAGE_ID.test(image))
             throw new Error("Container could not be committed");
           return image;
         },
