@@ -27,7 +27,7 @@ const BUILD_MS = 20 * 60_000;
 
 function owner(): SandboxOwner {
   return {
-    hostId: "local-vm-test",
+    hostId: HOST,
     hostGeneration: 1n,
     taskId: randomUUID(),
     attemptId: randomUUID(),
@@ -35,10 +35,22 @@ function owner(): SandboxOwner {
   };
 }
 
-function ownedContainers(): string[] {
+/** This run's own host: another run on the same runtime, at the same time, has another. */
+const HOST = `local-vm-test-${randomUUID().slice(0, 8)}`;
+
+/** This file's containers of `host`: another run on the same runtime keeps its own. */
+function ownedContainers(host = HOST): string[] {
   const listed = spawnSync(
     runtime,
-    ["ps", "-aq", "--no-trunc", "--filter", "label=supertag.local-vm=1"],
+    [
+      "ps",
+      "-aq",
+      "--no-trunc",
+      "--filter",
+      "label=supertag.local-vm=1",
+      "--filter",
+      `label=supertag.hostId=${host}`,
+    ],
     { encoding: "utf8" },
   );
   return listed.stdout.split("\n").filter(Boolean);
@@ -473,7 +485,7 @@ describe.skipIf(!answers)("local-vm provider", () => {
     async () => ({
       session: createLocalVmWorkspaceSession(options),
       async lose() {
-        for (const id of ownedContainers()) spawnSync(runtime, ["rm", "-f", id]);
+        for (const id of ownedContainers("conformance-host")) spawnSync(runtime, ["rm", "-f", id]);
       },
     }),
     { commands: true, snapshots: true, isolated: true, timeoutMs: 120_000 },
