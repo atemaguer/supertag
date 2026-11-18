@@ -14,9 +14,10 @@ SuperTag has three kinds of services, all run by the one `supertag` program:
 
 - The **Control Plane** stores and coordinates the organization. It is the one public API, for
   operator clients, Worker Hosts, and Gateways.
-- **Worker Hosts** are machines or sandboxes that provide execution capacity. Each runs Tasks
-  through a **harness adapter**, the process that drives an agent system such as Codex or Claude
-  Code.
+- **Worker Hosts** are machines or sandboxes that provide execution capacity. On each, a
+  **Worklet** (`supertag worker-host`) connects the host to the Control Plane and claims Tasks.
+  For each Task Attempt it starts a **Worker**: a **harness adapter**, the process that drives an
+  agent system such as Codex or Claude Code, and that harness.
 - A **Gateway** connects collaboration surfaces, such as Slack or GitHub, to the Control Plane.
   It is optional.
 
@@ -39,11 +40,12 @@ Slack / GitHub / Linear / Lark / Teams     CLI / terminal UI / desktop app / you
                           - durable state and audit (SQLite or PostgreSQL)
                                      ^
                                      | outbound connections
-                               Worker Hosts
-                          - claim Tasks their Tags may run
-                          - prepare pinned Workspace checkouts
-                          - run harness adapters: Codex, Claude Code, Cursor,
-                            OpenCode, OpenAI Agents, or your own
+                     Worker Hosts, each running a Worklet
+                          - claims Tasks the host's Tags may run
+                          - prepares pinned Workspace checkouts
+                          - starts a Worker per Task Attempt: a harness adapter
+                            for Codex, Claude Code, Cursor, OpenCode, OpenAI
+                            Agents, or your own
                           - local processes, E2B or Modal sandboxes, or a shared
                             execution environment
 ```
@@ -133,4 +135,4 @@ their own clients on the [Control Plane API](../reference/control-plane-api.md).
 share the same durable Task, identity, and permission boundaries.
 
 Continue with [Tags](tags.md), [Tasks and Sessions](tasks.md), or
-[Worker Hosts and harnesses](workers.md), depending on which boundary you need to understand next.
+[Worker Hosts, Worklets, Workers, and harnesses](workers.md), depending on which boundary you need to understand next.

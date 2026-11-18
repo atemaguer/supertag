@@ -54,7 +54,12 @@ Extension contracts (as named in `api-stability.md`): **Connector**. Write *harn
 adapter* in lowercase, like other industry terms, and keep code identifiers such as `Harness` as
 written.
 
-Plus **Control Plane** and **Gateway**, the services themselves.
+Plus **Control Plane** and **Gateway**, the services themselves, and **Worklet** and **Worker**,
+the two roles on a Worker Host. Keep the four runtime layers apart: a **Worker Host** is the
+machine and its enrolled identity, the **Worklet** is the program that connects it to the Control
+Plane and claims Tasks, a **Worker** is what runs one Task Attempt, and the *harness* is the agent
+system the Worker drives. Don't write "Worker Host" for the program or for the per-Task unit in
+new text.
 
 Lowercase, even though they are domain concepts: *collaboration surface*, *multiplayer*,
 *resource*, *thread*, *channel*, *repository*, *workspace*, *harness*.

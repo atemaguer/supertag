@@ -102,5 +102,5 @@ act on their responsibilities without being asked, coordinate with your teammate
 the coding agents and machines you choose.
 
 For details, see [multiplayer](multiplayer.md),
-[Worker Hosts and harnesses](workers.md), and
+[Worker Hosts, Worklets, Workers, and harnesses](workers.md), and
 [monetary budgets](../reference/coordination.md#monetary-budgets).

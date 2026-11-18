@@ -2,7 +2,7 @@
 
 For a plain-language explanation of Tags and their security model, start with
 [Tags](../concepts/tags.md). For execution terms, start with
-[Worker Hosts and harnesses](../concepts/workers.md). This page is for developers implementing
+[Worker Hosts, Worklets, Workers, and harnesses](../concepts/workers.md). This page is for developers implementing
 routing, policy admission, collaboration surface actions, or harness adapters.
 
 This page uses these SuperTag terms, each defined in the glossary: [Role](glossary.md#role),

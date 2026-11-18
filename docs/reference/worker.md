@@ -1,8 +1,10 @@
 # Worker Host reference
 
-The exact behavior of a **Worker Host**, the process that connects a machine or sandbox to the
-**Control Plane** and runs **Task Attempts**, and of the **harness adapters** it starts. For the
-ideas, read [Worker Hosts and harnesses](../concepts/workers.md); to run one, read
+The exact behavior of a **Worker Host**'s **Worklet**, the `supertag worker-host` program that
+connects a machine or sandbox to the **Control Plane** and runs **Task Attempts**, and of the
+**Workers** it starts: a **harness adapter** and its harness for each Task Attempt. Below, "the
+host" means the Worklet acting for its Worker Host. For the ideas, read
+[Worker Hosts, Worklets, Workers, and harnesses](../concepts/workers.md); to run one, read
 [Run Worker Hosts](../guides/workers.md). Other terms are in the [glossary](glossary.md).
 
 ## Boundary

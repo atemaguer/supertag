@@ -101,8 +101,17 @@ whole system rather than another first-class resource.
   it. Its credentials stay with that Gateway, in a credential vault.
 - <a id="gateway"></a>**Gateway** — the service that carries collaboration surface traffic and operator notifications.
   It is an optional client of the Control Plane with its own credential, `gateway:NAME`.
-- <a id="worker-host"></a>**Worker Host** — a machine, container, VM, or sandbox that runs Tasks through harness adapters.
-  It connects outbound to the Control Plane. See [Run Worker Hosts](../guides/workers.md).
+- <a id="worker-host"></a>**Worker Host** — a machine, container, VM, or sandbox that provides execution capacity,
+  enrolled under a name, `host:NAME`. Its Worklet connects it outbound to the Control Plane. See
+  [Run Worker Hosts](../guides/workers.md).
+- <a id="worklet"></a>**Worklet** — the program that runs on a Worker Host and connects it to the Control Plane:
+  `supertag worker-host`, or a host service under `supertag up`. It reports the host's capacity,
+  claims Tasks, holds their leases, starts a Worker for each Task Attempt, and reports the
+  results. See [Worker Hosts, Worklets, Workers, and harnesses](../concepts/workers.md).
+- <a id="worker"></a>**Worker** — what runs one [Task Attempt](#task-attempt): a harness adapter and the harness it
+  drives, started by the Worklet in their own process group, with a scratch directory and a
+  token that last only for that Task Attempt. A Worker reaches the Control Plane only
+  through its Worklet.
 - <a id="host-service"></a>**host service** — a `host` entry in `supertag.yaml` that connects its machine as a
   Worker Host. See [host service](supertag-yaml.md#host-service).
 - <a id="auth-key"></a>**Auth Key** — an operator-issued secret that enrolls principals of one role: a
@@ -126,7 +135,7 @@ whole system rather than another first-class resource.
   A remote Workspace keeps the repository on any git server. See
   [Work in a repository with Workspaces](../guides/workspaces.md).
 - <a id="harness"></a>**harness** — the agent system a Task runs on, such as Codex, Claude Code, Cursor, OpenCode, or
-  OpenAI Agents. See [Worker Hosts and harnesses](../concepts/workers.md).
+  OpenAI Agents. See [Worker Hosts, Worklets, Workers, and harnesses](../concepts/workers.md).
 - <a id="harness-adapter"></a>**harness adapter** — the process a Worker Host starts for each Task Attempt to drive a
   harness through the harness protocol. See [Write a harness adapter](../guides/harness-adapters.md).
 - <a id="execution-environment"></a>**execution environment** — where a Task's files and commands live: a local checkout, a

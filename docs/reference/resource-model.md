@@ -2,7 +2,7 @@
 
 For a plain-language introduction, start with [core concepts](../concepts/README.md). Then
 read [Tags](../concepts/tags.md), [Tasks and Sessions](../concepts/tasks.md), or
-[Worker Hosts and harnesses](../concepts/workers.md) when you need more detail.
+[Worker Hosts, Worklets, Workers, and harnesses](../concepts/workers.md) when you need more detail.
 
 SuperTag capitalizes the names of resources and contracts users create, configure, inspect, or
 implement. General terms such as **collaboration surface** and **harness** stay lowercase.
@@ -25,7 +25,10 @@ PascalCase names such as `PermissionSet`.
 
 The **Control Plane** and **Worker Hosts** are SuperTag's two top-level runtime components. The
 Control Plane stores the organization and schedules its work, and a Worker Host is a machine,
-container, VM, or sandbox that runs it. A separate, optional **Gateway** carries
+container, VM, or sandbox that provides the capacity to run it. On each Worker Host a **Worklet**,
+the `supertag worker-host` program, connects the host to the Control Plane, claims Tasks, and
+starts a **Worker** for each Task Attempt: a harness adapter and the harness it drives. The
+Worklet and the Worker are roles of running programs, not resources you create or apply. A separate, optional **Gateway** carries
 **collaboration surface** traffic as a client of the Control Plane. A collaboration surface is how SuperTag meets people in an external work tool, such as
 Slack, GitHub, Lark/Feishu, Linear, or Microsoft Teams: it receives events at a [Tag](#configuration-resources)'s locations and
 replies there. A location is a place on a collaboration surface, such as a channel or repository. The Control

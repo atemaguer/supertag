@@ -1,18 +1,28 @@
-# Worker Hosts and harnesses
+# Worker Hosts, Worklets, Workers, and harnesses
 
 The parts on this page run each **Task**, one turn of work for a **Tag**, a persistent AI actor
 with its own responsibilities and permissions. The **Control Plane**, the service that stores the
-organization, decides what work to accept and keeps a lasting record of it. **Worker Hosts**
-provide the machines or sandboxes where the work runs, and a **harness** connects each Task to an
-agent system. The [glossary](../reference/glossary.md) lists other terms.
+organization, decides what work to accept and keeps a lasting record of it. The work itself runs
+in four layers. The [glossary](../reference/glossary.md) lists other terms.
+
+| Layer | Plain-language meaning | Like, in Kubernetes | Like, in Ray |
+| --- | --- | --- | --- |
+| Worker Host | A machine, container, VM, or sandbox that provides capacity to run Tasks | A node | A node |
+| Worklet | The program on a Worker Host that connects it to the Control Plane: `supertag worker-host`. It claims Tasks, holds their leases, and starts and supervises Workers | The kubelet | The raylet |
+| Worker | What runs one Task Attempt: a harness adapter and the harness it drives, in their own process group | A pod | A worker process |
+| Harness | The agent system that does the work: Codex, Claude Code, Cursor, OpenCode, OpenAI Agents, or your own | The application in a container | The code a worker runs |
+
+Two more terms come up below:
 
 | Term | Plain-language meaning |
 | --- | --- |
-| Worker Host | A machine, container, VM, or sandbox that runs Tasks. It connects outbound to the Control Plane |
 | Task Attempt | One execution of a Task on a Worker Host. A retry is another Task Attempt |
-| Harness | The agent system a Task runs on: Codex, Claude Code, Cursor, OpenCode, OpenAI Agents, or your own |
-| Harness adapter | The process a Worker Host starts for each Task Attempt to drive the harness |
+| Harness adapter | The process a Worklet starts for each Task Attempt to drive the harness |
 | Execution environment | Where the Task's files and commands live: a local checkout, an E2B or Modal sandbox, or a shared execution environment |
+
+The Worklet handles control: what to run, and whether it is still allowed to. The Worker handles
+the work. A Worker never holds the Worker Host's credential and reaches the Control Plane only
+through its Worklet.
 
 ## Follow one Task
 
@@ -23,7 +33,7 @@ Collaboration surface or CLI
 Control Plane ── accepts, stores, and queues the Task for its Tag
         ▲
         │ claim (outbound connection)
-Worker Host ── prepares a pinned checkout ── starts the harness adapter
+Worklet ── prepares a pinned checkout ── starts a Worker (harness adapter)
         │                                           │
         │                           drives Codex, Claude Code, ...
         └── reports events, usage, the result, and the delivered commits
@@ -31,27 +41,36 @@ Worker Host ── prepares a pinned checkout ── starts the harness adapter
 
 1. A message reaches the Control Plane, which accepts it as a Task for a Tag and records the
    permissions and knowledge that apply.
-2. A Worker Host that may run the Tag, and carries the labels the Tag requires, claims the Task.
-   Its claim is a lease the host renews while it works.
-3. The host prepares a checkout of the Tag's Workspace pinned to an exact commit, resolves the
-   Task's Skills, and starts the harness adapter in it.
-4. The adapter runs the agent, reports progress, and completes the Task Attempt with its result
-   and a Session checkpoint.
-5. The host verifies the commits the Task made and delivers them as the branch
+2. The Worklet on a Worker Host that may run the Tag, and carries the labels the Tag requires,
+   claims the Task. Its claim is a lease the Worklet renews while the work runs.
+3. The Worklet prepares a checkout of the Tag's Workspace pinned to an exact commit, resolves the
+   Task's Skills, and starts a Worker in it: the harness adapter and its harness.
+4. The Worker runs the agent, reports progress through the Worklet, and completes the Task
+   Attempt with its result and a Session checkpoint.
+5. The Worklet verifies the commits the Task made and delivers them as the branch
    `supertag/session/...`: it writes the branch into the repository it maps, or pushes it to a
    remote Workspace's git server.
 
-## Worker Host
+## Worker Host and Worklet
 
 A Worker Host is the capacity side of SuperTag. It can be your laptop, a server, a CI runner, or
-a container. It enrolls once with an **Auth Key** and keeps its own credential. It reports its
-harnesses, models, labels, and concurrency, and claims only Tasks of the Tags it may run.
+a container. It enrolls once with an **Auth Key** and keeps its own credential.
+
+Its Worklet is the `supertag worker-host` program, which `supertag up` runs for each host service
+in `supertag.yaml`. The Worklet reports the host's harnesses, models, labels, and concurrency,
+and claims only Tasks of the Tags the host may run. It runs one Worker at a time for each unit of
+concurrency.
 
 A host never receives other hosts' credentials or the Control Plane's database credential. It
-holds the harness sign-ins and MCP credentials its Tasks use, and passes each harness only its
-own. See [Run Worker Hosts](../guides/workers.md).
+holds the harness sign-ins and MCP credentials its Tasks use, and the Worklet passes each Worker
+only its own harness's. See [Run Worker Hosts](../guides/workers.md).
 
-## Harness and harness adapter
+## Worker, harness, and harness adapter
+
+A Worker exists for one Task Attempt. The Worklet starts it in its own process group, with a
+scratch directory and a token that work only for that Task Attempt, and stops every process it
+left when the Task Attempt ends. A Workspace checkout, a Session checkpoint, and captured
+artifacts outlast the Worker; the Worklet keeps them.
 
 The harness is the agent system that does the work. The harness adapter connects one Task Attempt
 to it: it receives the Task, its Session checkpoint, and its allowed capabilities from the host,

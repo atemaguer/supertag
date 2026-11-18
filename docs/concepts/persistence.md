@@ -106,4 +106,4 @@ depends on the storage provider and its retention settings. For the commands, se
 
 - [Work in a repository with Workspaces](../guides/workspaces.md)
 - [Volumes](../reference/resource-model.md#volumes)
-- [Worker Hosts and harnesses](workers.md)
+- [Worker Hosts, Worklets, Workers, and harnesses](workers.md)

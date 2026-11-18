@@ -53,7 +53,7 @@ context — it is precise, and guessing produces wrong configuration.
 - [Glossary](../docs/reference/glossary.md) — one-line definitions of every public term
 - [How SuperTag fits together](../docs/concepts/how-it-works.md) — the service architecture
 - [Tasks and Sessions](../docs/concepts/tasks.md) — durable intent, retries, continuity
-- [Worker Hosts and harnesses](../docs/concepts/workers.md) — the execution vocabulary
+- [Worker Hosts, Worklets, Workers, and harnesses](../docs/concepts/workers.md) — the execution vocabulary
 - [Resource model](../docs/reference/resource-model.md) — what is configured versus observed
 
 ## Conventions

@@ -85,8 +85,11 @@ Once those ideas are clear, learn where the organization and its work run:
 
 - The [Control Plane](concepts/how-it-works.md) stores the organization, applies policy, and schedules work.
 - A [Worker Host](concepts/workers.md) is a machine or sandbox that provides execution capacity.
-- A **harness adapter** runs each Task Attempt on an agent system such as Codex, Claude Code, or
-  Cursor. The [execution overview](concepts/workers.md) explains how it fits together.
+  Its **Worklet**, the `supertag worker-host` program, connects it to the Control Plane and
+  claims Tasks.
+- A **Worker** runs each Task Attempt: a harness adapter and the agent system it drives, such as
+  Codex, Claude Code, or Cursor. The [execution overview](concepts/workers.md) explains how the
+  layers fit together.
 - [Multiplayer](concepts/multiplayer.md) explains how teammates and their Tags work together and share completed work safely.
 - [Persistence](concepts/persistence.md) explains what survives when a sandbox or host dies.
 
