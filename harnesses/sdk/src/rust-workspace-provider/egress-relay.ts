@@ -173,6 +173,8 @@ interface Stream {
   idle: ReturnType<typeof setTimeout>;
   /** Bytes sent to the sandbox that it has not returned credit for. */
   unacked: number;
+  /** Bytes the sandbox sent toward the proxy that this host has not yet returned credit for. */
+  inflight: number;
 }
 
 /**
@@ -286,6 +288,7 @@ export function createEgressRelayHost(
       socket,
       idle: setTimeout(() => end(id, true), idleMs),
       unacked: 0,
+      inflight: 0,
     };
     streams.set(id, stream);
     socket.on("data", (data: Buffer) => {
@@ -313,12 +316,15 @@ export function createEgressRelayHost(
     touch(id);
     const bytes = Buffer.from(data, "base64");
     // The relay keeps to its window, overshooting by at most one read; past twice the window,
-    // the connection is broken.
-    if (stream.socket.writableLength + bytes.length > 2 * window) {
+    // the connection is broken. The count is the relay's bytes this host has not yet credited,
+    // not the socket's buffer, which a large kernel buffer (as on Linux loopback) keeps empty.
+    if (stream.inflight + bytes.length > 2 * window) {
       end(id, true);
       return;
     }
+    stream.inflight += bytes.length;
     stream.socket.write(bytes, (error) => {
+      stream.inflight -= bytes.length;
       if (!error && streams.get(id) === stream) send(`A ${id} ${bytes.length}`);
     });
   }
