@@ -22,6 +22,9 @@ async function ownedDirectory(path: string): Promise<string> {
   return realpath(path);
 }
 
+/** The Worker Host's copy of the Tag's native memory for this Attempt. */
+export const NATIVE_MEMORY_DIRECTORY = "SUPERTAG_NATIVE_MEMORY_DIRECTORY";
+
 /** Copy only provider credentials, never user settings, plugins, hooks, or service credentials. */
 export async function nativeEnvironment(environment: NodeJS.ProcessEnv, declaredOutput?: string) {
   const state = await ownedDirectory(environment["SUPERTAG_ADAPTER_STATE_DIRECTORY"] ?? "");
@@ -52,6 +55,14 @@ export async function nativeEnvironment(environment: NodeJS.ProcessEnv, declared
     )
       throw new Error("Task output directory is outside the current workspace");
     env["SUPERTAG_OUTPUT_DIR"] = directory;
+  }
+  // The Tag's native memory, which the Worker Host keeps across Tasks: Claude Code's auto-memory
+  // directory. With our custom system prompt, Claude Code describes the directory to the model
+  // only when this variable names it; the `autoMemoryDirectory` setting alone moves it silently.
+  let memory: string | undefined;
+  if (environment[NATIVE_MEMORY_DIRECTORY]) {
+    memory = await ownedDirectory(environment[NATIVE_MEMORY_DIRECTORY]);
+    env["CLAUDE_COWORK_MEMORY_PATH_OVERRIDE"] = memory;
   }
   for (const key of CREDENTIAL_KEYS) if (environment[key]) env[key] = environment[key];
   if (!CREDENTIAL_KEYS.some((key) => env[key])) {
@@ -95,5 +106,5 @@ export async function nativeEnvironment(environment: NodeJS.ProcessEnv, declared
       }
     }
   }
-  return { env, cwd };
+  return { env, cwd, memory };
 }

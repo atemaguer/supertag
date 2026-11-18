@@ -467,6 +467,7 @@ mod tests {
             ..Default::default()
         };
         let attempt = Attempt {
+            native_memory: None,
             task_id: "task".into(),
             attempt_id: "attempt".into(),
             lease_token: "lease".into(),

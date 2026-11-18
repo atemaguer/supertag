@@ -2865,6 +2865,9 @@ fn tag_json(tag: &Tag) -> serde_json::Value {
             "per": crate::tags::start_rate_text(rate).split_once('/').map(|(_, per)| per.to_owned()),
             "in_window": tag.starts_in_window,
         })),
+        // What Worker Hosts hold of the Tag's harness-native memory (such as Claude Code's
+        // auto-memory), newest first; only `describe tag` reads it. Counts, never contents.
+        "native_memory": tag.native_memory.iter().map(memories::native_store_json).collect::<Vec<_>>(),
         // How the Tag's unprompted messages were received; only `describe tag` reads it.
         "attention": tag.attention.as_ref().map(|attention| json!({
             "window_days": attention.window_days,

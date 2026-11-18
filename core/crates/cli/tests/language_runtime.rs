@@ -121,6 +121,9 @@ database_tests! {
     claude_code_sdk_restores_session_on_a_fresh_host;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+    claude_keeps_native_memory_on_its_host_across_tasks;
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
     claude_runs_commands_only_with_the_hosts_unsandboxed_opt_in;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
@@ -964,6 +967,97 @@ async fn claude_code_sdk_restores_session_on_a_fresh_host(database: String) -> R
         assert_eq!(usage["cached_input_tokens"], 3);
         assert_eq!(usage["output_tokens"], 4);
     }
+    services.stop().await
+}
+
+/// Claude Code's auto-memory lasts across a Tag's Tasks on one Worker Host: a read-only turn
+/// writes it, the Control Plane records what the host holds, a later turn reads it, and an
+/// operator's reset drops it before the next turn.
+async fn claude_keeps_native_memory_on_its_host_across_tasks(database: String) -> Result<()> {
+    let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
+        return Ok(());
+    };
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let directory = tempfile::tempdir()?;
+    let native = claude_fixture(directory.path())?;
+    let services = LanguageServices::start(directory.path(), &database).await?;
+    services
+        .operator(&[
+            "tag",
+            "put",
+            "keeper",
+            "--instructions",
+            "Keep what matters.",
+            "--harness",
+            "claude-code",
+            "--allow",
+            "files:read",
+        ])
+        .await?;
+    let run = |prompt: &'static str| {
+        let services = &services;
+        let state = directory.path().join("host");
+        let interpreter = interpreter.clone();
+        let entry = entry.clone();
+        let native = native.clone();
+        async move {
+            // Each turn is its own Session: native memory is the Tag's, not one Session's.
+            let session = Uuid::new_v4().to_string();
+            let task = services
+                .operator(&[
+                    "task",
+                    "submit",
+                    "--tag",
+                    "keeper",
+                    "--session",
+                    &session,
+                    prompt,
+                ])
+                .await?;
+            let task_id = task["task_id"]
+                .as_str()
+                .context("Task ID missing")?
+                .to_owned();
+            let mut host = services.worker("claude-code", &state, Path::new(&interpreter), &entry);
+            host.arg("--claude-path")
+                .arg(&native)
+                .env("ANTHROPIC_API_KEY", "fixture-provider-key");
+            success(host).await?;
+            let task = services.operator(&["get", "task", &task_id]).await?;
+            assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+            anyhow::Ok(task["result"].as_str().unwrap_or_default().to_owned())
+        }
+    };
+    let written = run("remember-native").await?;
+    let written: Value =
+        serde_json::from_str(&written).with_context(|| format!("turn result: {written}"))?;
+    assert_eq!(written["memoryWrite"], true, "{written}");
+    assert_eq!(written["workspaceWrite"], false, "{written}");
+    let stores = services
+        .operator(&["describe", "tag", "keeper", "--output", "json"])
+        .await?["native_memory"]
+        .clone();
+    assert_eq!(stores.as_array().map(Vec::len), Some(1), "{stores}");
+    assert_eq!(stores[0]["harness"], "claude-code", "{stores}");
+    assert_eq!(stores[0]["revision"], 1, "{stores}");
+    assert_eq!(stores[0]["files"], 1, "{stores}");
+    assert!(
+        directory.path().join("host/native-memory/keeper").is_dir(),
+        "the host keeps the files under its state directory"
+    );
+
+    assert!(run("recall-native").await?.contains("- fixture memory"));
+
+    let reset = services
+        .operator(&["delete", "memory", "--native", "keeper"])
+        .await?;
+    assert_eq!(reset["reset_generation"], 1, "{reset}");
+    assert_eq!(run("recall-native").await?, "no memory");
+    let stores = services
+        .operator(&["describe", "tag", "keeper", "--output", "json"])
+        .await?["native_memory"]
+        .clone();
+    assert_eq!(stores[0]["files"], 0, "{stores}");
     services.stop().await
 }
 

@@ -72,7 +72,10 @@ pub(crate) async fn enabled_in(
     )
 }
 
-async fn tag_keeps_memory_in(tx: &mut Transaction<'_, Any>, tag_id: &str) -> Result<bool> {
+pub(crate) async fn tag_keeps_memory_in(
+    tx: &mut Transaction<'_, Any>,
+    tag_id: &str,
+) -> Result<bool> {
     Ok(sqlx::query_scalar::<_, i64>(
         "SELECT memory FROM supertag_v2_tags WHERE tag_id=$1 AND retired_at_ms IS NULL",
     )
@@ -84,7 +87,7 @@ async fn tag_keeps_memory_in(tx: &mut Transaction<'_, Any>, tag_id: &str) -> Res
 
 /// A started outside event, such as a GitHub or Linear webhook, never writes notes: its text is
 /// whatever someone outside put in an issue or pull request.
-fn external_origin(task: &Task) -> bool {
+pub(crate) fn external_origin(task: &Task) -> bool {
     use surface_location_scope::Provider;
     matches!(
         task.policy_snapshot
@@ -99,7 +102,7 @@ fn external_origin(task: &Task) -> bool {
 /// The notes a turn sees and writes: `Some(None)` shared, `Some(Some(principal))` private to
 /// that person. `None` when its audience is a private Session with no recorded person, which
 /// neither sees nor writes notes.
-async fn turn_audience_in(
+pub(crate) async fn turn_audience_in(
     tx: &mut Transaction<'_, Any>,
     task: &Task,
 ) -> Result<Option<Option<String>>> {
@@ -771,7 +774,7 @@ pub(crate) async fn retire_tag_in(tx: &mut Transaction<'_, Any>, tag: &str) -> R
         .bind(tag)
         .execute(&mut **tx)
         .await?;
-    Ok(())
+    crate::native_memory::retire_tag_in(tx, tag).await
 }
 
 async fn response_in(
@@ -843,6 +846,17 @@ impl memories_server::Memories for ControlPlane {
                 .await?,
         ))
     }
+    async fn reset_native(
+        &self,
+        request: Request<ResetNativeMemoryRequest>,
+    ) -> std::result::Result<Response<ResetNativeMemoryResponse>, Status> {
+        let principal = self.actor(&request)?;
+        Ok(Response::new(
+            self.store
+                .reset_native_memory(&principal, request.get_ref())
+                .await?,
+        ))
+    }
 }
 
 #[tonic::async_trait]
@@ -867,6 +881,16 @@ impl attempt_memory_server::AttemptMemory for ControlPlane {
         Ok(Response::new(
             self.store.attempt_forget(&host, request.get_ref()).await?,
         ))
+    }
+    async fn report_native(
+        &self,
+        request: Request<ReportNativeMemoryRequest>,
+    ) -> std::result::Result<Response<ReportNativeMemoryResponse>, Status> {
+        let host = self.host_authority(&request)?;
+        self.store
+            .report_native_memory(&host, request.get_ref())
+            .await?;
+        Ok(Response::new(ReportNativeMemoryResponse {}))
     }
 }
 

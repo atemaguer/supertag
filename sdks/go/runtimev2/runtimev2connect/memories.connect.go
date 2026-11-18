@@ -43,10 +43,15 @@ const (
 	MemoriesGetProcedure = "/supertag.runtime.v2.Memories/Get"
 	// MemoriesDeleteProcedure is the fully-qualified name of the Memories's Delete RPC.
 	MemoriesDeleteProcedure = "/supertag.runtime.v2.Memories/Delete"
+	// MemoriesResetNativeProcedure is the fully-qualified name of the Memories's ResetNative RPC.
+	MemoriesResetNativeProcedure = "/supertag.runtime.v2.Memories/ResetNative"
 	// AttemptMemoryRememberProcedure is the fully-qualified name of the AttemptMemory's Remember RPC.
 	AttemptMemoryRememberProcedure = "/supertag.runtime.v2.AttemptMemory/Remember"
 	// AttemptMemoryForgetProcedure is the fully-qualified name of the AttemptMemory's Forget RPC.
 	AttemptMemoryForgetProcedure = "/supertag.runtime.v2.AttemptMemory/Forget"
+	// AttemptMemoryReportNativeProcedure is the fully-qualified name of the AttemptMemory's
+	// ReportNative RPC.
+	AttemptMemoryReportNativeProcedure = "/supertag.runtime.v2.AttemptMemory/ReportNative"
 	// HarnessMemoryRememberProcedure is the fully-qualified name of the HarnessMemory's Remember RPC.
 	HarnessMemoryRememberProcedure = "/supertag.runtime.v2.HarnessMemory/Remember"
 	// HarnessMemoryForgetProcedure is the fully-qualified name of the HarnessMemory's Forget RPC.
@@ -58,6 +63,9 @@ type MemoriesClient interface {
 	List(context.Context, *connect.Request[runtimev2.ListMemoriesRequest]) (*connect.Response[runtimev2.ListMemoriesResponse], error)
 	Get(context.Context, *connect.Request[runtimev2.GetMemoryRequest]) (*connect.Response[runtimev2.Memory], error)
 	Delete(context.Context, *connect.Request[runtimev2.GetMemoryRequest]) (*connect.Response[runtimev2.Memory], error)
+	// Operators only. Drops a Tag's harness-native memory (NativeMemoryStore): every Worker Host
+	// deletes its copies before it next runs one of the Tag's Tasks, and the records go now.
+	ResetNative(context.Context, *connect.Request[runtimev2.ResetNativeMemoryRequest]) (*connect.Response[runtimev2.ResetNativeMemoryResponse], error)
 }
 
 // NewMemoriesClient constructs a client for the supertag.runtime.v2.Memories service. By default,
@@ -89,14 +97,21 @@ func NewMemoriesClient(httpClient connect.HTTPClient, baseURL string, opts ...co
 			connect.WithSchema(memoriesMethods.ByName("Delete")),
 			connect.WithClientOptions(opts...),
 		),
+		resetNative: connect.NewClient[runtimev2.ResetNativeMemoryRequest, runtimev2.ResetNativeMemoryResponse](
+			httpClient,
+			baseURL+MemoriesResetNativeProcedure,
+			connect.WithSchema(memoriesMethods.ByName("ResetNative")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // memoriesClient implements MemoriesClient.
 type memoriesClient struct {
-	list   *connect.Client[runtimev2.ListMemoriesRequest, runtimev2.ListMemoriesResponse]
-	get    *connect.Client[runtimev2.GetMemoryRequest, runtimev2.Memory]
-	delete *connect.Client[runtimev2.GetMemoryRequest, runtimev2.Memory]
+	list        *connect.Client[runtimev2.ListMemoriesRequest, runtimev2.ListMemoriesResponse]
+	get         *connect.Client[runtimev2.GetMemoryRequest, runtimev2.Memory]
+	delete      *connect.Client[runtimev2.GetMemoryRequest, runtimev2.Memory]
+	resetNative *connect.Client[runtimev2.ResetNativeMemoryRequest, runtimev2.ResetNativeMemoryResponse]
 }
 
 // List calls supertag.runtime.v2.Memories.List.
@@ -114,11 +129,19 @@ func (c *memoriesClient) Delete(ctx context.Context, req *connect.Request[runtim
 	return c.delete.CallUnary(ctx, req)
 }
 
+// ResetNative calls supertag.runtime.v2.Memories.ResetNative.
+func (c *memoriesClient) ResetNative(ctx context.Context, req *connect.Request[runtimev2.ResetNativeMemoryRequest]) (*connect.Response[runtimev2.ResetNativeMemoryResponse], error) {
+	return c.resetNative.CallUnary(ctx, req)
+}
+
 // MemoriesHandler is an implementation of the supertag.runtime.v2.Memories service.
 type MemoriesHandler interface {
 	List(context.Context, *connect.Request[runtimev2.ListMemoriesRequest]) (*connect.Response[runtimev2.ListMemoriesResponse], error)
 	Get(context.Context, *connect.Request[runtimev2.GetMemoryRequest]) (*connect.Response[runtimev2.Memory], error)
 	Delete(context.Context, *connect.Request[runtimev2.GetMemoryRequest]) (*connect.Response[runtimev2.Memory], error)
+	// Operators only. Drops a Tag's harness-native memory (NativeMemoryStore): every Worker Host
+	// deletes its copies before it next runs one of the Tag's Tasks, and the records go now.
+	ResetNative(context.Context, *connect.Request[runtimev2.ResetNativeMemoryRequest]) (*connect.Response[runtimev2.ResetNativeMemoryResponse], error)
 }
 
 // NewMemoriesHandler builds an HTTP handler from the service implementation. It returns the path on
@@ -146,6 +169,12 @@ func NewMemoriesHandler(svc MemoriesHandler, opts ...connect.HandlerOption) (str
 		connect.WithSchema(memoriesMethods.ByName("Delete")),
 		connect.WithHandlerOptions(opts...),
 	)
+	memoriesResetNativeHandler := connect.NewUnaryHandler(
+		MemoriesResetNativeProcedure,
+		svc.ResetNative,
+		connect.WithSchema(memoriesMethods.ByName("ResetNative")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.Memories/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case MemoriesListProcedure:
@@ -154,6 +183,8 @@ func NewMemoriesHandler(svc MemoriesHandler, opts ...connect.HandlerOption) (str
 			memoriesGetHandler.ServeHTTP(w, r)
 		case MemoriesDeleteProcedure:
 			memoriesDeleteHandler.ServeHTTP(w, r)
+		case MemoriesResetNativeProcedure:
+			memoriesResetNativeHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -175,10 +206,17 @@ func (UnimplementedMemoriesHandler) Delete(context.Context, *connect.Request[run
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Memories.Delete is not implemented"))
 }
 
+func (UnimplementedMemoriesHandler) ResetNative(context.Context, *connect.Request[runtimev2.ResetNativeMemoryRequest]) (*connect.Response[runtimev2.ResetNativeMemoryResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Memories.ResetNative is not implemented"))
+}
+
 // AttemptMemoryClient is a client for the supertag.runtime.v2.AttemptMemory service.
 type AttemptMemoryClient interface {
 	Remember(context.Context, *connect.Request[runtimev2.AttemptRememberRequest]) (*connect.Response[runtimev2.AttemptMemoryResponse], error)
 	Forget(context.Context, *connect.Request[runtimev2.AttemptForgetRequest]) (*connect.Response[runtimev2.AttemptMemoryResponse], error)
+	// After a turn's harness stops, its Worker Host records what it now holds of the store the
+	// turn was granted (Assignment.native_memory). Never file contents.
+	ReportNative(context.Context, *connect.Request[runtimev2.ReportNativeMemoryRequest]) (*connect.Response[runtimev2.ReportNativeMemoryResponse], error)
 }
 
 // NewAttemptMemoryClient constructs a client for the supertag.runtime.v2.AttemptMemory service. By
@@ -204,13 +242,20 @@ func NewAttemptMemoryClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(attemptMemoryMethods.ByName("Forget")),
 			connect.WithClientOptions(opts...),
 		),
+		reportNative: connect.NewClient[runtimev2.ReportNativeMemoryRequest, runtimev2.ReportNativeMemoryResponse](
+			httpClient,
+			baseURL+AttemptMemoryReportNativeProcedure,
+			connect.WithSchema(attemptMemoryMethods.ByName("ReportNative")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // attemptMemoryClient implements AttemptMemoryClient.
 type attemptMemoryClient struct {
-	remember *connect.Client[runtimev2.AttemptRememberRequest, runtimev2.AttemptMemoryResponse]
-	forget   *connect.Client[runtimev2.AttemptForgetRequest, runtimev2.AttemptMemoryResponse]
+	remember     *connect.Client[runtimev2.AttemptRememberRequest, runtimev2.AttemptMemoryResponse]
+	forget       *connect.Client[runtimev2.AttemptForgetRequest, runtimev2.AttemptMemoryResponse]
+	reportNative *connect.Client[runtimev2.ReportNativeMemoryRequest, runtimev2.ReportNativeMemoryResponse]
 }
 
 // Remember calls supertag.runtime.v2.AttemptMemory.Remember.
@@ -223,10 +268,18 @@ func (c *attemptMemoryClient) Forget(ctx context.Context, req *connect.Request[r
 	return c.forget.CallUnary(ctx, req)
 }
 
+// ReportNative calls supertag.runtime.v2.AttemptMemory.ReportNative.
+func (c *attemptMemoryClient) ReportNative(ctx context.Context, req *connect.Request[runtimev2.ReportNativeMemoryRequest]) (*connect.Response[runtimev2.ReportNativeMemoryResponse], error) {
+	return c.reportNative.CallUnary(ctx, req)
+}
+
 // AttemptMemoryHandler is an implementation of the supertag.runtime.v2.AttemptMemory service.
 type AttemptMemoryHandler interface {
 	Remember(context.Context, *connect.Request[runtimev2.AttemptRememberRequest]) (*connect.Response[runtimev2.AttemptMemoryResponse], error)
 	Forget(context.Context, *connect.Request[runtimev2.AttemptForgetRequest]) (*connect.Response[runtimev2.AttemptMemoryResponse], error)
+	// After a turn's harness stops, its Worker Host records what it now holds of the store the
+	// turn was granted (Assignment.native_memory). Never file contents.
+	ReportNative(context.Context, *connect.Request[runtimev2.ReportNativeMemoryRequest]) (*connect.Response[runtimev2.ReportNativeMemoryResponse], error)
 }
 
 // NewAttemptMemoryHandler builds an HTTP handler from the service implementation. It returns the
@@ -248,12 +301,20 @@ func NewAttemptMemoryHandler(svc AttemptMemoryHandler, opts ...connect.HandlerOp
 		connect.WithSchema(attemptMemoryMethods.ByName("Forget")),
 		connect.WithHandlerOptions(opts...),
 	)
+	attemptMemoryReportNativeHandler := connect.NewUnaryHandler(
+		AttemptMemoryReportNativeProcedure,
+		svc.ReportNative,
+		connect.WithSchema(attemptMemoryMethods.ByName("ReportNative")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.AttemptMemory/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AttemptMemoryRememberProcedure:
 			attemptMemoryRememberHandler.ServeHTTP(w, r)
 		case AttemptMemoryForgetProcedure:
 			attemptMemoryForgetHandler.ServeHTTP(w, r)
+		case AttemptMemoryReportNativeProcedure:
+			attemptMemoryReportNativeHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -269,6 +330,10 @@ func (UnimplementedAttemptMemoryHandler) Remember(context.Context, *connect.Requ
 
 func (UnimplementedAttemptMemoryHandler) Forget(context.Context, *connect.Request[runtimev2.AttemptForgetRequest]) (*connect.Response[runtimev2.AttemptMemoryResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptMemory.Forget is not implemented"))
+}
+
+func (UnimplementedAttemptMemoryHandler) ReportNative(context.Context, *connect.Request[runtimev2.ReportNativeMemoryRequest]) (*connect.Response[runtimev2.ReportNativeMemoryResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptMemory.ReportNative is not implemented"))
 }
 
 // HarnessMemoryClient is a client for the supertag.runtime.v2.HarnessMemory service.

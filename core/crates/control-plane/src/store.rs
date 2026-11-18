@@ -102,7 +102,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 99;
+        const SCHEMA_VERSION: i64 = 100;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -298,6 +298,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0097_git_delivery.sql"),
                 include_str!("../migrations/sqlite/0098_workspace_review_sessions.sql"),
                 include_str!("../migrations/sqlite/0099_attention_pacing.sql"),
+                include_str!("../migrations/sqlite/0100_native_memory.sql"),
             ]
         } else {
             [
@@ -402,6 +403,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0097_git_delivery.sql"),
                 include_str!("../migrations/postgresql/0098_workspace_review_sessions.sql"),
                 include_str!("../migrations/postgresql/0099_attention_pacing.sql"),
+                include_str!("../migrations/postgresql/0100_native_memory.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -690,6 +692,7 @@ impl Store {
             attention: None,
             start_rate,
             starts_in_window: 0,
+            native_memory: vec![],
         })
     }
 
@@ -1068,6 +1071,8 @@ impl Store {
                         Some(Assignment {
                             joined: crate::inputs::joined_in(&mut transaction, &task.task_id)
                                 .await?,
+                            native_memory: crate::native_memory::grant_in(&mut transaction, &task)
+                                .await?,
                             task: Some(task),
                             attempt_id,
                             lease_token: prior.try_get("lease_token")?,
@@ -1119,9 +1124,11 @@ impl Store {
         crate::reply_progress::claimed_in(&mut transaction, &task, !joined.is_empty()).await?;
         sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope, execution_profile, attempt_execution, gateway_workspace_scope, claimed_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)")
             .bind(&host.principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).bind(workspace_scope).bind(harness as i64).bind(context_scope).bind(profile_bytes).bind(attempt_execution).bind(gateway_workspace_scope).bind(now).execute(&mut *transaction).await?;
+        let native_memory = crate::native_memory::grant_in(&mut transaction, &task).await?;
         supertag_protocol::crash_point("control-plane.claim", "before-commit");
         transaction.commit().await?;
         Ok(Some(Assignment {
+            native_memory,
             task: Some(task),
             attempt_id: attempt,
             lease_token: lease,

@@ -63,6 +63,13 @@ impl memories_server::Memories for Api {
     async fn delete(&self, request: Request<GetMemoryRequest>) -> Result<Response<Memory>, Status> {
         memories!(self, request, delete)
     }
+
+    async fn reset_native(
+        &self,
+        request: Request<ResetNativeMemoryRequest>,
+    ) -> Result<Response<ResetNativeMemoryResponse>, Status> {
+        memories!(self, request, reset_native)
+    }
 }
 
 #[tonic::async_trait]
@@ -79,5 +86,12 @@ impl attempt_memory_server::AttemptMemory for Api {
         request: Request<AttemptForgetRequest>,
     ) -> Result<Response<AttemptMemoryResponse>, Status> {
         attempt_memory!(self, request, forget)
+    }
+
+    async fn report_native(
+        &self,
+        request: Request<ReportNativeMemoryRequest>,
+    ) -> Result<Response<ReportNativeMemoryResponse>, Status> {
+        attempt_memory!(self, request, report_native)
     }
 }

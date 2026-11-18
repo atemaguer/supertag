@@ -1685,6 +1685,8 @@ message Tag {
   StartRate start_rate = 7000;
   // How many of its Task Attempts started in the start rate's current window; read with GetTag.
   uint32 starts_in_window = 7001;
+  // What Worker Hosts hold of the Tag's harness-native memory, newest first; read with GetTag.
+  repeated NativeMemoryStore native_memory = 7200;
 }
 
 // A Tag's unprompted messages: the replies of turns no person asked for (Schedule fires and
@@ -2300,6 +2302,41 @@ message Assignment {
   // Later messages from the same Session that this Attempt answers together with `task`,
   // oldest first. The Worker Host renders them into the harness prompt.
   repeated JoinedMessage joined = 4;
+  // The harness-native memory store this Attempt may use, if any.
+  NativeMemoryGrant native_memory = 5;
+}
+
+// A Tag's harness-native memory: the files a harness keeps itself, such as Claude Code's
+// auto-memory. Worker Hosts keep the files, one store per Tag, harness, and audience (shared,
+// or private to one person's conversations); the Control Plane keeps only this record of what
+// each host holds. A host that is gone takes its copy with it.
+message NativeMemoryStore {
+  string tag_id = 1;
+  // The harness that writes it, such as `claude-code`.
+  string harness = 2;
+  // Unset for the shared store; the principal whose conversations a private store serves.
+  optional string audience = 3;
+  // The Worker Host holding this copy.
+  string host_id = 4;
+  // Increases with every turn that changed the copy.
+  uint64 revision = 5;
+  uint32 files = 6;
+  uint64 bytes = 7;
+  // SHA-256 over the copy's paths and contents.
+  string digest = 8;
+  int64 updated_at_ms = 9;
+  // The turn that last reported it.
+  string task_id = 10;
+}
+
+// The harness-native store a turn may use, sent with its Assignment. Absent when the Tag keeps
+// no memory, when an outside event such as a webhook started the turn, or when the turn has no
+// audience.
+message NativeMemoryGrant {
+  // The store within the Tag and harness: `shared`, or `person-` and a digest of the principal.
+  string scope = 1;
+  // A host drops copies of this Tag's stores made before the Tag's latest reset.
+  uint64 reset_generation = 2;
 }
 
 // A person's message joined into another Task's Attempt when that Attempt was claimed.

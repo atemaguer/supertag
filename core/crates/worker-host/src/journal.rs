@@ -28,6 +28,16 @@ pub(crate) struct Attempt {
     /// The later messages the Control Plane joined into this Attempt when it was claimed.
     #[serde(default)]
     pub joined: Vec<JoinedMessage>,
+    /// The Tag's native memory store the Control Plane granted this Attempt, if any.
+    #[serde(default)]
+    pub native_memory: Option<NativeMemoryGrant>,
+}
+
+/// `supertag_protocol::v2::NativeMemoryGrant`, as the journal keeps it.
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct NativeMemoryGrant {
+    pub scope: String,
+    pub reset_generation: u64,
 }
 
 /// A person's message this Attempt answers together with its Task's own prompt.
@@ -907,6 +917,7 @@ mod tests {
         let state = tempfile::tempdir()?;
         let journal = Journal::open(state.path())?;
         let attempt = |id: &str| Attempt {
+            native_memory: None,
             task_id: "task".into(),
             attempt_id: id.into(),
             lease_token: "lease".into(),
@@ -961,6 +972,7 @@ mod tests {
     fn lost_allocation_acknowledgement_requires_recovery_before_reuse() -> Result<()> {
         let state = tempfile::tempdir()?;
         let attempt = Attempt {
+            native_memory: None,
             task_id: "task".into(),
             attempt_id: "attempt".into(),
             lease_token: "lease-secret".into(),
@@ -1122,6 +1134,7 @@ mod tests {
         );
         journal.save(&Entry::Executing {
             attempt: Attempt {
+                native_memory: None,
                 task_id: "task".into(),
                 attempt_id: "attempt".into(),
                 lease_token: "lease".into(),

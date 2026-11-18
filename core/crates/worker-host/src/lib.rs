@@ -14,6 +14,7 @@ mod failures;
 mod guardian;
 mod journal;
 mod mcp;
+mod native_memory;
 mod prepared;
 mod readiness;
 mod remote;
@@ -213,6 +214,12 @@ impl Attempt {
                     sent_at_ms: message.sent_at_ms,
                 })
                 .collect(),
+            native_memory: assignment
+                .native_memory
+                .map(|grant| journal::NativeMemoryGrant {
+                    scope: grant.scope,
+                    reset_generation: grant.reset_generation,
+                }),
         })
     }
 
@@ -2242,6 +2249,12 @@ async fn run_assignment(
     // only the person's own text.
     task.prompt = joined_prompt(&task.prompt, &attempt.joined);
     let assignment = Assignment {
+        native_memory: attempt.native_memory.as_ref().map(|grant| {
+            supertag_protocol::v2::NativeMemoryGrant {
+                scope: grant.scope.clone(),
+                reset_generation: grant.reset_generation,
+            }
+        }),
         task: Some(task),
         attempt_id: attempt.attempt_id.clone(),
         lease_token: attempt.lease_token.clone(),

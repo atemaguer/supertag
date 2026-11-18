@@ -26,6 +26,14 @@ const BUILTIN_HARNESSES: [(HarnessKind, &str); 5] = [
     (HarnessKind::Cursor, "cursor"),
 ];
 
+/// The wire name of a built-in harness, such as `claude-code`; `None` for a custom adapter.
+pub(crate) fn harness_wire_name(harness: HarnessKind) -> Option<&'static str> {
+    BUILTIN_HARNESSES
+        .iter()
+        .find(|(kind, _)| *kind == harness)
+        .map(|(_, name)| *name)
+}
+
 pub(crate) fn harness_for_name(name: &str) -> Option<HarnessKind> {
     BUILTIN_HARNESSES
         .iter()

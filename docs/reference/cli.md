@@ -4362,7 +4362,7 @@ Commands:
   workspace         Delete a remote Workspace at its exact revision [alias: workspaces]
   surface-location  Remove a location's policy and stop new work on its connector alias [alias: surface-locations]
   schedule          Cancel a Schedule. A turn it already queued stays queued [alias: schedules]
-  memory            Delete one of a Tag's notes. To change a note, tell the Tag [alias: memories]
+  memory            Delete one of a Tag's notes, or with --native, a Tag's harness-native memory. To change a note, tell the Tag [alias: memories]
   help              Print this message or the help of the given subcommand(s)
 
 Options:
@@ -4546,18 +4546,20 @@ Options:
 ## `supertag delete memory`
 
 ```text
-Delete one of a Tag's notes. To change a note, tell the Tag
+Delete one of a Tag's notes, or with --native, a Tag's harness-native memory. To change a note, tell the Tag
 
-Usage: supertag delete memory [OPTIONS] <ID>
+Usage: supertag delete memory [OPTIONS] [ID]
 
 Arguments:
-  <ID>  Note ID
+  [ID]  Note ID
 
 Options:
-      --dry-run
-          Check that the note exists and show what would be deleted, without deleting it
       --gateway <URL|NAME>
           Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --native <TAG>
+          Instead of a note, drop this Tag's harness-native memory (such as Claude Code's auto-memory), which Worker Hosts keep: each host deletes its copies before it next runs one of the Tag's Tasks. Operators only
+      --dry-run
+          Check that the note exists and show what would be deleted, without deleting it
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help

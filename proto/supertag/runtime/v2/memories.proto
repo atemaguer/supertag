@@ -17,6 +17,9 @@ service Memories {
   rpc List(ListMemoriesRequest) returns (ListMemoriesResponse);
   rpc Get(GetMemoryRequest) returns (Memory);
   rpc Delete(GetMemoryRequest) returns (Memory);
+  // Operators only. Drops a Tag's harness-native memory (NativeMemoryStore): every Worker Host
+  // deletes its copies before it next runs one of the Tag's Tasks, and the records go now.
+  rpc ResetNative(ResetNativeMemoryRequest) returns (ResetNativeMemoryResponse);
 }
 
 // Called by a Worker Host for the turn it runs. A note written or forgotten during a turn takes
@@ -24,6 +27,9 @@ service Memories {
 service AttemptMemory {
   rpc Remember(AttemptRememberRequest) returns (AttemptMemoryResponse);
   rpc Forget(AttemptForgetRequest) returns (AttemptMemoryResponse);
+  // After a turn's harness stops, its Worker Host records what it now holds of the store the
+  // turn was granted (Assignment.native_memory). Never file contents.
+  rpc ReportNative(ReportNativeMemoryRequest) returns (ReportNativeMemoryResponse);
 }
 
 // Served by a Worker Host to its harness adapter. The Worker Host sets `attempt` from the
@@ -95,3 +101,26 @@ message AttemptMemoryResponse {
   // The notes this turn sees after the call, newest first, staged changes included.
   repeated Memory notes = 2;
 }
+
+message ResetNativeMemoryRequest {
+  string tag_id = 1;
+}
+
+message ResetNativeMemoryResponse {
+  // The records dropped.
+  repeated NativeMemoryStore stores = 1;
+  uint64 reset_generation = 2;
+}
+
+message ReportNativeMemoryRequest {
+  InspectAttemptRequest attempt = 1;
+  // Of the store as the host holds it after the turn.
+  uint64 revision = 2;
+  uint32 files = 3;
+  uint64 bytes = 4;
+  string digest = 5;
+  // The reset generation of the grant the copy was made under.
+  uint64 reset_generation = 6;
+}
+
+message ReportNativeMemoryResponse {}

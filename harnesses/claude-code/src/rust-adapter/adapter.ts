@@ -205,6 +205,12 @@ export interface HookScope {
   readonly output?: string | undefined;
   /** The Task's network scope, which `WebFetch` must stay inside. */
   readonly network?: NetworkRules | undefined;
+  /**
+   * The Tag's native memory directory, readable and writable under any scope: Tag-private
+   * state, not the Workspace. `only` names file tools the Task's actions did not admit, which
+   * reach nothing else.
+   */
+  readonly memory?: { readonly root: string; readonly only: ReadonlySet<string> } | undefined;
 }
 
 /**
@@ -392,27 +398,32 @@ export function permissionHook(
         ? input["file_path"]
         : (input["path"] ?? cwd);
       const writes = hook.tool_name === "Write" || hook.tool_name === "Edit";
-      allowed = await withinRoots(
-        cwd,
-        path,
-        writes
-          ? [cwd, ...mounts.write, ...scope.outside.write]
-          : [
-              cwd,
-              ...skillRoots,
-              ...mounts.read,
-              ...mounts.write,
-              ...scope.outside.read,
-              ...scope.outside.write,
-            ],
-      );
-      if (allowed && writes)
+      const inMemory =
+        scope.memory !== undefined && (await withinRoots(cwd, path, [scope.memory.root]));
+      if (scope.memory?.only.has(hook.tool_name) && !inMemory) allowed = false;
+      else if (inMemory) allowed = true;
+      else
+        allowed = await withinRoots(
+          cwd,
+          path,
+          writes
+            ? [cwd, ...mounts.write, ...scope.outside.write]
+            : [
+                cwd,
+                ...skillRoots,
+                ...mounts.read,
+                ...mounts.write,
+                ...scope.outside.read,
+                ...scope.outside.write,
+              ],
+        );
+      if (allowed && writes && !inMemory)
         allowed = !(await insideGitMetadata(cwd, path as string, [
           cwd,
           ...mounts.write,
           ...scope.outside.write,
         ]));
-      if (allowed) {
+      if (allowed && !inMemory) {
         reason = await scopeDenial(cwd, path as string, writes, scope.rules, scope.output);
         allowed = reason === undefined;
       }
@@ -582,7 +593,13 @@ export async function runAdapter(
       nativeSessionId: () => nativeSessionId,
       hasPendingExternalApprovals: mcp.hasPendingApprovals,
     });
-    const { env, cwd } = await nativeEnvironment(environment, task.outputPolicy?.directory);
+    const { env, cwd, memory } = await nativeEnvironment(environment, task.outputPolicy?.directory);
+    // Claude Code keeps its memories with its own file tools. A Task whose actions admit none of
+    // them (read-only, or a remote Workspace) still gets them, confined to the memory directory.
+    const memoryOnly = new Set(
+      memory ? ["Read", "Write", "Edit"].filter((tool) => !tools.includes(tool)) : [],
+    );
+    tools.push(...memoryOnly);
     const workspace = remote
       ? remoteWorkspaceTools(harness, task.allowedActions, controller.signal)
       : undefined;
@@ -609,6 +626,7 @@ export async function runAdapter(
     try {
       outside = await resolveOutsideDirectories(fileScope, cwd, [
         env["CLAUDE_CONFIG_DIR"] ?? "",
+        memory ?? "",
         ...(env["HOME"] && env["HOME"] !== environment["HOME"] ? [env["HOME"]] : []),
       ]);
     } catch (error) {
@@ -621,6 +639,7 @@ export async function runAdapter(
       outside,
       output: env["SUPERTAG_OUTPUT_DIR"],
       network: networkScope ? new NetworkRules(networkScope) : undefined,
+      memory: memory ? { root: memory, only: memoryOnly } : undefined,
     };
     // Commands under a network scope run in Claude Code's sandbox, which sends their traffic
     // only to the Worker Host's egress proxy.
@@ -672,7 +691,13 @@ export async function runAdapter(
       cwd,
       tools,
       allowedTools,
-      additionalDirectories: [...mounts.read, ...mounts.write, ...outside.read, ...outside.write],
+      additionalDirectories: [
+        ...mounts.read,
+        ...mounts.write,
+        ...outside.read,
+        ...outside.write,
+        ...(memory ? [memory] : []),
+      ],
       disallowedTools: [
         "Agent",
         "Task",
@@ -690,10 +715,10 @@ export async function runAdapter(
         syncClaudeAiSkills: false,
         syncClaudeAiPlugins: false,
         disableSkillShellExecution: true,
-        // SuperTag keeps the Tag's history; Claude's own per-Attempt memory would be lost
-        // with the Attempt and is invisible to operators.
-        autoMemoryEnabled: false,
-        autoDreamEnabled: false,
+        // Claude Code's auto-memory lives in the Tag's native memory directory, which the
+        // Worker Host keeps across Tasks. A turn granted none (the Tag keeps no memory, or an
+        // outside event started it) keeps none, rather than one lost with the Attempt.
+        ...(memory ? { autoMemoryDirectory: memory } : { autoMemoryEnabled: false }),
         ...(fileScope ? { permissions: { deny: nativeDenyRules(cwd, fileScope) } } : {}),
         ...(sandbox ? { sandbox } : {}),
       },

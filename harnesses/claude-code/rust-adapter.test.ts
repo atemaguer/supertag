@@ -105,6 +105,7 @@ async function invoke({
   history = [],
   hostRefusal,
   remoteWorkspace = false,
+  nativeMemory = false,
 }: {
   prompt?: string;
   checkpoint?: SessionCheckpoint;
@@ -135,6 +136,8 @@ async function invoke({
   /** Fail the limit confirmation as a Worker Host that refuses the call would. */
   hostRefusal?: string;
   remoteWorkspace?: boolean;
+  /** Give the Attempt a native memory directory, as a Worker Host does for a granted store. */
+  nativeMemory?: boolean;
 } = {}) {
   const workspaceCalls: HarnessWorkspaceRequest[] = [];
   const directory = await mkdtemp(join(tmpdir(), "supertag-rust-claude-"));
@@ -144,6 +147,8 @@ async function invoke({
   await mkdir(workspace, { mode: 0o700 });
   await mkdir(state, { mode: 0o700 });
   await mkdir(join(state, "tmp"), { mode: 0o700 });
+  const memory = join(directory, "memory");
+  if (nativeMemory) await mkdir(memory, { mode: 0o700 });
   const completions: HarnessCompleteRequest[] = [];
   const events: string[] = [];
   const kinds: TaskEventKind[] = [];
@@ -516,6 +521,7 @@ async function invoke({
         SUPERTAG_CONTROLPLANE_TOKEN: "must-not-reach-native",
         AWS_SECRET_ACCESS_KEY: "must-not-reach-native",
         NODE_OPTIONS: "--no-warnings",
+        ...(nativeMemory ? { SUPERTAG_NATIVE_MEMORY_DIRECTORY: memory } : {}),
       },
       stdio: ["pipe", "pipe", "pipe"],
     },
@@ -546,6 +552,7 @@ async function invoke({
     directory,
     workspace,
     state,
+    memory,
     completions,
     events,
     kinds,
@@ -698,7 +705,7 @@ it("resumes an approved transcript in another host directory with the real SDK m
   expect(text).toContain(second.workspace);
 }, 30000);
 
-it("starts a fresh native Session from the recap, without Claude's own auto memory", async () => {
+it("starts a fresh native Session from the recap, with no auto memory when none is granted", async () => {
   const history = [
     create(AttemptHistoryEntrySchema, {
       taskId: "earlier-task",
@@ -723,8 +730,11 @@ it("starts a fresh native Session from the recap, without Claude's own auto memo
     },
   ]);
   expect(seen.reread).toBe(true);
+  // No store was granted (the Tag keeps no memory): Claude keeps none that would vanish with
+  // the Attempt. Auto-dream is never forced off.
   expect(seen.autoMemoryEnabled).toBe(false);
-  expect(seen.autoDreamEnabled).toBe(false);
+  expect(seen.autoDreamEnabled).toBeUndefined();
+  expect(seen.memoryOverride).toBeNull();
 
   // A resumed native Session already holds its history: no recap.
   const first = await invoke({ prompt: "write" });
@@ -735,6 +745,33 @@ it("starts a fresh native Session from the recap, without Claude's own auto memo
   });
   expect(resumed.completions[0]?.succeeded).toBe(true);
   expect(resumed.completions[0]?.result).not.toContain("earlier-task");
+}, 60000);
+
+it("keeps Claude's auto memory in the Tag's native memory directory, writable even read-only", async () => {
+  const recall = await invoke({ prompt: "recall-recap", nativeMemory: true });
+  expect(recall.completions[0]?.succeeded, recall.completions[0]?.result).toBe(true);
+  const seen = JSON.parse(recall.completions[0]?.result ?? "{}");
+  const memory = await realpath(recall.memory);
+  // The override makes Claude Code describe the directory under our custom system prompt.
+  expect(seen.memoryOverride).toBe(memory);
+  expect(seen.autoMemoryDirectory).toBe(memory);
+  expect(seen.autoMemoryEnabled).toBeUndefined();
+  expect(seen.autoDreamEnabled).toBeUndefined();
+
+  // A read-only Task still writes its memories, and only there.
+  const readOnly = await invoke({
+    prompt: "remember-native",
+    actions: ["files:read"],
+    nativeMemory: true,
+  });
+  expect(readOnly.completions[0]?.succeeded, readOnly.completions[0]?.result).toBe(true);
+  expect(JSON.parse(readOnly.completions[0]?.result ?? "{}")).toEqual({
+    memoryWrite: true,
+    memoryRead: true,
+    workspaceWrite: false,
+    elsewhereRead: false,
+  });
+  expect(await readFile(join(readOnly.memory, "MEMORY.md"), "utf8")).toBe("- fixture memory\n");
 }, 60000);
 
 it("rejects a damaged checkpoint instead of silently resetting the native Session", async () => {

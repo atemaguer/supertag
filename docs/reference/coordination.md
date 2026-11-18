@@ -670,6 +670,35 @@ last had it in its context (`last_seen_at` in `describe memory`), so a note no t
 a long time is easy to spot. `supertag watch memory` follows notes as they are kept, rewritten,
 and deleted.
 
+### Harness memory
+
+Some harnesses keep a memory of their own. Claude Code's auto-memory, for
+example, is a folder of Markdown files with a `MEMORY.md` index, which Claude Code reads at the
+start of each turn and updates with its file tools. A Tag that keeps memory keeps its harness's
+memory too, beside its [notes](#memory), across Tasks:
+
+- **Where it lives.** On the Worker Host that ran the turn, under the host's state directory at
+  `native-memory/TAG/HARNESS/SCOPE/current`. The Control Plane never holds the files, only a record
+  of what each host holds: the revision, file count, size, and a digest.
+- **Who shares it.** It follows the audience rule for notes: one store for the Tag's shared turns
+  and one for each person's conversations, so one person's conversation never feeds another's.
+  A turn a GitHub or Linear event started gets none.
+- **Parallel turns.** Each turn works on its own copy. When the harness stops, the host merges the
+  copy back file by file: a file only one turn changed takes that change; a file two turns changed
+  keeps the later one and saves the earlier as `NAME.conflict-ATTEMPT.md` beside it; the
+  `MEMORY.md` index keeps both turns' lines.
+- **Limits.** A store holds at most 1,000 files and 4 MiB, and a file at most 256 KiB. A turn's
+  changes that would pass a limit, or that add a link or special file, are not kept.
+- **Another host.** Each Worker Host keeps its own copy. A Tag whose next turn runs on another
+  host starts from that host's copy, or from none, and a host that is removed takes its copy with
+  it. The Tag's notes and Sessions stay; harness memory is a convenience on top of them.
+
+Today Claude Code keeps harness memory this way. A read-only turn may still write to its memory
+folder, and nowhere else. `supertag describe tag` lists the copies Worker Hosts hold
+(`native_memory`), and `supertag delete memory --native TAG` drops all of them: each host deletes
+its copies before it next runs one of the Tag's Tasks. A Tag with `memory: false` keeps no harness
+memory either.
+
 ### Quiet results
 
 A Tag speaks when it has something to say. A recurring check that finds nothing, such as "check

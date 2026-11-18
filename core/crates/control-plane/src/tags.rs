@@ -94,6 +94,7 @@ pub(crate) fn tag_from_row(row: &AnyRow) -> Result<Tag> {
         attention: None,
         start_rate: crate::start_rates::from_row(row)?,
         starts_in_window: 0,
+        native_memory: vec![],
     })
 }
 

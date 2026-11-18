@@ -30,6 +30,7 @@ mod manifest_relationships;
 mod mcp_effects;
 mod memories;
 mod metrics;
+mod native_memory;
 mod network_logs;
 pub mod objective_limits;
 mod objective_overview;
@@ -396,7 +397,9 @@ impl operator_server::Operator for ControlPlane {
         let principal = self.actor(&request)?;
         let tag_id = request.into_inner().tag_id;
         self.store.ensure_client_tag(&principal, &tag_id).await?;
-        Ok(Response::new(self.store.get_tag(&tag_id).await?))
+        let mut tag = self.store.get_tag(&tag_id).await?;
+        tag.native_memory = self.store.native_memory_stores(&principal, &tag_id).await?;
+        Ok(Response::new(tag))
     }
 
     async fn retire_tag(

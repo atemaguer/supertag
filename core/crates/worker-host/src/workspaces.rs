@@ -1070,6 +1070,7 @@ mod tests {
         let journal = Journal::open(&state)?;
         journal.save(&Entry::Finalizing {
             attempt: Attempt {
+                native_memory: None,
                 task_id: "task".into(),
                 attempt_id: "attempt".into(),
                 lease_token: "lease".into(),

@@ -538,6 +538,7 @@ async fn run(
     shutdown: &CancellationToken,
 ) -> Result<HarnessCompleteRequest> {
     ensure!(assignment.task.is_some(), "assignment is missing its Task");
+    let native_memory = prepare_native_memory(options, &assignment).await;
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let bootstrap = AdapterBootstrap {
         endpoint: format!("http://{}", listener.local_addr()?),
@@ -624,11 +625,21 @@ async fn run(
         bootstrap,
         (valid_until, execution_ends),
         shutdown,
-        (workspace, output_directory),
+        (
+            workspace,
+            output_directory,
+            native_memory
+                .as_ref()
+                .map(crate::native_memory::Prepared::working_directory)
+                .as_deref(),
+        ),
         (&processes, &egress_environment),
     )
     .await;
     bridge.inputs.close();
+    if let Some(prepared) = native_memory {
+        finish_native_memory(&bridge, prepared).await;
+    }
     stop_server.cancel();
     if time::timeout(Duration::from_secs(2), &mut server)
         .await
@@ -646,13 +657,82 @@ async fn run(
     result
 }
 
+/// The Attempt's copy of its Tag's native memory, when the Control Plane granted one and this
+/// harness keeps one. Native memory is a convenience: a copy that cannot be made never stops
+/// the turn.
+async fn prepare_native_memory(
+    options: &HostOptions,
+    assignment: &Assignment,
+) -> Option<crate::native_memory::Prepared> {
+    let grant = assignment.native_memory.clone()?;
+    let harness = crate::native_memory::harness_directory(options.harness)?;
+    let tag = assignment.task.as_ref()?.tag_id.clone();
+    let state = options.state_directory.clone();
+    let attempt = assignment.attempt_id.clone();
+    match tokio::task::spawn_blocking(move || {
+        crate::native_memory::Prepared::prepare(&state, &tag, harness, &attempt, &grant)
+    })
+    .await
+    {
+        Ok(Ok(prepared)) => Some(prepared),
+        Ok(Err(error)) => {
+            crate::failures::note("Native memory could not be prepared", &error);
+            None
+        }
+        Err(error) => {
+            crate::failures::note("Native memory could not be prepared", &error);
+            None
+        }
+    }
+}
+
+/// Merges the Attempt's native memory back and records what this host now holds.
+async fn finish_native_memory(bridge: &Bridge, prepared: crate::native_memory::Prepared) {
+    let summary = match tokio::task::spawn_blocking(move || prepared.finish()).await {
+        Ok(Ok(summary)) => summary,
+        Ok(Err(error)) => {
+            crate::failures::note("Native memory changes were not kept", &error);
+            return;
+        }
+        Err(error) => {
+            crate::failures::note("Native memory changes were not kept", &error);
+            return;
+        }
+    };
+    let report = supertag_protocol::v2::ReportNativeMemoryRequest {
+        attempt: Some(bridge.attempt()),
+        revision: summary.revision,
+        files: summary.files,
+        bytes: summary.bytes,
+        digest: summary.digest,
+        reset_generation: summary.generation,
+    };
+    // The harness has stopped, so this goes straight out once, under the host's own credential;
+    // a record lost here is replaced by the next turn's.
+    let sent = async {
+        let mut request = authenticated_request(report, &bridge.host_token, None)
+            .map_err(|error| Status::internal(error.to_string()))?;
+        request.set_timeout(Duration::from_secs(10));
+        bridge
+            .coordination
+            .memory
+            .clone()
+            .report_native(request)
+            .await
+    }
+    .await;
+    if let Err(status) = sent {
+        crate::failures::note("Native memory record was not sent", &status.message());
+    }
+}
+
 async fn supervise(
     options: &HostOptions,
     bridge: &Bridge,
     bootstrap: AdapterBootstrap,
     (valid_until, execution_ends): (Instant, Instant),
     shutdown: &CancellationToken,
-    (workspace, output_directory): (Option<&Path>, Option<&Path>),
+    (workspace, output_directory, native_memory): (Option<&Path>, Option<&Path>, Option<&Path>),
     (processes, egress_environment): (&crate::journal::Processes, &[(String, std::ffi::OsString)]),
 ) -> Result<HarnessCompleteRequest> {
     if shutdown.is_cancelled() {
@@ -701,6 +781,9 @@ async fn supervise(
         command.env(crate::task_outputs::OUTPUT_DIRECTORY, directory);
     }
     command.envs(egress_environment.iter().map(|(name, value)| (name, value)));
+    if let Some(directory) = native_memory {
+        command.env(crate::native_memory::DIRECTORY, directory);
+    }
     command.env(
         crate::guardian::ADAPTER_SCRATCH_PARENT,
         options

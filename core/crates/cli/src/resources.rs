@@ -632,11 +632,13 @@ pub enum DeleteCommand {
         #[command(flatten)]
         args: schedules::DeleteArgs,
     },
-    /// Delete one of a Tag's notes. To change a note, tell the Tag.
+    /// Delete one of a Tag's notes, or with --native, a Tag's harness-native memory. To change a
+    /// note, tell the Tag.
     #[command(visible_alias = "memories")]
     Memory {
         /// Note ID.
-        id: String,
+        #[arg(required_unless_present = "native", conflicts_with = "native")]
+        id: Option<String>,
         #[command(flatten)]
         args: memories::DeleteArgs,
     },
@@ -892,7 +894,13 @@ pub async fn delete(connection: Connection, command: DeleteCommand) -> Result<()
             (format!("SurfaceLocation/{id}"), args.dry_run)
         }
         DeleteCommand::Schedule { id, args } => (format!("Schedule/{id}"), args.dry_run),
-        DeleteCommand::Memory { id, args } => (format!("Memory/{id}"), args.dry_run),
+        DeleteCommand::Memory { id, args } => (
+            match (&args.native, id) {
+                (Some(tag), _) => format!("NativeMemory/{tag}"),
+                (None, id) => format!("Memory/{}", id.as_deref().unwrap_or_default()),
+            },
+            args.dry_run,
+        ),
     };
     let deleted = async {
         match command {

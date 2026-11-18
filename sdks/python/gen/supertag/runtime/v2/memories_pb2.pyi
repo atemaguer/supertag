@@ -90,3 +90,37 @@ class AttemptMemoryResponse(_message.Message):
     memory: Memory
     notes: _containers.RepeatedCompositeFieldContainer[Memory]
     def __init__(self, memory: _Optional[_Union[Memory, _Mapping]] = ..., notes: _Optional[_Iterable[_Union[Memory, _Mapping]]] = ...) -> None: ...
+
+class ResetNativeMemoryRequest(_message.Message):
+    __slots__ = ("tag_id",)
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    tag_id: str
+    def __init__(self, tag_id: _Optional[str] = ...) -> None: ...
+
+class ResetNativeMemoryResponse(_message.Message):
+    __slots__ = ("stores", "reset_generation")
+    STORES_FIELD_NUMBER: _ClassVar[int]
+    RESET_GENERATION_FIELD_NUMBER: _ClassVar[int]
+    stores: _containers.RepeatedCompositeFieldContainer[_runtime_pb2.NativeMemoryStore]
+    reset_generation: int
+    def __init__(self, stores: _Optional[_Iterable[_Union[_runtime_pb2.NativeMemoryStore, _Mapping]]] = ..., reset_generation: _Optional[int] = ...) -> None: ...
+
+class ReportNativeMemoryRequest(_message.Message):
+    __slots__ = ("attempt", "revision", "files", "bytes", "digest", "reset_generation")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    REVISION_FIELD_NUMBER: _ClassVar[int]
+    FILES_FIELD_NUMBER: _ClassVar[int]
+    BYTES_FIELD_NUMBER: _ClassVar[int]
+    DIGEST_FIELD_NUMBER: _ClassVar[int]
+    RESET_GENERATION_FIELD_NUMBER: _ClassVar[int]
+    attempt: _runtime_pb2.InspectAttemptRequest
+    revision: int
+    files: int
+    bytes: int
+    digest: str
+    reset_generation: int
+    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., revision: _Optional[int] = ..., files: _Optional[int] = ..., bytes: _Optional[int] = ..., digest: _Optional[str] = ..., reset_generation: _Optional[int] = ...) -> None: ...
+
+class ReportNativeMemoryResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...

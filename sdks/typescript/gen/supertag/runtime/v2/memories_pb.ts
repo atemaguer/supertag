@@ -4,7 +4,7 @@
 
 import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { InspectAttemptRequest } from "./runtime_pb.js";
+import type { InspectAttemptRequest, NativeMemoryStore } from "./runtime_pb.js";
 import { file_supertag_runtime_v2_runtime } from "./runtime_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/memories.proto.
  */
 export const file_supertag_runtime_v2_memories: GenFile = /*@__PURE__*/
-  fileDesc("CiJzdXBlcnRhZy9ydW50aW1lL3YyL21lbW9yaWVzLnByb3RvEhNzdXBlcnRhZy5ydW50aW1lLnYyIrICCgZNZW1vcnkSEQoJbWVtb3J5X2lkGAEgASgJEg4KBnRhZ19pZBgCIAEoCRIMCgR0ZXh0GAMgASgJEhUKCGF1ZGllbmNlGAQgASgJSACIAQESLwoFc3RhdGUYBSABKA4yIC5zdXBlcnRhZy5ydW50aW1lLnYyLk1lbW9yeVN0YXRlEhIKCmNyZWF0ZWRfYnkYBiABKAkSGwoOc291cmNlX3Rhc2tfaWQYByABKAlIAYgBARIVCg1jcmVhdGVkX2F0X21zGAggASgDEhUKDXVwZGF0ZWRfYXRfbXMYCSABKAMSHAoPbGFzdF9zZWVuX2F0X21zGAogASgDSAKIAQFCCwoJX2F1ZGllbmNlQhEKD19zb3VyY2VfdGFza19pZEISChBfbGFzdF9zZWVuX2F0X21zIjUKE0xpc3RNZW1vcmllc1JlcXVlc3QSEwoGdGFnX2lkGAEgASgJSACIAQFCCQoHX3RhZ19pZCJFChRMaXN0TWVtb3JpZXNSZXNwb25zZRItCghtZW1vcmllcxgBIAMoCzIbLnN1cGVydGFnLnJ1bnRpbWUudjIuTWVtb3J5IiUKEEdldE1lbW9yeVJlcXVlc3QSEQoJbWVtb3J5X2lkGAEgASgJIp0BChZBdHRlbXB0UmVtZW1iZXJSZXF1ZXN0EjsKB2F0dGVtcHQYASABKAsyKi5zdXBlcnRhZy5ydW50aW1lLnYyLkluc3BlY3RBdHRlbXB0UmVxdWVzdBIUCgxvcGVyYXRpb25faWQYAiABKAkSDAoEdGV4dBgDIAEoCRIVCghyZXBsYWNlcxgEIAEoCUgAiAEBQgsKCV9yZXBsYWNlcyJ8ChRBdHRlbXB0Rm9yZ2V0UmVxdWVzdBI7CgdhdHRlbXB0GAEgASgLMiouc3VwZXJ0YWcucnVudGltZS52Mi5JbnNwZWN0QXR0ZW1wdFJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAIgASgJEhEKCW1lbW9yeV9pZBgDIAEoCSJwChVBdHRlbXB0TWVtb3J5UmVzcG9uc2USKwoGbWVtb3J5GAEgASgLMhsuc3VwZXJ0YWcucnVudGltZS52Mi5NZW1vcnkSKgoFbm90ZXMYAiADKAsyGy5zdXBlcnRhZy5ydW50aW1lLnYyLk1lbW9yeSp6CgtNZW1vcnlTdGF0ZRIcChhNRU1PUllfU1RBVEVfVU5TUEVDSUZJRUQQABIXChNNRU1PUllfU1RBVEVfU1RBR0VEEAESFwoTTUVNT1JZX1NUQVRFX0FDVElWRRACEhsKF01FTU9SWV9TVEFURV9GT1JHRVRUSU5HEAMygAIKCE1lbW9yaWVzElsKBExpc3QSKC5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RNZW1vcmllc1JlcXVlc3QaKS5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RNZW1vcmllc1Jlc3BvbnNlEkkKA0dldBIlLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0TWVtb3J5UmVxdWVzdBobLnN1cGVydGFnLnJ1bnRpbWUudjIuTWVtb3J5EkwKBkRlbGV0ZRIlLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0TWVtb3J5UmVxdWVzdBobLnN1cGVydGFnLnJ1bnRpbWUudjIuTWVtb3J5MtUBCg1BdHRlbXB0TWVtb3J5EmMKCFJlbWVtYmVyEisuc3VwZXJ0YWcucnVudGltZS52Mi5BdHRlbXB0UmVtZW1iZXJSZXF1ZXN0Giouc3VwZXJ0YWcucnVudGltZS52Mi5BdHRlbXB0TWVtb3J5UmVzcG9uc2USXwoGRm9yZ2V0Eikuc3VwZXJ0YWcucnVudGltZS52Mi5BdHRlbXB0Rm9yZ2V0UmVxdWVzdBoqLnN1cGVydGFnLnJ1bnRpbWUudjIuQXR0ZW1wdE1lbW9yeVJlc3BvbnNlMtUBCg1IYXJuZXNzTWVtb3J5EmMKCFJlbWVtYmVyEisuc3VwZXJ0YWcucnVudGltZS52Mi5BdHRlbXB0UmVtZW1iZXJSZXF1ZXN0Giouc3VwZXJ0YWcucnVudGltZS52Mi5BdHRlbXB0TWVtb3J5UmVzcG9uc2USXwoGRm9yZ2V0Eikuc3VwZXJ0YWcucnVudGltZS52Mi5BdHRlbXB0Rm9yZ2V0UmVxdWVzdBoqLnN1cGVydGFnLnJ1bnRpbWUudjIuQXR0ZW1wdE1lbW9yeVJlc3BvbnNlYgZwcm90bzM", [file_supertag_runtime_v2_runtime]);
+  fileDesc("CiJzdXBlcnRhZy9ydW50aW1lL3YyL21lbW9yaWVzLnByb3RvEhNzdXBlcnRhZy5ydW50aW1lLnYyIrICCgZNZW1vcnkSEQoJbWVtb3J5X2lkGAEgASgJEg4KBnRhZ19pZBgCIAEoCRIMCgR0ZXh0GAMgASgJEhUKCGF1ZGllbmNlGAQgASgJSACIAQESLwoFc3RhdGUYBSABKA4yIC5zdXBlcnRhZy5ydW50aW1lLnYyLk1lbW9yeVN0YXRlEhIKCmNyZWF0ZWRfYnkYBiABKAkSGwoOc291cmNlX3Rhc2tfaWQYByABKAlIAYgBARIVCg1jcmVhdGVkX2F0X21zGAggASgDEhUKDXVwZGF0ZWRfYXRfbXMYCSABKAMSHAoPbGFzdF9zZWVuX2F0X21zGAogASgDSAKIAQFCCwoJX2F1ZGllbmNlQhEKD19zb3VyY2VfdGFza19pZEISChBfbGFzdF9zZWVuX2F0X21zIjUKE0xpc3RNZW1vcmllc1JlcXVlc3QSEwoGdGFnX2lkGAEgASgJSACIAQFCCQoHX3RhZ19pZCJFChRMaXN0TWVtb3JpZXNSZXNwb25zZRItCghtZW1vcmllcxgBIAMoCzIbLnN1cGVydGFnLnJ1bnRpbWUudjIuTWVtb3J5IiUKEEdldE1lbW9yeVJlcXVlc3QSEQoJbWVtb3J5X2lkGAEgASgJIp0BChZBdHRlbXB0UmVtZW1iZXJSZXF1ZXN0EjsKB2F0dGVtcHQYASABKAsyKi5zdXBlcnRhZy5ydW50aW1lLnYyLkluc3BlY3RBdHRlbXB0UmVxdWVzdBIUCgxvcGVyYXRpb25faWQYAiABKAkSDAoEdGV4dBgDIAEoCRIVCghyZXBsYWNlcxgEIAEoCUgAiAEBQgsKCV9yZXBsYWNlcyJ8ChRBdHRlbXB0Rm9yZ2V0UmVxdWVzdBI7CgdhdHRlbXB0GAEgASgLMiouc3VwZXJ0YWcucnVudGltZS52Mi5JbnNwZWN0QXR0ZW1wdFJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAIgASgJEhEKCW1lbW9yeV9pZBgDIAEoCSJwChVBdHRlbXB0TWVtb3J5UmVzcG9uc2USKwoGbWVtb3J5GAEgASgLMhsuc3VwZXJ0YWcucnVudGltZS52Mi5NZW1vcnkSKgoFbm90ZXMYAiADKAsyGy5zdXBlcnRhZy5ydW50aW1lLnYyLk1lbW9yeSIqChhSZXNldE5hdGl2ZU1lbW9yeVJlcXVlc3QSDgoGdGFnX2lkGAEgASgJIm0KGVJlc2V0TmF0aXZlTWVtb3J5UmVzcG9uc2USNgoGc3RvcmVzGAEgAygLMiYuc3VwZXJ0YWcucnVudGltZS52Mi5OYXRpdmVNZW1vcnlTdG9yZRIYChByZXNldF9nZW5lcmF0aW9uGAIgASgEIrIBChlSZXBvcnROYXRpdmVNZW1vcnlSZXF1ZXN0EjsKB2F0dGVtcHQYASABKAsyKi5zdXBlcnRhZy5ydW50aW1lLnYyLkluc3BlY3RBdHRlbXB0UmVxdWVzdBIQCghyZXZpc2lvbhgCIAEoBBINCgVmaWxlcxgDIAEoDRINCgVieXRlcxgEIAEoBBIOCgZkaWdlc3QYBSABKAkSGAoQcmVzZXRfZ2VuZXJhdGlvbhgGIAEoBCIcChpSZXBvcnROYXRpdmVNZW1vcnlSZXNwb25zZSp6CgtNZW1vcnlTdGF0ZRIcChhNRU1PUllfU1RBVEVfVU5TUEVDSUZJRUQQABIXChNNRU1PUllfU1RBVEVfU1RBR0VEEAESFwoTTUVNT1JZX1NUQVRFX0FDVElWRRACEhsKF01FTU9SWV9TVEFURV9GT1JHRVRUSU5HEAMy7gIKCE1lbW9yaWVzElsKBExpc3QSKC5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RNZW1vcmllc1JlcXVlc3QaKS5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RNZW1vcmllc1Jlc3BvbnNlEkkKA0dldBIlLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0TWVtb3J5UmVxdWVzdBobLnN1cGVydGFnLnJ1bnRpbWUudjIuTWVtb3J5EkwKBkRlbGV0ZRIlLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0TWVtb3J5UmVxdWVzdBobLnN1cGVydGFnLnJ1bnRpbWUudjIuTWVtb3J5EmwKC1Jlc2V0TmF0aXZlEi0uc3VwZXJ0YWcucnVudGltZS52Mi5SZXNldE5hdGl2ZU1lbW9yeVJlcXVlc3QaLi5zdXBlcnRhZy5ydW50aW1lLnYyLlJlc2V0TmF0aXZlTWVtb3J5UmVzcG9uc2UyxgIKDUF0dGVtcHRNZW1vcnkSYwoIUmVtZW1iZXISKy5zdXBlcnRhZy5ydW50aW1lLnYyLkF0dGVtcHRSZW1lbWJlclJlcXVlc3QaKi5zdXBlcnRhZy5ydW50aW1lLnYyLkF0dGVtcHRNZW1vcnlSZXNwb25zZRJfCgZGb3JnZXQSKS5zdXBlcnRhZy5ydW50aW1lLnYyLkF0dGVtcHRGb3JnZXRSZXF1ZXN0Giouc3VwZXJ0YWcucnVudGltZS52Mi5BdHRlbXB0TWVtb3J5UmVzcG9uc2USbwoMUmVwb3J0TmF0aXZlEi4uc3VwZXJ0YWcucnVudGltZS52Mi5SZXBvcnROYXRpdmVNZW1vcnlSZXF1ZXN0Gi8uc3VwZXJ0YWcucnVudGltZS52Mi5SZXBvcnROYXRpdmVNZW1vcnlSZXNwb25zZTLVAQoNSGFybmVzc01lbW9yeRJjCghSZW1lbWJlchIrLnN1cGVydGFnLnJ1bnRpbWUudjIuQXR0ZW1wdFJlbWVtYmVyUmVxdWVzdBoqLnN1cGVydGFnLnJ1bnRpbWUudjIuQXR0ZW1wdE1lbW9yeVJlc3BvbnNlEl8KBkZvcmdldBIpLnN1cGVydGFnLnJ1bnRpbWUudjIuQXR0ZW1wdEZvcmdldFJlcXVlc3QaKi5zdXBlcnRhZy5ydW50aW1lLnYyLkF0dGVtcHRNZW1vcnlSZXNwb25zZWIGcHJvdG8z", [file_supertag_runtime_v2_runtime]);
 
 /**
  * @generated from message supertag.runtime.v2.Memory
@@ -230,6 +230,106 @@ export const AttemptMemoryResponseSchema: GenMessage<AttemptMemoryResponse> = /*
   messageDesc(file_supertag_runtime_v2_memories, 6);
 
 /**
+ * @generated from message supertag.runtime.v2.ResetNativeMemoryRequest
+ */
+export type ResetNativeMemoryRequest = Message<"supertag.runtime.v2.ResetNativeMemoryRequest"> & {
+  /**
+   * @generated from field: string tag_id = 1;
+   */
+  tagId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ResetNativeMemoryRequest.
+ * Use `create(ResetNativeMemoryRequestSchema)` to create a new message.
+ */
+export const ResetNativeMemoryRequestSchema: GenMessage<ResetNativeMemoryRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_memories, 7);
+
+/**
+ * @generated from message supertag.runtime.v2.ResetNativeMemoryResponse
+ */
+export type ResetNativeMemoryResponse = Message<"supertag.runtime.v2.ResetNativeMemoryResponse"> & {
+  /**
+   * The records dropped.
+   *
+   * @generated from field: repeated supertag.runtime.v2.NativeMemoryStore stores = 1;
+   */
+  stores: NativeMemoryStore[];
+
+  /**
+   * @generated from field: uint64 reset_generation = 2;
+   */
+  resetGeneration: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ResetNativeMemoryResponse.
+ * Use `create(ResetNativeMemoryResponseSchema)` to create a new message.
+ */
+export const ResetNativeMemoryResponseSchema: GenMessage<ResetNativeMemoryResponse> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_memories, 8);
+
+/**
+ * @generated from message supertag.runtime.v2.ReportNativeMemoryRequest
+ */
+export type ReportNativeMemoryRequest = Message<"supertag.runtime.v2.ReportNativeMemoryRequest"> & {
+  /**
+   * @generated from field: supertag.runtime.v2.InspectAttemptRequest attempt = 1;
+   */
+  attempt?: InspectAttemptRequest | undefined;
+
+  /**
+   * Of the store as the host holds it after the turn.
+   *
+   * @generated from field: uint64 revision = 2;
+   */
+  revision: bigint;
+
+  /**
+   * @generated from field: uint32 files = 3;
+   */
+  files: number;
+
+  /**
+   * @generated from field: uint64 bytes = 4;
+   */
+  bytes: bigint;
+
+  /**
+   * @generated from field: string digest = 5;
+   */
+  digest: string;
+
+  /**
+   * The reset generation of the grant the copy was made under.
+   *
+   * @generated from field: uint64 reset_generation = 6;
+   */
+  resetGeneration: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ReportNativeMemoryRequest.
+ * Use `create(ReportNativeMemoryRequestSchema)` to create a new message.
+ */
+export const ReportNativeMemoryRequestSchema: GenMessage<ReportNativeMemoryRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_memories, 9);
+
+/**
+ * @generated from message supertag.runtime.v2.ReportNativeMemoryResponse
+ */
+export type ReportNativeMemoryResponse = Message<"supertag.runtime.v2.ReportNativeMemoryResponse"> & {
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ReportNativeMemoryResponse.
+ * Use `create(ReportNativeMemoryResponseSchema)` to create a new message.
+ */
+export const ReportNativeMemoryResponseSchema: GenMessage<ReportNativeMemoryResponse> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_memories, 10);
+
+/**
  * @generated from enum supertag.runtime.v2.MemoryState
  */
 export enum MemoryState {
@@ -302,6 +402,17 @@ export const Memories: GenService<{
     input: typeof GetMemoryRequestSchema;
     output: typeof MemorySchema;
   },
+  /**
+   * Operators only. Drops a Tag's harness-native memory (NativeMemoryStore): every Worker Host
+   * deletes its copies before it next runs one of the Tag's Tasks, and the records go now.
+   *
+   * @generated from rpc supertag.runtime.v2.Memories.ResetNative
+   */
+  resetNative: {
+    methodKind: "unary";
+    input: typeof ResetNativeMemoryRequestSchema;
+    output: typeof ResetNativeMemoryResponseSchema;
+  },
 }> = /*@__PURE__*/
   serviceDesc(file_supertag_runtime_v2_memories, 0);
 
@@ -327,6 +438,17 @@ export const AttemptMemory: GenService<{
     methodKind: "unary";
     input: typeof AttemptForgetRequestSchema;
     output: typeof AttemptMemoryResponseSchema;
+  },
+  /**
+   * After a turn's harness stops, its Worker Host records what it now holds of the store the
+   * turn was granted (Assignment.native_memory). Never file contents.
+   *
+   * @generated from rpc supertag.runtime.v2.AttemptMemory.ReportNative
+   */
+  reportNative: {
+    methodKind: "unary";
+    input: typeof ReportNativeMemoryRequestSchema;
+    output: typeof ReportNativeMemoryResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_supertag_runtime_v2_memories, 1);

@@ -95,8 +95,9 @@ the lead; add it to a set to let another Tag follow up on its own, and leave it 
 
 Every Tag keeps [Memory](../../docs/reference/coordination.md#memory) unless its spec sets
 `memory: false` (or `supertag tag put TAG --memory false`): short notes it writes with `remember`
-and a daily review of its work. Turn it off for a Tag that must not carry anything between
-conversations.
+and a daily review of its work, plus its harness's own memory (Claude Code's auto-memory), which
+Worker Hosts keep per Tag. Turn it off for a Tag that must not carry anything between
+conversations. `supertag delete memory --native TAG` drops the harness memory alone.
 
 Two harness rules decide whether `commands:execute` works:
 

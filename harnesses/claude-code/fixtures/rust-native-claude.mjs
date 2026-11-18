@@ -912,6 +912,29 @@ async function turn(message) {
       reread: prompt.includes("call read_session"),
       autoMemoryEnabled: settings.autoMemoryEnabled,
       autoDreamEnabled: settings.autoDreamEnabled,
+      autoMemoryDirectory: settings.autoMemoryDirectory,
+      memoryOverride: process.env.CLAUDE_COWORK_MEMORY_PATH_OVERRIDE ?? null,
+    });
+  }
+  if (prompt === "recall-native") {
+    // A later Attempt reads what an earlier one kept.
+    const memory = process.env.CLAUDE_COWORK_MEMORY_PATH_OVERRIDE;
+    result = memory
+      ? await readFile(join(memory, "MEMORY.md"), "utf8").catch(() => "no memory")
+      : "no directory";
+  }
+  if (prompt === "remember-native") {
+    // Claude Code keeps auto memory with its own file tools in the override directory.
+    const memory = process.env.CLAUDE_COWORK_MEMORY_PATH_OVERRIDE;
+    if (!memory) throw new Error("no native memory directory");
+    const index = join(memory, "MEMORY.md");
+    const memoryWrite = await hook("Write", { file_path: index, content: "- fixture memory\n" });
+    if (memoryWrite) await writeFile(index, "- fixture memory\n");
+    result = JSON.stringify({
+      memoryWrite,
+      memoryRead: await hook("Read", { file_path: index }),
+      workspaceWrite: await hook("Write", { file_path: join(cwd, "escaped.txt"), content: "x" }),
+      elsewhereRead: await hook("Read", { file_path: "/etc/hosts" }),
     });
   }
   if (message.uuid) result += `; input: ${prompt}`;

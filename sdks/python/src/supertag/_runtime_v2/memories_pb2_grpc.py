@@ -58,6 +58,11 @@ class MemoriesStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.GetMemoryRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.Memory.FromString,
                 _registered_method=True)
+        self.ResetNative = channel.unary_unary(
+                '/supertag.runtime.v2.Memories/ResetNative',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ResetNativeMemoryRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ResetNativeMemoryResponse.FromString,
+                _registered_method=True)
 
 
 class MemoriesServicer:
@@ -90,6 +95,14 @@ class MemoriesServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ResetNative(self, request, context):
+        """Operators only. Drops a Tag's harness-native memory (NativeMemoryStore): every Worker Host
+        deletes its copies before it next runs one of the Tag's Tasks, and the records go now.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_MemoriesServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -107,6 +120,11 @@ def add_MemoriesServicer_to_server(servicer, server):
                     servicer.Delete,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.GetMemoryRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.Memory.SerializeToString,
+            ),
+            'ResetNative': grpc.unary_unary_rpc_method_handler(
+                    servicer.ResetNative,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ResetNativeMemoryRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ResetNativeMemoryResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -209,6 +227,33 @@ class Memories:
             metadata,
             _registered_method=True)
 
+    @staticmethod
+    def ResetNative(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Memories/ResetNative',
+            supertag_dot_runtime_dot_v2_dot_memories__pb2.ResetNativeMemoryRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_memories__pb2.ResetNativeMemoryResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
 
 class AttemptMemoryStub:
     """Called by a Worker Host for the turn it runs. A note written or forgotten during a turn takes
@@ -231,6 +276,11 @@ class AttemptMemoryStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptForgetRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptMemoryResponse.FromString,
                 _registered_method=True)
+        self.ReportNative = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptMemory/ReportNative',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ReportNativeMemoryRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ReportNativeMemoryResponse.FromString,
+                _registered_method=True)
 
 
 class AttemptMemoryServicer:
@@ -250,6 +300,14 @@ class AttemptMemoryServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReportNative(self, request, context):
+        """After a turn's harness stops, its Worker Host records what it now holds of the store the
+        turn was granted (Assignment.native_memory). Never file contents.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AttemptMemoryServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -262,6 +320,11 @@ def add_AttemptMemoryServicer_to_server(servicer, server):
                     servicer.Forget,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptForgetRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptMemoryResponse.SerializeToString,
+            ),
+            'ReportNative': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReportNative,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ReportNativeMemoryRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ReportNativeMemoryResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -320,6 +383,33 @@ class AttemptMemory:
             '/supertag.runtime.v2.AttemptMemory/Forget',
             supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptForgetRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptMemoryResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReportNative(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptMemory/ReportNative',
+            supertag_dot_runtime_dot_v2_dot_memories__pb2.ReportNativeMemoryRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_memories__pb2.ReportNativeMemoryResponse.FromString,
             options,
             channel_credentials,
             insecure,

@@ -625,6 +625,7 @@ mod tests {
         let journal = Journal::open(state.path())?;
         journal.save(&Entry::Terminal {
             attempt: Attempt {
+                native_memory: None,
                 task_id: "task".into(),
                 attempt_id: "attempt".into(),
                 lease_token: "private-lease-token".into(),

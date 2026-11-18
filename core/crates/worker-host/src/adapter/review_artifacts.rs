@@ -139,6 +139,7 @@ mod tests {
             host_token: "host-token".into(),
             harness: supertag_protocol::v2::HarnessKind::Unspecified,
             assignment: Assignment {
+                native_memory: None,
                 task: Some(Task {
                     task_id: "review-task".into(),
                     ..Default::default()
