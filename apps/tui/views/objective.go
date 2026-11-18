@@ -670,6 +670,15 @@ type ObjectiveOverview struct {
 
 	// The 50 newest commit review requests and their recorded verdicts, newest first.
 	CommitReviews []*ObjectiveCommitReview
+	// The result of the owner's latest finished turn in its own conversation. Empty before one.
+	LatestResult string
+}
+
+func (x *ObjectiveOverview) GetLatestResult() string {
+	if x != nil {
+		return x.LatestResult
+	}
+	return ""
 }
 
 func (x *ObjectiveOverview) GetObjective() *Objective {
@@ -1096,6 +1105,26 @@ type ObjectiveSession struct {
 	CreatedAt *timestamppb.Timestamp
 	// Its latest Task. Unset while it has none.
 	LatestTask *ObjectiveSessionTask
+	// Its latest Workspace delivery, from the Gateway's Objective overview. Unset when none
+	// was recorded.
+	Delivery *ObjectiveSessionDelivery
+}
+
+// A Session's latest Workspace delivery, as `supertag describe objective` lists it.
+type ObjectiveSessionDelivery struct {
+	TaskId       string
+	WorkspaceId  string
+	BaseCommit   string
+	HeadCommit   string
+	Committed    bool
+	ChangedFiles uint64
+}
+
+func (x *ObjectiveSession) GetDelivery() *ObjectiveSessionDelivery {
+	if x != nil {
+		return x.Delivery
+	}
+	return nil
 }
 
 func (x *ObjectiveSession) GetId() string {

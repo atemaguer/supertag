@@ -362,6 +362,9 @@ func TestRuntimeV2ObjectiveOverTLS(t *testing.T) {
 		}
 		return objective, nil
 	})
+	testRPC(mux, rpc.ObjectiveOverviewsGetObjectiveOverviewProcedure, func(_ context.Context, req *v2.GetObjectiveOverviewRequest) (*v2.ObjectiveOverview, error) {
+		return &v2.ObjectiveOverview{Objective: objective}, nil
+	})
 	testRPC(mux, rpc.ObjectivesListCommitReviewsProcedure, func(_ context.Context, req *v2.ListObjectiveCommitReviewsRequest) (*v2.ListObjectiveCommitReviewsResponse, error) {
 		if req.GetObjectiveId() != "sso" {
 			t.Errorf("ListCommitReviews request = %v", req)

@@ -90,6 +90,17 @@ func describeRuntimeObjective(view *views.ObjectiveOverview, teamName string) st
 	if idle := objective.GetIdleSince(); idle != nil {
 		lines = append(lines, "Idle since "+timeLabel(idle.AsTime(), time.Now())+": its owner's last turn left nothing running and asked nothing")
 	}
+	review := objective.GetStatus() == views.ObjectiveStatus_OBJECTIVE_STATUS_READY_FOR_REVIEW
+	if summary := strings.TrimSpace(objective.GetCompletionSummary()); summary != "" {
+		label := "Result"
+		if review {
+			label = "Owner's assessment"
+		}
+		lines = append(lines, label+": "+summary)
+	}
+	if result := strings.TrimSpace(view.GetLatestResult()); review && result != "" {
+		lines = append(lines, "Owner's last reply: "+result)
+	}
 	lines = append(lines, "Owner: "+objective.GetOwnerTag())
 	actions := strings.Join(objective.GetRuntimeActions(), ", ")
 	if actions == "" {
@@ -120,13 +131,50 @@ func describeRuntimeObjective(view *views.ObjectiveOverview, teamName string) st
 	}
 	lines = append(lines, commitReviewLines(view.GetCommitReviews(), func(id string) string { return id })...)
 	if objective.GetStatus() == views.ObjectiveStatus_OBJECTIVE_STATUS_READY_FOR_REVIEW {
-		lines = append(lines, "Review with supertag objective review "+shellWord(objective.GetId())+" approve")
+		lines = append(lines, "Ready for your review: press a to approve it, or c to request changes.")
 	}
-	lines = append(lines, "", fmt.Sprintf("Revision: %d", objective.GetRevision()), "Session history and delivery details are unavailable.")
+	lines = append(lines, sessionDeliveryLines(view.GetSessions())...)
+	lines = append(lines, "", fmt.Sprintf("Revision: %d", objective.GetRevision()))
 	for i, line := range lines {
 		lines[i] = terminalLines(line)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// sessionDeliveryLines lists each Session's latest Workspace delivery and the branch it updates,
+// as `supertag describe objective` does.
+func sessionDeliveryLines(sessions []*views.ObjectiveSession) []string {
+	lines := []string{"", "Delivered:"}
+	for _, session := range sessions {
+		delivery := session.GetDelivery()
+		if delivery == nil {
+			continue
+		}
+		label := "Owner's conversation"
+		if !session.GetOwner() {
+			label = "Work Session"
+			if title := strings.TrimSpace(session.GetTitle()); title != "" {
+				label += " " + firstLine(title)
+			}
+		}
+		files := fmt.Sprintf("%d changed files", delivery.ChangedFiles)
+		if delivery.ChangedFiles == 1 {
+			files = "1 changed file"
+		}
+		lines = append(lines, fmt.Sprintf("  %s (%s, Task %s)", label, session.GetTagId(), delivery.TaskId))
+		if delivery.Committed {
+			branch := client.SessionBranch(session.GetTagId(), session.GetId())
+			lines = append(lines,
+				fmt.Sprintf("    Commit %s in Workspace %s, %s since %s", shortCommit(delivery.HeadCommit), delivery.WorkspaceId, files, shortCommit(delivery.BaseCommit)),
+				"    Branch: "+branch, "      Merge it with: git merge "+branch)
+		} else {
+			lines = append(lines, fmt.Sprintf("    Uncommitted changes in Workspace %s, %s", delivery.WorkspaceId, files))
+		}
+	}
+	if len(lines) == 2 {
+		lines = append(lines, "  Nothing yet.")
+	}
+	return lines
 }
 
 func commitReviewLines(reviews []*views.ObjectiveCommitReview, tag func(string) string) []string {

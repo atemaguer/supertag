@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"math"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -113,6 +114,26 @@ func (c *runtimeClient) describeObjective(ctx context.Context, id string) (*view
 	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
+	// The Sessions' deliveries and the owner's latest result, as `supertag describe objective`
+	// reads them.
+	overview, err := c.overviews.GetObjectiveOverview(ctx, connect.NewRequest(&v2.GetObjectiveOverviewRequest{ObjectiveId: id}))
+	if err != nil {
+		return nil, apiError(err)
+	}
+	if overview.Msg.GetObjective().GetObjectiveId() != id {
+		return nil, &APIError{Code: connect.CodeDataLoss, Message: "Gateway returned a different Objective."}
+	}
+	if sessions := overview.Msg.GetSessions(); len(sessions) > 0 {
+		view.Sessions = nil
+		for _, session := range sessions {
+			view.Sessions = append(view.Sessions, runtimeObjectiveSession(session))
+		}
+	}
+	for _, turn := range overview.Msg.GetConversation() {
+		if result := strings.TrimSpace(turn.GetResult()); result != "" && turn.GetTagId() == owner {
+			view.LatestResult = result
+		}
+	}
 	const reviewLimit = 50
 	var before uint64
 	for len(view.CommitReviews) < reviewLimit {
@@ -140,6 +161,22 @@ func (c *runtimeClient) describeObjective(ctx context.Context, id string) (*view
 		before = next
 	}
 	return view, nil
+}
+
+func runtimeObjectiveSession(session *v2.ObjectiveSessionView) *views.ObjectiveSession {
+	out := &views.ObjectiveSession{
+		Id: session.GetSessionId(), TagId: session.GetTagId(), Tag: session.GetTagId(),
+		Owner: session.GetOwner(), Title: session.GetTitle(), ParentSessionId: session.GetParentSessionId(),
+		Question: session.GetQuestion(),
+	}
+	if delivery := session.GetDelivery(); delivery != nil {
+		out.Delivery = &views.ObjectiveSessionDelivery{
+			TaskId: delivery.GetTaskId(), WorkspaceId: delivery.GetWorkspaceId(),
+			BaseCommit: delivery.GetBaseCommit(), HeadCommit: delivery.GetHeadCommit(),
+			Committed: delivery.GetCommitted(), ChangedFiles: delivery.GetChangedFiles(),
+		}
+	}
+	return out
 }
 
 func runtimeCommitReview(review *v2.CommitReview) *views.ObjectiveCommitReview {
@@ -186,8 +223,9 @@ func runtimeObjective(objective *v2.Objective) *views.Objective {
 		OwnerTagId: objective.GetOwnerTagId(), OwnerTag: objective.GetOwnerTagId(),
 		TeamId: objective.GetTeamId(),
 		Status: objectiveStatus(objective.GetStatus()), Revision: int64(objective.GetRevision()),
-		Ongoing:        objective.GetOngoing(),
-		RuntimeActions: append([]string(nil), objective.GetRuntimeActions().GetActions()...),
+		Ongoing:           objective.GetOngoing(),
+		RuntimeActions:    append([]string(nil), objective.GetRuntimeActions().GetActions()...),
+		CompletionSummary: objective.GetCompletionSummary(),
 	}
 	if objective.DeadlineMs != nil {
 		out.Deadline = timestamppb.New(time.UnixMilli(*objective.DeadlineMs))

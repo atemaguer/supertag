@@ -20,6 +20,23 @@ func TestRuntimeObjectiveActionCeilingAppearsInOperatorProjection(t *testing.T) 
 		}
 		return objective, nil
 	})
+	// The overview carries each Session's delivery and the owner's latest result.
+	testRPC(mux, rpc.ObjectiveOverviewsGetObjectiveOverviewProcedure, func(_ context.Context, request *v2.GetObjectiveOverviewRequest) (*v2.ObjectiveOverview, error) {
+		if request.GetObjectiveId() != "release" {
+			t.Errorf("Overview scope: %v", request)
+		}
+		return &v2.ObjectiveOverview{
+			Objective: objective,
+			Sessions: []*v2.ObjectiveSessionView{{
+				SessionId: "objective/release", TagId: "owner", Owner: true,
+				Delivery: &v2.ObjectiveSessionDelivery{TaskId: "t2", WorkspaceId: "app", BaseCommit: "base", HeadCommit: "head", Committed: true, ChangedFiles: 2},
+			}},
+			Conversation: []*v2.ObjectiveTurn{
+				{TaskId: "t1", TagId: "owner", Result: "First pass"},
+				{TaskId: "t2", TagId: "owner", Result: "Shipped behind a flag"},
+			},
+		}, nil
+	})
 	testRPC(mux, rpc.ObjectivesListCommitReviewsProcedure, func(_ context.Context, request *v2.ListObjectiveCommitReviewsRequest) (*v2.ListObjectiveCommitReviewsResponse, error) {
 		if request.GetObjectiveId() != "release" || request.GetLimit() == 0 {
 			t.Errorf("Commit review scope: %v", request)
@@ -42,6 +59,13 @@ func TestRuntimeObjectiveActionCeilingAppearsInOperatorProjection(t *testing.T) 
 	view, err := c.DescribeObjective(t.Context(), "release")
 	if err != nil || !slices.Equal(view.GetObjective().GetRuntimeActions(), []string{"files:read", "commands:execute"}) {
 		t.Fatalf("Objective actions: %v, %v", view, err)
+	}
+	if view.GetLatestResult() != "Shipped behind a flag" || len(view.GetSessions()) != 1 {
+		t.Fatalf("Overview projection: %v", view)
+	}
+	if delivery := view.GetSessions()[0].GetDelivery(); delivery == nil || !delivery.Committed ||
+		delivery.HeadCommit != "head" || delivery.ChangedFiles != 2 {
+		t.Fatalf("Delivery projection: %v", delivery)
 	}
 	reviews := view.GetCommitReviews()
 	if len(reviews) != 2 || reviews[0].GetRequestId() != "pending" || reviews[0].GetVerdict() != "" ||

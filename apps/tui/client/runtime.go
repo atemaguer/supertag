@@ -34,6 +34,7 @@ type runtimeClient struct {
 	operator      runtimev2connect.OperatorClient
 	conversations runtimev2connect.ConversationsClient
 	objectives    runtimev2connect.ObjectivesClient
+	overviews     runtimev2connect.ObjectiveOverviewsClient
 	teams         runtimev2connect.TeamsClient
 	events        runtimev2connect.OperatorEventsClient
 	inbox         runtimev2connect.InboxClient
@@ -132,6 +133,7 @@ func New(target Target, version string) (*Client, error) {
 		operator:      runtimev2connect.NewOperatorClient(httpClient, origin, options...),
 		conversations: runtimev2connect.NewConversationsClient(httpClient, origin, options...),
 		objectives:    runtimev2connect.NewObjectivesClient(httpClient, origin, options...),
+		overviews:     runtimev2connect.NewObjectiveOverviewsClient(httpClient, origin, options...),
 		teams:         runtimev2connect.NewTeamsClient(httpClient, origin, options...),
 		events:        runtimev2connect.NewOperatorEventsClient(httpClient, origin, options...),
 		inbox:         runtimev2connect.NewInboxClient(httpClient, origin, options...),
