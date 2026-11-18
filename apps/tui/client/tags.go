@@ -17,6 +17,11 @@ import (
 // here gets the same.
 var newTagActions = []string{"commands:execute", "files:write", "schedule:create"}
 
+// codexActions are what a Codex Tag gets beyond newTagActions, as `supertag init` gives a Codex
+// lead: current Codex models run commands only in Codex code mode, which SuperTag starts only for
+// a Task that may also fetch from the web.
+var codexActions = []string{"web:fetch"}
+
 // Harnesses are the harnesses a Tag can name, in the order they are offered, with their names.
 var Harnesses = []struct{ Kind, Label string }{
 	{"claude_code", "Claude Code"},
@@ -127,8 +132,12 @@ func putTagRequest(tag NewTag) (*v2.PutTagRequest, error) {
 		return nil, &APIError{Code: connect.CodeInvalidArgument, Message: "Name the Tag with letters or digits."}
 	}
 	zero := uint64(0)
+	actions := slices.Clone(newTagActions)
+	if v2.HarnessKind(kind) == v2.HarnessKind_HARNESS_KIND_CODEX {
+		actions = append(actions, codexActions...)
+	}
 	request := &v2.PutTagRequest{TagId: tag.ID, HarnessKind: v2.HarnessKind(kind),
-		AllowedActions: slices.Clone(newTagActions), ExpectedRevision: &zero}
+		AllowedActions: actions, ExpectedRevision: &zero}
 	if name := strings.TrimSpace(tag.Name); name != "" && name != tag.ID {
 		request.Name = &name
 	}
