@@ -298,11 +298,13 @@ impl GatewayState {
         token: &str,
     ) -> Result<GatewayActivation> {
         let generation = self.0.read().await.generation;
-        // Cached conversations belong to this Gateway and principal. The local Control
-        // Plane is told apart by where it runs.
-        let gateway = origin
-            .clone()
-            .unwrap_or_else(|| format!("{LOCAL} {}", endpoint.url()));
+        // Cached conversations, and messages not yet sent, belong to this Gateway and principal.
+        // The local Control Plane is told apart by its state directory, not its address: each
+        // `supertag up` starts its Gateway on a new port, which would drop them all.
+        let gateway = origin.clone().unwrap_or_else(|| match self.2.as_deref() {
+            Some(state) => format!("{LOCAL} {}", state.display()),
+            None => format!("{LOCAL} {}", endpoint.url()),
+        });
         let session = Arc::new(Session::connect(endpoint, token).await?);
         let principal = session.principal().await?;
         let tags = session.tags().await?;

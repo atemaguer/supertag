@@ -898,6 +898,13 @@ async fn the_local_gateway_connects_with_its_current_token_and_is_never_saved() 
     assert_eq!(activation["gateways"]["local"]["origin"], address);
     let saved = std::fs::read_to_string(&store).unwrap();
     assert!(!saved.contains(&operator), "the local token was saved");
+    // What the app keeps for it, such as unsent messages, outlives the port `supertag up`
+    // gave the Gateway this time.
+    let scope = state.0.read().await.cache_scope.clone().unwrap();
+    assert_eq!(
+        scope.gateway,
+        format!("local {}", state_directory.display())
+    );
 
     // A replaced token is read at the next connect.
     private("credentials.json", credentials(&"f".repeat(64)));
