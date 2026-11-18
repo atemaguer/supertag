@@ -216,7 +216,8 @@ within the pre-1.0 compatibility policy described in
   commit stays durable). Commits sync once instead of rewriting a rollback journal, so Worker
   Hosts' writes keep up on a busy disk and operator reads no longer wait seconds behind them.
   The database gains `-wal` and `-shm` files beside it, owner-only like the database; back up the
-  whole state directory after `supertag down`, as before.
+  whole state directory after `supertag down`, as before. An existing database switches the first
+  time the Control Plane opens it.
 - Worker Hosts deliver Workspace changes themselves. Every delivered Task's Session branch
   `supertag/session/...` is pushed to a remote Workspace's server by the host that ran it, with a
   short-lived credential the Control Plane mints for that one push; `land` adds only a merge or a

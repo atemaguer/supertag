@@ -2768,6 +2768,47 @@ mod durability_tests {
             "the store commits through a write-ahead log"
         );
     }
+
+    /// A database an earlier release left in rollback-journal mode switches to the write-ahead
+    /// log when the store opens it, keeping its rows; its log is owner-only like the database.
+    #[tokio::test]
+    async fn sqlite_store_switches_an_existing_rollback_journal_database_to_wal() {
+        use sqlx::Connection;
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("state.db");
+        let url = format!("sqlite://{}?mode=rwc", path.display());
+        Store::open(&url).await.unwrap().close().await;
+        {
+            let mut connection = sqlx::SqliteConnection::connect(&url).await.unwrap();
+            let mode: String = sqlx::query_scalar("PRAGMA journal_mode=DELETE")
+                .fetch_one(&mut connection)
+                .await
+                .unwrap();
+            assert_eq!(mode, "delete");
+            connection.close().await.unwrap();
+        }
+        assert!(!directory.path().join("state.db-wal").exists());
+        let store = Store::open(&url).await.unwrap();
+        let journal: String = sqlx::query_scalar("PRAGMA journal_mode")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(journal, "wal");
+        let versions: Vec<i64> = sqlx::query_scalar("SELECT version FROM supertag_v2_schema")
+            .fetch_all(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(versions.len(), 1, "the migrated schema survives the switch");
+        for file in ["state.db", "state.db-wal", "state.db-shm"] {
+            let mode = std::fs::metadata(directory.path().join(file))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o077, 0, "{file} is owner-only");
+        }
+        store.close().await;
+    }
 }
 
 #[cfg(test)]

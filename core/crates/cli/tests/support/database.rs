@@ -113,8 +113,18 @@ fn migrations_digest() -> Result<String> {
 /// store, so the Control Plane starts without replaying every migration. Returns its URL.
 pub async fn migrated_sqlite(directory: &std::path::Path, file: &str) -> Result<String> {
     let database = directory.join(file);
-    std::fs::copy(sqlite_template().await?, &database)?;
+    let template = sqlite_template().await?;
+    std::fs::copy(template, &database)?;
     std::fs::set_permissions(&database, std::fs::Permissions::from_mode(0o600))?;
+    // The template is checkpointed when made, so it has no write-ahead log; copy one anyway if
+    // it does, as the database's committed rows would otherwise be missing from the copy.
+    let mut log = template.as_os_str().to_owned();
+    log.push("-wal");
+    if std::path::Path::new(&log).exists() {
+        let copy = directory.join(format!("{file}-wal"));
+        std::fs::copy(&log, &copy)?;
+        std::fs::set_permissions(&copy, std::fs::Permissions::from_mode(0o600))?;
+    }
     Ok(format!("sqlite://{}?mode=rwc", database.display()))
 }
 
@@ -145,6 +155,13 @@ async fn sqlite_template() -> Result<&'static std::path::Path> {
             );
             let store = supertag_control_plane::Store::open(&url).await?;
             store.close().await;
+            // The store writes through a write-ahead log: fold it into the file so a copy of
+            // the file alone holds every migrated row.
+            let mut connection = sqlx::SqliteConnection::connect(&url).await?;
+            sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+                .execute(&mut connection)
+                .await?;
+            connection.close().await?;
             anyhow::Ok(directory)
         })
         .await?;

@@ -186,9 +186,11 @@ vault credential, so give the replicas one credential vault. A SQLite database s
 
 - **PostgreSQL**: back it up with your provider's backups or `pg_dump`. Back up each Worker Host's
   artifact storage too: it holds the host's artifacts, deliveries, and Session checkpoints.
-- **Local SQLite**: stop the services with `supertag down`, then copy `~/.supertag`. Copying a
-  running database can capture a torn write. The database commits through a write-ahead log, so
-  copy its `-wal` file with it: copying the whole directory does.
+- **Local SQLite**: stop the Control Plane first, with `supertag down`, then copy `~/.supertag`.
+  Copying a running database can capture a torn write. The database commits through a
+  write-ahead log: a clean stop folds it into the database file, and any `-wal` file left beside
+  it belongs in the copy, which copying the whole directory does. A database from an earlier
+  release switches to the write-ahead log the first time the Control Plane opens it.
 - **Gateway**: back up its volume, which holds the file credential vault and connector state, or
   use HashiCorp Vault.
 
