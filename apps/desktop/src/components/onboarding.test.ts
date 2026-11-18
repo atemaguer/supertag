@@ -135,3 +135,31 @@ it("says how to install the CLI when there is none", async () => {
   await act(async () => button("Check again")?.click());
   expect(api.check).toHaveBeenCalledWith(undefined, undefined);
 });
+
+it("never checks on its own, however often it renders, and runs one check at a time", async () => {
+  let finish: (() => void) | undefined;
+  const api: SetupApi = {
+    check: vi.fn(
+      () =>
+        new Promise<SetupCheck>((resolve) => {
+          finish = () => resolve(project);
+        }),
+    ),
+    chooseFolder: vi.fn(async () => "/Users/me/code/app"),
+    setUp: vi.fn(),
+  };
+  // A parent re-renders with fresh props, as App does on every state change.
+  for (let render = 0; render < 5; render++)
+    await act(async () => {
+      root.render(createElement(Onboarding, { api, initial: { ...project }, onReady: () => {} }));
+    });
+  expect(api.check).not.toHaveBeenCalled();
+  // Check again, pressed twice while the first check is still running, checks once.
+  await act(async () => {
+    button("Check again")?.click();
+    button("Check again")?.click();
+  });
+  expect(api.check).toHaveBeenCalledTimes(1);
+  await act(async () => finish?.());
+  expect(api.check).toHaveBeenCalledTimes(1);
+});

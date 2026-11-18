@@ -415,6 +415,9 @@ export const nativeGateway = {
   localStartNeeded: () => invoke<boolean>("local_start_needed"),
   /** Starts the stopped local services with `supertag up`; false when nothing needed starting. */
   startLocal: () => invoke<boolean>("start_local_services"),
+  /** Why the app can't run the `supertag` CLI (missing, or another version), with the command
+   * that installs the right one; null when it can. */
+  localCliProblem: () => invoke<string | null>("local_cli_problem"),
   clear: (forget?: string) => invoke<GatewayList>("clear_gateway", { forget }),
   async watch(connectionId: string, watchEpoch: number, receive: (update: WatchUpdate) => void) {
     const onUpdate = new Channel<WatchUpdate>(receive);

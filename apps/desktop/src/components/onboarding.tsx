@@ -66,7 +66,13 @@ export function Onboarding({
   const [error, setError] = useState("");
   const setUpButton = useRef<HTMLButtonElement>(null);
 
+  // One check at a time: a check runs sign-in probes and can take seconds, and a second one
+  // started meanwhile would only race it.
+  const inFlight = useRef(false);
+
   async function recheck(next = directory, only?: string) {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setChecking(only ?? "all");
     setError("");
     try {
@@ -93,6 +99,7 @@ export function Onboarding({
     } catch (error) {
       setError(describe(error));
     } finally {
+      inFlight.current = false;
       setChecking(undefined);
     }
   }

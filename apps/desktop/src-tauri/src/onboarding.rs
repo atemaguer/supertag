@@ -106,6 +106,16 @@ pub async fn check(directory: Option<String>, harness: Option<String>) -> Result
     let Some(cli) = cli else {
         return Ok(serde_json::json!({ "cli": null, "install": INSTALL_COMMAND }));
     };
+    check_with(&cli, path.as_deref(), directory, harness).await
+}
+
+/// `check` with the CLI and PATH already found.
+async fn check_with(
+    cli: &Path,
+    path: Option<&str>,
+    directory: Option<String>,
+    harness: Option<String>,
+) -> Result<Value, String> {
     let mut args = vec!["init", "--check", "--json"];
     if let Some(directory) = directory.as_deref() {
         args.extend(["--directory", directory]);
@@ -113,7 +123,7 @@ pub async fn check(directory: Option<String>, harness: Option<String>) -> Result
     if let Some(harness) = harness.as_deref() {
         args.extend(["--harness", harness]);
     }
-    let ran = run(&cli, path.as_deref(), &args, None, CHECK_TIMEOUT).await?;
+    let ran = run(cli, path, &args, None, CHECK_TIMEOUT).await?;
     // A CLI older than the app has no check: say to update it, as for one that is missing.
     if !ran.success && ran.stderr.contains("unexpected argument") {
         return Ok(serde_json::json!({
@@ -185,6 +195,41 @@ mod tests {
         );
         assert_eq!(json_of("{\n  \"ready\": true\n}").unwrap()["ready"], true);
         assert!(json_of("no json here").is_none());
+    }
+
+    /// One check runs the CLI exactly once, with the check's arguments, and nothing more: the
+    /// stand-in CLI records every run, and the test waits after the answer so a late extra run
+    /// would still show in the record.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_check_runs_the_cli_once() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let directory = tempfile::tempdir().unwrap();
+        let runs = directory.path().join("runs");
+        let cli = directory.path().join("supertag");
+        std::fs::write(
+            &cli,
+            format!(
+                "#!/bin/sh\necho \"$*\" >> '{}'\necho '{{\"version\":1,\"ready\":false}}'\n",
+                runs.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let value = check_with(
+            &cli,
+            None,
+            Some("/tmp/My Project".into()),
+            Some("codex".into()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(value["ready"], false);
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(
+            std::fs::read_to_string(&runs).unwrap(),
+            "init --check --json --directory /tmp/My Project --harness codex\n"
+        );
     }
 
     #[test]

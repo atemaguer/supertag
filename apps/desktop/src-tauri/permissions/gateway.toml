@@ -1,12 +1,13 @@
 [[permission]]
 identifier = "gateway-client"
-description = "Connect to a saved or the local Gateway, set SuperTag up on this machine with the supertag CLI and start the local services when they are set up but stopped, create Tags, read, follow or send personal conversation messages and why a sent one waits, list and delete a Tag's notes, read a Tag's activity and network log, read a running Task's files on this machine, read, pause, resume and delete a Tag's Schedules, cache what it shows on launch, and save Task result files."
+description = "Connect to a saved or the local Gateway, set SuperTag up on this machine with the supertag CLI, start the local services when they are set up but stopped and check that the supertag CLI matches the app, create Tags, read, follow or send personal conversation messages and why a sent one waits, list and delete a Tag's notes, read a Tag's activity and network log, read a running Task's files on this machine, read, pause, resume and delete a Tag's Schedules, cache what it shows on launch, and save Task result files."
 commands.allow = [
   "list_gateways",
   "save_gateway",
   "connect_local_gateway",
   "local_start_needed",
   "start_local_services",
+  "local_cli_problem",
   "select_gateway",
   "clear_gateway",
   "start_gateway_watch",

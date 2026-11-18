@@ -69,6 +69,13 @@ async fn start_local_services() -> Result<bool, String> {
     Ok(true)
 }
 
+/// What stops the app from running the `supertag` CLI: none installed, or another version than
+/// the app's, with the command that installs the right one. `None` when it can run it.
+#[tauri::command]
+async fn local_cli_problem() -> Option<String> {
+    local_start::usable_cli().await.err()
+}
+
 /// Whether SuperTag can be set up for a project folder, from `supertag init --check --json`.
 #[tauri::command]
 async fn check_setup(
@@ -445,6 +452,7 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             connect_local_gateway,
             local_start_needed,
             start_local_services,
+            local_cli_problem,
             select_gateway,
             clear_gateway,
             start_gateway_watch,

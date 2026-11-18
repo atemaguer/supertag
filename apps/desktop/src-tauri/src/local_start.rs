@@ -11,6 +11,51 @@ use std::{
 /// How long `supertag up` may take to report its services ready.
 const UP_LIMIT: Duration = Duration::from_secs(180);
 
+/// The command that installs or updates the `supertag` CLI.
+pub const INSTALL_COMMAND: &str =
+    "curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh";
+
+/// The version of SuperTag this app belongs to; the CLI it runs must match it.
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The version `cli --version` reports (`supertag X`), or `None` when it says nothing usable in
+/// a few seconds.
+pub async fn cli_version(cli: &Path) -> Option<String> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::process::Command::new(cli)
+            .arg("--version")
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_version(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_version(printed: &str) -> Option<String> {
+    let version = printed.trim().strip_prefix("supertag ")?.trim();
+    (!version.is_empty() && !version.contains(char::is_whitespace)).then(|| version.to_owned())
+}
+
+/// What to tell the person when the CLI is another version than the app's, else `None`. A CLI
+/// whose version can't be read counts as another version.
+pub fn version_mismatch(cli_version: Option<&str>, app_version: &str) -> Option<String> {
+    if cli_version == Some(app_version) {
+        return None;
+    }
+    let cli_version = cli_version.unwrap_or("an unknown version");
+    Some(format!(
+        "This SuperTag CLI is {cli_version}, the app expects {app_version}. Update with: {INSTALL_COMMAND}"
+    ))
+}
+
 /// The `supertag` the app runs: the copy bundled beside the app's executable, else the first on
 /// `path`, else where the installer links it (`installed`). An app opened from Finder gets only
 /// the system PATH, which never holds the installer's `~/.local/bin`. Only an executable regular
@@ -95,17 +140,28 @@ fn is_this_app(_: &Path) -> bool {
 /// Starts the local services from `state` with `supertag up`. On failure, says what `up` printed
 /// and where the logs are.
 pub async fn start(state: &Path) -> Result<(), String> {
-    // The services find the coding agents (claude, codex, node) on the PATH they start with, so
-    // they need the user's shell PATH, not the bare one an app opened from Finder gets.
-    let (cli, path) = environment().await;
-    let cli = cli.ok_or(
-        "Could not find the supertag command. Install it with the install script, then reopen the app.",
-    )?;
+    let (cli, path) = usable_cli().await?;
     up(&cli, state, path.as_deref()).await
 }
 
+/// The `supertag` the app would run and the PATH it runs with, or what is wrong with it: none is
+/// installed, or it is another version than the app's. Onboarding asks this before it sets
+/// SuperTag up, and `start` before `up`.
+pub async fn usable_cli() -> Result<(PathBuf, Option<String>), String> {
+    let (cli, path) = environment().await;
+    let cli = cli.ok_or(format!(
+        "Could not find the supertag command. Install it with: {INSTALL_COMMAND}"
+    ))?;
+    // A CLI of another version may not read this state, or may migrate it under the app.
+    if let Some(mismatch) = version_mismatch(cli_version(&cli).await.as_deref(), APP_VERSION) {
+        return Err(format!("{mismatch}\n(It is {}.)", cli.display()));
+    }
+    Ok((cli, path))
+}
+
 /// The `supertag` the app runs, if any, and the PATH to run it and anything it starts with: the
-/// user's login shell's, else the app's own. First-launch setup runs the CLI the same way.
+/// user's login shell's, else the app's own. The services find the coding agents (claude, codex,
+/// node) on that PATH, which an app opened from Finder lacks.
 pub async fn environment() -> (Option<PathBuf>, Option<String>) {
     let path = login_path()
         .await
@@ -245,6 +301,40 @@ mod tests {
             cli(None, Some(&path), std::slice::from_ref(&installed)),
             Some(second.join("supertag"))
         );
+    }
+
+    #[test]
+    fn another_cli_version_is_named_with_the_update_command() {
+        assert_eq!(parse_version("supertag 0.3.0\n").as_deref(), Some("0.3.0"));
+        assert_eq!(parse_version("something else"), None);
+        assert_eq!(version_mismatch(Some("0.3.0"), "0.3.0"), None);
+        let older = version_mismatch(Some("0.2.0"), "0.3.0").unwrap();
+        assert_eq!(
+            older,
+            format!(
+                "This SuperTag CLI is 0.2.0, the app expects 0.3.0. Update with: {INSTALL_COMMAND}"
+            )
+        );
+        assert!(
+            version_mismatch(None, "0.3.0")
+                .unwrap()
+                .contains("an unknown version")
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reads_the_version_the_cli_reports() {
+        let root = tempfile::tempdir().unwrap();
+        let cli = tool(root.path(), "supertag", 0o755);
+        std::fs::write(
+            &cli,
+            "#!/bin/sh\ntest \"$1\" = --version && echo 'supertag 0.2.9'\n",
+        )
+        .unwrap();
+        assert_eq!(cli_version(&cli).await.as_deref(), Some("0.2.9"));
+        std::fs::write(&cli, "#!/bin/sh\nexit 1\n").unwrap();
+        assert_eq!(cli_version(&cli).await, None);
     }
 
     #[test]
