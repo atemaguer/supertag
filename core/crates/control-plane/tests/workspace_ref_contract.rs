@@ -118,6 +118,19 @@ async fn exercise(url: &str) {
         Some(following("main"))
     );
 
+    // A second Tag that names only the Workspace, as the terminal UI's New Tag form does, follows
+    // the branch the Workspace's other Tag follows.
+    let helper = store
+        .put_tag_spec(PutTagRequest {
+            tag_id: "helper".into(),
+            instructions: "Help".into(),
+            workspace: Some(following("")),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(helper.workspace, Some(following("main")));
+
     // Admission records the branch and leaves the commit for the Session's first Attempt.
     let first = submit(&store, "alpha").await.unwrap();
     let queued = submit(&store, "alpha").await.unwrap();

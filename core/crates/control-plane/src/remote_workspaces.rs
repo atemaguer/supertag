@@ -172,6 +172,38 @@ async fn require_credentials_in(tx: &mut Transaction<'_, Any>, value: &Workspace
     Ok(())
 }
 
+/// A Tag on a local Workspace that names neither a commit nor a branch follows the branch another
+/// Tag on that Workspace follows, such as the lead `supertag init` created, so a client that only
+/// picks the Workspace, like the terminal UI's New Tag form, gets the branch the repository's
+/// other Tags work from. With no such Tag, or two that follow different branches, it stays unset
+/// and is refused as before.
+pub(crate) async fn follow_shared_branch_in(
+    tx: &mut Transaction<'_, Any>,
+    tag_id: &str,
+    workspace: &mut Option<WorkspaceSpec>,
+) -> Result<()> {
+    let Some(spec) = workspace.as_mut() else {
+        return Ok(());
+    };
+    if !spec.base_ref.is_empty()
+        || !spec.base_commit.is_empty()
+        || catalog_in(tx, &spec.workspace_id).await?.is_some()
+    {
+        return Ok(());
+    }
+    let followed: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT workspace_base_ref FROM supertag_v2_tags WHERE workspace_id=$1 AND tag_id<>$2 AND workspace_base_ref IS NOT NULL AND workspace_base_ref<>''",
+    )
+    .bind(&spec.workspace_id)
+    .bind(tag_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    if let [branch] = followed.as_slice() {
+        spec.base_ref = branch.clone();
+    }
+    Ok(())
+}
+
 pub(crate) async fn validate_tag_in(
     tx: &mut Transaction<'_, Any>,
     workspace: Option<&WorkspaceSpec>,
