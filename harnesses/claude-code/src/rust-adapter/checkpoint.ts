@@ -19,6 +19,9 @@ interface Archive {
   nativeSessionId: string;
   transcripts: ClaudeTranscript[];
   totalCostUsd?: number;
+  /** The built-in tools the native Session was offered, sorted. Claude Code keeps a resumed
+   * Session's original tools, so a turn offered other tools starts fresh from the recap. */
+  tools?: string[];
 }
 
 function digest(payload: Uint8Array): string {
@@ -34,7 +37,11 @@ function archive(value: unknown, binding: Binding): Archive {
     item.sessionId !== binding.sessionId ||
     typeof item.nativeSessionId !== "string" ||
     !/^[a-zA-Z0-9-]{1,100}$/.test(item.nativeSessionId) ||
-    (item.totalCostUsd !== undefined && !validUsd(item.totalCostUsd))
+    (item.totalCostUsd !== undefined && !validUsd(item.totalCostUsd)) ||
+    (item.tools !== undefined &&
+      (!Array.isArray(item.tools) ||
+        item.tools.length > 64 ||
+        !item.tools.every((tool) => typeof tool === "string" && /^[A-Za-z0-9_]{1,64}$/.test(tool))))
   )
     throw new Error("Claude checkpoint belongs to another Session or format");
   const transcripts = readClaudeTranscripts(item.transcripts);
@@ -54,7 +61,25 @@ function archive(value: unknown, binding: Binding): Archive {
     nativeSessionId: item.nativeSessionId,
     transcripts,
     ...(item.totalCostUsd !== undefined ? { totalCostUsd: item.totalCostUsd } : {}),
+    ...(item.tools !== undefined ? { tools: [...item.tools] } : {}),
   };
+}
+
+/** The built-in tools a turn offers, in the order a checkpoint records them. */
+export function toolSet(tools: readonly string[]): string[] {
+  return [...new Set(tools)].sort();
+}
+
+/** Whether a turn offered `tools` may resume `checkpoint`'s native Session: only when it offers
+ * the same built-in tools, since a resumed Claude Code Session keeps the tools it started with. */
+export function resumable(checkpoint: Archive | undefined, tools: readonly string[]): boolean {
+  if (!checkpoint) return false;
+  if (checkpoint.tools === undefined) return true;
+  const offered = toolSet(tools);
+  return (
+    checkpoint.tools.length === offered.length &&
+    checkpoint.tools.every((tool, index) => tool === offered[index])
+  );
 }
 
 export function validUsd(value: unknown): value is number {
@@ -112,6 +137,7 @@ export function captureCheckpoint(
   transcripts: readonly ClaudeTranscript[],
   secrets: readonly string[],
   totalCostUsd?: number,
+  tools?: readonly string[],
 ) {
   const data = archive(
     {
@@ -121,6 +147,7 @@ export function captureCheckpoint(
       nativeSessionId,
       transcripts,
       totalCostUsd,
+      ...(tools ? { tools: toolSet(tools) } : {}),
     },
     task,
   );

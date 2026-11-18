@@ -705,6 +705,51 @@ it("resumes an approved transcript in another host directory with the real SDK m
   expect(text).toContain(second.workspace);
 }, 30000);
 
+it("starts a fresh native Session when a conversation's turn gains tools", async () => {
+  // Turn 1 of a conversation may not run commands. Once the operator grants commands:execute,
+  // the next turn is offered Bash. A resumed Claude Code Session keeps the tools it started
+  // with, so that turn starts a fresh native Session from the recap instead.
+  const first = await invoke({ prompt: "write" });
+  const checkpoint = first.completions[0]?.checkpoint;
+  expect(checkpoint).toBeDefined();
+  const second = await invoke({
+    prompt: "run-command",
+    checkpoint,
+    actions: ["files:read", "files:write", "commands:execute"],
+    allowUnsandboxedCommands: true,
+  });
+  expect(
+    second.completions[0]?.succeeded,
+    await readFile(join(second.workspace, "fixture-error.txt"), "utf8").catch(
+      () => second.completions[0]?.result,
+    ),
+  ).toBe(true);
+  expect(second.completions[0]?.result).toBe("fixture ran an admitted command");
+  const native = (run: typeof first) =>
+    JSON.parse(Buffer.from(run.completions[0]?.checkpoint?.payload ?? []).toString("utf8"));
+  expect(native(second).nativeSessionId).not.toBe(native(first).nativeSessionId);
+  expect(native(second).tools).toContain("Bash");
+  expect(native(first).tools).not.toContain("Bash");
+  // A turn offered the same tools as its checkpoint resumes that native Session.
+  const commands = {
+    actions: ["files:read", "files:write", "commands:execute"],
+    allowUnsandboxedCommands: true,
+  };
+  const before = await invoke({ prompt: "write", ...commands });
+  const after = await invoke({
+    prompt: "run-command",
+    checkpoint: before.completions[0]?.checkpoint,
+    ...commands,
+  });
+  expect(
+    after.completions[0]?.succeeded,
+    await readFile(join(after.workspace, "fixture-error.txt"), "utf8").catch(
+      () => after.completions[0]?.result,
+    ),
+  ).toBe(true);
+  expect(native(after).nativeSessionId).toBe(native(before).nativeSessionId);
+}, 30000);
+
 it("starts a fresh native Session from the recap, with no auto memory when none is granted", async () => {
   const history = [
     create(AttemptHistoryEntrySchema, {

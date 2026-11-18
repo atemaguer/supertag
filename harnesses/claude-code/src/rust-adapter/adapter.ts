@@ -48,7 +48,13 @@ import {
 import { ClaudeLiveInput, claudeQuery, isClaudeFinalResult } from "../query.js";
 import { ClaudeSessionStore, readClaudeTranscripts } from "../session-store.js";
 import { claudeUsageTracker } from "../usage.js";
-import { captureCheckpoint, restoreCheckpoint, resumedCostUsd, validUsd } from "./checkpoint.js";
+import {
+  captureCheckpoint,
+  restoreCheckpoint,
+  resumable,
+  resumedCostUsd,
+  validUsd,
+} from "./checkpoint.js";
 import {
   COORDINATION_PREFIX,
   COORDINATION_SERVER,
@@ -669,7 +675,10 @@ export async function runAdapter(
       Object.assign(env, egressCertificateEnvironment(environment));
     }
     phase = "checkpoint validation";
-    const restored = restoreCheckpoint(run.checkpoint, task, cwd);
+    const checkpointed = restoreCheckpoint(run.checkpoint, task, cwd);
+    // A resumed Claude Code Session keeps the tools it started with, so a turn whose admitted
+    // tools changed, such as one newly granted commands:execute, starts fresh from the recap.
+    const restored = resumable(checkpointed, tools) ? checkpointed : undefined;
     nativeSessionId = restored?.nativeSessionId;
     let costBaseline: number | undefined;
     try {
@@ -1031,6 +1040,7 @@ export async function runAdapter(
       store.snapshot(),
       secrets,
       lastTotalCostUsd,
+      tools,
     );
     const outcome = withObjectiveReport(
       {

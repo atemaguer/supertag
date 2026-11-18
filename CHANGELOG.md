@@ -411,6 +411,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- A Claude Code conversation picks up tools granted after it started. A resumed native Session
+  kept the tools of its first turn, so after `commands:execute` was granted, the conversation
+  still answered that it had no shell. A turn whose tools changed now starts a fresh native
+  Session from the conversation's recap.
 - `supertag placement explain` names a `model` requirement when no bound Worker Host lists the
   model a Task names, instead of calling those hosts eligible.
 - A supertag.yaml Worker Host reports the execution profile its lanes claim with. A local-vm host
