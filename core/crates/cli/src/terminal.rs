@@ -80,8 +80,28 @@ fn write(mut stream: impl Write, value: &str) {
         .and_then(|()| stream.flush());
 }
 
+/// Set by a command whose standard output is one JSON result, such as `supertag init --json`:
+/// its progress lines go to standard error instead.
+static PROGRESS_TO_STDERR: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Send what `out!` and `outln!` print to standard error from now on, keeping standard output
+/// for the result `write_result` prints.
+pub fn progress_to_stderr() {
+    PROGRESS_TO_STDERR.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
 #[doc(hidden)]
 pub fn write_stdout(value: &str) {
+    if PROGRESS_TO_STDERR.load(std::sync::atomic::Ordering::SeqCst) {
+        return write_stderr(value);
+    }
+    // terminal-safe: `write` filters every line.
+    write(std::io::stdout().lock(), value);
+}
+
+/// Print a command's result to standard output, even after `progress_to_stderr`.
+pub fn write_result(value: &str) {
     // terminal-safe: `write` filters every line.
     write(std::io::stdout().lock(), value);
 }

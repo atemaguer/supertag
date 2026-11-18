@@ -734,18 +734,39 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
     assert!(claude_fact["signed_in"].is_null(), "{found}");
     assert!(claude_fact["fix"].is_string(), "{found}");
     assert_eq!(found["state"]["configured"], false, "{found}");
+    // --harness checks only that one.
+    let mut one = machine.command(&[
+        "init",
+        "--check",
+        "--json",
+        "--harness",
+        "codex",
+        "--directory",
+        repository.to_str().unwrap(),
+    ]);
+    let one: Value = serde_json::from_slice(&one.output()?.stdout)?;
+    assert_eq!(one["harnesses"].as_array().map(Vec::len), Some(1), "{one}");
+    assert_eq!(one["harnesses"][0]["harness"], "codex", "{one}");
     let elsewhere = check(&machine.home)?;
     assert_eq!(elsewhere["repository"]["git"], false, "{elsewhere}");
     assert!(elsewhere["repository"]["fix"].is_string(), "{elsewhere}");
     assert!(!machine.state.join("supertag.yaml").exists());
 
-    // A named harness must be installed and signed in.
-    let output = init(&["--yes", "--harness", "claude-code"])?;
+    // A named harness must be installed and signed in. With --json, the failure is JSON too.
+    let output = init(&["--yes", "--json", "--harness", "claude-code"])?;
     assert!(!output.status.success());
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("Claude Code"),
-        "{output:?}"
+    let failed: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(
+        failed["error"], "claude-code is not installed on this machine.",
+        "{failed}"
     );
+    assert_eq!(
+        failed["fix_command"], "npm install -g @anthropic-ai/claude-code",
+        "{failed}"
+    );
+    let output = init(&["--yes", "--json", "--harness", "codex"])?;
+    let failed: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(failed["error"], "codex is not signed in.", "{failed}");
     assert!(!machine.state.join("supertag.yaml").exists());
     // A file-backed Codex login is checked without a model turn.
     fs::create_dir_all(machine.home.join(".codex"))?;
@@ -760,6 +781,7 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
     let mut apply = machine.command(&[
         "init",
         "--yes",
+        "--json",
         "--harness",
         "codex",
         "--directory",
@@ -774,7 +796,19 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
         String::from_utf8_lossy(&output.stderr),
         fs::read_to_string(machine.state.join("logs/supervisor.log")).unwrap_or_default()
     );
-    let stdout = String::from_utf8(output.stdout)?;
+    // Standard output is one JSON object; the progress a terminal would show is on standard error.
+    let result: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(result["version"], 1, "{result}");
+    assert_eq!(result["tag"], "lead", "{result}");
+    assert_eq!(result["workspace"], "my-project", "{result}");
+    assert_eq!(result["harness"], "codex", "{result}");
+    assert!(
+        result["control_plane"]
+            .as_str()
+            .is_some_and(|url| url.starts_with("http://127.0.0.1:")),
+        "{result}"
+    );
+    let stdout = String::from_utf8(output.stderr)?;
     assert!(
         stdout.contains("Started SuperTag in the background"),
         "{stdout}"

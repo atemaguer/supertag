@@ -94,13 +94,17 @@ A script or app can run `init` without a terminal:
   (Codex, Claude Code, Cursor, OpenCode), whether it is installed, signed in with the credentials
   a Worker Host would use, and, for a harness that runs through Node.js, whether that Node.js can
   run it; and whether `~/.supertag/supertag.yaml` exists and already maps the repository. Each
-  problem carries one `fix` line. `ready` is true when the folder and at least one harness are
-  usable.
+  problem carries one plain `fix` line and, when the fix is a command, that command as
+  `fix_command`; each harness also has an `install_url`. A sign-in check that takes longer than 30
+  seconds is reported as unknown. `ready` is true when the folder and at least one checked harness
+  are usable. Add `--harness codex` to check only that harness.
 - `supertag init --yes --harness codex --directory PATH` (or `--harness claude-code`) sets up that
   folder with that harness and starts SuperTag, as `init` does. It stops before writing anything
   when the harness is not installed or not signed in. On a machine that is already set up, it adds
   the folder as described in [Add another repository](#add-another-repository), and the Tag uses
-  the lead's harness.
+  the lead's harness. With `--json`, it prints one object: the Tag, Workspace, harness, and
+  Control Plane address on success, or `error`, `fix`, and `fix_command` with a non-zero exit
+  status on failure. Its progress goes to standard error.
 
 ### Run and stop SuperTag
 

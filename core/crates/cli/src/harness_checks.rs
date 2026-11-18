@@ -15,7 +15,7 @@ use supertag_protocol::v2::HarnessKind;
 pub use models::ModelCheck;
 use probe::Variables;
 
-const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(30);
+pub const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(30);
 const CLI_TIMEOUT: Duration = Duration::from_secs(15);
 const LISTING_TIMEOUT: Duration = Duration::from_secs(20);
 const CURSOR_CLI_TIMEOUT: Duration = Duration::from_secs(5);
@@ -165,7 +165,12 @@ async fn sign_in_once(
     model: Option<&str>,
     variables: &Variables,
 ) -> SignInResult {
-    let deadline = || probe::interactive_deadline(SIGN_IN_TIMEOUT);
+    // The deadline future finishes only when the probe ran out of time.
+    let ran_out = std::sync::atomic::AtomicBool::new(false);
+    let deadline = || async {
+        probe::interactive_deadline(SIGN_IN_TIMEOUT).await;
+        ran_out.store(true, std::sync::atomic::Ordering::SeqCst);
+    };
     let signed_in = match harness {
         Harness::Codex => {
             if !sign_in::codex_has_credential(variables) {
@@ -201,6 +206,7 @@ async fn sign_in_once(
                     detail: Some(
                         "OpenCode needs a model, as provider/model, to check sign-in.".into(),
                     ),
+                    timed_out: false,
                 };
             }
         },
@@ -223,6 +229,7 @@ async fn sign_in_once(
             return SignInResult {
                 signed_in: checked.status == cursor::Status::SignedIn,
                 detail: Some(checked.message),
+                timed_out: false,
             };
         }
     };
@@ -230,13 +237,20 @@ async fn sign_in_once(
     let detail = (harness == Harness::Codex)
         .then(|| probe::codex_executable(variables).map(|found| found.describe()))
         .flatten();
-    SignInResult { signed_in, detail }
+    let timed_out = !signed_in && ran_out.load(std::sync::atomic::Ordering::SeqCst);
+    SignInResult {
+        signed_in,
+        detail,
+        timed_out,
+    }
 }
 
 pub struct SignInResult {
     pub signed_in: bool,
     /// A fixed explanation, never native output.
     pub detail: Option<String>,
+    /// The check ran out of time, so it says nothing about the sign-in.
+    pub timed_out: bool,
 }
 
 #[derive(Args)]

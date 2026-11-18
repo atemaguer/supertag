@@ -36,15 +36,17 @@ pub struct InitArgs {
     #[arg(long, value_name = "PATH")]
     directory: Option<PathBuf>,
     /// The harness the lead Tag runs on, instead of the first signed-in one. Applies to a new
-    /// setup only: another repository's Tag uses the lead's harness.
+    /// setup only: another repository's Tag uses the lead's harness. With --check, check only
+    /// this harness.
     #[arg(long, value_enum)]
     harness: Option<InitHarness>,
     /// Check this machine and folder without changing anything: whether the folder is a git
     /// repository, which harnesses are installed and signed in, and whether SuperTag is set up.
-    #[arg(long, requires = "json", conflicts_with_all = ["yes", "harness"])]
+    #[arg(long, requires = "json", conflicts_with = "yes")]
     check: bool,
-    /// With --check, print the result as one JSON object.
-    #[arg(long, requires = "check")]
+    /// Print the result as one JSON object, and progress on standard error. Needs --check or
+    /// --yes.
+    #[arg(long)]
     json: bool,
 }
 
@@ -159,6 +161,8 @@ struct SignIns {
     /// `--check --json` prints only its JSON.
     quiet: bool,
     results: Vec<(Found, Option<String>, bool)>,
+    /// Harnesses whose check ran out of time.
+    timed_out: Vec<Found>,
 }
 
 impl SignIns {
@@ -187,6 +191,9 @@ impl SignIns {
             outln!("  {detail}");
         }
         let signed_in = result.signed_in;
+        if result.timed_out {
+            self.timed_out.push(harness);
+        }
         self.results
             .push((harness, model.map(str::to_owned), signed_in));
         Ok(signed_in)
@@ -249,6 +256,42 @@ fn start(branch: Option<&str>, head: &str) -> Start {
     }
 }
 
+/// An error with one line that says what to do, for `--json`.
+#[derive(Debug)]
+struct Fixable {
+    error: String,
+    fix: String,
+    command: Option<&'static str>,
+}
+
+impl std::fmt::Display for Fixable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.error, self.fix)
+    }
+}
+
+impl std::error::Error for Fixable {}
+
+/// The `--json` object for an init that failed.
+fn failure(error: &anyhow::Error) -> Value {
+    let (fix, command) = if let Some(fixable) = error.downcast_ref::<Fixable>() {
+        (Some(fixable.fix.clone()), fixable.command)
+    } else if let Some(problem) = error.downcast_ref::<RepositoryProblem>() {
+        (Some(problem.to_string()), problem.command())
+    } else {
+        (None, None)
+    };
+    json!({
+        "version": 1,
+        "error": match error.downcast_ref::<Fixable>() {
+            Some(fixable) => fixable.error.clone(),
+            None => format!("{error:#}"),
+        },
+        "fix": fix,
+        "fix_command": command,
+    })
+}
+
 /// Why a folder can't be set up, in words a person can act on.
 #[derive(Debug)]
 enum RepositoryProblem {
@@ -278,6 +321,16 @@ impl std::fmt::Display for RepositoryProblem {
 }
 
 impl std::error::Error for RepositoryProblem {}
+
+impl RepositoryProblem {
+    /// A command that fixes it, as the fix line words it.
+    fn command(&self) -> Option<&'static str> {
+        match self {
+            Self::NotRepository => Some("git init"),
+            Self::NoGit | Self::NoCommits(_) => None,
+        }
+    }
+}
 
 /// The git repository at `directory`, or the current directory.
 fn repository(directory: Option<&Path>) -> Result<Repository> {
@@ -474,20 +527,55 @@ struct Answers {
 
 pub async fn init(args: InitArgs) -> Result<()> {
     if args.check {
-        let report = check(args.directory.as_deref(), args.state_directory).await?;
+        let report = check(
+            args.directory.as_deref(),
+            args.state_directory,
+            args.harness.map(InitHarness::found),
+        )
+        .await?;
         outln!("{}", serde_json::to_string_pretty(&report)?);
         return Ok(());
     }
+    if !args.json {
+        return apply(args).await.map(drop);
+    }
+    // The app reading standard output gets one JSON object; progress goes to standard error.
+    crate::terminal::progress_to_stderr();
+    let result = if args.yes {
+        match apply(args).await {
+            Ok((path, root)) => applied(&path, &root),
+            Err(error) => Err(error),
+        }
+    } else {
+        Err(Fixable {
+            error: "supertag init --json does not ask questions.".into(),
+            fix: "Add --yes, or use --check.".into(),
+            command: None,
+        }
+        .into())
+    };
+    let value = match &result {
+        Ok(value) => value.clone(),
+        Err(error) => failure(error),
+    };
+    crate::terminal::write_result(&format!("{}\n", serde_json::to_string(&value)?));
+    result.map(drop)
+}
+
+/// Sets up SuperTag, or adds the repository to the setup, and starts it. Returns supertag.yaml's
+/// path and the repository's root.
+async fn apply(args: InitArgs) -> Result<(PathBuf, PathBuf)> {
     // First, before any question or side effect: a harness must be installed.
     let installed = installed_harnesses();
     let named = args.harness.map(InitHarness::found);
-    if let Some(harness) = named {
-        ensure!(
-            installed.contains(&harness),
-            "{} is not installed on this machine. {}",
-            harness.harness(),
-            install_line(harness)
-        );
+    if let Some(harness) = named
+        && !installed.contains(&harness)
+    {
+        bail!(Fixable {
+            error: format!("{} is not installed on this machine.", harness.harness()),
+            fix: install_line(harness).into(),
+            command: install_command(harness),
+        });
     }
     ensure!(
         !installed.is_empty(),
@@ -536,7 +624,7 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
                 "Nothing was changed. To try another harness, see https://github.com/atemaguer/supertag/blob/main/docs/operations/cli.md#try-another-harness; to start over, run supertag down and move {} aside, which leaves your Tags and conversations behind.",
                 state.display()
             );
-            return Ok(());
+            return Ok((path, repository.root));
         }
         // Adding this repository may have changed the file.
         let config =
@@ -547,6 +635,7 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
             supervisor: harness_checks::Supervisor::of(&config),
             quiet: false,
             results: Vec::new(),
+            timed_out: Vec::new(),
         };
         let mut checked = Vec::new();
         let mut runnable = false;
@@ -573,7 +662,8 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
         if !checked.is_empty() && !runnable {
             return Err(no_sign_in(&checked));
         }
-        return up(&state, config).await;
+        up(&state, config).await?;
+        return Ok((path, repository.root));
     }
 
     let mut sign_ins = SignIns {
@@ -582,6 +672,7 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
         supervisor: harness_checks::Supervisor::ThisProcess,
         quiet: false,
         results: Vec::new(),
+        timed_out: Vec::new(),
     };
     let mut signed_in = Vec::new();
     let mut without_node = false;
@@ -607,10 +698,13 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
                 "  claude-code: can't run: {problem}. SuperTag runs Claude Code through Node.js 22.13 or later. Install it from https://nodejs.org/en/download (or brew install node), then run supertag init again."
             );
             without_node = true;
-            ensure!(
-                named.is_none(),
-                "Claude Code can't run: {problem}. Install Node.js 22.13 or later from https://nodejs.org/en/download, then run supertag init again."
-            );
+            if named.is_some() {
+                bail!(Fixable {
+                    error: format!("Claude Code can't run: {problem}."),
+                    fix: "Install Node.js 22.13 or later from https://nodejs.org/en/download, then run supertag init again.".into(),
+                    command: None,
+                });
+            }
             continue;
         }
         let result = sign_ins.check(*harness, None).await?;
@@ -630,13 +724,13 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
         !installed.is_empty(),
         "Claude Code is the only harness on this machine, and it needs Node.js 22.13 or later on PATH. Install that, or install Codex (npm install -g @openai/codex), then run supertag init again."
     );
-    if let Some(harness) = named {
-        ensure!(
-            signed_in.contains(&harness),
-            "{} is not signed in. {}",
-            harness.harness(),
-            first_line(harness_checks::instructions(harness.check()))
-        );
+    if let Some(harness) = named
+        && !signed_in.contains(&harness)
+    {
+        bail!(sign_in_problem(
+            harness,
+            sign_ins.timed_out.contains(&harness)
+        ));
     }
     if prompter.is_none() && signed_in.is_empty() {
         return Err(no_sign_in(&installed));
@@ -711,7 +805,7 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
         "Run supertag in your terminal to talk to it. To keep SuperTag running after restarts, add restart: unless-stopped to both services in {} and run supertag up.",
         path.display()
     );
-    Ok(())
+    Ok((path, repository.root))
 }
 
 /// On an existing setup, run in a repository no local host maps yet: offers (default yes) to add
@@ -853,18 +947,70 @@ fn local_hosts(document: &Value) -> Vec<String> {
 
 /// Whether one of `hosts` maps the repository at `root` as a Workspace.
 fn maps(document: &Value, hosts: &[String], root: &Path) -> bool {
-    hosts.iter().any(|host| {
+    mapped_workspace(document, hosts, root).is_some()
+}
+
+/// The name of the Workspace a local host maps to `root`, if any.
+fn mapped_workspace(document: &Value, hosts: &[String], root: &Path) -> Option<String> {
+    hosts.iter().find_map(|host| {
         document["services"][host]["workspaces"]
-            .as_object()
-            .is_some_and(|workspaces| {
-                workspaces.values().any(|mapping| {
-                    let source = mapping.as_str().or_else(|| mapping["path"].as_str());
-                    source.is_some_and(|source| {
-                        expand_home(source).canonicalize().ok().as_deref() == Some(root)
-                    })
+            .as_object()?
+            .iter()
+            .find(|(_, mapping)| {
+                let source = mapping.as_str().or_else(|| mapping["path"].as_str());
+                source.is_some_and(|source| {
+                    expand_home(source).canonicalize().ok().as_deref() == Some(root)
                 })
             })
+            .map(|(name, _)| name.clone())
     })
+}
+
+/// The `--json` object for an init that finished: the Tag that works in `root`, and where the
+/// Control Plane listens.
+fn applied(path: &Path, root: &Path) -> Result<Value> {
+    let document = yaml_document(&std::fs::read_to_string(path)?)?;
+    let root = root.canonicalize()?;
+    let not_set_up = || Fixable {
+        error: format!(
+            "{} is not a Workspace of this machine's SuperTag.",
+            root.display()
+        ),
+        fix: format!(
+            "Add it under a host's workspaces in {}, add a Tag for it, and run supertag up.",
+            path.display()
+        ),
+        command: None,
+    };
+    let workspace =
+        mapped_workspace(&document, &local_hosts(&document), &root).ok_or_else(not_set_up)?;
+    let tags: Vec<&Value> = document["services"]["control-plane"]["provision"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|manifest| manifest["kind"] == "Tag")
+        .collect();
+    let lead = tags.iter().find(|tag| tag["spec"]["lead"] == true);
+    // The lead first, when it works in this Workspace.
+    let tag = lead
+        .into_iter()
+        .chain(tags.iter())
+        .find(|tag| tag["spec"]["workspace"]["id"] == workspace.as_str())
+        .ok_or_else(not_set_up)?;
+    let harness = [Some(tag), lead]
+        .into_iter()
+        .flatten()
+        .find_map(|tag| tag["spec"]["execution"]["harness"].as_str());
+    let state = path.parent().context("supertag.yaml has no directory")?;
+    let config =
+        local_config::load(Some(path.to_owned()), state)?.context("supertag.yaml missing")?;
+    Ok(json!({
+        "version": 1,
+        "tag": tag["metadata"]["name"],
+        "workspace": workspace,
+        "harness": harness,
+        "control_plane": config.plane.map(|plane| format!("http://{}", plane.listen)),
+    }))
 }
 
 fn expand_home(path: &str) -> PathBuf {
@@ -888,6 +1034,58 @@ fn install_line(harness: Found) -> &'static str {
     }
 }
 
+/// The command in `install_line`, if it has one.
+fn install_command(harness: Found) -> Option<&'static str> {
+    match harness {
+        Found::Codex => Some("npm install -g @openai/codex"),
+        Found::ClaudeCode => Some("npm install -g @anthropic-ai/claude-code"),
+        Found::Opencode => Some("npm install -g opencode-ai"),
+        Found::Cursor => None,
+    }
+}
+
+/// Where to read how to install a harness, or, for Cursor, get its API key.
+fn install_url(harness: Found) -> &'static str {
+    match harness {
+        Found::Codex => "https://developers.openai.com/codex/cli",
+        Found::ClaudeCode => "https://docs.claude.com/en/docs/claude-code/setup",
+        Found::Opencode => "https://opencode.ai/docs/",
+        Found::Cursor => "https://cursor.com/dashboard/api",
+    }
+}
+
+/// The command in the first line of `harness_checks::instructions`, if it has one.
+fn sign_in_command(harness: Found) -> Option<&'static str> {
+    match harness {
+        Found::Codex => Some("codex -c 'cli_auth_credentials_store=\"file\"' login"),
+        Found::ClaudeCode => Some("claude"),
+        Found::Cursor | Found::Opencode => None,
+    }
+}
+
+/// Why a harness's sign-in check failed, with one line that says what to do.
+fn sign_in_problem(harness: Found, timed_out: bool) -> Fixable {
+    if timed_out {
+        return Fixable {
+            error: format!("Couldn't check the {} sign-in.", harness.harness()),
+            fix: timed_out_line(),
+            command: None,
+        };
+    }
+    Fixable {
+        error: format!("{} is not signed in.", harness.harness()),
+        fix: first_line(harness_checks::instructions(harness.check())).into(),
+        command: sign_in_command(harness),
+    }
+}
+
+fn timed_out_line() -> String {
+    format!(
+        "Couldn't check the sign-in: it did not finish within {} seconds. Check your network connection, then check again.",
+        harness_checks::SIGN_IN_TIMEOUT.as_secs()
+    )
+}
+
 fn first_line(text: &str) -> &str {
     text.lines().next().unwrap_or(text)
 }
@@ -907,8 +1105,10 @@ fn bridge(harness: Found) -> Option<crate::node_bridges::NodeBridge> {
 struct HarnessFact {
     harness: Found,
     installed: bool,
-    /// `None` when it was not checked: not installed, or OpenCode, whose check needs a model.
+    /// `None` when it was not checked: not installed, or OpenCode, whose check needs a model;
+    /// or when the check ran out of time.
     signed_in: Option<bool>,
+    timed_out: bool,
     /// `None` for a harness without a Node bridge; otherwise why its Node can't run, if it can't.
     node: Option<Option<String>>,
 }
@@ -916,7 +1116,11 @@ struct HarnessFact {
 /// `supertag init --check --json`: what `init` would find, without changing anything. The same
 /// probes `init` runs: the repository, installed harnesses and their sign-in with the Worker
 /// Host's credentials, the Node a bridge needs, and the local setup.
-async fn check(directory: Option<&Path>, state_directory: Option<PathBuf>) -> Result<Value> {
+async fn check(
+    directory: Option<&Path>,
+    state_directory: Option<PathBuf>,
+    only: Option<Found>,
+) -> Result<Value> {
     let state = local_config::state_directory(state_directory)?;
     let path = state.join("supertag.yaml");
     let configured = path.exists();
@@ -937,6 +1141,7 @@ async fn check(directory: Option<&Path>, state_directory: Option<PathBuf>) -> Re
         supervisor: harness_checks::Supervisor::ThisProcess,
         quiet: true,
         results: Vec::new(),
+        timed_out: Vec::new(),
     };
     let installed = installed_harnesses();
     let mut facts = Vec::new();
@@ -945,7 +1150,10 @@ async fn check(directory: Option<&Path>, state_directory: Option<PathBuf>) -> Re
         Found::ClaudeCode,
         Found::Cursor,
         Found::Opencode,
-    ] {
+    ]
+    .into_iter()
+    .filter(|harness| only.is_none_or(|only| only == *harness))
+    {
         let is_installed = installed.contains(&harness);
         // OpenCode's check needs a model, which only an interactive init asks for.
         let signed_in = if is_installed && harness != Found::Opencode {
@@ -953,10 +1161,12 @@ async fn check(directory: Option<&Path>, state_directory: Option<PathBuf>) -> Re
         } else {
             None
         };
+        let timed_out = sign_ins.timed_out.contains(&harness);
         facts.push(HarnessFact {
             harness,
             installed: is_installed,
-            signed_in,
+            signed_in: signed_in.filter(|_| !timed_out),
+            timed_out,
             node: bridge(harness).map(crate::node_bridges::node_problem),
         });
     }
@@ -997,10 +1207,12 @@ fn check_report(
                 "branch": branch,
                 "detached_commit": detached,
                 "fix": null,
+                "fix_command": null,
             })
         }
         Err(error) => {
-            let no_commits = match error.downcast_ref::<RepositoryProblem>() {
+            let problem = error.downcast_ref::<RepositoryProblem>();
+            let no_commits = match problem {
                 Some(RepositoryProblem::NoCommits(root)) => Some(root.clone()),
                 _ => None,
             };
@@ -1013,6 +1225,7 @@ fn check_report(
                 "branch": null,
                 "detached_commit": null,
                 "fix": format!("{error:#}"),
+                "fix_command": problem.and_then(RepositoryProblem::command),
             })
         }
     };
@@ -1021,14 +1234,21 @@ fn check_report(
         .iter()
         .map(|fact| {
             let node_problem = fact.node.clone().flatten();
-            let fix = if !fact.installed {
-                Some(install_line(fact.harness).to_owned())
-            } else if fact.signed_in == Some(false) {
-                Some(first_line(harness_checks::instructions(fact.harness.check())).to_owned())
+            let (fix, fix_command) = if !fact.installed {
+                (
+                    Some(install_line(fact.harness).to_owned()),
+                    install_command(fact.harness),
+                )
+            } else if fact.timed_out || fact.signed_in == Some(false) {
+                let problem = sign_in_problem(fact.harness, fact.timed_out);
+                (Some(problem.fix), problem.command)
             } else {
-                node_problem
-                    .as_ref()
-                    .map(|problem| format!("Node.js: {problem}"))
+                (
+                    node_problem
+                        .as_ref()
+                        .map(|problem| format!("Node.js: {problem}")),
+                    None,
+                )
             };
             ready_harness |= fact.signed_in == Some(true) && node_problem.is_none();
             json!({
@@ -1039,7 +1259,9 @@ fn check_report(
                     "ok": problem.is_none(),
                     "fix": problem.as_ref().map(|problem| format!("Node.js: {problem}")),
                 })),
+                "install_url": install_url(fact.harness),
                 "fix": fix,
+                "fix_command": fix_command,
             })
         })
         .collect();
@@ -1341,18 +1563,21 @@ mod tests {
                 harness: Found::Codex,
                 installed: true,
                 signed_in: Some(false),
+                timed_out: false,
                 node: None,
             },
             HarnessFact {
                 harness: Found::ClaudeCode,
                 installed: true,
                 signed_in: Some(true),
+                timed_out: false,
                 node: Some(None),
             },
             HarnessFact {
                 harness: Found::Cursor,
                 installed: false,
                 signed_in: None,
+                timed_out: false,
                 node: Some(Some("Node.js is not on PATH".into())),
             },
         ];
@@ -1374,12 +1599,19 @@ mod tests {
         let codex_fix = harnesses[0]["fix"].as_str().unwrap();
         assert!(codex_fix.starts_with("Codex: run codex"), "{codex_fix}");
         assert!(!codex_fix.contains('\n'), "one line: {codex_fix}");
+        let command = harnesses[0]["fix_command"].as_str().unwrap();
+        assert!(codex_fix.contains(command), "{codex_fix} copies {command}");
+        assert_eq!(
+            harnesses[0]["install_url"],
+            "https://developers.openai.com/codex/cli"
+        );
         assert_eq!(harnesses[1]["signed_in"], true);
         assert_eq!(harnesses[1]["node"]["ok"], true);
         assert!(harnesses[1]["fix"].is_null());
         assert_eq!(harnesses[2]["installed"], false);
         assert!(harnesses[2]["signed_in"].is_null());
         assert_eq!(harnesses[2]["node"]["ok"], false);
+        assert!(harnesses[2]["fix_command"].is_null(), "Cursor needs a key");
         assert_eq!(value["state"]["configured"], false);
 
         // A signed-in harness whose Node can't run is not ready, and says so.
@@ -1387,6 +1619,7 @@ mod tests {
             harness: Found::ClaudeCode,
             installed: true,
             signed_in: Some(true),
+            timed_out: false,
             node: Some(Some("Node.js is not on PATH".into())),
         }];
         let value = check_report(
@@ -1402,6 +1635,31 @@ mod tests {
         );
         assert_eq!(value["state"]["repository_mapped"], true);
 
+        // A check that ran out of time says nothing about the sign-in.
+        let facts = [HarnessFact {
+            harness: Found::ClaudeCode,
+            installed: true,
+            signed_in: None,
+            timed_out: true,
+            node: Some(None),
+        }];
+        let value = check_report(
+            Path::new("/work/app"),
+            &repository,
+            &facts,
+            (state, true, true),
+        );
+        assert_eq!(value["ready"], false, "{value}");
+        assert!(value["harnesses"][0]["signed_in"].is_null());
+        assert!(
+            value["harnesses"][0]["fix"]
+                .as_str()
+                .unwrap()
+                .starts_with("Couldn't check the sign-in:"),
+            "{value}"
+        );
+        assert!(value["harnesses"][0]["fix_command"].is_null());
+
         // A folder that is no repository says what to do, and nothing is ready.
         let missing: Result<Repository> = Err(RepositoryProblem::NotRepository.into());
         let value = check_report(
@@ -1412,6 +1670,7 @@ mod tests {
         );
         assert_eq!(value["ready"], false);
         assert_eq!(value["repository"]["git"], false);
+        assert_eq!(value["repository"]["fix_command"], "git init");
         assert!(
             value["repository"]["fix"]
                 .as_str()
@@ -1430,6 +1689,28 @@ mod tests {
         assert_eq!(value["repository"]["git"], true);
         assert_eq!(value["repository"]["has_commits"], false);
         assert_eq!(value["repository"]["root"], "/work/new");
+    }
+
+    #[test]
+    fn a_failed_json_init_carries_its_fix_line_and_command() {
+        let error: anyhow::Error = sign_in_problem(Found::Codex, false).into();
+        let value = failure(&error);
+        assert_eq!(value["version"], 1);
+        assert_eq!(value["error"], "codex is not signed in.");
+        assert!(
+            value["fix"]
+                .as_str()
+                .unwrap()
+                .starts_with("Codex: run codex"),
+            "{value}"
+        );
+        assert_eq!(
+            value["fix_command"],
+            "codex -c 'cli_auth_credentials_store=\"file\"' login"
+        );
+        let other = failure(&anyhow::anyhow!("disk full"));
+        assert_eq!(other["error"], "disk full");
+        assert!(other["fix"].is_null() && other["fix_command"].is_null());
     }
 
     #[test]
