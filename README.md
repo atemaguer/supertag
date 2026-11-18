@@ -122,8 +122,8 @@ supertag
 
 `supertag init` checks your coding agent's sign-in, asks a few questions, and starts SuperTag in
 the background. Keep the default Tag name, `lead`. It works in this repository, starting from the
-commit you have checked out. Plain `supertag` opens the terminal UI. Select
-`lead` and ask:
+latest commit of the branch you have checked out. Plain `supertag`
+opens the terminal UI. Select `lead` and ask:
 
 > Read this repository and tell me what you would improve first.
 
