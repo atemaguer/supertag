@@ -30,12 +30,7 @@ where
     match backend {
         Backend::Sqlite => {
             let directory = tempfile::TempDir::new()?;
-            let database = directory.path().join("control-plane.db");
-            // A copy of this process's migrated store, so the Control Plane starts without
-            // replaying every migration.
-            std::fs::copy(sqlite_template().await?, &database)?;
-            std::fs::set_permissions(&database, std::fs::Permissions::from_mode(0o600))?;
-            let url = format!("sqlite://{}?mode=rwc", database.display());
+            let url = migrated_sqlite(directory.path(), "control-plane.db").await?;
             Box::pin(test(url)).await
         }
         Backend::Postgres => {
@@ -58,10 +53,7 @@ where
             // A copy of the migrated template, so the Control Plane starts without replaying
             // every migration. The template accepts no connections, so concurrent cases cannot
             // contend for it.
-            let template = postgres_template(&mut admin, &options).await?;
-            admin
-                .execute(format!("CREATE DATABASE {name} TEMPLATE {template}").as_str())
-                .await?;
+            create_migrated_postgres(&mut admin, &options, &name).await?;
             let mut guard = DatabaseGuard {
                 options: options.clone(),
                 name: Some(name.clone()),
@@ -115,6 +107,30 @@ fn migrations_digest() -> Result<String> {
         }
     }
     Ok(format!("{:x}", digest.finalize())[..16].to_owned())
+}
+
+/// A Control Plane SQLite store named `file` in `directory`, copied from this process's migrated
+/// store, so the Control Plane starts without replaying every migration. Returns its URL.
+pub async fn migrated_sqlite(directory: &std::path::Path, file: &str) -> Result<String> {
+    let database = directory.join(file);
+    std::fs::copy(sqlite_template().await?, &database)?;
+    std::fs::set_permissions(&database, std::fs::Permissions::from_mode(0o600))?;
+    Ok(format!("sqlite://{}?mode=rwc", database.display()))
+}
+
+/// Creates PostgreSQL database `name` from the migrated template, so the Control Plane starts
+/// without replaying every migration. The template accepts no connections, so concurrent cases
+/// cannot contend for it.
+pub async fn create_migrated_postgres(
+    admin: &mut PgConnection,
+    options: &PgConnectOptions,
+    name: &str,
+) -> Result<()> {
+    let template = postgres_template(admin, options).await?;
+    admin
+        .execute(format!("CREATE DATABASE {name} TEMPLATE {template}").as_str())
+        .await?;
+    Ok(())
 }
 
 /// This test process's migrated SQLite store, made once and copied for each case.
@@ -361,6 +377,7 @@ pub async fn connect(url: &str) -> Result<sqlx::AnyConnection> {
 /// `async fn NAME(database: String) -> Result<()>` named here, the macro adds `NAME::sqlite` and
 /// `NAME::postgres`. An `#[ignore = "..."]` before the name applies to both cases; otherwise only
 /// the PostgreSQL case is ignored, because it needs `SUPERTAG_RUST_TEST_POSTGRES_URL_FILE`.
+#[allow(unused_macros)]
 macro_rules! database_tests {
     ($(#[$runtime:meta] $(#[ignore = $reason:literal])? $name:ident;)+) => {
         $(

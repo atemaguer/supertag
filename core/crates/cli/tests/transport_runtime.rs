@@ -8,6 +8,10 @@
 #[path = "support/children.rs"]
 mod children;
 use children::reaped;
+#[path = "support/database.rs"]
+mod database;
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
 #[path = "support/protocol.rs"]
 mod protocol;
 use std::{
@@ -29,7 +33,7 @@ use supertag_transport::{KEEPALIVE_INTERVAL, KEEPALIVE_TIMEOUT};
 use anyhow::{Context, Result, anyhow, ensure};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use sqlx::{ConnectOptions, Connection, Executor, PgConnection, postgres::PgConnectOptions};
+use sqlx::{ConnectOptions, Connection, PgConnection, postgres::PgConnectOptions};
 use supertag_protocol::{
     authenticated_request,
     negotiation::{NegotiationError, Negotiator, negotiate, negotiate_versions},
@@ -173,6 +177,7 @@ async fn run_json(command: Command) -> Result<Value> {
     Ok(serde_json::from_slice(&output.stdout)?)
 }
 
+#[derive(Clone)]
 struct Tokens {
     gateway: String,
     operator: String,
@@ -290,25 +295,21 @@ where
     let options = PgConnectOptions::from_str(admin_url.trim())?;
     let mut admin = PgConnection::connect_with(&options).await?;
     let name = format!("supertag_rust_{label}_{}", Uuid::new_v4().simple());
-    admin
-        .execute(format!("CREATE DATABASE {name}").as_str())
-        .await?;
+    database::create_migrated_postgres(&mut admin, &options, &name).await?;
     let database = options.database(&name).to_url_lossy().to_string();
     // Isolate panics so the database is dropped after every process is reaped.
     let result = tokio::spawn(scenario(database)).await;
-    let cleanup = admin
-        .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
-        .await;
+    // A Control Plane the scenario left behind may still hold connections: terminate them
+    // and wait, rather than fail the case on its cleanup.
+    let cleanup = database::drop_database(&mut admin, &name).await;
     admin.close().await?;
     cleanup?;
     result.context("PostgreSQL scenario panicked")?
 }
 
-fn sqlite(directory: &Path) -> String {
-    format!(
-        "sqlite://{}?mode=rwc",
-        directory.join("control.db").display()
-    )
+/// A Control Plane SQLite store in `directory`, already migrated.
+async fn sqlite(directory: &Path) -> Result<String> {
+    database::migrated_sqlite(directory, "control.db").await
 }
 
 // ---------------------------------------------------------------------------
@@ -694,6 +695,47 @@ async fn start_host(
     })
 }
 
+/// How long a workload's Worker Hosts may take to start and report ready.
+const HOSTS_READY: Duration = Duration::from_secs(60);
+
+/// Waits until every named Worker Host reports ready to claim work.
+async fn hosts_ready(
+    operator: &mut OperatorClient<ProtocolChannel>,
+    tokens: &Tokens,
+    ids: &[&str],
+    bound: Duration,
+) -> Result<()> {
+    let started = Instant::now();
+    loop {
+        let listed = operator
+            .list_hosts(tokens.request(ListHostsRequest {
+                limit: 500,
+                cursor: String::new(),
+            })?)
+            .await?
+            .into_inner()
+            .hosts;
+        let waiting: Vec<&str> = ids
+            .iter()
+            .copied()
+            .filter(|id| {
+                !listed.iter().any(|host| {
+                    host.host_id == *id && host.phase() == supertag_protocol::v2::HostPhase::Ready
+                })
+            })
+            .collect();
+        if waiting.is_empty() {
+            timing("hosts-ready", started.elapsed());
+            return Ok(());
+        }
+        ensure!(
+            started.elapsed() <= bound,
+            "Worker Hosts {waiting:?} were not ready within {bound:?}"
+        );
+        sleep(Duration::from_millis(100)).await;
+    }
+}
+
 async fn task_state(
     operator: &mut OperatorClient<ProtocolChannel>,
     tokens: &Tokens,
@@ -707,6 +749,20 @@ async fn task_state(
         .into_inner();
     SLOWEST_READ_MS.fetch_max(sent.elapsed().as_millis() as u64, Ordering::SeqCst);
     Ok(task)
+}
+
+/// Appends `label elapsed_ms` to the file named by SUPERTAG_TEST_TIMINGS, when set.
+fn timing(label: &str, elapsed: Duration) {
+    if let Some(path) = std::env::var_os("SUPERTAG_TEST_TIMINGS") {
+        use std::io::Write;
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let _ = file.write_all(format!("{label}\t{}\n", elapsed.as_millis()).as_bytes());
+        }
+    }
 }
 
 /// The slowest operator read during a workload, reported with its invariants.
@@ -743,6 +799,7 @@ async fn wait_for_all(
                 observed.result
             );
             if observed.state() != TaskState::Queued && task.attempt_id.is_none() {
+                timing("queue-observed", task.queued_from.elapsed());
                 report
                     .queue_latencies
                     .push(task.queued_from.elapsed().as_millis());
@@ -849,6 +906,110 @@ async fn partition_round(
     Ok(())
 }
 
+async fn submit_one(
+    operator: &mut OperatorClient<ProtocolChannel>,
+    tokens: &Tokens,
+    workload: &Workload,
+    wave: usize,
+    index: usize,
+) -> Result<Submitted> {
+    let tag = index % workload.tags;
+    let prompt = format!("wave {wave} item {index}");
+    let accepted = operator
+        .submit_task(tokens.request(SubmitTaskRequest {
+            output_policy: None,
+            execution_limits: None,
+            tag_id: format!("scale-tag-{tag}"),
+            session_id: format!("scale-{wave}-{index}"),
+            operation_id: format!("scale-{wave}-{index}"),
+            prompt: prompt.clone(),
+            input_artifacts: vec![],
+        })?)
+        .await?
+        .into_inner();
+    Ok(Submitted {
+        task_id: accepted.task_id,
+        tag,
+        instructions: format!("Finish scale item for tag {tag}"),
+        prompt,
+        queued_from: Instant::now(),
+        attempt_id: None,
+    })
+}
+
+/// Submits a wave to serving hosts and measures each Task's queue latency from its own
+/// acceptance. A watcher polls each Task from the moment it is accepted, so a slow later
+/// submission (one SQLite writer, sixteen of them in a row) does not count as queue time for the
+/// Tasks before it.
+async fn submit_watched(
+    operator: &OperatorClient<ProtocolChannel>,
+    tokens: &Tokens,
+    workload: &Workload,
+    wave: usize,
+    report: &mut Report,
+) -> Result<Vec<Submitted>> {
+    let bound = workload.queue_latency;
+    let (accepted, mut incoming) =
+        tokio::sync::mpsc::unbounded_channel::<(usize, String, Instant)>();
+    let mut reader = operator.clone();
+    let watch_tokens = tokens.clone();
+    let watcher = tokio::spawn(async move {
+        let mut pending: Vec<(usize, String, Instant)> = Vec::new();
+        let mut placed: Vec<(usize, String, u128)> = Vec::new();
+        let mut open = true;
+        while open || !pending.is_empty() {
+            loop {
+                match incoming.try_recv() {
+                    Ok(task) => pending.push(task),
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
+                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                        open = false;
+                        break;
+                    }
+                }
+            }
+            let mut still = Vec::new();
+            for (index, id, queued_from) in pending.drain(..) {
+                let observed = task_state(&mut reader, &watch_tokens, &id).await?;
+                if observed.state() == TaskState::Queued {
+                    ensure!(
+                        queued_from.elapsed() <= bound,
+                        "Task {id} (wave {wave} item {index}) waited {:?} in the queue",
+                        queued_from.elapsed()
+                    );
+                    still.push((index, id, queued_from));
+                } else {
+                    timing("queue-observed submit", queued_from.elapsed());
+                    let attempt = observed.attempt_id.context("Attempt missing")?;
+                    placed.push((index, attempt, queued_from.elapsed().as_millis()));
+                }
+            }
+            pending = still;
+            sleep(Duration::from_millis(25)).await;
+        }
+        anyhow::Ok(placed)
+    });
+    let mut operator = operator.clone();
+    let mut tasks = Vec::new();
+    for index in 0..workload.hosts {
+        let task = submit_one(&mut operator, tokens, workload, wave, index).await?;
+        if accepted
+            .send((index, task.task_id.clone(), task.queued_from))
+            .is_err()
+        {
+            // The watcher stopped on an error; it says which.
+            break;
+        }
+        tasks.push(task);
+    }
+    drop(accepted);
+    for (index, attempt, latency) in watcher.await?? {
+        report.queue_latencies.push(latency);
+        tasks[index].attempt_id = Some(attempt);
+    }
+    Ok(tasks)
+}
+
 async fn submit_wave(
     operator: &mut OperatorClient<ProtocolChannel>,
     tokens: &Tokens,
@@ -857,28 +1018,7 @@ async fn submit_wave(
 ) -> Result<Vec<Submitted>> {
     let mut submitted = Vec::new();
     for index in 0..workload.hosts {
-        let tag = index % workload.tags;
-        let prompt = format!("wave {wave} item {index}");
-        let accepted = operator
-            .submit_task(tokens.request(SubmitTaskRequest {
-                output_policy: None,
-                execution_limits: None,
-                tag_id: format!("scale-tag-{tag}"),
-                session_id: format!("scale-{wave}-{index}"),
-                operation_id: format!("scale-{wave}-{index}"),
-                prompt: prompt.clone(),
-                input_artifacts: vec![],
-            })?)
-            .await?
-            .into_inner();
-        submitted.push(Submitted {
-            task_id: accepted.task_id,
-            tag,
-            instructions: format!("Finish scale item for tag {tag}"),
-            prompt,
-            queued_from: Instant::now(),
-            attempt_id: None,
-        });
+        submitted.push(submit_one(operator, tokens, workload, wave, index).await?);
     }
     Ok(submitted)
 }
@@ -940,6 +1080,10 @@ async fn exercise_workload(workload: Workload, database: String, label: &str) ->
             .await?,
         );
     }
+    // Queue latency is measured from submission to hosts that are already serving. Starting
+    // sixteen hosts is its own, load-bound step, with its own bound.
+    let ids: Vec<&str> = hosts.iter().map(|host| host.id.as_str()).collect();
+    hosts_ready(&mut operator, &tokens, &ids, HOSTS_READY).await?;
 
     let mut report = Report::default();
     let mut all_tasks = Vec::new();
@@ -951,7 +1095,7 @@ async fn exercise_workload(workload: Workload, database: String, label: &str) ->
         let mut tasks;
         if wave % 2 == 0 {
             // Execution partition: every Attempt is running when its host loses the Control Plane.
-            tasks = submit_wave(&mut operator, &tokens, &workload, wave).await?;
+            tasks = submit_watched(&operator, &tokens, &workload, wave, &mut report).await?;
             wait_for_all(
                 &mut operator,
                 &tokens,
@@ -1218,7 +1362,7 @@ fn check_summary(summary: &Value, workload: &Workload) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_partitioned_worker_hosts_reconnect_without_repeating_work() -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let summary = exercise_workload(FAST, sqlite(directory.path()), "sqlite").await?;
+    let summary = exercise_workload(FAST, sqlite(directory.path()).await?, "sqlite").await?;
     check_summary(&summary, &FAST);
     Ok(())
 }
@@ -1237,8 +1381,15 @@ async fn postgres_partitioned_worker_hosts_reconnect_without_repeating_work() ->
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "heavy 16-host workload; opt in with --ignored (SUPERTAG_TRANSPORT_SEED replays a schedule)"]
 async fn sqlite_sixteen_host_partition_storm_preserves_invariants() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let summary = exercise_workload(HEAVY, sqlite(directory.path()), "sqlite").await?;
+    let mut directory = tempfile::tempdir()?;
+    if std::env::var_os("SUPERTAG_TRANSPORT_KEEP").is_some() {
+        directory.disable_cleanup(true);
+        eprintln!(
+            "transport database directory: {}",
+            directory.path().display()
+        );
+    }
+    let summary = exercise_workload(HEAVY, sqlite(directory.path()).await?, "sqlite").await?;
     check_summary(&summary, &HEAVY);
     Ok(())
 }
@@ -1686,7 +1837,9 @@ async fn exercise_soak(database: String) -> Result<Value> {
 #[ignore = "soak; opt in with --ignored (SUPERTAG_TRANSPORT_SOAK_SECONDS, default 120)"]
 async fn sqlite_soak_survives_partition_and_service_restarts() -> Result<()> {
     let directory = tempfile::tempdir()?;
-    exercise_soak(sqlite(directory.path())).await.map(drop)
+    exercise_soak(sqlite(directory.path()).await?)
+        .await
+        .map(drop)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -2006,7 +2159,7 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_adapter_calls_ride_out_a_control_plane_partition() -> Result<()> {
     let directory = tempfile::tempdir()?;
-    exercise_adapter_calls_through_partition(sqlite(directory.path())).await
+    exercise_adapter_calls_through_partition(sqlite(directory.path()).await?).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -2258,7 +2411,7 @@ async fn exercise_work_session_calls_through_partition(database: String) -> Resu
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_work_session_continue_and_ask_ride_out_a_control_plane_partition() -> Result<()> {
     let directory = tempfile::tempdir()?;
-    exercise_work_session_calls_through_partition(sqlite(directory.path())).await
+    exercise_work_session_calls_through_partition(sqlite(directory.path()).await?).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -2719,7 +2872,7 @@ async fn exercise_gateway_credential_needs_no_client_certificate(database: Strin
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sqlite_gateway_credential_needs_no_client_certificate() -> Result<()> {
     let directory = tempfile::tempdir()?;
-    exercise_gateway_credential_needs_no_client_certificate(sqlite(directory.path())).await
+    exercise_gateway_credential_needs_no_client_certificate(sqlite(directory.path()).await?).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2735,7 +2888,7 @@ async fn postgres_gateway_credential_needs_no_client_certificate() -> Result<()>
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sqlite_mutual_tls_connects_all_three_service_roles() -> Result<()> {
     let directory = tempfile::tempdir()?;
-    exercise_mutual_tls(sqlite(directory.path())).await
+    exercise_mutual_tls(sqlite(directory.path()).await?).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2849,7 +3002,7 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
 
     // The real Control Plane accepts Worker Hosts, operators, and Gateways, and refuses old
     // peers and peers in the wrong role.
-    let mut services = Services::start(&sqlite(root), root, &tokens).await?;
+    let mut services = Services::start(&sqlite(root).await?, root, &tokens).await?;
     let plane = services.raw_channel().await?;
     for role in [
         ServiceRole::WorkerHost,
@@ -3025,7 +3178,7 @@ async fn exercise_protocol_fence(database: String) -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sqlite_services_refuse_calls_that_skipped_negotiation() -> Result<()> {
     let directory = tempfile::tempdir()?;
-    exercise_protocol_fence(sqlite(directory.path())).await
+    exercise_protocol_fence(sqlite(directory.path()).await?).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3287,7 +3440,7 @@ async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sqlite_tls_worker_host_traverses_an_idle_closing_proxy() -> Result<()> {
     let directory = tempfile::tempdir()?;
-    exercise_tls_proxy_traversal(sqlite(directory.path())).await
+    exercise_tls_proxy_traversal(sqlite(directory.path()).await?).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

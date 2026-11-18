@@ -2,8 +2,12 @@
 #[path = "support/children.rs"]
 mod children;
 use children::reaped;
+#[path = "support/database.rs"]
+mod database;
 #[path = "support/database_password.rs"]
 mod database_password;
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
 #[path = "support/protocol.rs"]
 mod protocol;
 use anyhow::{Context, Result, ensure};
@@ -1145,29 +1149,27 @@ where
     F: FnOnce(String) -> Fut,
     Fut: std::future::Future<Output = Result<()>>,
 {
-    use sqlx::{Connection, Executor};
+    use sqlx::Connection;
+    // Each case starts from an already migrated store, so `up`'s Control Plane starts well
+    // within its start timeout however loaded the machine is.
     if !postgres {
         let temp = tempfile::tempdir()?;
-        let url = format!(
-            "sqlite://{}?mode=rwc",
-            temp.path().join("plane.db").display()
-        );
+        let url = database::migrated_sqlite(temp.path(), "plane.db").await?;
         return contract(url).await;
     }
     let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
         .context("PostgreSQL URL file required")?;
     let admin_url = fs::read_to_string(path)?;
-    let mut admin = sqlx::PgConnection::connect(admin_url.trim()).await?;
+    let options =
+        <sqlx::postgres::PgConnectOptions as std::str::FromStr>::from_str(admin_url.trim())?;
+    let mut admin = sqlx::PgConnection::connect_with(&options).await?;
     let name = format!("supertag_lanes_{}", Uuid::new_v4().simple());
-    admin
-        .execute(format!("CREATE DATABASE {name}").as_str())
-        .await?;
+    database::create_migrated_postgres(&mut admin, &options, &name).await?;
     let mut url = url::Url::parse(admin_url.trim())?;
     url.set_path(&name);
     let result = contract(url.to_string()).await;
-    let cleanup = admin
-        .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
-        .await;
+    // A service the case left running may still hold connections.
+    let cleanup = database::drop_database(&mut admin, &name).await;
     admin.close().await?;
     cleanup?;
     result
