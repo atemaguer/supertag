@@ -203,8 +203,8 @@ last used, each opens Local at launch. The token is read at each connect and nev
 local Control Plane runs, they say so, name `supertag up`, and offer the saved Control Planes.
 The desktop app goes one step further at launch: when SuperTag is set up in that state directory
 but its services are stopped, and no saved Control Plane was last used, it shows "Starting
-SuperTag…", runs `supertag up` itself (the copy bundled with the app, else the one on `PATH`),
-and connects. If `up` fails, the app shows what it printed and where the logs are.
+SuperTag…", runs `supertag up` itself with your login shell's `PATH` (the copy bundled with the
+app, else the one on that `PATH` or in `~/.local/bin`), and connects. If `up` fails, the app shows what it printed and where the logs are.
 
 ## Send messages from the CLI
 
