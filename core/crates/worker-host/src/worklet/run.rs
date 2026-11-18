@@ -19,7 +19,8 @@ use tokio_util::sync::CancellationToken;
 use tonic::{Code, Status};
 use uuid::Uuid;
 
-use crate::worker::run::run_assignment;
+use crate::worker::{Settings, run::Worker};
+use crate::worklet::authority::Authority;
 use crate::worklet::authority::{with_authority, with_cleanup_authority};
 use crate::worklet::claim::{CLAIM_WAIT, claim_request};
 use crate::worklet::finish::{ensure_providers_stopped, save_finish, write_session_branch};
@@ -385,25 +386,29 @@ pub(crate) async fn run(
                 }
             }
             Entry::Starting { attempt } | Entry::PreparingInputs { attempt, .. } => {
-                run_assignment(
-                    (
-                        &crate::worker::Settings {
-                            options: &worker,
-                            state_directory: &options.state_directory,
-                        },
-                        options.once,
-                    ),
-                    &journal,
-                    &workspaces,
-                    (&mut host, &inputs, &coordination, &transfers, &token, &registration),
-                    attempt,
-                    &shutdown,
-                    || {
-                        if let Some(ready) = ready.take() {
-                            ready();
-                        }
+                Worker {
+                    options: Settings {
+                        options: &worker,
+                        state_directory: &options.state_directory,
                     },
-                )
+                    journal: &journal,
+                    workspaces: &workspaces,
+                    inputs: &inputs,
+                    coordination: &coordination,
+                    transfers: &transfers,
+                    shutdown: &shutdown,
+                    authority: Authority::new(
+                        (&mut host, &token, &registration),
+                        &shutdown,
+                        (&journal, &workspaces),
+                        (&options.state_directory, options.once),
+                    ),
+                }
+                .run(attempt, || {
+                    if let Some(ready) = ready.take() {
+                        ready();
+                    }
+                })
                 .await?;
             }
             Entry::Executing { attempt, prepared } => {

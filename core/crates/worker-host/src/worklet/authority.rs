@@ -1,18 +1,205 @@
 //! The Attempt's execution lease, which the Worklet holds and renews while a Worker or its own
-//! finalization works under it.
+//! finalization works under it, and the `Authority` handle through which a Worker takes every
+//! lease-bound action.
 
-use std::time::Duration;
+use std::{path::Path, time::Duration};
 
 use anyhow::{Context, Result};
-use supertag_protocol::v2::TaskState;
+use supertag_protocol::v2::{
+    AttemptAuthority, HarnessCompleteRequest, HostRecord, ResolveWorkspaceRefRequest,
+    StartTaskRequest, Task, TaskState,
+};
 use tokio::time::{self, Instant};
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
 
 use crate::{
     RegisteredHost, ensure_attempt, request, retryable,
-    worklet::{cleanup_failure, journal::Attempt},
+    worklet::{
+        cleanup_failure,
+        finish::{record_finish, save_finish},
+        journal::{Attempt, Journal},
+        recovery::{cleanup_terminal, purge_discarded},
+        workspaces::Workspaces,
+    },
 };
+
+/// The lease-bound actions a Worker takes for its Attempt: start it, renew its lease, keep the
+/// lease while an operation or a cleanup runs, report what it waits for, hand its outcome to the
+/// Worklet for Finish, and give the Attempt back before launch. The Worklet's registration, host
+/// credential, journal, and checkouts stay behind this handle.
+pub(crate) struct Authority<'a> {
+    host: &'a mut RegisteredHost,
+    token: &'a str,
+    registration: &'a HostRecord,
+    shutdown: &'a CancellationToken,
+    journal: &'a Journal,
+    workspaces: &'a Workspaces,
+    state_directory: &'a Path,
+    once: bool,
+}
+
+impl<'a> Authority<'a> {
+    pub(crate) fn new(
+        (host, token, registration): (&'a mut RegisteredHost, &'a str, &'a HostRecord),
+        shutdown: &'a CancellationToken,
+        (journal, workspaces): (&'a Journal, &'a Workspaces),
+        (state_directory, once): (&'a Path, bool),
+    ) -> Self {
+        Self {
+            host,
+            token,
+            registration,
+            shutdown,
+            journal,
+            workspaces,
+            state_directory,
+            once,
+        }
+    }
+
+    /// The host credential the Attempt's calls carry.
+    pub(crate) fn token(&self) -> &'a str {
+        self.token
+    }
+
+    /// This host's registration, which the Attempt's sandbox and shared-execution records name.
+    pub(crate) fn registration(&self) -> &'a HostRecord {
+        self.registration
+    }
+
+    /// A client for the Attempt-scoped calls the Worker's harness bridge, Context Item setup,
+    /// milestone reports, and egress log make.
+    pub(crate) fn client(&self) -> RegisteredHost {
+        self.host.clone()
+    }
+
+    /// Asks the Control Plane to start the claimed Attempt.
+    pub(crate) async fn start(&mut self, attempt: &Attempt) -> Result<Result<Task, Status>> {
+        let start = request(
+            StartTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+            },
+            self.token,
+        )?;
+        Ok(self
+            .host
+            .start_task(start)
+            .await
+            .map(tonic::Response::into_inner))
+    }
+
+    /// Reads the claimed Attempt's Task without starting it.
+    pub(crate) async fn inspect(&mut self, attempt: &Attempt) -> Result<Result<Task, Status>> {
+        let inspect = request(attempt.inspect(), self.token)?;
+        Ok(self
+            .host
+            .inspect_attempt(inspect)
+            .await
+            .map(tonic::Response::into_inner))
+    }
+
+    /// Renews the Attempt's lease once.
+    pub(crate) async fn renew(
+        &mut self,
+        attempt: &Attempt,
+    ) -> Result<Result<AttemptAuthority, Status>> {
+        let renew = request(attempt.inspect(), self.token)?;
+        Ok(self
+            .host
+            .renew_attempt(renew)
+            .await
+            .map(tonic::Response::into_inner))
+    }
+
+    /// Records the commit a followed branch resolved to for this Attempt's Session.
+    pub(crate) async fn resolve_workspace_ref(
+        &mut self,
+        attempt: &Attempt,
+        base_commit: String,
+    ) -> Result<Result<Task, Status>> {
+        let resolve = request(
+            ResolveWorkspaceRefRequest {
+                attempt: Some(attempt.inspect()),
+                base_commit,
+            },
+            self.token,
+        )?;
+        Ok(self
+            .host
+            .resolve_workspace_ref(resolve)
+            .await
+            .map(tonic::Response::into_inner))
+    }
+
+    /// Keeps the Attempt's lease while `operation` runs; see `with_authority`.
+    pub(crate) async fn keep<T>(
+        &mut self,
+        attempt: &Attempt,
+        cancel: &CancellationToken,
+        operation: impl std::future::Future<Output = Result<T, Status>>,
+    ) -> Result<(T, Instant), Status> {
+        with_authority(
+            self.host,
+            attempt,
+            self.token,
+            self.shutdown,
+            cancel,
+            operation,
+        )
+        .await
+    }
+
+    /// Keeps the Attempt's lease while `cleanup` runs; see `with_cleanup_authority`.
+    pub(crate) async fn keep_for_cleanup(
+        &mut self,
+        attempt: &Attempt,
+        cleanup: impl std::future::Future<Output = Result<()>>,
+    ) -> Result<()> {
+        with_cleanup_authority(self.host, attempt, self.token, self.shutdown, cleanup).await
+    }
+
+    /// Records whether the Attempt waits for the Worker Host holding its Session's last delivery.
+    pub(crate) async fn report_waiting_for_holder(&mut self, attempt: &Attempt, waiting: bool) {
+        report_waiting_for_holder(self.host, attempt, self.token, waiting).await;
+    }
+
+    /// Hands the Worker's own verdict to the Worklet, which reports it with Finish.
+    pub(crate) fn finish(&self, attempt: Attempt, outcome: HarnessCompleteRequest) -> Result<()> {
+        save_finish(self.journal, attempt, outcome)
+    }
+
+    /// Hands the adapter's outcome to the Worklet, which reports it with Finish.
+    pub(crate) fn record_finish(
+        &self,
+        attempt: Attempt,
+        outcome: HarnessCompleteRequest,
+    ) -> Result<()> {
+        record_finish(self.journal, attempt, outcome)
+    }
+
+    /// Gives back an Attempt whose lease ended before anything launched, and ends its local
+    /// state.
+    pub(crate) fn discard_prelaunch(&self, attempt: &Attempt) -> Result<()> {
+        let prepared = self
+            .journal
+            .load()?
+            .map(|entry| entry.prepared(attempt))
+            .transpose()?
+            .flatten();
+        let discarded = cleanup_terminal(
+            self.journal,
+            self.workspaces,
+            self.state_directory,
+            attempt,
+            prepared.as_deref(),
+        )?;
+        purge_discarded(discarded, self.once);
+        Ok(())
+    }
+}
 
 pub(crate) async fn renew_running_attempt(
     host: &mut RegisteredHost,
@@ -194,7 +381,7 @@ impl Drop for AbortOnDrop {
 
 /// Records on the Task whether its Attempt waits for the Worker Host holding its Session's last
 /// delivery. Best effort: a lost report only leaves the reason unshown until the next try.
-pub(crate) async fn report_waiting_for_holder(
+async fn report_waiting_for_holder(
     host: &mut RegisteredHost,
     attempt: &Attempt,
     token: &str,
