@@ -1265,8 +1265,9 @@ async fn local_shutdown_replays_finish_before_next_session_task_without_rerunnin
         .into_inner();
     assert_eq!(next.state(), TaskState::Queued);
 
+    // The Control Plane, the Gateway clients connect to, and the Worker Host.
     let children = direct_children(supervisor.child.id())?;
-    assert_eq!(children.len(), 2);
+    assert_eq!(children.len(), 3);
     let mut adapters = Vec::new();
     for child in &children {
         adapters.extend(descendants(*child)?);
