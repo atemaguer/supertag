@@ -40,6 +40,9 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(12);
 const KILL_TIMEOUT: Duration = Duration::from_secs(3);
 /// The Control Plane address an enrolled installation keeps across restarts.
 const CONTROL_PLANE_ADDRESS: &str = "control-plane-address";
+/// The local Gateway's last address, kept across `supertag down` so it comes back on the same
+/// port and a terminal UI left open reconnects.
+const GATEWAY_ADDRESS: &str = "gateway-address";
 /// Non-secret variables every local service inherits from the supervisor.
 const BASE_ENVIRONMENT: [&str; 8] = [
     "PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
@@ -380,9 +383,11 @@ impl Children {
         let endpoint = format!("http://{}", loopback_address(&address)?);
 
         let mut gateway = command(executable, "gateway");
+        let listen = previous_gateway(directory)
+            .map_or_else(|| "127.0.0.1:0".to_owned(), |address| address.to_string());
         gateway
             .envs(self.proxy.iter().cloned())
-            .args(["--control-plane", &endpoint, "--listen", "127.0.0.1:0"])
+            .args(["--control-plane", &endpoint, "--listen", &listen])
             .env("SUPERTAG_GATEWAY_CREDENTIAL", &credentials.gateway);
         for destination in &self.notify.0 {
             gateway.arg("--notify").arg(destination);
@@ -438,7 +443,13 @@ impl Children {
             lifecycle::GATEWAY,
         )
         .await?;
-        let gateway_endpoint = format!("http://{}", loopback_address(&address)?);
+        let gateway_address = loopback_address(&address)?;
+        let gateway_endpoint = format!("http://{gateway_address}");
+        write_private(
+            directory,
+            GATEWAY_ADDRESS,
+            gateway_address.to_string().as_bytes(),
+        )?;
         write_private(directory, GATEWAY_ENDPOINT, gateway_endpoint.as_bytes())?;
         self.gateway_address = Some(gateway_endpoint);
         Ok(endpoint)
@@ -1788,6 +1799,15 @@ pub async fn configured(
     }
     result
 }
+/// The local Gateway's last loopback address, when its port is free again.
+fn previous_gateway(directory: &Path) -> Option<SocketAddr> {
+    let address =
+        loopback_address(read_private(&directory.join(GATEWAY_ADDRESS)).ok()?.trim()).ok()?;
+    // Another program may have taken the port meanwhile; then the Gateway takes a new one.
+    std::net::TcpListener::bind(address).ok()?;
+    Some(address)
+}
+
 fn stable_listen(directory: &Path, configured: SocketAddr) -> Result<SocketAddr> {
     let path = directory.join(CONTROL_PLANE_ADDRESS);
     match fs::symlink_metadata(&path) {
@@ -2052,6 +2072,21 @@ async fn undrain(directory: &Path, endpoint: &str, operator: &str) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_local_gateway_comes_back_on_its_last_port_when_free() {
+        let temp = tempfile::tempdir().unwrap();
+        assert_eq!(previous_gateway(temp.path()), None);
+        let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = taken.local_addr().unwrap();
+        write_private(temp.path(), GATEWAY_ADDRESS, address.to_string().as_bytes()).unwrap();
+        // Another program holds the port: the Gateway takes a new one.
+        assert_eq!(previous_gateway(temp.path()), None);
+        drop(taken);
+        assert_eq!(previous_gateway(temp.path()), Some(address));
+        write_private(temp.path(), GATEWAY_ADDRESS, b"10.0.0.1:80").unwrap();
+        assert_eq!(previous_gateway(temp.path()), None);
+    }
+
     #[test]
     fn enrolled_control_plane_origin_cannot_be_retargeted_by_config() {
         let temp = tempfile::tempdir().unwrap();
