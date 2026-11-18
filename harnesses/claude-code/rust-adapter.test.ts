@@ -856,8 +856,8 @@ it("runs commands in a remote Workspace through its sandbox, with no built-in to
   await expect(readFile(join(run.workspace, "command-output.txt"))).rejects.toThrow();
 }, 30000);
 
-it("keeps no native memory in a remote Workspace, even when handed a memory directory", async () => {
-  // The memory folder is on the Worker Host, and a remote turn runs nothing there.
+it("keeps native memory on this host in a remote Workspace, out of the sandbox's reach", async () => {
+  // The memory tools run here, confined to the memory folder; the Workspace stays in the sandbox.
   const run = await invoke({
     prompt: "remote-command",
     actions: ["files:read", "files:write", "commands:execute"],
@@ -865,7 +865,21 @@ it("keeps no native memory in a remote Workspace, even when handed a memory dire
     nativeMemory: true,
   });
   expect(run.completions[0]?.succeeded, run.completions[0]?.result).toBe(true);
-}, 30000);
+  const remembered = await invoke({
+    prompt: "remember-native",
+    actions: ["files:read"],
+    remoteWorkspace: true,
+    nativeMemory: true,
+  });
+  expect(remembered.completions[0]?.succeeded, remembered.completions[0]?.result).toBe(true);
+  expect(JSON.parse(remembered.completions[0]?.result ?? "{}")).toMatchObject({
+    memoryWrite: true,
+    memoryRead: true,
+    workspaceWrite: false,
+    elsewhereRead: false,
+  });
+  expect(await readFile(join(remembered.memory, "MEMORY.md"), "utf8")).toBe("- fixture memory\n");
+}, 60000);
 
 it("refuses web actions in a remote Workspace, which would run on the Worker Host", async () => {
   for (const action of ["web:fetch", "web:search"]) {

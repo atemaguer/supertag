@@ -193,6 +193,9 @@ database_tests! {
     claude_keeps_native_memory_on_its_tags_volume_across_hosts;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+    claude_keeps_native_memory_in_remote_workspaces_across_hosts;
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
     claude_runs_commands_only_with_the_hosts_unsandboxed_opt_in;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
@@ -1656,6 +1659,165 @@ async fn claude_runs_commands_only_with_the_hosts_unsandboxed_opt_in(
             assert!(task["attempt_id"].is_null(), "{task}");
         }
     }
+    services.stop().await
+}
+
+/// Claude Code on E2B hosts keeps its auto-memory on the Worker Host, never in the sandbox: one
+/// host's remote turn writes it to the Tag's Volume with its own memory tools, and another host's
+/// remote turn, in another sandbox, reads it.
+async fn claude_keeps_native_memory_in_remote_workspaces_across_hosts(
+    database: String,
+) -> Result<()> {
+    let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
+        return Ok(());
+    };
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let transport = repo_path("harnesses/sdk/dist/rust-workspace-provider/transport.js")?;
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().canonicalize()?;
+    let native = claude_fixture(&root)?;
+    let provider = root.join("remote-provider.mjs");
+    std::fs::write(
+        &provider,
+        include_str!("../fixtures/cursor/remote-provider.mjs"),
+    )?;
+    std::fs::write(
+        root.join("modules.json"),
+        serde_json::to_vec(&serde_json::json!({ "providerTransport": transport }))?,
+    )?;
+    std::fs::write(root.join("provider-kind"), "e2b")?;
+    let source = root.join("source");
+    std::fs::create_dir(&source)?;
+    let git = |args: &[&str]| {
+        let mut command = Command::new("git");
+        command
+            .current_dir(&source)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .arg("-c")
+            .arg("user.name=SuperTag Fixture")
+            .arg("-c")
+            .arg("user.email=fixture@example.invalid")
+            .args(args);
+        command
+    };
+    success(git(&["init", "--quiet"])).await?;
+    std::fs::write(source.join("workspace.txt"), b"initial-content\n")?;
+    success(git(&["add", "workspace.txt"])).await?;
+    success(git(&["commit", "--quiet", "-m", "Fixture source"])).await?;
+    let base = String::from_utf8(success(git(&["rev-parse", "HEAD"])).await?)?;
+    let vault = root.join("vault");
+    std::fs::create_dir(&vault)?;
+    std::fs::set_permissions(&vault, std::fs::Permissions::from_mode(0o700))?;
+    let services = LanguageServices::start(&root, &database).await?;
+    services
+        .operator(&[
+            "volume",
+            "put",
+            "vault",
+            "--source",
+            &format!("file://{}", vault.display()),
+            "--operation-id",
+            "register-vault",
+        ])
+        .await?;
+    services
+        .operator(&[
+            "tag",
+            "put",
+            "keeper",
+            "--instructions",
+            "Keep what matters.",
+            "--harness",
+            "claude-code",
+            "--allow",
+            "files:read",
+            "--workspace-id",
+            "remote",
+            "--workspace-base",
+            base.trim(),
+            "--volume",
+            "vault",
+        ])
+        .await?;
+    let run = |state: &'static str, prompt: &'static str| {
+        let services = &services;
+        let (root, vault, source, provider) = (
+            root.clone(),
+            vault.clone(),
+            source.clone(),
+            provider.clone(),
+        );
+        let (interpreter, entry, native) = (interpreter.clone(), entry.clone(), native.clone());
+        async move {
+            let session = Uuid::new_v4().to_string();
+            let task = services
+                .operator(&[
+                    "task",
+                    "submit",
+                    "--tag",
+                    "keeper",
+                    "--session",
+                    &session,
+                    prompt,
+                ])
+                .await?;
+            let task_id = task["task_id"].as_str().context("Task ID")?.to_owned();
+            let mut host = services.worker(
+                "claude-code",
+                &root.join(state),
+                Path::new(&interpreter),
+                &entry,
+            );
+            host.arg("--claude-path")
+                .arg(&native)
+                .arg("--workspace-id")
+                .arg("remote")
+                .arg("--workspace-source")
+                .arg(&source)
+                .arg("--e2b-workspace-provider")
+                .arg(&interpreter)
+                .arg("--e2b-workspace-provider-arg")
+                .arg(&provider)
+                .arg("--volume")
+                .arg(format!("vault={}", vault.display()))
+                .env("ANTHROPIC_API_KEY", "fixture-provider-key")
+                .env("E2B_API_KEY", "synthetic-e2b-provider-key")
+                .env("E2B_DOMAIN", "fixture.e2b.invalid")
+                .env("SUPERTAG_E2B_TEMPLATE", "fixture-template");
+            // The remote round trip (allocate, stage, capture, stop) outlasts WAIT under load.
+            let output = timeout(Duration::from_secs(120), host.output()).await??;
+            ensure!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let task = services.operator(&["get", "task", &task_id]).await?;
+            assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+            anyhow::Ok(task["result"].as_str().unwrap_or_default().to_owned())
+        }
+    };
+    let written = run("first-host", "remember-native").await?;
+    let written: Value =
+        serde_json::from_str(&written).with_context(|| format!("turn result: {written}"))?;
+    assert_eq!(written["memoryWrite"], true, "{written}");
+    // The memory tools reach only the memory folder: not the host's checkout, nothing else.
+    assert_eq!(written["workspaceWrite"], false, "{written}");
+    assert_eq!(written["elsewhereRead"], false, "{written}");
+    let recalled = run("second-host", "recall-native").await?;
+    assert!(
+        recalled.contains("- fixture memory"),
+        "another host's remote turn reads the memory: {recalled}"
+    );
+    let tag = format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(b"keeper"));
+    assert!(
+        vault
+            .join(format!("tags/{tag}/native-memory/claude-code"))
+            .is_dir(),
+        "the memory is on the Tag's Volume"
+    );
     services.stop().await
 }
 

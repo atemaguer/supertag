@@ -712,16 +712,18 @@ Claude Code and Codex keep harness memory this way:
 
 - **Claude Code** keeps its auto-memory folder. A read-only turn may still write to its memory
   folder, and nowhere else. The folder belongs to the store, not to the checkout, so a turn in
-  another checkout path, or on another host, finds the same memory.
+  another checkout path, or on another host, finds the same memory. In a remote Workspace (E2B,
+  Modal, or a local-vm container) the folder stays on the Worker Host, where Claude Code runs:
+  Claude Code keeps its memories there with its own file tools, confined to the folder, while
+  every tool that touches the Workspace runs in the sandbox, which never reaches the folder.
 - **Codex** keeps its memory folder: notes it saves with its memory tools, and the summary it
   reads at the start of each turn. Each turn is told to search its notes before answering
   anything that may depend on earlier work. Codex's own extraction and consolidation, which run
   extra model calls at startup, stay off, so a note is found by searching, not added to the
   summary. Codex's git repository inside the folder is not kept.
 
-OpenCode and Cursor keep no memory of their own on the Worker Host. A turn in a remote Workspace
-(E2B, Modal, or a local-vm container) keeps no harness memory either: the memory folder is on the
-Worker Host, and a remote turn runs nothing there.
+OpenCode and Cursor keep no memory of their own on the Worker Host. Codex doesn't run in remote
+Workspaces.
 
 `supertag describe tag` lists the copies Worker Hosts hold (`native_memory`), and
 `supertag delete memory --native TAG` drops all of them: each host deletes

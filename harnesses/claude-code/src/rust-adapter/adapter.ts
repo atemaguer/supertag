@@ -606,14 +606,11 @@ export async function runAdapter(
       nativeSessionId: () => nativeSessionId,
       hasPendingExternalApprovals: mcp.hasPendingApprovals,
     });
-    const native = await nativeEnvironment(environment, task.outputPolicy?.directory);
-    const { env, cwd } = native;
-    // A remote Workspace runs nothing on this host, and the memory folder is on this host, so a
-    // remote turn keeps no native memory; the Worker Host grants none, and this holds if it did.
-    const memory = remote ? undefined : native.memory;
-    if (remote) delete env["CLAUDE_COWORK_MEMORY_PATH_OVERRIDE"];
-    // Claude Code keeps its memories with its own file tools. A read-only Task, whose actions
-    // admit none of them, still gets them, confined to the memory directory.
+    const { env, cwd, memory } = await nativeEnvironment(environment, task.outputPolicy?.directory);
+    // Claude Code keeps its memories with its own file tools, which run on this host. A Task whose
+    // actions admit none of them (read-only, or in a remote Workspace, where every Workspace tool
+    // runs in the sandbox) still gets them, confined to the memory directory on this host: the
+    // sandbox never reaches it.
     const memoryOnly = new Set(
       memory ? ["Read", "Write", "Edit"].filter((tool) => !tools.includes(tool)) : [],
     );
@@ -745,7 +742,7 @@ export async function runAdapter(
         TURN_GUIDANCE,
         tagPortfolio(run),
         remote
-          ? "The Task workspace is in a sandbox. Use the mcp__workspace tools, with paths relative to the workspace, for every file and command."
+          ? `The Task workspace is in a sandbox. Use the mcp__workspace tools, with paths relative to the workspace, for every file and command in it.${memory ? " Your memory folder is not in the sandbox: it is on this Worker Host, so keep your memories there with Read, Write, and Edit." : ""}`
           : "",
       ]
         .filter(Boolean)

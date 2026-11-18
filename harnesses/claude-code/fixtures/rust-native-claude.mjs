@@ -887,11 +887,19 @@ async function turn(message) {
     // In a remote Workspace, Claude Code keeps no built-in tool: every file and command tool is
     // the in-process workspace server, whose calls go to the sandbox.
     const offered = (arg("--tools") ?? "").split(",").filter(Boolean);
-    if (offered.some((tool) => !["WebFetch", "WebSearch"].includes(tool)))
+    // Only the memory tools, when the Tag keeps native memory: they reach its folder on the host,
+    // never the host's checkout or anything else on it.
+    const memory = process.env.CLAUDE_COWORK_MEMORY_PATH_OVERRIDE;
+    const builtIn = ["WebFetch", "WebSearch", ...(memory ? ["Read", "Write", "Edit"] : [])];
+    if (offered.some((tool) => !builtIn.includes(tool)))
       throw new Error(`Built-in tools were offered: ${offered}`);
-    // Nor native memory: its folder is on the host.
-    if (process.env.CLAUDE_COWORK_MEMORY_PATH_OVERRIDE)
-      throw new Error("Native memory reached a remote Workspace");
+    if (memory) {
+      if (!(await hook("Write", { file_path: join(memory, "remote.md"), content: "x" })))
+        throw new Error("Remote memory write was denied");
+      for (const path of [join(cwd, "workspace.txt"), "/etc/hosts"])
+        if (await hook("Read", { file_path: path }))
+          throw new Error(`Remote memory tools reached ${path} on the host`);
+    }
     if (await hook("Bash", { command: "echo host" })) throw new Error("Bash was admitted");
     const metadata = { mcp_server: { name: "workspace", source: "sdk" } };
     const input = { command: "echo ran > command-output.txt" };
