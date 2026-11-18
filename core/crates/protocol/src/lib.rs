@@ -38,6 +38,9 @@ pub const FILE_DESCRIPTOR_SET: &[u8] =
 /// Codex. The sentence it asks for reaches the person at once as its own message, before the work.
 pub const TURN_GUIDANCE: &str = "When a turn will take more than a moment, open it with one short sentence saying what you are about to do, as its own message, then do it. Answer a quick question directly.";
 pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
+/// The variable naming a Codex Attempt's executor socket on a remote Workspace: Codex runs its
+/// commands and file operations in the sandbox through it.
+pub const CODEX_EXEC_SOCKET: &str = "SUPERTAG_CODEX_EXEC_SOCKET";
 /// How a Worker Host says its Attempt cannot continue its Session yet: the Session's last delivery
 /// is not where it can read it. It then reports that it waits for the host holding it.
 pub const WAITS_FOR_HOLDER: &str = "waits for the Worker Host holding this Session's last delivery";

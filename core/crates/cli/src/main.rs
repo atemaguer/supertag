@@ -640,6 +640,13 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
     },
     #[command(name = "__codex-adapter", hide = true)]
     CodexAdapter(CodexAdapterArgs),
+    /// Codex's executor program on a remote Workspace: carries stdin and stdout to the Attempt's
+    /// exec-server socket.
+    #[command(name = "__codex-exec-bridge", hide = true)]
+    CodexExecBridge {
+        #[arg(long)]
+        socket: PathBuf,
+    },
     /// The local Gateway and its current operator token, as JSON for the terminal UI.
     #[command(name = "__local-gateway", hide = true)]
     LocalGateway,
@@ -855,6 +862,7 @@ fn dispatch(cli: Cli) -> Result<()> {
                     }
                     | Command::Test { .. }
                     | Command::CodexAdapter(_)
+                    | Command::CodexExecBridge { .. }
                     | Command::AdapterGuardian { .. }
                     | Command::LocalGateway
             ),
@@ -872,6 +880,7 @@ fn dispatch(cli: Cli) -> Result<()> {
             .enable_all()
             .build()?
             .block_on(harness::run_codex(args)),
+        Command::CodexExecBridge { socket } => supertag_worker_host::run_codex_exec_bridge(&socket),
         command => tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?
@@ -1208,7 +1217,7 @@ async fn run(command: Command) -> Result<()> {
             );
             let workspaces = adapter.workspace_mappings()?;
             use supertag_worker_host::{ProviderAuthority, ProviderConfig};
-            let remote_provider = if let Some(executable) = e2b_workspace_provider {
+            let mut remote_provider = if let Some(executable) = e2b_workspace_provider {
                 Some(ProviderConfig {
                     executable,
                     arguments: e2b_workspace_provider_arg,
@@ -1217,6 +1226,7 @@ async fn run(command: Command) -> Result<()> {
                         domain: std::env::var("E2B_DOMAIN").ok(),
                         template: std::env::var("SUPERTAG_E2B_TEMPLATE").ok(),
                     },
+                    codex_version: None,
                 })
             } else if let Some(executable) = modal_workspace_provider {
                 let required = |name| {
@@ -1241,18 +1251,21 @@ async fn run(command: Command) -> Result<()> {
                             .unwrap_or_else(|_| "main".into()),
                         image: std::env::var("SUPERTAG_MODAL_WORKSPACE_IMAGE").ok(),
                     },
+                    codex_version: None,
                 })
             } else if let Some(executable) = workspace_provider {
                 Some(ProviderConfig {
                     executable,
                     arguments: workspace_provider_arg,
                     authority: ProviderAuthority::generic(&workspace_provider_env)?,
+                    codex_version: None,
                 })
             } else if let Some(executable) = local_vm_workspace_provider {
                 Some(ProviderConfig {
                     executable,
                     arguments: local_vm_workspace_provider_arg,
                     authority: ProviderAuthority::local_vm(),
+                    codex_version: None,
                 })
             } else if local_vm {
                 let (executable, entry) = harness::local_vm_bridge()?;
@@ -1260,6 +1273,7 @@ async fn run(command: Command) -> Result<()> {
                     executable,
                     arguments: vec![entry.into_os_string()],
                     authority: ProviderAuthority::local_vm(),
+                    codex_version: None,
                 })
             } else {
                 None
@@ -1269,15 +1283,22 @@ async fn run(command: Command) -> Result<()> {
                     || workspaces.iter().all(|mapping| mapping.setup.is_none()),
                 "Workspace setup prepares local checkouts; remote Workspaces and shared execution cannot use it"
             );
-            if remote_provider.is_some() {
+            if let Some(config) = remote_provider.as_mut() {
                 ensure!(
                     matches!(
                         harness,
-                        HarnessKind::Cursor | HarnessKind::ClaudeCode | HarnessKind::Opencode
+                        HarnessKind::Cursor
+                            | HarnessKind::ClaudeCode
+                            | HarnessKind::Opencode
+                            | HarnessKind::Codex
                     ) && !workspaces.is_empty()
                         && !execution_profile.allow_unsandboxed_commands,
-                    "remote Workspace placement requires Cursor, Claude Code, or OpenCode and a named Workspace without unsandboxed commands"
+                    "remote Workspace placement requires Cursor, Claude Code, OpenCode, or Codex and a named Workspace without unsandboxed commands"
                 );
+                // Codex's exec-server in each sandbox must be exactly this host's Codex.
+                if harness == HarnessKind::Codex {
+                    config.codex_version = Some(adapter.codex_version()?);
+                }
                 execution_profile.remote_file_workspace = true;
                 execution_profile.declared_task_outputs = true;
                 execution_profile.unverified_workspace_provider = remote_provider
@@ -1472,6 +1493,7 @@ async fn run(command: Command) -> Result<()> {
         Command::AdapterGuardian { .. } => unreachable!("guardian runs outside Tokio"),
         Command::LocalGateway => unreachable!("local discovery runs outside Tokio"),
         Command::CodexAdapter(_) => unreachable!("Codex adapter uses a dedicated runtime"),
+        Command::CodexExecBridge { .. } => unreachable!("the Codex bridge runs outside Tokio"),
         Command::Tag {
             connection,
             command,

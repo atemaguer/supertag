@@ -152,11 +152,14 @@ pub(super) fn resolve_attempt(
         return None;
     }
     // Cursor, Claude Code, and OpenCode run every Workspace tool in a remote sandbox through
-    // split execution.
+    // split execution; Codex through its own exec-server there.
     if profile.remote_file_workspace
         && (!matches!(
             harness,
-            HarnessKind::Cursor | HarnessKind::ClaudeCode | HarnessKind::Opencode
+            HarnessKind::Cursor
+                | HarnessKind::ClaudeCode
+                | HarnessKind::Opencode
+                | HarnessKind::Codex
         ) || task.workspace.is_none())
     {
         return None;
@@ -233,6 +236,20 @@ pub(crate) fn lane_requirement(
             ),
         ));
     }
+    // Codex in a remote sandbox has no sandbox of its own there to keep a Task without commands
+    // from running them, so it runs only Tasks that may.
+    if profile.remote_file_workspace
+        && harness == HarnessKind::Codex
+        && !task
+            .allowed_actions
+            .iter()
+            .any(|action| action == "commands:execute")
+    {
+        return Some((
+            "codex-remote-commands".into(),
+            "Codex on a remote Workspace runs only Tasks with commands:execute; run the Tag on a local Codex Worker Host, or add commands:execute".into(),
+        ));
+    }
     let name = match harness {
         HarnessKind::ClaudeCode => "claude-code",
         HarnessKind::Opencode => "opencode",
@@ -297,7 +314,14 @@ mod tests {
         };
         assert!(resolve_attempt(&task, HarnessKind::Cursor, &profile).is_none());
         task.workspace = Some(WorkspaceSpec::default());
+        // Codex runs there only with commands: nothing else keeps it in bounds in the sandbox.
         assert!(resolve_attempt(&task, HarnessKind::Codex, &profile).is_none());
+        assert_eq!(
+            lane_requirement(&task, HarnessKind::Codex, &profile)
+                .unwrap()
+                .0,
+            "codex-remote-commands"
+        );
         assert!(
             resolve_attempt(&task, HarnessKind::Cursor, &profile)
                 .unwrap()
@@ -311,9 +335,13 @@ mod tests {
                 .unwrap()
                 .remote_file_workspace
         );
-        // Claude Code and OpenCode split the same way; other harnesses never take a remote
-        // Workspace.
-        for harness in [HarnessKind::ClaudeCode, HarnessKind::Opencode] {
+        // Claude Code and OpenCode split the same way, and Codex runs its own exec-server there;
+        // other harnesses never take a remote Workspace.
+        for harness in [
+            HarnessKind::ClaudeCode,
+            HarnessKind::Opencode,
+            HarnessKind::Codex,
+        ] {
             assert!(
                 resolve_attempt(&task, harness, &profile)
                     .unwrap()

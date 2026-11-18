@@ -131,6 +131,32 @@ pub struct AdapterOptions {
 }
 
 impl AdapterOptions {
+    /// The Codex executable's version (`codex --version` without its `codex-cli ` prefix), which
+    /// a remote Workspace's sandbox image must contain too.
+    pub fn codex_version(&self) -> Result<String> {
+        let executable =
+            executable_path(self.codex_path.clone().unwrap_or_else(|| "codex".into()))?;
+        let output = std::process::Command::new(&executable)
+            .arg("--version")
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .with_context(|| format!("run {} --version", executable.display()))?;
+        ensure!(output.status.success(), "Codex version probe failed");
+        let version = std::str::from_utf8(&output.stdout)
+            .ok()
+            .and_then(|line| line.trim().strip_prefix("codex-cli "))
+            .filter(|version| {
+                !version.is_empty()
+                    && version.len() <= 64
+                    && version
+                        .chars()
+                        .all(|value| value.is_ascii_alphanumeric() || matches!(value, '.' | '-'))
+            })
+            .context("invalid Codex version response")?;
+        Ok(version.to_owned())
+    }
+
     pub fn has_options(&self) -> bool {
         self != &Self::default()
     }
@@ -726,6 +752,8 @@ pub async fn run_codex(args: CodexAdapterArgs) -> Result<()> {
         .chain(["PATH", "TMPDIR", "LANG"])
         // The Attempt's egress proxy, for a Task with a network scope.
         .chain(supertag_worker_host::egress::ADAPTER_VARIABLES)
+        // A remote Workspace's executor socket, where Codex runs commands and file operations.
+        .chain([supertag_protocol::CODEX_EXEC_SOCKET])
         .filter_map(|name| std::env::var_os(name).map(|value| (OsString::from(name), value)))
         .collect();
     supertag_codex_adapter::run(

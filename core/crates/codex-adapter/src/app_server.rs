@@ -140,8 +140,10 @@ impl Transport {
     ) -> Result<Value> {
         let id = self.send(method, params).await?;
         // The first answer also waits for the app server process to start, which a loaded
-        // machine can stretch past one exchange's bound.
-        let limit = if method == "initialize" {
+        // machine can stretch past one exchange's bound. Starting or resuming a thread connects
+        // its environment: on a remote Workspace that starts the exec-server in the sandbox and
+        // reads its configuration there.
+        let limit = if matches!(method, "initialize" | "thread/start" | "thread/resume") {
             STARTUP_TIMEOUT
         } else {
             RPC_TIMEOUT

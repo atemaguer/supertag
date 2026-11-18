@@ -16,6 +16,9 @@ pub(crate) struct Policy {
     pub(crate) egress: Option<Egress>,
     /// The Tag's Codex memory is staged in CODEX_HOME: Codex reads it and keeps notes.
     pub(crate) memory: bool,
+    /// The Workspace is a remote sandbox: every command and file operation runs there, through
+    /// Codex's exec-server, and the sandbox is the boundary.
+    pub(crate) remote: bool,
 }
 
 /// The Attempt's egress proxy, from the Worker Host.
@@ -141,6 +144,7 @@ impl Policy {
             scope: None,
             egress: None,
             memory: false,
+            remote: false,
         };
         ensure!(
             !policy.write || disposable,
@@ -196,7 +200,8 @@ pub(crate) fn user_home() -> Result<PathBuf> {
 /// origin got 403 from the managed proxy, a direct connection could not resolve, and code-mode
 /// JavaScript has no fetch).
 pub(crate) fn code_mode_host(policy: &Policy) -> bool {
-    policy.commands && policy.network
+    // In a remote sandbox no Codex sandbox limits the network, so code mode always works there.
+    policy.commands && (policy.network || policy.remote)
 }
 
 pub(crate) fn arguments(
@@ -287,9 +292,29 @@ pub(crate) fn arguments(
     configuration.push(format!("features.unified_exec={}", policy.commands));
     configuration.push(format!(
         "web_search=\"{}\"",
-        if policy.search { "live" } else { "disabled" }
+        // Provider-hosted search is egress outside a remote sandbox's relay.
+        if policy.search && !policy.remote {
+            "live"
+        } else {
+            "disabled"
+        }
     ));
-    if policy.commands || policy.write || policy.scope.is_some() {
+    if policy.remote {
+        // The sandbox is the boundary: Codex's own sandbox cannot run inside it, and its managed
+        // network proxy, here on the Worker Host, is unreachable from it. The sandbox's only route
+        // out is SuperTag's egress relay, whose variables its commands already have.
+        ensure!(
+            policy.commands && policy.scope.is_none(),
+            "Codex on a remote Workspace runs only Tasks with commands:execute and no path scope"
+        );
+        configuration.extend(
+            [
+                "sandbox_mode=\"danger-full-access\"",
+                "features.network_proxy.enabled=false",
+            ]
+            .map(str::to_owned),
+        );
+    } else if policy.commands || policy.write || policy.scope.is_some() {
         // Every Task that writes, runs commands, or has a path scope uses SuperTag's own
         // `supertag` permission profile, so its filesystem table (protected entries, Workspace
         // copies, the path scope) applies whatever the network access.
@@ -374,7 +399,7 @@ pub(crate) fn arguments(
         );
         configuration.push("sandbox_mode=\"read-only\"".into());
     }
-    if let Some(egress) = &policy.egress {
+    if let Some(egress) = policy.egress.as_ref().filter(|_| !policy.remote) {
         configuration.push(format!(
             "{COMMAND_ENVIRONMENT}={}",
             inline_table(egress.command_environment()?)?
@@ -669,6 +694,47 @@ mod tests {
 
     fn actions(names: &[&str]) -> Vec<String> {
         names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    /// On a remote Workspace the sandbox is the boundary: no Codex sandbox, no managed proxy, no
+    /// provider-hosted search, and code mode without web:fetch.
+    #[test]
+    fn a_remote_workspace_runs_codex_unsandboxed_inside_its_sandbox() -> Result<()> {
+        let workspace = tempfile::tempdir()?;
+        let mut policy = Policy::from_actions(
+            &actions(&[
+                "files:read",
+                "files:write",
+                "commands:execute",
+                "web:search",
+            ]),
+            true,
+        )?;
+        policy.remote = true;
+        policy.egress = Some(Egress::default());
+        let args = arguments(workspace.path(), None, None, &policy)?;
+        for setting in [
+            "sandbox_mode=\"danger-full-access\"",
+            "features.network_proxy.enabled=false",
+            "web_search=\"disabled\"",
+            "features.code_mode_host=true",
+        ] {
+            assert!(args.contains(&setting.to_owned()), "{setting}");
+        }
+        assert!(
+            !args.iter().any(|arg| arg.starts_with("default_permissions")
+                || arg.starts_with("permissions.")
+                || arg.starts_with("shell_environment_policy"))
+        );
+        let thread = thread_parameters(workspace.path(), &policy, &args)?;
+        assert_eq!(thread["sandbox"], "danger-full-access");
+        // Without commands, or with a path scope, Codex has nothing to keep it in bounds there.
+        let mut read_only = Policy::from_actions(&actions(&["files:read"]), true)?;
+        read_only.remote = true;
+        assert!(arguments(workspace.path(), None, None, &read_only).is_err());
+        policy.scope = Some(Scope::default());
+        assert!(arguments(workspace.path(), None, None, &policy).is_err());
+        Ok(())
     }
 
     /// A project Codex trusts loads its own `.codex/config.toml`, which can add MCP servers. On a

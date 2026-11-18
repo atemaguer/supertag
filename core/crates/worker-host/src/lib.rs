@@ -6,6 +6,7 @@ mod capture_volumes;
 mod changed_paths;
 mod checkpoints;
 mod cleanup_failure;
+mod codex_exec;
 pub mod context;
 mod credentials;
 pub mod egress;
@@ -33,6 +34,7 @@ mod workspaces;
 
 pub use adapter::unsandboxed_caveat;
 pub use artifact_direct::{ArtifactPeers, ArtifactSourceConfig};
+pub use codex_exec::run_bridge as run_codex_exec_bridge;
 pub use credentials::{
     is_provider_secret, load_provider_credentials, provider_environment, provider_environment_for,
     provider_variable, validate_opencode_model,
@@ -331,7 +333,10 @@ pub async fn run(
             && (options.remote_provider.is_none()
                 || (matches!(
                     options.harness,
-                    HarnessKind::Cursor | HarnessKind::ClaudeCode | HarnessKind::Opencode
+                    HarnessKind::Cursor
+                        | HarnessKind::ClaudeCode
+                        | HarnessKind::Opencode
+                        | HarnessKind::Codex
                 ) && !options.workspaces.is_empty()
                     && !options.execution_profile.allow_unsandboxed_commands)),
         "invalid Worker Host remote Workspace profile"

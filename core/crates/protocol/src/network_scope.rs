@@ -550,7 +550,10 @@ pub fn reason(
     // proxy credential and placeholders, so the lane applies the scope and its credentials.
     let relayed = profile.remote_file_workspace
         && profile.remote_egress_relay
-        && matches!(harness, HarnessKind::Cursor | HarnessKind::ClaudeCode);
+        && matches!(
+            harness,
+            HarnessKind::Cursor | HarnessKind::ClaudeCode | HarnessKind::Codex
+        );
     if !relayed && let Some(reason) = harness_reason(task, harness) {
         return Some(reason);
     }

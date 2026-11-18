@@ -13,6 +13,7 @@ mod notifications;
 mod pricing;
 mod questions;
 mod recap;
+mod remote;
 mod schedules;
 mod skills;
 mod tag_sessions;
@@ -244,11 +245,21 @@ async fn execute(
         !options.timeout.is_zero(),
         "Codex execution timeout must be positive"
     );
-    let workspace = options
+    let local_workspace = options
         .workspace
         .canonicalize()
         .context("Codex workspace is unavailable")?;
-    ensure!(workspace.is_dir(), "Codex workspace must be a directory");
+    ensure!(
+        local_workspace.is_dir(),
+        "Codex workspace must be a directory"
+    );
+    // On a remote Workspace, Codex works in the sandbox's checkout through the Worker Host's
+    // executor socket; this host's directory only holds the process.
+    let exec_socket = remote::socket(&options.environment)?;
+    let workspace = match &exec_socket {
+        Some(socket) => remote::checkout(socket, options.timeout).await?,
+        None => local_workspace.clone(),
+    };
     let model = match &task.attempt_execution {
         Some(attempt) => attempt
             .selection
@@ -264,6 +275,7 @@ async fn execute(
     };
     let mut policy =
         config::Policy::from_actions(&task.allowed_actions, options.allow_workspace_write)?;
+    policy.remote = exec_socket.is_some();
     policy.writable_roots = task
         .workspace
         .iter()
@@ -298,7 +310,10 @@ async fn execute(
             output_directory: output_directory.clone(),
         });
     }
-    if let Some(scope) = supertag_protocol::network_scope::of_task(task) {
+    // A remote sandbox's commands reach the network only through its relay, set up by the
+    // provider; Codex here takes no part.
+    if let Some(scope) = supertag_protocol::network_scope::of_task(task).filter(|_| !policy.remote)
+    {
         policy.egress = Some(egress(&options.environment, scope)?);
     }
     let effort = task
@@ -314,6 +329,13 @@ async fn execute(
     let skills = skills::prepare(task, resolved_skills, authentication.home())?;
     if let Some(directory) = &native_memory {
         native_memory::copy_in(directory, authentication.home())?;
+    }
+    if let Some(socket) = &exec_socket {
+        remote::write_environments(
+            authentication.home(),
+            &std::env::current_exe().context("the SuperTag executable is unavailable")?,
+            socket,
+        )?;
     }
     let previous_checkpoint = previous_checkpoint.filter(|checkpoint| {
         checkpoint::resumes(checkpoint, &questions.manifest(), &skills.manifest)
@@ -390,7 +412,7 @@ async fn execute(
     let mut command = Command::new(&executable);
     command
         .args(arguments)
-        .current_dir(&workspace)
+        .current_dir(&local_workspace)
         .env_clear()
         .envs(environment)
         .stdin(Stdio::piped())

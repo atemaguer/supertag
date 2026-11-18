@@ -60,6 +60,8 @@ pub struct ProviderConfig {
     pub executable: PathBuf,
     pub arguments: Vec<OsString>,
     pub authority: ProviderAuthority,
+    /// For a Codex Worker Host, its Codex version, which each sandbox image must contain.
+    pub codex_version: Option<String>,
 }
 
 #[derive(Clone)]
@@ -378,6 +380,8 @@ pub(crate) struct RemoteProvider {
     egress: Option<RemoteWorkspaceEgress>,
     /// The Task's dependency cache key; empty for a preparation sandbox.
     dependency_cache: String,
+    /// This host's Codex version for a Codex Attempt's sandbox; empty otherwise.
+    codex_version: String,
 }
 
 impl RemoteProvider {
@@ -477,6 +481,7 @@ impl RemoteProvider {
                 allocate_timeout: config.allocate_timeout(),
                 egress: None,
                 dependency_cache: String::new(),
+                codex_version: config.codex_version.clone().unwrap_or_default(),
             }),
             Err(error) => {
                 reap(&mut child)
@@ -553,8 +558,12 @@ impl RemoteProvider {
                         prepare,
                         egress: self.egress.clone(),
                         dependency_cache: self.dependency_cache.clone(),
-                        // Codex does not run on a remote Workspace yet.
-                        codex_version: String::new(),
+                        // A preparation sandbox holds trusted content only and runs no Codex.
+                        codex_version: if prepare {
+                            String::new()
+                        } else {
+                            self.codex_version.clone()
+                        },
                     },
                     deadline,
                 )?)
@@ -1252,6 +1261,7 @@ mod tests {
             executable: "/bin/true".into(),
             arguments: Vec::new(),
             authority,
+            codex_version: None,
         };
         let generic = config(ProviderAuthority::generic(&names).unwrap());
         assert!(!generic.verified());
@@ -1312,6 +1322,7 @@ mod tests {
                     .map(|(name, value)| ((*name).into(), (*value).into()))
                     .collect(),
             },
+            codex_version: None,
         };
         let local = config(
             &[("SUPERTAG_LOCAL_VM_IMAGE", "first:1")],
@@ -1371,6 +1382,7 @@ mod tests {
                 domain: None,
                 template: None,
             },
+            codex_version: None,
         };
         let scope = original.authority_fingerprint();
         assert!(valid_sha256(&scope));
@@ -1406,6 +1418,7 @@ mod tests {
                 environment: "main".into(),
                 image: None,
             },
+            codex_version: None,
         };
         let scope = config.authority_fingerprint();
         let mut changed = config.clone();
@@ -1729,6 +1742,7 @@ mod tests {
                 domain: Some("fixture.invalid".into()),
                 template: Some("fixture-template".into()),
             },
+            codex_version: None,
         }
     }
     async fn fixture() -> (tempfile::TempDir, RemoteProvider, Mock, CancellationToken) {

@@ -41,6 +41,7 @@ pub(crate) type Replacer = tokio::sync::mpsc::Sender<
 #[derive(Clone)]
 enum Provider {
     Sandbox {
+        channel: Channel,
         client: HarnessWorkspaceClient<Channel>,
         token: String,
     },
@@ -54,12 +55,16 @@ enum Provider {
 /// it could not be prepared.
 pub(crate) type SandboxReady =
     tokio::sync::watch::Sender<Option<Result<(Channel, String), String>>>;
+/// The receiving end of [`SandboxReady`].
+pub(crate) type SandboxSource =
+    tokio::sync::watch::Receiver<Option<Result<(Channel, String), String>>>;
 
 impl RemoteWorkspace {
     pub(crate) fn new(channel: Channel, token: String) -> Self {
         Self {
             provider: Provider::Sandbox {
-                client: client(channel),
+                client: client(channel.clone()),
+                channel,
                 token,
             },
             operation: Arc::default(),
@@ -94,6 +99,20 @@ impl RemoteWorkspace {
             operation: Arc::default(),
             replacer: None,
             replaced: Arc::default(),
+        }
+    }
+
+    /// Where the sandbox's provider helper is reached once it is staged, for Codex's executor;
+    /// None for shared execution, which has no sandbox.
+    pub(crate) fn sandbox_ready(&self) -> Option<SandboxSource> {
+        match &self.provider {
+            Provider::Sandbox { channel, token, .. } => {
+                let (_ready, source) =
+                    tokio::sync::watch::channel(Some(Ok((channel.clone(), token.clone()))));
+                Some(source)
+            }
+            Provider::Pending(ready) => Some(ready.clone()),
+            Provider::Shared(_) => None,
         }
     }
 
@@ -173,7 +192,9 @@ impl RemoteWorkspace {
                 }
                 input => access.execute(input).await,
             },
-            Provider::Sandbox { client, token } => sandbox(client, token, input, deadline).await,
+            Provider::Sandbox { client, token, .. } => {
+                sandbox(client, token, input, deadline).await
+            }
             Provider::Pending(ready) => {
                 let mut ready = ready.clone();
                 let prepared = time::timeout_at(deadline, ready.wait_for(Option::is_some))

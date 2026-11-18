@@ -665,9 +665,15 @@ pub fn reason(
             "tools in a remote Workspace sandbox reach only the Workspace, so they cannot grant additionalDirectories; run the Tag on a local Worker Host".to_owned(),
         );
     }
+    // Codex's exec-server reads and writes the sandbox directly, past the provider's file tools.
+    if profile.remote_file_workspace && harness == HarnessKind::Codex {
+        return Some(
+            "Codex on a remote Workspace cannot apply a path scope yet; run the Tag on a local Codex Worker Host, or remove the path scope from the Tag's Permission Sets".to_owned(),
+        );
+    }
     if profile.remote_file_workspace && has(task, "commands:execute") && !scope.hidden.is_empty() {
         return Some(format!(
-            "commands in a remote Workspace sandbox can read hidden paths ({}); remove commands:execute or the hidden paths from the Tag's Permission Sets, or run the Tag on Codex",
+            "commands in a remote Workspace sandbox can read hidden paths ({}); remove commands:execute or the hidden paths from the Tag's Permission Sets, or run the Tag on a local Codex Worker Host",
             listed(&scope.hidden)
         ));
     }
@@ -1107,6 +1113,14 @@ mod tests {
                     HarnessKind::Codex,
                     &local
                 ));
+                // On a remote Workspace its exec-server reads and writes past any scope.
+                let remote_codex = reason(
+                    &task(actions, scope.clone(), true),
+                    HarnessKind::Codex,
+                    &remote,
+                )
+                .unwrap();
+                assert!(remote_codex.contains("local"), "{remote_codex}");
             }
         }
         for harness in [HarnessKind::ClaudeCode, HarnessKind::Opencode] {

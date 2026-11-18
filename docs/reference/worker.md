@@ -90,7 +90,7 @@ turns. Reported tokens are not a billing cap. See [Budgets and allocation](coord
 
 | Harness | Adapter | Credentials it receives | Commands |
 | --- | --- | --- | --- |
-| `codex` | Built into `supertag`; drives Codex's app-server | `CODEX_API_KEY`, `OPENAI_API_KEY`, and a copy of a file-backed sign-in | In Codex's sandbox, writable only in the checkout and read-write Workspace Volume copies. A code-mode-only model, such as gpt-6-sol, runs commands only when the Task also has `web:fetch`; see [Codex commands and models](../operations/requirements.md#codex-commands-and-models) |
+| `codex` | Built into `supertag`; drives Codex's app-server | `CODEX_API_KEY`, `OPENAI_API_KEY`, and a copy of a file-backed sign-in | In Codex's sandbox, writable only in the checkout and read-write Workspace Volume copies; or, on a host with an E2B, Modal, or own-provider Workspace, in the Task's sandbox through Codex's exec-server. A code-mode-only model, such as gpt-6-sol, runs commands only when the Task also has `web:fetch`; see [Codex commands and models](../operations/requirements.md#codex-commands-and-models) |
 | `claude-code` | Node bridge on the Claude Agent SDK | `ANTHROPIC_API_KEY` or the host user's sign-in | In a container with `--local-vm`, or in the Task's sandbox on a host with an E2B or Modal Workspace, with no built-in tool. Without a sandbox, only with `--allow-unsandboxed-commands`; a permission hook keeps file tools in the Task's roots |
 | `cursor` | Node bridge on the Cursor SDK | `CURSOR_API_KEY` | In a container with `--local-vm`; in the Task's sandbox on a host with an E2B or Modal Workspace; in a shared execution environment; or without a sandbox, only with `--allow-unsandboxed-commands` |
 | `opencode` | Node bridge | The selected provider's API key, or `--opencode-auth-file` | In a container with `--local-vm`, or in the Task's sandbox on a host with an E2B or Modal Workspace, with every built-in tool off. Without a sandbox, only with `--allow-unsandboxed-commands` |
@@ -167,7 +167,7 @@ the only form: read-only provider-native Modal Volume mounts are on the backlog.
 
 ## Remote sandboxes and shared execution
 
-A Cursor or Claude Code Task can keep its Workspace in an E2B or Modal sandbox
+A Cursor, Claude Code, OpenCode, or Codex Task can keep its Workspace in an E2B or Modal sandbox
 (`--e2b-workspace-provider`, `--modal-workspace-provider`), or in your own provider's
 (`--workspace-provider`; see [Run your own provider](sandbox-providers.md#run-your-own-provider)),
 while the harness and its credentials stay on the host. Only the checkout moves into the sandbox; keys never do. A Task with
@@ -192,6 +192,22 @@ relay in the sandbox, for the Task's commands; see [Run a harness in a sandbox](
 `.devcontainer` settings choose the sandbox image, user, and setup; see
 [Devcontainer settings](devcontainer-subset.md). The
 [sandbox provider contract](sandbox-providers.md) states what a provider must do.
+
+A Codex host can use the same providers. Codex itself, with its keys, stays on the host. Its
+commands and file operations run in the sandbox, through Codex's own exec-server there:
+- **Image:** the sandbox image must contain a `codex` of exactly the host's version on
+  `/usr/local/bin:/usr/bin:/bin`. Allocation fails otherwise, naming the version.
+- **Configuration:** Codex reads its configuration from an empty, read-only directory in the
+  sandbox, so nothing a Task writes there, such as `~/.codex` or a repository's
+  `.codex/config.toml`, adds MCP servers or hooks.
+- **Code mode:** code-mode JavaScript runs on the host in Codex's V8 isolate, which has no
+  network or file access. Only its tool calls reach the sandbox.
+- **Task limits:** the sandbox is the boundary, and Codex's own sandbox is off inside it. So
+  Codex runs there only Tasks with `commands:execute` and no path scope.
+- **Repository Skills:** Codex reads a repository's own Skills (`.agents/skills`) from the
+  checkout, as it does on a local host. They are instructions only. Codex 0.163.0 has no switch
+  that turns them off without hiding SuperTag's Skills too.
+- **Lost sandbox:** a lost sandbox is not replaced. Codex's tool calls fail, and nothing runs on the host instead.
 
 A shared execution environment, served by `supertag-shared-execution`, holds one workspace that
 several Cursor Sessions use. The host connects with `--shared-execution-endpoint` and

@@ -11,7 +11,7 @@ mod schedules;
 mod tag_sessions;
 mod text;
 mod work_sessions;
-mod workspace;
+pub(crate) mod workspace;
 pub(crate) use workspace::RemoteWorkspace;
 mod workstreams;
 
@@ -545,6 +545,21 @@ async fn run(
     shutdown: &CancellationToken,
 ) -> Result<HarnessCompleteRequest> {
     ensure!(assignment.task.is_some(), "assignment is missing its Task");
+    // Codex on a remote Workspace runs its commands and file operations in the sandbox, through
+    // its exec-server there; the bridge lives as long as this run.
+    let codex_exec = remote_workspace
+        .as_ref()
+        .filter(|_| options.harness == HarnessKind::Codex)
+        .and_then(workspace::RemoteWorkspace::sandbox_ready)
+        .map(crate::codex_exec::CodexExecBridge::bind)
+        .transpose()?;
+    let mut egress_environment = egress_environment;
+    if let Some(exec) = &codex_exec {
+        egress_environment.push((
+            supertag_protocol::CODEX_EXEC_SOCKET.to_owned(),
+            exec.socket().into_os_string(),
+        ));
+    }
     let native_memory =
         prepare_native_memory(options, &assignment, &coordination, host_token).await;
     let listener = TcpListener::bind("127.0.0.1:0").await?;

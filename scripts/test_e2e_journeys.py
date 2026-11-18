@@ -42,7 +42,9 @@ credential skips. Claude Code, Cursor, and OpenCode need their bridges staged be
 (scripts/node_bridges.py). Without SUPERTAG_E2E_BINARY every journey is skipped, as in CI.
 
 `--provider modal` runs only ModalJourney instead: one Claude Code turn in a Modal sandbox on the
-signed-in Modal CLI's profile (see its docstring for what it needs).
+signed-in Modal CLI's profile (see its docstring for what it needs). `--provider codex-local-vm`
+runs only CodexLocalVmJourney: one Codex turn whose commands and edits run in a local-vm
+container through Codex's exec-server.
 """
 from __future__ import annotations
 
@@ -704,6 +706,167 @@ spec:
         self.assertEqual(left.strip(), "")
 
 
+class CodexLocalVmJourney(Stack):
+    """One live Codex turn on a remote Workspace whose sandbox is a local-vm container: Codex stays
+    on the Worker Host with this machine's Codex sign-in, and its commands and file edits run in
+    the container through Codex's exec-server. The delivery holds an apply_patch change and a
+    command's output that only the container could produce (Linux, uid 1000), and the Session
+    branch lands on the git server.
+
+    Run with `--provider codex-local-vm`; it spends one small Codex turn. It needs Docker, the
+    local-vm provider built, Codex signed in with a file-backed login, and
+    SUPERTAG_E2E_CODEX_LINUX naming a Linux `codex` binary of exactly this machine's Codex
+    version for the container's architecture (from npm's `@openai/codex@VERSION-linux-ARCH`).
+    """
+
+    timeout = 900
+
+    @classmethod
+    def setUpClass(cls):
+        if not (BINARY and PROVIDER == "codex-local-vm"):
+            raise unittest.SkipTest("run with --provider codex-local-vm; it spends a Codex turn")
+        linux_codex = Path(os.environ.get("SUPERTAG_E2E_CODEX_LINUX", ""))
+        node = shutil.which("node")
+        if not (docker_runs() and LOCAL_VM_PROVIDER.exists() and node and linux_codex.is_file()):
+            raise unittest.SkipTest("needs Docker, the local-vm provider, Node, and SUPERTAG_E2E_CODEX_LINUX")
+        cls.binary = Path(BINARY).resolve()
+        cls.temporary = tempfile.TemporaryDirectory(prefix="st-e2e-codex-")
+        cls.root = Path(cls.temporary.name)
+        # The sandbox image: the local-vm base's essentials, plus this host's Codex version.
+        version = subprocess.run(["codex", "--version"], capture_output=True, text=True,
+                                 check=True).stdout.strip().removeprefix("codex-cli ")
+        context = cls.root / "image"
+        context.mkdir()
+        shutil.copy(linux_codex, context / "codex")
+        (context / "Dockerfile").write_text("""FROM debian:bookworm-slim
+RUN apt-get update \\
+ && apt-get install -y --no-install-recommends ca-certificates git procps python3 \\
+ && rm -rf /var/lib/apt/lists/* \\
+ && useradd --create-home --shell /bin/bash --uid 1000 user \\
+ && find / -xdev -type f -perm /6000 -exec chmod u-s,g-s {} +
+COPY --chmod=755 codex /usr/local/bin/codex
+USER user
+WORKDIR /home/user
+""")
+        cls.image = f"supertag-e2e-codex:{version}"
+        # The machine's own platform, as the local-vm provider runs its containers.
+        native = "linux/arm64" if os.uname().machine in ("arm64", "aarch64") else "linux/amd64"
+        subprocess.run(["docker", "build", "-q", "--platform", native, "-t", cls.image, str(context)],
+                       check=True, capture_output=True)
+        found = subprocess.run(["docker", "run", "--rm", "--platform", native, cls.image, "codex", "--version"],
+                               capture_output=True, text=True).stdout.strip()
+        if found != f"codex-cli {version}":
+            raise unittest.SkipTest(f"SUPERTAG_E2E_CODEX_LINUX is {found or 'not runnable'}, not codex-cli {version}")
+        cls.state = cls.root / "state"
+        cls.state.mkdir(mode=0o700)
+        repository = cls.root / "app"
+        cls.server = cls.root / "server.git"
+        repository.mkdir()
+        git(repository, "init", "-q", "-b", "main")
+        (repository / "workspace.txt").write_text(BASE)
+        git(repository, "add", "-A")
+        git(repository, "commit", "-qm", "Initial")
+        git(cls.root, "init", "-q", "--bare", "-b", "main", str(cls.server))
+        git(repository, "push", "-q", str(cls.server), "main")
+        cls.port = free_port()
+        (cls.state / "supertag.yaml").write_text(f"""version: 1
+name: st-e2e-codex
+services:
+  control-plane:
+    type: control-plane
+    ports: ["127.0.0.1:{cls.port}"]
+    provision:
+      - apiVersion: supertag/v1
+        kind: PermissionSet
+        metadata: {{ name: run }}
+        spec:
+          permissions:
+            - {{ target: runtime, action: files:write }}
+            - {{ target: runtime, action: commands:execute }}
+      - apiVersion: supertag/v1
+        kind: Role
+        metadata: {{ name: Builder }}
+        spec:
+          purpose: "Edit and run commands in the Workspace."
+          permissionSets: [run]
+""")
+        cls.cli("up")
+        cls.addClassCleanup(cls.down)
+        cls.cli("workspace", "put", "handbook-codex", "--remote", f"file://{cls.server}", "--ref", "main")
+        manifest = cls.root / "tag.yaml"
+        manifest.write_text("""apiVersion: supertag/v1
+kind: Tag
+metadata: { name: codex-vm }
+spec:
+  instructions: "Do exactly what the request asks, then reply DONE."
+  roles: [Builder]
+  execution: { harness: codex, models: [gpt-6-sol], efforts: [low] }
+  workspace: { id: handbook-codex }
+""")
+        cls.cli("apply", "-f", str(manifest))
+        key = cls.cli("auth-key", "create", "codex-vm-host", "--role", "host", "--tag", "codex-vm")
+        key = key["auth_key"] if isinstance(key, dict) else key.strip().split()[-1]
+        cls.host_state = cls.root / "host"
+        control_plane = f"http://127.0.0.1:{cls.port}"
+        cls.cli("host", "enroll", "codex-vm-host", "--control-plane", control_plane,
+                "--state-directory", str(cls.host_state), "--auth-key", key)
+        docker = Path(shutil.which("docker")).parent
+        codex = Path(shutil.which("codex")).parent
+        environment = {**cls.environment(), "SUPERTAG_LOCAL_VM_IMAGE": cls.image,
+                       "PATH": f"{codex}:{Path(node).parent}:{docker}:/usr/bin:/bin"}
+        cls.host_log = open(cls.root / "host.log", "w")
+        cls.host = subprocess.Popen(
+            [str(cls.binary), "worker-host", "--control-plane", control_plane,
+             "--state-directory", str(cls.host_state), "--harness", "codex",
+             "--harness-model", "gpt-6-sol",
+             "--remote-workspace", "handbook-codex",
+             "--local-vm-workspace-provider", node,
+             "--local-vm-workspace-provider-arg", str(LOCAL_VM_PROVIDER)],
+            env=environment, stdout=cls.host_log, stderr=subprocess.STDOUT)
+        cls.addClassCleanup(cls.stop_host)
+        cls.addClassCleanup(lambda: subprocess.run(["docker", "image", "rm", "-f", cls.image],
+                                                   capture_output=True))
+
+    @classmethod
+    def stop_host(cls):
+        cls.host.terminate()
+        try:
+            cls.host.wait(30)
+        except subprocess.TimeoutExpired:
+            cls.host.kill()
+        cls.host_log.close()
+
+    def test_a_codex_turn_edits_and_runs_commands_only_in_its_container(self):
+        task_id = self.submit(
+            "codex-vm", "journey-codex",
+            "1. Use apply_patch to append the line `codex-remote` to workspace.txt. "
+            "2. Run the shell command `uname -s > where.txt && id -u >> where.txt` in the "
+            "working directory. Reply DONE.",
+            harness="codex")
+        def read():
+            if self.host.poll() is not None:
+                self.fail("the Worker Host exited:\n" + (self.root / "host.log").read_text()[-6000:])
+            return self.cli("get", "task", task_id)
+        task = self.until(f"Task {task_id}", read, lambda value: value["state"] in TERMINAL)
+        self.assertEqual(task["state"], "TASK_STATE_SUCCEEDED",
+                         (json.dumps(task), (self.root / "host.log").read_text()[-6000:]))
+        landing = self.landing("journey-codex", "branch")
+        self.assertEqual(landing["state"], "landed", landing)
+        self.assertEqual(git(self.server, "rev-parse", landing["branch"]).strip(),
+                         task["workspace_delivery"]["head_commit"])
+        # The apply_patch change, made through the exec-server's file operations.
+        self.assertEqual(git(self.server, "show", f"{landing['branch']}:workspace.txt"),
+                         BASE + "codex-remote\n")
+        # The command ran in the container: Linux, as its unprivileged user, never this host.
+        self.assertEqual(git(self.server, "show", f"{landing['branch']}:where.txt").split(),
+                         ["Linux", "1000"])
+        self.assertNotEqual(os.uname().sysname, "Linux", "the proof needs a non-Linux host")
+        self.assertEqual(git(self.server, "show", "main:workspace.txt"), BASE)
+        left = subprocess.run(["docker", "ps", "-aq", "--filter", f"label=supertag.taskId={task_id}"],
+                              capture_output=True, text=True).stdout
+        self.assertEqual(left.strip(), "")
+
+
 class ModalJourney(Stack):
     """A remote Workspace on a Worker Host whose Workspaces run in Modal sandboxes: one Claude Code
     turn (a Modal host takes Claude Code, Cursor, or OpenCode, not Codex or an adapter) whose
@@ -842,10 +1005,10 @@ if __name__ == "__main__":
         os.environ["SUPERTAG_E2E_PROVIDER"] = sys.argv[index + 1]
         del sys.argv[index:index + 2]
         PROVIDER = os.environ["SUPERTAG_E2E_PROVIDER"]
-        if PROVIDER != "modal":
-            sys.exit("--provider takes modal")
+        if PROVIDER not in ("modal", "codex-local-vm"):
+            sys.exit("--provider takes modal or codex-local-vm")
         # The provider journey runs alone; the other journeys keep their own flags.
-        sys.argv.append("ModalJourney")
+        sys.argv.append("ModalJourney" if PROVIDER == "modal" else "CodexLocalVmJourney")
     if "--harness" in sys.argv:
         index = sys.argv.index("--harness")
         os.environ["SUPERTAG_E2E_HARNESS"] = sys.argv[index + 1]
