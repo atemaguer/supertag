@@ -172,13 +172,15 @@ server, pushes each Session's changes back.
    supertag workspace credential add handbook-rw --ssh-key ~/.ssh/handbook_deploy
    supertag workspace credential add gitlab --https-token --username supertag
    supertag workspace credential add internal --credential-helper '!/usr/local/bin/mint-token'
+   supertag workspace credential add acme-github --github-app --app-id 12345 --installation-id 67890 --private-key ~/acme-app.pem
    ```
 
    `--https-token` reads the token from `SUPERTAG_WORKSPACE_TOKEN` or a hidden prompt.
    `--ssh-key` takes a key without a passphrase; add `--known-hosts FILE` to pin the server's host
    key, or SuperTag trusts the first key it sees and remembers it. `--credential-helper` names a
    git [credential helper](https://git-scm.com/docs/gitcredentials), which may mint short-lived
-   tokens.
+   tokens. `--github-app` stores a GitHub App's private key: for each read or push, git delivery
+   mints a token for that one repository with only `contents: read` or `contents: write`.
 
 2. Declare the Workspace: its remote, the branch Sessions start from, its credentials, and where
    changes land:
@@ -229,6 +231,7 @@ Without `ref`, it follows the server's default branch.
 | omitted | Changes stay with SuperTag; import them with `supertag fetch` |
 | `branch` | Each delivered Task updates the Session's branch `supertag/session/HASH` on the server |
 | `merge` | The Session's branch is pushed, and once its work is reported done it is merged into the target branch with a merge commit, which is pushed |
+| `review` | As `branch`, and the Session's draft pull request against `base` is opened or updated (GitHub) |
 
 Git delivery pushes only `supertag/session/...` branches and the Workspace's merge target, and
 only fast-forward. A branch someone changed outside SuperTag is never overwritten: its landing is
@@ -242,6 +245,33 @@ on the merge target, and protect your default branch.
 succeeds whether or not its changes landed. The Control Plane keeps no copy of a result, so
 landing reads it from the Worker Host that ran the Task; while that host is away, the landing
 waits and retries once the host reports Ready again.
+
+### Review changes in GitHub pull requests
+
+With `review`, people review a Session's work as a draft pull request, as they would a
+colleague's. Each delivered Task pushes the Session's branch and then opens the Session's draft
+pull request against `base`, or updates its title and description. One Session has one pull
+request; its title is the Work Session's title, and its description is the latest Task's result.
+
+```sh
+supertag workspace put app --remote https://github.com/acme/app.git --ref main \
+  --credential acme-github --land review --base main
+```
+
+In a manifest, `land: { review: { base: main } }`. A github.com remote is GitHub; for GitHub
+Enterprise Server add `--forge github` (`forge: github`), and SuperTag calls the API at `/api/v3/`
+on the remote's host. A plain git server has no review, so `workspace put` refuses it.
+
+The pull request is opened through GitHub's API with the Workspace's push credential: a GitHub
+App, whose token for this is narrowed to `pull_requests: write` on the one repository, or an HTTPS
+token. Install the App with **Contents** and **Pull requests** read and write. A token authors the
+pull request as its person, who then cannot approve it.
+
+SuperTag never merges, closes, or marks a pull request ready, and never reopens one: if someone
+closes it, or opens another from the same branch, the landing is held with the reason. When the
+pull request is merged, the Work Session that opened it closes, provided the
+[GitHub surface](../surfaces/github.md) receives the repository's `pull_request` webhooks.
+`supertag get landings` shows the pull request of each landed review.
 
 ## Attach data outside the repository
 
@@ -346,9 +376,12 @@ gets at most two replacements; after a third stop, the turn fails.
 - Git LFS is refused with a clear error: keep large files in a Volume.
 - `merge` lands only a Work Session, when its work is reported done; a conversation's own Session
   never merges, so use `branch` for it.
-- A remote Workspace lands branches and merges; it does not open pull requests yet, a merged
-  pull request does not close its Work Session, and a message naming a repository does not
-  choose a Workspace: a Tag works in the Workspace it is bound to.
+- `review` opens pull requests on GitHub only, not GitLab. Review comments and mentions on the
+  pull request do not continue its Session yet, and drafts are not marked ready for you.
+- A message naming a repository does not choose a Workspace: a Tag works in the Workspace it is
+  bound to.
+- `supertag workspace credential add --github-app` stores an App you created; it does not create
+  the App for you.
 
 ## Next
 

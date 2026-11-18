@@ -513,9 +513,19 @@ Options:
           Possible values:
           - branch: Each delivered Task updates its Session's branch supertag/session/ID on the remote
           - merge:  Finished Sessions merge into --target, which is pushed
+          - review: Each delivered Task updates its Session's branch and a draft pull request against --base. Needs a GitHub remote
 
       --target <TARGET>
           The branch finished Sessions merge into, with --land merge
+
+      --base <BASE>
+          The branch pull requests target, with --land review
+
+      --forge <FORGE>
+          The forge that reviews changes, for a self-hosted forge. A github.com remote is GitHub
+
+          Possible values:
+          - github: GitHub or GitHub Enterprise Server
 
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. If given, the change is refused when the resource has changed since
@@ -593,6 +603,14 @@ Options:
           The HTTPS user name sent with the token [default: supertag]
       --credential-helper <HELPER>
           A git credential helper, as git's credential.helper setting names it, such as `!/usr/local/bin/mint-token`
+      --github-app
+          A GitHub App installation: git delivery mints a token for one repository, narrowed to each operation, from the App's private key
+      --app-id <ID>
+          The GitHub App's ID, with --github-app
+      --installation-id <ID>
+          The ID of the App's installation on the repositories' owner, with --github-app
+      --private-key <PATH>
+          The GitHub App's private key file (.pem), with --github-app. Stored in this machine's credential vault, apart from any copy the GitHub surface keeps
   -h, --help
           Print help
 ```

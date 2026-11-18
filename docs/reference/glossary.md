@@ -54,8 +54,8 @@ whole system rather than another first-class resource.
 
 ## Security and knowledge
 
-- <a id="workspace-credential"></a>**Workspace Credential** — an SSH key, HTTPS token, or git credential helper that git delivery
-  uses to read and push a remote Workspace. Its secret stays in the Control Plane machine's
+- <a id="workspace-credential"></a>**Workspace Credential** — an SSH key, HTTPS token, git credential helper, or GitHub App that
+  git delivery uses to read and push a remote Workspace. Its secret stays in the Control Plane machine's
   credential vault. See [Workspace Credentials](resource-model.md#workspace-credentials).
 - <a id="skill"></a>**Skill** — a reusable package of instructions and supporting files.
 - <a id="context-set"></a>**Context Set** — reusable knowledge, Skills, or captured [artifact](#artifact) selections that may be added to a Task. See

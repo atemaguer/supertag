@@ -95,7 +95,9 @@ Mention `@supertag` in an issue in the added repository. The Tag replies as the 
 ## Rules
 
 - A repository without a Tag fails before the Control Plane accepts a Task.
-- A pull request event starts no work when the pull request is merged or closed.
+- A pull request event starts no work when the pull request is merged or closed. A merged pull
+  request that a Workspace's [review landing](../guides/workspaces.md#review-changes-in-github-pull-requests)
+  opened closes the Work Session that opened it.
 - Gateway credentials authenticate only webhooks and replies. A remote Workspace on GitHub uses
   its own [Workspace Credential](../reference/resource-model.md#workspace-credentials), and
   GitHub's hosted MCP server uses separate credentials too. See

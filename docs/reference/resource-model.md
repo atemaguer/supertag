@@ -51,7 +51,7 @@ and [execution environments](glossary.md#execution-environment).
   repository to it by name, or a remote Workspace names a repository on any git server; see
   [Workspaces](#workspaces).
 - **Workspace Credential** — what git delivery presents to a remote Workspace's git server: an
-  SSH key, an HTTPS token, or a git credential helper. The Control Plane stores its name, kind, and
+  SSH key, an HTTPS token, a git credential helper, or a GitHub App. The Control Plane stores its name, kind, and
   a non-secret identifier; the secret stays in the credential vault of the machine that runs the
   Control Plane. See [Workspace Credentials](#workspace-credentials).
 - **Surface Account** — an enrolled external workspace or account; credentials remain in the
@@ -414,7 +414,8 @@ spec:
   remote: ssh://git@git.acme.internal/handbook.git   # https://, ssh://, user@host:path, or file://
   ref: main                     # optional: the branch new Sessions start from; default branch if omitted
   credential: handbook-rw       # or credentials: { read: NAME, push: NAME }; omit for none
-  land: { merge: drafts }       # optional: branch, or { merge: TARGET }
+  land: { merge: drafts }       # optional: branch, { merge: TARGET }, or { review: { base: BRANCH } }
+  forge: github                 # optional: a self-hosted GitHub; github.com needs no forge
 ```
 
 | Field | Rules |
@@ -422,7 +423,8 @@ spec:
 | `remote` | `https://` or `ssh://` URL, scp-style `user@host:path`, `file:///absolute/path` for a bare repository on the Control Plane's machine, or `http://` to a loopback address. Never a password, token, or `ext::` helper |
 | `ref` | A branch name. Each new Session pins the commit it names once; every Task of the Session starts there |
 | `credential`, `credentials` | Names of [Workspace Credentials](#workspace-credentials) that must exist. `read` reads the source; `push` lands changes |
-| `land` | `branch` updates the Session's branch `supertag/session/HASH` on every delivered Task. `{merge: TARGET}` also merges a finished Session into `TARGET`, a branch outside `supertag/`. Omit it to keep changes with SuperTag |
+| `land` | `branch` updates the Session's branch `supertag/session/HASH` on every delivered Task. `{merge: TARGET}` also merges a finished Session into `TARGET`, a branch outside `supertag/`. `{review: {base: BRANCH}}` also opens or updates the Session's draft pull request against `BRANCH`; it needs a GitHub forge and a GitHub App or HTTPS token push credential. Omit it to keep changes with SuperTag |
+| `forge` | `github` for GitHub Enterprise Server, whose API is `/api/v3/` on the remote's host. A github.com remote is GitHub without it; any other remote is a plain git server, which has no review |
 
 A Tag names its Workspace in `spec.workspace`:
 
@@ -458,6 +460,12 @@ A Workspace Credential is created on the machine that runs the Control Plane wit
 | SSH key | `--ssh-key PATH`, optionally `--known-hosts PATH` | The key's SHA256 fingerprint |
 | HTTPS token | `--https-token` (from `SUPERTAG_WORKSPACE_TOKEN` or a hidden prompt), `--username` | The user name |
 | Credential helper | `--credential-helper HELPER` | The helper's program name |
+| GitHub App | `--github-app --app-id ID --installation-id ID --private-key PATH` | `app:ID/installation:ID` |
+
+A GitHub App credential reaches only `https://` GitHub remotes. For each operation git delivery
+mints a token for the one repository with only what that operation needs: `contents: read` to read,
+`contents: write` to push, and `pull_requests: write` to open or update a review's pull request.
+Tokens are never stored. The key is a separate copy from any the GitHub surface keeps.
 
 The secret goes to the credential vault the Control Plane reads (`SUPERTAG_CREDENTIAL_VAULT`,
 in `SUPERTAG_STATE_DIR` by default) under `workspace-credential/NAME`, never to the database, a
@@ -474,13 +482,17 @@ Workspace's merge target, fast-forward only, whatever the credential could do. A
 | --- | --- |
 | `queued` | Waiting for git delivery, or for the Worker Host that holds the delivery to reconnect |
 | `claimed` | Git delivery is pushing |
-| `landed` | The branch or target names `landed_commit` |
+| `landed` | The branch or target names `landed_commit`; in review mode, `pull_request` is open from the branch |
 | `conflict` | The Session's changes conflict with the target in `conflicts`; nothing was merged, and `follow_up_task_id` merges `target_commit` into the Session |
 | `held` | Refused until someone acts, such as a branch changed outside SuperTag, a missing credential, or Git LFS |
 | `superseded` | A newer delivery of the same Session replaced it before it landed |
 
 `merge` lands a Work Session when its Tag or an operator closes it or its Objective closes, and
-again when a merge follow-up Task succeeds. Merge commits are authored by the Tag's name with a
+again when a merge follow-up Task succeeds. `review` lands every delivered Task like `branch`, then
+opens the Session's draft pull request or updates its title and description; it never merges,
+closes, reopens, or marks it ready, and holds the landing when the pull request was closed or the
+branch has another one. The pull request's merge, reported by the GitHub surface's webhook, closes
+the Work Session with the reason `merged`. Merge commits are authored by the Tag's name with a
 SuperTag no-reply address, with the requester as a `Co-authored-by` trailer. Content checks are the
 server's job: SuperTag runs no tests or hooks before landing.
 
