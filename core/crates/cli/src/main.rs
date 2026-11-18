@@ -1408,6 +1408,17 @@ async fn run(command: Command) -> Result<()> {
                     },
                 )
                 .collect();
+            // The supervisor reports the Host's presence for its lanes, so it reports the profile
+            // a lane claims with, not one rebuilt from the service's settings.
+            if supervised_lane.is_some() {
+                use base64::Engine as _;
+                use prost::Message as _;
+                outln!(
+                    "profile {}",
+                    base64::engine::general_purpose::STANDARD
+                        .encode(execution_profile.encode_to_vec())
+                );
+            }
             let disk_space = supertag_worker_host::environment::DiskSpaceSource::Directory(
                 state_directory.clone(),
             );

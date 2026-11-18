@@ -940,6 +940,10 @@ struct LaneStates {
     changed: tokio::sync::Notify,
     /// Presence reports the Control Plane answered, current or transiently unavailable.
     reports: std::sync::atomic::AtomicU64,
+    /// Each harness's execution profile as its lanes report it, which presence reports in place
+    /// of the one built from the service's settings: only a lane knows, for example, that its
+    /// Workspaces run in local-vm containers.
+    profiles: std::sync::Mutex<BTreeMap<usize, supertag_protocol::v2::HarnessExecutionProfile>>,
 }
 
 impl LaneStates {
@@ -951,6 +955,27 @@ impl LaneStates {
             self.changed.notify_one();
         }
     }
+
+    fn set_profile(&self, harness: usize, profile: supertag_protocol::v2::HarnessExecutionProfile) {
+        let mut profiles = self.profiles.lock().expect("lane profiles");
+        if profiles.get(&harness) != Some(&profile) {
+            profiles.insert(harness, profile);
+            drop(profiles);
+            self.changed.notify_one();
+        }
+    }
+}
+
+/// The longest line a lane writes to its supervisor, its encoded execution profile.
+const LANE_LINE_LIMIT: u64 = 256 * 1024;
+
+fn decode_profile(encoded: &str) -> Option<supertag_protocol::v2::HarnessExecutionProfile> {
+    use base64::Engine as _;
+    use prost::Message as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
+    supertag_protocol::v2::HarnessExecutionProfile::decode(bytes.as_slice()).ok()
 }
 
 impl ManagedLane {
@@ -1219,13 +1244,19 @@ impl ManagedHost {
         });
         let states = self.states.clone();
         states.set(index, LaneState::Pending);
+        let harness = lane.harness;
         let (ready, started) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
             let mut ready = Some(ready);
             let mut lines = BufReader::new(stdout);
             loop {
                 let mut line = String::new();
-                match (&mut lines).take(256).read_line(&mut line).await {
+                // A lane's profile line carries its encoded execution profile.
+                match (&mut lines)
+                    .take(LANE_LINE_LIMIT)
+                    .read_line(&mut line)
+                    .await
+                {
                     Ok(0) | Err(_) => break,
                     Ok(_) => {}
                 }
@@ -1239,6 +1270,10 @@ impl ManagedHost {
                         if let Some(state) = other.strip_prefix("state ").and_then(LaneState::parse)
                         {
                             states.set(index, state);
+                        } else if let Some(profile) =
+                            other.strip_prefix("profile ").and_then(decode_profile)
+                        {
+                            states.set_profile(harness, profile);
                         }
                     }
                 }
@@ -1460,8 +1495,12 @@ fn report_presence(
                     .collect::<Vec<_>>()
             };
             let capacity = states.capacity.load(std::sync::atomic::Ordering::SeqCst);
-            for slot in &mut slots {
+            let profiles = states.profiles.lock().expect("lane profiles").clone();
+            for (index, slot) in slots.iter_mut().enumerate() {
                 slot.capacity = capacity;
+                if let Some(profile) = profiles.get(&index) {
+                    slot.profile = profile.clone();
+                }
             }
             let reported = shared.report(&slots, &lanes, &workspaces).await;
             if stopping {

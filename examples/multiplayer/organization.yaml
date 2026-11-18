@@ -2,7 +2,7 @@
 # machine and coding agent, plus a shared reviewer.
 #   web       Alex directs it. Claude Code on Alex's laptop. Owns the web app.
 #   api       Sam directs it. Codex on Sam's laptop. Owns the API.
-#   reviewer  Shared by the team. Cursor on an always-on server.
+#   reviewer  Shared by the team. Claude Code on an always-on server.
 # The three share the Team `checkout`, so they message each other directly and record what they
 # agree in its Workstream. Alex and Sam hear about it only when a decision is theirs.
 #
@@ -13,13 +13,16 @@
 # Each host service in its own supertag.yaml serves the repository as the Workspace `app` and
 # lists the models its Tag uses; a Task that names a model runs only on a host that lists it:
 #   Alex:   harnesses: [claude-code]  models: { claude-code: [claude-sonnet-5-5] }
-#           environment: local-vm     workspaces: { app: ~/code/app }
+#           allow-unsandboxed-commands: [claude-code]
+#           workspaces: { app: ~/code/app }
 #   Sam:    harnesses: [codex]        models: { codex: [gpt-6-sol] }
 #           workspaces: { app: ~/code/app }
-#   server: harnesses: [cursor]       models: { cursor: [claude-opus-5-5] }
-#           environment: local-vm     workspaces: { app: ~/code/app }
-# The server also needs CURSOR_API_KEY in ~/.supertag/.env. Alex and Sam each connect their own
-# terminal or desktop app with a client Auth Key; see docs/guides/self-hosting.md.
+#   server: harnesses: [claude-code]  models: { claude-code: [claude-opus-5-5] }
+#           allow-unsandboxed-commands: [claude-code]
+#           workspaces: { app: ~/code/app }
+# `allow-unsandboxed-commands` lets Claude Code run commands as the machine's user, with its files
+# and network. Alex and Sam each connect their own terminal or desktop app with a client Auth Key;
+# see docs/guides/self-hosting.md.
 #
 # Before applying, replace `app` with your Workspace name and `main` with the branch new Sessions
 # start from. Then run:
@@ -79,7 +82,7 @@ spec:
     severity and a file and line, to the Tag that asked. Say plainly when a change is ready.
     Don't rewrite the change yourself.
   permissionSets: [build-tools]
-  execution: { harness: cursor, models: [claude-opus-5-5] }
+  execution: { harness: claude-code, models: [claude-opus-5-5] }
 ---
 apiVersion: supertag/v1
 kind: Tag

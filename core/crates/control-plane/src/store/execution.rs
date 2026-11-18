@@ -195,9 +195,9 @@ pub(super) fn resolve_attempt(
 }
 
 /// What keeps a host lane for `harness` with `profile` from running the Task, as
-/// `(requirement, summary)`: commands that would run unsandboxed without the host's opt-in, or a
-/// path or network scope the lane cannot apply. Both depend on the host, so `placement explain` reports
-/// them only when no bound host's lane can run the Task.
+/// `(requirement, summary)`: commands that would run unsandboxed without the host's opt-in, a
+/// path or network scope the lane cannot apply, or a model it does not list. These depend on the
+/// host, so `placement explain` reports them only when no bound host's lane can run the Task.
 pub(crate) fn lane_requirement(
     task: &Task,
     harness: HarnessKind,
@@ -248,6 +248,21 @@ pub(crate) fn lane_requirement(
         return Some((
             "codex-remote-commands".into(),
             "Codex on a remote Workspace runs only Tasks with commands:execute; run the Tag on a local Codex Worker Host, or add commands:execute".into(),
+        ));
+    }
+    // A Task that names a model runs only on a lane that lists it.
+    if let Some(model) = task
+        .execution_selection
+        .as_ref()
+        .and_then(|selection| selection.model.as_ref())
+        && profile.model_ids.binary_search(model).is_err()
+    {
+        return Some((
+            "model".into(),
+            format!(
+                "no bound Worker Host lists model {model} for {}; add it to models on a Worker Host's supertag.yaml service, or choose another model",
+                crate::placement::harness_name(harness)
+            ),
         ));
     }
     let name = match harness {
@@ -427,5 +442,35 @@ mod tests {
             ..profile
         };
         assert!(normalize_profile(Some(&invalid)).is_err());
+    }
+
+    #[test]
+    fn a_task_naming_a_model_needs_a_lane_that_lists_it() {
+        let task = Task {
+            allowed_actions: vec!["files:read".into()],
+            execution_selection: Some(ExecutionSelection {
+                model: Some("gpt-6-sol".into()),
+                effort: None,
+            }),
+            ..Default::default()
+        };
+        let unlisted = HarnessExecutionProfile::default();
+        let (requirement, summary) =
+            lane_requirement(&task, HarnessKind::Codex, &unlisted).unwrap();
+        assert_eq!(requirement, "model");
+        assert!(summary.contains("gpt-6-sol") && summary.contains("Codex"));
+        assert!(resolve_attempt(&task, HarnessKind::Codex, &unlisted).is_none());
+        let listed = HarnessExecutionProfile {
+            model_ids: vec!["gpt-6-sol".into()],
+            ..Default::default()
+        };
+        assert!(lane_requirement(&task, HarnessKind::Codex, &listed).is_none());
+        assert!(resolve_attempt(&task, HarnessKind::Codex, &listed).is_some());
+        // A Task that names no model runs on the lane's default.
+        let unnamed = Task {
+            execution_selection: None,
+            ..task
+        };
+        assert!(lane_requirement(&unnamed, HarnessKind::Codex, &unlisted).is_none());
     }
 }

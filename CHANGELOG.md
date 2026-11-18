@@ -263,7 +263,8 @@ within the pre-1.0 compatibility policy described in
   that owns four ongoing Objectives (production errors, alerts, a red main, dependency
   advisories) with scoped network access to Sentry and GitHub, plus a read-only `support` Tag.
   `multiplayer` shows two teammates' Tags on their own machines and coding agents settling details
-  with each other. `review-team` now uses `environment: local-vm`. Each example's outcomes live in
+  with each other. The examples use only Claude Code and Codex, and no local-vm containers: their
+  Claude Code hosts set `allow-unsandboxed-commands`. Each example's outcomes live in
   its own `objectives.yaml`, applied when you're ready to start the work. `solo` and
   `mixed-harnesses` are removed.
 - An Objective whose owner's turn ends idle twice stays `working` instead of becoming `blocked`:
@@ -406,6 +407,11 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- `supertag placement explain` names a `model` requirement when no bound Worker Host lists the
+  model a Task names, instead of calling those hosts eligible.
+- A supertag.yaml Worker Host reports the execution profile its lanes claim with. A local-vm host
+  no longer appears to run Claude Code commands unsandboxed in `placement explain`, and its
+  Volumes and MCP servers show as labels in `supertag get host`.
 - A Modal Workspace whose `SUPERTAG_MODAL_WORKSPACE_APP` names no existing app, or that is missing
   its configuration, now fails naming it, instead of "Remote workspace operation failed".
 - A Codex turn no longer fails with `Codex emitted an unsupported event type: turn/diff/updated`

@@ -8,17 +8,18 @@
 #     type: host
 #     harnesses: [claude-code]
 #     models: { claude-code: [claude-opus-5-5, claude-sonnet-5-5] }
-#     environment: local-vm
+#     allow-unsandboxed-commands: [claude-code]
 #     labels: [team]
 #     workspaces: { app: ~/code/app }
 #   my-laptop-verify:
 #     type: host
 #     harnesses: [claude-code]
 #     models: { claude-code: [claude-opus-5-5, claude-sonnet-5-5] }
-#     environment: local-vm
+#     allow-unsandboxed-commands: [claude-code]
 #     labels: [verify]
 #     workspaces: { app: ~/code/app }
-# To share one host instead, give it both labels.
+# To share one host instead, give it both labels. `allow-unsandboxed-commands` lets Claude Code run
+# commands as your user, with your files and network.
 #
 # Before applying, replace `app` with your Workspace name and `main` with the branch new Sessions
 # start from. Then run:

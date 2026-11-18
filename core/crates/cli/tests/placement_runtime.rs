@@ -567,12 +567,16 @@ async fn postgres_labelled_hosts_share_a_reusable_key_and_take_only_matching_wor
 }
 
 /// A supertag.yaml host service's `labels` reach the Control Plane through the local
-/// supervisor, so a Tag's `runsOn` selects that host and not its unlabelled neighbour.
+/// supervisor, so a Tag's `runsOn` selects that host and not its unlabelled neighbour. The
+/// supervisor also reports what only its lanes know, such as the Volumes they map.
 async fn local_host_services_carry_their_declared_labels(database: String) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
     let state = root.join("state");
     let file = root.join("supertag.yaml");
+    let datasets = root.join("datasets");
+    std::os::unix::fs::DirBuilderExt::mode(&mut std::fs::DirBuilder::new(), 0o700)
+        .create(&datasets)?;
     let (control_plane, secrets) = if database.starts_with("postgres") {
         let (section, secrets) = database_password::config(&database, root)?;
         (
@@ -589,7 +593,8 @@ async fn local_host_services_carry_their_declared_labels(database: String) -> Re
         &file,
         serde_json::to_vec(&json!({"version": 1, "secrets": secrets, "services": {
             "control-plane": control_plane,
-            "trainer-box": {"type": "host", "adapter": ADAPTER, "labels": ["GPU", "team:infra"]},
+            "trainer-box": {"type": "host", "adapter": ADAPTER, "labels": ["GPU", "team:infra"],
+                "volumes": {"datasets": datasets}},
             "plain-box": {"type": "host", "adapter": ADAPTER},
         }}))?,
     )?;
@@ -647,7 +652,7 @@ async fn local_host_services_carry_their_declared_labels(database: String) -> Re
             tokio::time::sleep(Duration::from_millis(100)).await;
         };
         let labels = trainer["labels"].as_array().context("missing labels")?;
-        for label in ["gpu", "team:infra"] {
+        for label in ["gpu", "team:infra", "volume:datasets"] {
             ensure!(
                 labels.contains(&json!(label)),
                 "trainer-box lacks {label}: {trainer}"

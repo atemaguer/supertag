@@ -4,7 +4,7 @@
 #
 # Run the hosts somewhere always on, so the Tags keep their responsibilities while your laptop is
 # off. Two host services in its supertag.yaml serve the repository as the Workspace `app`:
-#   reliability-host:            # Codex runs in its own sandbox
+#   reliability-host:
 #     type: host
 #     harnesses: [codex]
 #     models: { codex: [gpt-6-sol] }
@@ -12,11 +12,10 @@
 #       sentry: { secret: sentry-token, environment: SENTRY_AUTH_TOKEN }
 #       github: { secret: github-token, environment: GITHUB_TOKEN }
 #     workspaces: { app: ~/code/app }
-#   support-host:                # Claude Code's tools run in a container
+#   support-host:
 #     type: host
 #     harnesses: [claude-code]
 #     models: { claude-code: [claude-sonnet-5-5] }
-#     environment: local-vm
 #     workspaces: { app: ~/code/app }
 # with `sentry-token` and `github-token` under `secrets:`. The Tasks see only placeholders; the
 # host's egress proxy adds the real tokens to requests the `reliability-tools` grants allow.

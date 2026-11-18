@@ -77,7 +77,8 @@ and serves its harness and model. `placement explain` names which is missing:
 | --- | --- |
 | No Worker Host may run the Tag | Start a host, or enroll one with an Auth Key that names the Tag |
 | Hosts lack the required labels | `supertag placement runs-on TAG LABEL...`, or add the label to a host |
-| No host serves the harness or model | Add the harness or model to a host's `harnesses` or `models` |
+| No host serves the harness | Add the harness to a host's `harnesses` |
+| `model`: no host lists the model the Task names | Add the model to a host's `models`, or choose a model a host lists |
 | Hosts are busy or draining | Wait, raise `concurrency`, or `supertag host resume HOST` |
 | An uncertain Task Attempt keeps a host's slot | Confirm it stopped, then run the `supertag task resolve-attempt` command it names |
 | `unsandboxed-commands`: no host lets the harness run commands | Set `environment: local-vm` on a host, add the harness to a host's `allow-unsandboxed-commands`, or remove `commands:execute` |
@@ -88,7 +89,7 @@ and serves its harness and model. `placement explain` names which is missing:
 
 Each entry under `hosts` also gives that Worker Host's own `requirement` and `reason` when none
 of its lanes for the Task's harness can run the Task: `harness` when it runs no such lane, or
-`unsandboxed-commands` or `file-scope` as above. Use them to find the host to change.
+`model`, `unsandboxed-commands`, or `file-scope` as above. Use them to find the host to change.
 
 ## 6. Check the harness
 
