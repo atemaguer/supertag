@@ -1,4 +1,4 @@
-import type { Message, Tag } from "../gateway";
+import type { Message } from "../gateway";
 import { previewLine } from "../lib/preview-line";
 import type { TagSummary } from "./sidebar";
 
@@ -133,10 +133,4 @@ export function conversationSummary(messages: readonly Message[]): TagSummary {
     ...(last.task.createdAtMs !== undefined ? { lastActivityMs: last.task.createdAtMs } : {}),
     ...(RUNNING.has(last.task.state) ? { working: true } : {}),
   };
-}
-
-/** "3 of 8 Work Sessions open", once the Tag says how many it may have. */
-export function workSessionCount(tag: Pick<Tag, "maxWorkSessions" | "openWorkSessions">) {
-  if (!tag.maxWorkSessions) return undefined;
-  return `${tag.openWorkSessions ?? 0} of ${tag.maxWorkSessions} Work Sessions open`;
 }

@@ -6,7 +6,6 @@ import {
   dividerLabel,
   lastOperatorMessage,
   timeDividers,
-  workSessionCount,
 } from "./transcript";
 
 const message = (
@@ -89,12 +88,4 @@ it("treats a Schedule's turn as the Tag's: no delivery, never the operator's las
       message("c", { state: "queued", prompt: "Hidden" }, { scheduleId: "sch_1" }),
     ]),
   ).toEqual({ working: true });
-});
-
-it("says how many Work Sessions the Tag has open of its limit", () => {
-  expect(workSessionCount({ maxWorkSessions: 8, openWorkSessions: 3 })).toBe(
-    "3 of 8 Work Sessions open",
-  );
-  expect(workSessionCount({ maxWorkSessions: 8 })).toBe("0 of 8 Work Sessions open");
-  expect(workSessionCount({})).toBeUndefined();
 });

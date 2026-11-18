@@ -52,7 +52,6 @@ import {
   joinedReplies,
   lastOperatorMessage,
   timeDividers,
-  workSessionCount,
 } from "./transcript";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
@@ -276,6 +275,21 @@ export function ConversationPane({
   // The activity pane's width: at least 280px, at most 60% of the window, and never so wide
   // that the conversation is narrower than 420px.
   const workArea = useRef<HTMLDivElement>(null);
+  const conversationPane = useRef<HTMLDivElement>(null);
+  const composerForm = useRef<HTMLFormElement>(null);
+  // The conversation pads its end, and places its jump-to-latest button, by the composer's
+  // height, which grows with a long draft.
+  useEffect(() => {
+    const form = composerForm.current;
+    const pane = conversationPane.current;
+    if (!form || !pane) return;
+    const follow = () =>
+      pane.style.setProperty("--composer-height", `${form.getBoundingClientRect().height}px`);
+    follow();
+    const observer = new ResizeObserver(follow);
+    observer.observe(form);
+    return () => observer.disconnect();
+  }, []);
   const [activityWidth, setActivityWidth] = useStoredWidth(
     ACTIVITY_WIDTH_KEY,
     ACTIVITY_WIDTH.initial,
@@ -310,7 +324,7 @@ export function ConversationPane({
         </div>
       )}
       <div className="work-area" ref={workArea}>
-        <div className="conversation">
+        <div className="conversation" ref={conversationPane}>
           {history.loading ? (
             <div className="history">
               <div className="timeline">
@@ -374,11 +388,8 @@ export function ConversationPane({
               <JumpToLatest messages={messages.length} />
             </Conversation>
           )}
-          {workSessionCount(tag) && (
-            // How much room the Tag has to start longer work, across all its conversations.
-            <p className="work-session-count">{workSessionCount(tag)}</p>
-          )}
-          <form className="composer" onSubmit={send}>
+          {/* The composer floats over the conversation, which scrolls under it. */}
+          <form className="composer" ref={composerForm} onSubmit={send}>
             <div className="composer-box">
               <Textarea
                 ref={composer}
@@ -437,6 +448,7 @@ export function ConversationPane({
                 key={activeTask}
                 gateway={gateway}
                 taskId={activeTask}
+                task={messages.find((message) => message.task.taskId === activeTask)?.task}
                 latest={latestEvent(messages, activeTask)}
                 pushed={follow.connected}
                 onClose={() => {
@@ -558,12 +570,14 @@ function latestEvent(messages: readonly TagMessage[], taskId: string) {
 function ActivityPane({
   gateway,
   taskId,
+  task,
   latest,
   pushed,
   onClose,
 }: {
   gateway: Gateway;
   taskId: string;
+  task?: { tagId: string; sessionId: string };
   latest?: number;
   pushed: boolean;
   onClose(): void;
@@ -632,7 +646,11 @@ function ActivityPane({
           <li key={event.sequence}>{eventLine(event)}</li>
         ))}
       </ol>
-      <TaskFiles gateway={gateway} taskId={taskId} />
+      <TaskFiles
+        gateway={gateway}
+        taskId={taskId}
+        {...(task ? { session: { tagId: task.tagId, sessionId: task.sessionId } } : {})}
+      />
     </aside>
   );
 }

@@ -773,6 +773,7 @@ button:disabled {
   position: relative;
 }
 .conversation {
+  position: relative;
   flex: 1;
   min-width: 0;
   display: flex;
@@ -790,7 +791,9 @@ button:disabled {
   --bubble-max: min(85%, 800px);
   width: 100%;
   min-height: 100%;
-  padding: calc(var(--strip-height) + 12px) var(--transcript-inset) 28px;
+  /* The composer floats over the end of the conversation: the last message clears it. */
+  padding: calc(var(--strip-height) + 12px) var(--transcript-inset)
+    calc(var(--composer-height, 96px) + 16px);
   display: flex;
   flex-direction: column;
   gap: 26px;
@@ -800,7 +803,8 @@ button:disabled {
 }
 .scroll-latest {
   position: absolute;
-  bottom: 16px;
+  bottom: calc(var(--composer-height, 96px) + 12px);
+  z-index: 2;
   left: 50%;
   transform: translateX(-50%);
   gap: 5px;
@@ -1035,6 +1039,12 @@ button:disabled {
 .markdown li {
   padding-block: 2px;
 }
+/* A line break in a message stays a line break, as in a messaging app, rather than joining the
+   lines as Markdown does. */
+.markdown p,
+.markdown li {
+  white-space: pre-line;
+}
 .tag-turn .bubble [data-streamdown="inline-code"] {
   background: rgb(0 0 0 / 24%);
 }
@@ -1089,13 +1099,6 @@ button:disabled {
   font-size: 11px;
   margin: 0;
 }
-.work-session-count {
-  color: var(--muted);
-  font-size: 11px;
-  /* Lines up with the composer's text below it. */
-  margin: 0;
-  padding: 0 calc(var(--transcript-inset) + 20px) 0;
-}
 .report-label {
   color: var(--muted);
   font-size: 11px;
@@ -1146,10 +1149,20 @@ button:disabled {
 .task-status[data-tone="error"] .status-dot {
   background: #ffb7a9;
 }
-/* The composer: one rounded pill across the bottom. */
+/* The composer: one rounded pill floating over the bottom of the conversation, which scrolls
+   under it. Only a soft fade behind it keeps the messages passing under from crowding it. */
 .composer {
-  width: 100%;
-  padding: 6px var(--transcript-inset) 14px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  padding: 28px var(--transcript-inset) 14px;
+  background: linear-gradient(to bottom, transparent, var(--background) 30px);
+  pointer-events: none;
+}
+.composer > * {
+  pointer-events: auto;
 }
 .composer-box {
   display: flex;
@@ -1669,4 +1682,27 @@ button.identity-pill[aria-expanded="true"] {
   font-family: inherit;
   font-size: 12px;
   white-space: nowrap;
+}
+
+/* A finished Task's branch, with commands to copy. */
+.branch-hint {
+  display: grid;
+  gap: 6px;
+}
+.branch-command {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.branch-command code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 6px;
+  border-radius: 5px;
+  background: var(--panel);
+  font-size: 11px;
 }
