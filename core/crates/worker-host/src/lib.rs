@@ -2049,15 +2049,16 @@ async fn run_assignment(
     };
     let mut sandbox_execution_ends = None;
     // A remote sandbox nothing needs before the Harness starts is prepared while it runs, so the
-    // model starts without waiting for it; its first tool waits instead. Workspace copies, Task
-    // artifact inputs and MCP servers need the sandbox first, so then it is prepared before.
+    // model starts without waiting for it; its first tool waits instead. Task artifact inputs and
+    // Workspace copies are named by path at launch and staged in the background. MCP servers
+    // need the sandbox first, since the Harness lists their tools when it starts, so then it is
+    // prepared before.
     let defer_sandbox = options.remote_provider.is_some()
         && options.shared_execution.is_none()
-        && mounted.is_none()
-        && task.input_artifacts.is_empty()
         && workspace_mcp.is_none()
         && supertag_protocol::mcp::grants(&task).next().is_none();
     let mut deferred = None;
+    let mut deferred_inputs = None;
     if defer_sandbox {
         let prepared = workspace
             .as_ref()
@@ -2066,8 +2067,50 @@ async fn run_assignment(
         let cancel = shutdown.child_token();
         match workspaces.remote_environment(prepared, &cancel).await {
             Ok(environment) => {
+                // Inputs download now, without the sandbox, so the Harness reads their paths.
+                if !task.input_artifacts.is_empty() || mounted.is_some() {
+                    let downloaded = Box::pin(with_authority(
+                        host,
+                        &attempt,
+                        token,
+                        shutdown,
+                        &cancel,
+                        remote::download_inputs(&attempt, &task, (coordination, token), &cancel),
+                    ))
+                    .await;
+                    let inputs = match downloaded {
+                        Ok((inputs, expires)) => {
+                            valid_until = expires;
+                            inputs
+                        }
+                        Err(error) => {
+                            return save_finish(
+                                journal,
+                                attempt,
+                                adapter::failed(&format!(
+                                    "Remote Workspace could not be prepared: {}",
+                                    error.message()
+                                )),
+                            );
+                        }
+                    };
+                    match remote::launch_instructions(&inputs, mounted.as_ref(), &attempt) {
+                        Ok(Some(instructions)) => task.instructions.push_str(&instructions),
+                        Ok(None) => {}
+                        Err(error) => {
+                            return save_finish(
+                                journal,
+                                attempt,
+                                adapter::failed(&format!(
+                                    "Remote Workspace could not be prepared: {error:#}"
+                                )),
+                            );
+                        }
+                    }
+                    deferred_inputs = Some(inputs);
+                }
                 let (pending, ready) = adapter::RemoteWorkspace::pending();
-                sandbox_execution_ends = Some(remote::execution_ends(options));
+                sandbox_execution_ends = Some(remote::execution_ends(options, mounted.as_ref()));
                 deferred = Some((environment, pending, ready));
             }
             Err(error) => {
@@ -2114,6 +2157,7 @@ async fn run_assignment(
                             .map(|_| workspace.checkout.base_commit.as_str()),
                         environment,
                         mounted.as_ref(),
+                        None,
                     ),
                     (registration, coordination, token),
                     (egress.as_ref(), &cancel),
@@ -2435,7 +2479,12 @@ async fn run_assignment(
             journal,
             workspaces,
             (&attempt, prepared, sandbox_task),
-            (None, sandbox_environment.flatten(), None),
+            (
+                None,
+                sandbox_environment.flatten(),
+                mounted.as_ref(),
+                deferred_inputs.take(),
+            ),
             (registration, coordination, token),
             (egress.as_ref(), &sandbox_cancel),
         )

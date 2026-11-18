@@ -177,6 +177,13 @@ impl RemoteInputs {
         Ok(result)
     }
 
+    /// What the Harness reads about these inputs: their Workspace paths. Delivery is settled
+    /// separately, once they are staged.
+    pub(crate) fn instructions(&self) -> Option<String> {
+        let locations = self.acquisitions.iter().map(location).collect::<Vec<_>>();
+        (!locations.is_empty()).then(|| instructions(&locations))
+    }
+
     pub(crate) async fn delivered(
         self,
         client: &AcquisitionClient<'_>,

@@ -167,6 +167,23 @@ async fn contract(provider: RemoteWorkspace, name: &str, database: &str) -> Resu
         ensure!(Instant::now() < deadline, "remote Stage was not reached");
         sleep(Duration::from_millis(20)).await;
     };
+    // The Harness starts while its sandbox still stages the inputs: it reads their paths at
+    // launch, and its first tool waits for the sandbox.
+    let starts = || -> Result<usize> {
+        Ok(fixture
+            .trace()?
+            .iter()
+            .filter(|entry| entry["type"] == "started" && entry["mode"] == "remote-input-consumer")
+            .count())
+    };
+    let deadline = Instant::now() + WAIT;
+    while starts()? < 3 {
+        ensure!(
+            Instant::now() < deadline,
+            "the Harness waited for its sandbox's inputs to stage"
+        );
+        sleep(Duration::from_millis(20)).await;
+    }
     interrupted.kill().await?;
     std::fs::remove_file(hold)?;
     let recovery = timeout(
@@ -186,13 +203,14 @@ async fn contract(provider: RemoteWorkspace, name: &str, database: &str) -> Resu
             .count(),
         1
     );
+    // The recovery never ran the interrupted Attempt's Harness again.
     assert_eq!(
         fixture
             .trace()?
             .iter()
             .filter(|entry| entry["type"] == "started" && entry["mode"] == "remote-input-consumer")
             .count(),
-        2
+        3
     );
     assert!(matches!(
         runtime.task(&interruption.task_id).await?.state(),

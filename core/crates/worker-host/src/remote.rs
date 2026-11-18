@@ -66,12 +66,62 @@ pub(crate) const OUTPUTS_FAILED: &str = "Task output files could not be captured
 /// When a Harness that starts before its sandbox must stop: the sandbox's lifetime less its
 /// cleanup margin, counted from now. The sandbox is allocated later, so this is never later than
 /// the deadline `prepare` reports.
-pub(crate) fn execution_ends(options: &HostOptions) -> Instant {
+pub(crate) fn execution_ends(options: &HostOptions, mounted: Option<&Mounted>) -> Instant {
+    let margin = sandbox_margin(mounted);
     let timeout = options
         .attempt_timeout
-        .saturating_add(SANDBOX_CLEANUP_MARGIN)
+        .saturating_add(margin)
         .min(MAX_SANDBOX_LIFETIME);
-    Instant::now() + timeout.saturating_sub(SANDBOX_CLEANUP_MARGIN)
+    Instant::now() + timeout.saturating_sub(margin)
+}
+
+/// What a sandbox's lifetime keeps after the Harness stops: cleanup, and time to capture its
+/// read-write Workspace copies.
+fn sandbox_margin(mounted: Option<&Mounted>) -> Duration {
+    let read_write = mounted.into_iter().flat_map(|mounted| {
+        mounted
+            .copies()
+            .iter()
+            .filter(|copy| copy.read_write)
+            .map(|copy| {
+                (
+                    copy.files.iter().map(|file| file.size).sum(),
+                    copy.max_bytes,
+                )
+            })
+    });
+    SANDBOX_CLEANUP_MARGIN.saturating_add(copy_capture_margin(read_write))
+}
+
+/// What the Harness reads about its Task artifact inputs and Workspace copies in a remote
+/// sandbox: paths only, so it can start before the sandbox is prepared.
+pub(crate) fn launch_instructions(
+    inputs: &RemoteInputs,
+    mounted: Option<&Mounted>,
+    attempt: &Attempt,
+) -> Result<Option<String>> {
+    let mut instructions = inputs.instructions();
+    if let Some(mounted) = mounted {
+        instructions
+            .get_or_insert_default()
+            .push_str(&mounted.remote_instructions(&attempt.attempt_id)?);
+    }
+    Ok(instructions)
+}
+
+/// Downloads a Task's artifact inputs for its remote sandbox, which stages them later.
+pub(crate) async fn download_inputs(
+    attempt: &Attempt,
+    task: &Task,
+    (coordination, token): (&CoordinationClients, &str),
+    cancel: &CancellationToken,
+) -> Result<RemoteInputs, Status> {
+    let acquisition = AcquisitionClient {
+        coordination,
+        host_token: token,
+        attempt: attempt.inspect(),
+    };
+    RemoteInputs::download(&acquisition, task, cancel).await
 }
 
 pub(crate) async fn prepare(
@@ -79,10 +129,11 @@ pub(crate) async fn prepare(
     journal: &Journal,
     workspaces: &Workspaces,
     (attempt, workspace, task): (&Attempt, &PreparedWorkspace, &Task),
-    (mcp_commit, environment, mounted): (
+    (mcp_commit, environment, mounted, downloaded): (
         Option<&str>,
         Option<RemoteDevcontainer>,
         Option<&Mounted>,
+        Option<RemoteInputs>,
     ),
     (registration, coordination, token): (&HostRecord, &CoordinationClients, &str),
     (egress, cancel): (Option<&crate::egress::AttemptEgress>, &CancellationToken),
@@ -126,7 +177,11 @@ pub(crate) async fn prepare(
         host_token: token,
         attempt: attempt.inspect(),
     };
-    let inputs = RemoteInputs::download(&acquisition, task, cancel).await?;
+    // Inputs downloaded before a Harness that started first are staged here, not fetched again.
+    let inputs = match downloaded {
+        Some(inputs) => inputs,
+        None => RemoteInputs::download(&acquisition, task, cancel).await?,
+    };
     // A devcontainer with lifecycle commands starts the Task's sandbox from a prepared artifact:
     // its image, trusted checkout, and setup are already there.
     let prepared = match environment
@@ -147,19 +202,7 @@ pub(crate) async fn prepare(
         ),
         None => None,
     };
-    let read_write = mounted.into_iter().flat_map(|mounted| {
-        mounted
-            .copies()
-            .iter()
-            .filter(|copy| copy.read_write)
-            .map(|copy| {
-                (
-                    copy.files.iter().map(|file| file.size).sum(),
-                    copy.max_bytes,
-                )
-            })
-    });
-    let margin = SANDBOX_CLEANUP_MARGIN.saturating_add(copy_capture_margin(read_write));
+    let margin = sandbox_margin(mounted);
     let timeout = options
         .attempt_timeout
         .saturating_add(margin)
@@ -233,12 +276,9 @@ pub(crate) async fn prepare(
         cancel,
     )
     .await?;
-    let mut instructions = inputs.delivered(&acquisition, cancel).await?;
-    if let Some(mounted) = mounted {
-        instructions
-            .get_or_insert_default()
-            .push_str(&mounted.remote_instructions(&attempt.attempt_id)?);
-    }
+    let instructions = launch_instructions(&inputs, mounted, attempt)?;
+    // Delivered only once staged in the sandbox.
+    inputs.delivered(&acquisition, cancel).await?;
     Ok((provider, instructions, execution_ends, restart))
 }
 
