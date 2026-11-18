@@ -42,7 +42,7 @@ To choose the locations or a version, set these before `sh`:
 
 | Variable | Default |
 | --- | --- |
-| `SUPERTAG_VERSION` | The release the script came from. Set a version, such as `0.3.0`, to install that release |
+| `SUPERTAG_VERSION` | The release the script came from. Set a version, such as `0.3.1`, to install that release |
 | `SUPERTAG_INSTALL_ROOT` | `$XDG_DATA_HOME/supertag` when `XDG_DATA_HOME` is set, otherwise `~/.local/share/supertag` |
 | `SUPERTAG_BIN_DIR` | `$XDG_BIN_HOME` when it is set, otherwise `~/.local/bin` |
 
@@ -111,7 +111,7 @@ The Python SDK is `supertag` on PyPI, in Python 3.10 or newer. Install the versi
 your CLI:
 
 ```sh
-python -m pip install 'supertag==0.3.0'
+python -m pip install 'supertag==0.3.1'
 ```
 
 Each SDK connects to a Control Plane and lets a custom harness adapter talk to its Worker Host;

@@ -1,8 +1,12 @@
 // User docs must name the current release, not an older or newer one, nor a local package archive.
-// These pages show version pairs as illustrative examples, so their versions are not checked.
+// These pages show version pairs as illustrative examples, so their versions are not checked: an
+// upgrade from the previous release, or a protocol mismatch naming both releases. The install
+// guide's PyPI pin is checked separately (check-install-docs.test.mjs).
 const illustrativeVersions = new Set([
   "docs/guides/troubleshooting.md",
+  "docs/operations/install.md",
   "docs/reference/api-stability.md",
+  "docs/reference/control-plane-api.md",
 ]);
 // History names the releases it happened in.
 const historical = (name) => name === "CHANGELOG.md" || name.startsWith("docs/development/");

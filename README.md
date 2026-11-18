@@ -219,7 +219,7 @@ application to a Control Plane and a harness adapter to its Worker Host:
 
 ```sh
 npm install supertag-ai
-python -m pip install 'supertag==0.3.0'
+python -m pip install 'supertag==0.3.1'
 ```
 
 [Write a harness adapter](docs/guides/harness-adapters.md) · [Connect your own collaboration surface](docs/reference/connector-contract.md) · [Check API stability](docs/reference/api-stability.md)
