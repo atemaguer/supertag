@@ -171,8 +171,11 @@ an outside caller can observe.
    must not admit commands.
 5. **Capture rules.** Capture returns exactly what [Capture](#capture) lists, within the size
    limit, with a receipt. It never follows a link out of the checkout.
-6. **Network rules.** The sandbox has no network access. A Task with `web:fetch`, `web:search`,
-   or `browser:use` never runs on such a host, because those tools would run on the host.
+6. **Network rules.** The sandbox has no network access, DNS included. Egress, if offered, must
+   go only to the Worker Host's egress proxy, with no other egress, DNS included. Until a remote
+   relay ships, a Task with a [network scope](iam.md#network-scopes) never runs on such a host,
+   and neither does a Task with `web:fetch`, `web:search`, or `browser:use`, because those tools
+   would run on the host.
 7. **Ownership.** Every sandbox carries its owner's five labels. Stop and recovery act only on a
    sandbox whose labels match exactly.
 
@@ -194,9 +197,12 @@ trusted.
 These will become requirements when they ship. A provider written now should leave room for
 them.
 
-- **Egress relay.** A sandbox will reach the network only through a relay inside it, which
-  tunnels to the Worker Host's egress proxy. The proxy applies the Task's
-  [network scope](iam.md#network-scopes). The sandbox will deny every other connection.
+- **Egress relay.** A sandbox will reach the network only through a relay that carries its
+  traffic over the provider's exec stream to the Worker Host's egress proxy, while the sandbox's
+  own network stays fully blocked. The proxy applies the Task's
+  [network scope](iam.md#network-scopes). Egress, if offered, must go only to the host's proxy,
+  with no other egress, DNS included. A tunnel that leaves the sandbox's resolver working does
+  not meet this.
 
 ## Run your own provider
 
