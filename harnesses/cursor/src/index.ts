@@ -1,3 +1,4 @@
+import { readFileSync, unlinkSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -208,6 +209,30 @@ function safeErrorDetail(message: string, secrets: readonly SensitiveValue[]): s
     : bounded;
 }
 
+/** The variable naming a private file the Worker Host wrote the Cursor API key into. */
+export const PROVIDER_CREDENTIALS_FILE = "SUPERTAG_PROVIDER_CREDENTIALS_FILE";
+
+let providerKey: { readonly value: string | undefined } | undefined;
+
+/**
+ * The Cursor API key. A Worker Host hands it over in a private file, a JSON object of variable to
+ * value named by `SUPERTAG_PROVIDER_CREDENTIALS_FILE`, which the first call reads and deletes, so
+ * the key never sits in this process's environment for `ps eww` or `/proc/<pid>/environ` to show.
+ * That closes accidental leaks only: the key is still in this process's memory. Without the
+ * file, `CURSOR_API_KEY` from the environment.
+ */
+export function cursorApiKey(): string | undefined {
+  if (providerKey) return providerKey.value;
+  const file = process.env[PROVIDER_CREDENTIALS_FILE];
+  if (!file) return process.env["CURSOR_API_KEY"];
+  delete process.env[PROVIDER_CREDENTIALS_FILE];
+  const text = readFileSync(file, "utf8");
+  unlinkSync(file);
+  const value: unknown = JSON.parse(text)?.["CURSOR_API_KEY"];
+  providerKey = { value: typeof value === "string" ? value : undefined };
+  return providerKey.value;
+}
+
 /**
  * The SDK runner has per-turn tokens and a portable JSONL store. Cursor CLI's stream-json
  * omits usage, and ACP needs an approval-response client, so this package drives the SDK.
@@ -222,7 +247,7 @@ export async function* runCursor(
   signal?: AbortSignal,
   executor?: CursorSplitExecutor,
 ): AsyncIterable<CursorRunnerEvent> {
-  const key = process.env["CURSOR_API_KEY"];
+  const key = cursorApiKey();
   if (!key) throw new Error("Cursor SDK requires CURSOR_API_KEY");
   const runnerJs = fileURLToPath(new URL("./runner.js", import.meta.url));
   const runnerTs = fileURLToPath(new URL("./runner.ts", import.meta.url));

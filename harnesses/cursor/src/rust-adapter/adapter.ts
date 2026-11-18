@@ -25,6 +25,7 @@ import {
 import {
   CURSOR_WORKER_POLICY,
   CursorProtocolError,
+  cursorApiKey,
   cursorToolsForSplit,
   runCursor,
 } from "../index.js";
@@ -93,6 +94,8 @@ export async function runAdapter(
   signal: AbortSignal,
   configuration: CursorAdapterOptions,
 ) {
+  // Take the key out of its file before anything else can run.
+  cursorApiKey();
   const bridge = harnessClient(bootstrap.endpoint, bootstrap.token);
   const { client, options } = bridge;
   const run = await receipt(() => client.attach({}, options()));
@@ -163,7 +166,7 @@ export async function runAdapter(
       limits?.maxReportedTokens !== undefined
     )
       throw new Error("Cursor does not support the accepted Skills or execution limits");
-    const apiKey = process.env["CURSOR_API_KEY"];
+    const apiKey = cursorApiKey();
     if (!apiKey || apiKey.length < 8 || apiKey.length > 4096)
       throw new Error("Cursor requires a valid provider credential");
     const admittedModels = task.policySnapshot?.execution?.models ?? [];

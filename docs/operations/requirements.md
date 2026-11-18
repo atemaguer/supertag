@@ -222,10 +222,13 @@ runs; the Worker Host warns about that when it starts.
 
 Cursor's key doesn't go behind the proxy. The Cursor SDK trades `CURSOR_API_KEY` for an access
 token that it then sends itself, and Cursor's service can switch it to streams the proxy doesn't
-carry. On a host with `allow-unsandboxed-commands: [cursor]`, the commands Cursor runs get an
-environment without the key, but the Cursor adapter holds it, and a command running as the same
-user can read it from the adapter process. The Worker Host warns about this when it starts. Use
-`environment: local-vm` to keep the key out of their reach.
+carry. The Worker Host hands the key to the Cursor adapter in a private file the adapter reads
+and deletes as it starts, and the adapter passes it to Cursor over a pipe, so it is in no
+process's environment, including that of the commands Cursor runs. That closes accidental leaks
+only: on a host with `allow-unsandboxed-commands: [cursor]`, a command running as the same user
+can still read the key from the host's `env_file` or, where the OS allows it, the adapter's
+memory. The Worker Host warns about this when it starts. Use `environment: local-vm` to keep the
+key out of their reach.
 
 `supertag up` hands each Worker Host its harness's provider keys and tokens in a private file
 that the host reads and deletes as it starts, rather than in its environment, so `ps eww`,

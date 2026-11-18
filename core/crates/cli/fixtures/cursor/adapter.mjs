@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -14,8 +15,10 @@ const { values } = parseArgs({
   },
 });
 
-assert.ok(process.env.CURSOR_API_KEY === "synthetic-cursor-provider-key");
+// The Worker Host hands the key over in a private file the adapter deletes, never its environment.
+assert.ok(existsSync(process.env.SUPERTAG_PROVIDER_CREDENTIALS_FILE ?? ""), "no provider key file");
 for (const key of [
+  "CURSOR_API_KEY",
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
   "E2B_API_KEY",
@@ -44,12 +47,15 @@ process.on("SIGTERM", abort);
 process.on("SIGINT", abort);
 try {
   const bootstrap = await readBootstrap(process.stdin);
-  await runAdapter(bootstrap, controller.signal, {
+  const credentials = process.env.SUPERTAG_PROVIDER_CREDENTIALS_FILE;
+  const running = runAdapter(bootstrap, controller.signal, {
     model: values.model,
     timeoutMs: Number(values["timeout-seconds"]) * 1000,
     allowUnsandboxedCommands: values["allow-unsandboxed-commands"],
     runnerEntrypoint: fileURLToPath(new URL("./runner.mjs", import.meta.url)),
   });
+  assert.ok(!existsSync(credentials), "the adapter left its provider key file behind");
+  await running;
 } finally {
   process.off("SIGTERM", abort);
   process.off("SIGINT", abort);

@@ -864,6 +864,57 @@ fn opencode_file_key(options: &HostOptions, provider: &str) -> Option<String> {
         .filter(|key| !key.is_empty())
 }
 
+/// Names the private file that hands an adapter its provider keys.
+const PROVIDER_CREDENTIALS_FILE: &str = "SUPERTAG_PROVIDER_CREDENTIALS_FILE";
+
+/// A private file of provider keys for one adapter launch, a JSON object of variable to value. The
+/// adapter deletes it once read; dropping this removes it if the adapter never did. It keeps the
+/// keys out of process environments, which closes accidental leaks, not a boundary: the adapter
+/// still holds the key in memory.
+struct CredentialHandoff(PathBuf);
+
+impl CredentialHandoff {
+    fn write(
+        state_directory: &Path,
+        secrets: Vec<(&str, std::ffi::OsString)>,
+    ) -> Result<Option<Self>> {
+        use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
+        if secrets.is_empty() {
+            return Ok(None);
+        }
+        let mut values = serde_json::Map::new();
+        for (name, value) in secrets {
+            let value = value
+                .into_string()
+                .map_err(|_| anyhow!("{name} is not valid UTF-8"))?;
+            values.insert(name.to_owned(), serde_json::Value::String(value));
+        }
+        let directory = state_directory.join("provider-handoff");
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&directory)
+            .context("create the provider credential handoff directory")?;
+        let path = directory.join(format!("{}.json", Uuid::new_v4().simple()));
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .context("create the provider credential handoff")?;
+        let handoff = Self(path);
+        io::Write::write_all(&mut file, &serde_json::to_vec(&values)?)
+            .context("write the provider credential handoff")?;
+        Ok(Some(handoff))
+    }
+}
+
+impl Drop for CredentialHandoff {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// What allowing a harness to run commands without a sandbox means, for `supertag init` and a
 /// Worker Host that starts with `allow-unsandboxed-commands`.
 pub fn unsandboxed_caveat(name: &str) -> String {
@@ -900,9 +951,8 @@ pub(crate) fn unproxied_key_warning(options: &HostOptions) -> Option<String> {
         // The Cursor SDK takes its backend from CURSOR_BACKEND_URL, but trades the API key for an
         // access token it then sends itself, and the backend can switch it to HTTP/2
         // bidirectional streams, which the provider proxy doesn't carry. So the adapter holds
-        // the key, and commands it runs leave it out of their environment but can still read
-        // the adapter's.
-        HarnessKind::Cursor => Some("Cursor's API key can't be kept in the Worker Host: the Cursor adapter holds CURSOR_API_KEY, and the commands it runs without a sandbox, as the same user, can read it from the adapter process. Use environment: local-vm to keep the key out of their reach.".to_owned()),
+        // the key: never in an environment (see `CredentialHandoff`), but in its memory.
+        HarnessKind::Cursor => Some("Cursor's API key can't be kept in the Worker Host: the Cursor adapter holds CURSOR_API_KEY in memory, out of every process environment, and the commands it runs without a sandbox, as the same user, can still reach it there or in the host's env_file. Use environment: local-vm to keep the key out of their reach.".to_owned()),
         _ => None,
     }
 }
@@ -1024,13 +1074,27 @@ async fn supervise(
             .canonicalize()
             .context("resolve private Worker Host state")?,
     );
-    command.envs(
+    let provider_variables =
         crate::provider_environment_for(options.harness, options.provider_model.as_deref())?
             .iter()
-            .filter_map(|&name| {
-                crate::provider_variable(name).map(|value| (OsStr::new(name), value))
-            }),
-    );
+            .filter_map(|&name| crate::provider_variable(name).map(|value| (name, value)));
+    // The Cursor adapter takes its key from a private file it reads and deletes, so the key never
+    // sits in the guardian's or the adapter's environment. Removed here if the adapter never read it.
+    let _handoff = if options.harness == HarnessKind::Cursor {
+        let (secrets, others): (Vec<_>, Vec<_>) =
+            provider_variables.partition(|(name, _)| crate::is_provider_secret(name));
+        command.envs(
+            others
+                .into_iter()
+                .map(|(name, value)| (OsStr::new(name), value)),
+        );
+        CredentialHandoff::write(&options.state_directory, secrets)?.inspect(|handoff| {
+            command.env(PROVIDER_CREDENTIALS_FILE, &handoff.0);
+        })
+    } else {
+        command.envs(provider_variables.map(|(name, value)| (OsStr::new(name), value)));
+        None
+    };
     // Behind the provider proxy the adapter gets placeholders and the proxy's URL, never the key.
     if let Some(provider) = provider {
         for (variable, placeholder) in provider.placeholders() {

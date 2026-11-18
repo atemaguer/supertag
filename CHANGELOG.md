@@ -220,6 +220,9 @@ within the pre-1.0 compatibility policy described in
   (migration 0114) instead of one process's memory. A replica that does not hold the warm host's
   waiting claim leaves the Task to it for 2 seconds when that host is ready with a free slot for
   the Task's harness.
+  provider proxy. The Worker Host now hands that key to the Cursor adapter in a private file the
+  adapter reads and deletes, so it is in no process's environment. That closes accidental leaks,
+  not a boundary.
 - `supertag up` hands each Worker Host its harness's provider keys and tokens in a private file the
   host reads and deletes as it starts, instead of in its environment, and a Linux Worker Host marks
   itself non-dumpable. This keeps keys out of `ps eww`, `/proc/<pid>/environ`, and core dumps: it
