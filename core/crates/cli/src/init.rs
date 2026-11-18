@@ -444,8 +444,8 @@ pub async fn init(args: InitArgs) -> Result<()> {
         };
         if !keep {
             outln!(
-                "Nothing was changed. Edit {} or move it aside to start over.",
-                path.display()
+                "Nothing was changed. To try another harness, see https://github.com/atemaguer/supertag/blob/main/docs/operations/cli.md#try-another-harness; to start over, run supertag down and move {} aside, which leaves your Tags and conversations behind.",
+                state.display()
             );
             return Ok(());
         }

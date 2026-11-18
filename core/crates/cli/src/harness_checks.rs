@@ -64,16 +64,16 @@ impl Harness {
 pub fn instructions(harness: Harness) -> &'static str {
     match harness {
         Harness::ClaudeCode => {
-            "Claude Code: run claude and use /login, or set ANTHROPIC_API_KEY in the host's env_file (default ~/.supertag/.env). A background host also inherits it from the shell; a service unit does not. Tasks read the secure sign-in store selected by CLAUDE_SECURESTORAGE_CONFIG_DIR, otherwise ~/.claude (macOS Keychain on macOS; .credentials.json on Linux). Task sessions and settings stay in a separate temporary directory."
+            "Claude Code: run claude and sign in with /login, then run this again.\n    Or set ANTHROPIC_API_KEY in ~/.supertag/.env. A background host also inherits it from the shell; a service unit does not. Tasks read the secure sign-in store selected by CLAUDE_SECURESTORAGE_CONFIG_DIR, otherwise ~/.claude (macOS Keychain on macOS; .credentials.json on Linux). Task sessions and settings stay in a separate temporary directory."
         }
         Harness::Codex => {
-            "Codex: run codex -c 'cli_auth_credentials_store=\"file\"' login, or set CODEX_API_KEY or OPENAI_API_KEY in the host's env_file (default ~/.supertag/.env). On macOS, a Keychain-only login is not copied to Task Attempts. A background host also inherits environment credentials from the shell; a service unit does not. Tasks use CODEX_API_KEY first, then copy $CODEX_HOME/auth.json (default ~/.codex/auth.json), then fall back to OPENAI_API_KEY if that file is missing. The file-backed sign-in check only verifies credential structure; it cannot verify account access without rotating a refresh token."
+            "Codex: run codex -c 'cli_auth_credentials_store=\"file\"' login, then run this again.\n    Or set CODEX_API_KEY or OPENAI_API_KEY in ~/.supertag/.env. On macOS, a Keychain-only login is not copied to Task Attempts. A background host also inherits environment credentials from the shell; a service unit does not. Tasks use CODEX_API_KEY first, then copy $CODEX_HOME/auth.json (default ~/.codex/auth.json), then fall back to OPENAI_API_KEY if that file is missing. The file-backed sign-in check only verifies credential structure; it cannot verify account access without rotating a refresh token."
         }
         Harness::Cursor => {
-            "Cursor: generate an API key at https://cursor.com/dashboard/api and set CURSOR_API_KEY in the host's env_file (default ~/.supertag/.env). The Cursor app and cursor-agent logins do not authenticate the Cursor SDK runner."
+            "Cursor: generate an API key at https://cursor.com/dashboard/api and set CURSOR_API_KEY in ~/.supertag/.env.\n    The Cursor app and cursor-agent logins do not authenticate the Cursor SDK runner."
         }
         Harness::Opencode => {
-            "OpenCode: set the API key for the selected provider/model in the Worker Host environment (for example OPENAI_API_KEY for openai, or ANTHROPIC_API_KEY for anthropic). Tasks use an isolated OpenCode home and do not read your usual OpenCode auth.json."
+            "OpenCode: set the API key for the selected provider/model in ~/.supertag/.env (for example OPENAI_API_KEY for openai, or ANTHROPIC_API_KEY for anthropic).\n    Tasks use an isolated OpenCode home and do not read your usual OpenCode auth.json."
         }
     }
 }

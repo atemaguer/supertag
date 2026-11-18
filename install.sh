@@ -206,4 +206,4 @@ case "$node_version" in
       "${node_version:+; this is $node_version}"
     ;;
 esac
-printf 'Next: install Claude Code, Codex, Cursor, or OpenCode, then run supertag init in a repository.\n'
+printf 'Next: install Claude Code or Codex (Cursor and OpenCode also work), then run supertag init in a repository.\n'

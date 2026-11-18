@@ -207,7 +207,7 @@ fn sign_in_checks_each_harness_with_the_worker_host_credentials() -> Result<()> 
 done"#,
     )?;
     let claude = machine.fails(&["sign-in", "claude-code"], &[])?;
-    assert!(claude.contains("run claude and use /login"), "{claude}");
+    assert!(claude.contains("run claude and sign in with /login"), "{claude}");
     assert!(
         claude.contains("CLAUDE_SECURESTORAGE_CONFIG_DIR"),
         "{claude}"

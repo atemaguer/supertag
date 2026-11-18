@@ -134,9 +134,16 @@ like this.
 /goal Add a test for an uncovered edge case. Done when the new test and its suite pass. Ask me before changing application code.
 ```
 
-Open **Waiting on you** when the Tag needs a decision. Each delivered change arrives in your
-repository as a `supertag/session/...` branch. Review it, then decide whether to merge it or ask
-for a revision.
+Questions the Tag asks you appear under **Waiting on you**. When the Objective is ready, the
+Objectives list in the sidebar shows it as `review`. Each delivered change arrives in your
+repository as a `supertag/session/...` branch. Review it, then approve the Objective or ask for a
+revision:
+
+```sh
+supertag describe objective OBJECTIVE_ID
+supertag objective review OBJECTIVE_ID approve
+supertag objective review OBJECTIVE_ID request-changes --feedback "Also cover the empty case."
+```
 
 [Installation options](docs/operations/install.md) · [Talk to a Tag](docs/guides/talk-to-a-tag.md) · [Run your first Team](docs/guides/first-team.md) · [Direct SuperTag from your coding agent](docs/guides/coding-agent-operator.md)
 

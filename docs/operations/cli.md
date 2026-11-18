@@ -113,6 +113,24 @@ A service with `restart: unless-stopped` makes `supertag up` install a per-user 
 `supertag down --remove-services` also uninstalls the unit.
 
 
+### Try another harness
+
+A Tag keeps the harness it was created with, so `lead` can't switch from Claude Code to Codex.
+To try another harness, add it to the host and create a second Tag on it. Add the harness to the
+host's `harnesses` in `~/.supertag/supertag.yaml`, for example `harnesses: [claude-code, codex]`,
+then run:
+
+```sh
+supertag up
+supertag tag put codex-lead --harness codex --workspace-id WORKSPACE --workspace-ref BRANCH \
+  --allow files:write --allow commands:execute --allow web:fetch
+```
+
+`WORKSPACE` is the name `init` gave the Workspace, under the host's `workspaces`, and `BRANCH` the
+branch its Sessions start from. To start over
+instead, run `supertag down` and move `~/.supertag` aside before `supertag init`; that also leaves
+your Tags and conversations behind.
+
 ### Let the lead run commands
 
 A Claude Code, Cursor, or OpenCode lead set up without commands reads and edits files but runs
