@@ -11,6 +11,11 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- A Tag can name a Volume (`supertag tag put --volume`, `spec.volume`). Its Tasks' captures go
+  there, written by the Worker Host itself: S3 through 15-minute presigned uploads bound to the
+  file's length and SHA-256 and checked with a HEAD, file Volumes only on hosts that map them
+  (`supertag worker-host --volume ID=DIR`, placement label `volume:ID`). S3 signing settings live
+  in the Control Plane's credential vault (`supertag volume credential set`).
 - Claude Code's own memory is on and lasts per Tag: the Worker Host keeps a shared store and one
   per person, copies it into each turn and merges it back afterwards, file by file. `supertag
   describe tag` shows each host's copy; `supertag delete memory --native TAG` resets it.
@@ -277,6 +282,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Removed
 
+- `supertag volume copy`, `supertag volume download`, and the Control Plane's `--artifact-volume`
+  and `--artifact-s3-volumes`; the Control Plane no longer reads or writes Volume files.
 - `--checkpoint-directory` and the Control Plane's checkpoint storage.
 - `supertag volume copy` and the Control Plane's `--artifact-volume` and `--artifact-s3-volumes`:
   the Control Plane maps no Volume. Starting it with either flag is refused with the replacement:
