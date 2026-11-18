@@ -33,10 +33,13 @@ the fixture adapter beside it:
     cargo build -p supertag-cli --features test-fixtures --bin supertag --bin supertag-fixture-adapter
     SUPERTAG_E2E_BINARY=core/target/debug/supertag python3 -m unittest scripts/test_e2e_journeys.py
 
-With `--harness codex` or `--harness claude-code` (or SUPERTAG_E2E_HARNESS), the host runs that
-harness with this machine's own CLI login instead, which spends a few small turns. Claude Code
-also needs its bridge staged beside the CLI (scripts/node_bridges.py). Without
-SUPERTAG_E2E_BINARY every journey is skipped, as in CI.
+With `--harness codex`, `claude-code`, `cursor`, or `opencode` (or SUPERTAG_E2E_HARNESS), the host
+runs that harness instead, which spends about a dozen small turns. Codex and Claude Code use this
+machine's own CLI sign-in; Cursor needs CURSOR_API_KEY; OpenCode runs SUPERTAG_E2E_OPENCODE_MODEL
+(default openai/gpt-5.5: smaller models announce a Work Session's edit and end the turn without
+making it) with its provider's API-key variable, such as OPENAI_API_KEY. A harness without its
+credential skips. Claude Code, Cursor, and OpenCode need their bridges staged beside the CLI
+(scripts/node_bridges.py). Without SUPERTAG_E2E_BINARY every journey is skipped, as in CI.
 
 `--provider modal` runs only ModalJourney instead: one Claude Code turn in a Modal sandbox on the
 signed-in Modal CLI's profile (see its docstring for what it needs).
@@ -123,6 +126,27 @@ class GitHttp(http.server.BaseHTTPRequestHandler):
 
     do_GET = serve
     do_POST = serve
+
+
+OPENCODE_MODEL = os.environ.get("SUPERTAG_E2E_OPENCODE_MODEL", "openai/gpt-5.5")
+# The provider API-key variable OpenCode reads for each provider a model may name.
+OPENCODE_KEYS = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+
+
+def harness_credentials_missing(harness: str) -> str:
+    """Why `harness` can't run here, or "" when its credential is present. Codex and Claude Code
+    use this machine's own CLI sign-in; Cursor's SDK needs CURSOR_API_KEY (a Cursor app or
+    cursor-agent sign-in isn't enough), and OpenCode the API-key variable of its model's provider."""
+    if harness == "cursor" and not os.environ.get("CURSOR_API_KEY"):
+        return "the Cursor journeys need CURSOR_API_KEY"
+    if harness == "opencode":
+        provider = OPENCODE_MODEL.split("/", 1)[0]
+        variable = OPENCODE_KEYS.get(provider)
+        if variable is None:
+            return f"set SUPERTAG_E2E_OPENCODE_MODEL to an openai/ or anthropic/ model, not {OPENCODE_MODEL}"
+        if not os.environ.get(variable):
+            return f"the OpenCode journeys with {OPENCODE_MODEL} need {variable}"
+    return ""
 
 
 def free_port() -> int:
@@ -266,6 +290,9 @@ class Journeys(Stack):
 
     @classmethod
     def setUpClass(cls):
+        missing = harness_credentials_missing(HARNESS)
+        if missing:
+            raise unittest.SkipTest(missing)
         cls.binary = Path(BINARY).resolve()
         cls.temporary = tempfile.TemporaryDirectory(prefix="st-e2e-")
         cls.root = Path(cls.temporary.name)
@@ -298,8 +325,10 @@ class Journeys(Stack):
 
         if HARNESS:
             runner = f"    harnesses: [{HARNESS}]\n"
-            if HARNESS == "claude-code":
-                runner += "    allow-unsandboxed-commands: [claude-code]\n"
+            if HARNESS in ("claude-code", "cursor", "opencode"):
+                runner += f"    allow-unsandboxed-commands: [{HARNESS}]\n"
+            if HARNESS == "opencode":
+                runner += f"    models: {{ opencode: {OPENCODE_MODEL} }}\n"
         else:
             adapter = cls.binary.with_name("supertag-fixture-adapter")
             if not adapter.exists():
