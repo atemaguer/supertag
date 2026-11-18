@@ -103,7 +103,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 112;
+        const SCHEMA_VERSION: i64 = 113;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -334,6 +334,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0110_landing_verification.sql"),
                 include_str!("../migrations/sqlite/0111_native_memory_garbage.sql"),
                 include_str!("../migrations/sqlite/0112_native_memory_pending_objects.sql"),
+                include_str!("../migrations/sqlite/0113_attempt_finalization.sql"),
             ]
         } else {
             [
@@ -451,6 +452,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0110_landing_verification.sql"),
                 include_str!("../migrations/postgresql/0111_native_memory_garbage.sql"),
                 include_str!("../migrations/postgresql/0112_native_memory_pending_objects.sql"),
+                include_str!("../migrations/postgresql/0113_attempt_finalization.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -1298,6 +1300,7 @@ impl Store {
         let column = match AttemptMilestone::try_from(input.milestone) {
             Ok(AttemptMilestone::WorkspaceReady) => "workspace_ready_at_ms",
             Ok(AttemptMilestone::AdapterAttached) => "attached_at_ms",
+            Ok(AttemptMilestone::HarnessFinished) => "harness_finished_at_ms",
             Ok(AttemptMilestone::Unspecified) | Err(_) => {
                 return Err(invalid("Attempt milestone is required"));
             }
@@ -1463,6 +1466,14 @@ impl Store {
         )
         .await?;
         let now = self.execution_now_ms();
+        // The first report's time, for the finalization time in `supertag metrics`.
+        sqlx::query(
+            "UPDATE supertag_v2_claims SET reported_at_ms=$1 WHERE attempt_id=$2 AND reported_at_ms IS NULL",
+        )
+        .bind(now)
+        .bind(&input.attempt_id)
+        .execute(&mut *transaction)
+        .await?;
         let mut state = task_row(&row)?.state();
         if state == TaskState::Running {
             crate::objectives::objective_sweep_in(&mut transaction, now).await?;

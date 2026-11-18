@@ -152,8 +152,11 @@ one Worker Host is connected and ready; `verify deployment --require-ready` fail
 `supertag metrics` reports queued and running Tasks, Worker Host capacity, recovery decisions, and
 backlogs. For the last 500 started Task Attempts it shows the median and longest time from start
 until the Workspace was ready, the harness adapter attached, and the harness's first event, so you
-can see where the wait before a model's first token goes. The Control Plane stamps each point by
-its own clock; a Worker Host reports the first two best-effort, so a Task Attempt may lack them. It also reports how long the Control Plane process that answered took to admit each
+can see where the wait before a model's first token goes, and the time from the harness finishing
+to the Worker Host reporting the result (`finalization`: Workspace capture, delivery, checkpoint,
+and outputs). The Control Plane stamps each point by its own clock; a Worker Host reports when the
+Workspace was ready, when the adapter attached, and when the harness finished, best-effort, so a
+Task Attempt may lack them. It also reports how long the Control Plane process that answered took to admit each
 collaboration surface's events since it started: admitted and failed calls, average and longest
 time, and how many took over 2 seconds, the shortest acknowledgement deadline a Gateway has. Each
 replica counts only the events it served.

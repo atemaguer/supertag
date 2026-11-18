@@ -225,7 +225,12 @@ async fn metrics_count_every_record_beyond_list_pages(database: String) -> Resul
         snapshot["scheduling"]["first_event"]["attempts"], 1,
         "{snapshot}"
     );
-    for phase in ["workspace_ready", "adapter_attached", "first_event"] {
+    for phase in [
+        "workspace_ready",
+        "adapter_attached",
+        "first_event",
+        "finalization",
+    ] {
         let value = |name: &str| snapshot["scheduling"][phase][name].as_i64().unwrap_or(-1);
         ensure!(
             (0..=1).contains(&value("attempts"))

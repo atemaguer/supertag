@@ -129,7 +129,7 @@ class MetricUsage(_message.Message):
     def __init__(self, attempts: _Optional[int] = ..., reported_tokens: _Optional[int] = ..., unknown_token_attempts: _Optional[int] = ..., reported_cost: _Optional[_Iterable[_Union[_spend_pb2.SpendAmount, _Mapping]]] = ..., unknown_cost_attempts: _Optional[int] = ..., estimated_cost_attempts: _Optional[int] = ...) -> None: ...
 
 class MetricScheduling(_message.Message):
-    __slots__ = ("queued", "worker_hosts", "oldest_queued_at_ms", "placed_tasks", "average_queue_wait_ms", "maximum_queue_wait_ms", "started_attempts", "average_start_wait_ms", "maximum_start_wait_ms", "workspace_ready", "adapter_attached", "first_event")
+    __slots__ = ("queued", "worker_hosts", "oldest_queued_at_ms", "placed_tasks", "average_queue_wait_ms", "maximum_queue_wait_ms", "started_attempts", "average_start_wait_ms", "maximum_start_wait_ms", "workspace_ready", "adapter_attached", "first_event", "finalization")
     QUEUED_FIELD_NUMBER: _ClassVar[int]
     WORKER_HOSTS_FIELD_NUMBER: _ClassVar[int]
     OLDEST_QUEUED_AT_MS_FIELD_NUMBER: _ClassVar[int]
@@ -142,6 +142,7 @@ class MetricScheduling(_message.Message):
     WORKSPACE_READY_FIELD_NUMBER: _ClassVar[int]
     ADAPTER_ATTACHED_FIELD_NUMBER: _ClassVar[int]
     FIRST_EVENT_FIELD_NUMBER: _ClassVar[int]
+    FINALIZATION_FIELD_NUMBER: _ClassVar[int]
     queued: int
     worker_hosts: _containers.RepeatedCompositeFieldContainer[MetricWorkerHost]
     oldest_queued_at_ms: int
@@ -154,7 +155,8 @@ class MetricScheduling(_message.Message):
     workspace_ready: MetricPhase
     adapter_attached: MetricPhase
     first_event: MetricPhase
-    def __init__(self, queued: _Optional[int] = ..., worker_hosts: _Optional[_Iterable[_Union[MetricWorkerHost, _Mapping]]] = ..., oldest_queued_at_ms: _Optional[int] = ..., placed_tasks: _Optional[int] = ..., average_queue_wait_ms: _Optional[int] = ..., maximum_queue_wait_ms: _Optional[int] = ..., started_attempts: _Optional[int] = ..., average_start_wait_ms: _Optional[int] = ..., maximum_start_wait_ms: _Optional[int] = ..., workspace_ready: _Optional[_Union[MetricPhase, _Mapping]] = ..., adapter_attached: _Optional[_Union[MetricPhase, _Mapping]] = ..., first_event: _Optional[_Union[MetricPhase, _Mapping]] = ...) -> None: ...
+    finalization: MetricPhase
+    def __init__(self, queued: _Optional[int] = ..., worker_hosts: _Optional[_Iterable[_Union[MetricWorkerHost, _Mapping]]] = ..., oldest_queued_at_ms: _Optional[int] = ..., placed_tasks: _Optional[int] = ..., average_queue_wait_ms: _Optional[int] = ..., maximum_queue_wait_ms: _Optional[int] = ..., started_attempts: _Optional[int] = ..., average_start_wait_ms: _Optional[int] = ..., maximum_start_wait_ms: _Optional[int] = ..., workspace_ready: _Optional[_Union[MetricPhase, _Mapping]] = ..., adapter_attached: _Optional[_Union[MetricPhase, _Mapping]] = ..., first_event: _Optional[_Union[MetricPhase, _Mapping]] = ..., finalization: _Optional[_Union[MetricPhase, _Mapping]] = ...) -> None: ...
 
 class MetricPhase(_message.Message):
     __slots__ = ("attempts", "median_ms", "maximum_ms")

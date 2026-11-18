@@ -2570,6 +2570,12 @@ async fn run_assignment(
         replacements
     };
     let (outcome, sandbox, mut replacements) = tokio::join!(run, background_sandbox, replacer);
+    report_milestone(
+        host,
+        &attempt.inspect(),
+        token,
+        supertag_protocol::v2::AttemptMilestone::HarnessFinished,
+    );
     let outcome = match sandbox {
         None => outcome,
         Some((Ok((prepared, _, _, _)), _)) => {

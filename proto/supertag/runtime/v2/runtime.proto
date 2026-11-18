@@ -846,6 +846,8 @@ enum AttemptMilestone {
   ATTEMPT_MILESTONE_WORKSPACE_READY = 1;
   // Its harness adapter attached to the Worker Host.
   ATTEMPT_MILESTONE_ADAPTER_ATTACHED = 2;
+  // Its harness finished the turn; the Worker Host then captures and delivers the Workspace.
+  ATTEMPT_MILESTONE_HARNESS_FINISHED = 3;
 }
 
 message ReportAttemptMilestoneRequest {

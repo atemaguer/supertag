@@ -124,9 +124,12 @@ message MetricScheduling {
   MetricPhase workspace_ready = 5407;
   MetricPhase adapter_attached = 5408;
   MetricPhase first_event = 5409;
+  // From a recent Attempt's harness finishing to the Worker Host reporting its result:
+  // Workspace capture, delivery, checkpoint and outputs.
+  MetricPhase finalization = 5410;
 }
 
-// One phase of recent Attempts (at most the last 500 started), measured from start.
+// One phase of recent Attempts (at most the last 500 started).
 message MetricPhase {
   int64 attempts = 1;
   int64 median_ms = 2;

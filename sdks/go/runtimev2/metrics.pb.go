@@ -708,8 +708,11 @@ type MetricScheduling struct {
 	WorkspaceReady  *MetricPhase `protobuf:"bytes,5407,opt,name=workspace_ready,json=workspaceReady,proto3" json:"workspace_ready,omitempty"`
 	AdapterAttached *MetricPhase `protobuf:"bytes,5408,opt,name=adapter_attached,json=adapterAttached,proto3" json:"adapter_attached,omitempty"`
 	FirstEvent      *MetricPhase `protobuf:"bytes,5409,opt,name=first_event,json=firstEvent,proto3" json:"first_event,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// From a recent Attempt's harness finishing to the Worker Host reporting its result:
+	// Workspace capture, delivery, checkpoint and outputs.
+	Finalization  *MetricPhase `protobuf:"bytes,5410,opt,name=finalization,proto3" json:"finalization,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *MetricScheduling) Reset() {
@@ -826,7 +829,14 @@ func (x *MetricScheduling) GetFirstEvent() *MetricPhase {
 	return nil
 }
 
-// One phase of recent Attempts (at most the last 500 started), measured from start.
+func (x *MetricScheduling) GetFinalization() *MetricPhase {
+	if x != nil {
+		return x.Finalization
+	}
+	return nil
+}
+
+// One phase of recent Attempts (at most the last 500 started).
 type MetricPhase struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Attempts      int64                  `protobuf:"varint,1,opt,name=attempts,proto3" json:"attempts,omitempty"`
@@ -1140,7 +1150,7 @@ const file_supertag_runtime_v2_metrics_proto_rawDesc = "" +
 	"\rreported_cost\x18\x04 \x03(\v2 .supertag.runtime.v2.SpendAmountR\freportedCost\x122\n" +
 	"\x15unknown_cost_attempts\x18\x05 \x01(\x03R\x13unknownCostAttempts\x126\n" +
 	"\x17estimated_cost_attempts\x18\x06 \x01(\x03R\x15estimatedCostAttemptsB\x12\n" +
-	"\x10_reported_tokens\"\xbf\x05\n" +
+	"\x10_reported_tokens\"\x86\x06\n" +
 	"\x10MetricScheduling\x12\x16\n" +
 	"\x06queued\x18\x01 \x01(\x03R\x06queued\x12H\n" +
 	"\fworker_hosts\x18\x02 \x03(\v2%.supertag.runtime.v2.MetricWorkerHostR\vworkerHosts\x123\n" +
@@ -1154,7 +1164,8 @@ const file_supertag_runtime_v2_metrics_proto_rawDesc = "" +
 	"\x0fworkspace_ready\x18\x9f* \x01(\v2 .supertag.runtime.v2.MetricPhaseR\x0eworkspaceReady\x12L\n" +
 	"\x10adapter_attached\x18\xa0* \x01(\v2 .supertag.runtime.v2.MetricPhaseR\x0fadapterAttached\x12B\n" +
 	"\vfirst_event\x18\xa1* \x01(\v2 .supertag.runtime.v2.MetricPhaseR\n" +
-	"firstEventB\x16\n" +
+	"firstEvent\x12E\n" +
+	"\ffinalization\x18\xa2* \x01(\v2 .supertag.runtime.v2.MetricPhaseR\ffinalizationB\x16\n" +
 	"\x14_oldest_queued_at_ms\"e\n" +
 	"\vMetricPhase\x12\x1a\n" +
 	"\battempts\x18\x01 \x01(\x03R\battempts\x12\x1b\n" +
@@ -1224,14 +1235,15 @@ var file_supertag_runtime_v2_metrics_proto_depIdxs = []int32{
 	9,  // 11: supertag.runtime.v2.MetricScheduling.workspace_ready:type_name -> supertag.runtime.v2.MetricPhase
 	9,  // 12: supertag.runtime.v2.MetricScheduling.adapter_attached:type_name -> supertag.runtime.v2.MetricPhase
 	9,  // 13: supertag.runtime.v2.MetricScheduling.first_event:type_name -> supertag.runtime.v2.MetricPhase
-	14, // 14: supertag.runtime.v2.MetricWorkerHost.phase:type_name -> supertag.runtime.v2.HostPhase
-	0,  // 15: supertag.runtime.v2.Metrics.GetMetrics:input_type -> supertag.runtime.v2.GetMetricsRequest
-	1,  // 16: supertag.runtime.v2.Metrics.GetMetrics:output_type -> supertag.runtime.v2.MetricSnapshot
-	16, // [16:17] is the sub-list for method output_type
-	15, // [15:16] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	9,  // 14: supertag.runtime.v2.MetricScheduling.finalization:type_name -> supertag.runtime.v2.MetricPhase
+	14, // 15: supertag.runtime.v2.MetricWorkerHost.phase:type_name -> supertag.runtime.v2.HostPhase
+	0,  // 16: supertag.runtime.v2.Metrics.GetMetrics:input_type -> supertag.runtime.v2.GetMetricsRequest
+	1,  // 17: supertag.runtime.v2.Metrics.GetMetrics:output_type -> supertag.runtime.v2.MetricSnapshot
+	17, // [17:18] is the sub-list for method output_type
+	16, // [16:17] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_metrics_proto_init() }

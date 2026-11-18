@@ -224,7 +224,8 @@ impl Store {
         // The most recent started Attempts, bounded so the medians are computed here: SQLite has
         // no percentile function.
         let rows = sqlx::query(
-            "SELECT started_at_ms, workspace_ready_at_ms, attached_at_ms, first_event_at_ms \
+            "SELECT started_at_ms, workspace_ready_at_ms, attached_at_ms, first_event_at_ms, \
+             harness_finished_at_ms, reported_at_ms \
              FROM supertag_v2_claims WHERE started_at_ms IS NOT NULL AND attempt_id IS NOT NULL \
              ORDER BY started_at_ms DESC LIMIT $1",
         )
@@ -232,6 +233,7 @@ impl Store {
         .fetch_all(&self.pool)
         .await?;
         let mut phases: [Vec<i64>; 3] = Default::default();
+        let mut finalization = Vec::new();
         for row in &rows {
             let started: i64 = row.try_get("started_at_ms")?;
             for (phase, column) in phases.iter_mut().zip([
@@ -243,12 +245,19 @@ impl Store {
                     phase.push((at - started).max(0));
                 }
             }
+            if let (Some(finished), Some(reported)) = (
+                row.try_get::<Option<i64>, _>("harness_finished_at_ms")?,
+                row.try_get::<Option<i64>, _>("reported_at_ms")?,
+            ) {
+                finalization.push((reported - finished).max(0));
+            }
         }
         let [workspace_ready, adapter_attached, first_event] = phases.map(metric_phase);
         Ok(MetricScheduling {
             workspace_ready: Some(workspace_ready),
             adapter_attached: Some(adapter_attached),
             first_event: Some(first_event),
+            finalization: Some(metric_phase(finalization)),
             oldest_queued_at_ms,
             placed_tasks,
             average_queue_wait_ms,

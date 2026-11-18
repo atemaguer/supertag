@@ -104,6 +104,7 @@ class AttemptMilestone(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     ATTEMPT_MILESTONE_UNSPECIFIED: _ClassVar[AttemptMilestone]
     ATTEMPT_MILESTONE_WORKSPACE_READY: _ClassVar[AttemptMilestone]
     ATTEMPT_MILESTONE_ADAPTER_ATTACHED: _ClassVar[AttemptMilestone]
+    ATTEMPT_MILESTONE_HARNESS_FINISHED: _ClassVar[AttemptMilestone]
 
 class HostPhase(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -393,6 +394,7 @@ COMMIT_REVIEW_DECISION_CHANGES_REQUESTED: CommitReviewDecision
 ATTEMPT_MILESTONE_UNSPECIFIED: AttemptMilestone
 ATTEMPT_MILESTONE_WORKSPACE_READY: AttemptMilestone
 ATTEMPT_MILESTONE_ADAPTER_ATTACHED: AttemptMilestone
+ATTEMPT_MILESTONE_HARNESS_FINISHED: AttemptMilestone
 HOST_PHASE_UNSPECIFIED: HostPhase
 HOST_PHASE_PENDING: HostPhase
 HOST_PHASE_READY: HostPhase

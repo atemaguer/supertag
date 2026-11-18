@@ -349,6 +349,27 @@ async fn milestones(url: String) {
             .await
             .unwrap();
     }
+    // Finalization runs from the harness finishing to the host's report.
+    clock.store(NOW + 2_000, Ordering::SeqCst);
+    store
+        .report_attempt_milestone(&host, &reach(AttemptMilestone::HarnessFinished))
+        .await
+        .unwrap();
+    clock.store(NOW + 5_000, Ordering::SeqCst);
+    store
+        .finish_task(
+            &host,
+            &FinishTaskRequest {
+                task_id: task_id.clone(),
+                attempt_id: attempt_id.clone(),
+                lease_token: lease_token.clone(),
+                result: "Done".into(),
+                succeeded: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
     let scheduling = store.metrics().await.unwrap().scheduling.unwrap();
     let phase = |phase: Option<MetricPhase>| {
         let phase = phase.unwrap();
@@ -357,6 +378,7 @@ async fn milestones(url: String) {
     assert_eq!(phase(scheduling.workspace_ready), (1, 100, 100));
     assert_eq!(phase(scheduling.adapter_attached), (1, 250, 250));
     assert_eq!(phase(scheduling.first_event), (1, 400, 400));
+    assert_eq!(phase(scheduling.finalization), (1, 3_000, 3_000));
     store.close().await;
 }
 

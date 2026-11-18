@@ -158,7 +158,8 @@ supertag watch objective flaky-tests
 `watch` streams change notices and reconnects from its last resume token. `watch objective ID`
 follows one Objective as a timeline until it closes. `supertag metrics` prints counts of Tasks,
 usage, Worker Host capacity, backlogs, and how long recent Task Attempts took from start to a ready
-Workspace, an attached harness, and the harness's first event.
+Workspace, an attached harness, and the harness's first event, and from the harness finishing to
+the result being reported.
 
 ## Organize Tags
 

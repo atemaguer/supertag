@@ -167,6 +167,7 @@ fn metrics_json(snapshot: &MetricSnapshot) -> Value {
             "workspace_ready": phase_json(scheduling.workspace_ready.as_ref()),
             "adapter_attached": phase_json(scheduling.adapter_attached.as_ref()),
             "first_event": phase_json(scheduling.first_event.as_ref()),
+            "finalization": phase_json(scheduling.finalization.as_ref()),
             "worker_hosts": scheduling.worker_hosts.iter().map(|host| json!({
                 "id": host.host_id,
                 "phase": host_phase(host.phase()),
@@ -362,11 +363,17 @@ fn metrics_text(snapshot: &MetricSnapshot) -> String {
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();
-            if phases.is_empty() {
+            let mut text = if phases.is_empty() {
                 String::new()
             } else {
                 format!("From start (recent Attempts): {}\n", phases.join("; "))
+            };
+            if let Some(phase) =
+                phase_text("harness done to reported", scheduling.finalization.as_ref())
+            {
+                text.push_str(&format!("Finalization (recent Attempts): {phase}\n"));
             }
+            text
         },
         recovery.awaiting_decision,
         recovery.cleanup_unconfirmed,

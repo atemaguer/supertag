@@ -51,7 +51,8 @@ limited in three places:
 
 `supertag metrics` shows queued Tasks, host capacity, and how long Tasks waited: before a claim,
 between claim and start, and, for the last 500 started Task Attempts, the median and longest time from
-start to a ready Workspace, an attached harness adapter, and the harness's first event.
+start to a ready Workspace, an attached harness adapter, and the harness's first event, and from
+the harness finishing to the Worker Host reporting the result.
 
 ### Start rates
 

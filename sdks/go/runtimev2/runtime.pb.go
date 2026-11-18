@@ -660,6 +660,8 @@ const (
 	AttemptMilestone_ATTEMPT_MILESTONE_WORKSPACE_READY AttemptMilestone = 1
 	// Its harness adapter attached to the Worker Host.
 	AttemptMilestone_ATTEMPT_MILESTONE_ADAPTER_ATTACHED AttemptMilestone = 2
+	// Its harness finished the turn; the Worker Host then captures and delivers the Workspace.
+	AttemptMilestone_ATTEMPT_MILESTONE_HARNESS_FINISHED AttemptMilestone = 3
 )
 
 // Enum value maps for AttemptMilestone.
@@ -668,11 +670,13 @@ var (
 		0: "ATTEMPT_MILESTONE_UNSPECIFIED",
 		1: "ATTEMPT_MILESTONE_WORKSPACE_READY",
 		2: "ATTEMPT_MILESTONE_ADAPTER_ATTACHED",
+		3: "ATTEMPT_MILESTONE_HARNESS_FINISHED",
 	}
 	AttemptMilestone_value = map[string]int32{
 		"ATTEMPT_MILESTONE_UNSPECIFIED":      0,
 		"ATTEMPT_MILESTONE_WORKSPACE_READY":  1,
 		"ATTEMPT_MILESTONE_ADAPTER_ATTACHED": 2,
+		"ATTEMPT_MILESTONE_HARNESS_FINISHED": 3,
 	}
 )
 
@@ -28425,11 +28429,12 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x14CommitReviewDecision\x12&\n" +
 	"\"COMMIT_REVIEW_DECISION_UNSPECIFIED\x10\x00\x12#\n" +
 	"\x1fCOMMIT_REVIEW_DECISION_APPROVED\x10\x01\x12,\n" +
-	"(COMMIT_REVIEW_DECISION_CHANGES_REQUESTED\x10\x02*\x84\x01\n" +
+	"(COMMIT_REVIEW_DECISION_CHANGES_REQUESTED\x10\x02*\xac\x01\n" +
 	"\x10AttemptMilestone\x12!\n" +
 	"\x1dATTEMPT_MILESTONE_UNSPECIFIED\x10\x00\x12%\n" +
 	"!ATTEMPT_MILESTONE_WORKSPACE_READY\x10\x01\x12&\n" +
-	"\"ATTEMPT_MILESTONE_ADAPTER_ATTACHED\x10\x02*\xce\x01\n" +
+	"\"ATTEMPT_MILESTONE_ADAPTER_ATTACHED\x10\x02\x12&\n" +
+	"\"ATTEMPT_MILESTONE_HARNESS_FINISHED\x10\x03*\xce\x01\n" +
 	"\tHostPhase\x12\x1a\n" +
 	"\x16HOST_PHASE_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12HOST_PHASE_PENDING\x10\x01\x12\x14\n" +
