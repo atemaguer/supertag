@@ -1432,19 +1432,43 @@ fn check_cancelled(cancel: &CancellationToken) -> Result<()> {
     Ok(())
 }
 
-/// The commit message: the subject, and the requester as a `Co-authored-by` trailer.
+/// The commit message: the subject, the whole first line when the subject had to shorten it,
+/// and the requester as a `Co-authored-by` trailer.
 fn commit_message(summary: &str, author: Option<&CommitAuthor>) -> String {
+    let line = summary_line(summary);
     let subject = commit_subject(summary);
+    let mut message = subject.clone();
+    if subject != line {
+        message.push_str(&format!("\n\n{line}"));
+    }
     match author.map(|author| author.co_author.as_str()) {
         Some(co_author) if !co_author.is_empty() && !co_author.chars().any(char::is_control) => {
-            format!("{subject}\n\nCo-authored-by: {co_author}\n")
+            format!("{message}\n\nCo-authored-by: {co_author}\n")
         }
-        _ => subject,
+        _ => message,
     }
 }
 
-/// The result's first non-empty line, as the commit's subject.
+/// A commit subject's longest length, in characters.
+const SUBJECT_CHARS: usize = 72;
+
+/// The result's first non-empty line, as the commit's subject: at most `SUBJECT_CHARS`, cut at a
+/// word boundary and marked with an ellipsis when longer, never mid-word.
 fn commit_subject(summary: &str) -> String {
+    let line = summary_line(summary);
+    if line.chars().count() <= SUBJECT_CHARS {
+        return line;
+    }
+    let head: String = line.chars().take(SUBJECT_CHARS - 1).collect();
+    let cut = head
+        .rfind(' ')
+        .filter(|at| *at > SUBJECT_CHARS / 2)
+        .map_or(head.as_str(), |at| &head[..at]);
+    format!("{}…", cut.trim_end_matches([' ', ',', ';', ':', '.']))
+}
+
+/// The result's first non-empty line, without link targets or control characters.
+fn summary_line(summary: &str) -> String {
     let line = summary
         .lines()
         .map(str::trim)
@@ -1453,7 +1477,7 @@ fn commit_subject(summary: &str) -> String {
     without_link_targets(line)
         .chars()
         .filter(|ch| !ch.is_control())
-        .take(72)
+        .take(1_000)
         .collect()
 }
 
@@ -1634,6 +1658,25 @@ mod tests {
         );
         assert_eq!(commit_subject("Fix a[0] and [b]"), "Fix a[0] and [b]");
         assert_eq!(commit_subject("[x](y"), "[x](y");
+    }
+
+    #[test]
+    fn a_long_summary_shortens_at_a_word_and_keeps_its_whole_line_in_the_body() {
+        let summary = "Added `subtract(a, b)` with a docstring to [calc.py](/tmp/x/calc.py) and tests for both operations in [test_calc.py](/tmp/x/test_calc.py).";
+        let subject = commit_subject(summary);
+        assert_eq!(
+            subject,
+            "Added `subtract(a, b)` with a docstring to calc.py and tests for both…"
+        );
+        assert!(subject.chars().count() <= SUBJECT_CHARS);
+        assert_eq!(
+            commit_message(summary, None),
+            format!(
+                "{subject}\n\nAdded `subtract(a, b)` with a docstring to calc.py and tests for both operations in test_calc.py."
+            )
+        );
+        // A short one stays as it is, with no body.
+        assert_eq!(commit_message("Fix the parser.", None), "Fix the parser.");
     }
 
     #[test]
