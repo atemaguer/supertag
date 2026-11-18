@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -36,8 +37,32 @@ type markdown struct {
 	renders int
 }
 
+// renderVersion names how replies are rendered. Raise it when a change would render a cached
+// reply differently, so the cache renders it again.
+const renderVersion = 2
+
+// fileLink is a Markdown link; one whose target is a file path rather than a web address, such
+// as the file a harness changed in its checkout, means nothing to the reader, so only its text is
+// shown.
+var fileLink = regexp.MustCompile(`\[([^\[\]]+)\]\(([^)\s]+)\)`)
+
+// webAddress is a link target the reader can open.
+var webAddress = regexp.MustCompile(`^(?i:https?://|mailto:)`)
+
+// withoutLocalLinks keeps a file link's text and drops its path.
+func withoutLocalLinks(text string) string {
+	return fileLink.ReplaceAllStringFunc(text, func(link string) string {
+		parts := fileLink.FindStringSubmatch(link)
+		if webAddress.MatchString(parts[2]) {
+			return link
+		}
+		return parts[1]
+	})
+}
+
 func (md *markdown) render(text string, width int) string {
 	md.renders++
+	text = withoutLocalLinks(text)
 	if md.renderer == nil || md.width != width {
 		renderer, err := glamour.NewTermRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(width))
 		if err != nil {

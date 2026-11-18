@@ -80,6 +80,9 @@ type cachedConversation struct {
 	Turns          []cachedTurn `json:"turns"`
 	// Width is the width the entries were rendered at.
 	Width int `json:"width,omitempty"`
+	// Renderer is the renderVersion the entries were rendered with; another one's renderings
+	// are dropped and the entries render again.
+	Renderer int `json:"renderer,omitempty"`
 	// WorkShown are the work Session lines the turns already show, so a later read of a turn
 	// does not show them again.
 	WorkShown []string `json:"workShown,omitempty"`
@@ -207,7 +210,7 @@ const renderedBudget = 1 << 20
 // renderings of the newest entries.
 func (m *model) conversationSnapshot(tag string) cachedConversation {
 	h := &m.conversation(tag).runtime
-	snapshot := cachedConversation{ConversationID: h.conversationID, Width: m.paneWidth()}
+	snapshot := cachedConversation{ConversationID: h.conversationID, Width: m.paneWidth(), Renderer: renderVersion}
 	if !h.read {
 		return snapshot
 	}
@@ -347,7 +350,7 @@ func (m *model) cachedConversation(tag string) {
 		restored := &runtimeTurn{settled: turn.Settled, needsFollow: !turn.Settled, joined: turn.Joined, started: turn.Started,
 			after: turn.After, order: turn.Order, sentAt: fromMilli(turn.SentAtMs), completedAt: fromMilli(turn.CompletedAtMs)}
 		restored.status, restored.hidden = turn.Status, turn.Hidden
-		rendered := cached.Width > 0
+		rendered := cached.Width > 0 && cached.Renderer == renderVersion
 		for _, held := range turn.Entries {
 			restored.entries = append(restored.entries, entry{kind: held.Kind, text: held.Text, session: held.Session})
 			// Each entry renders once per width: keep the renderings up to the first missing one.
