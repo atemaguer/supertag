@@ -27,10 +27,11 @@ within the pre-1.0 compatibility policy described in
   binary files are listed only. The app reads them from disk after `TaskFiles.Locate`, which returns
   only where the files are; a Task on another machine says "Files on Worker Host NAME are
   unreachable from here".
-- Claude Code, Cursor, and OpenCode Tasks can run in local-vm containers on the Worker Host's own
-  Docker or Podman (`environment: local-vm`, or `supertag worker-host --local-vm`): their file and
+- Claude Code, Cursor, OpenCode, and Codex Tasks can run in local-vm containers on the Worker
+  Host's own Docker (`environment: local-vm`, or `supertag worker-host --local-vm`): their file and
   command tools run in a container with no network and no root, while the harness and its keys
-  stay on the host. `supertag init` offers it by default when Docker or Podman is running, and a
+  stay on the host. Podman is refused for now, because it gives a Task more privilege than local-vm
+  promises. `supertag init` offers containers when Docker is running, defaulting to no, and a
   Task that runs commands goes to a waiting local-vm host before an unsandboxed one. A scoped
   `web:fetch` reaches its hosts through the same relay as Modal's, and a local-vm host can take
   `network-credentials`. OpenCode now also runs with its Workspace in an E2B or Modal sandbox.
