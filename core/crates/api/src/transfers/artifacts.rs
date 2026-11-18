@@ -35,25 +35,6 @@ impl ApiTransfers {
             .into_inner())
     }
 
-    async fn operator_file(
-        &self,
-        metadata: tonic::metadata::MetadataMap,
-        input: &DownloadArtifactFileRequest,
-    ) -> Result<ArtifactFile, Status> {
-        let mut lookup = Request::new(GetCapturedArtifactRequest {
-            artifact_id: input.artifact_id.clone(),
-        });
-        *lookup.metadata_mut() = metadata;
-        let capture = artifact_catalog_server::ArtifactCatalog::get(self, lookup)
-            .await?
-            .into_inner();
-        capture
-            .files
-            .into_iter()
-            .find(|file| file.path == input.path)
-            .ok_or_else(|| Status::not_found("artifact file was not found"))
-    }
-
     pub(super) async fn locate_copies(
         &self,
         metadata: tonic::metadata::MetadataMap,
@@ -327,59 +308,6 @@ impl artifact_transfers_server::ArtifactTransfers for ApiTransfers {
             let expected = expected.clone();
             async move {
                 if transfer.acquired_file(metadata, input).await? != expected {
-                    return Err(Status::data_loss(
-                        "artifact selection changed during transfer",
-                    ));
-                }
-                Ok(())
-            }
-        };
-        authorize().await?;
-        Ok(Response::new(download_stream(
-            file,
-            permit,
-            blob,
-            ArtifactDownload {
-                part: Some(artifact_download::Part::File(entry)),
-            },
-            |data| ArtifactDownload {
-                part: Some(artifact_download::Part::Chunk(data)),
-            },
-            authorize,
-            ARTIFACT_TRANSFER_TIMEOUT,
-        )))
-    }
-
-    type DownloadFileStream = ReceiverStream<Result<ArtifactDownload, Status>>;
-
-    async fn download_file(
-        &self,
-        request: Request<DownloadArtifactFileRequest>,
-    ) -> Result<Response<Self::DownloadFileStream>, Status> {
-        let (metadata, _, input) = request.into_parts();
-        validate_artifact_path(&input.path)?;
-        let entry = self.operator_file(metadata.clone(), &input).await?;
-        let blob = entry
-            .blob
-            .clone()
-            .filter(|blob| {
-                supertag_protocol::valid_sha256(&blob.sha256)
-                    && blob.byte_length <= MAX_ARTIFACT_FILE_BYTES
-            })
-            .ok_or_else(|| Status::data_loss("artifact file has an invalid blob reference"))?;
-        let permit = self.acquire()?;
-        let file = self
-            .open_artifact(&metadata, Target::Operator(input.clone()), &blob)
-            .await?;
-        let transfer = self.clone();
-        let expected = entry.clone();
-        let authorize = move || {
-            let transfer = transfer.clone();
-            let metadata = metadata.clone();
-            let input = input.clone();
-            let expected = expected.clone();
-            async move {
-                if transfer.operator_file(metadata, &input).await? != expected {
                     return Err(Status::data_loss(
                         "artifact selection changed during transfer",
                     ));

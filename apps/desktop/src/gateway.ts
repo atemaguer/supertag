@@ -14,11 +14,6 @@ export interface Tag {
   openWorkSessions?: number;
 }
 
-export interface ResultArtifact {
-  artifactId: string;
-  paths: string[];
-}
-
 export interface Task {
   taskId: string;
   tagId: string;
@@ -26,7 +21,6 @@ export interface Task {
   prompt?: string;
   state: string;
   result?: string;
-  artifacts?: ResultArtifact[];
   /** When the operator sent it, in milliseconds since the epoch, once the Gateway says. */
   createdAtMs?: number;
   /** The turn finished quietly: no person was waiting and it found nothing to say. */
@@ -124,7 +118,6 @@ export interface Gateway {
     read: ReadMessages,
     receive: (update: FollowUpdate) => void,
   ): Promise<() => Promise<void>>;
-  saveArtifact(artifactId: string, path: string): Promise<boolean>;
   /** The Tag's notes the caller sees, newest first. */
   notes?(tagId: string): Promise<Note[]>;
   /** Deletes a note at once; the Tag no longer sees it from its next turn. */
@@ -318,8 +311,6 @@ export function gatewaySession(connectionId: string, scope: string): Gateway {
       });
       return () => invoke<void>("stop_conversation_follow", { followId });
     },
-    saveArtifact: (artifactId, path) =>
-      invoke("save_result_artifact", { connectionId, artifactId, path }),
     notes: (tagId) => invoke("list_notes", { connectionId, tagId }),
     deleteNote: (memoryId) => invoke("delete_note", { connectionId, memoryId }),
     networkLogs: (tagId) => invoke("list_network_logs", { connectionId, tagId }),

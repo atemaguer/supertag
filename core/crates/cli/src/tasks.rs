@@ -18,7 +18,7 @@ use supertag_protocol::{
 };
 use uuid::Uuid;
 
-use crate::{Connection, artifacts, print_task, request, task_json};
+use crate::{Connection, print_task, request, task_json};
 
 #[derive(Clone, Copy, ValueEnum)]
 pub enum RecoveryDecision {
@@ -104,16 +104,6 @@ pub enum TaskCommand {
         #[arg(long)]
         operation_id: Option<String>,
     },
-    /// Download the patch or Git bundle published by a successful workspace Task.
-    Download {
-        task_id: String,
-        /// Which published result to download.
-        #[arg(long, value_enum)]
-        kind: artifacts::ArtifactKind,
-        /// Local file to create with the download. It must not already exist.
-        #[arg(long)]
-        output: PathBuf,
-    },
 }
 
 fn client(channel: ProtocolChannel) -> OperatorClient<ProtocolChannel> {
@@ -129,11 +119,6 @@ pub async fn run(connection: Connection, command: TaskCommand) -> Result<()> {
             text,
             operation_id,
         } => crate::inputs::queue(connection, task_id, text, operation_id).await?,
-        TaskCommand::Download {
-            task_id,
-            kind,
-            output,
-        } => artifacts::download(connection, task_id, kind, &output).await?,
         TaskCommand::Submit {
             tag,
             session,

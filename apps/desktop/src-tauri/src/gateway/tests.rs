@@ -103,7 +103,7 @@ async fn a_gateway_from_an_older_protocol_is_refused_on_connect_with_the_fix() {
     assert_eq!(
         refused,
         format!(
-            "This app speaks SuperTag protocol 4, but the Gateway at {address} runs SuperTag {} (protocol 2). Upgrade the Gateway.",
+            "This app speaks SuperTag protocol 5, but the Gateway at {address} runs SuperTag {} (protocol 2). Upgrade the Gateway.",
             supertag_protocol::negotiation::build_version()
         )
     );
@@ -230,11 +230,8 @@ fn work_session_reports_keep_result_and_identity_but_strip_internal_input() {
         json["task"]["result"],
         "The dependency update passed verification."
     );
-    assert_eq!(json["task"]["artifacts"][0]["artifactId"], "report-capture");
-    assert_eq!(
-        json["task"]["artifacts"][0]["paths"][0],
-        "outputs/review.md"
-    );
+    // The conversation shows only the message: no file list.
+    assert!(json["task"].get("artifacts").is_none());
     assert!(json["task"].get("prompt").is_none());
     assert!(json.get("liveInput").is_none());
     assert!(json.get("eventsTruncated").is_none());
@@ -834,147 +831,6 @@ async fn an_auth_key_enrolls_this_device_and_only_its_credential_is_saved() {
     );
     gateway.abort();
     plane.abort();
-}
-
-#[tokio::test]
-async fn artifact_save_checks_authority_and_bytes_and_keeps_existing_files() {
-    use sha2::{Digest, Sha256};
-    use v2::{
-        ArtifactDownload, ArtifactFile, BlobReference, DownloadArtifactFileRequest,
-        artifact_download::Part,
-        artifact_transfers_server::{ArtifactTransfers, ArtifactTransfersServer},
-    };
-
-    const BODY: &[u8] = b"artifact fixture";
-    const PATH: &str = "outputs/report.txt";
-
-    struct Transfers;
-    #[tonic::async_trait]
-    impl ArtifactTransfers for Transfers {
-        type DownloadFileStream =
-            tokio_stream::Iter<std::vec::IntoIter<std::result::Result<ArtifactDownload, Status>>>;
-
-        type DownloadAcquiredFileStream = Self::DownloadFileStream;
-
-        async fn download_acquired_file(
-            &self,
-            _: Request<v2::GetAcquiredArtifactFileRequest>,
-        ) -> std::result::Result<tonic::Response<Self::DownloadAcquiredFileStream>, Status>
-        {
-            Err(Status::unimplemented("unused"))
-        }
-
-        async fn download_file(
-            &self,
-            request: Request<DownloadArtifactFileRequest>,
-        ) -> std::result::Result<tonic::Response<Self::DownloadFileStream>, Status> {
-            if request
-                .metadata()
-                .get("authorization")
-                .and_then(|header| header.to_str().ok())
-                != Some("Bearer artifact-operator")
-            {
-                return Err(Status::unauthenticated("unexpected credential"));
-            }
-            let input = request.into_inner();
-            if input.path != PATH {
-                return Err(Status::not_found("path missing"));
-            }
-            let digest = if input.artifact_id == "corrupted" {
-                Sha256::digest(b"other bytes")
-            } else {
-                Sha256::digest(BODY)
-            };
-            let frames = vec![
-                Ok(ArtifactDownload {
-                    part: Some(Part::File(ArtifactFile {
-                        git_output: None,
-                        path: input.path,
-                        blob: Some(BlobReference {
-                            sha256: format!("{digest:x}"),
-                            byte_length: BODY.len() as u64,
-                        }),
-                    })),
-                }),
-                Ok(ArtifactDownload {
-                    part: Some(Part::Chunk(BODY.to_vec())),
-                }),
-            ];
-            Ok(tonic::Response::new(tokio_stream::iter(frames)))
-        }
-    }
-
-    let directory = tempfile::tempdir().unwrap();
-    let destination = directory.path().join("saved.txt");
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = format!("http://{}", listener.local_addr().unwrap());
-    let server = tokio::spawn(
-        Server::builder()
-            .add_service(ArtifactTransfersServer::new(Transfers))
-            .serve_with_incoming(TcpListenerStream::new(listener)),
-    );
-    let client = GatewayState::default();
-    client.0.write().await.session = Some(Arc::new(Session {
-        channel: supertag_protocol::negotiation::bind_current(
-            endpoint(&address).unwrap().connect().await.unwrap(),
-        ),
-        authorization: bearer("artifact-operator").unwrap(),
-    }));
-
-    assert!(
-        !client
-            .save_artifact("0", "valid".into(), PATH.into(), |_| async { Ok(None) })
-            .await
-            .unwrap()
-    );
-    assert!(
-        client
-            .save_artifact("0", "corrupted".into(), PATH.into(), |_| async {
-                Ok(Some(destination.clone()))
-            })
-            .await
-            .unwrap_err()
-            .contains("did not match")
-    );
-    assert!(!destination.exists());
-    let first_destination = destination.clone();
-    assert!(
-        client
-            .save_artifact("0", "valid".into(), PATH.into(), |name| async move {
-                assert_eq!(name, "report.txt");
-                Ok(Some(first_destination))
-            })
-            .await
-            .unwrap()
-    );
-    assert_eq!(std::fs::read(&destination).unwrap(), BODY);
-
-    std::fs::write(&destination, b"operator file").unwrap();
-    assert!(
-        client
-            .save_artifact("0", "valid".into(), PATH.into(), |_| async {
-                Ok(Some(destination.clone()))
-            })
-            .await
-            .unwrap_err()
-            .contains("already exists")
-    );
-    assert_eq!(std::fs::read(&destination).unwrap(), b"operator file");
-
-    let obsolete = directory.path().join("obsolete.txt");
-    assert!(
-        client
-            .save_artifact("0", "valid".into(), PATH.into(), |_| async {
-                client.disconnect().await;
-                Ok(Some(obsolete.clone()))
-            })
-            .await
-            .unwrap_err()
-            .contains("connection changed")
-    );
-    assert!(!obsolete.exists());
-    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
-    server.abort();
 }
 
 /// The local Gateway connects with the operator token in its state directory, read at each

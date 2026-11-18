@@ -25,7 +25,6 @@ const (
 	commandKeyboardShortcuts
 	commandSwitchGateway
 	commandCreateObjective
-	commandTaskFiles
 	commandOpenInbox
 	commandNotes
 	commandNetwork
@@ -95,7 +94,7 @@ func (a *app) paletteTags() []paletteCommand {
 }
 
 // commands are the Actions section: New Tag, the keyboard shortcuts, the Gateways, then
-// those about a Tag only while one is selected, Task files, and the inbox.
+// those about a Tag only while one is selected, and the inbox.
 func (a *app) commands() []paletteCommand {
 	newTag := "a name, a harness and a Workspace"
 	if refusal := a.inner.tagAdminRefusal(); refusal != "" {
@@ -118,7 +117,6 @@ func (a *app) commands() []paletteCommand {
 		out = append(out, paletteCommand{id: commandNetwork, title: "Network", about: "web requests " + tag + "'s Tasks made, allowed or refused"})
 		out = append(out, paletteCommand{id: commandSchedules, title: "Schedules", about: "when " + tag + " wakes up · pause, resume or delete"})
 	}
-	out = append(out, paletteCommand{id: commandTaskFiles, title: "Task files", about: "save files from a completed Task"})
 
 	waiting := fmt.Sprintf("%d waiting", len(a.inner.inbox.Items))
 	if a.inner.inbox.Truncated {
@@ -254,8 +252,6 @@ func (a *app) run(c paletteCommand) tea.Cmd {
 		return nil
 	case commandCreateObjective:
 		cmd = a.inner.openObjectiveForm("")
-	case commandTaskFiles:
-		return a.openTaskFiles()
 	case commandNotes:
 		return a.openNotes()
 	case commandNetwork:

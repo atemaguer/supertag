@@ -60,8 +60,7 @@ Details:
   conversation and every Session beneath it. Task Attempts with unknown cost are called out,
   because the budget cannot count them.
 - **Delivered** lists each Session's latest delivery: its commit and changed files in the
-  Workspace, and the `supertag task download` command when it published a patch. A branch
-  delivery is imported into your repository as the Session's branch under `supertag/session/`; see
+  Workspace. A branch delivery is imported into your repository as the Session's branch under `supertag/session/`; see
   [Workspaces](workspaces.md#3-see-the-branches-appear).
 - **Needs you** lists approval requests, questions, results submitted for review, pauses, and
   budget or deadline limits, each with the command that acts on it. A question appears in full.

@@ -22,7 +22,6 @@ sha2 = "0.10"
 supertag-protocol = { path = "../../../core/crates/protocol" }
 supertag-transport = { path = "../../../core/crates/transport" }
 tauri = { version = "2", features = [] }
-tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 tempfile = "3"

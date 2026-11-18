@@ -184,9 +184,6 @@ export const previewGateway: Gateway = {
     if (!conversation) throw new Error("No conversation with that Tag yet.");
     return conversation;
   },
-  async saveArtifact() {
-    return false;
-  },
   async events(taskId, afterSequence) {
     return previewEvents(taskId).filter(({ sequence }) => sequence > afterSequence);
   },

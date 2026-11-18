@@ -46,7 +46,6 @@ function plane(schedules: Schedule[], changeSchedule: Gateway["changeSchedule"])
       throw new Error("not read");
     },
     events: async () => [],
-    saveArtifact: async () => false,
     schedules: vi.fn(async () => schedules),
     changeSchedule,
     scope: "test",

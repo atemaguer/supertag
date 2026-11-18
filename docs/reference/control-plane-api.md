@@ -85,7 +85,7 @@ name in `supertag audit`.
 | `AuthKeys`, `Enrollments` | Auth Keys, enrollment, and credential rotation |
 | `OperatorAccess` | Operator Tokens (admin only) and the audit log |
 | `ArtifactCatalog`, `ArtifactPublications`, `ArtifactVolumes` | Artifacts, publications to other Objectives, and Volumes |
-| `ArtifactTransfers.DownloadFile`, `Transfers.DownloadWorkspaceArtifact` | Artifact files and Workspace delivery patches and bundles, relayed from the Worker Host that holds them |
+| `Transfers.DownloadWorkspaceArtifact` | A Workspace delivery's bundle for `supertag fetch`, relayed from the Worker Host that holds it |
 | `Workspaces`, `WorkspaceCredentials`, `WorkspaceLandings` | Remote Workspaces, their Workspace Credentials and checks, and where Session changes landed |
 | `WorkspaceVolumes` | Workspace data Volumes |
 | `Spend`, `Metrics` | Spend reports and an operational snapshot |

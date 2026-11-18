@@ -56,7 +56,6 @@ type app struct {
 	choiceErr string
 	// palette is the command palette while it shows.
 	palette       *palette
-	files         *taskFilesDialog
 	notes         *notesDialog
 	network       *networkDialog
 	activity      *activityDialog
@@ -101,7 +100,6 @@ func (a *app) start(i int) error {
 		cancel()
 		return err
 	}
-	a.closeTaskFiles()
 	a.closeNotes()
 	a.closeNetwork()
 	a.closeActivity()
@@ -126,7 +124,6 @@ func (a *app) start(i int) error {
 
 // stop ends the current model's streams and calls, and writes what its cache has not written.
 func (a *app) stop() {
-	a.closeTaskFiles()
 	a.closeNotes()
 	a.closeNetwork()
 	a.closeActivity()
@@ -160,18 +157,12 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.gatewayDialog.inputs[i].SetWidth(max(a.width-6, 10))
 			}
 		}
-		if a.files != nil {
-			a.files.input.SetWidth(max(a.width-6, 10))
-		}
 		if a.palette != nil {
 			a.palette.filter.SetWidth(max(a.width-6, 10))
 		}
 	case tea.KeyPressMsg:
 		if a.gatewayDialog != nil {
 			return a, a.gatewayKey(msg)
-		}
-		if a.files != nil {
-			return a, a.taskFilesKey(msg)
 		}
 		if a.notes != nil {
 			return a, a.notesKey(msg)
@@ -216,14 +207,6 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, tea.Batch(cmd, a.forward(msg))
 		}
-		if a.files != nil {
-			var cmd tea.Cmd
-			a.files.input, cmd = a.files.input.Update(msg)
-			if _, paste := msg.(tea.PasteMsg); paste {
-				return a, cmd
-			}
-			return a, tea.Batch(cmd, a.forward(msg))
-		}
 		if a.palette != nil {
 			var cmd tea.Cmd
 			a.palette.filter, cmd = a.palette.filter.Update(msg)
@@ -248,7 +231,7 @@ func (a *app) forward(msg tea.Msg) tea.Cmd {
 	if !a.hasTarget {
 		return nil
 	}
-	if a.taskFilesMessage(msg) || a.notesMessage(msg) || a.networkMessage(msg) || a.activityMessage(msg) || a.schedulesMessage(msg) {
+	if a.notesMessage(msg) || a.networkMessage(msg) || a.activityMessage(msg) || a.schedulesMessage(msg) {
 		return nil
 	}
 	watched := tea.Batch(a.notesWatched(msg), a.networkWatched(msg), a.activityWatched(msg), a.schedulesWatched(msg))
@@ -353,7 +336,7 @@ func ownMessage(msg tea.Msg) bool {
 }
 
 func (a *app) View() tea.View {
-	if (!a.choosing && a.palette == nil && a.files == nil && a.notes == nil && a.network == nil && a.activity == nil && a.schedules == nil && a.gatewayDialog == nil) || a.width == 0 {
+	if (!a.choosing && a.palette == nil && a.notes == nil && a.network == nil && a.activity == nil && a.schedules == nil && a.gatewayDialog == nil) || a.width == 0 {
 		if !a.hasTarget {
 			return tea.NewView("")
 		}
@@ -362,9 +345,6 @@ func (a *app) View() tea.View {
 	shown := a.renderChoices
 	if a.palette != nil {
 		shown = a.renderPalette
-	}
-	if a.files != nil {
-		shown = a.renderTaskFiles
 	}
 	if a.notes != nil {
 		shown = a.renderNotes

@@ -122,7 +122,6 @@ a delivery into another clone, or for a Workspace with `land: patch`:
 
 ```sh
 supertag fetch TASK_ID --repository ~/code/app-review
-supertag task download TASK_ID --kind patch --output change.patch
 ```
 
 `fetch` also takes a Session ID, to import that Session's latest delivery. A Task with no
@@ -360,7 +359,7 @@ gets at most two replacements; after a third stop, the turn fails.
 | --- | --- |
 | Your checkout | Untouched. Deliveries arrive only as `supertag/session/...` branches |
 | Task checkouts | The Worker Host's state directory, one per Task Attempt |
-| Deliveries | Bundles and patches, kept on the Worker Host that ran the Task and relayed by the Control Plane to `fetch` and `task download` |
+| Deliveries | Bundles and patches, kept on the Worker Host that ran the Task and relayed by the Control Plane to `fetch` |
 | Landed changes | A remote Workspace's server, on `supertag/session/...` branches and the merge target |
 | Workspace Credentials | The credential vault of the machine that runs the Control Plane; never on a Worker Host or in a harness |
 | Captured artifacts | The Worker Host that captured them; see [Artifacts](../reference/artifacts.md) |

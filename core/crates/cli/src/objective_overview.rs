@@ -395,7 +395,7 @@ fn delivery_lines(
     session: &ObjectiveSessionView,
     delivery: &ObjectiveSessionDelivery,
 ) -> Vec<String> {
-    let mut lines = vec![
+    vec![
         format!(
             "  {} ({}, Task {})",
             session_label(session),
@@ -403,14 +403,7 @@ fn delivery_lines(
             delivery.task_id
         ),
         format!("    {}", delivery_summary(delivery)),
-    ];
-    if delivery.patch {
-        lines.push(format!(
-            "    Download: supertag task download {} --kind patch --output FILE",
-            delivery.task_id
-        ));
-    }
-    lines
+    ]
 }
 
 fn failure_lines(session: &ObjectiveSessionView, failure: &ObjectiveSessionFailure) -> Vec<String> {
@@ -669,7 +662,7 @@ mod tests {
         let text = text(&working);
         assert!(
             text.contains(
-                "Delivered:\n  Build the exporter (builder, Task t2)\n    Commit 0123456789ab in Workspace product, 3 changed files since fedcba987654\n    Download: supertag task download t2 --kind patch --output FILE\n"
+                "Delivered:\n  Build the exporter (builder, Task t2)\n    Commit 0123456789ab in Workspace product, 3 changed files since fedcba987654\n"
             ),
             "{text}"
         );

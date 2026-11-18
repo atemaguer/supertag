@@ -24,7 +24,6 @@ it("renders a Work Session report as Tag output with activity and no operator bu
       },
       activeTask: "report-task",
       onActivity: () => {},
-      onSaveArtifact: async () => false,
     }),
   );
   expect(html).toContain("Work Session report");
@@ -46,7 +45,6 @@ it("keeps the operator prompt and joined Task activity on ordinary messages", ()
       },
       activeTask: "running-task",
       onActivity: () => {},
-      onSaveArtifact: async () => false,
     }),
   );
   expect(html).toContain("user-turn");
@@ -55,21 +53,6 @@ it("keeps the operator prompt and joined Task activity on ordinary messages", ()
   expect(html).toContain('aria-expanded="true"');
   expect(html).not.toContain("Work Session report");
   expect(html).not.toContain(task.result);
-});
-
-it("offers the selected Task result files in the Tag reply", () => {
-  const html = renderToStaticMarkup(
-    createElement(ConversationEntry, {
-      message: {
-        order: 1,
-        task: { ...task, artifacts: [{ artifactId: "capture", paths: ["outputs/report.md"] }] },
-      },
-      onActivity: () => {},
-      onSaveArtifact: async () => false,
-    }),
-  );
-  expect(html).toContain('aria-label="Task result files"');
-  expect(html).toContain('aria-label="Save outputs/report.md"');
 });
 
 /** What a reader sees: the text, without markup or attributes such as accessible labels. */
@@ -84,7 +67,6 @@ it("shows each message the Tag wrote, and then its reply once, but never its act
         { sequence: 2, kind: "activity", text: "Running pnpm install" },
       ],
       onActivity: () => {},
-      onSaveArtifact: async () => false,
     }),
   );
   expect(running).toContain("I&#x27;ll check the lockfile first.");
@@ -98,7 +80,6 @@ it("shows each message the Tag wrote, and then its reply once, but never its act
         { sequence: 3, kind: "message", text: task.result ?? "" },
       ],
       onActivity: () => {},
-      onSaveArtifact: async () => false,
     }),
   );
   expect(done).toContain("I&#x27;ll check the lockfile first.");
@@ -119,7 +100,6 @@ it("renders the operator's prompt as written and the Tag's messages and result a
       },
       events: [{ sequence: 1, kind: "message", text: "Checking the **lockfile**." }],
       onActivity: () => {},
-      onSaveArtifact: async () => false,
     }),
   );
   expect(html).toContain("is-user");
@@ -144,7 +124,6 @@ it("keeps activity and progress out of the transcript, running or ended without 
           },
         ],
         onActivity: () => {},
-        onSaveArtifact: async () => false,
       }),
     );
   const running = render("running");
@@ -165,7 +144,6 @@ it("gives each message its own bubble with a copy action, and no avatar or name 
         { sequence: 2, kind: "message", text: "The lockfile is current." },
       ],
       onActivity: () => {},
-      onSaveArtifact: async () => false,
     }),
   );
   expect(html.match(/class="[^"]*\bbubble tag-message\b/g)).toHaveLength(2);
@@ -187,7 +165,6 @@ it("gives only the last bubble of each group a tail, and shows the operator's de
       delivery: "Seen",
       divider: Date.now(),
       onActivity: () => {},
-      onSaveArtifact: async () => false,
     }),
   );
   expect(html.match(/class="[^"]*\bbubble prompt-text tail\b/g)).toHaveLength(1);
@@ -204,7 +181,6 @@ it("shows the Tag typing for the whole running turn, last, as dots alone", () =>
       createElement(ConversationEntry, {
         message: { order: 1, task: running },
         onActivity: () => {},
-        onSaveArtifact: async () => false,
         ...props,
       }),
     );
@@ -243,7 +219,6 @@ it("says how a turn ended only when it did not simply succeed", () => {
       createElement(ConversationEntry, {
         message: { order: 1, task: { ...task, state, result: undefined }, liveInput },
         onActivity: () => {},
-        onSaveArtifact: async () => false,
       }),
     );
   expect(render("failed")).toMatch(/data-tone="error"[^>]*>.*Failed/);
@@ -270,7 +245,6 @@ it("renders a Schedule's turn as the Tag's reply under a muted caption, with no 
       },
       delivery: "Seen",
       onActivity: () => {},
-      onSaveArtifact: async () => false,
     }),
   );
   expect(html).toContain("CI is green.");
@@ -290,7 +264,6 @@ it("says why a report's work Session closed", () => {
         workSessionClosed: "idle",
       },
       onActivity: () => {},
-      onSaveArtifact: async () => false,
     }),
   );
   expect(html).toContain("Work Session report · closed: idle");

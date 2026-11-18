@@ -60,7 +60,6 @@ function gateway(scope: string, pages: MessagePage[] = []) {
     send: async () => message("sent", 9),
     markRead,
     events: async () => [],
-    saveArtifact: async () => false,
     readCache: async (key) => disk.get(key),
     writeCache: async (key, value) => {
       disk.set(key, structuredClone(value));

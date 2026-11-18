@@ -95,13 +95,6 @@ async function verifyRuntime(binary) {
     const replay = await client.operator.submitTask(submission, { timeoutMs: 3000 });
     assert.ok(accepted.taskId);
     assert.equal(replay.taskId, accepted.taskId);
-    const missing = client.downloadArtifactFile(
-      { artifactId: "unknown", path: "evidence.txt" },
-      { timeoutMs: 3000 },
-    );
-    await assert.rejects(async () => missing[Symbol.asyncIterator]().next(), {
-      code: Code.NotFound,
-    });
     console.log("Gateway authorization, Task replay, and streaming passed.");
 
     const adapter = join(root, "adapter.mjs");

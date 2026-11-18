@@ -23,7 +23,6 @@ function render(message: Message, wait?: string) {
           readEvents: async () => [],
           wait: nextWait,
           onActivity: () => {},
-          onSaveArtifact: async () => false,
         }),
       ),
     );

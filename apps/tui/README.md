@@ -211,8 +211,6 @@ The palette's actions:
   on the budget, creates the Objective, which starts at once. The pane then says whether its
   owner took its first turn, with any warnings, and enter shows the Objective. When it could not
   start, such as for an owner without a connected Worker Host, `r` starts it once that is fixed.
-- **Task files** lists the files a completed Task captured, by Task ID, and saves the chosen one
-  to a destination you type.
 - **Open inbox** shows the first item waiting on you, with the rail on it.
 
 Tab moves between the rail and the main pane; up and down (or `k` and `j`) move through the rail,

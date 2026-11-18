@@ -122,7 +122,6 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     ("ArtifactCatalog", "*", O),
     ("ArtifactCatalog", "Get", OC),
     ("ArtifactCatalog", "List", OC),
-    ("ArtifactTransfers", "DownloadFile", OC),
     ("Inbox", "*", O),
     ("Inbox", "ListItems", OC),
     ("Inbox", "GetQuestion", OC),
@@ -350,7 +349,6 @@ mod tests {
             "NetworkLogs/List",
             "OperatorAccess/CreateOperatorToken",
             "Conversations/FollowConversation",
-            "ArtifactTransfers/DownloadFile",
             "Transfers/DownloadWorkspaceArtifact",
         ] {
             assert!(forwards(path), "{path}");

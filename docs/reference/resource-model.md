@@ -589,8 +589,8 @@ spec:
   source: s3://acme-artifacts/archive
 ```
 
-`supertag get volume` lists artifact Volumes, and `supertag volume copy` and
-`supertag volume download` move one artifact file in and out. For what a Volume keeps when a
+`supertag get volume` lists artifact Volumes, and `supertag volume copy` copies one artifact file
+in. For what a Volume keeps when a
 sandbox or host dies, see [Persistence](../concepts/persistence.md).
 
 ### Volume security

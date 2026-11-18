@@ -7,7 +7,6 @@ use gateway::{
     Messages, NewTag, ReadMessages, Tag, TagOptions, WatchUpdate,
 };
 use tauri::{Manager, State, ipc::Channel, webview::PageLoadEvent};
-use tauri_plugin_dialog::DialogExt;
 
 fn gateway_store<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
     app.path()
@@ -294,44 +293,9 @@ async fn write_cache<R: tauri::Runtime>(
         .await
 }
 
-#[tauri::command]
-async fn save_result_artifact<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-    state: State<'_, GatewayState>,
-    connection_id: String,
-    artifact_id: String,
-    path: String,
-) -> Result<bool, String> {
-    state
-        .save_artifact(
-            &connection_id,
-            artifact_id,
-            path,
-            move |filename| async move {
-                let (send, receive) = tokio::sync::oneshot::channel();
-                app.dialog()
-                    .file()
-                    .set_file_name(filename)
-                    .save_file(move |file| {
-                        let _ = send.send(file);
-                    });
-                receive
-                    .await
-                    .map_err(|_| "Could not open the save dialog.".to_owned())?
-                    .map(|file| {
-                        file.into_path()
-                            .map_err(|_| "Choose a local file location.".to_owned())
-                    })
-                    .transpose()
-            },
-        )
-        .await
-}
-
 fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .manage(GatewayState::new(local_state_directory()))
-        .plugin(tauri_plugin_dialog::init())
         // A Tag's reply or question while its conversation is not in view; see notifications.ts.
         .plugin(tauri_plugin_notification::init())
         // Links in messages open in the system browser; the capability allows only http and https.
@@ -390,8 +354,7 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             stop_conversation_follow,
             read_cache,
             write_cache,
-            mark_conversation_read,
-            save_result_artifact
+            mark_conversation_read
         ])
 }
 
@@ -515,22 +478,6 @@ mod tests {
         let remote = tauri::test::get_ipc_response(&main, watch("https://untrusted.example"));
         assert!(remote.unwrap_err().to_string().contains("not allowed"));
         let other = tauri::test::get_ipc_response(&secondary, watch("tauri://localhost"));
-        assert!(other.unwrap_err().to_string().contains("not allowed"));
-        let save = |url: &str| tauri::webview::InvokeRequest {
-            cmd: "save_result_artifact".into(),
-            body: tauri::ipc::InvokeBody::Json(json!({
-                "connectionId": "1", "artifactId": "capture", "path": "outputs/report.txt"
-            })),
-            ..request(url)
-        };
-        let local = tauri::test::get_ipc_response(&main, save("tauri://localhost"));
-        assert_eq!(
-            local.unwrap_err(),
-            Value::String("Connect to a Gateway first.".into())
-        );
-        let remote = tauri::test::get_ipc_response(&main, save("https://untrusted.example"));
-        assert!(remote.unwrap_err().to_string().contains("not allowed"));
-        let other = tauri::test::get_ipc_response(&secondary, save("tauri://localhost"));
         assert!(other.unwrap_err().to_string().contains("not allowed"));
     }
 }

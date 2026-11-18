@@ -51,7 +51,7 @@ class _OldGateway(negotiation_pb2_grpc.ProtocolNegotiationServicer):
     def Negotiate(self, request, context):  # noqa: N802
         self.calls.append(dict(context.invocation_metadata()).get("authorization", ""))
         assert request.role == negotiation_pb2.SERVICE_ROLE_CLIENT
-        assert list(request.protocol_versions) == [4]
+        assert list(request.protocol_versions) == [5]
         context.abort(
             grpc.StatusCode.FAILED_PRECONDITION,
             "incompatible SuperTag protocol: this Gateway (SuperTag 0.3.0) speaks protocol "
@@ -112,8 +112,8 @@ class _ReplacedGateway(
         self.negotiations += 1
         return negotiation_pb2.NegotiateProtocolResponse(
             role=negotiation_pb2.SERVICE_ROLE_GATEWAY,
-            protocol_version=4,
-            protocol_versions=[4],
+            protocol_version=5,
+            protocol_versions=[5],
             build_version="fixture",
         )
 
@@ -279,14 +279,6 @@ async def test_gateway_clients_replay_task_and_stream_events(deployment):
         accepted = await client.operator.SubmitTask(submission, timeout=3)
         replay = await client.operator.SubmitTask(submission, timeout=3)
         assert accepted.task_id and replay.task_id == accepted.task_id
-
-        missing = client.download_artifact_file(
-            artifacts.DownloadArtifactFileRequest(artifact_id="unknown", path="evidence.txt"),
-            timeout=3,
-        )
-        with pytest.raises(grpc.aio.AioRpcError) as rejected:
-            await missing.read()
-        assert rejected.value.code() == grpc.StatusCode.NOT_FOUND
 
 
 def test_installed_harness_runs_one_task_and_replays_event(deployment, tmp_path):

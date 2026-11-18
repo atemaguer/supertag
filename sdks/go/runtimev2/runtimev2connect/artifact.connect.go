@@ -112,9 +112,6 @@ const (
 	// AttemptArtifactsAuthorizeArtifactTransferProcedure is the fully-qualified name of the
 	// AttemptArtifacts's AuthorizeArtifactTransfer RPC.
 	AttemptArtifactsAuthorizeArtifactTransferProcedure = "/supertag.runtime.v2.AttemptArtifacts/AuthorizeArtifactTransfer"
-	// ArtifactTransfersDownloadFileProcedure is the fully-qualified name of the ArtifactTransfers's
-	// DownloadFile RPC.
-	ArtifactTransfersDownloadFileProcedure = "/supertag.runtime.v2.ArtifactTransfers/DownloadFile"
 	// ArtifactTransfersDownloadAcquiredFileProcedure is the fully-qualified name of the
 	// ArtifactTransfers's DownloadAcquiredFile RPC.
 	ArtifactTransfersDownloadAcquiredFileProcedure = "/supertag.runtime.v2.ArtifactTransfers/DownloadAcquiredFile"
@@ -142,9 +139,6 @@ const (
 	ArtifactVolumesCopyProcedure = "/supertag.runtime.v2.ArtifactVolumes/Copy"
 	// ArtifactVolumesGetCopyProcedure is the fully-qualified name of the ArtifactVolumes's GetCopy RPC.
 	ArtifactVolumesGetCopyProcedure = "/supertag.runtime.v2.ArtifactVolumes/GetCopy"
-	// ArtifactVolumesDownloadCopyProcedure is the fully-qualified name of the ArtifactVolumes's
-	// DownloadCopy RPC.
-	ArtifactVolumesDownloadCopyProcedure = "/supertag.runtime.v2.ArtifactVolumes/DownloadCopy"
 	// ArtifactVolumesListCopiesProcedure is the fully-qualified name of the ArtifactVolumes's
 	// ListCopies RPC.
 	ArtifactVolumesListCopiesProcedure = "/supertag.runtime.v2.ArtifactVolumes/ListCopies"
@@ -939,7 +933,6 @@ func (UnimplementedAttemptArtifactsHandler) AuthorizeArtifactTransfer(context.Co
 
 // ArtifactTransfersClient is a client for the supertag.runtime.v2.ArtifactTransfers service.
 type ArtifactTransfersClient interface {
-	DownloadFile(context.Context, *connect.Request[runtimev2.DownloadArtifactFileRequest]) (*connect.ServerStreamForClient[runtimev2.ArtifactDownload], error)
 	DownloadAcquiredFile(context.Context, *connect.Request[runtimev2.GetAcquiredArtifactFileRequest]) (*connect.ServerStreamForClient[runtimev2.ArtifactDownload], error)
 }
 
@@ -954,12 +947,6 @@ func NewArtifactTransfersClient(httpClient connect.HTTPClient, baseURL string, o
 	baseURL = strings.TrimRight(baseURL, "/")
 	artifactTransfersMethods := runtimev2.File_supertag_runtime_v2_artifact_proto.Services().ByName("ArtifactTransfers").Methods()
 	return &artifactTransfersClient{
-		downloadFile: connect.NewClient[runtimev2.DownloadArtifactFileRequest, runtimev2.ArtifactDownload](
-			httpClient,
-			baseURL+ArtifactTransfersDownloadFileProcedure,
-			connect.WithSchema(artifactTransfersMethods.ByName("DownloadFile")),
-			connect.WithClientOptions(opts...),
-		),
 		downloadAcquiredFile: connect.NewClient[runtimev2.GetAcquiredArtifactFileRequest, runtimev2.ArtifactDownload](
 			httpClient,
 			baseURL+ArtifactTransfersDownloadAcquiredFileProcedure,
@@ -971,13 +958,7 @@ func NewArtifactTransfersClient(httpClient connect.HTTPClient, baseURL string, o
 
 // artifactTransfersClient implements ArtifactTransfersClient.
 type artifactTransfersClient struct {
-	downloadFile         *connect.Client[runtimev2.DownloadArtifactFileRequest, runtimev2.ArtifactDownload]
 	downloadAcquiredFile *connect.Client[runtimev2.GetAcquiredArtifactFileRequest, runtimev2.ArtifactDownload]
-}
-
-// DownloadFile calls supertag.runtime.v2.ArtifactTransfers.DownloadFile.
-func (c *artifactTransfersClient) DownloadFile(ctx context.Context, req *connect.Request[runtimev2.DownloadArtifactFileRequest]) (*connect.ServerStreamForClient[runtimev2.ArtifactDownload], error) {
-	return c.downloadFile.CallServerStream(ctx, req)
 }
 
 // DownloadAcquiredFile calls supertag.runtime.v2.ArtifactTransfers.DownloadAcquiredFile.
@@ -988,7 +969,6 @@ func (c *artifactTransfersClient) DownloadAcquiredFile(ctx context.Context, req 
 // ArtifactTransfersHandler is an implementation of the supertag.runtime.v2.ArtifactTransfers
 // service.
 type ArtifactTransfersHandler interface {
-	DownloadFile(context.Context, *connect.Request[runtimev2.DownloadArtifactFileRequest], *connect.ServerStream[runtimev2.ArtifactDownload]) error
 	DownloadAcquiredFile(context.Context, *connect.Request[runtimev2.GetAcquiredArtifactFileRequest], *connect.ServerStream[runtimev2.ArtifactDownload]) error
 }
 
@@ -999,12 +979,6 @@ type ArtifactTransfersHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewArtifactTransfersHandler(svc ArtifactTransfersHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	artifactTransfersMethods := runtimev2.File_supertag_runtime_v2_artifact_proto.Services().ByName("ArtifactTransfers").Methods()
-	artifactTransfersDownloadFileHandler := connect.NewServerStreamHandler(
-		ArtifactTransfersDownloadFileProcedure,
-		svc.DownloadFile,
-		connect.WithSchema(artifactTransfersMethods.ByName("DownloadFile")),
-		connect.WithHandlerOptions(opts...),
-	)
 	artifactTransfersDownloadAcquiredFileHandler := connect.NewServerStreamHandler(
 		ArtifactTransfersDownloadAcquiredFileProcedure,
 		svc.DownloadAcquiredFile,
@@ -1013,8 +987,6 @@ func NewArtifactTransfersHandler(svc ArtifactTransfersHandler, opts ...connect.H
 	)
 	return "/supertag.runtime.v2.ArtifactTransfers/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case ArtifactTransfersDownloadFileProcedure:
-			artifactTransfersDownloadFileHandler.ServeHTTP(w, r)
 		case ArtifactTransfersDownloadAcquiredFileProcedure:
 			artifactTransfersDownloadAcquiredFileHandler.ServeHTTP(w, r)
 		default:
@@ -1025,10 +997,6 @@ func NewArtifactTransfersHandler(svc ArtifactTransfersHandler, opts ...connect.H
 
 // UnimplementedArtifactTransfersHandler returns CodeUnimplemented from all methods.
 type UnimplementedArtifactTransfersHandler struct{}
-
-func (UnimplementedArtifactTransfersHandler) DownloadFile(context.Context, *connect.Request[runtimev2.DownloadArtifactFileRequest], *connect.ServerStream[runtimev2.ArtifactDownload]) error {
-	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactTransfers.DownloadFile is not implemented"))
-}
 
 func (UnimplementedArtifactTransfersHandler) DownloadAcquiredFile(context.Context, *connect.Request[runtimev2.GetAcquiredArtifactFileRequest], *connect.ServerStream[runtimev2.ArtifactDownload]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactTransfers.DownloadAcquiredFile is not implemented"))
@@ -1216,7 +1184,6 @@ type ArtifactVolumesClient interface {
 	Delete(context.Context, *connect.Request[runtimev2.DeleteArtifactVolumeRequest]) (*connect.Response[runtimev2.DeleteArtifactVolumeResponse], error)
 	Copy(context.Context, *connect.Request[runtimev2.CopyArtifactToVolumeRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error)
 	GetCopy(context.Context, *connect.Request[runtimev2.GetArtifactVolumeCopyRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error)
-	DownloadCopy(context.Context, *connect.Request[runtimev2.GetArtifactVolumeCopyRequest]) (*connect.ServerStreamForClient[runtimev2.ArtifactDownload], error)
 	ListCopies(context.Context, *connect.Request[runtimev2.ListArtifactVolumeCopiesRequest]) (*connect.Response[runtimev2.ListArtifactVolumeCopiesResponse], error)
 }
 
@@ -1267,12 +1234,6 @@ func NewArtifactVolumesClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(artifactVolumesMethods.ByName("GetCopy")),
 			connect.WithClientOptions(opts...),
 		),
-		downloadCopy: connect.NewClient[runtimev2.GetArtifactVolumeCopyRequest, runtimev2.ArtifactDownload](
-			httpClient,
-			baseURL+ArtifactVolumesDownloadCopyProcedure,
-			connect.WithSchema(artifactVolumesMethods.ByName("DownloadCopy")),
-			connect.WithClientOptions(opts...),
-		),
 		listCopies: connect.NewClient[runtimev2.ListArtifactVolumeCopiesRequest, runtimev2.ListArtifactVolumeCopiesResponse](
 			httpClient,
 			baseURL+ArtifactVolumesListCopiesProcedure,
@@ -1284,14 +1245,13 @@ func NewArtifactVolumesClient(httpClient connect.HTTPClient, baseURL string, opt
 
 // artifactVolumesClient implements ArtifactVolumesClient.
 type artifactVolumesClient struct {
-	put          *connect.Client[runtimev2.PutArtifactVolumeRequest, runtimev2.ArtifactVolume]
-	get          *connect.Client[runtimev2.GetArtifactVolumeRequest, runtimev2.ArtifactVolume]
-	list         *connect.Client[runtimev2.ListArtifactVolumesRequest, runtimev2.ListArtifactVolumesResponse]
-	delete       *connect.Client[runtimev2.DeleteArtifactVolumeRequest, runtimev2.DeleteArtifactVolumeResponse]
-	copy         *connect.Client[runtimev2.CopyArtifactToVolumeRequest, runtimev2.ArtifactVolumeCopy]
-	getCopy      *connect.Client[runtimev2.GetArtifactVolumeCopyRequest, runtimev2.ArtifactVolumeCopy]
-	downloadCopy *connect.Client[runtimev2.GetArtifactVolumeCopyRequest, runtimev2.ArtifactDownload]
-	listCopies   *connect.Client[runtimev2.ListArtifactVolumeCopiesRequest, runtimev2.ListArtifactVolumeCopiesResponse]
+	put        *connect.Client[runtimev2.PutArtifactVolumeRequest, runtimev2.ArtifactVolume]
+	get        *connect.Client[runtimev2.GetArtifactVolumeRequest, runtimev2.ArtifactVolume]
+	list       *connect.Client[runtimev2.ListArtifactVolumesRequest, runtimev2.ListArtifactVolumesResponse]
+	delete     *connect.Client[runtimev2.DeleteArtifactVolumeRequest, runtimev2.DeleteArtifactVolumeResponse]
+	copy       *connect.Client[runtimev2.CopyArtifactToVolumeRequest, runtimev2.ArtifactVolumeCopy]
+	getCopy    *connect.Client[runtimev2.GetArtifactVolumeCopyRequest, runtimev2.ArtifactVolumeCopy]
+	listCopies *connect.Client[runtimev2.ListArtifactVolumeCopiesRequest, runtimev2.ListArtifactVolumeCopiesResponse]
 }
 
 // Put calls supertag.runtime.v2.ArtifactVolumes.Put.
@@ -1324,11 +1284,6 @@ func (c *artifactVolumesClient) GetCopy(ctx context.Context, req *connect.Reques
 	return c.getCopy.CallUnary(ctx, req)
 }
 
-// DownloadCopy calls supertag.runtime.v2.ArtifactVolumes.DownloadCopy.
-func (c *artifactVolumesClient) DownloadCopy(ctx context.Context, req *connect.Request[runtimev2.GetArtifactVolumeCopyRequest]) (*connect.ServerStreamForClient[runtimev2.ArtifactDownload], error) {
-	return c.downloadCopy.CallServerStream(ctx, req)
-}
-
 // ListCopies calls supertag.runtime.v2.ArtifactVolumes.ListCopies.
 func (c *artifactVolumesClient) ListCopies(ctx context.Context, req *connect.Request[runtimev2.ListArtifactVolumeCopiesRequest]) (*connect.Response[runtimev2.ListArtifactVolumeCopiesResponse], error) {
 	return c.listCopies.CallUnary(ctx, req)
@@ -1342,7 +1297,6 @@ type ArtifactVolumesHandler interface {
 	Delete(context.Context, *connect.Request[runtimev2.DeleteArtifactVolumeRequest]) (*connect.Response[runtimev2.DeleteArtifactVolumeResponse], error)
 	Copy(context.Context, *connect.Request[runtimev2.CopyArtifactToVolumeRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error)
 	GetCopy(context.Context, *connect.Request[runtimev2.GetArtifactVolumeCopyRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error)
-	DownloadCopy(context.Context, *connect.Request[runtimev2.GetArtifactVolumeCopyRequest], *connect.ServerStream[runtimev2.ArtifactDownload]) error
 	ListCopies(context.Context, *connect.Request[runtimev2.ListArtifactVolumeCopiesRequest]) (*connect.Response[runtimev2.ListArtifactVolumeCopiesResponse], error)
 }
 
@@ -1389,12 +1343,6 @@ func NewArtifactVolumesHandler(svc ArtifactVolumesHandler, opts ...connect.Handl
 		connect.WithSchema(artifactVolumesMethods.ByName("GetCopy")),
 		connect.WithHandlerOptions(opts...),
 	)
-	artifactVolumesDownloadCopyHandler := connect.NewServerStreamHandler(
-		ArtifactVolumesDownloadCopyProcedure,
-		svc.DownloadCopy,
-		connect.WithSchema(artifactVolumesMethods.ByName("DownloadCopy")),
-		connect.WithHandlerOptions(opts...),
-	)
 	artifactVolumesListCopiesHandler := connect.NewUnaryHandler(
 		ArtifactVolumesListCopiesProcedure,
 		svc.ListCopies,
@@ -1415,8 +1363,6 @@ func NewArtifactVolumesHandler(svc ArtifactVolumesHandler, opts ...connect.Handl
 			artifactVolumesCopyHandler.ServeHTTP(w, r)
 		case ArtifactVolumesGetCopyProcedure:
 			artifactVolumesGetCopyHandler.ServeHTTP(w, r)
-		case ArtifactVolumesDownloadCopyProcedure:
-			artifactVolumesDownloadCopyHandler.ServeHTTP(w, r)
 		case ArtifactVolumesListCopiesProcedure:
 			artifactVolumesListCopiesHandler.ServeHTTP(w, r)
 		default:
@@ -1450,10 +1396,6 @@ func (UnimplementedArtifactVolumesHandler) Copy(context.Context, *connect.Reques
 
 func (UnimplementedArtifactVolumesHandler) GetCopy(context.Context, *connect.Request[runtimev2.GetArtifactVolumeCopyRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactVolumes.GetCopy is not implemented"))
-}
-
-func (UnimplementedArtifactVolumesHandler) DownloadCopy(context.Context, *connect.Request[runtimev2.GetArtifactVolumeCopyRequest], *connect.ServerStream[runtimev2.ArtifactDownload]) error {
-	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactVolumes.DownloadCopy is not implemented"))
 }
 
 func (UnimplementedArtifactVolumesHandler) ListCopies(context.Context, *connect.Request[runtimev2.ListArtifactVolumeCopiesRequest]) (*connect.Response[runtimev2.ListArtifactVolumeCopiesResponse], error) {

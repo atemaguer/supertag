@@ -483,67 +483,6 @@ fn client(
 }
 #[tonic::async_trait]
 impl artifact_volumes_server::ArtifactVolumes for ApiTransfers {
-    type DownloadCopyStream = ReceiverStream<Result<ArtifactDownload, Status>>;
-    async fn download_copy(
-        &self,
-        request: Request<GetArtifactVolumeCopyRequest>,
-    ) -> Result<Response<Self::DownloadCopyStream>, Status> {
-        let (metadata, _, input) = request.into_parts();
-        let mut lookup = Request::new(input.clone());
-        *lookup.metadata_mut() = metadata.clone();
-        let copy = self.get_copy(lookup).await?.into_inner();
-        if copy.state() != ArtifactVolumeCopyState::Verified {
-            return Err(Status::failed_precondition(
-                "artifact Volume copy is not verified",
-            ));
-        }
-        let volume = copy
-            .volume
-            .as_ref()
-            .ok_or_else(|| Status::data_loss("copy has no Volume"))?;
-        let mapping = self.volumes.resolve(volume)?;
-        let file = copy
-            .file
-            .clone()
-            .ok_or_else(|| Status::data_loss("copy has no file"))?;
-        let blob = file
-            .blob
-            .clone()
-            .filter(|b| {
-                supertag_protocol::valid_sha256(&b.sha256)
-                    && b.byte_length <= MAX_ARTIFACT_FILE_BYTES
-            })
-            .ok_or_else(|| Status::data_loss("copy has invalid bytes"))?;
-        let permit = self.acquire()?;
-        let reader = Source::File(mapping.read(&copy.storage_key, &blob).await?);
-        let api = self.clone();
-        let authorize = move || {
-            let mut request = Request::new(input.clone());
-            *request.metadata_mut() = metadata.clone();
-            let api = api.clone();
-            let copy = copy.clone();
-            async move {
-                if api.get_copy(request).await?.into_inner() != copy {
-                    return Err(Status::data_loss("artifact Volume receipt changed"));
-                }
-                Ok(())
-            }
-        };
-        authorize().await?;
-        Ok(Response::new(download_stream(
-            reader,
-            permit,
-            blob,
-            ArtifactDownload {
-                part: Some(artifact_download::Part::File(file)),
-            },
-            |chunk| ArtifactDownload {
-                part: Some(artifact_download::Part::Chunk(chunk)),
-            },
-            authorize,
-            Duration::from_secs(60),
-        )))
-    }
     async fn copy(
         &self,
         request: Request<CopyArtifactToVolumeRequest>,

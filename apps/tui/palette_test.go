@@ -193,7 +193,7 @@ func TestSlashOpensThePaletteOnlyWhereItIsNotTyped(t *testing.T) {
 		t.Fatalf("a paste into the palette reached the input: %q", a.inner.input.Value())
 	}
 	s := appScreen(a)
-	if !strings.Contains(s, "Create Objective") || strings.Contains(s, "Open inbox") || strings.Contains(s, "Task files") {
+	if !strings.Contains(s, "Create Objective") || strings.Contains(s, "Open inbox") {
 		t.Fatalf("the filter must keep only matching commands:\n%s", s)
 	}
 	typeApp(t, a, "zz")

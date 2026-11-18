@@ -39,3 +39,25 @@ pub async fn serve(mut command: Command) -> Result<Child> {
     tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
     Ok(child)
 }
+
+/// The bytes with this SHA-256 that a test's Worker Hosts hold in their shared artifact directory.
+/// The Control Plane passes no files to clients, so a test reads delivered or captured bytes
+/// where the Worker Host keeps them.
+pub fn held_bytes(root: &Path, sha256: &str) -> Result<Vec<u8>> {
+    fn find(directory: &Path, name: &str) -> Result<Option<std::path::PathBuf>> {
+        for entry in std::fs::read_dir(directory)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                if let Some(found) = find(&entry.path(), name)? {
+                    return Ok(Some(found));
+                }
+            } else if entry.file_name() == name {
+                return Ok(Some(entry.path()));
+            }
+        }
+        Ok(None)
+    }
+    let path = find(&artifact_directory(root), sha256)?
+        .with_context(|| format!("no Worker Host holds {sha256}"))?;
+    Ok(std::fs::read(path)?)
+}

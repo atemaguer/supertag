@@ -75,7 +75,6 @@ it("shows a sent message at once, keeps it with a retry when it fails, and retri
     messages: async () => ({ conversationId: "c1", messages: accepted ? [sent] : [] }),
     send,
     events: async () => [],
-    saveArtifact: async () => false,
     markRead: async () => {
       throw new Error("not listed");
     },
@@ -117,7 +116,6 @@ it("moves a message that was not delivered back to the composer to edit", async 
       throw new Error("refused");
     },
     events: async () => [],
-    saveArtifact: async () => false,
     markRead: async () => {
       throw new Error("not listed");
     },
@@ -150,7 +148,6 @@ it("resizes the Task activity pane between its limits, remembers it, and resets 
     messages: async () => ({ conversationId: "c1", messages: [done] }),
     send: async () => done,
     events: async () => [],
-    saveArtifact: async () => false,
     markRead: async () => {
       throw new Error("not listed");
     },
@@ -237,7 +234,6 @@ it("shows the Tag's messages and its result as the conversation's follow pushes 
     messages,
     send: async () => turn("queued"),
     events: async () => [],
-    saveArtifact: async () => false,
     markRead: async () => {
       throw new Error("not listed");
     },
@@ -315,7 +311,6 @@ it("shows a turn's reply after the messages that joined it, in the order they we
     messages: async () => ({ conversationId: "c1", messages: [...page].reverse() }),
     send: async () => first,
     events: async () => [],
-    saveArtifact: async () => false,
     markRead: async () => {
       throw new Error("not listed");
     },
@@ -356,7 +351,6 @@ it("shows the Tag's Schedules in its details panel, never in the conversation", 
       throw new Error("not sent");
     },
     events: async () => [],
-    saveArtifact: async () => false,
     markRead: async () => {
       throw new Error("not listed");
     },

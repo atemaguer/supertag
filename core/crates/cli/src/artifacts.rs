@@ -1,48 +1,16 @@
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
-
-use anyhow::{Context, Result, bail, ensure};
-use clap::{Args, Subcommand, ValueEnum};
+use anyhow::Result;
+use clap::Args;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
-    CHECKPOINT_CHUNK_BYTES, MAX_MESSAGE_BYTES,
-    artifacts::{MAX_ARTIFACT_FILE_BYTES, validate_artifact_path},
+    MAX_MESSAGE_BYTES,
     v2::{
-        ArtifactSummary, BlobReference, DownloadArtifactFileRequest, GetCapturedArtifactRequest,
-        GetWorkspaceArtifactRequest, ListCapturedArtifactsRequest, WorkspaceArtifactKind,
+        ArtifactSummary, BlobReference, GetCapturedArtifactRequest, ListCapturedArtifactsRequest,
         WorkspaceDeliveryReference, artifact_catalog_client::ArtifactCatalogClient,
-        artifact_download, artifact_transfers_client::ArtifactTransfersClient,
-        transfers_client::TransfersClient, workspace_download,
     },
-    valid_sha256, validate_workspace_delivery,
 };
-use tokio::io::AsyncWriteExt;
 
 use crate::{Connection, connect_operator, request};
-
-#[derive(Clone, Copy, ValueEnum)]
-pub enum ArtifactKind {
-    Patch,
-    Bundle,
-}
-
-#[derive(Subcommand)]
-pub enum CaptureCommand {
-    /// Download one immutable file and verify its digest before publishing it locally.
-    Download {
-        artifact_id: String,
-        /// File in the artifact to download.
-        #[arg(long)]
-        path: String,
-        /// Local file to create with the verified download. It must not already exist.
-        #[arg(long)]
-        output: PathBuf,
-    },
-}
 
 // Options for `supertag get artifacts`: the artifacts captured by a Task.
 #[derive(Args)]
@@ -101,129 +69,6 @@ pub(crate) async fn fetch(
             "blob": file.blob.as_ref().map(describe_blob),
         })).collect::<Vec<_>>(),
     }))
-}
-
-pub async fn run_capture(connection: Connection, command: CaptureCommand) -> Result<()> {
-    let CaptureCommand::Download {
-        artifact_id,
-        path,
-        output,
-    } = command;
-    validate_artifact_path(&path)?;
-    let (channel, token) =
-        crate::connect_operator_with_timeout(connection, Duration::from_secs(65)).await?;
-    let mut client = ArtifactTransfersClient::new(channel)
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
-    let mut upstream = request(
-        DownloadArtifactFileRequest {
-            artifact_id,
-            path: path.clone(),
-        },
-        &token,
-    )?;
-    upstream.set_timeout(Duration::from_secs(65));
-    let mut stream = client.download_file(upstream).await?.into_inner();
-    let file = match stream.message().await?.and_then(|message| message.part) {
-        Some(artifact_download::Part::File(file)) if file.path == path => file,
-        _ => bail!("artifact download did not include the selected file receipt"),
-    };
-    let blob = file
-        .blob
-        .as_ref()
-        .filter(|value| valid_sha256(&value.sha256) && value.byte_length <= MAX_ARTIFACT_FILE_BYTES)
-        .context("invalid artifact file receipt")?;
-    publish_download(&output, blob, stream, |record| match record.part {
-        Some(artifact_download::Part::Chunk(chunk)) => Some(chunk),
-        _ => None,
-    })
-    .await
-}
-
-pub async fn download(
-    connection: Connection,
-    task_id: String,
-    kind: ArtifactKind,
-    output: &Path,
-) -> Result<()> {
-    let (channel, token) = connect_operator(connection).await?;
-    let mut client = TransfersClient::new(channel)
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
-    let mut upstream = request(
-        GetWorkspaceArtifactRequest {
-            task_id,
-            kind: match kind {
-                ArtifactKind::Patch => WorkspaceArtifactKind::Patch as i32,
-                ArtifactKind::Bundle => WorkspaceArtifactKind::Bundle as i32,
-            },
-        },
-        &token,
-    )?;
-    upstream.set_timeout(Duration::from_secs(120));
-    let mut stream = client
-        .download_workspace_artifact(upstream)
-        .await?
-        .into_inner();
-    let reference = match stream.message().await?.and_then(|message| message.part) {
-        Some(workspace_download::Part::Reference(reference)) => reference,
-        _ => bail!("workspace download did not include a receipt"),
-    };
-    validate_workspace_delivery(&reference)?;
-    let blob = match kind {
-        ArtifactKind::Patch => reference.patch.as_ref(),
-        ArtifactKind::Bundle => reference.bundle.as_ref(),
-    }
-    .expect("validated blob reference");
-
-    publish_download(output, blob, stream, |record| match record.part {
-        Some(workspace_download::Part::Chunk(chunk)) => Some(chunk),
-        _ => None,
-    })
-    .await
-}
-
-pub(crate) async fn publish_download<M: 'static>(
-    output: &Path,
-    blob: &BlobReference,
-    mut stream: tonic::Streaming<M>,
-    chunk: impl Fn(M) -> Option<Vec<u8>>,
-) -> Result<()> {
-    let parent = output
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let staged = tempfile::NamedTempFile::new_in(parent).context("stage artifact download")?;
-    let mut file = tokio::fs::File::from_std(staged.as_file().try_clone()?);
-    let mut size = 0u64;
-    let mut digest = Sha256::new();
-    while let Some(message) = stream.message().await? {
-        let Some(chunk) = chunk(message) else {
-            bail!("unexpected artifact download record");
-        };
-        size += chunk.len() as u64;
-        ensure!(
-            !chunk.is_empty() && chunk.len() <= CHECKPOINT_CHUNK_BYTES && size <= blob.byte_length,
-            "artifact chunk exceeds its receipt"
-        );
-        digest.update(&chunk);
-        file.write_all(&chunk).await?;
-    }
-    ensure!(
-        size == blob.byte_length && format!("{:x}", digest.finalize()) == blob.sha256,
-        "artifact differs from its receipt"
-    );
-    file.flush().await?;
-    file.sync_all().await?;
-    drop(file);
-    staged
-        .persist_noclobber(output)
-        .context("publish artifact download")?;
-    tokio::fs::File::open(parent).await?.sync_all().await?;
-    crate::terminal::print_json(
-        &json!({ "output": output, "sha256": blob.sha256, "byte_length": size }),
-    )?;
-    Ok(())
 }
 
 fn describe_blob(value: &BlobReference) -> Value {

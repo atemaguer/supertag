@@ -227,19 +227,6 @@ async fn capture(
     Ok((artifact.summary.unwrap().artifact_id, bytes, blob, held))
 }
 
-fn capture_download(
-    credentials: &Credentials,
-    public: &str,
-    artifact: &str,
-    output: &Path,
-) -> Command {
-    let mut command = credentials.command(&["artifact", "--gateway", public]);
-    command
-        .args(["download", artifact, "--path", "report.txt", "--output"])
-        .arg(output);
-    command
-}
-
 async fn read_dynamic(
     credentials: &Credentials,
     public: &str,
@@ -387,7 +374,7 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
     std::fs::set_permissions(&volume_path, std::fs::Permissions::from_mode(0o700))?;
     let credentials = Credentials::new();
     let (mut control, public) = service(plane(&credentials, &root, &database, false)).await?;
-    let (artifact_id, bytes, blob, mut held) = capture(&credentials, &public).await?;
+    let (artifact_id, bytes, _, mut held) = capture(&credentials, &public).await?;
     let source = format!("file://{}", volume_path.display());
     let registered = json(volume(
         &credentials,
@@ -471,25 +458,6 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
     ))
     .await?;
     assert_eq!(listed["copies"], serde_json::json!([receipt.clone()]));
-    let copy_id = receipt["copy_id"].as_str().unwrap();
-    let download = root.join("downloaded.txt");
-    let downloaded = json(volume(
-        &credentials,
-        &new_public,
-        &["download", copy_id, "--output", download.to_str().unwrap()],
-    ))
-    .await?;
-    assert_eq!(downloaded["sha256"], blob.sha256);
-    assert_eq!(std::fs::read(&download)?, bytes);
-    let from_capture = root.join("capture.txt");
-    json(capture_download(
-        &credentials,
-        &new_public,
-        &artifact_id,
-        &from_capture,
-    ))
-    .await?;
-    assert_eq!(std::fs::read(&from_capture)?, bytes);
     read_dynamic(&credentials, &new_public, &artifact_id, &bytes).await?;
     // The Control Plane stored no artifact bytes: its checkpoint directory is empty.
     assert_eq!(std::fs::read_dir(root.join("cas"))?.count(), 0);
@@ -499,16 +467,6 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
         .await?;
     assert!(!corrupted.status.success());
     assert_eq!(std::fs::read(&destination)?, b"divergent destination");
-    let refused = root.join("refused.txt");
-    let denied = volume(
-        &credentials,
-        &new_public,
-        &["download", copy_id, "--output", refused.to_str().unwrap()],
-    )
-    .output()
-    .await?;
-    assert!(!denied.status.success());
-    assert!(!refused.exists());
     let copy_id = receipt["copy_id"].as_str().unwrap();
     assert_eq!(
         json(resource(

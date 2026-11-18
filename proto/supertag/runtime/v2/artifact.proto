@@ -42,9 +42,9 @@ service AttemptArtifacts {
   rpc AuthorizeArtifactTransfer(AuthorizeArtifactTransferRequest) returns (AuthorizedArtifactTransfer);
 }
 
-// Downloads relayed from a Volume copy or the holding Worker Host.
+// A Worker Host's download of an artifact file its Attempt acquired, relayed from a Volume copy or
+// the holding Worker Host.
 service ArtifactTransfers {
-  rpc DownloadFile(DownloadArtifactFileRequest) returns (stream ArtifactDownload);
   rpc DownloadAcquiredFile(GetAcquiredArtifactFileRequest) returns (stream ArtifactDownload);
 }
 
@@ -253,7 +253,6 @@ service ArtifactVolumes {
   rpc Delete(DeleteArtifactVolumeRequest) returns (DeleteArtifactVolumeResponse);
   rpc Copy(CopyArtifactToVolumeRequest) returns (ArtifactVolumeCopy);
   rpc GetCopy(GetArtifactVolumeCopyRequest) returns (ArtifactVolumeCopy);
-  rpc DownloadCopy(GetArtifactVolumeCopyRequest) returns (stream ArtifactDownload);
   rpc ListCopies(ListArtifactVolumeCopiesRequest) returns (ListArtifactVolumeCopiesResponse);
 }
 // Internal metadata authority. Only the Control Plane's API tier verifies and

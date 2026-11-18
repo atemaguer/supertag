@@ -4,7 +4,6 @@ import type { Gateway, Message as TagMessage, TaskEvent } from "../gateway";
 import { turnView, useTurnEvents } from "../lib/turn";
 import { Message, MessageContent, MessageResponse } from "./ai-elements/message";
 import { ExternalLink } from "./external-link";
-import { ResultFiles } from "./result-files";
 import { dividerLabel, fromOperator, RUNNING } from "./transcript";
 import { Button } from "./ui/button";
 
@@ -77,7 +76,6 @@ export function ConversationEntry({
   delivery,
   divider,
   onActivity,
-  onSaveArtifact,
 }: {
   message: TagMessage;
   /**
@@ -99,7 +97,6 @@ export function ConversationEntry({
   divider?: number;
   activeTask?: string;
   onActivity(taskId: string, trigger: HTMLButtonElement): void;
-  onSaveArtifact: Gateway["saveArtifact"];
 }) {
   const prompt = message.task.prompt;
   const own = fromOperator(message);
@@ -186,9 +183,6 @@ export function ConversationEntry({
                 </button>
                 {wait && <p className="task-wait">{wait}</p>}
               </div>
-            )}
-            {!joined && task.artifacts && task.artifacts.length > 0 && (
-              <ResultFiles artifacts={task.artifacts} onSave={onSaveArtifact} />
             )}
             {report && (
               <div className="turn-meta">

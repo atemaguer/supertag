@@ -21,7 +21,6 @@ it("opens the Task activity from the typing bubble while the turn runs", () => {
       createElement(ConversationEntry, {
         message,
         onActivity,
-        onSaveArtifact: async () => false,
       }),
     ),
   );

@@ -476,12 +476,6 @@ impl<'a> Runtime<'a> {
         command
     }
 
-    /// A Worker Host with no Workspace mapping, so it claims no Cursor Task. It keeps running and
-    /// relays the test's artifacts and deliveries after the `--once` hosts exit.
-    fn holder(&self, fixture: &Fixture) -> Command {
-        self.host_command(fixture, &format!("holder-{}", Uuid::new_v4()))
-    }
-
     fn host_command(&self, fixture: &Fixture, label: &str) -> Command {
         let mut command = self.credentials.command(&[
             "worker-host",

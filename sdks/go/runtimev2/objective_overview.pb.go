@@ -1013,7 +1013,7 @@ type ObjectiveSessionDelivery struct {
 	HeadCommit   string                 `protobuf:"bytes,4,opt,name=head_commit,json=headCommit,proto3" json:"head_commit,omitempty"`
 	Committed    bool                   `protobuf:"varint,5,opt,name=committed,proto3" json:"committed,omitempty"`
 	ChangedFiles uint64                 `protobuf:"varint,6,opt,name=changed_files,json=changedFiles,proto3" json:"changed_files,omitempty"`
-	// Whether a patch is published for `supertag task download --kind patch`.
+	// Whether the delivery published a patch.
 	Patch         bool `protobuf:"varint,7,opt,name=patch,proto3" json:"patch,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

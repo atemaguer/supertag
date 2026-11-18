@@ -1118,7 +1118,8 @@ class AttemptArtifacts:
 
 
 class ArtifactTransfersStub:
-    """Downloads relayed from a Volume copy or the holding Worker Host.
+    """A Worker Host's download of an artifact file its Attempt acquired, relayed from a Volume copy or
+    the holding Worker Host.
     """
 
     def __init__(self, channel):
@@ -1127,11 +1128,6 @@ class ArtifactTransfersStub:
         Args:
             channel: A grpc.Channel.
         """
-        self.DownloadFile = channel.unary_stream(
-                '/supertag.runtime.v2.ArtifactTransfers/DownloadFile',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DownloadArtifactFileRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactDownload.FromString,
-                _registered_method=True)
         self.DownloadAcquiredFile = channel.unary_stream(
                 '/supertag.runtime.v2.ArtifactTransfers/DownloadAcquiredFile',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetAcquiredArtifactFileRequest.SerializeToString,
@@ -1140,14 +1136,9 @@ class ArtifactTransfersStub:
 
 
 class ArtifactTransfersServicer:
-    """Downloads relayed from a Volume copy or the holding Worker Host.
+    """A Worker Host's download of an artifact file its Attempt acquired, relayed from a Volume copy or
+    the holding Worker Host.
     """
-
-    def DownloadFile(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
 
     def DownloadAcquiredFile(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -1158,11 +1149,6 @@ class ArtifactTransfersServicer:
 
 def add_ArtifactTransfersServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'DownloadFile': grpc.unary_stream_rpc_method_handler(
-                    servicer.DownloadFile,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DownloadArtifactFileRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactDownload.SerializeToString,
-            ),
             'DownloadAcquiredFile': grpc.unary_stream_rpc_method_handler(
                     servicer.DownloadAcquiredFile,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetAcquiredArtifactFileRequest.FromString,
@@ -1177,35 +1163,9 @@ def add_ArtifactTransfersServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class ArtifactTransfers:
-    """Downloads relayed from a Volume copy or the holding Worker Host.
+    """A Worker Host's download of an artifact file its Attempt acquired, relayed from a Volume copy or
+    the holding Worker Host.
     """
-
-    @staticmethod
-    def DownloadFile(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_stream(
-            request,
-            target,
-            '/supertag.runtime.v2.ArtifactTransfers/DownloadFile',
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.DownloadArtifactFileRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactDownload.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
 
     @staticmethod
     def DownloadAcquiredFile(request,
@@ -1524,11 +1484,6 @@ class ArtifactVolumesStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeCopyRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.FromString,
                 _registered_method=True)
-        self.DownloadCopy = channel.unary_stream(
-                '/supertag.runtime.v2.ArtifactVolumes/DownloadCopy',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeCopyRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactDownload.FromString,
-                _registered_method=True)
         self.ListCopies = channel.unary_unary(
                 '/supertag.runtime.v2.ArtifactVolumes/ListCopies',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumeCopiesRequest.SerializeToString,
@@ -1578,12 +1533,6 @@ class ArtifactVolumesServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def DownloadCopy(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
     def ListCopies(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -1622,11 +1571,6 @@ def add_ArtifactVolumesServicer_to_server(servicer, server):
                     servicer.GetCopy,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeCopyRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.SerializeToString,
-            ),
-            'DownloadCopy': grpc.unary_stream_rpc_method_handler(
-                    servicer.DownloadCopy,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeCopyRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactDownload.SerializeToString,
             ),
             'ListCopies': grpc.unary_unary_rpc_method_handler(
                     servicer.ListCopies,
@@ -1799,33 +1743,6 @@ class ArtifactVolumes:
             '/supertag.runtime.v2.ArtifactVolumes/GetCopy',
             supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeCopyRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def DownloadCopy(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_stream(
-            request,
-            target,
-            '/supertag.runtime.v2.ArtifactVolumes/DownloadCopy',
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeCopyRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactDownload.FromString,
             options,
             channel_credentials,
             insecure,

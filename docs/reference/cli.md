@@ -58,7 +58,6 @@ Commands:
   artifact-consumption  Approve and withdraw a destination Objective's use of a publication
   volume                Register Volumes and copy immutable artifact files into explicitly mapped storage
   workspace-volume      Register a Volume whose files Tasks receive as Workspace copies
-  artifact              Download files captured by a Task
   fetch                 Import a Task's or Session's delivered commits as its Session branch in a repository
   session               Close a Work Session so it no longer counts toward its Tag's limit
   schedule              Wake a Tag later in your conversation with it, or pause and resume a Schedule
@@ -2730,7 +2729,6 @@ Commands:
   usage            Read native token usage recorded for a Task Attempt
   input            Send a message to a running Task, with a queued fallback if it cannot take it
   resolve-attempt  Record an audited decision for a stopped, uncertain Task Attempt
-  download         Download the patch or Git bundle published by a successful workspace Task
   help             Print this message or the help of the given subcommand(s)
 
 Options:
@@ -2889,29 +2887,6 @@ Options:
           Confirm that no process of this Attempt is still running
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
-  -h, --help
-          Print help
-```
-
-## `supertag task download`
-
-```text
-Download the patch or Git bundle published by a successful workspace Task
-
-Usage: supertag task download [OPTIONS] --kind <KIND> --output <OUTPUT> <TASK_ID>
-
-Arguments:
-  <TASK_ID>  
-
-Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --kind <KIND>
-          Which published result to download [possible values: patch, bundle]
-      --output <OUTPUT>
-          Local file to create with the download. It must not already exist
-      --state-directory <STATE_DIRECTORY>
-          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
           Print help
 ```
@@ -3095,10 +3070,9 @@ Register Volumes and copy immutable artifact files into explicitly mapped storag
 Usage: supertag volume [OPTIONS] <COMMAND>
 
 Commands:
-  put       Register a file or S3-compatible Volume. Existing metadata requires its exact revision
-  copy      Copy one exact artifact file. The Control Plane must separately consent to this Volume's storage
-  download  Download and re-verify one recorded copy, even when the Worker Host that produced it is offline
-  help      Print this message or the help of the given subcommand(s)
+  put   Register a file or S3-compatible Volume. Existing metadata requires its exact revision
+  copy  Copy one exact artifact file. The Control Plane must separately consent to this Volume's storage
+  help  Print this message or the help of the given subcommand(s)
 
 Options:
       --gateway <URL|NAME>
@@ -3160,27 +3134,6 @@ Options:
           Print help
 ```
 
-## `supertag volume download`
-
-```text
-Download and re-verify one recorded copy, even when the Worker Host that produced it is offline
-
-Usage: supertag volume download [OPTIONS] --output <OUTPUT> <COPY_ID>
-
-Arguments:
-  <COPY_ID>  
-
-Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --output <OUTPUT>
-          Local file to create with the verified copy. It must not already exist
-      --state-directory <STATE_DIRECTORY>
-          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
-  -h, --help
-          Print help
-```
-
 ## `supertag workspace-volume`
 
 ```text
@@ -3222,49 +3175,6 @@ Options:
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
       --expected-revision <EXPECTED_REVISION>
           The revision you last read, or 0 to create. The change is refused when it no longer matches [default: 0]
-  -h, --help
-          Print help
-```
-
-## `supertag artifact`
-
-```text
-Download files captured by a Task
-
-Usage: supertag artifact [OPTIONS] <COMMAND>
-
-Commands:
-  download  Download one immutable file and verify its digest before publishing it locally
-  help      Print this message or the help of the given subcommand(s)
-
-Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --state-directory <STATE_DIRECTORY>
-          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
-  -h, --help
-          Print help
-```
-
-## `supertag artifact download`
-
-```text
-Download one immutable file and verify its digest before publishing it locally
-
-Usage: supertag artifact download [OPTIONS] --path <PATH> --output <OUTPUT> <ARTIFACT_ID>
-
-Arguments:
-  <ARTIFACT_ID>  
-
-Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --path <PATH>
-          File in the artifact to download
-      --output <OUTPUT>
-          Local file to create with the verified download. It must not already exist
-      --state-directory <STATE_DIRECTORY>
-          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
           Print help
 ```

@@ -1142,33 +1142,6 @@ button:disabled {
 .task-status[data-tone="error"] .status-dot {
   background: #ffb7a9;
 }
-.result-files {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  max-width: var(--bubble-max);
-  margin: 2px 0 0;
-  padding: 0;
-  list-style: none;
-}
-.result-files li {
-  min-width: 0;
-  max-width: 100%;
-}
-.result-file {
-  height: auto;
-  min-height: 32px;
-  max-width: 100%;
-  padding-block: 5px;
-  justify-content: flex-start;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  text-align: left;
-}
-.result-files p {
-  margin: 4px 0 0;
-  font-size: 12px;
-}
 /* The composer: one rounded pill across the bottom. */
 .composer {
   width: 100%;

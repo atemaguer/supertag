@@ -102,12 +102,9 @@ database_tests! {
     #[tokio::test]
     watch_replays_private_conversations_after_services_restart;
     #[tokio::test]
-    captured_artifact_bytes_survive_control_plane_restart_with_private_metadata;
+    captured_artifact_survives_control_plane_restart_with_private_metadata;
     #[tokio::test]
     a_followed_conversation_streams_redacted_reply_text_before_the_answer;
-    #[tokio::test]
-    #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
-    go_tui_lists_and_saves_completed_task_files;
     #[tokio::test]
     #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
     bare_launcher_saves_and_switches_between_two_gateways;
@@ -189,20 +186,11 @@ async fn retirement_removes_tag_from_roster_and_preserves_identity(database: Str
     Ok(())
 }
 
-async fn captured_artifact_bytes_survive_control_plane_restart_with_private_metadata(
+/// A captured artifact's files are recorded on the Control Plane and stay private to their
+/// operator across a restart; the bytes stay on the Worker Host.
+async fn captured_artifact_survives_control_plane_restart_with_private_metadata(
     database: String,
 ) -> Result<()> {
-    captured_artifact_round_trip(None, database).await
-}
-
-async fn go_tui_lists_and_saves_completed_task_files(database: String) -> Result<()> {
-    let Some(binary) = crate::prerequisites::env("tui", "SUPERTAG_RUST_TEST_TUI")? else {
-        return Ok(());
-    };
-    captured_artifact_round_trip(Some(Path::new(&binary)), database).await
-}
-
-async fn captured_artifact_round_trip(tui: Option<&Path>, database: String) -> Result<()> {
     let directory = tempfile::Builder::new()
         .prefix("files-tui-")
         .tempdir_in("/tmp")?;
@@ -351,108 +339,35 @@ async fn captured_artifact_round_trip(tui: Option<&Path>, database: String) -> R
     control.kill().await?;
     let (mut control, endpoint) = service(create_control()).await?;
     let bob_token = operator_token(&endpoint, &token, "bob").await?;
-    let bob_endpoint = endpoint.clone();
-    let mut alice_transfers =
-        artifact_transfers_client::ArtifactTransfersClient::new(channel(&endpoint).await?);
-    let mut bob_transfers =
-        artifact_transfers_client::ArtifactTransfersClient::new(channel(&bob_endpoint).await?);
-    let download = DownloadArtifactFileRequest {
-        artifact_id: captured
-            .summary
-            .as_ref()
-            .context("artifact summary missing")?
-            .artifact_id
-            .clone(),
-        path: "report.txt".into(),
+    let artifact_id = captured
+        .summary
+        .as_ref()
+        .context("artifact summary missing")?
+        .artifact_id
+        .clone();
+    let get = GetCapturedArtifactRequest {
+        artifact_id: artifact_id.clone(),
     };
+    // Another operator cannot see the artifact; its owner sees its files after the restart.
+    let mut alice_catalog =
+        artifact_catalog_client::ArtifactCatalogClient::new(channel(&endpoint).await?);
     assert_eq!(
-        bob_transfers
-            .download_file(authenticated_request(download.clone(), &bob_token, None)?)
+        alice_catalog
+            .get(authenticated_request(get.clone(), &bob_token, None)?)
             .await
             .unwrap_err()
             .code(),
         Code::NotFound
     );
-    // Until the holding host reconnects, the reader learns which host holds the bytes.
-    let offline = alice_transfers
-        .download_file(authenticated_request(download.clone(), &token, None)?)
-        .await
-        .unwrap_err();
-    assert_eq!(offline.code(), Code::Unavailable, "{offline:?}");
-    assert!(
-        offline.message().contains("held by Worker Host local"),
-        "{offline:?}"
-    );
-    held.reconnect(channel(&endpoint).await?).await?;
-    let read = |transfers: &mut artifact_transfers_client::ArtifactTransfersClient<_>| {
-        let mut transfers = transfers.clone();
-        let request = authenticated_request(download.clone(), &token, None);
-        async move {
-            let mut returned = transfers.download_file(request?).await?.into_inner();
-            ensure!(
-                matches!(returned.message().await?.and_then(|message| message.part),
-                Some(artifact_download::Part::File(file)) if file.path == "report.txt")
-            );
-            let mut result = Vec::new();
-            while let Some(message) = returned.message().await? {
-                let Some(artifact_download::Part::Chunk(chunk)) = message.part else {
-                    anyhow::bail!("expected artifact data");
-                };
-                result.extend(chunk);
-            }
-            Ok(result)
-        }
-    };
-    assert_eq!(read(&mut alice_transfers).await?, bytes);
-    // The Control Plane verifies relayed bytes against the receipt.
-    held.corrupt(&attempt.attempt_id, &blob, &vec![b'x'; bytes.len()]);
-    let corrupt = read(&mut alice_transfers).await.unwrap_err();
-    assert_eq!(
-        corrupt
-            .downcast_ref::<tonic::Status>()
-            .map(tonic::Status::code),
-        Some(Code::DataLoss),
-        "{corrupt:?}"
-    );
-    held.corrupt(&attempt.attempt_id, &blob, bytes);
+    let restored = alice_catalog
+        .get(authenticated_request(get, &token, None)?)
+        .await?
+        .into_inner();
+    assert_eq!(restored.files, captured.files);
+    // The bytes stay with the Worker Host: a reconnected host's repeated commit is the same capture.
     control_plane_state_holds_no_artifact_bytes(&blobs, bytes)?;
     held.reconnect(channel(&endpoint).await?).await?;
     assert_eq!(held.commit(capture).await?, captured);
-    if let Some(binary) = tui {
-        let mut host = worker_host_client::WorkerHostClient::new(channel(&endpoint).await?);
-        host.finish_task(artifact_host_request(
-            FinishTaskRequest {
-                task_id: task.task_id,
-                attempt_id: attempt.attempt_id,
-                lease_token: attempt.lease_token,
-                result: "Evidence is ready.".into(),
-                succeeded: true,
-                artifacts: vec![ArtifactSelection {
-                    artifact_id: captured
-                        .summary
-                        .context("capture summary missing")?
-                        .artifact_id,
-                    paths: vec!["report.txt".into()],
-                }],
-                ..Default::default()
-            },
-            &host_token,
-            generation,
-        )?)
-        .await?;
-        // The terminal UI connects to a Gateway in front of the Control Plane.
-        let mut gateway = command(&[
-            "gateway",
-            "--control-plane",
-            &endpoint,
-            "--listen",
-            "127.0.0.1:0",
-        ]);
-        gateway.env("SUPERTAG_GATEWAY_CREDENTIAL", &secret);
-        let (mut gateway, gateway_url) = service(gateway).await?;
-        tui_save_task_file(directory.path(), binary, &gateway_url, &token, bytes).await?;
-        gateway.kill().await?;
-    }
     control.kill().await?;
     Ok(())
 }
@@ -536,82 +451,6 @@ fn up_command(database: &str, args: &[&str]) -> Command {
         up.env("SUPERTAG_DATABASE_URL", database);
     }
     up
-}
-
-async fn tui_save_task_file(
-    directory: &Path,
-    binary: &Path,
-    endpoint: &str,
-    token: &str,
-    bytes: &[u8],
-) -> Result<()> {
-    // The synthetic operator token is a provider environment value, never a CLI argument.
-    let script = directory.join("launch-tui");
-    std::fs::write(
-        &script,
-        format!(
-            "#!/bin/sh\nexport SUPERTAG_OPERATOR_TOKEN='{}'\nexec env HOME={} {} tui --gateway '{}' --binary {}\n",
-            token,
-            shell_path(directory)?,
-            shell_path(Path::new(BINARY))?,
-            endpoint,
-            shell_path(binary)?
-        ),
-    )?;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))?;
-    let tmux = Tmux {
-        socket: directory.join("tmux.sock"),
-    };
-    tmux.run(&[
-        "new-session",
-        "-d",
-        "-s",
-        "runtime",
-        "-x",
-        "160",
-        "-y",
-        "45",
-        &format!(
-            "env -i PATH=/usr/bin:/bin TERM=xterm-256color {}",
-            shell_path(&script)?
-        ),
-    ])
-    .await?;
-    tmux.wait_for("Evidence is ready.").await?;
-    tmux.wait_for("Save from Ctrl+k").await?;
-    tmux.run(&["send-keys", "-t", "runtime", "C-k"]).await?;
-    tmux.wait_for("Search Tags, conversations, settings")
-        .await?;
-    tmux.run(&["send-keys", "-t", "runtime", "-l", "Task files"])
-        .await?;
-    tmux.run(&["send-keys", "-t", "runtime", "Enter"]).await?;
-    // The reply already mentions report.txt. Wait for the loaded file row
-    // before sending a key that the loading dialog intentionally ignores.
-    tmux.wait_for("bytes  ·  Evidence").await?;
-    tmux.wait_for("enter chooses").await?;
-    tmux.run(&["send-keys", "-t", "runtime", "Enter"]).await?;
-    tmux.wait_for("Save to a local path").await?;
-    let output = directory.join("saved-report.txt");
-    tmux.run(&["send-keys", "-t", "runtime", "C-u"]).await?;
-    tmux.run(&[
-        "send-keys",
-        "-t",
-        "runtime",
-        "-l",
-        output.to_str().context("output path UTF-8")?,
-    ])
-    .await?;
-    tmux.run(&["send-keys", "-t", "runtime", "Enter"]).await?;
-    tmux.wait_for("Saved ").await?;
-    assert_eq!(std::fs::read(&output)?, bytes);
-    assert_eq!(
-        std::fs::metadata(&output)?.permissions().mode() & 0o777,
-        0o600
-    );
-    tmux.run(&["send-keys", "-t", "runtime", "Escape"]).await?;
-    tmux.wait_for("Evidence is ready.").await?;
-    tmux.run(&["send-keys", "-t", "runtime", "C-c"]).await?;
-    Ok(())
 }
 
 fn artifact_host_request<T>(input: T, token: &str, generation: u64) -> Result<tonic::Request<T>> {

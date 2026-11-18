@@ -4,7 +4,6 @@ import { createGrpcTransport, Http2SessionManager } from "@connectrpc/connect-no
 import {
   ArtifactCatalog,
   ArtifactPublications,
-  ArtifactTransfers,
   ArtifactVolumes,
 } from "../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/artifact_pb.js";
 import {
@@ -25,7 +24,6 @@ import {
   Operator,
   OperatorEvents,
   Teams,
-  Transfers,
   WorkSessions,
 } from "../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/runtime_pb.js";
 import { WorkspaceLandings } from "../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/workspace_landings_pb.js";
@@ -62,7 +60,7 @@ function gatewayOrigin(value: string): URL {
 /** Names, on every call, the protocol version this client negotiated with the Gateway. */
 const PROTOCOL_HEADER = "x-supertag-protocol";
 /** The SuperTag protocol versions this client speaks. */
-const PROTOCOL_VERSIONS = [4];
+const PROTOCOL_VERSIONS = [5];
 
 function refusedByGateway(error: unknown): ConnectError {
   const status = ConnectError.from(error);
@@ -191,8 +189,6 @@ export function createGatewayClient(options: GatewayClientOptions) {
       },
     ],
   });
-  const artifacts = createClient(ArtifactTransfers, transport);
-  const transfers = createClient(Transfers, transport);
   return {
     operator: createClient(Operator, transport),
     conversations: createClient(Conversations, transport),
@@ -212,9 +208,6 @@ export function createGatewayClient(options: GatewayClientOptions) {
     artifacts: createClient(ArtifactCatalog, transport),
     artifactPublications: createClient(ArtifactPublications, transport),
     volumes: createClient(ArtifactVolumes, transport),
-    downloadArtifactFile: artifacts.downloadFile,
-    downloadWorkspaceArtifact: transfers.downloadWorkspaceArtifact,
-    downloadReviewArtifact: transfers.downloadReviewArtifact,
     close() {
       closed = true;
       session.abort();

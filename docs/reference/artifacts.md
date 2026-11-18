@@ -377,20 +377,19 @@ supertag volume put archive --source s3://acme-artifacts/archive --operation-id 
 supertag volume copy archive ARTIFACT_ID --path research/findings.md --expected-revision 1 \
   --operation-id copy-findings
 supertag get volume-copy
-supertag volume download COPY_ID --output findings.md
 ```
 
 `volume copy` relays the bytes from the holding Worker Host into the Volume, so that Worker Host
 must be connected. Repeating a copy that already reached the Volume succeeds while it is offline.
-`volume download` reads the copy back and verifies it. Artifact downloads also use a recorded
-Volume copy, whether or not the holding Worker Host is connected. `supertag delete volume` is
-refused while reserved or verified copies depend on the Volume.
+A consuming Task's Worker Host reads a recorded Volume copy whether or not the holding Worker Host
+is connected. `supertag delete volume` is refused while reserved or verified copies depend on the
+Volume.
 
-### Operator downloads
+### Client downloads
 
-`supertag artifact download ARTIFACT_ID --path PATH --output FILE` writes one file only when its size
-and digest match, and never overwrites an existing file. When neither the holding Worker Host nor a
-Volume copy is reachable, it writes nothing and reports the error above, naming the Worker Host.
+Clients can't download artifact files: the CLI, the terminal UI, the desktop app, and the SDKs
+list artifacts and their files, but the bytes stay on the Worker Host that captured them or in a
+Volume copy. The Control Plane doesn't pass files to clients.
 
 Automatic replication and repair are not implemented. Back up every Worker Host's artifact
 storage, artifact Volumes, and the catalog database together.

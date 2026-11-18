@@ -499,7 +499,7 @@ export type ObjectiveSessionDelivery = Message<"supertag.runtime.v2.ObjectiveSes
   changedFiles: bigint;
 
   /**
-   * Whether a patch is published for `supertag task download --kind patch`.
+   * Whether the delivery published a patch.
    *
    * @generated from field: bool patch = 7;
    */

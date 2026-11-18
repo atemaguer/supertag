@@ -76,12 +76,6 @@ impl Credentials {
         command
     }
 
-    /// A Worker Host that keeps running with no Workspace mapping, so it claims no Workspace
-    /// Task: it holds the test's deliveries and artifacts for readers after `--once` hosts exit.
-    fn holder(&self, public: &str, state: &Path) -> Command {
-        self.host(public, state, None, "--workspace-fixture")
-    }
-
     fn host(&self, public: &str, state: &Path, source: Option<&Path>, mode: &str) -> Command {
         let mut command = self.command(&[
             "worker-host",
@@ -436,49 +430,27 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     let (restarted, restored_public) = service(plane_command(Some(listen))).await?;
     plane = restarted;
     assert_eq!(restored_public, public);
-    let patch = directory.join("review.patch");
-    let bundle = directory.join("review.bundle");
-    // The Control Plane stores no delivery: with no host holding it connected, a download names
-    // the holding Worker Host and writes nothing.
-    let mut offline =
-        credentials.operator(&["task", "download", first_id, "--kind", "patch"], &public);
-    offline.arg("--output").arg(&patch);
-    let offline = output(offline).await?;
-    assert!(!offline.status.success());
-    let message = String::from_utf8_lossy(&offline.stderr);
-    assert!(message.contains("held by Worker Host local"), "{message}");
-    assert!(!patch.exists());
+    // The Control Plane stores no delivery: the Worker Host that ran the Task holds its patch and
+    // bundle.
     ensure!(
         !artifact_store.exists() || std::fs::read_dir(&artifact_store)?.next().is_none(),
         "the Control Plane stored delivery bytes"
     );
-    let holding =
-        holding_host::serve(credentials.holder(&public, &directory.join("holder"))).await?;
-    for (kind, path) in [("patch", &patch), ("bundle", &bundle)] {
-        let mut download =
-            credentials.operator(&["task", "download", first_id, "--kind", kind], &public);
-        download.arg("--output").arg(path);
-        let receipt = json(download).await?;
-        let bytes = std::fs::read(path)?;
-        assert_eq!(
-            format!("{:x}", Sha256::digest(&bytes)),
-            delivery[kind]["sha256"]
-        );
+    let bundle = directory.join("review.bundle");
+    for kind in ["patch", "bundle"] {
+        let bytes = holding_host::held_bytes(directory, field(&delivery[kind], "sha256")?)?;
         assert_eq!(
             bytes.len() as u64,
             delivery[kind]["byte_length"]
                 .as_u64()
                 .context("missing byte length")?
         );
-        assert_eq!(receipt["sha256"], delivery[kind]["sha256"]);
+        if kind == "patch" {
+            assert!(String::from_utf8_lossy(&bytes).contains("GIT binary patch"));
+        } else {
+            std::fs::write(&bundle, bytes)?;
+        }
     }
-    let patch_bytes = std::fs::read(&patch)?;
-    assert!(String::from_utf8_lossy(&patch_bytes).contains("GIT binary patch"));
-    let mut overwrite =
-        credentials.operator(&["task", "download", first_id, "--kind", "patch"], &public);
-    overwrite.arg("--output").arg(&patch);
-    assert!(!output(overwrite).await?.status.success());
-    assert_eq!(std::fs::read(&patch)?, patch_bytes);
 
     // Verify the exported commit independently in a clone holding only the base: the bundle
     // carries what the Task added to its start commit, the base.
@@ -526,7 +498,6 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         .arg(&source)
         .args(["cat-file", "-e", &first_head]);
     assert!(!output(absent).await?.status.success());
-    drop(holding);
 
     let second = json(submit("second")).await?;
     let second_id = field(&second, "task_id")?;
@@ -722,24 +693,11 @@ async fn artifact_inputs_survive_control_plane_restart_and_do_not_enter_workspac
                 metadata["inputs"][0]["paths"],
                 serde_json::json!(["evidence.txt"])
             );
-            // The consumer exited; a holding host relays its delivery.
-            let holding =
-                holding_host::serve(credentials.holder(&public, &root.join("holder"))).await?;
-            let mut command = credentials.operator(
-                &[
-                    "task",
-                    "download",
-                    field(&task, "task_id")?,
-                    "--kind",
-                    "patch",
-                ],
-                &public,
-            );
-            let patch = root.join("patch.diff");
-            command.arg("--output").arg(&patch);
-            success(command).await?;
-            drop(holding);
-            let patch = std::fs::read_to_string(patch)?;
+            // The consumer's Worker Host holds its delivered patch.
+            let patch = String::from_utf8(holding_host::held_bytes(
+                root,
+                field(&result["workspace_delivery"]["patch"], "sha256")?,
+            )?)?;
             assert!(patch.contains("derived.txt"));
             assert!(!patch.contains("inputs/") && !patch.contains("artifact-"));
         }

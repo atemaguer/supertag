@@ -209,20 +209,11 @@ see [operator decisions](objective-decisions.md).
 When the lead reports completion, the agent reads the latest description and the full
 delivered diff before running anything from it. Run checks only in a sandbox or container without
 the SuperTag CLI credential, SSH keys, git push credentials, or secret environment variables.
-Review verification evidence and unresolved findings. For a captured report,
-use the artifact ID and path returned with the result:
-
-```sh
-review_dir=$(mktemp -d)
-supertag artifact download ARTIFACT_ID --path reports/walkthrough.md \
-  --output "$review_dir/walkthrough.md"
-```
-
-An **artifact** is a captured output file. Its path above is illustrative; use the exact path in
-the artifact's file list. `mktemp` creates a fresh directory outside the application repository.
-Download writes one file and refuses an existing destination. A download needs access to
-the host or storage holding the file; see
-[artifacts](../reference/artifacts.md). A completion claim alone is not proof that checks passed.
+Review verification evidence and unresolved findings. An **artifact** is a captured output file.
+`supertag get artifact --task TASK_ID` lists a Task's artifacts and their files, but a client
+can't download them: they stay on the Worker Host that captured them. To review a report, ask for
+it in the delivered branch. See [artifacts](../reference/artifacts.md). A completion claim alone
+is not proof that checks passed.
 The agent presents the branch, result, evidence, and remaining risks, and merges only
 when you explicitly authorize that merge.
 

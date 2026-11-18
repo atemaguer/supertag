@@ -322,16 +322,6 @@ async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback(
     ))
     .await?;
     let file_path = volume_path.join(file_copy["storage_key"].as_str().unwrap());
-    let output = root.join("downloaded.txt");
-    json(capture_download(
-        &credentials,
-        &public,
-        &artifact_id,
-        &output,
-    ))
-    .await?;
-    assert_eq!(std::fs::read(&output)?, bytes);
-    std::fs::remove_file(&output)?;
     assert_eq!(object_state.lock().unwrap().reads, 4);
     // A bad first candidate cannot shadow the independently verified later copy.
     std::fs::write(&file_path, &divergence)?;
@@ -350,39 +340,16 @@ async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback(
         json(volume(&credentials, &public, &copy_args)).await?,
         receipt
     );
-    let copy_id = receipt["copy_id"].as_str().unwrap();
-    let download = ["download", copy_id, "--output", output.to_str().unwrap()];
-    let downloaded = json(volume(&credentials, &public, &download)).await?;
-    assert_eq!(downloaded["sha256"], blob.sha256);
-    assert_eq!(std::fs::read(&output)?, bytes);
-    std::fs::remove_file(&output)?;
-
-    json(capture_download(
-        &credentials,
-        &public,
-        &artifact_id,
-        &output,
-    ))
-    .await?;
-    assert_eq!(std::fs::read(&output)?, bytes);
-    std::fs::remove_file(&output)?;
     read_dynamic(&credentials, &public, &artifact_id, &bytes).await?;
     assert!(!root.join("cas").join(&blob.sha256).exists());
     assert_eq!(std::fs::read(&file_path)?, divergence);
 
     object_state.lock().unwrap().bytes = Some(vec![b'x'; bytes.len()]);
-    refused(
-        capture_download(&credentials, &public, &artifact_id, &output),
-        "no reachable copy of these artifact bytes",
-    )
-    .await?;
-    refused(volume(&credentials, &public, &download), "verified").await?;
-    assert!(!output.exists());
     refused(volume(&credentials, &public, &copy_args), "verified").await?;
     object_state.lock().unwrap().bytes = None;
     refused(volume(&credentials, &public, &copy_args), "verified").await?;
     object_state.lock().unwrap().redirect = Some(format!("{endpoint}/outside"));
-    refused(volume(&credentials, &public, &download), "verified").await?;
+    refused(volume(&credentials, &public, &copy_args), "verified").await?;
     {
         let state = object_state.lock().unwrap();
         assert_eq!((state.writes, state.invalid_requests), (2, 0));

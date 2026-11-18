@@ -296,12 +296,18 @@ impl LanguageServices {
         operator(args, &self.public, &self.operator_token).await
     }
 
-    /// Runs one operator command while `holder`, a Worker Host that claims no Task, relays the
-    /// artifacts the test's exited `--once` hosts hold. The Control Plane stores none of those
-    /// bytes. The holder registers a new host generation, so it stops before the next host runs.
-    async fn held(&self, holder: &impl Fn() -> Command, args: &[&str]) -> Result<Value> {
-        let _holding = holding_host::serve(holder()).await?;
-        self.operator(args).await
+    /// The bytes of `path` in `artifact`, read where the test's Worker Hosts keep them under
+    /// `directory`: the Control Plane passes no files to clients.
+    async fn held_file(&self, directory: &Path, artifact: &str, path: &str) -> Result<Vec<u8>> {
+        let manifest = self.operator(&["get", "artifact", artifact]).await?;
+        let file = manifest["files"]
+            .as_array()
+            .and_then(|files| files.iter().find(|file| file["path"] == path))
+            .with_context(|| format!("{artifact} has no file {path}: {manifest}"))?;
+        holding_host::held_bytes(
+            directory,
+            file["blob"]["sha256"].as_str().context("file digest")?,
+        )
     }
 
     fn worker(&self, harness: &str, directory: &Path, runtime: &Path, entry: &Path) -> Command {
@@ -1324,8 +1330,7 @@ async fn claude_captures_selected_workspace_files_for_the_operator(database: Str
         ])
         .await?;
     let task_id = task["task_id"].as_str().context("Task ID missing")?;
-    // Each run is a fresh host incarnation: the holder below replaces the previous one, and a
-    // state directory carries its incarnation.
+    // Each run is a fresh host incarnation, and a state directory carries its incarnation.
     let runs = std::cell::Cell::new(0);
     let worker = || {
         runs.set(runs.get() + 1);
@@ -1343,22 +1348,6 @@ async fn claude_captures_selected_workspace_files_for_the_operator(database: Str
             .arg("evidence")
             .arg("--workspace-source")
             .arg(&source)
-            .env("ANTHROPIC_API_KEY", "fixture-artifact-provider-key");
-        host
-    };
-    // No Workspace mapping, so it claims none of the producer's Tasks.
-    let holder = || {
-        runs.set(runs.get() + 1);
-        let mut host = services.serving_worker(
-            "claude-code",
-            &directory.path().join(format!("holder-{}", runs.get())),
-            Path::new(&interpreter),
-            &entry,
-        );
-        host.arg("--claude-path")
-            .arg(&native)
-            .arg("--artifact-directory")
-            .arg(holding_host::artifact_directory(directory.path()))
             .env("ANTHROPIC_API_KEY", "fixture-artifact-provider-key");
         host
     };
@@ -1404,21 +1393,12 @@ async fn claude_captures_selected_workspace_files_for_the_operator(database: Str
     let artifact = services.operator(&["get", "artifact", artifact_id]).await?;
     assert_eq!(artifact["files"][0]["path"], "empty.txt");
     assert_eq!(artifact["files"][1]["path"], "report.txt");
-    let destination = directory.path().join("download.txt");
-    let output = destination.to_str().context("fixture path is not UTF-8")?;
-    let download = [
-        "artifact",
-        "download",
-        artifact_id,
-        "--path",
-        "report.txt",
-        "--output",
-        output,
-    ];
-    services.held(&holder, &download).await?;
-    assert_eq!(std::fs::read(&destination)?, report);
-    assert!(services.held(&holder, &download).await.is_err());
-    assert_eq!(std::fs::read(&destination)?, report);
+    assert_eq!(
+        services
+            .held_file(directory.path(), artifact_id, "report.txt")
+            .await?,
+        report
+    );
     let managed_id = managed["artifact_id"]
         .as_str()
         .context("managed artifact ID missing")?;
@@ -1443,27 +1423,15 @@ async fn claude_captures_selected_workspace_files_for_the_operator(database: Str
         1
     );
     assert_eq!(managed_artifact["files"][0]["path"], output_path);
-    let managed_download = directory.path().join("deliverable.txt");
-    services
-        .held(
-            &holder,
-            &[
-                "artifact",
-                "download",
-                managed_id,
-                "--path",
-                &output_path,
-                "--output",
-                managed_download
-                    .to_str()
-                    .context("fixture path is not UTF-8")?,
-            ],
-        )
-        .await?;
-    assert_eq!(std::fs::read(&managed_download)?, b"managed Task output\n");
+    assert_eq!(
+        services
+            .held_file(directory.path(), managed_id, &output_path)
+            .await?,
+        b"managed Task output\n"
+    );
     assert_eq!(task["workspace_delivery"]["changed_files"], 0);
     assert!(success(git(&["status", "--porcelain"])).await?.is_empty());
-    declared_output_cases(&services, directory.path(), &worker, &holder).await?;
+    declared_output_cases(&services, directory.path(), &worker).await?;
     let remote = directory.path().join("verified-remote.git");
     let remote_path = remote.to_str().context("Git fixture path is not UTF-8")?;
     success(git(&["init", "--bare", "--quiet", remote_path])).await?;
@@ -1475,34 +1443,10 @@ async fn claude_captures_selected_workspace_files_for_the_operator(database: Str
         "HEAD:refs/heads/advertised",
     ]))
     .await?;
-    verify_git_output_case(
-        &services,
-        directory.path(),
-        &worker,
-        &holder,
-        "reference",
-        true,
-    )
-    .await?;
-    verify_git_output_case(
-        &services,
-        directory.path(),
-        &worker,
-        &holder,
-        "capture",
-        false,
-    )
-    .await?;
+    verify_git_output_case(&services, directory.path(), &worker, "reference", true).await?;
+    verify_git_output_case(&services, directory.path(), &worker, "capture", false).await?;
     success(git(&["remote", "remove", "origin"])).await?;
-    verify_git_output_case(
-        &services,
-        directory.path(),
-        &worker,
-        &holder,
-        "reference",
-        false,
-    )
-    .await?;
+    verify_git_output_case(&services, directory.path(), &worker, "reference", false).await?;
     services.stop().await
 }
 
@@ -1510,7 +1454,6 @@ async fn verify_git_output_case(
     services: &LanguageServices,
     directory: &Path,
     worker: &impl Fn() -> Command,
-    holder: &impl Fn() -> Command,
     mode: &str,
     advertised: bool,
 ) -> Result<()> {
@@ -1551,31 +1494,17 @@ async fn verify_git_output_case(
     let artifact = selection["artifact_id"]
         .as_str()
         .context("artifact ID missing")?;
-    let download = |path: &str| directory.join(format!("{session}-{path}"));
-    for path in ["report.txt", "supertag-git-output.json"] {
-        services
-            .held(
-                holder,
-                &[
-                    "artifact",
-                    "download",
-                    artifact,
-                    "--path",
-                    path,
-                    "--output",
-                    download(path)
-                        .to_str()
-                        .context("download path is not UTF-8")?,
-                ],
-            )
-            .await?;
-    }
     assert_eq!(
-        std::fs::read(download("report.txt"))?,
+        services
+            .held_file(directory, artifact, "report.txt")
+            .await?,
         b"dirty tracked output\n"
     );
-    let snapshot: Value =
-        serde_json::from_slice(&std::fs::read(download("supertag-git-output.json"))?)?;
+    let snapshot: Value = serde_json::from_slice(
+        &services
+            .held_file(directory, artifact, "supertag-git-output.json")
+            .await?,
+    )?;
     assert_eq!(snapshot["kind"], "selected-git-snapshot");
     assert_eq!(snapshot["deleted"], serde_json::json!(["removed.txt"]));
     assert_eq!(
@@ -1607,7 +1536,6 @@ async fn declared_output_cases(
     services: &LanguageServices,
     directory: &Path,
     worker: impl Fn() -> Command,
-    holder: &impl Fn() -> Command,
 ) -> Result<()> {
     let policy_file = directory.join("output-policy.json");
     let file = policy_file
@@ -1669,22 +1597,12 @@ async fn declared_output_cases(
             let artifact_id = selection["artifact_id"]
                 .as_str()
                 .context("artifact ID missing")?;
-            let destination = directory.join("declared.txt");
-            services
-                .held(
-                    holder,
-                    &[
-                        "artifact",
-                        "download",
-                        artifact_id,
-                        "--path",
-                        "deliverables/deliverable.txt",
-                        "--output",
-                        destination.to_str().context("fixture path is not UTF-8")?,
-                    ],
-                )
-                .await?;
-            assert_eq!(std::fs::read(destination)?, b"managed Task output\n");
+            assert_eq!(
+                services
+                    .held_file(directory, artifact_id, "deliverables/deliverable.txt")
+                    .await?,
+                b"managed Task output\n"
+            );
         }
     }
     Ok(())

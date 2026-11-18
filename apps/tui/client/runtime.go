@@ -35,7 +35,6 @@ type runtimeClient struct {
 	inbox         runtimev2connect.InboxClient
 	workSessions  runtimev2connect.WorkSessionsClient
 	artifacts     runtimev2connect.ArtifactCatalogClient
-	artifactFiles runtimev2connect.ArtifactTransfersClient
 	enrollments   runtimev2connect.EnrollmentsClient
 	memories      runtimev2connect.MemoriesClient
 	networkLogs   runtimev2connect.NetworkLogsClient
@@ -134,7 +133,6 @@ func New(target Target, version string) (*Client, error) {
 		inbox:         runtimev2connect.NewInboxClient(httpClient, origin, options...),
 		workSessions:  runtimev2connect.NewWorkSessionsClient(httpClient, origin, options...),
 		artifacts:     runtimev2connect.NewArtifactCatalogClient(httpClient, origin, options...),
-		artifactFiles: runtimev2connect.NewArtifactTransfersClient(httpClient, origin, options...),
 		enrollments:   runtimev2connect.NewEnrollmentsClient(httpClient, origin, options...),
 		memories:      runtimev2connect.NewMemoriesClient(httpClient, origin, options...),
 		networkLogs:   runtimev2connect.NewNetworkLogsClient(httpClient, origin, options...),
@@ -390,7 +388,7 @@ func runtimeReply(task *v2.Task) *views.Reply {
 	text := task.GetResult()
 	switch task.GetState() {
 	case v2.TaskState_TASK_STATE_SUCCEEDED:
-		return &views.Reply{Presentation: views.ReplyPresentation_REPLY_PRESENTATION_FINAL_RESULT, Text: text + taskFilesNotice(task)}
+		return &views.Reply{Presentation: views.ReplyPresentation_REPLY_PRESENTATION_FINAL_RESULT, Text: text}
 	case v2.TaskState_TASK_STATE_FAILED:
 		if text == "" {
 			text = "Task failed."

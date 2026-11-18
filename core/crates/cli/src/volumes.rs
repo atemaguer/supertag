@@ -38,13 +38,6 @@ pub enum VolumeCommand {
         #[arg(long)]
         operation_id: String,
     },
-    /// Download and re-verify one recorded copy, even when the Worker Host that produced it is offline.
-    Download {
-        copy_id: String,
-        /// Local file to create with the verified copy. It must not already exist.
-        #[arg(long)]
-        output: PathBuf,
-    },
 }
 
 // Options for `supertag get volumes`.
@@ -205,48 +198,13 @@ fn copy(v: &ArtifactVolumeCopy) -> Value {
     json!({"copy_id":v.copy_id,"operation_id":v.operation_id,"volume":v.volume.as_ref().map(volume),"artifact_id":v.artifact_id,"file":v.file.as_ref().map(|f|json!({"path":f.path,"blob":f.blob.as_ref().map(|b|json!({"sha256":b.sha256,"byte_length":b.byte_length}))})),"storage_key":v.storage_key,"state":v.state().as_str_name(),"created_at_ms":v.created_at_ms,"verified_at_ms":v.verified_at_ms})
 }
 pub async fn run(connection: Connection, command: VolumeCommand) -> Result<()> {
-    let (channel, token) = if matches!(
-        command,
-        VolumeCommand::Copy { .. } | VolumeCommand::Download { .. }
-    ) {
+    let (channel, token) = if matches!(command, VolumeCommand::Copy { .. }) {
         crate::connect_operator_with_timeout(connection, VOLUME_TRANSFER_TIMEOUT).await?
     } else {
         connect_operator(connection).await?
     };
     let mut client = client(channel.clone());
     let value = match command {
-        VolumeCommand::Download { copy_id, output } => {
-            let receipt = client
-                .get_copy(request(
-                    GetArtifactVolumeCopyRequest {
-                        copy_id: copy_id.clone(),
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            let expected = receipt.file.context("copy has no file")?;
-            let blob = expected
-                .blob
-                .as_ref()
-                .filter(|b| {
-                    supertag_protocol::valid_sha256(&b.sha256)
-                        && b.byte_length <= supertag_protocol::artifacts::MAX_ARTIFACT_FILE_BYTES
-                })
-                .context("copy has no valid stored bytes")?;
-            let mut download = request(GetArtifactVolumeCopyRequest { copy_id }, &token)?;
-            download.set_timeout(VOLUME_TRANSFER_TIMEOUT);
-            let mut stream = client.download_copy(download).await?.into_inner();
-            match stream.message().await?.and_then(|v| v.part) {
-                Some(artifact_download::Part::File(file)) if file == expected => {}
-                _ => bail!("Volume download differs from its exact copy receipt"),
-            }
-            return crate::artifacts::publish_download(&output, blob, stream, |v| match v.part {
-                Some(artifact_download::Part::Chunk(bytes)) => Some(bytes),
-                _ => None,
-            })
-            .await;
-        }
         VolumeCommand::Put {
             volume_id,
             source,

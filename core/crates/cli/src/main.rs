@@ -675,13 +675,6 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[command(subcommand)]
         command: workspace_mounts::VolumeCommand,
     },
-    /// Download files captured by a Task.
-    Artifact {
-        #[command(flatten)]
-        connection: Connection,
-        #[command(subcommand)]
-        command: artifacts::CaptureCommand,
-    },
     /// Import a Task's or Session's delivered commits as its Session branch in a repository.
     Fetch {
         #[command(flatten)]
@@ -1426,12 +1419,6 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => workspace_mounts::run(connection, command).await?,
-        Command::Artifact {
-            connection,
-            command,
-        } => {
-            artifacts::run_capture(connection, command).await?;
-        }
         Command::Input {
             connection,
             command,

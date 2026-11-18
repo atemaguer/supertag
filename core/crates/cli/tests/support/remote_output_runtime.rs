@@ -38,39 +38,36 @@ fn declared(required: &[&str], git: OutputGitMode, max_bytes: u64) -> TaskOutput
     }
 }
 
+/// The bytes of `path` in `artifact`, from the Worker Host that holds them: the Control Plane
+/// passes no files to clients.
 async fn download(
     runtime: &Runtime<'_>,
     fixture: &Fixture,
     artifact: &str,
     path: &str,
 ) -> Result<Vec<u8>> {
-    let destination = fixture.root.join(format!("artifact-{}", Uuid::new_v4()));
-    // The producing host exited; a holding host relays its artifacts.
-    let _holding = holding_host::serve(runtime.holder(fixture)).await?;
     let output = timeout(
         WAIT,
         runtime
             .credentials
-            .command(&[
-                "artifact",
-                "--gateway",
-                &runtime.endpoint,
-                "download",
-                artifact,
-                "--path",
-                path,
-                "--output",
-                destination.to_str().context("download destination")?,
-            ])
+            .command(&["get", "--gateway", &runtime.endpoint, "artifact", artifact])
             .output(),
     )
     .await??;
     ensure!(
         output.status.success(),
-        "artifact download failed: {}",
+        "artifact lookup failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    Ok(std::fs::read(destination)?)
+    let manifest: Value = serde_json::from_slice(&output.stdout)?;
+    let file = manifest["files"]
+        .as_array()
+        .and_then(|files| files.iter().find(|file| file["path"] == path))
+        .with_context(|| format!("{artifact} has no file {path}: {manifest}"))?;
+    holding_host::held_bytes(
+        &fixture.root,
+        file["blob"]["sha256"].as_str().context("file digest")?,
+    )
 }
 
 async fn worker_exit(worker: Child) -> Result<()> {

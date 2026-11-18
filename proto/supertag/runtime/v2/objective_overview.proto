@@ -165,7 +165,7 @@ message ObjectiveSessionDelivery {
   string head_commit = 4;
   bool committed = 5;
   uint64 changed_files = 6;
-  // Whether a patch is published for `supertag task download --kind patch`.
+  // Whether the delivery published a patch.
   bool patch = 7;
 }
 

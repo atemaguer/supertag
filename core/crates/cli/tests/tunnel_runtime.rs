@@ -3,8 +3,8 @@
 //! outer `wss://` TLS and forwards plain HTTP/1.1, while SuperTag's mutual TLS runs end to
 //! end inside the tunnel:
 //!
-//! - every Control Plane call shape (unary, client-streaming Workspace upload,
-//!   server-streaming artifact download and Watch), a Gateway's calls to the Control Plane,
+//! - every Control Plane call shape (unary, client-streaming Workspace upload, and a
+//!   server-streaming Watch), a Gateway's calls to the Control Plane,
 //!   and the operator's call to the Gateway;
 //! - severing either client's tunnel mid-Attempt, after which the Worker Host and Gateway
 //!   reconnect and the Attempt completes once;
@@ -1562,8 +1562,7 @@ async fn every_role_is_held_to_its_table_row_natively_and_through_the_tunnel(
 // Call shapes
 
 /// The Control Plane's whole public surface runs through a tunnel: unary operator and Worker
-/// Host calls, the client-streaming Workspace upload, the server-streaming artifact download,
-/// and a Watch stream. A Gateway reaches the Control Plane, and an operator the Gateway,
+/// Host calls, the client-streaming Workspace upload, and a server-streaming Watch. A Gateway reaches the Control Plane, and an operator the Gateway,
 /// through tunnels too. The native listener keeps working beside the tunnel, and clients
 /// without valid inner TLS are refused.
 async fn tunnel_carries_every_service_role_and_call_shape_with_mutual_tls(
@@ -1639,22 +1638,7 @@ async fn tunnel_carries_every_service_role_and_call_shape_with_mutual_tls(
     );
     watched_change(&mut events, &task_id).await?;
 
-    // The Control Plane stores no delivery: the host, back without a Workspace to claim work for,
-    // relays it through its tunnel, and the operator receives it as a streamed download.
-    let _holding =
-        holding_host::serve(deployment.worker_host(&public, &state, Path::new(ADAPTER))).await?;
-    let delivery = &task["workspace_delivery"];
-    assert_eq!(delivery["changed_files"], 2, "{task}");
-    let bundle = root.join("delivery.bundle");
-    let mut download = deployment.operator(&["task", "download", &task_id, "--kind", "bundle"]);
-    download.arg("--output").arg(&bundle);
-    let receipt = run_json(download).await?;
-    let bytes = std::fs::read(&bundle)?;
-    assert_eq!(
-        format!("{:x}", Sha256::digest(&bytes)),
-        delivery["bundle"]["sha256"]
-    );
-    assert_eq!(receipt["sha256"], delivery["bundle"]["sha256"]);
+    assert_eq!(task["workspace_delivery"]["changed_files"], 2, "{task}");
 
     // The native listener still answers on the same Control Plane.
     let native = run_json(deployment.native_operator(&["get", "task", &task_id])).await?;

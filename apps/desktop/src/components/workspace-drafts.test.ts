@@ -30,7 +30,6 @@ const gateway: Gateway = {
     throw new Error("unused");
   },
   events: async () => [],
-  saveArtifact: async () => false,
   scope: "test",
   readCache: async () => undefined,
   writeCache: async () => {},

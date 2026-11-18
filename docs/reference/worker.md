@@ -128,8 +128,6 @@ writes your repository. Your machine imports the delivery as the branch
 - `supertag up` imports deliveries for every Workspace that a host of its own Control Plane maps
   in `supertag.yaml`, unless the Workspace sets `land: patch`.
 - `supertag fetch TASK_OR_SESSION_ID --repository PATH` imports one into any clone.
-- `supertag task download TASK_ID --kind patch|bundle --output FILE` saves the file. The bundle
-  needs its start commit to import; `git bundle verify` names it.
 
 Each of these reads fails while the host that produced the delivery is offline, with an error
 naming that host. The Session's next Task waits instead: its Task Attempt keeps its slot and

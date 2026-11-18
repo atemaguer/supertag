@@ -211,7 +211,6 @@ one branch per Session. Import a delivery yourself, or into another clone, with 
 
 ```sh
 supertag fetch TASK_ID --repository ~/code/app
-supertag task download TASK_ID --kind patch --output change.patch
 ```
 
 See [Work in a repository with Workspaces](../guides/workspaces.md).

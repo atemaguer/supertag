@@ -1,13 +1,10 @@
 //! Operator Tokens and the audit log through a separate Control Plane process.
 //!
 //! The admin operator token issues, rotates, and revokes an Operator Token with the CLI. A running
-//! Control Plane refuses the revoked token on new calls and ends a Watch stream and an artifact download
-//! it already opened. The audit log names every resource a call changed.
+//! Control Plane refuses the revoked token on new calls and ends a Watch stream it already opened. The audit log names every resource a call changed.
 #[path = "support/children.rs"]
 mod children;
 use children::reaped;
-#[path = "support/held_artifacts.rs"]
-mod held_artifacts;
 #[path = "support/protocol.rs"]
 mod protocol;
 use std::{
@@ -19,12 +16,11 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
-use supertag_protocol::negotiation::ProtocolChannel;
 
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use sqlx::{Connection, Executor};
-use supertag_protocol::{HOST_GENERATION_HEADER, MAX_MESSAGE_BYTES, authenticated_request, v2::*};
+use supertag_protocol::{MAX_MESSAGE_BYTES, authenticated_request, v2::*};
 use tokio::time::sleep;
 use tonic::{Code, Request, transport::Endpoint};
 use uuid::Uuid;
@@ -45,15 +41,6 @@ impl Credentials {
             admin: Uuid::new_v4().to_string(),
             host: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
         }
-    }
-
-    /// A Worker Host call for `generation`.
-    fn host<T>(&self, value: T, generation: u64) -> Result<Request<T>> {
-        let mut request = request(value, &self.host)?;
-        request
-            .metadata_mut()
-            .insert(HOST_GENERATION_HEADER, generation.to_string().parse()?);
-        Ok(request)
     }
 
     fn command(&self, args: &[&str]) -> Command {
@@ -718,192 +705,6 @@ async fn audit_names_every_changed_resource(database: &str) -> Result<()> {
     Ok(())
 }
 
-/// Captures one artifact file of `bytes` from a Task the Operator Token submitted. The returned
-/// storage holds the bytes, as the capturing Worker Host does, and relays them while it lives.
-async fn capture_artifact(
-    credentials: &Credentials,
-    channel: ProtocolChannel,
-    secret: &str,
-    bytes: &[u8],
-) -> Result<(String, held_artifacts::HeldArtifacts)> {
-    let mut operator = operator_client::OperatorClient::new(channel.clone());
-    let mut host = worker_host_client::WorkerHostClient::new(channel.clone());
-    operator
-        .put_tag(request(
-            PutTagRequest {
-                allowed_actions: vec!["files:read".into()],
-                ..put_tag("writer")
-            },
-            secret,
-        )?)
-        .await?;
-    let task = operator
-        .submit_task(request(
-            SubmitTaskRequest {
-                tag_id: "writer".into(),
-                session_id: "source".into(),
-                operation_id: "submit".into(),
-                prompt: "Evidence".into(),
-                ..Default::default()
-            },
-            secret,
-        )?)
-        .await?
-        .into_inner();
-    let registered = host
-        .register_host(request(
-            RegisterHostRequest {
-                incarnation_id: "download-fixture".into(),
-            },
-            &credentials.host,
-        )?)
-        .await?
-        .into_inner();
-    let generation = registered.generation;
-    let assignment = host
-        .claim_task(credentials.host(
-            ClaimTaskRequest {
-                operation_id: "claim".into(),
-                ..Default::default()
-            },
-            generation,
-        )?)
-        .await?
-        .into_inner()
-        .assignment
-        .context("no assignment")?;
-    ensure!(assignment.task.as_ref().context("task")?.task_id == task.task_id);
-    let attempt = InspectAttemptRequest {
-        task_id: task.task_id.clone(),
-        attempt_id: assignment.attempt_id,
-        lease_token: assignment.lease_token,
-    };
-    host.start_task(credentials.host(
-        StartTaskRequest {
-            task_id: attempt.task_id.clone(),
-            attempt_id: attempt.attempt_id.clone(),
-            lease_token: attempt.lease_token.clone(),
-        },
-        generation,
-    )?)
-    .await?;
-    let held =
-        held_artifacts::HeldArtifacts::register(channel.clone(), &credentials.host, generation)
-            .await?;
-    let blob = held.hold(&attempt.attempt_id, bytes);
-    let artifact = held
-        .commit(CommitArtifactCaptureRequest {
-            attempt: Some(attempt.clone()),
-            operation_id: "capture".into(),
-            description: Some(ArtifactDescription {
-                title: "Evidence".into(),
-                kind: "report".into(),
-                summary: None,
-            }),
-            files: vec![ArtifactFile {
-                path: "report.bin".into(),
-                blob: Some(blob),
-                ..Default::default()
-            }],
-            ..Default::default()
-        })
-        .await?;
-    host.finish_task(credentials.host(
-        FinishTaskRequest {
-            task_id: attempt.task_id,
-            attempt_id: attempt.attempt_id,
-            lease_token: attempt.lease_token,
-            succeeded: true,
-            result: "Captured".into(),
-            ..Default::default()
-        },
-        generation,
-    )?)
-    .await?;
-    Ok((artifact.summary.context("summary")?.artifact_id, held))
-}
-
-async fn revoked_token_ends_an_in_flight_download(database: &str) -> Result<()> {
-    let credentials = Credentials::new();
-    let services = services(&credentials, database).await?;
-    let channel =
-        protocol::negotiated(Endpoint::from_shared(services.public.clone())?.connect_lazy())
-            .await?;
-    let secret = create_token(&credentials, &services.public, "reader")?;
-    // Far more than the HTTP/2 windows and stream buffers hold, so the download is still in
-    // flight when the token is revoked.
-    let bytes: Vec<u8> = (0..24 * 1024 * 1024)
-        .map(|index| (index % 251) as u8)
-        .collect();
-    let (artifact_id, _held) =
-        capture_artifact(&credentials, channel.clone(), &secret, &bytes).await?;
-    let mut transfers = artifact_transfers_client::ArtifactTransfersClient::new(channel);
-    let download = |token: &str| {
-        let mut download = authenticated_request(
-            DownloadArtifactFileRequest {
-                artifact_id: artifact_id.clone(),
-                path: "report.bin".into(),
-            },
-            token,
-            None,
-        )?;
-        download.set_timeout(Duration::from_secs(60));
-        anyhow::Ok(download)
-    };
-    // The token reads the whole file while it is valid.
-    let mut whole = transfers
-        .download_file(download(&secret)?)
-        .await?
-        .into_inner();
-    let mut length = 0;
-    while let Some(message) = whole.message().await? {
-        if let Some(artifact_download::Part::Chunk(chunk)) = message.part {
-            length += chunk.len();
-        }
-    }
-    assert_eq!(length, bytes.len());
-
-    let mut stream = transfers
-        .download_file(download(&secret)?)
-        .await?
-        .into_inner();
-    let header = stream.message().await?.context("download header")?;
-    assert!(matches!(
-        header.part,
-        Some(artifact_download::Part::File(_))
-    ));
-    cli(
-        &credentials,
-        &credentials.admin,
-        &services.public,
-        &["operator-token", "revoke", "reader"],
-    )?;
-    let revoked_at = Instant::now();
-    // The download is blocked on this reader. Its next periodic recheck, once it resumes, is the
-    // first since the revocation, so it ends before the remaining bytes are sent.
-    sleep(Duration::from_millis(1500)).await;
-    let mut received = 0;
-    let ended = loop {
-        match tokio::time::timeout(Duration::from_secs(10), stream.message())
-            .await
-            .context("revoked download stayed open")?
-        {
-            Ok(Some(message)) => {
-                if let Some(artifact_download::Part::Chunk(chunk)) = message.part {
-                    received += chunk.len();
-                }
-            }
-            Ok(None) => anyhow::bail!("revoked download finished after {received} bytes"),
-            Err(error) => break error,
-        }
-    };
-    assert_eq!(ended.code(), Code::Unauthenticated, "{ended:?}");
-    assert!(ended.message().contains("revoked"), "{ended:?}");
-    assert!(received < bytes.len());
-    assert!(revoked_at.elapsed() < Duration::from_secs(5));
-    Ok(())
-}
-
 async fn postgres_database<F, Fut>(run: F) -> Result<()>
 where
     F: FnOnce(String) -> Fut,
@@ -944,19 +745,6 @@ async fn sqlite_audit_names_every_changed_resource() -> Result<()> {
 #[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
 async fn postgres_audit_names_every_changed_resource() -> Result<()> {
     postgres_database(|url| async move { audit_names_every_changed_resource(&url).await }).await
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sqlite_revoked_token_ends_an_in_flight_download() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    revoked_token_ends_an_in_flight_download(&sqlite_database(&directory)).await
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
-async fn postgres_revoked_token_ends_an_in_flight_download() -> Result<()> {
-    postgres_database(|url| async move { revoked_token_ends_an_in_flight_download(&url).await })
-        .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

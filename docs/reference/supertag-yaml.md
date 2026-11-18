@@ -257,7 +257,7 @@ with `supertag fetch ID`.
 | `land` | What `supertag up` does |
 | --- | --- |
 | `local` (default) | Imports each delivered Task into the repository as the branch `supertag/session/HASH` |
-| `patch` | Leaves the repository alone; the patch and bundle stay downloadable with `supertag task download` |
+| `patch` | Leaves the repository alone; `supertag fetch` imports a delivery when you want it |
 | `{ push: REMOTE }` | Imports, then pushes each Session branch to `REMOTE`, one of the repository's git remotes |
 | `{ merge: BRANCH }` | Imports, then merges a Session into the local branch `BRANCH` once its work is reported done |
 | `{ merge: BRANCH, push: REMOTE }` | Merges as above, then pushes the Session branch and `BRANCH` to `REMOTE` |

@@ -28,5 +28,4 @@ commands.allow = [
   "mark_conversation_read",
   "read_cache",
   "write_cache",
-  "save_result_artifact",
 ]

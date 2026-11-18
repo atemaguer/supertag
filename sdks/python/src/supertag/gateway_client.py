@@ -95,7 +95,7 @@ def _connection(url: str, token: str, *, ca: bytes | None, identity: tuple[bytes
 # Every call names the protocol version this client negotiated with the Gateway, which
 # refuses a call without it.
 _PROTOCOL_HEADER = "x-supertag-protocol"
-_PROTOCOL_VERSIONS = (4,)
+_PROTOCOL_VERSIONS = (5,)
 _NEGOTIATION_TIMEOUT = 5.0
 
 
@@ -340,10 +340,6 @@ class _Services:
         self.artifacts = artifact_pb2_grpc.ArtifactCatalogStub(channel)
         self.artifact_publications = artifact_pb2_grpc.ArtifactPublicationsStub(channel)
         self.volumes = artifact_pb2_grpc.ArtifactVolumesStub(channel)
-        self.download_artifact_file = artifact_pb2_grpc.ArtifactTransfersStub(channel).DownloadFile
-        transfers = runtime_pb2_grpc.TransfersStub(channel)
-        self.download_workspace_artifact = transfers.DownloadWorkspaceArtifact
-        self.download_review_artifact = transfers.DownloadReviewArtifact
 
 
 class GatewayClient(_Services):

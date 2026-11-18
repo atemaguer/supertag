@@ -292,10 +292,9 @@ supertag get session WORK_SESSION_ID
 
 ```sh
 supertag get artifact --task TASK_ID
-supertag artifact download ARTIFACT_ID --path report.md --output report.md
 ```
 
-See [Artifacts](../reference/artifacts.md).
+A client lists artifacts but can't download their files. See [Artifacts](../reference/artifacts.md).
 
 ## Inspect and drain Worker Hosts
 
