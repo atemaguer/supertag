@@ -172,6 +172,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- Session checkpoints live on the Worker Host that ran the turn, not on the Control Plane. A
+  queued Task waits up to 10 minutes for that host; after that, or if it is offline, another
+  host starts the Session from its recap (`placement explain` shows `checkpoint-holder`).
+  Existing checkpoints are dropped on upgrade, so those Sessions restart from their recap.
 - SuperTag now speaks protocol 5. Peers on protocol 4 are refused when they connect; upgrade
   every service and client together.
 - The terminal UI shows times of day on one 12-hour clock, "4:01 PM", in its Tag list, notes, and
@@ -263,6 +267,7 @@ within the pre-1.0 compatibility policy described in
 
 ### Removed
 
+- `--checkpoint-directory` and the Control Plane's checkpoint storage.
 - Client file downloads: `supertag artifact download`, `supertag task download`, `supertag volume
   download`, the desktop app's Task result files, the terminal UI's Task files view, and the SDK
   Gateway clients' download methods. The Control Plane no longer passes files to clients;
