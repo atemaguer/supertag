@@ -147,8 +147,9 @@ While a Task runs on a Worker Host on your own machine, the desktop app shows it
 **Files** in the Task's activity panel: open folders, read text files in a read-only viewer, and
 show a file in Finder. Binary files are listed but don't open. The list refreshes while the Task
 runs. The app reads the files from your disk; they never pass through the Control Plane. A Task on
-another machine says "Files on Worker Host NAME are unreachable from here", and a finished Task's
-work is on its Session branch. The app and the Worker Host know they share a machine from
+another machine says "Files on Worker Host NAME are unreachable from here". For a finished Task,
+**Files** names its Session branch, `supertag/session/ID`, with `git diff` and `git checkout`
+commands to copy and run in the Workspace's repository. The app and the Worker Host know they share a machine from
 `~/.supertag/machine-id`, a random identifier created on first use, whichever state directory
 each one uses.
 
