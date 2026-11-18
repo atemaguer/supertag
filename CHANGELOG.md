@@ -11,6 +11,12 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- A Task that acquires a capture whose producing Worker Host can't serve it reads the file from
+  a verified Volume copy instead: through a presigned GET for an S3 Volume, or through its own
+  `--volume` mapping for a file Volume.
+- A Session checkpoint kept on a Tag's Volume is deleted from it once the Control Plane drops
+  the checkpoint: by the Control Plane for an S3 Volume, whose credential now also needs
+  `DeleteObject`, and every 10 minutes by a Worker Host that maps a file Volume.
 - A Tag can name a Volume (`supertag tag put --volume`, `spec.volume`). Its Tasks' captures go
   there, written by the Worker Host itself: S3 through 15-minute presigned uploads bound to the
   file's length and SHA-256 and checked with a HEAD, file Volumes only on hosts that map them

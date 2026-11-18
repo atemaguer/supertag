@@ -66,8 +66,9 @@ checkpoints on that Volume instead, at `tags/<SHA-256 of TAG>/sessions/<SHA-256 
 The turn's host writes it there, through its own `--volume` mapping for a file Volume or a
 presigned request for an S3 one, and keeps no copy. Any host that reaches the Volume resumes it,
 so the next Task waits for no particular host. The reader checks the checkpoint's size and SHA-256,
-and a missing or changed checkpoint starts the turn fresh. Checkpoints already on a Volume are
-not deleted from it yet when they are dropped.
+and a missing or changed checkpoint starts the turn fresh. A dropped checkpoint's object is
+deleted from the Volume: by the Control Plane within seconds for an S3 Volume, and within 10
+minutes by a Worker Host that maps a file Volume.
 
 | Rule | When |
 | --- | --- |

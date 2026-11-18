@@ -384,7 +384,7 @@ the Control Plane:
   ```
 
   It goes to the Control Plane's credential vault, and Worker Hosts never receive it. It needs
-  only `PutObject`, `GetObject`, and `HeadObject` on the Volume's prefix. When a host reserves a
+  only `PutObject`, `GetObject`, `HeadObject`, and `DeleteObject` on the Volume's prefix. When a host reserves a
   capture, the Control Plane presigns one PUT per file, valid for 15 minutes; the file's length and
   SHA-256 checksum are signed headers and the PUT cannot overwrite, so the store refuses any other
   bytes. When the capture commits, the Control Plane checks each object with a HEAD request: its
@@ -403,6 +403,17 @@ checked fails, for example when the Control Plane holds no credential for an S3 
 Task sees the error. The capture's copies are listed by `supertag get volume-copies` to anyone
 who may read the capture. Hosts and people that mount the Volume read them; the Control Plane
 serves no Volume file.
+
+A Task that acquires a capture reads it from the producing Worker Host first. When that host
+can't serve it, for example because it is gone, the consumer reads the file from a verified
+Volume copy: through a presigned GET, valid for 15 minutes, for an S3 Volume, or through its own
+`--volume` mapping for a file Volume. It checks the length and SHA-256 itself.
+
+A Tag's Session checkpoints also go on its Volume, as described in
+[Session checkpoints](control-plane.md#session-checkpoints). When the Control Plane drops one,
+its object is deleted: the Control Plane deletes it from an S3 Volume within seconds, and a
+Worker Host that maps a file Volume deletes it within 10 minutes. Captures and native memory
+objects are not deleted.
 
 The Volume must be registered before a Tag names it, and it cannot be retargeted or deleted while
 a Tag names it. Captures made before a Tag named the Volume keep only their Worker Host copy.
