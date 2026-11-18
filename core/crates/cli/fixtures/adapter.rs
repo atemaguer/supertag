@@ -311,7 +311,20 @@ async fn main() -> Result<()> {
                 )?)
                 .await?
                 .into_inner();
-            ensure!(replay == started, "Work Session replay changed the receipt");
+            // A replay names the same Work Session and child Task. It reads the Work Session as it
+            // is now, so the child's state may have moved on: another lane can claim it between
+            // the two calls.
+            ensure!(
+                replay.work_session_id == started.work_session_id
+                    && replay.latest_task_id == started.latest_task_id
+                    && replay.title == started.title
+                    && replay.tag_id == started.tag_id
+                    && replay.parent_tag_id == started.parent_tag_id
+                    && replay.parent_session_id == started.parent_session_id
+                    && replay.starter_task_id == started.starter_task_id
+                    && replay.created_order == started.created_order,
+                "Work Session replay changed the receipt"
+            );
             let mut changed = work_input.clone();
             changed.instruction = "Changed instruction".into();
             ensure!(
