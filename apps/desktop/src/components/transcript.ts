@@ -1,4 +1,5 @@
 import type { Message, Tag } from "../gateway";
+import { previewLine } from "../lib/preview-line";
 import type { TagSummary } from "./sidebar";
 
 /** Tasks a Worker Host has not finished: the Tag is still working on them. */
@@ -126,7 +127,7 @@ export function conversationSummary(messages: readonly Message[]): TagSummary {
   if (!last) return {};
   const reply = last.task.result?.trim();
   const prompt = fromOperator(last) ? last.task.prompt?.trim() : undefined;
-  const line = (reply || (prompt ? `You: ${prompt}` : "")).split("\n")[0]?.trim();
+  const line = reply ? previewLine(reply) : prompt ? `You: ${previewLine(prompt)}` : "";
   return {
     ...(line ? { preview: line } : {}),
     ...(last.task.createdAtMs !== undefined ? { lastActivityMs: last.task.createdAtMs } : {}),

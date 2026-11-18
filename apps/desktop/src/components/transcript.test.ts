@@ -70,6 +70,9 @@ it("finds the operator's last message and summarises the conversation for the si
   expect(
     conversationSummary([message("c", { state: "running", result: undefined, createdAtMs: 5 })]),
   ).toEqual({ preview: "You: Check it", lastActivityMs: 5, working: true });
+  expect(
+    conversationSummary([message("d", { result: "It contained `hi` in [hello.txt](/tmp/x)." })]),
+  ).toEqual({ preview: "It contained hi in hello.txt." });
   expect(conversationSummary([])).toEqual({});
 });
 
