@@ -11,6 +11,11 @@ use super::{GatewayState, MAX_PAGES, Result, Session, Tag, harness_name, rpc_err
 /// and run commands in its Workspace, and schedule its own follow-ups.
 const NEW_TAG_ACTIONS: [&str; 3] = ["commands:execute", "files:write", "schedule:create"];
 
+/// What `supertag init` adds for a Codex lead: current Codex models run commands only in Codex
+/// code mode, which SuperTag starts only for a Task that may also fetch from the web. Without it,
+/// every Task of a new Codex Tag that runs a command fails.
+const CODEX_ACTIONS: [&str; 1] = ["web:fetch"];
+
 /// What a new Tag can run on: the harnesses and Workspaces the Gateway's Worker Hosts offer.
 #[derive(Serialize, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -49,7 +54,15 @@ impl NewTag {
             tag_id: self.tag_id,
             name,
             harness_kind: harness as i32,
-            allowed_actions: NEW_TAG_ACTIONS.map(String::from).to_vec(),
+            allowed_actions: NEW_TAG_ACTIONS
+                .iter()
+                .chain(if harness == v2::HarnessKind::Codex {
+                    CODEX_ACTIONS.as_slice()
+                } else {
+                    &[]
+                })
+                .map(|action| (*action).to_owned())
+                .collect(),
             workspace: self
                 .workspace_id
                 .filter(|workspace| !workspace.is_empty())
@@ -245,6 +258,15 @@ mod tests {
         .request()
         .unwrap();
         assert!(plain.name.is_none());
+        assert_eq!(
+            plain.allowed_actions,
+            [
+                "commands:execute",
+                "files:write",
+                "schedule:create",
+                "web:fetch"
+            ]
+        );
         assert!(plain.workspace.is_none());
 
         for harness in ["", "unspecified", "unknown"] {
