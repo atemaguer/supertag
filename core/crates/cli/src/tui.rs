@@ -168,8 +168,14 @@ fn certificate_path(name: &str) -> Result<Option<PathBuf>> {
 }
 
 async fn check_version(binary: &Path) -> Result<()> {
+    ensure!(
+        binary.is_file(),
+        "the terminal UI is not installed: {} is missing. Reinstall SuperTag, or run supertag --help for the commands",
+        binary.display()
+    );
+    // macOS scans a newly installed binary on its first run, which can take several seconds.
     let output = timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(30),
         terminal_command(binary, None)
             .arg("--version")
             .stdin(Stdio::null())
