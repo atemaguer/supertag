@@ -51,9 +51,9 @@ and [execution environments](glossary.md#execution-environment).
   repository to it by name, or a remote Workspace names a repository on any git server; see
   [Workspaces](#workspaces).
 - **Workspace Credential** — what git delivery presents to a remote Workspace's git server: an
-  SSH key, an HTTPS token, a git credential helper, or a GitHub App. The Control Plane stores its name, kind, and
-  a non-secret identifier; the secret stays in the credential vault of the machine that runs the
-  Control Plane. See [Workspace Credentials](#workspace-credentials).
+  SSH key, an HTTPS token, a git credential helper, or a GitHub App. The Control Plane stores its
+  name, kind, and a non-secret identifier; the secret stays in the credential vault of the
+  machine that runs the Control Plane. See [Workspace Credentials](#workspace-credentials).
 - **Surface Account** — an enrolled external workspace or account; credentials remain in the
   credential vault. `supertag setup surface` enrolls one interactively, and a SurfaceAccount
   manifest declares one; see [Declared Surface Accounts](#declared-surface-accounts).

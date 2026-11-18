@@ -746,6 +746,7 @@ fn close_reason(reason: v2::WorkSessionCloseReason) -> Option<String> {
             Reason::DeliveryPulled => "delivery pulled",
             Reason::ObjectiveClosed => "Objective closed",
             Reason::Upgrade => "finished before the upgrade",
+            Reason::Merged => "pull request merged",
         }
         .to_owned(),
     )

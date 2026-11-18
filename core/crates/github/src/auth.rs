@@ -32,7 +32,7 @@ pub struct GithubAppConfig {
 
 enum Credential {
     Token(String),
-    App(GithubApp),
+    App(Box<GithubApp>),
 }
 
 /// The Gateway's GitHub connector authentication for its one repository.
@@ -147,7 +147,7 @@ impl Authentication {
                 ensure!(valid_token(value), "invalid GitHub token");
                 Credential::Token(value.clone())
             }
-            GithubAuthentication::App(app) => Credential::App(GithubApp::new(app)?),
+            GithubAuthentication::App(app) => Credential::App(Box::new(GithubApp::new(app)?)),
         };
         Ok(Self {
             credential,
