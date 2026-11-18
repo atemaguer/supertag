@@ -270,7 +270,8 @@ within the pre-1.0 compatibility policy described in
   that owns four ongoing Objectives (production errors, alerts, a red main, dependency
   advisories) with scoped network access to Sentry and GitHub, plus a read-only `support` Tag.
   `multiplayer` shows two teammates' Tags on their own machines and coding agents settling details
-  with each other. The examples use only Claude Code and Codex, and no local-vm containers: their
+  with each other; in `reliability` the two Tags accept each other's messages, so `reliability`
+  answers `support`. The examples use only Claude Code and Codex, and no local-vm containers: their
   Claude Code hosts set `allow-unsandboxed-commands`. Each example's outcomes live in
   its own `objectives.yaml`, applied when you're ready to start the work. `solo` and
   `mixed-harnesses` are removed.
@@ -418,6 +419,13 @@ within the pre-1.0 compatibility policy described in
   kept the tools of its first turn, so after `commands:execute` was granted, the conversation
   still answered that it had no shell. A turn whose tools changed now starts a fresh native
   Session from the conversation's recap.
+- A Tag whose message a recipient doesn't accept is told why: the recipient's
+  `acceptsMessagesFrom` does not name it and they share no Team, with the `supertag
+  mailbox-grant allow` command that permits it. Claude Code and Codex Tasks got only "refused"
+  before. Both now also get the reason when a Task has sent its three messages.
+- A Tag's inbox turn answers a Tag that needs an answer with `send_message`, as
+  [Tag messaging](docs/guides/tag-messaging.md) describes. Codex Tags read the inbox's "sent
+  nowhere" note as no way to reply, so the sender never heard back.
 - `supertag placement explain` names a `model` requirement when no bound Worker Host lists the
   model a Task names, instead of calling those hosts eligible.
 - A supertag.yaml Worker Host reports the execution profile its lanes claim with. A local-vm host

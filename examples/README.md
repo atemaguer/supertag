@@ -75,7 +75,8 @@ can't change once it exists; create a new Objective instead.
   [Codex commands and models](../docs/operations/requirements.md#codex-commands-and-models).
 - **Teams.** A Tag hands work to another Tag only when the Objective names a Team they share, and
   Tags in one Team message each other without further grants. A Tag outside the Team needs an
-  `acceptsMessagesFrom` entry on the recipient, as `reliability` has for `support`.
+  `acceptsMessagesFrom` entry on the recipient. Entries are one-way, so in `reliability` each Tag
+  names the other: `support` hands over reports, and `reliability` answers.
 
 If you ran `supertag init`, the first `diff` of `review-team` shows the `Lead` Role's purpose and
 instructions as owned by `cli`. Review them, then take them over once with

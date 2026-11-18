@@ -850,7 +850,7 @@ impl Client {
                 .map(|review| review.submission(secrets))
                 .transpose()?,
         };
-        let result = confirm(async || {
+        let result = confirm_reason(async || {
             self.mailbox
                 .send_message(
                     crate::request(input.clone(), token)
@@ -859,8 +859,12 @@ impl Client {
                 .await
         })
         .await?;
-        let Some(result) = result else {
-            return Ok(refused());
+        let result = match result {
+            Ok(result) => result,
+            // A recipient that does not accept the sender's messages, or a spent message limit:
+            // the model can say so and go on.
+            Err(Some(reason)) => return Ok(response(crate::auth::redact(reason, secrets), false)),
+            Err(None) => return Ok(refused()),
         };
         match (result.message, result.approval, result.review) {
             (Some(sent), None, None) => {

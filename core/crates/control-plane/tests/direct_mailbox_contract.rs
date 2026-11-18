@@ -265,7 +265,7 @@ async fn submit_direct_messages(
         store
             .send_attempt_tag_message(sender, &send(&source, "outsider", "outsider", "No"))
             .await,
-        Err(StoreError::PermissionDenied)
+        Err(StoreError::FailedPrecondition(reason)) if reason.contains("acceptsMessagesFrom")
     ));
     assert!(matches!(
         store
@@ -577,7 +577,7 @@ async fn verify_scoped_delivery(store: &Store, sender: &HostAuthority, receiver:
         store
             .send_attempt_tag_message(sender, &send(&source, "revoked", "outsider", "No"))
             .await,
-        Err(StoreError::PermissionDenied)
+        Err(StoreError::FailedPrecondition(reason)) if reason.contains("acceptsMessagesFrom")
     ));
     finish(store, sender, &source, vec![]).await;
     let inbox = claim(store, receiver, "outsider").await;
@@ -589,7 +589,7 @@ async fn verify_scoped_delivery(store: &Store, sender: &HostAuthority, receiver:
                 &send(&inbox, "no-reverse", "alpha", "No reverse grant")
             )
             .await,
-        Err(StoreError::PermissionDenied)
+        Err(StoreError::FailedPrecondition(reason)) if reason.contains("acceptsMessagesFrom")
     ));
     finish(store, receiver, &inbox, vec![]).await;
 }

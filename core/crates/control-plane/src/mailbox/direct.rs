@@ -286,8 +286,12 @@ impl Store {
             return Err(invalid("a Tag cannot send a message to itself"));
         }
         crate::tags::require_active(&mut tx, &input.recipient_tag_id).await?;
+        // The sender may learn why, so it can tell whoever handed it the work.
         if !may_send_in(&mut tx, &sender, &input.recipient_tag_id).await? {
-            return Err(StoreError::PermissionDenied);
+            let recipient = &input.recipient_tag_id;
+            return Err(StoreError::FailedPrecondition(format!(
+                "Tag {recipient} does not accept messages from Tag {sender}: they share no Team, and {recipient}'s acceptsMessagesFrom does not name {sender}. An operator can allow it with supertag mailbox-grant allow {sender} {recipient}"
+            )));
         }
         let prior = sqlx::query("SELECT request_digest,message_id FROM supertag_v2_mailbox_send_operations WHERE source_task_id=$1 AND operation_id=$2")
             .bind(&attempt.task_id).bind(&input.operation_id).fetch_optional(&mut *tx).await?;

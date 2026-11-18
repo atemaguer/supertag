@@ -1267,7 +1267,13 @@ export function registerCoordinationTools(
                 return response("The direct message approval was denied or expired.", true);
               }
             }
-          } catch {}
+          } catch (error) {
+            // A refusal the model can act on, such as a recipient that does not accept this
+            // Tag's messages, comes back with its reason; the turn goes on.
+            const failure = ConnectError.from(error);
+            if (ACTIONABLE.includes(failure.code))
+              return response(safeText(failure.rawMessage), true);
+          }
           return response("The direct message could not be confirmed.", true);
         }),
     );

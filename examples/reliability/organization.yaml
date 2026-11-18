@@ -102,3 +102,5 @@ metadata: { name: support }
 spec:
   roles: [Support Triage]
   workspace: { id: app, ref: main }
+  # Grants are one-way: this lets `reliability` answer or ask about a report it was handed.
+  acceptsMessagesFrom: [reliability]
