@@ -258,7 +258,10 @@ receives, which may include its provider key. Cursor also needs `files:write` to
 ```
 
 A host started without supertag.yaml takes the same opt-in with `supertag worker-host
---allow-unsandboxed-commands`.
+--allow-unsandboxed-commands`. A host with the opt-in prints what it allows each time it starts.
+SuperTag keeps model keys out of those commands' environment where it can (see
+[Credentials available during Tasks](../operations/requirements.md#credentials-available-during-tasks)),
+which stops accidental leaks but is not a boundary.
 
 ### Network credentials
 

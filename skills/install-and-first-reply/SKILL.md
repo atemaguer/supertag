@@ -42,9 +42,11 @@ the credentials the Worker Host will have and labels it `signed in` or not, with
 instructions. OpenCode prints `sign-in not checked (choose a model)` until you choose a model.
 It then asks for the Control Plane port, the harness (and a `provider/model` for OpenCode), the
 Workspace name, and the Tag's name, with defaults in brackets. For Claude Code, Cursor, or
-OpenCode, it also asks whether to let that harness run commands without a sandbox, recorded as
-`allow-unsandboxed-commands` on the host. `--yes` accepts every default, including that opt-in,
-and needs no terminal. It writes `~/.supertag/supertag.yaml` and starts, in the background:
+OpenCode, it suggests local-vm containers: with Docker or Podman running it offers them, defaulting
+to yes (`environment: local-vm` on the host). Otherwise, or if you decline, it asks whether to let
+that harness run commands without a sandbox instead, defaulting to no, and prints what that
+allows; a yes is recorded as `allow-unsandboxed-commands` on the host. `--yes` accepts every
+default, so it never opts in to commands without a sandbox, and needs no terminal. It writes `~/.supertag/supertag.yaml` and starts, in the background:
 
 - a `control-plane` service, which creates the Permission Set `local-tools` (`commands:execute`
   and `files:write`, plus `web:fetch` for Codex), the Role `Lead`, and the Tag `lead`, bound to this repository's Workspace and

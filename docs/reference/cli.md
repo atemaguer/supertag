@@ -2323,6 +2323,9 @@ Options:
       --artifact-peer-ca-file <ARTIFACT_PEER_CA_FILE>
           CA certificate for the configured artifact peer endpoints
 
+      --provider-credentials-file <PATH>
+          Private JSON file of the harness's provider keys and tokens, read and deleted at start, so they stay out of this process's environment. `supertag up` writes it
+
       --e2b-workspace-provider <E2B_WORKSPACE_PROVIDER>
           Executable for a private E2B workspace provider used by Cursor
 

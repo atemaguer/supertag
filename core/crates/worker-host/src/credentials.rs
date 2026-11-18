@@ -1,6 +1,47 @@
 //! Explicit provider selection; service credentials and ambient native config never cross.
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
+use std::{collections::BTreeMap, ffi::OsString, path::Path, sync::OnceLock};
 use supertag_protocol::v2::HarnessKind;
+
+/// Provider credentials the Worker Host read from a file at start rather than its environment.
+static FILE_CREDENTIALS: OnceLock<BTreeMap<String, String>> = OnceLock::new();
+
+/// Whether a provider variable holds a secret (a key or token), as opposed to a path such as
+/// `HOME`. Supervisors hand secrets to a Worker Host in a file, never its environment.
+pub fn is_provider_secret(name: &str) -> bool {
+    name.ends_with("_KEY") || name.ends_with("_TOKEN")
+}
+
+/// Read the provider credentials a supervisor wrote for this Worker Host (a JSON object of
+/// variable to value) and delete the file. The values then stay out of the host's initial
+/// environment, where `ps eww`, `/proc/<pid>/environ`, and crash or debug dumps of the
+/// environment would show them. This closes accidental leaks only: a command running as the
+/// same user can still read the host's memory where the OS lets it.
+pub fn load_provider_credentials(path: &Path) -> Result<()> {
+    let bytes = std::fs::read(path).context("read the provider credentials file")?;
+    std::fs::remove_file(path).context("remove the provider credentials file")?;
+    let credentials: BTreeMap<String, String> =
+        serde_json::from_slice(&bytes).context("parse the provider credentials file")?;
+    ensure!(
+        credentials.keys().all(|name| is_provider_secret(name)),
+        "the provider credentials file names a variable that is not a key or token"
+    );
+    ensure!(
+        FILE_CREDENTIALS.set(credentials).is_ok(),
+        "provider credentials are already loaded"
+    );
+    Ok(())
+}
+
+/// A provider variable's value: from the credentials file when the host read one, else from the
+/// host's environment.
+pub fn provider_variable(name: &str) -> Option<OsString> {
+    FILE_CREDENTIALS
+        .get()
+        .and_then(|credentials| credentials.get(name))
+        .map(OsString::from)
+        .or_else(|| std::env::var_os(name))
+}
 
 pub fn provider_environment(harness: HarnessKind) -> &'static [&'static str] {
     match harness {
@@ -53,6 +94,29 @@ pub fn provider_environment_for(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn provider_credentials_file_is_read_once_and_deleted() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("provider-credentials.json");
+        std::fs::write(&path, r#"{"FIXTURE_PROVIDER_API_KEY":"sk-from-file"}"#).unwrap();
+        load_provider_credentials(&path).unwrap();
+        assert!(!path.exists(), "the host deletes the file once read");
+        assert_eq!(
+            provider_variable("FIXTURE_PROVIDER_API_KEY"),
+            Some(OsString::from("sk-from-file"))
+        );
+        assert_eq!(provider_variable("FIXTURE_PROVIDER_UNSET_KEY"), None);
+        std::fs::write(&path, "{}").unwrap();
+        assert!(load_provider_credentials(&path).is_err());
+    }
+    #[test]
+    fn only_keys_and_tokens_are_secrets() {
+        assert!(is_provider_secret("ANTHROPIC_API_KEY"));
+        assert!(is_provider_secret("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert!(!is_provider_secret("HOME"));
+        assert!(!is_provider_secret("CODEX_HOME"));
+        assert!(!is_provider_secret("CLAUDE_SECURESTORAGE_CONFIG_DIR"));
+    }
     #[test]
     fn cursor_receives_only_its_api_key() {
         assert_eq!(

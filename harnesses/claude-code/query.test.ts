@@ -1323,8 +1323,15 @@ setInterval(() => {}, 1000);
           // original process is gone: a loaded host may already have reused that number.
         } catch (error) {
           expect(error).toMatchObject({ name: "ExecutionCleanupError" });
-          // Inventory failures before launch cannot establish post-result cleanup behavior.
-          expect(await readFile(join(dir, "pid"), "utf8")).toMatch(/^\d+$/u);
+          // Inventory failures before launch cannot establish post-result cleanup behavior. The
+          // fake Claude writes its PID as it starts, which a loaded machine can delay: wait for it.
+          let launched = "";
+          for (const deadline = Date.now() + 5_000; Date.now() < deadline; ) {
+            launched = await readFile(join(dir, "pid"), "utf8").catch(() => "");
+            if (launched) break;
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          expect(launched).toMatch(/^\d+$/u);
           cleanupFailed = true;
         }
         // Without confirmed cleanup the stream fails, so the result never completes an Attempt.

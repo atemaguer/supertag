@@ -709,21 +709,20 @@ fn answers(
 }
 
 /// Whether a harness without a container runs commands on this machine, unsandboxed. Codex
-/// sandboxes its own.
+/// sandboxes its own. The suggestion is local-vm containers; running commands without a sandbox
+/// takes an explicit yes, which `--yes` never gives.
 fn unsandboxed(harness: Found, ask: Option<&mut Prompter>) -> Result<Commands> {
     Ok(match (harness, ask) {
         (Found::ClaudeCode | Found::Opencode | Found::Cursor, Some(prompter)) => {
             let name = harness.harness();
             outln!(
-                "{name} runs commands as you, without a sandbox, so give its Tags only trusted work. Codex sandboxes its commands."
-            );
-            outln!(
-                "With Docker or Podman running, {name} can run them in containers instead: set environment: local-vm on its host in supertag.yaml."
+                "{name} has no sandbox of its own, so SuperTag suggests running its commands in local-vm containers: with Docker or Podman running, set environment: local-vm on its host in supertag.yaml. Codex sandboxes its commands."
             );
             if prompter.confirm(
-                &format!("Allow {name} to run commands without a sandbox?"),
-                true,
+                &format!("Allow {name} to run commands without a sandbox instead?"),
+                false,
             )? {
+                outln!("  {}", supertag_worker_host::unsandboxed_caveat(name));
                 if matches!(harness, Found::ClaudeCode) {
                     outln!(
                         "  Those commands can read a Claude Code sign-in made with /login. With ANTHROPIC_API_KEY in ~/.supertag/.env instead, the key stays in the Worker Host and Claude Code gets a stand-in."
@@ -732,17 +731,17 @@ fn unsandboxed(harness: Found, ask: Option<&mut Prompter>) -> Result<Commands> {
                 Commands::Unsandboxed
             } else {
                 outln!(
-                    "  Tasks that run commands will not run on {name}. To allow it later, add allow-unsandboxed-commands to its host in supertag.yaml."
+                    "  Tasks that run commands will wait for a host that can run them. Set environment: local-vm, or add allow-unsandboxed-commands, on its host in supertag.yaml, then run supertag up."
                 );
                 Commands::Unset
             }
         }
         (Found::ClaudeCode | Found::Opencode | Found::Cursor, None) => {
             outln!(
-                "  Allowed {} to run commands without a sandbox (allow-unsandboxed-commands in supertag.yaml); remove it there and run supertag up to undo.",
+                "  {} has no sandbox of its own, and no Docker or Podman is running for local-vm containers, so its Tasks that run commands will wait. Start one and set environment: local-vm on its host in supertag.yaml, or opt in to commands without a sandbox with allow-unsandboxed-commands; then run supertag up.",
                 harness.harness()
             );
-            Commands::Unsandboxed
+            Commands::Unset
         }
         (Found::Codex, _) => {
             outln!(

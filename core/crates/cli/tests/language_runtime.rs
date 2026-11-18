@@ -1603,8 +1603,8 @@ async fn claude_keeps_native_memory_on_its_host_across_tasks(database: String) -
     services.stop().await
 }
 
-/// On a host that runs commands unsandboxed, Claude Code's API key stays in the Worker Host: the
-/// harness and the adapter hold a placeholder and the provider proxy's URL, and the proxy puts the
+/// On a host that runs commands unsandboxed, Claude Code's API key stays in the Worker Host, which
+/// read it from a file rather than its environment: the harness and the adapter hold a placeholder and the provider proxy's URL, and the proxy puts the
 /// real key on the request it forwards to the provider.
 async fn claude_holds_only_a_placeholder_key_on_an_unsandboxed_host(
     database: String,
@@ -1678,12 +1678,24 @@ async fn claude_holds_only_a_placeholder_key_on_an_unsandboxed_host(
         Path::new(&interpreter),
         &entry,
     );
+    // The key reaches the host the way `supertag up` hands it over: in a private file the host
+    // reads and deletes, never its environment.
+    let credentials = directory.path().join("provider-credentials.json");
+    std::fs::write(
+        &credentials,
+        serde_json::json!({ "ANTHROPIC_API_KEY": SECRET }).to_string(),
+    )?;
     host.arg("--claude-path")
         .arg(&native)
         .arg("--allow-unsandboxed-commands")
-        .env("ANTHROPIC_API_KEY", SECRET)
+        .arg("--provider-credentials-file")
+        .arg(&credentials)
         .env("SUPERTAG_TEST_ANTHROPIC_ORIGIN", &origin);
     success(host).await?;
+    assert!(
+        !credentials.exists(),
+        "the host deletes its provider credentials file"
+    );
     let task = services.operator(&["get", "task", task_id]).await?;
     assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
     let result = task["result"].as_str().context("result")?;

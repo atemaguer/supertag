@@ -31,8 +31,12 @@ mod volume_objects;
 mod workspace_mounts;
 mod workspaces;
 
+pub use adapter::unsandboxed_caveat;
 pub use artifact_direct::{ArtifactPeers, ArtifactSourceConfig};
-pub use credentials::{provider_environment, provider_environment_for, validate_opencode_model};
+pub use credentials::{
+    is_provider_secret, load_provider_credentials, provider_environment, provider_environment_for,
+    provider_variable, validate_opencode_model,
+};
 pub use enrollment::{
     EnrolledRole, credential, enroll, enrolled_control_plane, enrolled_host, rotate_own_credential,
 };
@@ -607,6 +611,15 @@ pub async fn run(
     // Preflight: warn before claiming work when the host is short of disk space.
     if let Some(warning) = environment::low_disk_warning(options.disk_space.sample().as_ref()) {
         supertag_protocol::terminal_text::warn(&warning);
+    }
+    if options.execution_profile.allow_unsandboxed_commands {
+        let name = match options.harness {
+            HarnessKind::ClaudeCode => "Claude Code",
+            HarnessKind::Opencode => "OpenCode",
+            HarnessKind::Cursor => "Cursor",
+            _ => "This harness",
+        };
+        supertag_protocol::terminal_text::warn(&adapter::unsandboxed_caveat(name));
     }
     // A sign-in the provider proxy can't hold stays readable to commands run unsandboxed.
     if let Some(warning) = adapter::unproxied_key_warning(&options) {

@@ -839,10 +839,10 @@ fn provider_origin(provider: &str) -> Option<String> {
     Some(origin.to_owned())
 }
 
-/// A credential from the host's environment, when it holds one.
+/// A credential the host holds (from its credentials file or environment), when it holds one.
 fn environment_credential(variable: &str) -> Option<crate::provider_proxy::Swap> {
-    std::env::var(variable)
-        .ok()
+    crate::provider_variable(variable)
+        .and_then(|value| value.into_string().ok())
         .filter(|value| !value.is_empty())
         .map(|value| crate::provider_proxy::Swap::new(variable, value))
 }
@@ -862,6 +862,14 @@ fn opencode_file_key(options: &HostOptions, provider: &str) -> Option<String> {
         .then(|| entry.get("key")?.as_str().map(str::to_owned))
         .flatten()
         .filter(|key| !key.is_empty())
+}
+
+/// What allowing a harness to run commands without a sandbox means, for `supertag init` and a
+/// Worker Host that starts with `allow-unsandboxed-commands`.
+pub fn unsandboxed_caveat(name: &str) -> String {
+    format!(
+        "{name} runs commands without a sandbox, as this host's user: they can read and change anything that user can, including its files, the env_file, and harness sign-ins, and reach the network. Give its Tags only trusted work. SuperTag keeps model keys out of those commands' environment, which stops accidental leaks but is not a boundary. For one, run the host with environment: local-vm on Docker or Podman."
+    )
 }
 
 /// Why this unsandboxed host's model key can't go behind the provider proxy, so the commands its
@@ -1013,7 +1021,9 @@ async fn supervise(
     command.envs(
         crate::provider_environment_for(options.harness, options.provider_model.as_deref())?
             .iter()
-            .filter_map(|&name| std::env::var_os(name).map(|value| (OsStr::new(name), value))),
+            .filter_map(|&name| {
+                crate::provider_variable(name).map(|value| (OsStr::new(name), value))
+            }),
     );
     // Behind the provider proxy the adapter gets placeholders and the proxy's URL, never the key.
     if let Some(provider) = provider {

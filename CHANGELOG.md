@@ -212,6 +212,15 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- `supertag up` hands each Worker Host its harness's provider keys and tokens in a private file the
+  host reads and deletes as it starts, instead of in its environment, and a Linux Worker Host marks
+  itself non-dumpable. This keeps keys out of `ps eww`, `/proc/<pid>/environ`, and core dumps: it
+  closes accidental leaks, and is not a boundary against commands run without a sandbox.
+  `supertag worker-host --provider-credentials-file` takes the same file.
+- `supertag init` suggests local-vm containers for Claude Code, Cursor, and OpenCode and asks
+  whether to run commands without a sandbox instead, defaulting to no; `--yes` no longer allows
+  it. Choosing it, and starting a Worker Host with `allow-unsandboxed-commands`, prints what
+  those commands can reach.
 - A SQLite Control Plane commits through a write-ahead log (still `synchronous = FULL`, so every
   commit stays durable). Commits sync once instead of rewriting a rollback journal, so Worker
   Hosts' writes keep up on a busy disk and operator reads no longer wait seconds behind them.

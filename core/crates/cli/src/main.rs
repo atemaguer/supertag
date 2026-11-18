@@ -499,6 +499,10 @@ enum Command {
         /// CA certificate for the configured artifact peer endpoints.
         #[arg(long, requires = "artifact_peers")]
         artifact_peer_ca_file: Option<PathBuf>,
+        /// Private JSON file of the harness's provider keys and tokens, read and deleted at
+        /// start, so they stay out of this process's environment. `supertag up` writes it.
+        #[arg(long, value_name = "PATH")]
+        provider_credentials_file: Option<PathBuf>,
         /// Executable for a private E2B workspace provider used by Cursor.
         #[arg(long)]
         e2b_workspace_provider: Option<PathBuf>,
@@ -1156,7 +1160,22 @@ async fn run(command: Command) -> Result<()> {
             artifact_transfer_tls_key,
             artifact_peers,
             artifact_peer_ca_file,
+            provider_credentials_file,
         } => {
+            // Keep provider keys out of this process's environment and, on Linux, keep other
+            // processes of the same user from reading its memory or environment through /proc
+            // or ptrace. Both close accidental leaks; neither is a boundary against commands
+            // run without a sandbox.
+            if let Some(path) = &provider_credentials_file {
+                supertag_worker_host::load_provider_credentials(path)?;
+            }
+            #[cfg(target_os = "linux")]
+            // SAFETY: prctl(PR_SET_DUMPABLE) takes integer arguments and changes only this
+            // process's dumpable flag.
+            if unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } != 0 {
+                return Err(std::io::Error::last_os_error())
+                    .context("mark the Worker Host non-dumpable");
+            }
             let harness = adapter.harness_kind();
             ensure!(
                 skill_catalog.is_none()

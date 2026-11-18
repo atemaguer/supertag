@@ -783,6 +783,23 @@ async fn unsafe_provision_case(database: String, linked: bool) -> Result<()> {
     Ok(())
 }
 
+/// A Worker Host's environment, where its user can read it. A Linux Worker Host is non-dumpable,
+/// so only root reads its `/proc/<pid>/environ`; that it is denied is the check there.
+fn host_environment(pid: i32) -> Result<Option<std::collections::BTreeMap<String, String>>> {
+    #[cfg(target_os = "linux")]
+    // SAFETY: geteuid has no preconditions.
+    if unsafe { libc::geteuid() } != 0 {
+        let denied = fs::read(format!("/proc/{pid}/environ"))
+            .expect_err("a non-dumpable Worker Host's environment is unreadable");
+        ensure!(
+            denied.kind() == std::io::ErrorKind::PermissionDenied,
+            "{denied}"
+        );
+        return Ok(None);
+    }
+    process_environment(pid).map(Some)
+}
+
 /// The exact environment of a process this test owns.
 fn process_environment(pid: i32) -> Result<std::collections::BTreeMap<String, String>> {
     #[cfg(target_os = "linux")]
@@ -914,6 +931,7 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     uses_database(&state, &database)?;
     let credential = token(&state)?;
     let mut roles = std::collections::BTreeMap::new();
+    let mut commands = std::collections::BTreeMap::new();
     for (pid, command) in children(supervisor.child.id())? {
         let role = if command.contains("/hosts/codex-host") {
             "codex-host"
@@ -926,7 +944,15 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
         } else {
             anyhow::bail!("unexpected supervised child: {command}");
         };
-        roles.insert(role, process_environment(pid)?);
+        let environment = if role.ends_with("-host") || role == "reporter" {
+            host_environment(pid)?
+        } else {
+            Some(process_environment(pid)?)
+        };
+        if let Some(environment) = environment {
+            roles.insert(role, environment);
+        }
+        commands.insert(role, command);
     }
     // The env_file proxy reaches every service, so a service unit can use one. Its https://
     // URL is one SuperTag cannot use, which fails only connections that would go through it,
@@ -973,19 +999,25 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
         names(&roles["gateway"]),
         expected(&["SUPERTAG_GATEWAY_CREDENTIAL"])
     );
-    // The Codex Host gets only Codex credentials: the shell's value wins, env_file fills the gap.
-    // Each lane presents its Host credential; the guardian never passes it to a harness.
-    let codex = &roles["codex-host"];
-    assert_eq!(
-        names(codex),
-        expected(&["CODEX_API_KEY", "OPENAI_API_KEY", "SUPERTAG_HOST_TOKEN"])
+    // The Codex Host gets only Codex credentials, and in a file it read and deleted, never its
+    // environment. Each lane presents its Host credential; the guardian never passes it to a
+    // harness.
+    if let Some(codex) = roles.get("codex-host") {
+        assert_eq!(names(codex), expected(&["SUPERTAG_HOST_TOKEN"]));
+    }
+    let credentials = commands["codex-host"]
+        .split_whitespace()
+        .skip_while(|argument| *argument != "--provider-credentials-file")
+        .nth(1)
+        .context("the Codex Host is given a provider credentials file")?;
+    assert!(
+        !Path::new(credentials).exists(),
+        "the Codex Host deleted its provider credentials file"
     );
-    assert_eq!(codex["CODEX_API_KEY"], "shell-codex");
-    assert_eq!(codex["OPENAI_API_KEY"], "file-openai");
-    assert_eq!(
-        names(&roles["reporter"]),
-        expected(&["SUPERTAG_HOST_TOKEN"])
-    );
+    assert!(!commands["reporter"].contains("--provider-credentials-file"));
+    if let Some(reporter) = roles.get("reporter") {
+        assert_eq!(names(reporter), expected(&["SUPERTAG_HOST_TOKEN"]));
+    }
     for (role, environment) in &roles {
         // The database password reaches the Control Plane alone, under any name.
         if *role != "control-plane" {
@@ -1571,22 +1603,22 @@ async fn shared_host_runs_harnesses_concurrently(database: String) -> Result<()>
             .model_ids,
         ["fixture-model"]
     );
-    // Each lane holds only its own harness's provider credentials.
+    // Each lane holds only its own harness's provider credentials (the OpenAI Agents stand-in
+    // checks its own), from a file it read and deleted rather than its environment.
     let lanes = shared.lanes()?;
     assert_eq!(lanes.len(), 4);
     for (pid, command) in &lanes {
-        let environment = process_environment(*pid)?;
-        let mut names = names(&environment);
-        names.retain(|name| !["HOME", "PATH", "SUPERTAG_LOCAL_SERVICE_LIFELINE"].contains(name));
-        if command.contains("/lanes/codex-") {
-            assert_eq!(
-                names,
-                ["CODEX_API_KEY", "OPENAI_API_KEY", "SUPERTAG_HOST_TOKEN"]
-            );
-        } else {
-            assert!(command.contains("/lanes/openai-agents-"), "{command}");
-            assert_eq!(names, ["OPENAI_API_KEY", "SUPERTAG_HOST_TOKEN"]);
+        if let Some(environment) = host_environment(*pid)? {
+            let mut names = names(&environment);
+            names
+                .retain(|name| !["HOME", "PATH", "SUPERTAG_LOCAL_SERVICE_LIFELINE"].contains(name));
+            assert_eq!(names, ["SUPERTAG_HOST_TOKEN"], "{command}");
         }
+        assert!(
+            command.contains("/lanes/codex-") || command.contains("/lanes/openai-agents-"),
+            "{command}"
+        );
+        assert!(command.contains("provider-credentials.json"), "{command}");
     }
 
     tag(&mut operator, &token, "coder", HarnessKind::Codex).await?;

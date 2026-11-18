@@ -206,7 +206,7 @@ credentials with appropriate provider limits. `CODEX_API_KEY` takes precedence o
 the Codex sign-in file; `OPENAI_API_KEY` is only a fallback when that file is missing.
 
 On a Worker Host with `allow-unsandboxed-commands` for Claude Code, an `ANTHROPIC_API_KEY`,
-`ANTHROPIC_AUTH_TOKEN`, or `CLAUDE_CODE_OAUTH_TOKEN` in the host's environment stays in the Worker
+`ANTHROPIC_AUTH_TOKEN`, or `CLAUDE_CODE_OAUTH_TOKEN` given to the host stays in the Worker
 Host. Each Task's Claude Code gets a stand-in value and the address of a proxy on `127.0.0.1` that
 puts the real key on its requests to `api.anthropic.com`, and on nothing else. Claude Code also
 removes its credentials from the environment of the commands it runs. A command can still call
@@ -214,15 +214,25 @@ Anthropic through that proxy while its Task runs, but it can't read the key from
 the adapter.
 
 OpenCode works the same way on such a host for its `anthropic` and `openai` providers: the
-provider's API key, from the host's environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) or an
+provider's API key, given to the host (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) or from an
 `api` entry in the OpenCode auth file, stays in the Worker Host, and OpenCode's provider `baseURL`
 points at the proxy, which forwards only to `api.anthropic.com` or `api.openai.com`. Other
 providers, and an OpenCode sign-in that isn't an API key, stay readable to the commands OpenCode
 runs; the Worker Host warns about that when it starts.
 
-Neither is a boundary against a command set on stealing the key: such a command runs as the Worker
-Host's user and can read the host's own environment, its `env_file`, and the OpenCode auth file.
-Only a sandbox, such as `environment: local-vm`, keeps the key out of reach.
+`supertag up` hands each Worker Host its harness's provider keys and tokens in a private file
+that the host reads and deletes as it starts, rather than in its environment, so `ps eww`,
+`/proc/<pid>/environ`, and tools that dump a process's environment don't show them. On Linux the
+Worker Host also marks itself non-dumpable, so other processes of the same user can't read its
+memory or environment through `/proc` or attach a debugger to it, and it writes no core dump.
+A host started directly with `supertag worker-host` reads keys from its environment, unless it is
+given the same kind of file, a JSON object of variable names to values, with
+`--provider-credentials-file`.
+
+None of this is a boundary against a command set on stealing the key: such a command runs as the
+Worker Host's user and can read the host's `env_file` and the OpenCode auth file, and, where the
+OS allows it, the host's memory. These measures close accidental leaks only. Only a sandbox, such
+as `environment: local-vm`, keeps the key out of reach.
 
 A sign-in made with `/login` lives in the system's secure store (the macOS Keychain) and can't go
 behind the proxy, so commands Claude Code runs without a sandbox can reach it. The Worker Host

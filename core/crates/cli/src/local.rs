@@ -474,10 +474,13 @@ impl Children {
         if let Some(catalog) = &options.skill_catalog {
             host.arg("--skill-catalog").arg(catalog);
         }
-        host.envs(
-            Environment::default()
-                .selected(options.adapter.provider_environment()?.iter().copied()),
-        );
+        provider_credentials(
+            &mut host,
+            directory,
+            "host",
+            &Environment::default(),
+            options.adapter.provider_environment()?,
+        )?;
         let ready = start_child(
             &mut self.worker_host,
             &mut host,
@@ -828,6 +831,43 @@ fn remove_endpoint(directory: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Give a Worker Host its harness's provider variables: paths such as `HOME` in its environment,
+/// and keys and tokens in a private file it reads and deletes at start, so they never sit in its
+/// initial environment for `ps eww` or `/proc/<pid>/environ` to show. That closes accidental
+/// leaks, not a boundary: the env_file and the host's memory stay readable to its user.
+fn provider_credentials(
+    host: &mut Command,
+    directory: &Path,
+    name: &str,
+    environment: &Environment,
+    variables: &[&str],
+) -> Result<()> {
+    let mut secrets = BTreeMap::new();
+    for (variable, value) in environment.selected(variables.iter().copied()) {
+        if supertag_worker_host::is_provider_secret(variable) {
+            let value = value
+                .into_string()
+                .map_err(|_| anyhow::anyhow!("{variable} is not valid UTF-8"))?;
+            secrets.insert(variable, value);
+        } else {
+            host.env(variable, value);
+        }
+    }
+    if secrets.is_empty() {
+        return Ok(());
+    }
+    let file = format!(".{name}.provider-credentials.json");
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(directory)?;
+    write_private(directory, &file, &serde_json::to_vec(&secrets)?)
+        .context("write the Worker Host's provider credentials")?;
+    host.arg("--provider-credentials-file")
+        .arg(directory.join(file));
+    Ok(())
+}
+
 pub(crate) fn write_private(directory: &Path, name: &str, bytes: &[u8]) -> Result<()> {
     let temporary = directory.join(format!(".{name}.{}.tmp", Uuid::new_v4().simple()));
     let mut file = OpenOptions::new()
@@ -1126,10 +1166,17 @@ impl ManagedHost {
         }
         // Only this lane's harness credentials, from the shell or env_file. Service tokens and
         // other harnesses' credentials never reach the lane or its harness children.
-        host.envs(
-            self.environment
-                .selected(adapter.provider_environment()?.iter().copied()),
-        );
+        provider_credentials(
+            &mut host,
+            &self.directory,
+            &lane
+                .directory
+                .file_name()
+                .context("lane directory has no name")?
+                .to_string_lossy(),
+            &self.environment,
+            adapter.provider_environment()?,
+        )?;
         host.envs(
             HOST_TLS_ENVIRONMENT
                 .into_iter()

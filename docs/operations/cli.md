@@ -57,11 +57,11 @@ harness's Tasks in containers on it, defaulting to yes; `--yes` accepts. The hos
 `environment: local-vm`, and the first Task builds the container image. See
 [local-vm containers](../reference/supertag-yaml.md#local-vm-containers).
 
-Otherwise `init` explains that the harness runs commands as you,
-without a sandbox, so its Tags should get only trusted work, and asks whether to allow that,
-defaulting to yes. The answer becomes the host's `allow-unsandboxed-commands`; without it, the
-lead Tag's Tasks that run commands wait. `--yes` allows it and prints how to undo it. See
-[Unsandboxed harnesses](../reference/supertag-yaml.md#unsandboxed-harnesses).
+Otherwise, or when you decline the containers, `init` suggests local-vm and asks whether to let
+the harness run commands without a sandbox instead, defaulting to no. A yes prints what that
+allows and becomes the host's `allow-unsandboxed-commands`; without it, the lead Tag's Tasks that
+run commands wait. `--yes` never allows it, and prints how to set up local-vm or opt in later.
+See [Unsandboxed harnesses](../reference/supertag-yaml.md#unsandboxed-harnesses).
 
 The `local-tools` Permission Set grants `commands:execute` and `files:write`. For a Codex `lead`,
 it also grants `web:fetch`, and `init` says so: current Codex models run commands only in Codex
