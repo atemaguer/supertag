@@ -16,6 +16,9 @@ pub(crate) struct Policy {
     pub(crate) egress: Option<Egress>,
     /// The Tag's Codex memory is staged in CODEX_HOME: Codex reads it and keeps notes.
     pub(crate) memory: bool,
+    /// The Tag's daily memory review: Codex also consolidates the memory in this CODEX_HOME,
+    /// and the turn waits for it.
+    pub(crate) consolidate: Option<PathBuf>,
     /// The Workspace is a remote sandbox: every command and file operation runs there, through
     /// Codex's exec-server, and the sandbox is the boundary.
     pub(crate) remote: bool,
@@ -144,6 +147,7 @@ impl Policy {
             scope: None,
             egress: None,
             memory: false,
+            consolidate: None,
             remote: false,
         };
         ensure!(
@@ -274,14 +278,18 @@ pub(crate) fn arguments(
     ] {
         configuration.push(format!("features.{feature}=false"));
     }
-    // Codex reads the Tag's memory and keeps notes with its memory tools, but never runs its own
-    // extraction and consolidation agents: they spend model calls the Task's budget does not see.
+    // Codex reads the Tag's memory and keeps notes with its memory tools. Only the Tag's daily
+    // memory review runs Codex's own extraction and consolidation agents, which spend model
+    // calls Codex doesn't report: the review turn is reported unpriced.
     configuration.push(format!("features.memories={}", policy.memory));
     if policy.memory {
         configuration.extend([
             "memories.use_memories=true".into(),
             "memories.dedicated_tools=true".into(),
-            "memories.generate_memories=false".into(),
+            format!(
+                "memories.generate_memories={}",
+                policy.consolidate.is_some()
+            ),
         ]);
     }
     configuration.push(format!(
@@ -760,7 +768,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_memory_reads_and_keeps_notes_but_never_generates() -> Result<()> {
+    fn codex_memory_reads_and_keeps_notes_and_generates_only_in_the_review() -> Result<()> {
         let workspace = tempfile::tempdir()?;
         let mut policy = Policy::from_actions(&actions(&["files:read"]), false)?;
         let without = arguments(workspace.path(), None, None, &policy)?;
@@ -782,6 +790,10 @@ mod tests {
             assert!(with.contains(&setting.to_owned()), "{setting}");
         }
         assert!(!with.contains(&"features.memories=false".to_owned()));
+        // Only the Tag's daily review runs Codex's own consolidation.
+        policy.consolidate = Some(workspace.path().to_path_buf());
+        let review = arguments(workspace.path(), None, None, &policy)?;
+        assert!(review.contains(&"memories.generate_memories=true".to_owned()));
         Ok(())
     }
 

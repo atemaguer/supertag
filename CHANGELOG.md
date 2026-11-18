@@ -213,6 +213,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- A Codex Tag's daily review turn runs Codex's own memory consolidation and waits up to 3 minutes
+  for it, so the notes the Tag's turns kept reach the summary Codex reads at the start of every
+  turn. The review turn is reported unpriced, because Codex doesn't report the consolidation's
+  tokens.
 - Deleting a Volume sends the Session checkpoints and native memory still on it for deletion, and
   those Sessions and memory stores start fresh. A Volume can't move to another source while it
   holds either, or while objects at its old source wait for deletion.

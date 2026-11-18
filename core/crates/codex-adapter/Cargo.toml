@@ -14,6 +14,7 @@ libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite"] }
 supertag-protocol.workspace = true
 supertag-workspaces = { path = "../workspaces" }
 tempfile.workspace = true

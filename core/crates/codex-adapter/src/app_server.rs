@@ -213,6 +213,9 @@ struct Stream {
     inventory: crate::questions::Tools,
     /// Commands are admitted, but the code-mode host stays off; see `config::code_mode_host`.
     commands_without_code_mode: bool,
+    /// The turn runs Codex's memory consolidation, whose spend Codex doesn't report: its usage
+    /// carries no cost, so the Attempt counts as unpriced.
+    unpriced: bool,
     /// Unknown progress notifications already logged, so each is logged once.
     unknown_progress: std::collections::HashSet<String>,
 }
@@ -229,6 +232,7 @@ impl Stream {
     ) -> Result<Self> {
         let resumed = expected_thread.is_some();
         let commands_without_code_mode = policy.commands && !crate::config::code_mode_host(&policy);
+        let unpriced = policy.consolidate.is_some();
         let mut native = events::Stream::new(policy, expected_thread);
         native.accept(&serde_json::to_vec(
             &json!({"type":"thread.started","thread_id":thread}),
@@ -250,6 +254,7 @@ impl Stream {
             resumed,
             inventory,
             commands_without_code_mode,
+            unpriced,
             unknown_progress: Default::default(),
         })
     }
@@ -486,7 +491,8 @@ impl Stream {
                         .as_deref()
                         .or(self.configured_model.as_deref()),
                     &usage,
-                );
+                )
+                .filter(|_| !self.unpriced);
                 let recording = report_usage(
                     harness,
                     token,
@@ -898,6 +904,7 @@ pub(crate) async fn execute(
         .context("Codex thread identity is invalid")?
         .to_owned();
     let memory = policy.memory;
+    let consolidation = policy.consolidate.clone();
     let mut stream = Stream::new(
         policy,
         thread,
@@ -1038,6 +1045,9 @@ pub(crate) async fn execute(
             }
         }
         ensure!(pending.is_none(),"Codex stopped before steering was acknowledged");
+        if let Some(home) = &consolidation {
+            await_consolidation(&mut transport, &mut stream, home, (harness, token, secrets), advisory_id).await?;
+        }
         let mut input = transport.input.take().context("Codex request pipe is closed")?;
         input.shutdown().await.context("could not close Codex request pipe")?;
         drop(input);
@@ -1087,6 +1097,86 @@ pub(crate) async fn execute(
     }
     outcome?;
     stream.finish(questions.quiet_note().is_some())
+}
+
+/// How long the Tag's review turn waits, after it completes, for Codex's memory consolidation.
+const CONSOLIDATION_LIMIT: Duration = Duration::from_secs(180);
+/// How long a review turn waits for a consolidation job to show up before deciding none runs.
+const CONSOLIDATION_START: Duration = Duration::from_secs(10);
+
+/// The status of Codex's memory consolidation job in `home`, from its own job table: `None`
+/// until Codex has recorded one.
+async fn consolidation_status(home: &std::path::Path) -> Option<String> {
+    use sqlx::{ConnectOptions as _, Row as _};
+    let mut connection = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(home.join("memories_1.sqlite"))
+        .read_only(true)
+        .connect()
+        .await
+        .ok()?;
+    let status = sqlx::query("SELECT status FROM jobs WHERE kind='memory_consolidate_global'")
+        .fetch_optional(&mut connection)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|row| row.try_get::<String, _>("status").ok());
+    let _ = sqlx::Connection::close(connection).await;
+    status
+}
+
+/// Whether the review turn may stop waiting: Codex finished its consolidation job, or failed it
+/// (it retries a failed one later, not in this turn), or recorded none in [`CONSOLIDATION_START`].
+fn consolidation_settled(status: Option<&str>, waited: Duration) -> bool {
+    match status {
+        Some("running") => false,
+        Some(_) => true,
+        None => waited >= CONSOLIDATION_START,
+    }
+}
+
+/// Keeps the app-server running after the review turn until its memory consolidation finishes,
+/// for at most [`CONSOLIDATION_LIMIT`], so the consolidated notes are in CODEX_HOME before the
+/// adapter copies them out. Requests are refused; the turn's own late notifications still count.
+async fn await_consolidation(
+    transport: &mut Transport,
+    stream: &mut Stream,
+    home: &std::path::Path,
+    (harness, token, secrets): (&mut HarnessClient<Channel>, &str, &[String]),
+    mut advisory_id: Option<u64>,
+) -> Result<()> {
+    let started = Instant::now();
+    let mut poll = time::interval(Duration::from_secs(1));
+    poll.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+    while started.elapsed() < CONSOLIDATION_LIMIT {
+        tokio::select! {
+            value = transport.output.recv() => {
+                let Some(value) = value else { return Ok(()) };
+                let value = value?;
+                if transport.deny_request(&value).await? {
+                    continue;
+                }
+                if value.get("method").is_none() {
+                    if advisory_id.is_some() && value["id"].as_u64() == advisory_id {
+                        advisory_id = None;
+                        continue;
+                    }
+                    bail!("Codex returned an unexpected response identity");
+                }
+                // The consolidation agent's own thread reports on itself; only the turn's thread
+                // reaches the Task.
+                if value["params"]["threadId"].as_str() == Some(stream.thread.as_str()) {
+                    stream.notification(value, harness, token, secrets).await?;
+                }
+            }
+            _ = poll.tick() => {
+                if consolidation_settled(consolidation_status(home).await.as_deref(), started.elapsed()) {
+                    return Ok(());
+                }
+            }
+        }
+    }
+    // Past the limit the turn ends anyway: the next review consolidates what is left.
+    Ok(())
 }
 
 /// A `progress.updated` Task event for a Codex plan: the first eight steps, the first
@@ -1139,6 +1229,42 @@ mod tests {
     use super::*;
     use std::{os::unix::fs::PermissionsExt, process::Stdio};
     use tokio::process::Command;
+
+    #[tokio::test]
+    async fn the_review_turn_waits_only_while_codex_consolidates() -> Result<()> {
+        use sqlx::ConnectOptions as _;
+        let home = tempfile::tempdir()?;
+        // No job table yet: Codex hasn't started one.
+        assert_eq!(consolidation_status(home.path()).await, None);
+        let mut connection = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(home.path().join("memories_1.sqlite"))
+            .create_if_missing(true)
+            .connect()
+            .await?;
+        sqlx::query("CREATE TABLE jobs (kind TEXT, job_key TEXT, status TEXT)")
+            .execute(&mut connection)
+            .await?;
+        assert_eq!(consolidation_status(home.path()).await, None);
+        sqlx::query("INSERT INTO jobs VALUES ('memory_consolidate_global','global','running')")
+            .execute(&mut connection)
+            .await?;
+        let running = consolidation_status(home.path()).await;
+        assert_eq!(running.as_deref(), Some("running"));
+        assert!(!consolidation_settled(
+            running.as_deref(),
+            CONSOLIDATION_LIMIT
+        ));
+        sqlx::query("UPDATE jobs SET status='done'")
+            .execute(&mut connection)
+            .await?;
+        let done = consolidation_status(home.path()).await;
+        assert!(consolidation_settled(done.as_deref(), Duration::ZERO));
+        // A failed job ends the wait too; without a job, only after the start grace.
+        assert!(consolidation_settled(Some("error"), Duration::ZERO));
+        assert!(!consolidation_settled(None, Duration::from_secs(1)));
+        assert!(consolidation_settled(None, CONSOLIDATION_START));
+        Ok(())
+    }
 
     #[tokio::test]
     #[ignore = "requires SUPERTAG_TEST_CODEX_BINARY; credential-free native Skill inventory probe"]

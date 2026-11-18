@@ -40,6 +40,9 @@ pub const TURN_GUIDANCE: &str = "When a turn will take more than a moment, open 
 pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 /// The variable naming a Codex Attempt's executor socket on a remote Workspace: Codex runs its
 /// commands and file operations in the sandbox through it.
+/// The start of a Tag's reserved Session for its daily memory review, `memory:TAG`.
+pub const MEMORY_REVIEW_SESSION_PREFIX: &str = "memory:";
+
 pub const CODEX_EXEC_SOCKET: &str = "SUPERTAG_CODEX_EXEC_SOCKET";
 /// How a provider's stdio-server call ends once it confirmed the Task's sandbox gone (the SDK's
 /// `SANDBOX_GONE`).

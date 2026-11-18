@@ -323,9 +323,18 @@ async fn execute(
         .and_then(|selection| selection.effort.as_deref());
     let native_memory = native_memory::directory(&options.environment)?;
     policy.memory = native_memory.is_some();
+    let authentication = auth::Prepared::new(&options.environment, &options.state_directory)?;
+    // The Tag's daily review consolidates the notes its turns kept into the summary Codex loads
+    // into every later turn.
+    if policy.memory
+        && task
+            .session_id
+            .starts_with(supertag_protocol::MEMORY_REVIEW_SESSION_PREFIX)
+    {
+        policy.consolidate = Some(authentication.home().to_path_buf());
+    }
     let arguments = config::arguments(&workspace, model, effort, &policy)?;
     let thread_parameters = config::thread_parameters(&workspace, &policy, &arguments)?;
-    let authentication = auth::Prepared::new(&options.environment, &options.state_directory)?;
     let skills = skills::prepare(task, resolved_skills, authentication.home())?;
     if let Some(directory) = &native_memory {
         native_memory::copy_in(directory, authentication.home())?;

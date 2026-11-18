@@ -718,9 +718,12 @@ Claude Code and Codex keep harness memory this way:
   every tool that touches the Workspace runs in the sandbox, which never reaches the folder.
 - **Codex** keeps its memory folder: notes it saves with its memory tools, and the summary it
   reads at the start of each turn. Each turn is told to search its notes before answering
-  anything that may depend on earlier work. Codex's own extraction and consolidation, which run
-  extra model calls at startup, stay off, so a note is found by searching, not added to the
-  summary. Codex's git repository inside the folder is not kept.
+  anything that may depend on earlier work. Codex's own consolidation, which folds the notes into
+  that summary with extra model calls, runs only in the Tag's daily review turn: the turn waits up
+  to 3 minutes after it finishes for Codex to complete it, so later turns read the notes in the
+  summary without searching. Codex doesn't report the consolidation's tokens, so a Codex review
+  turn is reported unpriced, with only its own tokens counted. Codex's git repository inside the
+  folder is not kept.
 
 OpenCode and Cursor keep no memory of their own on the Worker Host. Codex doesn't run in remote
 Workspaces.

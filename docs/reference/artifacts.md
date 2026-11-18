@@ -62,7 +62,8 @@ capture when the files must describe a consistent result. The capturing Task Att
 responsible for the submission; it may not have authored every file in a shared workspace.
 
 Worker Hosts do not collect content from a harness's own home directory, such as Codex memories
-or Claude Code plans. Codex runs with its memories and image generation turned off.
+or Claude Code plans, as artifacts; harness memory is kept as described in
+[Harness memory](coordination.md#harness-memory). Codex runs with image generation turned off.
 
 ## Automatic Task outputs
 

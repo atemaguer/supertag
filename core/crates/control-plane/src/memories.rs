@@ -43,7 +43,7 @@ const REVIEW_INTERVAL_MS: i64 = 24 * 60 * 60 * 1000;
 const REVIEW_SESSIONS: i64 = 30;
 const SWEEP_BATCH: i64 = 32;
 
-const SESSION_PREFIX: &str = "memory:";
+const SESSION_PREFIX: &str = supertag_protocol::MEMORY_REVIEW_SESSION_PREFIX;
 
 /// The reserved Session a Tag's review turns run in.
 pub(crate) fn review_session(session: &str) -> bool {
