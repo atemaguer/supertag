@@ -179,6 +179,7 @@ async fn sign_in_once(
                     detail: Some(
                         "No Codex sign-in found: no ~/.codex/auth.json (or under CODEX_HOME), CODEX_API_KEY, or OPENAI_API_KEY.".into(),
                     ),
+                    timed_out: false,
                 };
             }
             sign_in::codex(variables, model, deadline()).await
@@ -196,6 +197,9 @@ async fn sign_in_once(
                         "Claude Code's one-turn check didn't succeed: check your network, and that your account can use Claude Code.".into(),
                     ),
                 },
+                // Only a check that ran out of time is unknown; a logged-out answer is definite.
+                timed_out: outcome == sign_in::ClaudeSignIn::Failed
+                    && ran_out.load(std::sync::atomic::Ordering::SeqCst),
             };
         }
         Harness::Opencode => match model {
