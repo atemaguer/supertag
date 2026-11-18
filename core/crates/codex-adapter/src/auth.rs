@@ -84,7 +84,9 @@ impl Prepared {
             prepared.stage_key(key)?;
             return Ok(prepared);
         }
-        bail!("Codex requires CODEX_API_KEY, a file-backed Codex sign-in, or OPENAI_API_KEY")
+        bail!(
+            "Codex is not signed in on this Worker Host. Run codex -c 'cli_auth_credentials_store=\"file\"' login (or set CODEX_API_KEY or OPENAI_API_KEY in ~/.supertag/.env), then send the message again"
+        )
     }
 
     pub(crate) fn environment(
