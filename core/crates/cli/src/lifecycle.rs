@@ -485,6 +485,7 @@ pub async fn up(options: Background) -> Result<()> {
                 manager.path(&definition.name).display()
             );
         }
+        let log_start = log_length(&state, SUPERVISOR);
         for line in manager.install(&definition)? {
             outln!("{line}");
         }
@@ -492,6 +493,7 @@ pub async fn up(options: Background) -> Result<()> {
             &state,
             |status| status.started_at_ms >= since.saturating_sub(1_000),
             None,
+            log_start,
         )
         .await?
     } else {
@@ -501,6 +503,7 @@ pub async fn up(options: Background) -> Result<()> {
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW)
             .open(log_path(&state, SUPERVISOR))?;
+        let log_start = log.metadata()?.len();
         let mut command = Command::new(std::env::current_exe()?);
         // `--force` only governs this command's restart; the supervisor runs in its foreground.
         command
@@ -514,7 +517,13 @@ pub async fn up(options: Background) -> Result<()> {
             .process_group(0);
         let mut child = command.spawn().context("start the SuperTag supervisor")?;
         let pid = child.id();
-        let status = wait_ready(&state, |status| status.pid == pid, Some(&mut child)).await?;
+        let status = wait_ready(
+            &state,
+            |status| status.pid == pid,
+            Some(&mut child),
+            log_start,
+        )
+        .await?;
         // The supervisor outlives this command; init reaps it after we exit.
         std::mem::forget(child);
         status
@@ -652,7 +661,8 @@ async fn change_concurrency(
     };
     write_private(state, CONCURRENCY_REQUEST, &serde_json::to_vec(&request)?)?;
     let pid = status.pid;
-    let applied = wait_ready(state, |status| status.pid == pid && status.fingerprint == request.fingerprint, None)
+    let log_start = log_length(state, SUPERVISOR);
+    let applied = wait_ready(state, |status| status.pid == pid && status.fingerprint == request.fingerprint, None, log_start)
         .await
         .context("the running supervisor did not apply the concurrency change; run supertag up --force to restart it")?;
     let mut changed = false;
@@ -780,6 +790,7 @@ async fn wait_ready(
     state: &Path,
     ours: impl Fn(&SupervisorStatus) -> bool,
     mut child: Option<&mut std::process::Child>,
+    log_start: u64,
 ) -> Result<SupervisorStatus> {
     let deadline = Instant::now() + READY_TIMEOUT;
     loop {
@@ -788,7 +799,7 @@ async fn wait_ready(
         {
             bail!(
                 "the SuperTag supervisor exited with {exit} before it was ready:\n{}",
-                log_tail(state, SUPERVISOR)
+                log_tail(state, SUPERVISOR, log_start)
             );
         }
         if let Some(status) = read_status(state).ok().flatten()
@@ -801,17 +812,29 @@ async fn wait_ready(
             Instant::now() < deadline,
             "SuperTag did not become ready within {} seconds:\n{}",
             READY_TIMEOUT.as_secs(),
-            log_tail(state, SUPERVISOR)
+            log_tail(state, SUPERVISOR, log_start)
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
-fn log_tail(state: &Path, service: &str) -> String {
+fn log_length(state: &Path, service: &str) -> u64 {
+    fs::metadata(log_path(state, service)).map_or(0, |metadata| metadata.len())
+}
+
+/// The last lines `service` logged since `start`, its log's length before this start, so an
+/// earlier run's errors are not reported as this one's; with a hint for a port in use.
+fn log_tail(state: &Path, service: &str, start: u64) -> String {
     let text = fs::read(log_path(state, service)).unwrap_or_default();
-    let text = String::from_utf8_lossy(&text);
+    let text = String::from_utf8_lossy(text.get(start as usize..).unwrap_or_default());
     let lines: Vec<_> = text.lines().collect();
-    lines[lines.len().saturating_sub(20)..].join("\n")
+    let mut tail = lines[lines.len().saturating_sub(20)..].join("\n");
+    if text.contains("Address already in use") {
+        tail.push_str(
+            "\nAnother program is using a port SuperTag listens on. Stop it, or change the port under services.control-plane.ports in supertag.yaml and run supertag up again.",
+        );
+    }
+    tail
 }
 
 /// Why `stop` stopped a supervisor without draining its hosts through its Control Plane.
