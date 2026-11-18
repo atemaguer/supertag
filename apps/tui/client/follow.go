@@ -307,6 +307,13 @@ func History(tag string, page []*views.Message, displayedTaskIDs ...string) []Hi
 	}
 	items := make([]HistoryItem, 0, len(page))
 	workEvents := map[string]bool{}
+	// A Session's branch is said once, under its latest delivering turn: the page is newest first.
+	latestDelivery := map[string]string{}
+	for _, message := range page {
+		if delivery := message.GetDelivery(); delivery != nil && latestDelivery[delivery.Branch] == "" {
+			latestDelivery[delivery.Branch] = message.GetTaskId()
+		}
+	}
 	for i := len(page) - 1; i >= 0; i-- {
 		message := page[i]
 		shown := newShown(tag)
@@ -334,7 +341,9 @@ func History(tag string, page []*views.Message, displayedTaskIDs ...string) []Hi
 			if message.GetStatus() == views.ReplyStatus_REPLY_STATUS_REPLIED {
 				shown.finalizing = message.GetFinalizing()
 				item.Events = append(item.Events, shown.reply(message.GetReply())...)
-				item.Events = append(item.Events, shown.delivered(message.GetDelivery())...)
+				if delivery := message.GetDelivery(); delivery != nil && latestDelivery[delivery.Branch] == message.GetTaskId() {
+					item.Events = append(item.Events, shown.delivered(delivery)...)
+				}
 			} else {
 				item.Events = append(item.Events, shown.wait(message.GetWaitingReason())...)
 				if activity := message.GetActivity(); activity != "" {

@@ -679,3 +679,25 @@ func TestAFinishedTurnSaysOnceWhereItsChangesWent(t *testing.T) {
 		t.Fatalf("remote delivery = %v", remote)
 	}
 }
+
+func TestASessionsBranchIsSaidOnceUnderItsLatestDeliveringTurn(t *testing.T) {
+	branch := SessionBranch("lead", "5f0c")
+	turn := func(id, head string) *views.Message {
+		return &views.Message{TaskId: id, Tag: "lead", SessionId: "5f0c", Status: views.ReplyStatus_REPLY_STATUS_REPLIED,
+			Reply:    &views.Reply{Text: "Done " + id},
+			Delivery: &views.Delivery{Branch: branch, Head: head, Workspace: "app"}}
+	}
+	// Newest first, as ListMessages returns them.
+	items := History("lead", []*views.Message{turn("third", "c"), turn("second", "b"), turn("first", "a")})
+	said := map[string]int{}
+	for _, item := range items {
+		for _, event := range item.Events {
+			if event.Kind == EventDelivered {
+				said[item.Message.GetTaskId()]++
+			}
+		}
+	}
+	if len(said) != 1 || said["third"] != 1 {
+		t.Fatalf("delivery notes = %v", said)
+	}
+}

@@ -440,6 +440,6 @@ func delivery(task *v2.Task) *views.Delivery {
 	if branch == "" {
 		return nil
 	}
-	return &views.Delivery{Branch: branch, Workspace: task.GetWorkspace().GetWorkspaceId(),
+	return &views.Delivery{Branch: branch, Head: delivered.GetHeadCommit(), Workspace: task.GetWorkspace().GetWorkspaceId(),
 		Remote: task.GetWorkspace().GetRemote() != nil}
 }

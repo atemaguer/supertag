@@ -350,6 +350,8 @@ type Message struct {
 type Delivery struct {
 	Branch    string
 	Workspace string
+	// The commit the branch holds after this turn.
+	Head string
 	// The Workspace is remote: the branch is on its git server, not in a local repository.
 	Remote bool
 }
