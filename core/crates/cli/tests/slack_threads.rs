@@ -485,6 +485,8 @@ database_tests! {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     three_quick_messages_get_one_acknowledgement_and_one_reply;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    a_delivery_retried_during_a_slow_ingest_makes_one_task_and_one_reply;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     a_schedule_set_in_a_slack_thread_replies_in_that_thread;
 }
 
@@ -600,6 +602,91 @@ async fn a_schedule_set_in_a_slack_thread_replies_in_that_thread(database: Strin
 
 /// Three quick messages in a thread: the first is acknowledged, the claim joins the other two
 /// into its run, and one reply replaces the acknowledgement. Nothing else is posted.
+/// Slack redelivers an event it got no 2xx for within three seconds. While the Control Plane is
+/// too slow to admit a mention, the Gateway answers 503 and Slack sends it again; whether a
+/// stalled attempt committed or not, the message becomes one Task and one reply.
+async fn a_delivery_retried_during_a_slow_ingest_makes_one_task_and_one_reply(
+    database: String,
+) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let credentials = Credentials::new();
+    let mock = MockSlack::start().await?;
+    let database = Database { url: database };
+    let (mut cp, private) = control_plane(&credentials, directory.path(), &database).await?;
+    let (mut serving, public, http) = gateway(
+        &credentials,
+        &private,
+        directory.path(),
+        "gateway",
+        "builder",
+        &mock,
+    )
+    .await?;
+    put_builder(&credentials, &public).await?;
+    let mention = payload("EvSLOW1", THREAD, true, "inspect the slow fixture");
+
+    // Ingest stalls: another transaction holds the Control Plane's write order, so admission
+    // waits past the Gateway's deadline. Slack's first delivery and its retry both get a 503.
+    let mut holder = database.connect().await?;
+    let mut held = holder.begin().await?;
+    sqlx::query("UPDATE supertag_v2_write_order SET revision=revision WHERE singleton=1")
+        .execute(&mut *held)
+        .await?;
+    for delivery in ["first delivery", "Slack's retry"] {
+        assert_eq!(
+            signed(&http, &mention).await?,
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+            "{delivery} during the slow ingest"
+        );
+    }
+    held.rollback().await?;
+    drop(holder);
+    // Ingest is quick again. Slack keeps retrying until one delivery is acknowledged (on a loaded
+    // machine an admission can still outlast the deadline); a later duplicate is acknowledged too.
+    for _ in 0..2 {
+        let deadline = tokio::time::Instant::now() + WAIT;
+        while signed(&http, &mention).await? != reqwest::StatusCode::OK {
+            ensure!(
+                tokio::time::Instant::now() < deadline,
+                "Slack's retries were never acknowledged"
+            );
+            sleep(Duration::from_millis(500)).await;
+        }
+    }
+    assert_eq!(
+        task_count(&database.url).await?,
+        1,
+        "one Task for the message"
+    );
+    let mut connector = ConnectorClient::new(protocol::dial(private.clone()).await?);
+    let task = receipt(&mut connector, &credentials, &mention).await?;
+    execute(
+        &credentials,
+        directory.path(),
+        &public,
+        "host",
+        &task,
+        &database.url,
+    )
+    .await?;
+    delivered_final(&mock, 1).await?;
+    // Nothing else arrives: no second reply, no second acknowledgement.
+    sleep(Duration::from_secs(2)).await;
+    delivered_final(&mock, 1).await?;
+    let acknowledgements = mock
+        .requests
+        .lock()
+        .await
+        .iter()
+        .filter(|(_, body)| body["text"] == ACKNOWLEDGEMENT)
+        .count();
+    assert!(acknowledgements <= 1, "duplicate acknowledgement");
+    assert_eq!(task_count(&database.url).await?, 1);
+    serving.stop().await?;
+    cp.stop().await?;
+    Ok(())
+}
+
 async fn three_quick_messages_get_one_acknowledgement_and_one_reply(
     database: String,
 ) -> Result<()> {

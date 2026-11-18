@@ -120,7 +120,10 @@ Worker Host. See [MCP tools](worker-tools.md).
 - Each message goes through the channel's current location and authorization.
 - The Control Plane stores each event before the Gateway acknowledges it. Over Socket Mode, an
   event the Control Plane could not store stays unacknowledged, and Slack delivers it again. Over
-  HTTP, the Gateway also checks Slack's timestamp and signature.
+  HTTP, the Gateway also checks Slack's timestamp and signature, and answers 503 when the Control
+  Plane can't store the event within Slack's three seconds; Slack then sends it again a few more
+  times before it gives up. A message the Control Plane can't store by then is lost, so keep the
+  Control Plane reachable from the Gateway.
 - Slack can deliver one message several times, and as both `app_mention` and `message`. The Tag
   still answers it once.
 - A message the Tag can't take gets one short answer in the thread that says why, for example when
@@ -132,6 +135,8 @@ Worker Host. See [MCP tools](worker-tools.md).
   itself is remembered for good, so a later redelivery still reaches the same Task.
 - Over Socket Mode, the Gateway reconnects when Slack asks it to or the connection drops. It stops
   with an error when Slack refuses the app-level token or Socket Mode is turned off for the app.
+- Editing or deleting a message changes nothing: an edit isn't sent to the Tag again, and a deleted
+  message's Task still runs. To change what you asked, send a new message in the thread.
 - The starter manifest does not subscribe to private channel messages.
 
 ## If something goes wrong
