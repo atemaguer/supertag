@@ -121,7 +121,10 @@ mod tests {
         assert_eq!(value["startRate"]["perMs"], 3_600_000);
         assert_eq!(value["startRate"]["inWindow"], 3);
         assert_eq!(value["idleObjectives"][0]["objectiveId"], "ship");
-        assert_eq!(value["idleObjectives"][0]["idleSinceMs"], 1_900_000_000_000_i64);
+        assert_eq!(
+            value["idleObjectives"][0]["idleSinceMs"],
+            1_900_000_000_000_i64
+        );
         let without = serde_json::to_value(TagActivity::from(v2::Tag::default())).unwrap();
         assert!(without.get("startRate").is_none());
         assert!(without.get("idleObjectives").is_none());
