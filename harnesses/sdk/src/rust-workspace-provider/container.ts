@@ -14,6 +14,10 @@
  * or a directory on the way to them. With that, the seal is a boundary here: the Task can neither
  * replace the program that stops it nor hide from it. Snapshots are `<runtime> commit` images. A
  * devcontainer's image and layers are built with an empty context, on the host's native platform.
+ *
+ * The Workspace user's operations go through one long-lived exec server per container
+ * (exec-server.ts), started after the process record, so the seal stops it like any Task
+ * process; a stopped server is replaced on the next operation.
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -31,6 +35,7 @@ import {
   EGRESS_RELAY_PROGRAM,
   type EgressRelayHost,
 } from "./egress-relay.js";
+import { createExecServer, EXEC_SERVER_PROGRAM, type ExecServer } from "./exec-server.js";
 import {
   BUILD_TIMEOUT_MS,
   createSandboxWorkspaceSession,
@@ -72,6 +77,11 @@ export interface ContainerProviderOptions {
    * at `/supertag/cache`, for package managers' downloads.
    */
   readonly dependencyCaches?: boolean;
+  /**
+   * Serves the Workspace user's processes from one long-lived exec per container instead of an
+   * exec each (see exec-server.ts); on by default.
+   */
+  readonly execServer?: boolean;
 }
 
 /** Where a dependency cache volume is mounted, and what points package managers at it. */
@@ -318,6 +328,48 @@ export function containerSandboxProvider(
       rest,
     );
 
+  /** Each container's exec server, started on the first operation after allocation. */
+  const servers = new Map<string, ExecServer>();
+
+  /**
+   * Runs `argv` as the Workspace user: through the container's exec server when one runs, so it
+   * costs a line each way, or through an exec of its own.
+   */
+  async function userRun(
+    id: string,
+    argv: readonly string[],
+    rest: { input?: Uint8Array; signal?: AbortSignal; timeoutMs?: number } = {},
+  ): Promise<Ran> {
+    const server = servers.get(id);
+    if (server) {
+      rest.signal?.throwIfAborted();
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+      const process = await server.spawn(
+        { argv, cwd: "/tmp", ...(rest.input ? { stdin: rest.input } : {}) },
+        (stream, bytes) => (stream === "stdout" ? stdout : stderr).push(Buffer.from(bytes)),
+      );
+      if (process) {
+        const timer = rest.timeoutMs ? setTimeout(() => process.kill(), rest.timeoutMs) : undefined;
+        const abort = () => process.kill();
+        rest.signal?.addEventListener("abort", abort, { once: true });
+        try {
+          const exitCode = await process.exited;
+          rest.signal?.throwIfAborted();
+          return {
+            exitCode,
+            stdout: Buffer.concat(stdout).toString("utf8"),
+            stderr: Buffer.concat(stderr).toString("utf8"),
+          };
+        } finally {
+          clearTimeout(timer);
+          rest.signal?.removeEventListener("abort", abort);
+        }
+      }
+    }
+    return exec(id, argv, rest);
+  }
+
   /** The container's owner labels, or undefined when the runtime reports it absent. */
   async function inspect(id: string): Promise<Record<string, string> | undefined> {
     const result = await cli(runtime, ["inspect", "--format", "{{json .Config.Labels}}", id]);
@@ -335,11 +387,11 @@ export function containerSandboxProvider(
       listOutputFiles: (root, query) => listSandboxOutputFiles(sandbox, root, query),
       materializeArtifactFiles: (input) => materializeSandboxArtifactFiles(sandbox, input),
       async mkdir(path) {
-        if ((await exec(id, ["mkdir", "-p", "--", path])).exitCode !== 0)
+        if ((await userRun(id, ["mkdir", "-p", "--", path])).exitCode !== 0)
           throw new Error("Directory could not be made");
       },
       async write(path, bytes, write) {
-        const result = await exec(
+        const result = await userRun(
           id,
           [
             "python3",
@@ -356,7 +408,7 @@ export function containerSandboxProvider(
         if (result.exitCode !== 0) throw new Error("File could not be written safely");
       },
       async read(path, read) {
-        const result = await exec(id, [
+        const result = await userRun(id, [
           "python3",
           "-I",
           "-S",
@@ -370,10 +422,52 @@ export function containerSandboxProvider(
         return new Uint8Array(Buffer.from(result.stdout, "base64"));
       },
       async makeReadOnly(path) {
-        if ((await exec(id, ["chmod", "-R", "a-w", "--", path])).exitCode !== 0)
+        if ((await userRun(id, ["chmod", "-R", "a-w", "--", path])).exitCode !== 0)
           throw new Error("Path could not be made read-only");
       },
       async start(spec: ProcessSpec, start) {
+        // Defined first: output can arrive with the server's reply that the process started.
+        let stdoutText = "";
+        let stderrText = "";
+        const decoders = { stdout: new TextDecoder(), stderr: new TextDecoder() };
+        const decode = async (stream: "stdout" | "stderr", bytes: Uint8Array) => {
+          const text = decoders[stream].decode(bytes, { stream: true });
+          if (!text) return;
+          if (stream === "stdout") stdoutText += text;
+          else stderrText += text;
+          await start.onOutput({ stream, text });
+        };
+        const served = await servers.get(id)?.spawn(
+          {
+            argv: [spec.command, ...(spec.args ?? [])],
+            cwd: spec.cwd ?? "/tmp",
+            environment: spec.environment ?? {},
+            replaceEnvironment: spec.replaceEnvironment === true,
+            ...(spec.stdin === undefined ? {} : { stdin: new TextEncoder().encode(spec.stdin) }),
+            streamInput: spec.streamInput === true,
+          },
+          (stream, bytes) => void decode(stream, bytes),
+        );
+        if (served) {
+          start.signal?.addEventListener("abort", () => served.kill(), { once: true });
+          return {
+            ...(served.pid === undefined ? {} : { pid: served.pid }),
+            ...(spec.streamInput
+              ? {
+                  write: (bytes: Uint8Array) => served.write(bytes),
+                  endInput: async () => served.endInput(),
+                }
+              : {}),
+            async wait() {
+              const exitCode = await served.exited;
+              return { exitCode, stdout: stdoutText, stderr: stderrText };
+            },
+            async terminate() {
+              served.kill();
+              return true;
+            },
+          };
+        }
         const environment = Object.entries(spec.environment ?? {}).map(([k, v]) => `${k}=${v}`);
         const argv = spec.replaceEnvironment
           ? ["/usr/bin/env", "-i", ...environment, spec.command, ...(spec.args ?? [])]
@@ -725,6 +819,21 @@ export function containerSandboxProvider(
       }
       const sandbox = instance(id);
       const relay = egress ? await startEgressRelay(id, egress, interpreter) : undefined;
+      // The exec server starts on the first operation, after the session recorded the
+      // container's own processes, so the seal never spares it.
+      if (options.execServer !== false)
+        servers.set(
+          id,
+          createExecServer(() => {
+            const child = spawn(
+              runtime,
+              ["exec", "-i", "-w", "/tmp", id, interpreter, "-I", "-S", "-c", EXEC_SERVER_PROGRAM],
+              { stdio: "pipe" },
+            );
+            child.stderr.resume();
+            return child;
+          }),
+        );
       if (relay) relays.set(id, relay);
       const workspace: SandboxWorkspace = {
         sandboxId: id,
@@ -747,7 +856,7 @@ export function containerSandboxProvider(
             },
           }),
         run: (argv, runTimeoutMs, runSignal) =>
-          exec(id, argv, { signal: runSignal, timeoutMs: runTimeoutMs }),
+          userRun(id, argv, { signal: runSignal, timeoutMs: runTimeoutMs }),
         async writeTransfer(path, bytes, writeSignal) {
           const result = await exec(id, ["sh", "-c", 'set -C; umask 077; cat > "$1"', "sh", path], {
             input: bytes,
@@ -783,6 +892,8 @@ export function containerSandboxProvider(
       if (sandboxId !== undefined) {
         relays.get(sandboxId)?.close();
         relays.delete(sandboxId);
+        servers.get(sandboxId)?.close();
+        servers.delete(sandboxId);
       }
       const owned = labels(owner, label);
       const matches = (found: Record<string, string>) =>

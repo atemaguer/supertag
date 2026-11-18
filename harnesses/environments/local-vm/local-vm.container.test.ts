@@ -180,7 +180,11 @@ describe.skipIf(!answers)("local-vm provider", () => {
       expect(direct.stdout.trim()).toBe("blocked");
       // The Task's user cannot stop the relay, which runs as root.
       const kill = await workspace.run(
-        ["sh", "-c", "pkill python3; pgrep -u 0 -f 'relay ready' >/dev/null && echo alive"],
+        [
+          "sh",
+          "-c",
+          "kill -9 $(pgrep -u 0 -f 'relay ready') 2>/dev/null; pgrep -u 0 -f 'relay ready' >/dev/null && echo alive",
+        ],
         30_000,
         AbortSignal.timeout(30_000),
       );
@@ -356,6 +360,72 @@ describe.skipIf(!answers)("local-vm provider", () => {
       if (made.length) spawnSync(runtime, ["volume", "rm", ...made]);
     }
   }, 180_000);
+
+  it("serves operations from one exec server that a seal or the Task may stop, then starts another", async () => {
+    const who = owner();
+    const workspace = await provider.allocate(who, 60_000, AbortSignal.timeout(60_000));
+    const run = (script: string) =>
+      workspace.run(["sh", "-c", script], 30_000, AbortSignal.timeout(30_000));
+    const servers = () =>
+      spawnSync(runtime, ["exec", workspace.sandboxId, "pgrep", "-c", "-f", "op.*spawn"], {
+        encoding: "utf8",
+      }).stdout.trim();
+    try {
+      // No server runs until the first operation, so the process record never includes it.
+      expect(servers()).toBe("0");
+      expect((await run("echo first")).stdout).toBe("first\n");
+      expect(servers()).toBe("1");
+      // A seal stops every process the record lacks, the server among them, as root.
+      await workspace.runPrivileged?.(
+        ["pkill", "-9", "-f", "op.*spawn"],
+        30_000,
+        AbortSignal.timeout(30_000),
+      );
+      expect((await run("echo after-seal")).stdout).toBe("after-seal\n");
+      // The Task may stop it too: that operation ends without a result, and the next is served.
+      const killed = await run("pkill -9 -f 'op.*spawn'; sleep 5; echo unreachable");
+      expect(killed.stdout).not.toContain("unreachable");
+      expect((await run("echo again")).stdout).toBe("again\n");
+      expect(servers()).toBe("1");
+    } finally {
+      await provider.stop(who, workspace.sandboxId);
+    }
+  }, 120_000);
+
+  it(
+    "serves an operation far faster than an exec of its own",
+    async () => {
+      const measure = async (execServer: boolean) => {
+        const timed = containerSandboxProvider({
+          name: "local-vm",
+          label: "supertag.local-vm",
+          runtime,
+          image: options.image,
+          user: options.user,
+          buildImages: true,
+          execServer,
+        });
+        const who = owner();
+        const workspace = await timed.allocate(who, 60_000, AbortSignal.timeout(BUILD_MS));
+        try {
+          await workspace.run(["true"], 10_000, AbortSignal.timeout(10_000));
+          const started = performance.now();
+          for (let index = 0; index < 20; index += 1)
+            await workspace.run(["true"], 10_000, AbortSignal.timeout(10_000));
+          return (performance.now() - started) / 20;
+        } finally {
+          await timed.stop(who, workspace.sandboxId);
+        }
+      };
+      const own = await measure(false);
+      const served = await measure(true);
+      console.log(
+        `per operation: ${own.toFixed(1)} ms with an exec each, ${served.toFixed(1)} ms served`,
+      );
+      expect(served).toBeLessThan(own / 2);
+    },
+    BUILD_MS,
+  );
 
   it(
     "refuses a Workspace user that is root",
