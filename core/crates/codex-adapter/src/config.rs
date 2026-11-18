@@ -671,6 +671,28 @@ mod tests {
         names.iter().map(|name| (*name).to_owned()).collect()
     }
 
+    /// A project Codex trusts loads its own `.codex/config.toml`, which can add MCP servers. On a
+    /// remote Workspace that file is the Task's to write, so no setting may ever trust a project.
+    #[test]
+    fn no_configuration_marks_a_project_trusted() -> Result<()> {
+        let workspace = tempfile::tempdir()?;
+        for granted in [
+            &["files:read"][..],
+            &["files:read", "files:write"],
+            &["files:read", "files:write", "commands:execute"],
+            &["files:read", "files:write", "commands:execute", "web:fetch"],
+        ] {
+            let policy = Policy::from_actions(&actions(granted), true)?;
+            for argument in arguments(workspace.path(), None, None, &policy)? {
+                assert!(
+                    !argument.starts_with("projects") && !argument.contains("trust_level"),
+                    "{argument}"
+                );
+            }
+        }
+        Ok(())
+    }
+
     #[test]
     fn codex_memory_reads_and_keeps_notes_but_never_generates() -> Result<()> {
         let workspace = tempfile::tempdir()?;

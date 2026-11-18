@@ -29,6 +29,7 @@ export {
 } from "./process-seal.js";
 export {
   BUILD_TIMEOUT_MS,
+  CODEX_HOME,
   createSandboxWorkspaceSession,
   EGRESS_CLIENT_PORT,
   egressProxy,
@@ -40,6 +41,7 @@ export {
   type SandboxWorkspace,
   type SandboxWorkspaceProvider,
   type SandboxWorkspaceSession,
+  type StdioServerStart,
   validSandboxEnvironment,
 } from "./session.js";
 export * from "./transport.js";

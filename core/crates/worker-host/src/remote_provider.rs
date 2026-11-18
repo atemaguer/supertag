@@ -553,6 +553,8 @@ impl RemoteProvider {
                         prepare,
                         egress: self.egress.clone(),
                         dependency_cache: self.dependency_cache.clone(),
+                        // Codex does not run on a remote Workspace yet.
+                        codex_version: String::new(),
                     },
                     deadline,
                 )?)
@@ -1604,7 +1606,7 @@ mod tests {
                 })),
             }
         }
-        type RunMcpServerStream = ReceiverStream<Result<RemoteMcpServerOutput, Status>>;
+        type RunStdioServerStream = ReceiverStream<Result<RemoteStdioServerOutput, Status>>;
         /// A line-oriented MCP server that answers from inside the fixture "sandbox".
         async fn snapshot(
             &self,
@@ -1627,16 +1629,17 @@ mod tests {
             assert_eq!(request.get_ref().artifact, "im-prepared");
             Ok(Response::new(RemoteWorkspaceRemoveArtifactResponse {}))
         }
-        async fn run_mcp_server(
+        async fn run_stdio_server(
             &self,
-            request: Request<Streaming<RemoteMcpServerInput>>,
-        ) -> Result<Response<Self::RunMcpServerStream>, Status> {
+            request: Request<Streaming<RemoteStdioServerInput>>,
+        ) -> Result<Response<Self::RunStdioServerStream>, Status> {
             self.authorize(&request)?;
             let mut input = request.into_inner();
-            let Some(remote_mcp_server_input::Part::Start(start)) =
-                input.message().await?.and_then(|message| message.part)
+            let Some(remote_stdio_server_input::Part::Start(RemoteStdioServerStart {
+                server: Some(remote_stdio_server_start::Server::Mcp(start)),
+            })) = input.message().await?.and_then(|message| message.part)
             else {
-                return Err(Status::invalid_argument("missing start"));
+                return Err(Status::invalid_argument("missing MCP start"));
             };
             let index = {
                 let mut started = self.mcp.lock().unwrap();
@@ -1648,7 +1651,7 @@ mod tests {
             tokio::spawn(async move {
                 let mut pending = Vec::new();
                 while let Ok(Some(message)) = input.message().await {
-                    let Some(remote_mcp_server_input::Part::Stdin(bytes)) = message.part else {
+                    let Some(remote_stdio_server_input::Part::Stdin(bytes)) = message.part else {
                         return;
                     };
                     pending.extend(bytes);
@@ -1680,7 +1683,7 @@ mod tests {
                         let tail = reply.split_off(reply.len() / 2);
                         for stdout in [reply, tail] {
                             if sender
-                                .send(Ok(RemoteMcpServerOutput { stdout }))
+                                .send(Ok(RemoteStdioServerOutput { stdout }))
                                 .await
                                 .is_err()
                             {

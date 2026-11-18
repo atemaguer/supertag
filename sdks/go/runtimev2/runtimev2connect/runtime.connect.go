@@ -434,9 +434,9 @@ const (
 	// RemoteWorkspaceProviderStopProcedure is the fully-qualified name of the RemoteWorkspaceProvider's
 	// Stop RPC.
 	RemoteWorkspaceProviderStopProcedure = "/supertag.runtime.v2.RemoteWorkspaceProvider/Stop"
-	// RemoteWorkspaceProviderRunMcpServerProcedure is the fully-qualified name of the
-	// RemoteWorkspaceProvider's RunMcpServer RPC.
-	RemoteWorkspaceProviderRunMcpServerProcedure = "/supertag.runtime.v2.RemoteWorkspaceProvider/RunMcpServer"
+	// RemoteWorkspaceProviderRunStdioServerProcedure is the fully-qualified name of the
+	// RemoteWorkspaceProvider's RunStdioServer RPC.
+	RemoteWorkspaceProviderRunStdioServerProcedure = "/supertag.runtime.v2.RemoteWorkspaceProvider/RunStdioServer"
 	// RemoteWorkspaceProviderStageCopyProcedure is the fully-qualified name of the
 	// RemoteWorkspaceProvider's StageCopy RPC.
 	RemoteWorkspaceProviderStageCopyProcedure = "/supertag.runtime.v2.RemoteWorkspaceProvider/StageCopy"
@@ -4910,10 +4910,11 @@ type RemoteWorkspaceProviderClient interface {
 	Stage(context.Context) *connect.ClientStreamForClient[runtimev2.RemoteWorkspaceStageChunk, runtimev2.RemoteWorkspaceStageResponse]
 	Capture(context.Context, *connect.Request[runtimev2.RemoteWorkspaceCaptureRequest]) (*connect.ServerStreamForClient[runtimev2.RemoteWorkspaceCaptureChunk], error)
 	Stop(context.Context, *connect.Request[runtimev2.RemoteWorkspaceStopRequest]) (*connect.Response[runtimev2.RemoteWorkspaceStopResponse], error)
-	// One Workspace stdio MCP server, started inside the staged sandbox from its trusted copy.
-	// The first input is the start record; later inputs are its stdin. Outputs are its stdout.
-	// Ending or cancelling the call stops the server process, never the sandbox.
-	RunMcpServer(context.Context) *connect.BidiStreamForClient[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]
+	// One stdio server started inside the staged sandbox: a Workspace MCP server from its trusted
+	// copy, or Codex's exec-server for a Codex Attempt. The first input is the start record; later
+	// inputs are its stdin. Outputs are its stdout. Ending or cancelling the call stops the server
+	// process, never the sandbox.
+	RunStdioServer(context.Context) *connect.BidiStreamForClient[runtimev2.RemoteStdioServerInput, runtimev2.RemoteStdioServerOutput]
 	// One Workspace Volume copy the Worker Host staged, uploaded after Stage and before the
 	// Harness starts: the header, then for each file its record and exactly its bytes, and each
 	// empty directory. The provider seals a read-only copy, and Capture leaves every copy out of
@@ -4965,10 +4966,10 @@ func NewRemoteWorkspaceProviderClient(httpClient connect.HTTPClient, baseURL str
 			connect.WithSchema(remoteWorkspaceProviderMethods.ByName("Stop")),
 			connect.WithClientOptions(opts...),
 		),
-		runMcpServer: connect.NewClient[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput](
+		runStdioServer: connect.NewClient[runtimev2.RemoteStdioServerInput, runtimev2.RemoteStdioServerOutput](
 			httpClient,
-			baseURL+RemoteWorkspaceProviderRunMcpServerProcedure,
-			connect.WithSchema(remoteWorkspaceProviderMethods.ByName("RunMcpServer")),
+			baseURL+RemoteWorkspaceProviderRunStdioServerProcedure,
+			connect.WithSchema(remoteWorkspaceProviderMethods.ByName("RunStdioServer")),
 			connect.WithClientOptions(opts...),
 		),
 		stageCopy: connect.NewClient[runtimev2.RemoteWorkspaceCopyUpload, runtimev2.RemoteWorkspaceCopyStaged](
@@ -5004,7 +5005,7 @@ type remoteWorkspaceProviderClient struct {
 	stage          *connect.Client[runtimev2.RemoteWorkspaceStageChunk, runtimev2.RemoteWorkspaceStageResponse]
 	capture        *connect.Client[runtimev2.RemoteWorkspaceCaptureRequest, runtimev2.RemoteWorkspaceCaptureChunk]
 	stop           *connect.Client[runtimev2.RemoteWorkspaceStopRequest, runtimev2.RemoteWorkspaceStopResponse]
-	runMcpServer   *connect.Client[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]
+	runStdioServer *connect.Client[runtimev2.RemoteStdioServerInput, runtimev2.RemoteStdioServerOutput]
 	stageCopy      *connect.Client[runtimev2.RemoteWorkspaceCopyUpload, runtimev2.RemoteWorkspaceCopyStaged]
 	captureCopy    *connect.Client[runtimev2.RemoteWorkspaceCaptureCopyRequest, runtimev2.RemoteWorkspaceCopyDownload]
 	snapshot       *connect.Client[runtimev2.RemoteWorkspaceSnapshotRequest, runtimev2.RemoteWorkspaceSnapshot]
@@ -5031,9 +5032,9 @@ func (c *remoteWorkspaceProviderClient) Stop(ctx context.Context, req *connect.R
 	return c.stop.CallUnary(ctx, req)
 }
 
-// RunMcpServer calls supertag.runtime.v2.RemoteWorkspaceProvider.RunMcpServer.
-func (c *remoteWorkspaceProviderClient) RunMcpServer(ctx context.Context) *connect.BidiStreamForClient[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput] {
-	return c.runMcpServer.CallBidiStream(ctx)
+// RunStdioServer calls supertag.runtime.v2.RemoteWorkspaceProvider.RunStdioServer.
+func (c *remoteWorkspaceProviderClient) RunStdioServer(ctx context.Context) *connect.BidiStreamForClient[runtimev2.RemoteStdioServerInput, runtimev2.RemoteStdioServerOutput] {
+	return c.runStdioServer.CallBidiStream(ctx)
 }
 
 // StageCopy calls supertag.runtime.v2.RemoteWorkspaceProvider.StageCopy.
@@ -5063,10 +5064,11 @@ type RemoteWorkspaceProviderHandler interface {
 	Stage(context.Context, *connect.ClientStream[runtimev2.RemoteWorkspaceStageChunk]) (*connect.Response[runtimev2.RemoteWorkspaceStageResponse], error)
 	Capture(context.Context, *connect.Request[runtimev2.RemoteWorkspaceCaptureRequest], *connect.ServerStream[runtimev2.RemoteWorkspaceCaptureChunk]) error
 	Stop(context.Context, *connect.Request[runtimev2.RemoteWorkspaceStopRequest]) (*connect.Response[runtimev2.RemoteWorkspaceStopResponse], error)
-	// One Workspace stdio MCP server, started inside the staged sandbox from its trusted copy.
-	// The first input is the start record; later inputs are its stdin. Outputs are its stdout.
-	// Ending or cancelling the call stops the server process, never the sandbox.
-	RunMcpServer(context.Context, *connect.BidiStream[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]) error
+	// One stdio server started inside the staged sandbox: a Workspace MCP server from its trusted
+	// copy, or Codex's exec-server for a Codex Attempt. The first input is the start record; later
+	// inputs are its stdin. Outputs are its stdout. Ending or cancelling the call stops the server
+	// process, never the sandbox.
+	RunStdioServer(context.Context, *connect.BidiStream[runtimev2.RemoteStdioServerInput, runtimev2.RemoteStdioServerOutput]) error
 	// One Workspace Volume copy the Worker Host staged, uploaded after Stage and before the
 	// Harness starts: the header, then for each file its record and exactly its bytes, and each
 	// empty directory. The provider seals a read-only copy, and Capture leaves every copy out of
@@ -5113,10 +5115,10 @@ func NewRemoteWorkspaceProviderHandler(svc RemoteWorkspaceProviderHandler, opts 
 		connect.WithSchema(remoteWorkspaceProviderMethods.ByName("Stop")),
 		connect.WithHandlerOptions(opts...),
 	)
-	remoteWorkspaceProviderRunMcpServerHandler := connect.NewBidiStreamHandler(
-		RemoteWorkspaceProviderRunMcpServerProcedure,
-		svc.RunMcpServer,
-		connect.WithSchema(remoteWorkspaceProviderMethods.ByName("RunMcpServer")),
+	remoteWorkspaceProviderRunStdioServerHandler := connect.NewBidiStreamHandler(
+		RemoteWorkspaceProviderRunStdioServerProcedure,
+		svc.RunStdioServer,
+		connect.WithSchema(remoteWorkspaceProviderMethods.ByName("RunStdioServer")),
 		connect.WithHandlerOptions(opts...),
 	)
 	remoteWorkspaceProviderStageCopyHandler := connect.NewClientStreamHandler(
@@ -5153,8 +5155,8 @@ func NewRemoteWorkspaceProviderHandler(svc RemoteWorkspaceProviderHandler, opts 
 			remoteWorkspaceProviderCaptureHandler.ServeHTTP(w, r)
 		case RemoteWorkspaceProviderStopProcedure:
 			remoteWorkspaceProviderStopHandler.ServeHTTP(w, r)
-		case RemoteWorkspaceProviderRunMcpServerProcedure:
-			remoteWorkspaceProviderRunMcpServerHandler.ServeHTTP(w, r)
+		case RemoteWorkspaceProviderRunStdioServerProcedure:
+			remoteWorkspaceProviderRunStdioServerHandler.ServeHTTP(w, r)
 		case RemoteWorkspaceProviderStageCopyProcedure:
 			remoteWorkspaceProviderStageCopyHandler.ServeHTTP(w, r)
 		case RemoteWorkspaceProviderCaptureCopyProcedure:
@@ -5188,8 +5190,8 @@ func (UnimplementedRemoteWorkspaceProviderHandler) Stop(context.Context, *connec
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.RemoteWorkspaceProvider.Stop is not implemented"))
 }
 
-func (UnimplementedRemoteWorkspaceProviderHandler) RunMcpServer(context.Context, *connect.BidiStream[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]) error {
-	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.RemoteWorkspaceProvider.RunMcpServer is not implemented"))
+func (UnimplementedRemoteWorkspaceProviderHandler) RunStdioServer(context.Context, *connect.BidiStream[runtimev2.RemoteStdioServerInput, runtimev2.RemoteStdioServerOutput]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.RemoteWorkspaceProvider.RunStdioServer is not implemented"))
 }
 
 func (UnimplementedRemoteWorkspaceProviderHandler) StageCopy(context.Context, *connect.ClientStream[runtimev2.RemoteWorkspaceCopyUpload]) (*connect.Response[runtimev2.RemoteWorkspaceCopyStaged], error) {

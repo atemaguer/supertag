@@ -443,12 +443,13 @@ const implementation = {
         throw error;
       }
     },
-    async *runMcpServer(stream, context) {
+    async *runStdioServer(stream, context) {
       assert.ok(staged && mcpStaged && !allocation.stopped);
       const inputs = stream[Symbol.asyncIterator]();
       const first = await inputs.next();
       assert.equal(first.value?.part.case, "start");
-      const { name, command, args } = first.value.part.value;
+      assert.equal(first.value.part.value.server.case, "mcp");
+      const { name, command, args } = first.value.part.value.server.value;
       const cwd = join(directory, "mcp");
       // The fixture sandbox image has Node.js on PATH, and nothing of the Worker Host.
       const child = spawn(

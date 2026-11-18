@@ -168,7 +168,7 @@ it("stops a Workspace MCP server's process group before capture without ending t
   await f.session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
   await f.session.stage({ ...header, mcpCommit: header.startCommit }, bytes);
   const { start, childPid } = await forkingMcpServer();
-  const server = await f.session.startMcpServer(start);
+  const server = await f.session.startStdioServer({ kind: "mcp", ...start });
   const pid = await childPid();
   const started = Date.now();
   const gone = goneAfter(pid, started);
@@ -190,7 +190,8 @@ it("stops a Workspace MCP server that is not reading its input before capture", 
   const { header, bytes } = await bundle();
   await session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
   await session.stage({ ...header, mcpCommit: header.startCommit }, bytes);
-  const server = await session.startMcpServer({
+  const server = await session.startStdioServer({
+    kind: "mcp",
     name: "tools",
     command: "sh",
     args: ["-c", "exec sleep 60"],

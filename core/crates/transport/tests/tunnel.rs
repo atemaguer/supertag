@@ -13,14 +13,15 @@ use std::{
 
 use anyhow::{Context, Result, ensure};
 use supertag_protocol::v2::{
-    ArtifactInputFile, RemoteMcpServerInput, RemoteMcpServerOutput, RemoteMcpServerStart,
-    RemoteWorkspaceAllocateRequest, RemoteWorkspaceAllocation, RemoteWorkspaceCaptureChunk,
-    RemoteWorkspaceCaptureCopyRequest, RemoteWorkspaceCaptureRequest, RemoteWorkspaceCopyDownload,
-    RemoteWorkspaceCopyStaged, RemoteWorkspaceCopyUpload, RemoteWorkspaceOwner,
-    RemoteWorkspaceRemoveArtifactRequest, RemoteWorkspaceRemoveArtifactResponse,
-    RemoteWorkspaceSnapshot, RemoteWorkspaceSnapshotRequest, RemoteWorkspaceStageChunk,
-    RemoteWorkspaceStageResponse, RemoteWorkspaceStopRequest, RemoteWorkspaceStopResponse,
-    remote_mcp_server_input, remote_workspace_capture_chunk,
+    ArtifactInputFile, RemoteMcpServerStart, RemoteStdioServerInput, RemoteStdioServerOutput,
+    RemoteStdioServerStart, RemoteWorkspaceAllocateRequest, RemoteWorkspaceAllocation,
+    RemoteWorkspaceCaptureChunk, RemoteWorkspaceCaptureCopyRequest, RemoteWorkspaceCaptureRequest,
+    RemoteWorkspaceCopyDownload, RemoteWorkspaceCopyStaged, RemoteWorkspaceCopyUpload,
+    RemoteWorkspaceOwner, RemoteWorkspaceRemoveArtifactRequest,
+    RemoteWorkspaceRemoveArtifactResponse, RemoteWorkspaceSnapshot, RemoteWorkspaceSnapshotRequest,
+    RemoteWorkspaceStageChunk, RemoteWorkspaceStageResponse, RemoteWorkspaceStopRequest,
+    RemoteWorkspaceStopResponse, remote_stdio_server_input, remote_stdio_server_start,
+    remote_workspace_capture_chunk,
     remote_workspace_provider_client::RemoteWorkspaceProviderClient,
     remote_workspace_provider_server::{RemoteWorkspaceProvider, RemoteWorkspaceProviderServer},
     remote_workspace_stage_chunk,
@@ -143,31 +144,31 @@ impl RemoteWorkspaceProvider for Provider {
         Err(Status::unimplemented("not part of the tunnel fixture"))
     }
 
-    type RunMcpServerStream = Boxed<RemoteMcpServerOutput>;
+    type RunStdioServerStream = Boxed<RemoteStdioServerOutput>;
 
     /// Answers each stdin message as soon as it arrives, so the client can interleave.
-    async fn run_mcp_server(
+    async fn run_stdio_server(
         &self,
-        request: Request<Streaming<RemoteMcpServerInput>>,
-    ) -> Result<Response<Self::RunMcpServerStream>, Status> {
+        request: Request<Streaming<RemoteStdioServerInput>>,
+    ) -> Result<Response<Self::RunStdioServerStream>, Status> {
         let mut inputs = request.into_inner();
         let output = async_stream(move |sender| async move {
             while let Some(input) = inputs.next().await {
                 let reply = match input.map(|input| input.part) {
-                    Ok(Some(remote_mcp_server_input::Part::Start(start))) => {
-                        format!("started {}", start.name).into_bytes()
-                    }
-                    Ok(Some(remote_mcp_server_input::Part::Stdin(stdin))) => {
+                    Ok(Some(remote_stdio_server_input::Part::Start(RemoteStdioServerStart {
+                        server: Some(remote_stdio_server_start::Server::Mcp(start)),
+                    }))) => format!("started {}", start.name).into_bytes(),
+                    Ok(Some(remote_stdio_server_input::Part::Stdin(stdin))) => {
                         [b"echo ".as_slice(), &stdin].concat()
                     }
-                    Ok(None) => continue,
+                    Ok(Some(remote_stdio_server_input::Part::Start(_))) | Ok(None) => continue,
                     Err(status) => {
                         let _ = sender.send(Err(status)).await;
                         return;
                     }
                 };
                 if sender
-                    .send(Ok(RemoteMcpServerOutput { stdout: reply }))
+                    .send(Ok(RemoteStdioServerOutput { stdout: reply }))
                     .await
                     .is_err()
                 {
@@ -507,15 +508,21 @@ async fn exercise(
     // Bidirectional: each reply arrives before the next input is sent.
     let (sender, receiver) = tokio::sync::mpsc::channel(1);
     sender
-        .send(RemoteMcpServerInput {
-            part: Some(remote_mcp_server_input::Part::Start(RemoteMcpServerStart {
-                name: "files".into(),
-                ..Default::default()
-            })),
+        .send(RemoteStdioServerInput {
+            part: Some(remote_stdio_server_input::Part::Start(
+                RemoteStdioServerStart {
+                    server: Some(remote_stdio_server_start::Server::Mcp(
+                        RemoteMcpServerStart {
+                            name: "files".into(),
+                            ..Default::default()
+                        },
+                    )),
+                },
+            )),
         })
         .await?;
     let mut outputs = client
-        .run_mcp_server(tokio_stream::wrappers::ReceiverStream::new(receiver))
+        .run_stdio_server(tokio_stream::wrappers::ReceiverStream::new(receiver))
         .await?
         .into_inner();
     let first = outputs.next().await.context("start reply")??;
@@ -523,8 +530,8 @@ async fn exercise(
     for round in 0..20 {
         let line = format!("{{\"id\":{round}}}");
         sender
-            .send(RemoteMcpServerInput {
-                part: Some(remote_mcp_server_input::Part::Stdin(
+            .send(RemoteStdioServerInput {
+                part: Some(remote_stdio_server_input::Part::Stdin(
                     line.clone().into_bytes(),
                 )),
             })
@@ -698,15 +705,21 @@ async fn a_dropped_tunnel_fails_calls_as_retryable_and_the_channel_recovers() ->
     // A bidirectional call in progress when the edge crashes.
     let (sender, receiver) = tokio::sync::mpsc::channel(1);
     sender
-        .send(RemoteMcpServerInput {
-            part: Some(remote_mcp_server_input::Part::Start(RemoteMcpServerStart {
-                name: "files".into(),
-                ..Default::default()
-            })),
+        .send(RemoteStdioServerInput {
+            part: Some(remote_stdio_server_input::Part::Start(
+                RemoteStdioServerStart {
+                    server: Some(remote_stdio_server_start::Server::Mcp(
+                        RemoteMcpServerStart {
+                            name: "files".into(),
+                            ..Default::default()
+                        },
+                    )),
+                },
+            )),
         })
         .await?;
     let mut outputs = client
-        .run_mcp_server(tokio_stream::wrappers::ReceiverStream::new(receiver))
+        .run_stdio_server(tokio_stream::wrappers::ReceiverStream::new(receiver))
         .await?
         .into_inner();
     outputs.next().await.context("start reply")??;
@@ -1070,15 +1083,21 @@ async fn keepalive_fails_a_call_on_a_connection_dropped_without_a_close() -> Res
     let mut client = RemoteWorkspaceProviderClient::new(target.connect().await?);
     let (sender, receiver) = tokio::sync::mpsc::channel(1);
     sender
-        .send(RemoteMcpServerInput {
-            part: Some(remote_mcp_server_input::Part::Start(RemoteMcpServerStart {
-                name: "files".into(),
-                ..Default::default()
-            })),
+        .send(RemoteStdioServerInput {
+            part: Some(remote_stdio_server_input::Part::Start(
+                RemoteStdioServerStart {
+                    server: Some(remote_stdio_server_start::Server::Mcp(
+                        RemoteMcpServerStart {
+                            name: "files".into(),
+                            ..Default::default()
+                        },
+                    )),
+                },
+            )),
         })
         .await?;
     let mut outputs = client
-        .run_mcp_server(tokio_stream::wrappers::ReceiverStream::new(receiver))
+        .run_stdio_server(tokio_stream::wrappers::ReceiverStream::new(receiver))
         .await?
         .into_inner();
     outputs.next().await.context("start reply")??;

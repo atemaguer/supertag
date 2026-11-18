@@ -18,12 +18,13 @@ import { Code, createClient } from "@connectrpc/connect";
 import { createGrpcTransport, Http2SessionManager } from "@connectrpc/connect-node";
 import {
   HarnessWorkspace,
-  RemoteMcpServerInputSchema,
+  RemoteStdioServerInputSchema,
   RemoteWorkspaceCopyUploadSchema,
   RemoteWorkspaceProvider,
   RemoteWorkspaceStageChunkSchema,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import {
+  CODEX_HOME,
   createWorkspaceHandlers,
   startRemoteWorkspaceTransport,
 } from "@supertag/worker-sdk/internal/rust-workspace-provider";
@@ -344,12 +345,13 @@ it("refuses to capture a sandbox that ran a Workspace MCP server and cannot be s
   const { header, bytes } = await bundle();
   await session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
   await session.stage({ ...header, mcpCommit: header.startCommit }, bytes);
-  const server = await session.startMcpServer({
+  const server = await session.startStdioServer({
+    kind: "mcp",
     name: "probe",
     command: "sh",
     args: ["-c", "cat"],
   });
-  await session.stopMcpServer(server);
+  await session.stopStdioServer(server);
   await expect(session.capture()).rejects.toThrow(/captured/u);
   await session.stop({ owner });
 });
@@ -580,11 +582,14 @@ it("runs a Workspace stdio MCP server in the trusted copy beside the checkout, w
   const canary = "host-canary-value";
   vi.stubEnv("SUPERTAG_MCP_CANARY", canary);
   const start = (args: string[]) =>
-    create(RemoteMcpServerInputSchema, {
-      part: { case: "start", value: { name: "tools", command: "sh", args } },
+    create(RemoteStdioServerInputSchema, {
+      part: {
+        case: "start",
+        value: { server: { case: "mcp", value: { name: "tools", command: "sh", args } } },
+      },
     });
   const stdin = (text: string) =>
-    create(RemoteMcpServerInputSchema, {
+    create(RemoteStdioServerInputSchema, {
       part: { case: "stdin", value: new TextEncoder().encode(text) },
     });
   try {
@@ -607,7 +612,7 @@ it("runs a Workspace stdio MCP server in the trusted copy beside the checkout, w
       yield stdin("hello\n");
     })();
     let output = "";
-    for await (const part of provider.runMcpServer(inputs, auth)) {
+    for await (const part of provider.runStdioServer(inputs, auth)) {
       output += new TextDecoder().decode(part.stdout);
     }
     const [directory, ...lines] = output.trim().split("\n");
@@ -626,7 +631,7 @@ it("runs a Workspace stdio MCP server in the trusted copy beside the checkout, w
     expect(await readFile(join(directory ?? "", "a.txt"), "utf8")).toBe("original\n");
     await expect(session.execute({ kind: "read", path: "../mcp/a.txt" })).rejects.toThrow();
     // A running server is stopped before capture, so it cannot change the returned tree.
-    const held = provider.runMcpServer(
+    const held = provider.runStdioServer(
       (async function* () {
         yield start(["-c", "echo ready; exec sleep 30"]);
         await new Promise(() => undefined);
@@ -642,7 +647,7 @@ it("runs a Workspace stdio MCP server in the trusted copy beside the checkout, w
     // No server starts once capture sealed the sandbox.
     await expect(
       (async () => {
-        for await (const _ of provider.runMcpServer(
+        for await (const _ of provider.runStdioServer(
           (async function* () {
             yield start(["-c", "echo late"]);
           })(),
@@ -707,7 +712,7 @@ it("stops a Workspace MCP server's process group before capture, even children i
   await session.stage({ ...header, mcpCommit: header.startCommit }, bytes);
   const server = forkingMcpServer();
   const { start, childPid } = await server;
-  const process_ = await session.startMcpServer(start);
+  const process_ = await session.startStdioServer({ kind: "mcp", ...start });
   const pid = await childPid();
   const started = Date.now();
   const gone = goneAfter(pid, started);
@@ -725,7 +730,8 @@ it("stops a Workspace MCP server that is not reading its input before capture", 
   const { header, bytes } = await bundle();
   await session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
   await session.stage({ ...header, mcpCommit: header.startCommit }, bytes);
-  const server = await session.startMcpServer({
+  const server = await session.startStdioServer({
+    kind: "mcp",
     name: "tools",
     command: "sh",
     args: ["-c", "exec sleep 60"],
@@ -755,7 +761,8 @@ it("refuses capture rather than wait for an MCP server descendant that left its 
   // The descendant starts its own session, so no process group signal reaches it, and it
   // holds the server's output open.
   const escaping = `import os, sys; os.setsid(); open(sys.argv[1], "w").write(str(os.getpid())); os.execvp("sleep", ["sleep", "60"])`;
-  await session.startMcpServer({
+  await session.startStdioServer({
+    kind: "mcp",
     name: "tools",
     command: "sh",
     args: ["-c", `python3 -c '${escaping}' "${pidFile}" & exec sleep 60`],
@@ -779,9 +786,9 @@ it("refuses a Workspace MCP server without a trusted copy", async () => {
     /trusted MCP commit/u,
   );
   await session.stage(header, bytes);
-  await expect(session.startMcpServer({ name: "tools", command: "sh", args: [] })).rejects.toThrow(
-    /no trusted MCP copy/u,
-  );
+  await expect(
+    session.startStdioServer({ kind: "mcp", name: "tools", command: "sh", args: [] }),
+  ).rejects.toThrow(/no trusted MCP copy/u);
 }, 15_000);
 
 it("refuses a trusted MCP commit the bundle lacks, that is no commit, or that is no ancestor", async () => {
@@ -1429,5 +1436,133 @@ it("starts the egress relay as root over a long-lived command, and keeps the san
     "python3",
   ]);
   expect(factory.create.mock.calls[0]?.[0].allowInternetAccess).toBe(false);
+  await session.stop({ owner });
+});
+
+/** Answers the session's `codex --version` with `reported`; every other command runs as usual. */
+function reportCodex(client: Awaited<ReturnType<typeof fixture>>["client"], reported: string) {
+  const run = client.commands.run;
+  const commands: string[] = [];
+  client.commands.run = vi.fn(async (command: string, options?: unknown) => {
+    commands.push(command);
+    if (command.endsWith("'codex' '--version'"))
+      return { exitCode: reported ? 0 : 127, stdout: reported, stderr: "" };
+    return (run as (command: string, options?: unknown) => unknown)(command, options);
+  }) as typeof client.commands.run;
+  return commands;
+}
+
+it("allocates for Codex only when the image's codex matches and its CODEX_HOME is read-only", async () => {
+  const privileged = fakePrivileged();
+  const { session, client } = await fixture(undefined, privileged);
+  const commands = reportCodex(client, "codex-cli 0.163.0\n");
+  await session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "commands:execute"],
+    codexVersion: "0.163.0",
+  });
+  // The version is read as the Workspace user, with only the fixed PATH and LANG.
+  expect(commands).toContain(
+    "'/usr/bin/env' '-i' 'PATH=/usr/local/bin:/usr/bin:/bin' 'LANG=C.UTF-8' 'codex' '--version'",
+  );
+  // The privileged user recreates CODEX_HOME empty, root-owned, mode 0555.
+  const prepare = privileged.mock.calls.find(([argv]) => argv.at(-1) === CODEX_HOME);
+  expect(prepare?.[0]).toEqual(expect.arrayContaining(["python3", "-I", "-S", "-c"]));
+  expect(prepare?.[0].find((value) => value.includes("os.mkdir(home, 0o555)"))).toBeDefined();
+  await session.stop({ owner });
+});
+
+it("refuses a Codex allocation whose image lacks this host's codex, naming the version", async () => {
+  for (const reported of ["codex-cli 0.162.0", ""]) {
+    const { session, client } = await fixture();
+    reportCodex(client, reported);
+    await expect(
+      session.allocate({
+        owner,
+        timeoutMs: 60_000,
+        allowedActions: ["files:read", "commands:execute"],
+        codexVersion: "0.163.0",
+      }),
+    ).rejects.toThrow(
+      new RegExp(
+        `must contain codex 0\\.163\\.0 .* found ${reported ? "0\\.162\\.0" : "none"}`,
+        "u",
+      ),
+    );
+  }
+  // A CODEX_HOME the privileged user could not make read-only fails the same way.
+  const seal = fakePrivileged();
+  const refusing = vi.fn(async (argv: string[]) =>
+    argv.at(-1) === CODEX_HOME ? { exitCode: 3, stdout: "" } : seal(argv),
+  );
+  const { session, client } = await fixture(undefined, refusing);
+  reportCodex(client, "codex-cli 0.163.0");
+  await expect(
+    session.allocate({
+      owner,
+      timeoutMs: 60_000,
+      allowedActions: ["files:read", "commands:execute"],
+      codexVersion: "0.163.0",
+    }),
+  ).rejects.toThrow(/read-only Codex configuration directory/u);
+  // Neither an invalid version nor a preparation sandbox reaches the provider.
+  const invalid = await fixture();
+  await expect(
+    invalid.session.allocate({
+      owner,
+      timeoutMs: 60_000,
+      allowedActions: [],
+      codexVersion: "0.163.0; rm -rf /",
+    }),
+  ).rejects.toThrow(/Codex version is invalid/u);
+  expect(invalid.factory.create).not.toHaveBeenCalled();
+});
+
+it("starts Codex's exec-server in the checkout with an exact environment and read-only CODEX_HOME", async () => {
+  const { session, client } = await fixture();
+  const commands = reportCodex(client, "codex-cli 0.163.0");
+  const { header, bytes } = await bundle();
+  await session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write", "commands:execute"],
+    codexVersion: "0.163.0",
+  });
+  await session.stage(header, bytes);
+  const before = commands.length;
+  const server = await session.startStdioServer({ kind: "codexExecServer" });
+  await session.stopStdioServer(server);
+  const launch = commands.slice(before).find((command) => command.includes("'exec-server'"));
+  expect(launch).toBeDefined();
+  // The supervisor gets exactly this environment and execs the fixed argv; nothing of the Worker
+  // Host or a Harness plan is passed.
+  const words = [...(launch as string).matchAll(/'((?:[^']|'"'"')*)'/gu)].map(([, word]) =>
+    (word as string).replaceAll(`'"'"'`, "'"),
+  );
+  const supervisor = words.findIndex((word) => word.startsWith("import json, os, select"));
+  expect(JSON.parse(words[supervisor + 1] as string)).toEqual({
+    PATH: "/usr/local/bin:/usr/bin:/bin",
+    LANG: "C.UTF-8",
+    CODEX_HOME,
+  });
+  expect(words.slice(supervisor + 2)).toEqual(["codex", "exec-server", "--listen", "stdio"]);
+  expect(words.slice(0, 4)).toEqual([
+    "/usr/bin/env",
+    "-i",
+    "PATH=/usr/local/bin:/usr/bin:/bin",
+    "LANG=C.UTF-8",
+  ]);
+  await session.stop({ owner });
+});
+
+it("starts Codex's exec-server only in a sandbox allocated for Codex", async () => {
+  const { session } = await fixture();
+  const { header, bytes } = await bundle();
+  await session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
+  await session.stage(header, bytes);
+  await expect(session.startStdioServer({ kind: "codexExecServer" })).rejects.toThrow(
+    /not allocated for Codex/u,
+  );
   await session.stop({ owner });
 });

@@ -1735,7 +1735,7 @@ class RemoteWorkspaceOwner(_message.Message):
     def __init__(self, host_id: _Optional[str] = ..., host_generation: _Optional[int] = ..., task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., allocation_id: _Optional[str] = ...) -> None: ...
 
 class RemoteWorkspaceAllocateRequest(_message.Message):
-    __slots__ = ("owner", "timeout_ms", "allowed_actions", "environment", "prepared_artifact", "prepare", "file_scope", "egress", "dependency_cache")
+    __slots__ = ("owner", "timeout_ms", "allowed_actions", "environment", "prepared_artifact", "prepare", "file_scope", "egress", "dependency_cache", "codex_version")
     OWNER_FIELD_NUMBER: _ClassVar[int]
     TIMEOUT_MS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
@@ -1745,6 +1745,7 @@ class RemoteWorkspaceAllocateRequest(_message.Message):
     FILE_SCOPE_FIELD_NUMBER: _ClassVar[int]
     EGRESS_FIELD_NUMBER: _ClassVar[int]
     DEPENDENCY_CACHE_FIELD_NUMBER: _ClassVar[int]
+    CODEX_VERSION_FIELD_NUMBER: _ClassVar[int]
     owner: RemoteWorkspaceOwner
     timeout_ms: int
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
@@ -1754,7 +1755,8 @@ class RemoteWorkspaceAllocateRequest(_message.Message):
     file_scope: _policy_pb2.FileScope
     egress: RemoteWorkspaceEgress
     dependency_cache: str
-    def __init__(self, owner: _Optional[_Union[RemoteWorkspaceOwner, _Mapping]] = ..., timeout_ms: _Optional[int] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., environment: _Optional[_Union[RemoteWorkspaceEnvironment, _Mapping]] = ..., prepared_artifact: _Optional[str] = ..., prepare: _Optional[bool] = ..., file_scope: _Optional[_Union[_policy_pb2.FileScope, _Mapping]] = ..., egress: _Optional[_Union[RemoteWorkspaceEgress, _Mapping]] = ..., dependency_cache: _Optional[str] = ...) -> None: ...
+    codex_version: str
+    def __init__(self, owner: _Optional[_Union[RemoteWorkspaceOwner, _Mapping]] = ..., timeout_ms: _Optional[int] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., environment: _Optional[_Union[RemoteWorkspaceEnvironment, _Mapping]] = ..., prepared_artifact: _Optional[str] = ..., prepare: _Optional[bool] = ..., file_scope: _Optional[_Union[_policy_pb2.FileScope, _Mapping]] = ..., egress: _Optional[_Union[RemoteWorkspaceEgress, _Mapping]] = ..., dependency_cache: _Optional[str] = ..., codex_version: _Optional[str] = ...) -> None: ...
 
 class RemoteWorkspaceEnvironment(_message.Message):
     __slots__ = ("image", "dockerfile_commands", "user", "setup_commands")
@@ -1875,15 +1877,27 @@ class RemoteMcpServerStart(_message.Message):
     args: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, name: _Optional[str] = ..., command: _Optional[str] = ..., args: _Optional[_Iterable[str]] = ...) -> None: ...
 
-class RemoteMcpServerInput(_message.Message):
+class RemoteCodexExecServerStart(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class RemoteStdioServerStart(_message.Message):
+    __slots__ = ("mcp", "codex_exec_server")
+    MCP_FIELD_NUMBER: _ClassVar[int]
+    CODEX_EXEC_SERVER_FIELD_NUMBER: _ClassVar[int]
+    mcp: RemoteMcpServerStart
+    codex_exec_server: RemoteCodexExecServerStart
+    def __init__(self, mcp: _Optional[_Union[RemoteMcpServerStart, _Mapping]] = ..., codex_exec_server: _Optional[_Union[RemoteCodexExecServerStart, _Mapping]] = ...) -> None: ...
+
+class RemoteStdioServerInput(_message.Message):
     __slots__ = ("start", "stdin")
     START_FIELD_NUMBER: _ClassVar[int]
     STDIN_FIELD_NUMBER: _ClassVar[int]
-    start: RemoteMcpServerStart
+    start: RemoteStdioServerStart
     stdin: bytes
-    def __init__(self, start: _Optional[_Union[RemoteMcpServerStart, _Mapping]] = ..., stdin: _Optional[bytes] = ...) -> None: ...
+    def __init__(self, start: _Optional[_Union[RemoteStdioServerStart, _Mapping]] = ..., stdin: _Optional[bytes] = ...) -> None: ...
 
-class RemoteMcpServerOutput(_message.Message):
+class RemoteStdioServerOutput(_message.Message):
     __slots__ = ("stdout",)
     STDOUT_FIELD_NUMBER: _ClassVar[int]
     stdout: bytes

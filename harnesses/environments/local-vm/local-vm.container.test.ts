@@ -1,13 +1,18 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  CODEX_HOME,
   containerDockerfile,
   containerSandboxProvider,
   EGRESS_RELAY_PROGRAM,
   nativePlatform,
   type SandboxOwner,
+  type SandboxWorkspaceSession,
 } from "@supertag/worker-sdk/internal/rust-workspace-provider";
 import { sandboxProviderConformance } from "@supertag/worker-sdk/internal/rust-workspace-provider/conformance";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -481,6 +486,130 @@ describe.skipIf(!answers)("local-vm provider", () => {
     BUILD_MS,
   );
 
+  it(
+    "keeps every Codex configuration layer out of Codex's exec-server, whatever the Task plants",
+    async () => {
+      const session = createLocalVmWorkspaceSession(options);
+      const who = owner();
+      const source = await mkdtemp(join(tmpdir(), "supertag-codex-layers-"));
+      try {
+        // The repository itself carries a project config with an MCP server; Codex must leave an
+        // untrusted project's layer unread.
+        const git = (...args: string[]) => {
+          const result = spawnSync("git", args, { cwd: source, encoding: "utf8" });
+          if (result.status !== 0) throw new Error(result.stderr);
+          return result.stdout.trim();
+        };
+        git("init", "-q", "--template=");
+        await mkdir(join(source, ".codex"));
+        await writeFile(
+          join(source, ".codex", "config.toml"),
+          '[mcp_servers.project_planted]\nurl = "http://127.0.0.1:9/project"\n',
+        );
+        git("add", ".");
+        git(
+          "-c",
+          "user.name=Fixture",
+          "-c",
+          "user.email=fixture@example.invalid",
+          "-c",
+          "commit.gpgSign=false",
+          "commit",
+          "-qm",
+          "planted",
+        );
+        const startCommit = git("rev-parse", "HEAD");
+        git("update-ref", "refs/heads/supertag-deliveries/codex", startCommit);
+        git("bundle", "create", "source.bundle", "refs/heads/supertag-deliveries/codex");
+        const bytes = await readFile(join(source, "source.bundle"));
+        await session.allocate(
+          {
+            owner: who,
+            timeoutMs: 120_000,
+            allowedActions: ["files:read", "files:write", "commands:execute"],
+            codexVersion: CODEX_TEST_VERSION,
+            environment: {
+              // A devcontainer-style image: the operator's own base, plus Codex.
+              image: CODEX_TEST_IMAGE,
+              dockerfileCommands: [
+                "USER root",
+                "RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git && rm -rf /var/lib/apt/lists/* && useradd --create-home --uid 1000 user && find / -xdev -type f -perm /6000 -exec chmod u-s,g-s {} +",
+                INSTALL_CODEX,
+                "USER user",
+              ],
+              user: "user",
+              // As a Task could: plant a user config, and try the read-only CODEX_HOME and the
+              // system layer too.
+              setupCommands: [
+                'mkdir -p "$HOME/.codex" && printf \'[mcp_servers.planted]\\nurl = "http://127.0.0.1:9/mcp"\\n\' > "$HOME/.codex/config.toml"',
+                `printf x > ${CODEX_HOME}/config.toml 2>/dev/null || true`,
+                "mkdir -p /etc/codex 2>/dev/null && printf x > /etc/codex/config.toml 2>/dev/null || true",
+              ],
+            },
+          },
+          AbortSignal.timeout(BUILD_MS),
+        );
+        await session.stage(
+          {
+            startCommit,
+            bundle: {
+              sha256: createHash("sha256").update(bytes).digest("hex"),
+              byteLength: BigInt(bytes.length),
+            },
+          },
+          bytes,
+        );
+        const server = await session.startStdioServer({ kind: "codexExecServer" });
+        try {
+          const rpc = jsonRpc(server);
+          const initialized = await rpc.call("initialize", { clientName: "supertag-test" });
+          rpc.notify("initialized", {});
+          const cwd = initialized.environmentInfo.cwd as string;
+          const read = await rpc.call("environmentConfig/read", {
+            cwd,
+            // What Codex reads from an executor: MCP servers (0.163), hooks (later releases),
+            // and anything else that could add tools or commands.
+            configPaths: [["mcp_servers"], ["hooks"], ["skills"], ["plugins"], ["features"]],
+            requirementsPaths: [["mcp_servers"], ["hooks"]],
+          });
+          // No layer at all: not the planted user config, not the repository's untrusted project
+          // config, and nothing in CODEX_HOME or /etc/codex.
+          expect(read.config.layers).toEqual([]);
+          expect(read.requirements.layers).toEqual([]);
+          expect(read.codexHomeDir).toBe(`file://${CODEX_HOME}`);
+          // Commands inherit the exec-server's environment: the read-only CODEX_HOME, nothing
+          // from the Worker Host.
+          await rpc.call("process/start", {
+            processId: "env",
+            argv: ["/bin/sh", "-c", "env"],
+            cwd,
+            envPolicy: {
+              inherit: "all",
+              ignoreDefaultExcludes: true,
+              exclude: [],
+              set: {},
+              includeOnly: [],
+            },
+            env: {},
+            tty: false,
+            pipeStdin: false,
+            arg0: null,
+          });
+          const output = await rpc.output("env");
+          expect(output).toContain(`CODEX_HOME=${CODEX_HOME}\n`);
+          expect(output).not.toMatch(/SUPERTAG|CODEX_API_KEY|OPENAI_API_KEY/u);
+        } finally {
+          await session.stopStdioServer(server);
+        }
+        await session.stop({ owner: who });
+      } finally {
+        await session.stop({ owner: who }).catch(() => undefined);
+        await rm(source, { recursive: true, force: true });
+      }
+    },
+    BUILD_MS,
+  );
+
   for (const check of sandboxProviderConformance(
     async () => ({
       session: createLocalVmWorkspaceSession(options),
@@ -492,6 +621,64 @@ describe.skipIf(!answers)("local-vm provider", () => {
   ))
     it(`local-vm conformance: ${check.name}`, check.run, check.timeoutMs);
 });
+
+/** The pinned Codex the exec-server test installs; any version the host matches would do. */
+const CODEX_TEST_VERSION = "0.163.0";
+const CODEX_TEST_IMAGE =
+  "python:3.13-slim-bookworm@sha256:a5a7017efc5969e00ae2b91c8eb0631049a569652aa4ffc4501769049ae45c72";
+/** Installs `codex` from npm's Linux package for this machine, checked against its integrity. */
+const INSTALL_CODEX = `RUN python3 -c 'import base64, hashlib, io, platform, tarfile, urllib.request; arch, triple, integrity = {"aarch64": ("arm64", "aarch64", "IH2/R+4OarjGvsAf1ll3fdyLwrPgYLl3uzp6u9CyD9sj2Lw+ViDSe3QBZVHdcHJs0eIiZFg6Wprcuy4CRZaUGw=="), "x86_64": ("x64", "x86_64", "uwRaOsrYogLQhcxAM/GoeWrw0QIWEMRo7c9gM8sKAviVkZQHlu9kRLJ5PkufbV+ABGjyZgIwiFdJ0LCJ0N6e8w==")}[platform.machine()]; data = urllib.request.urlopen("https://registry.npmjs.org/@openai/codex/-/codex-${CODEX_TEST_VERSION}-linux-" + arch + ".tgz").read(); assert base64.b64encode(hashlib.sha512(data).digest()).decode() == integrity; binary = tarfile.open(fileobj=io.BytesIO(data)).extractfile("package/vendor/" + triple + "-unknown-linux-musl/bin/codex").read(); open("/usr/local/bin/codex", "wb").write(binary)' && chmod 755 /usr/local/bin/codex`;
+
+/** Newline-delimited JSON-RPC over a stdio server's input and output. */
+function jsonRpc(server: Awaited<ReturnType<SandboxWorkspaceSession["startStdioServer"]>>) {
+  const pending = new Map<number, (message: { result?: unknown; error?: unknown }) => void>();
+  const outputs = new Map<string, string>();
+  const closed = new Map<string, () => void>();
+  let next = 1;
+  let buffered = "";
+  void (async () => {
+    for await (const chunk of server.output ?? []) {
+      if (chunk.stream !== "stdout") continue;
+      buffered += chunk.text;
+      let end = buffered.indexOf("\n");
+      while (end >= 0) {
+        const message = JSON.parse(buffered.slice(0, end));
+        buffered = buffered.slice(end + 1);
+        end = buffered.indexOf("\n");
+        if (typeof message.id === "number") pending.get(message.id)?.(message);
+        else if (message.method === "process/output")
+          outputs.set(
+            message.params.processId,
+            (outputs.get(message.params.processId) ?? "") +
+              Buffer.from(message.params.chunk, "base64").toString(),
+          );
+        else if (message.method === "process/closed") closed.get(message.params.processId)?.();
+      }
+    }
+  })();
+  const send = (message: object) =>
+    server.write?.(new TextEncoder().encode(`${JSON.stringify(message)}\n`));
+  return {
+    // biome-ignore lint/suspicious/noExplicitAny: the exec-server's JSON results are untyped
+    async call(method: string, params: object): Promise<any> {
+      const id = next++;
+      const answered = new Promise<{ result?: unknown; error?: unknown }>((resolve) =>
+        pending.set(id, resolve),
+      );
+      await send({ id, method, params });
+      const message = await answered;
+      if (message.error) throw new Error(`${method}: ${JSON.stringify(message.error)}`);
+      return message.result;
+    },
+    notify(method: string, params: object) {
+      void send({ method, params });
+    },
+    async output(processId: string): Promise<string> {
+      await new Promise<void>((resolve) => closed.set(processId, resolve));
+      return outputs.get(processId) ?? "";
+    },
+  };
+}
 
 it("pins the base image to a digest", () => {
   expect(BASE_DOCKERFILE.split("\n")[0]).toMatch(/@sha256:/u);

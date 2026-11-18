@@ -2,7 +2,11 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { type HarnessWorkspaceRequest, WorkspaceGrepMode } from "../rust-harness/index.js";
 import { inputManifest } from "./input-files.js";
 import type { WorkspaceOperation } from "./operations.js";
-import { type createSandboxWorkspaceSession, MAX_TRANSFER } from "./session.js";
+import {
+  type createSandboxWorkspaceSession,
+  MAX_TRANSFER,
+  type StdioServerStart,
+} from "./session.js";
 import type { RemoteWorkspaceHandlers } from "./transport.js";
 
 const CHUNK_SIZE = 256 * 1024;
@@ -84,6 +88,7 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
           prepare,
           egress,
           dependencyCache,
+          codexVersion,
         } = request;
         const fileScope = request.fileScope;
         return session.allocate(
@@ -104,6 +109,7 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
             ...(preparedArtifact === undefined ? {} : { preparedArtifact }),
             prepare,
             ...(dependencyCache ? { dependencyCache } : {}),
+            ...(codexVersion ? { codexVersion } : {}),
             ...(egress === undefined
               ? {}
               : {
@@ -216,29 +222,42 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
           yield { part: { case: "payload", value: bytes.subarray(offset, offset + CHUNK_SIZE) } };
         }
       },
-      async *runMcpServer(stream, context) {
+      async *runStdioServer(stream, context) {
         const inputs = stream[Symbol.asyncIterator]();
         const first = await inputs.next();
         if (first.done || first.value.part.case !== "start")
-          throw new ConnectError("Workspace MCP server start is required", Code.InvalidArgument);
-        const { name, command, args } = first.value.part.value;
-        const server = await session.startMcpServer({ name, command, args }, context.signal);
+          throw new ConnectError("Stdio server start is required", Code.InvalidArgument);
+        const requested = first.value.part.value.server;
+        const start: StdioServerStart =
+          requested.case === "mcp"
+            ? {
+                kind: "mcp",
+                name: requested.value.name,
+                command: requested.value.command,
+                args: requested.value.args,
+              }
+            : requested.case === "codexExecServer"
+              ? { kind: "codexExecServer" }
+              : (() => {
+                  throw new ConnectError("Stdio server kind is required", Code.InvalidArgument);
+                })();
+        const server = await session.startStdioServer(start, context.signal);
         const { write, endInput, output } = server;
         if (!write || !endInput || !output)
-          throw new ConnectError("Workspace MCP server is unavailable", Code.Unavailable);
+          throw new ConnectError("Stdio server is unavailable", Code.Unavailable);
         // The Host's input ends when it closes the server; then the server sees end of input.
         const forwarded = (async () => {
           for (;;) {
             const next = await inputs.next();
             if (next.done) break;
             if (next.value.part.case !== "stdin")
-              throw new ConnectError("Invalid Workspace MCP server input", Code.InvalidArgument);
+              throw new ConnectError("Invalid stdio server input", Code.InvalidArgument);
             await write.call(server, next.value.part.value);
           }
           await endInput.call(server);
         })();
         // Never wait on the Host's input once the server ended: ending the call releases it.
-        forwarded.catch(() => session.stopMcpServer(server));
+        forwarded.catch(() => session.stopStdioServer(server));
         const encoder = new TextEncoder();
         try {
           for await (const chunk of output) {
@@ -248,7 +267,7 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
           }
         } finally {
           // Ends its input, so its supervisor stops its process group, never the sandbox.
-          await session.stopMcpServer(server);
+          await session.stopStdioServer(server);
         }
       },
       async snapshot(_request, context) {

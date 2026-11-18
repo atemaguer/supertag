@@ -90,6 +90,12 @@ ID, and allocation ID. The provider:
 A Task with `commands:execute` gets a sandbox only from a provider that can seal it. Otherwise
 Allocate fails.
 
+For a Codex Task Attempt, the request also carries the Worker Host's Codex version. The provider
+then checks, as the Workspace user, that `codex --version` on the fixed PATH
+`/usr/local/bin:/usr/bin:/bin` reports exactly that version. As the sandbox's privileged user, it
+recreates `/opt/supertag-codex-home` empty, owned by root, and read-only. A mismatch, a missing
+`codex`, or a sandbox that can't do either fails Allocate, naming the version the image needs.
+
 When the allocation response is lost, the host recovers through Stop with the owner alone. The
 provider then finds the sandbox by its five labels. It counts exactly one match as the owner's,
 and never trusts a sandbox ID it has not verified.
@@ -149,11 +155,21 @@ missing acknowledgement is `uncertain`, and the host retries. Stop on a stopped 
 | Call | When |
 | --- | --- |
 | `StageCopy`, `CaptureCopy` | The host maps [Workspace Volume](worker.md#workspace-volumes) copies |
-| `RunMcpServer` | The Workspace declares stdio MCP servers; they run from a trusted copy of the start commit |
+| `RunStdioServer` | The Workspace declares stdio MCP servers, which run from a trusted copy of the start commit; or a Codex Task Attempt runs Codex's exec-server (see below) |
 | `Snapshot`, `RemoveArtifact` | The provider keeps prepared artifacts, so later sandboxes skip the image build and setup |
 
 A provider that lacks one refuses the call. The Task Attempt that needed it fails; nothing falls
 back to the host.
+
+`RunStdioServer` with the Codex kind runs `codex exec-server --listen stdio` in the checkout, as the
+Workspace user. Its environment is exactly what a Task command gets, plus
+`CODEX_HOME=/opt/supertag-codex-home`. Codex reads its configuration layers, such as MCP servers
+and hooks, from `CODEX_HOME`, so nothing a Task writes in the sandbox, such as `~/.codex` or a
+repository's `.codex/config.toml`, adds tools or commands. Codex applies its environment policy to
+this environment for every command it runs, so no Worker Host variable reaches a command.
+Codex itself stays on the Worker Host with its keys, including the host that runs code-mode
+JavaScript: a V8 isolate with no network or file access, whose tool calls run in the sandbox
+through the exec-server.
 
 ## Security requirements
 

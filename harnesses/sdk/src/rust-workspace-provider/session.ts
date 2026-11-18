@@ -227,24 +227,57 @@ export interface McpServerStart {
   readonly args: readonly string[];
 }
 
+/** A stdio server the session starts in the staged sandbox. */
+export type StdioServerStart =
+  | ({ readonly kind: "mcp" } & McpServerStart)
+  | { readonly kind: "codexExecServer" };
+
+/**
+ * `CODEX_HOME` for Codex's exec-server: an empty directory owned by the sandbox's privileged user
+ * that the Workspace user cannot write. Codex reads its configuration layers, such as MCP
+ * servers, from here; the Workspace user's own `~/.codex` is never read.
+ */
+export const CODEX_HOME = "/opt/supertag-codex-home";
+/**
+ * Recreates `CODEX_HOME` empty, owned by the privileged user, mode 0555, under a parent the
+ * Workspace user cannot write. Exits non-zero when it cannot.
+ */
+const CODEX_PREPARE = `import os, shutil, stat, sys
+home = sys.argv[1]
+parent = os.path.dirname(home)
+info = os.lstat(parent)
+if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+    sys.exit(3)
+if os.path.lexists(home):
+    if os.path.isdir(home) and not os.path.islink(home):
+        shutil.rmtree(home)
+    else:
+        os.unlink(home)
+os.mkdir(home, 0o555)
+os.chmod(home, 0o555)
+info = os.lstat(home)
+if info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o555 or os.listdir(home):
+    sys.exit(4)
+`;
+
 const MCP_PATH = "/usr/local/bin:/usr/bin:/bin";
 /**
- * How long a Workspace MCP server may take to stop once its input ends: the supervisor's own
+ * How long a stdio server (a Workspace MCP server or Codex's exec-server) may take to stop once its input ends: the supervisor's own
  * grace, terminate, and kill steps, plus margin. A server still running after it leaves the
  * Workspace unsettled, so capture refuses rather than waits.
  */
-const MCP_STOP_MS = 5_000;
+const STDIO_STOP_MS = 5_000;
 
 /**
- * Runs one Workspace MCP server in its own process group and forwards this process's input to
+ * Runs one stdio server (the command after its JSON environment) in its own process group and forwards this process's input to
  * it. When the input ends, the server gets half a second to exit, then SIGTERM, then two seconds,
  * then the whole group gets SIGKILL, so children the server forked cannot hold its output open
  * or outlive it. The same happens when the server exits by itself. Stopping a server never stops
  * the sandbox: on Modal a process's terminate is the sandbox's.
  */
-const MCP_SUPERVISOR = `import os, select, signal, sys, threading
-command = sys.argv[1:]
-environment = {"PATH": "${MCP_PATH}", "LANG": "C.UTF-8"}
+const STDIO_SUPERVISOR = `import json, os, select, signal, sys, threading
+environment = json.loads(sys.argv[1])
+command = sys.argv[2:]
 reader, writer = os.pipe()
 pid = os.fork()
 if pid == 0:
@@ -436,21 +469,23 @@ export function createSandboxWorkspaceSession(
   let tools: ReturnType<typeof createWorkspaceOperations> | undefined;
   let captured: CapturedTree | undefined;
   let mcpStaged = false;
+  /** The Codex version the image holds, checked at allocation; set only for a Codex Attempt. */
+  let codexVersion: string | undefined;
   /** The commit Stage materialized; Capture indexes it to tell ignored files from tracked ones. */
   let stagedCommit = "";
   /** Present when the Task may run commands: the sandbox is sealed before Capture. */
   let seal: ProcessSeal | undefined;
-  /** The Task may run commands; with any Workspace MCP server started, the seal is required. */
+  /** The Task may run commands; with any stdio server started, the seal is required. */
   let commands = false;
-  let mcpStarted = false;
+  let stdioStarted = false;
   /** The provider confirmed the sandbox gone: every later call reports it without asking again. */
   let sandboxLost = false;
   /** The Task's network through the relay; its CA is written at Stage. */
   let egress: SandboxEgress | undefined;
   /** This Attempt's Workspace copies, once the first is staged. */
   let copies: WorkspaceCopies | undefined;
-  const mcpServers = new Set<ProcessHandle>();
-  const mcpStops = new WeakMap<ProcessHandle, Promise<boolean>>();
+  const stdioServers = new Set<ProcessHandle>();
+  const stdioStops = new WeakMap<ProcessHandle, Promise<boolean>>();
   let uncertain = false;
   let allocationStarted = false;
   let hostRecordedSandbox = false;
@@ -478,12 +513,12 @@ export function createSandboxWorkspaceSession(
   }
 
   /**
-   * Ends a Workspace MCP server's input, so its supervisor stops the server's process group, and
-   * waits at most MCP_STOP_MS for it to exit. Never kills the process: on Modal that stops the
+   * Ends a stdio server's input, so its supervisor stops the server's process group, and
+   * waits at most STDIO_STOP_MS for it to exit. Never kills the process: on Modal that stops the
    * sandbox. Resolves false when the exit was not confirmed in time.
    */
-  function stopMcpServer(server: ProcessHandle): Promise<boolean> {
-    let stopping = mcpStops.get(server);
+  function stopStdioServer(server: ProcessHandle): Promise<boolean> {
+    let stopping = stdioStops.get(server);
     if (stopping === undefined) {
       stopping = (async () => {
         let timer: ReturnType<typeof setTimeout> | undefined;
@@ -495,26 +530,60 @@ export function createSandboxWorkspaceSession(
               return true;
             })(),
             new Promise<false>((resolve) => {
-              timer = setTimeout(() => resolve(false), MCP_STOP_MS);
+              timer = setTimeout(() => resolve(false), STDIO_STOP_MS);
             }),
           ]);
         } finally {
           clearTimeout(timer);
         }
       })();
-      mcpStops.set(server, stopping);
+      stdioStops.set(server, stopping);
     }
     return stopping;
   }
 
   /**
-   * Workspace MCP servers end before capture or Stop, so none can change the tree after. A server
+   * Checks, as the Workspace user, that the image's `codex` on the fixed PATH is exactly
+   * `version`, then recreates the read-only `CODEX_HOME` as the privileged user. A mismatch or a
+   * sandbox that cannot do either is a configuration the operator must fix.
+   */
+  async function prepareCodex(
+    workspace: SandboxWorkspace,
+    version: string,
+    signal: AbortSignal,
+  ): Promise<string> {
+    if (!seal || !workspace.runPrivileged)
+      throw new WorkspaceConfigurationError(
+        `${provider.label} cannot run Codex: its sandbox must be sealable and run privileged setup`,
+      );
+    const found = await workspace.run(cleanCommand("codex", "--version"), 30_000, signal);
+    const reported = found.exitCode === 0 ? found.stdout.trim() : "";
+    if (reported !== `codex-cli ${version}`)
+      throw new WorkspaceConfigurationError(
+        `${provider.label} sandbox image must contain codex ${version} on PATH /usr/local/bin:/usr/bin:/bin to match this Worker Host; found ${
+          /^codex-cli [0-9A-Za-z.-]{1,48}$/u.test(reported) ? reported.slice(10) : "none"
+        }`,
+      );
+    const prepared = await workspace.runPrivileged(
+      cleanCommand("python3", "-I", "-S", "-c", CODEX_PREPARE, CODEX_HOME),
+      30_000,
+      signal,
+    );
+    if (prepared.exitCode !== 0)
+      throw new WorkspaceConfigurationError(
+        `${provider.label} cannot create the read-only Codex configuration directory ${CODEX_HOME}: its parent must exist, be owned by root, and be writable by no one else`,
+      );
+    return version;
+  }
+
+  /**
+   * Stdio servers end before capture or Stop, so none can change the tree after. A server
    * that did not stop in time leaves the Workspace unsettled, so capture refuses.
    */
-  async function stopMcpServers(): Promise<void> {
-    const running = [...mcpServers];
-    mcpServers.clear();
-    const stopped = await Promise.all(running.map(stopMcpServer));
+  async function stopStdioServers(): Promise<void> {
+    const running = [...stdioServers];
+    stdioServers.clear();
+    const stopped = await Promise.all(running.map(stopStdioServer));
     if (stopped.includes(false)) uncertain = true;
   }
 
@@ -564,15 +633,40 @@ export function createSandboxWorkspaceSession(
     captured = undefined;
     owner ??= { ...request.owner };
     lifetime.abort();
-    await stopMcpServers();
+    await stopStdioServers();
     const result = await provider.stop(owner, knownId ?? request.sandboxId);
     if (result.state === "stopped") stoppedSandboxId = result.sandboxId;
     return result;
   }
 
+  /**
+   * Variables a Task command gets beyond PATH and LANG: the sandbox's own, such as package
+   * managers' cache directories, and with a network scope the relay's proxy and CA.
+   */
+  function commandVariables(): Record<string, string> | undefined {
+    if (!((egress && root) || sandbox?.commandEnvironment)) return undefined;
+    return {
+      ...sandbox?.commandEnvironment,
+      ...egress?.variables,
+      ...Object.fromEntries(
+        [
+          "SSL_CERT_FILE",
+          "REQUESTS_CA_BUNDLE",
+          "CURL_CA_BUNDLE",
+          "NODE_EXTRA_CA_CERTS",
+          "GIT_SSL_CAINFO",
+          "PIP_CERT",
+        ]
+          .filter(() => egress && root)
+          .map((name) => [name, `${root}/egress-ca.pem`]),
+      ),
+    };
+  }
+
   /** The file tools: staged inputs and read-only copies may only be read. */
   function createTools() {
     if (!sandbox || !root) throw workspaceError("allocation is unavailable");
+    const commandEnvironment = commandVariables();
     return createWorkspaceOperations({
       environment: observedEnvironment(
         sandbox.environment(root),
@@ -588,26 +682,7 @@ export function createSandboxWorkspaceSession(
       ],
       allowedActions,
       ...(fileScope ? { fileScope } : {}),
-      ...((egress && root) || sandbox?.commandEnvironment
-        ? {
-            commandEnvironment: {
-              ...sandbox?.commandEnvironment,
-              ...egress?.variables,
-              ...Object.fromEntries(
-                [
-                  "SSL_CERT_FILE",
-                  "REQUESTS_CA_BUNDLE",
-                  "CURL_CA_BUNDLE",
-                  "NODE_EXTRA_CA_CERTS",
-                  "GIT_SSL_CAINFO",
-                  "PIP_CERT",
-                ]
-                  .filter(() => egress && root)
-                  .map((name) => [name, `${root}/egress-ca.pem`]),
-              ),
-            },
-          }
-        : {}),
+      ...(commandEnvironment ? { commandEnvironment } : {}),
     });
   }
 
@@ -651,6 +726,8 @@ export function createSandboxWorkspaceSession(
         prepare?: boolean;
         egress?: SandboxEgress;
         dependencyCache?: string;
+        /** The Worker Host's Codex version, for a Codex Attempt: the image must hold it. */
+        codexVersion?: string;
       },
       caller?: AbortSignal,
     ): Promise<{ sandboxId: string }> {
@@ -680,6 +757,12 @@ export function createSandboxWorkspaceSession(
         (request.prepare || !/^[0-9a-f]{64}$/u.test(request.dependencyCache))
       )
         throw workspaceError("dependency cache is invalid");
+      if (
+        request.codexVersion !== undefined &&
+        (request.prepare ||
+          !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.]{1,32})?$/u.test(request.codexVersion))
+      )
+        throw workspaceError("Codex version is invalid");
       const build =
         request.prepare ||
         (preparedArtifact === undefined && (environment?.dockerfileCommands.length ?? 0) > 0);
@@ -714,7 +797,7 @@ export function createSandboxWorkspaceSession(
         if (request.egress && !sandbox.egressRelay)
           throw new Error("Sandbox egress relay is unavailable");
         egress = request.egress;
-        // Commands and Workspace MCP servers are Task-driven processes that may outlive their
+        // Commands and stdio servers are Task-driven processes that may outlive their
         // call, so every sandbox records its own processes first, before any of them exists.
         commands = request.allowedActions.includes("commands:execute");
         if (sandbox.runPrivileged) {
@@ -723,13 +806,15 @@ export function createSandboxWorkspaceSession(
             await recording.record(signal);
             seal = recording;
           } catch (error) {
-            // Without commands the record matters only if a Workspace MCP server runs; then
+            // Without commands the record matters only if a stdio server runs; then
             // Capture refuses. An image the record cannot run in never fails a file-only Task.
             if (commands) throw error;
           }
         }
         // Only a sandbox that can be sealed admits commands.
         if (commands && !seal) throw new Error("Sandbox cannot be sealed");
+        if (request.codexVersion !== undefined)
+          codexVersion = await prepareCodex(sandbox, request.codexVersion, signal);
         root = preparing || fromArtifact ? preparedRoot : `/tmp/supertag-workspace-${randomUUID()}`;
         phase = "allocated";
         return { sandboxId };
@@ -914,19 +999,43 @@ export function createSandboxWorkspaceSession(
       if (result.isError && (await confirmedGone())) return lostResult();
       return result;
     },
-    /**
-     * Starts one Workspace stdio MCP server in the trusted copy beside the checkout, with only a
-     * fixed PATH and LANG: no Worker Host variable and no variable a Harness plan set.
-     */
-    /** Stops a server startMcpServer returned; see stopMcpServer. */
-    async stopMcpServer(server: ProcessHandle): Promise<void> {
-      if (!(await stopMcpServer(server))) uncertain = true;
+    /** Stops a server startStdioServer returned; see stopStdioServer. */
+    async stopStdioServer(server: ProcessHandle): Promise<void> {
+      if (!(await stopStdioServer(server))) uncertain = true;
     },
-    async startMcpServer(start: McpServerStart, caller?: AbortSignal): Promise<ProcessHandle> {
+    /**
+     * Starts one stdio server under the supervisor, with an exact environment and nothing
+     * inherited from the Worker Host or a Harness plan:
+     * - a Workspace MCP server in the trusted copy beside the checkout, with only PATH and LANG;
+     * - Codex's exec-server in the checkout, with what a Task command gets plus the read-only
+     *   `CODEX_HOME`. Codex applies its environment policy to this environment for every command
+     *   it runs, so it is the whole environment those commands can inherit.
+     */
+    async startStdioServer(start: StdioServerStart, caller?: AbortSignal): Promise<ProcessHandle> {
       if (phase !== "staged" || !sandbox || !root)
-        throw workspaceError("must be staged before an MCP server starts");
-      if (!mcpStaged) throw workspaceError("has no trusted MCP copy");
-      if (!validMcpStart(start)) throw workspaceError("MCP server launch is invalid");
+        throw workspaceError("must be staged before a stdio server starts");
+      let launch: { cwd: string; environment: Record<string, string>; argv: string[] };
+      if (start.kind === "mcp") {
+        if (!mcpStaged) throw workspaceError("has no trusted MCP copy");
+        if (!validMcpStart(start)) throw workspaceError("MCP server launch is invalid");
+        launch = {
+          cwd: "mcp",
+          environment: { PATH: MCP_PATH, LANG: "C.UTF-8" },
+          argv: [start.command, ...start.args],
+        };
+      } else {
+        if (codexVersion === undefined) throw workspaceError("was not allocated for Codex");
+        launch = {
+          cwd: "checkout",
+          environment: {
+            PATH: MCP_PATH,
+            LANG: "C.UTF-8",
+            ...commandVariables(),
+            CODEX_HOME,
+          },
+          argv: ["codex", "exec-server", "--listen", "stdio"],
+        };
+      }
       caller?.throwIfAborted();
       lifetime.signal.throwIfAborted();
       // Only the session's end cancels the process; a caller's end stops it through its input.
@@ -941,11 +1050,11 @@ export function createSandboxWorkspaceSession(
             "-I",
             "-S",
             "-c",
-            MCP_SUPERVISOR,
-            start.command,
-            ...start.args,
+            STDIO_SUPERVISOR,
+            JSON.stringify(launch.environment),
+            ...launch.argv,
           ],
-          cwd: "mcp",
+          cwd: launch.cwd,
           environment: {},
           replaceEnvironment: true,
           streamInput: true,
@@ -953,21 +1062,21 @@ export function createSandboxWorkspaceSession(
         },
         lifetime.signal,
       );
-      mcpServers.add(server);
-      mcpStarted = true;
+      stdioServers.add(server);
+      stdioStarted = true;
       void server.wait().then(
-        () => mcpServers.delete(server),
-        () => mcpServers.delete(server),
+        () => stdioServers.delete(server),
+        () => stdioServers.delete(server),
       );
       const refuse = async (message: string) => {
-        if (!(await stopMcpServer(server))) uncertain = true;
+        if (!(await stopStdioServer(server))) uncertain = true;
         return workspaceError(message);
       };
       if (!server.write || !server.endInput || !server.output)
-        throw await refuse("cannot stream MCP server input and output");
+        throw await refuse("cannot stream the stdio server's input and output");
       if (phase !== "staged") throw await refuse("tools were sealed");
-      caller?.addEventListener("abort", () => void stopMcpServer(server), { once: true });
-      if (caller?.aborted) void stopMcpServer(server);
+      caller?.addEventListener("abort", () => void stopStdioServer(server), { once: true });
+      if (caller?.aborted) void stopStdioServer(server);
       return server;
     },
     /**
@@ -986,7 +1095,7 @@ export function createSandboxWorkspaceSession(
         // Close admissions first. Allow active file processes to settle naturally.
         // Abort/transport uncertainty while a tool ran permanently prevents capture.
         await toolTail;
-        await stopMcpServers();
+        await stopStdioServers();
         await tools.dispose();
         if (uncertain) throw workspaceError("was modified by an unsettled operation");
         signal.throwIfAborted();
@@ -1013,7 +1122,7 @@ export function createSandboxWorkspaceSession(
         // Nothing a Task-driven process left running may change the tree while it is read: the
         // seal and the capture run as one privileged process, with no gap between them.
         let result: { exitCode: number | null; stdout: string };
-        if (commands || mcpStarted) {
+        if (commands || stdioStarted) {
           if (!seal) {
             uncertain = true;
             throw workspaceError("could not be sealed");

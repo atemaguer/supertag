@@ -6374,10 +6374,10 @@ class RemoteWorkspaceProviderStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStopRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStopResponse.FromString,
                 _registered_method=True)
-        self.RunMcpServer = channel.stream_stream(
-                '/supertag.runtime.v2.RemoteWorkspaceProvider/RunMcpServer',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteMcpServerInput.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteMcpServerOutput.FromString,
+        self.RunStdioServer = channel.stream_stream(
+                '/supertag.runtime.v2.RemoteWorkspaceProvider/RunStdioServer',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteStdioServerInput.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteStdioServerOutput.FromString,
                 _registered_method=True)
         self.StageCopy = channel.stream_unary(
                 '/supertag.runtime.v2.RemoteWorkspaceProvider/StageCopy',
@@ -6430,10 +6430,11 @@ class RemoteWorkspaceProviderServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def RunMcpServer(self, request_iterator, context):
-        """One Workspace stdio MCP server, started inside the staged sandbox from its trusted copy.
-        The first input is the start record; later inputs are its stdin. Outputs are its stdout.
-        Ending or cancelling the call stops the server process, never the sandbox.
+    def RunStdioServer(self, request_iterator, context):
+        """One stdio server started inside the staged sandbox: a Workspace MCP server from its trusted
+        copy, or Codex's exec-server for a Codex Attempt. The first input is the start record; later
+        inputs are its stdin. Outputs are its stdout. Ending or cancelling the call stops the server
+        process, never the sandbox.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -6495,10 +6496,10 @@ def add_RemoteWorkspaceProviderServicer_to_server(servicer, server):
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStopRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStopResponse.SerializeToString,
             ),
-            'RunMcpServer': grpc.stream_stream_rpc_method_handler(
-                    servicer.RunMcpServer,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteMcpServerInput.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteMcpServerOutput.SerializeToString,
+            'RunStdioServer': grpc.stream_stream_rpc_method_handler(
+                    servicer.RunStdioServer,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteStdioServerInput.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteStdioServerOutput.SerializeToString,
             ),
             'StageCopy': grpc.stream_unary_rpc_method_handler(
                     servicer.StageCopy,
@@ -6642,7 +6643,7 @@ class RemoteWorkspaceProvider:
             _registered_method=True)
 
     @staticmethod
-    def RunMcpServer(request_iterator,
+    def RunStdioServer(request_iterator,
             target,
             options=(),
             channel_credentials=None,
@@ -6655,9 +6656,9 @@ class RemoteWorkspaceProvider:
         return grpc.experimental.stream_stream(
             request_iterator,
             target,
-            '/supertag.runtime.v2.RemoteWorkspaceProvider/RunMcpServer',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteMcpServerInput.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteMcpServerOutput.FromString,
+            '/supertag.runtime.v2.RemoteWorkspaceProvider/RunStdioServer',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteStdioServerInput.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteStdioServerOutput.FromString,
             options,
             channel_credentials,
             insecure,

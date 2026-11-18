@@ -1173,10 +1173,11 @@ service RemoteWorkspaceProvider {
   rpc Stage(stream RemoteWorkspaceStageChunk) returns (RemoteWorkspaceStageResponse);
   rpc Capture(RemoteWorkspaceCaptureRequest) returns (stream RemoteWorkspaceCaptureChunk);
   rpc Stop(RemoteWorkspaceStopRequest) returns (RemoteWorkspaceStopResponse);
-  // One Workspace stdio MCP server, started inside the staged sandbox from its trusted copy.
-  // The first input is the start record; later inputs are its stdin. Outputs are its stdout.
-  // Ending or cancelling the call stops the server process, never the sandbox.
-  rpc RunMcpServer(stream RemoteMcpServerInput) returns (stream RemoteMcpServerOutput);
+  // One stdio server started inside the staged sandbox: a Workspace MCP server from its trusted
+  // copy, or Codex's exec-server for a Codex Attempt. The first input is the start record; later
+  // inputs are its stdin. Outputs are its stdout. Ending or cancelling the call stops the server
+  // process, never the sandbox.
+  rpc RunStdioServer(stream RemoteStdioServerInput) returns (stream RemoteStdioServerOutput);
   // One Workspace Volume copy the Worker Host staged, uploaded after Stage and before the
   // Harness starts: the header, then for each file its record and exactly its bytes, and each
   // empty directory. The provider seals a read-only copy, and Capture leaves every copy out of
@@ -1278,6 +1279,10 @@ message RemoteWorkspaceAllocateRequest {
   // Workspace: a SHA-256 of the Worker Host, Workspace, and Tag, never their names. Empty for a
   // preparation sandbox. A provider that keeps no cache ignores it.
   string dependency_cache = 3800;
+  // For a Codex Attempt, the Worker Host's Codex version (`codex --version` without its
+  // `codex-cli ` prefix). The image must contain a `codex` of exactly this version, or allocation
+  // fails naming the version needed. Empty for every other harness.
+  string codex_version = 3900;
 }
 
 // A sandbox image and setup derived only from the trusted commit's devcontainer subset.
@@ -1379,14 +1384,27 @@ message RemoteMcpServerStart {
   repeated string args = 3;
 }
 
-message RemoteMcpServerInput {
+// `codex exec-server --listen stdio`, run in the checkout as the Workspace user with the
+// environment a Workspace command gets, and `CODEX_HOME` set to an empty directory the user cannot
+// write, so nothing in the sandbox adds Codex configuration such as MCP servers. Only a sandbox
+// allocated with `codex_version` starts it.
+message RemoteCodexExecServerStart {}
+
+message RemoteStdioServerStart {
+  oneof server {
+    RemoteMcpServerStart mcp = 1;
+    RemoteCodexExecServerStart codex_exec_server = 2;
+  }
+}
+
+message RemoteStdioServerInput {
   oneof part {
-    RemoteMcpServerStart start = 1;
+    RemoteStdioServerStart start = 1;
     bytes stdin = 2;
   }
 }
 
-message RemoteMcpServerOutput {
+message RemoteStdioServerOutput {
   bytes stdout = 1;
 }
 

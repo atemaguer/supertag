@@ -14,7 +14,8 @@ use serde_json::{Value, json};
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
-        RemoteMcpServerInput, RemoteMcpServerStart, remote_mcp_server_input,
+        RemoteMcpServerStart, RemoteStdioServerInput, RemoteStdioServerStart,
+        remote_stdio_server_input, remote_stdio_server_start,
         remote_workspace_provider_client::RemoteWorkspaceProviderClient,
     },
 };
@@ -142,12 +143,18 @@ impl Session {
         let (program, args) = command.split_first().ok_or(Failure::Unavailable)?;
         let (sender, receiver) = mpsc::channel(4);
         sender
-            .try_send(RemoteMcpServerInput {
-                part: Some(remote_mcp_server_input::Part::Start(RemoteMcpServerStart {
-                    name: name.to_owned(),
-                    command: program.clone(),
-                    args: args.to_vec(),
-                })),
+            .try_send(RemoteStdioServerInput {
+                part: Some(remote_stdio_server_input::Part::Start(
+                    RemoteStdioServerStart {
+                        server: Some(remote_stdio_server_start::Server::Mcp(
+                            RemoteMcpServerStart {
+                                name: name.to_owned(),
+                                command: program.clone(),
+                                args: args.to_vec(),
+                            },
+                        )),
+                    },
+                )),
             })
             .map_err(|_| Failure::Unavailable)?;
         let request = authenticated_request(ReceiverStream::new(receiver), &connection.token, None)
@@ -165,8 +172,8 @@ impl Session {
                     match pump_input.read(&mut buffer).await {
                         Ok(0) | Err(_) => break,
                         Ok(size) => {
-                            let chunk = RemoteMcpServerInput {
-                                part: Some(remote_mcp_server_input::Part::Stdin(
+                            let chunk = RemoteStdioServerInput {
+                                part: Some(remote_stdio_server_input::Part::Stdin(
                                     buffer[..size].to_vec(),
                                 )),
                             };
@@ -178,7 +185,7 @@ impl Session {
                 }
             };
             let forward_output = async move {
-                let Ok(response) = client.run_mcp_server(request).await else {
+                let Ok(response) = client.run_stdio_server(request).await else {
                     return;
                 };
                 let mut stream = response.into_inner();

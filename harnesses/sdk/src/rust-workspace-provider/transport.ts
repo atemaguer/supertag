@@ -160,8 +160,8 @@ async function* boundedParts<T extends { part?: { case?: string | undefined; val
   }
 }
 
-/** A Workspace MCP server's stdin arrives in bounded chunks for as long as the server runs. */
-async function* boundedMcpInput<
+/** A stdio server's stdin arrives in bounded chunks for as long as the server runs. */
+async function* boundedStdioInput<
   T extends { part?: { case?: string | undefined; value?: unknown } },
 >(source: AsyncIterable<T>, limits: typeof MAXIMUM, context: HandlerContext): AsyncGenerator<T> {
   try {
@@ -172,7 +172,7 @@ async function* boundedMcpInput<
         part.part?.case === "stdin" &&
         (!(value instanceof Uint8Array) || value.byteLength > limits.chunkBytes)
       )
-        throw new ConnectError("Workspace MCP input exceeds its limit", Code.ResourceExhausted);
+        throw new ConnectError("Stdio server input exceeds its limit", Code.ResourceExhausted);
       yield part;
     }
   } catch (error) {
@@ -266,10 +266,10 @@ export async function startRemoteWorkspaceTransport(
             invoke(context, () => options.provider.snapshot(request, context)),
           removeArtifact: (request, context) =>
             invoke(context, () => options.provider.removeArtifact(request, context)),
-          runMcpServer: async function* (stream, context) {
+          runStdioServer: async function* (stream, context) {
             try {
-              yield* options.provider.runMcpServer(
-                boundedMcpInput(stream, limits, context),
+              yield* options.provider.runStdioServer(
+                boundedStdioInput(stream, limits, context),
                 context,
               );
             } catch (error) {
