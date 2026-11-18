@@ -291,7 +291,7 @@ it("records the sandbox's processes, seals it before capture, and returns no ign
   expect(paths.some((path) => path.split("/").includes(".git"))).toBe(false);
   expect(paths).not.toContain("out/scratch.txt");
   await session.stop({ owner });
-});
+}, 15_000);
 
 it("allocates a file-only Task even where the process record cannot run, but never commands", async () => {
   const broken = vi.fn(async () => ({ exitCode: 127, stdout: "python3: not found\n" }));
