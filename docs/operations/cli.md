@@ -137,10 +137,12 @@ A Claude Code, Cursor, or OpenCode lead set up without commands reads and edits 
 none. To let it run commands, first choose where they run on the host in
 `~/.supertag/supertag.yaml`: `environment: local-vm` with Docker running, or
 `allow-unsandboxed-commands: [claude-code]` (or the harness's name) to run them on this machine as
-you. Then grant `commands:execute` in the lead's Permission Set and restart the services:
+you. Then grant `commands:execute` in the lead's Permission Set and restart the services.
+`--force-conflicts` is needed because `init` created the set; the `&&` stops before `up` if the
+apply fails:
 
 ```sh
-supertag apply --set provision -f - <<'END'
+supertag apply --set provision --force-conflicts -f - <<'END' &&
 apiVersion: supertag/v1
 kind: PermissionSet
 metadata: { name: local-tools }
@@ -154,8 +156,12 @@ END
 supertag up
 ```
 
-Granting `commands:execute` without a place to run the commands makes every Task of the lead
-wait, with `unsandboxed-commands` in `supertag placement explain`.
+`supertag up` creates provisioned resources only when they are missing, so the older
+`local-tools` entry under `provision` in `supertag.yaml` doesn't take the grant away; add
+`commands:execute` there too to keep the file in step. Granting `commands:execute` without a
+place to run the commands makes every Task of the lead wait, with `unsandboxed-commands` in
+`supertag placement explain`.
+
 ## Talk to a Tag
 
 The terminal UI is the place for conversations. Plain `supertag` opens it for your local
