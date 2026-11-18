@@ -36,9 +36,10 @@ Check this page before [installing SuperTag](install.md).
 
 ## Choose and sign in to a harness
 
-Prepare at least one harness on the Worker Host. Codex and OpenCode need their CLIs on `PATH`,
-and `supertag init` finds Claude Code by its `claude` CLI; Cursor uses its bundled SDK and does not
-need `cursor-agent`. Sign in as the same OS user that runs the host.
+Prepare at least one harness on the Worker Host. Start with Claude Code or Codex: `supertag init`
+finds them by their `claude` and `codex` CLIs on `PATH`. Cursor and OpenCode also work (OpenCode
+needs its CLI on `PATH`; Cursor uses its bundled SDK and does not need `cursor-agent`). Sign in as
+the same OS user that runs the host.
 
 SuperTag runs the Codex CLI you install, so keep it current: `supertag init` and `supertag up`
 check its version and stop with the upgrade command when it is older than the minimum. A newer

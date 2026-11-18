@@ -106,7 +106,9 @@ toward the same Objective.
 
 ## Run your first Tag
 
-On an Apple silicon Mac or Linux, install Git, Node.js, and a [supported coding agent](#works-with). [Check requirements and sign-in](docs/operations/requirements.md)
+On an Apple silicon Mac or Linux, install Git and [Claude Code](https://code.claude.com/docs/en/setup)
+or [Codex](https://developers.openai.com/codex/cli/), and sign in to it. Claude Code also needs
+Node.js; see [requirements and sign-in](docs/operations/requirements.md) for versions.
 
 [Install SuperTag](docs/operations/install.md), then run this from an existing Git repository with
 at least one commit.

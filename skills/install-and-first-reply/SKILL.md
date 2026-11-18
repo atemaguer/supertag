@@ -9,14 +9,11 @@ Goal: one Tag that takes an Objective in a real git repository and delivers the 
 branch, followed by the same Tag answering in one chat channel. Do not configure more than one
 collaboration surface on the first run.
 
-Check [Requirements](../../docs/operations/requirements.md) for system tools and harness sign-in
-before starting. Before `supertag init`, sign in to each harness you will serve: run
+Use Codex or Claude Code for the first run. Check [Requirements](../../docs/operations/requirements.md)
+for system tools, then sign in before `supertag init`: run
 `codex -c 'cli_auth_credentials_store="file"' login` for Codex, or run `claude` and follow its
-prompt for Claude Code. For Cursor, the user generates an API key at
-https://cursor.com/dashboard/api and adds `CURSOR_API_KEY=...` to `~/.supertag/.env` themselves;
-`init` detects Cursor only when `CURSOR_API_KEY` is also set in the environment it runs in.
-Never ask for a key in chat or write it for them. For OpenCode, set the provider's API-key
-variable in `~/.supertag/.env`.
+prompt for Claude Code. Cursor and OpenCode also work; their setup is under
+[Other harnesses](#other-harnesses) below.
 
 ## 1. Install
 
@@ -36,8 +33,8 @@ cd ~/code/app
 supertag init
 ```
 
-`init` finds `claude`, `codex`, and `opencode` on `PATH`, and Cursor through `CURSOR_API_KEY`, and
-stops without changing anything when none is available. It checks each harness's sign-in with
+`init` finds `claude` and `codex` on `PATH` (and `opencode`, or Cursor through `CURSOR_API_KEY`),
+and stops without changing anything when none is available. It checks each harness's sign-in with
 the credentials the Worker Host will have and labels it `signed in` or not, with sign-in
 instructions. OpenCode prints `sign-in not checked (choose a model)` until you choose a model.
 It then asks for the Control Plane port, the harness (and a `provider/model` for OpenCode), the
@@ -91,8 +88,9 @@ supertag describe objective readme-setup
 ```
 
 `watch objective` follows the Objective as a timeline until it closes. `describe` shows status,
-owner, **Delivered**, **Needs you**, and each Session. When a Task changes the repository,
-`supertag up` imports its commits as the branch `supertag/session/HASH` in your checkout:
+owner, **Delivered**, **Needs you**, and each Session. When a Task changes the repository, the
+Worker Host writes its commits into your repository as the branch `supertag/session/HASH`. It
+never switches your checked-out branch or touches your working tree:
 
 ```sh
 git branch --list 'supertag/session/*'
@@ -180,3 +178,11 @@ team deployment, continue to [deploy-supertag](../deploy-supertag/SKILL.md).
 | 3 | `supertag describe objective readme-setup` shows the owner's turn queued or running |
 | 4 | `describe objective` lists a delivery, and `git branch` shows `supertag/session/...` |
 | 6 | `supertag get surface-location` lists the channel, and a threaded reply appears |
+
+## Other harnesses
+
+For Cursor, the user generates an API key at https://cursor.com/dashboard/api and adds
+`CURSOR_API_KEY=...` to `~/.supertag/.env` themselves; `init` detects Cursor only when
+`CURSOR_API_KEY` is also set in the environment it runs in. Never ask for a key in chat or write
+it for them. For OpenCode, set the provider's API-key variable in `~/.supertag/.env`; `init` then
+asks for a `provider/model`. See [Requirements](../../docs/operations/requirements.md#choose-and-sign-in-to-a-harness).

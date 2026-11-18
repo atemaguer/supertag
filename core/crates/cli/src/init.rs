@@ -218,7 +218,7 @@ fn repository() -> Result<Repository> {
     let output = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
         .output()
-        .context("run git")?;
+        .context("supertag init needs git on PATH; install it and run supertag init again")?;
     ensure!(
         output.status.success(),
         "supertag init sets up SuperTag for a git repository; run it inside one"
@@ -409,7 +409,7 @@ pub async fn init(args: InitArgs) -> Result<()> {
     let installed = installed_harnesses();
     ensure!(
         !installed.is_empty(),
-        "SuperTag runs Tasks with an installed harness, and none was found. Install one of:\n  Claude Code: npm install -g @anthropic-ai/claude-code\n  Codex: npm install -g @openai/codex\n  OpenCode: npm install -g opencode-ai\n  Cursor: set CURSOR_API_KEY\nThen run supertag init again."
+        "SuperTag runs Tasks with an installed coding agent, and none was found. Install Claude Code or Codex:\n  Claude Code: npm install -g @anthropic-ai/claude-code\n  Codex: npm install -g @openai/codex\nSign in to it, then run supertag init again. (OpenCode, with opencode on PATH, and Cursor, with CURSOR_API_KEY set, also work.)"
     );
     if args.yes && installed == [Found::Opencode] {
         bail!(
