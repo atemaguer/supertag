@@ -37,6 +37,9 @@ With `--harness codex` or `--harness claude-code` (or SUPERTAG_E2E_HARNESS), the
 harness with this machine's own CLI login instead, which spends a few small turns. Claude Code
 also needs its bridge staged beside the CLI (scripts/node_bridges.py). Without
 SUPERTAG_E2E_BINARY every journey is skipped, as in CI.
+
+`--provider modal` runs only ModalJourney instead: one Claude Code turn in a Modal sandbox on the
+signed-in Modal CLI's profile (see its docstring for what it needs).
 """
 from __future__ import annotations
 
@@ -56,6 +59,8 @@ from pathlib import Path
 
 BINARY = os.environ.get("SUPERTAG_E2E_BINARY", "")
 HARNESS = os.environ.get("SUPERTAG_E2E_HARNESS", "")
+PROVIDER = os.environ.get("SUPERTAG_E2E_PROVIDER", "")
+REPOSITORY = Path(__file__).resolve().parents[1]
 TERMINAL = {"TASK_STATE_SUCCEEDED", "TASK_STATE_FAILED", "TASK_STATE_CANCELLED", "TASK_STATE_UNCERTAIN"}
 BASE = "base\n"
 
@@ -72,7 +77,8 @@ TOKEN = "e2e-" + os.urandom(16).hex()
 
 
 class GitHttp(http.server.BaseHTTPRequestHandler):
-    """`git http-backend` over HTTP that requires basic auth with the user `supertag` and TOKEN."""
+    """`git http-backend` over HTTP that requires basic auth with the user `supertag` and TOKEN.
+    `Stack.serve_git_http` makes a subclass with its own `root`."""
 
     root = ""
     expected = "Basic " + base64.b64encode(f"supertag:{TOKEN}".encode()).decode()
@@ -125,11 +131,14 @@ def free_port() -> int:
         return probe.getsockname()[1]
 
 
+def edit_text(line: str) -> str:
+    """A model's turn that appends `line` to workspace.txt."""
+    return f"Append the line '{line}' at the end of workspace.txt, creating the file if it is missing. Change nothing else."
+
+
 def edit(line: str) -> str:
     """A turn that appends `line` to workspace.txt."""
-    if HARNESS:
-        return f"Append the line '{line}' at the end of workspace.txt, creating the file if it is missing. Change nothing else."
-    return f"edit: {line}"
+    return edit_text(line) if HARNESS else f"edit: {line}"
 
 
 def start(title: str, line: str) -> str:
@@ -140,8 +149,117 @@ def start(title: str, line: str) -> str:
     return f"start: {title} | {edit(line)}"
 
 
+class Stack(unittest.TestCase):
+    """A disposable `supertag up` in a temporary directory, and helpers to drive it. A subclass's
+    setUpClass sets `binary`, `temporary`, `root`, and `state`, then writes supertag.yaml and
+    runs `up`."""
+
+    timeout = 120
+
+    @classmethod
+    def serve_git_http(cls, root: Path) -> str:
+        """Serves the bare repositories under `root` over HTTP with basic auth; returns the URL."""
+        handler = type("Handler", (GitHttp,), {"root": str(root)})
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        cls.addClassCleanup(server.server_close)
+        cls.addClassCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_address[1]}"
+
+    @classmethod
+    def down(cls):
+        subprocess.run([str(cls.binary), "down", "--force"], env=cls.environment(), capture_output=True)
+        cls.temporary.cleanup()
+
+    @classmethod
+    def environment(cls) -> dict[str, str]:
+        environment = {key: value for key, value in os.environ.items() if not key.startswith("SUPERTAG_")}
+        environment["SUPERTAG_STATE_DIR"] = str(cls.state)
+        return environment
+
+    @classmethod
+    def cli(cls, *args: str, extra: dict[str, str] | None = None):
+        done = subprocess.run([str(cls.binary), *args], env={**cls.environment(), **(extra or {})},
+                              capture_output=True, text=True, timeout=300)
+        if done.returncode != 0:
+            raise AssertionError(f"supertag {' '.join(args)} failed:\n{done.stdout}\n{done.stderr}")
+        try:
+            return json.loads(done.stdout)
+        except json.JSONDecodeError:
+            return done.stdout
+
+    def submit(self, tag: str, session: str, prompt: str, harness: str | None = None) -> str:
+        harness = HARNESS if harness is None else harness
+        limits = []
+        if harness == "codex":
+            limits = ["--max-reported-tokens", "400000"]
+        elif harness == "claude-code":
+            limits = ["--max-reported-cost-minor", "100", "--reported-cost-currency", "USD"]
+        return self.cli("task", "submit", "--tag", tag, "--session", session, *limits, prompt)["task_id"]
+
+    def until(self, what: str, read, ready):
+        deadline = time.monotonic() + self.timeout
+        while True:
+            value = read()
+            if ready(value):
+                return value
+            if time.monotonic() > deadline:
+                landings = self.cli("get", "landings")
+                self.fail(f"timed out waiting for {what}: {value}\nlandings: {json.dumps(landings)}")
+            time.sleep(1)
+
+    def finished(self, task: str) -> dict:
+        value = self.until(f"Task {task}", lambda: self.cli("get", "task", task),
+                           lambda value: value["state"] in TERMINAL)
+        self.assertEqual(value["state"], "TASK_STATE_SUCCEEDED", value)
+        return value
+
+    def landing(self, session: str, mode: str, after: str | None = None) -> dict:
+        """The Session's first `mode` landing, or the first one after the landing `after`, once
+        it has finished."""
+        def read():
+            landings = sorted(self.cli("get", "landings", "--session-id", session)["landings"],
+                              key=lambda landing: landing["created_order"])
+            if after is not None:
+                ids = [landing["landing_id"] for landing in landings]
+                landings = landings[ids.index(after) + 1:] if after in ids else []
+            for landing in landings:
+                if landing["mode"] == mode:
+                    return landing
+            return None
+        return self.until(f"a {mode} landing of {session}", read,
+                          lambda value: value is not None and value["state"] not in ("queued", "claimed"))
+
+    def work_session(self, tag: str, parent: str) -> dict:
+        listed = self.until(f"the Work Session of {parent}",
+                            lambda: self.cli("get", "sessions", "--parent-tag", tag, "--parent-session", parent),
+                            lambda value: value["work_sessions"])
+        work = listed["work_sessions"][0]
+        self.finished(work["latest_task_id"])
+        reported = self.until(f"the report of {work['work_session_id']}",
+                              lambda: self.cli("get", "session", work["work_session_id"]),
+                              lambda value: value.get("report_task_state") in TERMINAL)
+        return reported
+
+    @staticmethod
+    def read(repository: Path, ref: str) -> str:
+        return git(repository, "show", f"{ref}:workspace.txt")
+
+    def session_branches(self, repository: Path) -> set[str]:
+        return set(git(repository, "for-each-ref", "--format=%(refname:short)", "refs/heads/supertag/session").split())
+
+    def assert_no_secret_on_disk(self, directory: Path, secrets: list[str]):
+        """No regular file under `directory` holds any of `secrets`."""
+        self.assertTrue(directory.is_dir(), directory)
+        for path in directory.rglob("*"):
+            if path.is_file() and not path.is_symlink():
+                data = path.read_bytes()
+                for secret in secrets:
+                    self.assertNotIn(secret.encode(), data, f"{secret[:12]}... found in {path}")
+
+
 @unittest.skipUnless(BINARY, "set SUPERTAG_E2E_BINARY to a supertag built with --features test-fixtures")
-class Journeys(unittest.TestCase):
+class Journeys(Stack):
     """One stack for every journey, in order: later journeys reuse the earlier Sessions' state."""
 
     timeout = 600 if HARNESS else 120
@@ -170,11 +288,7 @@ class Journeys(unittest.TestCase):
         cls.http_root = cls.root / "http"
         cls.http_root.mkdir()
         git(cls.root, "clone", "-q", "--bare", str(cls.server), str(cls.http_root / "handbook.git"))
-        GitHttp.root = str(cls.http_root)
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), GitHttp)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        cls.addClassCleanup(server.shutdown)
-        cls.http_remote = f"http://127.0.0.1:{server.server_address[1]}/handbook.git"
+        cls.http_remote = cls.serve_git_http(cls.http_root) + "/handbook.git"
 
         # SSH key: sshd in a disposable container, when Docker runs here.
         cls.ssh_remote = cls.start_sshd()
@@ -308,87 +422,6 @@ spec:
         cls.ssh_command = ssh_command
         return remote
 
-    @classmethod
-    def down(cls):
-        subprocess.run([str(cls.binary), "down", "--force"], env=cls.environment(), capture_output=True)
-        cls.temporary.cleanup()
-
-    @classmethod
-    def environment(cls) -> dict[str, str]:
-        environment = {key: value for key, value in os.environ.items() if not key.startswith("SUPERTAG_")}
-        environment["SUPERTAG_STATE_DIR"] = str(cls.state)
-        return environment
-
-    @classmethod
-    def cli(cls, *args: str, extra: dict[str, str] | None = None):
-        done = subprocess.run([str(cls.binary), *args], env={**cls.environment(), **(extra or {})},
-                              capture_output=True, text=True, timeout=300)
-        if done.returncode != 0:
-            raise AssertionError(f"supertag {' '.join(args)} failed:\n{done.stdout}\n{done.stderr}")
-        try:
-            return json.loads(done.stdout)
-        except json.JSONDecodeError:
-            return done.stdout
-
-    def submit(self, tag: str, session: str, prompt: str) -> str:
-        limits = []
-        if HARNESS == "codex":
-            limits = ["--max-reported-tokens", "400000"]
-        elif HARNESS == "claude-code":
-            limits = ["--max-reported-cost-minor", "100", "--reported-cost-currency", "USD"]
-        return self.cli("task", "submit", "--tag", tag, "--session", session, *limits, prompt)["task_id"]
-
-    def until(self, what: str, read, ready):
-        deadline = time.monotonic() + self.timeout
-        while True:
-            value = read()
-            if ready(value):
-                return value
-            if time.monotonic() > deadline:
-                landings = self.cli("get", "landings")
-                self.fail(f"timed out waiting for {what}: {value}\nlandings: {json.dumps(landings)}")
-            time.sleep(1)
-
-    def finished(self, task: str) -> dict:
-        value = self.until(f"Task {task}", lambda: self.cli("get", "task", task),
-                           lambda value: value["state"] in TERMINAL)
-        self.assertEqual(value["state"], "TASK_STATE_SUCCEEDED", value)
-        return value
-
-    def landing(self, session: str, mode: str, after: str | None = None) -> dict:
-        """The Session's first `mode` landing, or the first one after the landing `after`, once
-        it has finished."""
-        def read():
-            landings = sorted(self.cli("get", "landings", "--session-id", session)["landings"],
-                              key=lambda landing: landing["created_order"])
-            if after is not None:
-                ids = [landing["landing_id"] for landing in landings]
-                landings = landings[ids.index(after) + 1:] if after in ids else []
-            for landing in landings:
-                if landing["mode"] == mode:
-                    return landing
-            return None
-        return self.until(f"a {mode} landing of {session}", read,
-                          lambda value: value is not None and value["state"] not in ("queued", "claimed"))
-
-    def work_session(self, tag: str, parent: str) -> dict:
-        listed = self.until(f"the Work Session of {parent}",
-                            lambda: self.cli("get", "sessions", "--parent-tag", tag, "--parent-session", parent),
-                            lambda value: value["work_sessions"])
-        work = listed["work_sessions"][0]
-        self.finished(work["latest_task_id"])
-        reported = self.until(f"the report of {work['work_session_id']}",
-                              lambda: self.cli("get", "session", work["work_session_id"]),
-                              lambda value: value.get("report_task_state") in TERMINAL)
-        return reported
-
-    @staticmethod
-    def read(repository: Path, ref: str) -> str:
-        return git(repository, "show", f"{ref}:workspace.txt")
-
-    def session_branches(self, repository: Path) -> set[str]:
-        return set(git(repository, "for-each-ref", "--format=%(refname:short)", "refs/heads/supertag/session").split())
-
     def test_1_local_land_writes_the_session_branch_and_continuation_builds_on_it(self):
         task = self.finished(self.submit("local", "journey-local", edit("alpha")))
         branches = self.until("the local Session branch", lambda: self.session_branches(self.repository), bool)
@@ -481,13 +514,7 @@ spec:
             received = (self.environment_dumps / f"{task['task_id']}.env").read_text()
             for secret in secrets:
                 self.assertNotIn(secret, received)
-        host = self.state / "hosts"
-        self.assertTrue(host.is_dir(), host)
-        for path in host.rglob("*"):
-            if path.is_file() and not path.is_symlink():
-                data = path.read_bytes()
-                for secret in secrets:
-                    self.assertNotIn(secret.encode(), data, f"{secret[:12]}... found in {path}")
+        self.assert_no_secret_on_disk(self.state / "hosts", secrets)
         return landing
 
     def test_5_https_token_remote_lands_without_the_token_reaching_the_host(self):
@@ -514,7 +541,6 @@ spec:
         self.assertTrue(shown.startswith(landing["landed_commit"]), shown)
 
 
-REPOSITORY = Path(__file__).resolve().parent.parent
 LOCAL_VM_ADAPTER = REPOSITORY / "harnesses/claude-code/dist/rust-adapter/entry.js"
 LOCAL_VM_PROVIDER = REPOSITORY / "harnesses/environments/local-vm/dist/rust-provider/main.js"
 LOCAL_VM_CLAUDE = REPOSITORY / "harnesses/claude-code/fixtures/rust-native-claude.mjs"
@@ -529,7 +555,7 @@ def docker_runs() -> bool:
 @unittest.skipUnless(docker_runs(), "the local-vm journey needs Docker")
 @unittest.skipUnless(shutil.which("node") and LOCAL_VM_ADAPTER.exists() and LOCAL_VM_PROVIDER.exists(),
                      "build the Claude Code adapter and the local-vm provider: pnpm -r build")
-class LocalVmJourney(unittest.TestCase):
+class LocalVmJourney(Stack):
     """A remote Workspace whose Task runs commands in a local-vm container, on a Worker Host
     enrolled with a host Auth Key, and whose Session branch lands on the git server. The host runs
     the fixture Claude Code, so no model is called; the first run builds the container image."""
@@ -624,11 +650,6 @@ spec:
             cls.host.kill()
         cls.host_log.close()
 
-    # The journeys' own stack helpers, wherever in their class hierarchy they are defined.
-    down, environment, cli, until, finished, landing = (
-        next(vars(base)[name] for base in Journeys.__mro__ if name in vars(base))
-        for name in ("down", "environment", "cli", "until", "finished", "landing"))
-
     def test_a_local_vm_task_runs_commands_in_its_container_and_lands_its_session_branch(self):
         task_id = self.cli("task", "submit", "--tag", "vm", "--session", "journey-vm",
                            "local-vm-command")["task_id"]
@@ -654,7 +675,148 @@ spec:
         self.assertEqual(left.strip(), "")
 
 
+class ModalJourney(Stack):
+    """A remote Workspace on a Worker Host whose Workspaces run in Modal sandboxes: one Claude Code
+    turn (a Modal host takes Claude Code, Cursor, or OpenCode, not Codex or an adapter) whose
+    Session branch lands on an HTTPS-token server.
+
+    The git server stays on loopback: the Worker Host reads the source and pushes the Session's
+    branch itself, and only the checkout's files travel to the sandbox, so Modal never reaches it.
+    It needs the Modal CLI signed in (`~/.modal.toml`; MODAL_PROFILE picks a profile other than
+    the active one), an existing Modal app (SUPERTAG_E2E_MODAL_APP, default supertag-conformance),
+    the Modal provider built (`pnpm --filter @supertag/worker-environment-modal build`), Node on
+    PATH, the Claude Code bridge staged beside the CLI, and a Claude Code sign-in. One sandbox,
+    for one turn of a few seconds; the provider takes no filesystem snapshot without a setup.
+    """
+
+    timeout = 900
+
+    @classmethod
+    def setUpClass(cls):
+        if not (BINARY and PROVIDER == "modal"):
+            raise unittest.SkipTest("run with --provider modal; it spends Modal and Claude Code credit")
+        provider = REPOSITORY / "harnesses/environments/modal/dist/rust-provider/main.js"
+        node = shutil.which("node")
+        if not provider.exists() or node is None:
+            raise unittest.SkipTest(f"build {provider} and put node on PATH")
+        token_id, token_secret = cls.modal_token()
+        cls.binary = Path(BINARY).resolve()
+        cls.temporary = tempfile.TemporaryDirectory(prefix="st-e2e-modal-")
+        cls.root = Path(cls.temporary.name)
+        cls.state = cls.root / "state"
+        cls.state.mkdir(mode=0o700)
+        seed = cls.root / "seed"
+        seed.mkdir()
+        git(seed, "init", "-q", "-b", "main")
+        (seed / "workspace.txt").write_text(BASE)
+        git(seed, "add", "-A")
+        git(seed, "commit", "-qm", "Initial")
+        cls.http_root = cls.root / "http"
+        cls.http_root.mkdir()
+        git(cls.root, "init", "-q", "--bare", "-b", "main", str(cls.http_root / "handbook.git"))
+        git(seed, "push", "-q", str(cls.http_root / "handbook.git"), "main")
+        cls.http_remote = cls.serve_git_http(cls.http_root) + "/handbook.git"
+
+        port = free_port()
+        (cls.state / "supertag.yaml").write_text(f"""version: 1
+name: st-e2e-modal
+services:
+  control-plane:
+    type: control-plane
+    ports: ["127.0.0.1:{port}"]
+    provision:
+      - apiVersion: supertag/v1
+        kind: PermissionSet
+        metadata: {{ name: edit }}
+        spec:
+          permissions:
+            - {{ target: runtime, action: files:read }}
+            - {{ target: runtime, action: files:write }}
+            - {{ target: runtime, action: commands:execute }}
+      - apiVersion: supertag/v1
+        kind: Role
+        metadata: {{ name: Builder }}
+        spec:
+          purpose: "Make small, bounded repository changes and report what changed."
+          permissionSets: [edit]
+""")
+        cls.cli("up")
+        cls.addClassCleanup(cls.down)
+        cls.cli("workspace", "credential", "add", "https-token", "--https-token", "--username", "supertag",
+                extra={"SUPERTAG_WORKSPACE_TOKEN": TOKEN})
+        cls.cli("workspace", "put", "handbook-modal", "--remote", cls.http_remote, "--ref", "main",
+                "--credential", "https-token")
+        manifest = cls.root / "tag.yaml"
+        manifest.write_text("""apiVersion: supertag/v1
+kind: Tag
+metadata: { name: modal }
+spec:
+  instructions: "Make the smallest change that does what is asked. Commit nothing yourself. Be brief."
+  roles: [Builder]
+  execution: { harness: claude-code }
+  workspace: { id: handbook-modal }
+""")
+        cls.cli("apply", "-f", str(manifest))
+
+        key = cls.cli("auth-key", "create", "modal-host", "--role", "host", "--all-tags")["auth_key"]
+        cls.host_state = cls.root / "modal-host"
+        cls.host_state.mkdir(mode=0o700)
+        control_plane = f"http://127.0.0.1:{port}"
+        cls.cli("host", "enroll", "modal-host", "--control-plane", control_plane,
+                "--state-directory", str(cls.host_state), extra={"SUPERTAG_AUTH_KEY": key})
+        environment = {key: value for key, value in os.environ.items() if not key.startswith(("SUPERTAG_", "MODAL_"))}
+        environment.update({
+            "MODAL_TOKEN_ID": token_id, "MODAL_TOKEN_SECRET": token_secret,
+            "SUPERTAG_MODAL_WORKSPACE_APP": os.environ.get("SUPERTAG_E2E_MODAL_APP", "supertag-conformance"),
+        })
+        cls.host_log = (cls.root / "modal-host.log").open("w")
+        host = subprocess.Popen(
+            [str(cls.binary), "worker-host", "--control-plane", control_plane,
+             "--state-directory", str(cls.host_state), "--harness", "claude-code",
+             "--remote-workspace", "handbook-modal",
+             "--modal-workspace-provider", node, "--modal-workspace-provider-arg", str(provider)],
+            env=environment, stdout=cls.host_log, stderr=subprocess.STDOUT)
+        cls.addClassCleanup(cls.host_log.close)
+        cls.addClassCleanup(host.wait, 60)
+        cls.addClassCleanup(host.terminate)
+        cls.modal_secrets = [token_secret]
+
+    @staticmethod
+    def modal_token() -> tuple[str, str]:
+        """The Modal CLI's token for MODAL_PROFILE or its active profile, never printed."""
+        import tomllib
+        path = Path.home() / ".modal.toml"
+        if not path.exists():
+            raise unittest.SkipTest("sign in with the Modal CLI first (~/.modal.toml)")
+        profiles = tomllib.loads(path.read_text())
+        name = os.environ.get("MODAL_PROFILE") or next(
+            (name for name, profile in profiles.items() if profile.get("active")), None)
+        profile = profiles.get(name or "", {})
+        if not profile.get("token_id") or not profile.get("token_secret"):
+            raise unittest.SkipTest("no Modal token in the selected profile")
+        return profile["token_id"], profile["token_secret"]
+
+    def test_a_modal_sandbox_turn_lands_its_session_branch(self):
+        task = self.finished(self.submit("modal", "journey-modal", edit_text("kappa"), harness="claude-code"))
+        self.assertTrue(task["workspace_delivery"]["committed"], task["result"])
+        landing = self.landing("journey-modal", "branch")
+        self.assertEqual(landing["state"], "landed", landing)
+        self.assertEqual(landing["landed_commit"], task["workspace_delivery"]["head_commit"])
+        self.assertIn("kappa", self.read(self.http_root / "handbook.git", landing["branch"]))
+        # Neither the git token nor the Modal token reaches the host's state (every checkout).
+        self.assert_no_secret_on_disk(self.host_state, [TOKEN, *self.modal_secrets])
+
+
 if __name__ == "__main__":
+    if "--provider" in sys.argv:
+        index = sys.argv.index("--provider")
+        os.environ["SUPERTAG_E2E_PROVIDER"] = sys.argv[index + 1]
+        del sys.argv[index:index + 2]
+        PROVIDER = os.environ["SUPERTAG_E2E_PROVIDER"]
+        if PROVIDER != "modal":
+            sys.exit("--provider takes modal")
+        # The provider journey runs alone; the other journeys keep their own flags.
+        sys.argv.append("ModalJourney")
     if "--harness" in sys.argv:
         index = sys.argv.index("--harness")
         os.environ["SUPERTAG_E2E_HARNESS"] = sys.argv[index + 1]
