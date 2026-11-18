@@ -173,8 +173,8 @@ supertag objective review OBJECTIVE_ID approve
 supertag objective review OBJECTIVE_ID request-changes --feedback "Also cover the empty case."
 ```
 
-Prefer a window to the terminal? On an Apple silicon Mac, [install the desktop app](docs/operations/install.md#install-the-desktop-app)
-too: it uses the same `supertag` and talks to the same Tags.
+Prefer a window to the terminal? On an Apple silicon Mac, [install the desktop app](docs/operations/install.md#install-the-desktop-app):
+it carries its own `supertag`, sets SuperTag up on first launch, and talks to the same Tags.
 
 [Installation options](docs/operations/install.md) · [Talk to a Tag](docs/guides/talk-to-a-tag.md) · [Run your first Team](docs/guides/first-team.md) · [Direct SuperTag from your coding agent](docs/guides/coding-agent-operator.md)
 

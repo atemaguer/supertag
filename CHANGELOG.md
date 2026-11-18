@@ -14,8 +14,9 @@ within the pre-1.0 compatibility policy described in
 ### Added
 
 - Releases include the desktop app for Macs with Apple silicon as a signed and notarized disk
-  image, `SuperTag-VERSION-darwin-arm64.dmg`, beside the CLI archives. The app uses the
-  `supertag` CLI on `PATH`.
+  image, `SuperTag-VERSION-darwin-arm64.dmg`, beside the CLI archives. The app carries its own
+  `supertag` CLI, terminal UI, and Node.js bridges, so it needs no separate install, and sets
+  SuperTag up on first launch.
 - A Task that acquires a capture whose producing Worker Host can't serve it reads the file from
   a verified Volume copy instead: through a presigned GET for an S3 Volume, or through its own
   `--volume` mapping for a file Volume.

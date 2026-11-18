@@ -72,18 +72,19 @@ reads the same `SUPERTAG_INSTALL_ROOT` and `SUPERTAG_BIN_DIR`.
 On an Apple silicon Mac, the desktop app gives your conversations with Tags a window of their own.
 Intel Macs and Linux have no desktop app; use the terminal UI there.
 
-1. Install the `supertag` command first with the install script above. The app runs it.
-2. Download `SuperTag-VERSION-darwin-arm64.dmg` from the
+1. Download `SuperTag-VERSION-darwin-arm64.dmg` from the
    [latest release](https://github.com/atemaguer/supertag/releases/latest), open it, and drag
    **SuperTag** to **Applications**.
-3. Open SuperTag from Applications.
+2. Open SuperTag from Applications.
 
-When SuperTag isn't set up on this Mac yet, set it up on first launch: follow the app's setup
-screen when it shows one, or run `supertag init` in a repository, as in
-[Run your first Tag](../../README.md#run-your-first-tag). On later launches the app connects to
-your local SuperTag, and when its services are stopped it shows "Starting SuperTag…" and starts
-them with `supertag up`. If they can't start, it shows what `supertag up` printed and where the
-logs are.
+The app carries its own `supertag` CLI, terminal UI, and Node.js bridges, so it needs no separate
+install. Claude Code still needs [Node.js](requirements.md) on your Mac; Codex needs nothing more. To
+also use `supertag` in a terminal, install it with the install script above.
+
+On first launch the app's setup screen asks for your project folder and coding agent, then sets
+SuperTag up and opens your conversation with `lead`. On later launches it connects to your local
+SuperTag, and when its services are stopped it shows "Starting SuperTag…" and starts them with
+`supertag up`. If they can't start, it shows what `supertag up` printed and where the logs are.
 
 ## Build only the CLI
 
