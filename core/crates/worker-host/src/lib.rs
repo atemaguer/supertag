@@ -1,63 +1,52 @@
-mod adapter;
-mod artifact_direct;
+//! A Worker Host: the Worklet (`worklet/`), the per-host program that registers, claims, holds
+//! leases, and recovers, and the Worker (`worker/`), which runs one Task Attempt.
+
 mod artifact_inputs;
 mod artifact_snapshots;
-mod capture_volumes;
-mod changed_paths;
-mod checkpoints;
-mod cleanup_failure;
-mod codex_exec;
-pub mod context;
 mod credentials;
-pub mod egress;
-mod enrollment;
 pub mod environment;
 mod failures;
-mod guardian;
-mod journal;
-mod landing;
-mod mcp;
-mod native_memory;
-mod native_memory_volume;
-mod prepared;
-mod provider_proxy;
-mod readiness;
-mod remote;
-mod remote_provider;
-mod shared_execution;
-mod shared_host;
-mod task_artifact_inputs;
-mod task_outputs;
-mod volume_objects;
+mod worker;
+mod worklet;
 mod workspace_mounts;
-mod workspaces;
 
-pub use adapter::unsandboxed_caveat;
-pub use artifact_direct::{ArtifactPeers, ArtifactSourceConfig};
-pub use codex_exec::run_bridge as run_codex_exec_bridge;
+use worker::{
+    adapter, changed_paths, mcp, remote, remote_provider, shared_execution, task_artifact_inputs,
+    task_outputs,
+};
+use worklet::{
+    artifact_direct, checkpoints, cleanup_failure, enrollment, landing, readiness, volume_objects,
+    workspaces,
+};
+
 pub use credentials::{
     is_provider_secret, load_provider_credentials, provider_environment, provider_environment_for,
     provider_variable, validate_opencode_model,
 };
-pub use enrollment::{
-    EnrolledRole, credential, enroll, enrolled_control_plane, enrolled_host, rotate_own_credential,
-};
-pub use guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
-pub use mcp::{
+pub use worker::adapter::unsandboxed_caveat;
+pub use worker::codex_exec::run_bridge as run_codex_exec_bridge;
+pub use worker::guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
+pub use worker::mcp::{
     McpCatalog, McpCatalogEntry, McpLogin, McpLoginOptions, McpLoginState, McpLoginStore,
     login_command as mcp_login_command, run_mcp_login,
 };
-pub use readiness::{LaneObserver, State as LaneState, host_labels};
-pub use remote_provider::{ProviderAuthority, ProviderConfig};
-pub use shared_execution::SharedExecutionConfig;
-pub use shared_host::{HarnessSlots, SharedHost, holds_attempt, transient as presence_retryable};
+pub use worker::remote_provider::{ProviderAuthority, ProviderConfig};
+pub use worker::shared_execution::SharedExecutionConfig;
+pub use worker::{context, egress};
+pub use worklet::artifact_direct::{ArtifactPeers, ArtifactSourceConfig};
+pub use worklet::enrollment::{
+    EnrolledRole, credential, enroll, enrolled_control_plane, enrolled_host, rotate_own_credential,
+};
+pub use worklet::readiness::{LaneObserver, State as LaneState, host_labels};
+pub use worklet::shared_host::{
+    HarnessSlots, SharedHost, holds_attempt, transient as presence_retryable,
+};
+pub use worklet::workspaces::{WORKSPACE_DIRECTORY, WorkspaceMapping, WorkspaceSource};
 pub use workspace_mounts::WorkspaceMounts;
-pub use workspaces::{WORKSPACE_DIRECTORY, WorkspaceMapping, WorkspaceSource};
 
 use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, bail, ensure};
-use journal::{Attempt, Entry, Journal};
 use prost::Message;
 use supertag_protocol::{
     HOST_GENERATION_HEADER, MAX_MESSAGE_BYTES, authenticated_request,
@@ -91,6 +80,7 @@ use tonic::{
     transport::Channel,
 };
 use uuid::Uuid;
+use worklet::journal::{self, Attempt, Entry, Journal};
 
 pub struct HostOptions {
     pub control_plane: supertag_transport::Target,

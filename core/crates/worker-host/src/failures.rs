@@ -43,7 +43,7 @@ fn secrets() -> Vec<SensitiveValue> {
         .unwrap_or_else(|error| error.into_inner())
         .clone();
     let known: Vec<&str> = known.iter().map(String::as_str).collect();
-    crate::adapter::host_secrets(&known)
+    crate::worker::adapter::host_secrets(&known)
 }
 
 /// The most failure detail lines an Attempt reports, and their longest length, as the Control

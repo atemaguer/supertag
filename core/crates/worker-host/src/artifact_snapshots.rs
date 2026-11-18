@@ -27,7 +27,7 @@ const SNAPSHOTS: &str = "artifact-snapshots";
 #[derive(Clone)]
 pub(crate) struct Snapshots {
     directory: PathBuf,
-    artifact_source: Option<crate::artifact_direct::SourceStorage>,
+    artifact_source: Option<crate::worklet::artifact_direct::SourceStorage>,
 }
 
 pub(crate) enum Capture {
@@ -67,7 +67,7 @@ impl Snapshots {
 
     pub(crate) fn with_artifact_source(
         mut self,
-        source: Option<crate::artifact_direct::SourceStorage>,
+        source: Option<crate::worklet::artifact_direct::SourceStorage>,
     ) -> Self {
         self.artifact_source = source;
         self
@@ -370,7 +370,7 @@ impl Snapshots {
         &self,
         manifest: &mut CommitArtifactCaptureRequest,
         selected: &[Vec<u8>],
-        source: Option<&crate::artifact_direct::SourceStorage>,
+        source: Option<&crate::worklet::artifact_direct::SourceStorage>,
     ) -> Result<(), Status> {
         match (&manifest.source_storage_id, source) {
             (Some(id), Some(source)) if source.has_id(id) => source.retain(manifest, selected),
@@ -535,7 +535,7 @@ fn journal_error<E>(_: E) -> Status {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::journal::{Attempt, Entry, Journal};
+    use crate::worklet::journal::{Attempt, Entry, Journal};
     use supertag_protocol::v2::{ArtifactProducer, ArtifactSummary};
     use tonic::Code;
 
