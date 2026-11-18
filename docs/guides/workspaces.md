@@ -221,8 +221,9 @@ only while it holds the landing.
      {"step": "ci", "status": "unknown", "detail": "not a forge SuperTag can inspect"}]}
    ```
 
-4. Serve it on Worker Hosts with `--workspace-id handbook --workspace-from-control-plane`, and bind
-   a Tag with `--workspace-id handbook` and no base commit or branch.
+4. Serve it on Worker Hosts: in `supertag.yaml`, `workspaces: { handbook: { remote: true } }` in
+   a host service, or `supertag worker-host --remote-workspace handbook`. Bind a Tag with
+   `--workspace-id handbook` and no base commit or branch.
 
 Each new Session starts from the commit `ref` names when the Session begins, and keeps that commit.
 Without `ref`, it follows the server's default branch.

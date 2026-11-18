@@ -346,11 +346,7 @@ async fn a_remote_workspace_lands_through_git_delivery(database: String) -> Resu
         .arg(root.join("host"))
         .arg("--artifact-directory")
         .arg(holding_host::artifact_directory(&root))
-        .args([
-            "--workspace-id",
-            "handbook",
-            "--workspace-from-control-plane",
-        ])
+        .args(["--remote-workspace", "handbook"])
         .env("SUPERTAG_WORKSPACE_TOKEN", "ambient-must-not-reach-adapter");
     let mut host = holding_host::serve(host).await?;
 
@@ -806,7 +802,7 @@ async fn a_review_workspace_opens_a_pull_request_that_closes_its_work_session(
             .arg(root.join(state))
             .arg("--artifact-directory")
             .arg(holding_host::artifact_directory(&root))
-            .args(["--workspace-id", "app", "--workspace-from-control-plane"]);
+            .args(["--remote-workspace", "app"]);
         host
     };
     // Runs `--once` hosts until `task` succeeds: a remote Workspace's Task is claimable once git

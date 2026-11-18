@@ -2204,6 +2204,57 @@ async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
     Ok(())
 }
 
+/// A host service maps a remote Workspace with `remote: true`: the host serves it beside a local
+/// one, and `supertag up` says when its Control Plane does not define it yet.
+async fn a_host_service_serves_a_remote_workspace(database: String) -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let state = temp.path().join("state");
+    let file = temp.path().join("supertag.yaml");
+    let source = temp.path().join("app");
+    fs::create_dir(&source)?;
+    let (section, secrets) = if database.starts_with("postgres") {
+        database_password::config(&database, temp.path())?
+    } else {
+        (Value::Null, serde_json::json!({}))
+    };
+    yaml(
+        &file,
+        &serde_json::json!({"version":1,"secrets":secrets,"services":{
+            "control-plane":{"type":"control-plane","ports":["127.0.0.1:0"],"database":section},
+            "shared":{"type":"host","adapter":ADAPTER,"concurrency":1,
+                "workspaces":{"app":source,"handbook":{"remote":true}}}
+        }}),
+    )?;
+    let mut supervisor = Process::spawn(&state, Some(&file), &[])?;
+    let endpoint = supervisor.ready()?;
+    let credential = token(&state)?;
+    let mut operator = client(&endpoint).await?;
+    let ready = host_until(&mut operator, &credential, |status| {
+        status.phase() == HostPhase::Ready && status.workspace_ids.len() == 2
+    })
+    .await?;
+    let mut ids = ready.workspace_ids.clone();
+    ids.sort();
+    assert_eq!(ids, ["app", "handbook"]);
+    let log = fs::read_to_string(&supervisor.log)?;
+    assert!(
+        log.contains("remote Workspace handbook is not defined on this Control Plane"),
+        "{log}"
+    );
+    supervisor.stop().await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_a_host_service_serves_a_remote_workspace() -> Result<()> {
+    with_database(false, a_host_service_serves_a_remote_workspace).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_a_host_service_serves_a_remote_workspace() -> Result<()> {
+    with_database(true, a_host_service_serves_a_remote_workspace).await
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sqlite_concurrency_changes_without_a_restart() -> Result<()> {
     with_database(false, concurrency_changes_without_a_restart).await

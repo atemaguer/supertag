@@ -104,34 +104,30 @@ pub struct AdapterOptions {
     #[arg(long, requires = "harness")]
     codex_model: Option<String>,
     /// Existing directory for read-only Tasks. Otherwise each Task gets its own directory.
-    #[arg(long, requires = "harness", conflicts_with = "workspace_id")]
+    #[arg(long, requires = "harness", conflicts_with_all = ["workspace_id", "remote_workspace"])]
     codex_workspace: Option<PathBuf>,
-    /// Repository identity that this host can prepare for accepted Tasks. Repeat it, each
+    /// Local Workspace that this host can prepare for accepted Tasks. Repeat it, each
     /// followed by its --workspace-source, to map several Workspaces.
-    #[arg(long, requires = "workspace_source_kind")]
+    #[arg(long, requires = "workspace_source")]
     workspace_id: Vec<String>,
     /// Trusted local Git source for the preceding --workspace-id; Tasks run in separate
     /// pinned checkouts. Several Workspace IDs may name the same source.
-    #[arg(long, requires = "workspace_id", group = "workspace_source_kind")]
+    #[arg(long, requires = "workspace_id")]
     workspace_source: Vec<PathBuf>,
     /// ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of
-    /// a Workspace. It runs on this host, outside any harness sandbox, in the checkout on the
-    /// Workspace's base commit, with a 10-minute limit.
+    /// a local Workspace. It runs on this host, outside any harness sandbox, in the checkout on
+    /// the Workspace's base commit, with a 10-minute limit.
     #[arg(long, value_name = "ID=COMMAND", requires = "workspace_id")]
     workspace_setup: Vec<String>,
     /// ID: deliver a local Workspace as patches only; this host writes no Session branch into
     /// its repository.
     #[arg(long, value_name = "ID", requires = "workspace_source")]
     workspace_patch: Vec<String>,
-    /// Serve each --workspace-id as a remote Workspace, read from its server with a credential
-    /// the Control Plane grants for each read.
-    #[arg(
-        long,
-        requires = "workspace_id",
-        group = "workspace_source_kind",
-        conflicts_with = "workspace_source"
-    )]
-    workspace_from_control_plane: bool,
+    /// ID of a remote Workspace this host serves, read from and pushed to its git server with a
+    /// credential the Control Plane grants for each operation. Repeat it for several; it may be
+    /// combined with local Workspaces.
+    #[arg(long, value_name = "ID")]
+    remote_workspace: Vec<String>,
 }
 
 impl AdapterOptions {
@@ -142,20 +138,13 @@ impl AdapterOptions {
         self.adapter.is_some() || self.harness.is_some()
     }
 
-    /// The host's Workspace mappings, each `--workspace-id` paired with the
-    /// `--workspace-source` in the same position, or every ID served from the Control Plane.
+    /// The host's Workspace mappings: each `--workspace-id` paired with the `--workspace-source`
+    /// in the same position, then each `--remote-workspace`.
     pub fn workspace_mappings(&self) -> Result<Vec<WorkspaceMapping>> {
-        if self.workspace_from_control_plane {
-            ensure!(
-                self.workspace_source.is_empty(),
-                "remote Workspaces take no --workspace-source"
-            );
-        } else {
-            ensure!(
-                self.workspace_source.len() == self.workspace_id.len(),
-                "give each --workspace-id its own --workspace-source"
-            );
-        }
+        ensure!(
+            self.workspace_source.len() == self.workspace_id.len(),
+            "give each --workspace-id its own --workspace-source"
+        );
         let mut setups = std::collections::BTreeMap::new();
         for value in &self.workspace_setup {
             let (id, command) = value
@@ -177,24 +166,34 @@ impl AdapterOptions {
             );
         }
         let mut seen = std::collections::BTreeSet::new();
-        self.workspace_id
-            .iter()
-            .enumerate()
-            .map(|(index, workspace_id)| {
-                ensure!(
-                    seen.insert(workspace_id),
-                    "Workspace {workspace_id} is mapped more than once"
-                );
-                Ok(WorkspaceMapping {
+        let local =
+            self.workspace_id
+                .iter()
+                .zip(&self.workspace_source)
+                .map(|(workspace_id, source)| WorkspaceMapping {
                     workspace_id: workspace_id.clone(),
-                    source: match self.workspace_source.get(index) {
-                        Some(source) => WorkspaceSource::Local(source.clone()),
-                        None => WorkspaceSource::ControlPlane,
-                    },
+                    source: WorkspaceSource::Local(source.clone()),
                     setup: setups.get(workspace_id.as_str()).cloned(),
-                    session_branches: self.workspace_source.get(index).is_some()
-                        && !self.workspace_patch.contains(workspace_id),
-                })
+                    session_branches: !self.workspace_patch.contains(workspace_id),
+                });
+        let remote = self
+            .remote_workspace
+            .iter()
+            .map(|workspace_id| WorkspaceMapping {
+                workspace_id: workspace_id.clone(),
+                source: WorkspaceSource::ControlPlane,
+                setup: None,
+                session_branches: false,
+            });
+        local
+            .chain(remote)
+            .map(|mapping| {
+                ensure!(
+                    seen.insert(mapping.workspace_id.clone()),
+                    "Workspace {} is mapped more than once",
+                    mapping.workspace_id
+                );
+                Ok(mapping)
             })
             .collect()
     }
@@ -395,8 +394,8 @@ impl AdapterOptions {
         for id in &self.workspace_patch {
             args.extend([OsString::from("--workspace-patch"), id.into()]);
         }
-        if self.workspace_from_control_plane {
-            args.push(OsString::from("--workspace-from-control-plane"));
+        for id in &self.remote_workspace {
+            args.extend([OsString::from("--remote-workspace"), id.into()]);
         }
     }
 

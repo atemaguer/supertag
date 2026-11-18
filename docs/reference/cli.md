@@ -1853,19 +1853,19 @@ Options:
           Existing directory for read-only Tasks. Otherwise each Task gets its own directory
 
       --workspace-id <WORKSPACE_ID>
-          Repository identity that this host can prepare for accepted Tasks. Repeat it, each followed by its --workspace-source, to map several Workspaces
+          Local Workspace that this host can prepare for accepted Tasks. Repeat it, each followed by its --workspace-source, to map several Workspaces
 
       --workspace-source <WORKSPACE_SOURCE>
           Trusted local Git source for the preceding --workspace-id; Tasks run in separate pinned checkouts. Several Workspace IDs may name the same source
 
       --workspace-setup <ID=COMMAND>
-          ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of a Workspace. It runs on this host, outside any harness sandbox, in the checkout on the Workspace's base commit, with a 10-minute limit
+          ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of a local Workspace. It runs on this host, outside any harness sandbox, in the checkout on the Workspace's base commit, with a 10-minute limit
 
       --workspace-patch <ID>
           ID: deliver a local Workspace as patches only; this host writes no Session branch into its repository
 
-      --workspace-from-control-plane
-          Serve each --workspace-id as a remote Workspace, read from its server with a credential the Control Plane grants for each read
+      --remote-workspace <ID>
+          ID of a remote Workspace this host serves, read from and pushed to its git server with a credential the Control Plane grants for each operation. Repeat it for several; it may be combined with local Workspaces
 
       --skill-catalog <SKILL_CATALOG>
           Private host allowlist of Skill packages.
@@ -2285,19 +2285,19 @@ Options:
           Existing directory for read-only Tasks. Otherwise each Task gets its own directory
 
       --workspace-id <WORKSPACE_ID>
-          Repository identity that this host can prepare for accepted Tasks. Repeat it, each followed by its --workspace-source, to map several Workspaces
+          Local Workspace that this host can prepare for accepted Tasks. Repeat it, each followed by its --workspace-source, to map several Workspaces
 
       --workspace-source <WORKSPACE_SOURCE>
           Trusted local Git source for the preceding --workspace-id; Tasks run in separate pinned checkouts. Several Workspace IDs may name the same source
 
       --workspace-setup <ID=COMMAND>
-          ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of a Workspace. It runs on this host, outside any harness sandbox, in the checkout on the Workspace's base commit, with a 10-minute limit
+          ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of a local Workspace. It runs on this host, outside any harness sandbox, in the checkout on the Workspace's base commit, with a 10-minute limit
 
       --workspace-patch <ID>
           ID: deliver a local Workspace as patches only; this host writes no Session branch into its repository
 
-      --workspace-from-control-plane
-          Serve each --workspace-id as a remote Workspace, read from its server with a credential the Control Plane grants for each read
+      --remote-workspace <ID>
+          ID of a remote Workspace this host serves, read from and pushed to its git server with a credential the Control Plane grants for each operation. Repeat it for several; it may be combined with local Workspaces
 
       --workspace-mount-mappings <WORKSPACE_MOUNT_MAPPINGS>
           Owner-controlled JSON mappings for Workspace Volume copies: each maps a Volume to a destination root, and an S3 Volume's credential name to an endpoint, region, and key variables

@@ -568,7 +568,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         )]
         mcp_catalog: Option<PathBuf>,
         /// gRPC origin of a standalone shared execution provider for Cursor.
-        #[arg(long, requires = "shared_execution_environment", conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider", "workspace_provider", "local_vm", "local_vm_workspace_provider", "mcp_catalog", "workspace_id", "allow_unsandboxed_commands"])]
+        #[arg(long, requires = "shared_execution_environment", conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider", "workspace_provider", "local_vm", "local_vm_workspace_provider", "mcp_catalog", "workspace_id", "remote_workspace", "allow_unsandboxed_commands"])]
         shared_execution_endpoint: Option<String>,
         /// Environment ID expected from the provider. Set SUPERTAG_EXECUTION_ADMIN_TOKEN separately.
         #[arg(long, requires = "shared_execution_endpoint")]

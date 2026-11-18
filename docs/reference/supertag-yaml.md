@@ -287,7 +287,14 @@ github=GITHUB_TOKEN` and reads the value from `SUPERTAG_NETWORK_CREDENTIAL_GITHU
       app: ~/code/app
       api: { path: ~/code/api, land: patch, setup: npm ci }
       docs: { path: ~/code/docs, land: { merge: agents, push: origin } }
+      handbook: { remote: true }
 ```
+
+`{ remote: true }` serves a remote Workspace: a `Workspace` resource on a git server, which the
+host reads and pushes itself with a credential the Control Plane grants for each operation. It
+takes no `path`, `land`, or `setup`: the resource's own `land` applies. `supertag up` warns when its
+Control Plane defines no such Workspace yet; create it with `supertag workspace put`. The rest of
+this section is about local repositories.
 
 Each Task Attempt runs in its own checkout of the repository, pinned to an exact commit. `setup`
 runs in each new checkout before the harness starts, on the host and outside any harness sandbox,

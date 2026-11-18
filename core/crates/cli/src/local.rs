@@ -1480,6 +1480,11 @@ pub async fn configured(
         .iter()
         .flat_map(|host| host.session_branches.clone())
         .collect();
+    let remote_workspaces: Vec<String> = config
+        .hosts
+        .iter()
+        .flat_map(|host| host.remote_workspaces.clone())
+        .collect();
     tokio::pin!(shutdown);
     let startup = async {
         let credentials = config
@@ -1577,6 +1582,7 @@ pub async fn configured(
         }
         if let (Some(endpoint), Some(credentials)) = (&endpoint, &credentials) {
             undrain(&directory, endpoint, &credentials.operator).await?;
+            warn_missing_workspaces(endpoint, &credentials.operator, &remote_workspaces).await;
             if !session_branches.is_empty() {
                 importer = Some(tokio::spawn(crate::delivery_branches::follow(
                     endpoint.clone(),
@@ -1891,6 +1897,40 @@ async fn wait_configured(
 
 /// Return Worker Hosts that `supertag down` drained to service. An operator's own drain, made
 /// with `supertag host drain`, is not recorded here and survives a restart.
+/// Says which remote Workspaces a host serves that this Control Plane does not define: such a
+/// host waits for Tasks it can never be given until one is created with `supertag workspace put`.
+async fn warn_missing_workspaces(endpoint: &str, operator: &str, ids: &[String]) {
+    use supertag_protocol::v2::{GetWorkspaceRequest, workspaces_client::WorkspacesClient};
+    if ids.is_empty() {
+        return;
+    }
+    let Ok(channel) = async {
+        crate::network::operator_channel(&crate::network::endpoint(endpoint.into()).await?).await
+    }
+    .await
+    else {
+        return;
+    };
+    let mut client = WorkspacesClient::new(channel);
+    for id in ids {
+        let Ok(request) = crate::request(
+            GetWorkspaceRequest {
+                workspace_id: id.clone(),
+            },
+            operator,
+        ) else {
+            continue;
+        };
+        if let Err(status) = client.get(request).await
+            && status.code() == tonic::Code::NotFound
+        {
+            supervisor_log(&format!(
+                "remote Workspace {id} is not defined on this Control Plane; create it with supertag workspace put {id} --remote URL"
+            ));
+        }
+    }
+}
+
 async fn undrain(directory: &Path, endpoint: &str, operator: &str) -> Result<()> {
     let hosts = lifecycle::drained_hosts(directory)?;
     if hosts.is_empty() {

@@ -102,8 +102,10 @@ turns. Reported tokens are not a billing cap. See [Budgets and allocation](coord
 ## Workspaces
 
 A Tag's Workspace is a repository the host maps: a local Git source
-(`--workspace-id ID --workspace-source PATH`, or `workspaces` in `supertag.yaml`), or a GitHub
-source the Control Plane holds (`--workspace-from-control-plane`). Each Task Attempt runs in its
+(`--workspace-id ID --workspace-source PATH`, or `workspaces` in `supertag.yaml`), or a remote
+Workspace on a git server (`--remote-workspace ID`, or `ID: { remote: true }` in `supertag.yaml`),
+which the host reads and pushes with a credential the Control Plane grants for each operation. One
+host may serve both kinds. Each Task Attempt runs in its
 own checkout pinned to an exact commit. The host's own Git commands never run repository hooks,
 filters, or configuration a Task wrote, and the host fails a Task Attempt whose repository Git
 configuration changed while it ran.

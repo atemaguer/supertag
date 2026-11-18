@@ -147,7 +147,8 @@ enum ProvisionEntry {
     File(PathBuf),
     Inline(serde_json::Value),
 }
-/// A Workspace's local repository: a path, or a path and where Session changes land.
+/// A Workspace's local repository: a path, or a path and where Session changes land; or
+/// `{remote: true}`, a remote Workspace the host reads from and pushes to its git server.
 #[derive(Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
 enum WorkspaceMapping {
@@ -159,6 +160,9 @@ enum WorkspaceMapping {
         /// Shell command that prepares each new Task checkout; see `--workspace-setup`.
         #[serde(default)]
         setup: Option<String>,
+    },
+    Remote {
+        remote: bool,
     },
 }
 /// Where a local Workspace's Session changes land: `local` (the default) imports each
@@ -184,10 +188,12 @@ enum LandMode {
     Patch,
 }
 impl WorkspaceMapping {
-    fn parts(&self) -> (&Path, Option<&Land>, Option<&str>) {
+    /// A local Workspace's path, `land`, and setup; `None` for a remote Workspace.
+    fn parts(&self) -> Option<(&Path, Option<&Land>, Option<&str>)> {
         match self {
-            Self::Path(path) => (path, None, None),
-            Self::Detailed { path, land, setup } => (path, land.as_ref(), setup.as_deref()),
+            Self::Path(path) => Some((path, None, None)),
+            Self::Detailed { path, land, setup } => Some((path, land.as_ref(), setup.as_deref())),
+            Self::Remote { .. } => None,
         }
     }
 }
@@ -314,6 +320,9 @@ pub struct Host {
     /// Only a Host of this file's own Control Plane has them; the supervisor imports with the
     /// local operator credential.
     pub session_branches: crate::delivery_branches::Repositories,
+    /// Remote Workspaces this Host of the file's own Control Plane serves, which `supertag up`
+    /// checks exist there.
+    pub remote_workspaces: Vec<String>,
     /// `environment: local-vm`: every lane runs Tasks in a container on this machine.
     pub local_vm: bool,
 }
@@ -755,9 +764,21 @@ pub(crate) fn parse(
         let mut mapping = Vec::new();
         let mut setups = Vec::new();
         let mut session_branches = BTreeMap::new();
+        let mut remote_workspaces = Vec::new();
         for (id, workspace) in &workspaces {
             identifier(id)?;
-            let (path, land, setup) = workspace.parts();
+            let Some((path, land, setup)) = workspace.parts() else {
+                // Its landing is the Workspace resource's own `land`.
+                ensure!(
+                    matches!(workspace, WorkspaceMapping::Remote { remote: true }),
+                    "Workspace {id}: give a path, or remote: true for a remote Workspace"
+                );
+                setups.push(OsString::from(format!("--remote-workspace={id}")));
+                if remote.is_none() {
+                    remote_workspaces.push(id.clone());
+                }
+                continue;
+            };
             let path = resolve_path(base, path)?;
             let landing = match land {
                 None | Some(Land::Mode(LandMode::Local)) => {
@@ -913,6 +934,7 @@ pub(crate) fn parse(
             restart,
             network_credentials: credential_secrets,
             session_branches,
+            remote_workspaces,
             volumes: volumes
                 .into_iter()
                 .map(|(id, path)| Ok((id, resolve_path(base, &path)?)))
@@ -1692,6 +1714,68 @@ secrets:
             "services:\n  control-plane: {{type: control-plane}}\n  big: {{type: host, harnesses: [codex], workspaces: {{{workspaces}}}}}\n"
         );
         assert!(parse(many.as_bytes(), Path::new("/trusted"), |_| None).is_err());
+    }
+
+    #[test]
+    fn a_host_serves_remote_workspaces_beside_local_ones() {
+        let c = parse(
+            br#"services:
+  control-plane: {type: control-plane, ports: ["127.0.0.1:0"]}
+  shared:
+    type: host
+    harnesses: [codex]
+    workspaces: {app: ./app, handbook: {remote: true}}
+"#,
+            Path::new("/trusted"),
+            |_| None,
+        )
+        .unwrap();
+        let host = &c.hosts[0];
+        // `supertag up` checks the remote Workspace exists; only the local one gets a branch.
+        assert_eq!(host.remote_workspaces, ["handbook"]);
+        assert_eq!(host.session_branches.keys().collect::<Vec<_>>(), ["app"]);
+        let adapter = &host.harnesses[0];
+        let mappings: Vec<_> = adapter
+            .workspace_mappings()
+            .unwrap()
+            .into_iter()
+            .map(|mapping| {
+                (
+                    mapping.workspace_id,
+                    matches!(
+                        mapping.source,
+                        supertag_worker_host::WorkspaceSource::ControlPlane
+                    ),
+                    mapping.session_branches,
+                )
+            })
+            .collect();
+        assert_eq!(
+            mappings,
+            [
+                ("app".to_owned(), false, true),
+                ("handbook".to_owned(), true, false)
+            ]
+        );
+        let args = adapter.worker_args();
+        let remote = args
+            .iter()
+            .position(|arg| arg == "--remote-workspace")
+            .expect("remote Workspace flag");
+        assert_eq!(args[remote + 1], "handbook");
+        // A remote Workspace has no path, land, or setup, and `remote: false` names nothing.
+        for invalid in [
+            &br#"services: {h: {type: host, adapter: ./a, workspaces: {w: {remote: false}}}}"#[..],
+            br#"services: {h: {type: host, adapter: ./a, workspaces: {w: {remote: true, path: ./w}}}}"#,
+            br#"services: {h: {type: host, adapter: ./a, workspaces: {w: {remote: true, land: patch}}}}"#,
+            br#"services: {h: {type: host, adapter: ./a, workspaces: {w: {remote: true, setup: make}}}}"#,
+        ] {
+            assert!(
+                parse(invalid, Path::new("/trusted"), |_| None).is_err(),
+                "{}",
+                String::from_utf8_lossy(invalid)
+            );
+        }
     }
 
     #[test]

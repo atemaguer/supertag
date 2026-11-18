@@ -318,8 +318,8 @@ self-reported: a host can claim any label. Labels therefore decide placement onl
 access, and a Tag's bindings stay the only way to let a host run its Tasks.
 
 A Task in a named Workspace runs only on a bound host that serves it and so carries
-`workspace:NAME`: a host that maps the local Workspace, or, for a remote Workspace, a host started
-with `--workspace-from-control-plane`. The host must also carry the Tag's `runsOn` labels. When no
+`workspace:NAME`: a host that maps the local Workspace, or, for a remote Workspace, a host that serves it
+(`--remote-workspace NAME`, or `remote: true` in `supertag.yaml`). The host must also carry the Tag's `runsOn` labels. When no
 bound host carries the required labels, the Task waits. Its
 scheduling record names the requirement, such as `labels:macos,gpu`, and `supertag describe task`
 prints `No bound Worker Host has labels: macos, gpu`. The list names the labels no bound host
@@ -402,7 +402,7 @@ or land on a git server. A Workspace has one of two sources:
   Several hosts may map the same name to their own clones. The Control Plane stores no record of
   it.
 - **A remote Workspace**: a repository on any git server, declared as a `Workspace` resource.
-  Hosts that serve it with `--workspace-from-control-plane` read each Session's source from the
+  Hosts that serve it (`--remote-workspace NAME`) read each Session's source from the
   server themselves, with the read Workspace Credential the Control Plane grants for that one
   read, so they need no clone and store no credential.
 
