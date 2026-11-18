@@ -1303,6 +1303,10 @@ message RemoteWorkspaceAllocateRequest {
   FileScope file_scope = 3600;
   // Present only for a Task with a network scope on a provider that offers the relay.
   optional RemoteWorkspaceEgress egress = 3700;
+  // A dependency cache the Task's commands may reuse across this Tag's Task Attempts on this
+  // Workspace: a SHA-256 of the Worker Host, Workspace, and Tag, never their names. Empty for a
+  // preparation sandbox. A provider that keeps no cache ignores it.
+  string dependency_cache = 3800;
 }
 
 // A sandbox image and setup derived only from the trusted commit's devcontainer subset.

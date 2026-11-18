@@ -376,6 +376,8 @@ pub(crate) struct RemoteProvider {
     allocate_timeout: Duration,
     /// The Task's network through the sandbox's relay to the Attempt's egress proxy.
     egress: Option<RemoteWorkspaceEgress>,
+    /// The Task's dependency cache key; empty for a preparation sandbox.
+    dependency_cache: String,
 }
 
 impl RemoteProvider {
@@ -383,6 +385,11 @@ impl RemoteProvider {
     /// the egress proxy over its own exec stream.
     pub(crate) fn set_egress(&mut self, egress: RemoteWorkspaceEgress) {
         self.egress = Some(egress);
+    }
+
+    /// Lets Allocate reuse the dependency cache of `key` (see `dependency_cache_key`).
+    pub(crate) fn set_dependency_cache(&mut self, key: String) {
+        self.dependency_cache = key;
     }
 
     pub async fn spawn(
@@ -469,6 +476,7 @@ impl RemoteProvider {
                 token,
                 allocate_timeout: config.allocate_timeout(),
                 egress: None,
+                dependency_cache: String::new(),
             }),
             Err(error) => {
                 reap(&mut child)
@@ -544,6 +552,7 @@ impl RemoteProvider {
                         prepared_artifact,
                         prepare,
                         egress: self.egress.clone(),
+                        dependency_cache: self.dependency_cache.clone(),
                     },
                     deadline,
                 )?)

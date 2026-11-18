@@ -9702,9 +9702,13 @@ type RemoteWorkspaceAllocateRequest struct {
 	// The Task's path scope, which the provider's file tools apply after resolving symlinks.
 	FileScope *FileScope `protobuf:"bytes,3600,opt,name=file_scope,json=fileScope,proto3" json:"file_scope,omitempty"`
 	// Present only for a Task with a network scope on a provider that offers the relay.
-	Egress        *RemoteWorkspaceEgress `protobuf:"bytes,3700,opt,name=egress,proto3,oneof" json:"egress,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Egress *RemoteWorkspaceEgress `protobuf:"bytes,3700,opt,name=egress,proto3,oneof" json:"egress,omitempty"`
+	// A dependency cache the Task's commands may reuse across this Tag's Task Attempts on this
+	// Workspace: a SHA-256 of the Worker Host, Workspace, and Tag, never their names. Empty for a
+	// preparation sandbox. A provider that keeps no cache ignores it.
+	DependencyCache string `protobuf:"bytes,3800,opt,name=dependency_cache,json=dependencyCache,proto3" json:"dependency_cache,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RemoteWorkspaceAllocateRequest) Reset() {
@@ -9791,6 +9795,13 @@ func (x *RemoteWorkspaceAllocateRequest) GetEgress() *RemoteWorkspaceEgress {
 		return x.Egress
 	}
 	return nil
+}
+
+func (x *RemoteWorkspaceAllocateRequest) GetDependencyCache() string {
+	if x != nil {
+		return x.DependencyCache
+	}
+	return ""
 }
 
 // A sandbox image and setup derived only from the trusted commit's devcontainer subset.
@@ -26997,7 +27008,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12\x1d\n" +
 	"\n" +
 	"attempt_id\x18\x04 \x01(\tR\tattemptId\x12#\n" +
-	"\rallocation_id\x18\x05 \x01(\tR\fallocationId\"\x8b\x04\n" +
+	"\rallocation_id\x18\x05 \x01(\tR\fallocationId\"\xb7\x04\n" +
 	"\x1eRemoteWorkspaceAllocateRequest\x12?\n" +
 	"\x05owner\x18\x01 \x01(\v2).supertag.runtime.v2.RemoteWorkspaceOwnerR\x05owner\x12\x1d\n" +
 	"\n" +
@@ -27008,7 +27019,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\aprepare\x18\xad\x1b \x01(\bR\aprepare\x12>\n" +
 	"\n" +
 	"file_scope\x18\x90\x1c \x01(\v2\x1e.supertag.runtime.v2.FileScopeR\tfileScope\x12H\n" +
-	"\x06egress\x18\xf4\x1c \x01(\v2*.supertag.runtime.v2.RemoteWorkspaceEgressH\x02R\x06egress\x88\x01\x01B\x0e\n" +
+	"\x06egress\x18\xf4\x1c \x01(\v2*.supertag.runtime.v2.RemoteWorkspaceEgressH\x02R\x06egress\x88\x01\x01\x12*\n" +
+	"\x10dependency_cache\x18\xd8\x1d \x01(\tR\x0fdependencyCacheB\x0e\n" +
 	"\f_environmentB\x14\n" +
 	"\x12_prepared_artifactB\t\n" +
 	"\a_egress\"\xbb\x01\n" +

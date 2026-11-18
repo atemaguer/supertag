@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer } from "node:net";
 import {
@@ -52,6 +52,7 @@ describe.skipIf(!answers)("local-vm provider", () => {
     image: options.image,
     user: options.user,
     buildImages: true,
+    dependencyCaches: true,
     runFlags: ["--memory", options.memory],
   });
 
@@ -306,6 +307,55 @@ describe.skipIf(!answers)("local-vm provider", () => {
       await provider.stop(who, workspace.sandboxId);
     }
   }, 120_000);
+
+  it("keeps a dependency cache per Workspace and Tag across Task Attempts, and no other", async () => {
+    const key = (tag: string) =>
+      createHash("sha256").update(`test-host\0repo\0${tag}`).digest("hex");
+    const builder = key(`builder-${randomUUID()}`);
+    const reviewer = key(`reviewer-${randomUUID()}`);
+    const attempt = async (cache: string, script: string) => {
+      const who = owner();
+      const workspace = await provider.allocate(
+        who,
+        60_000,
+        AbortSignal.timeout(60_000),
+        undefined,
+        undefined,
+        undefined,
+        cache,
+      );
+      try {
+        expect(workspace.commandEnvironment?.["npm_config_cache"]).toBe("/supertag/cache/npm");
+        return await workspace.run(["sh", "-c", script], 30_000, AbortSignal.timeout(30_000));
+      } finally {
+        await provider.stop(who, workspace.sandboxId);
+      }
+    };
+    const volumes = () =>
+      spawnSync(runtime, ["volume", "ls", "-q", "--filter", "label=supertag.local-vm.cache=1"], {
+        encoding: "utf8",
+      })
+        .stdout.split("\n")
+        .filter(Boolean);
+    const before = new Set(volumes());
+    try {
+      // The Workspace user owns the cache, and what one Task Attempt downloads, the next finds.
+      const first = await attempt(
+        builder,
+        "mkdir -p /supertag/cache/npm && echo cached > /supertag/cache/npm/package && stat -c %u /supertag/cache",
+      );
+      expect(first.stdout.trim()).toBe("1000");
+      expect((await attempt(builder, "cat /supertag/cache/npm/package")).stdout.trim()).toBe(
+        "cached",
+      );
+      // Another Tag on the same Workspace starts from an empty cache.
+      const other = await attempt(reviewer, "ls -A /supertag/cache");
+      expect(other.stdout.trim()).toBe("");
+    } finally {
+      const made = volumes().filter((name) => !before.has(name));
+      if (made.length) spawnSync(runtime, ["volume", "rm", ...made]);
+    }
+  }, 180_000);
 
   it(
     "refuses a Workspace user that is root",

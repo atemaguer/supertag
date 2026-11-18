@@ -75,6 +75,7 @@ export function createLocalVmWorkspaceSession(
     user: options.user,
     platform: nativePlatform(),
     buildImages: true,
+    dependencyCaches: true,
     runFlags: ["--memory", options.memory],
     log,
   });

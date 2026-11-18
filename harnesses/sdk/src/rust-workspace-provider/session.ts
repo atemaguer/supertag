@@ -85,6 +85,8 @@ export interface SandboxWorkspace {
   runPrivileged?: PrivilegedRun;
   /** True when the provider started the egress relay the allocation asked for. */
   readonly egressRelay?: true;
+  /** Variables every Task command gets, such as package managers' cache directories. */
+  readonly commandEnvironment?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -179,6 +181,11 @@ export interface SandboxWorkspaceProvider {
      * the session records the sandbox's own processes, so sealing spares it.
      */
     egress?: SandboxEgress,
+    /**
+     * A key for a dependency cache the provider may keep for this Workspace and Tag across Task
+     * Attempts; see `RemoteWorkspaceAllocateRequest.dependency_cache`.
+     */
+    dependencyCache?: string,
   ): Promise<SandboxWorkspace>;
   stop(owner: SandboxOwner, sandboxId?: string): Promise<SandboxStopResult>;
   /**
@@ -581,10 +588,11 @@ export function createSandboxWorkspaceSession(
       ],
       allowedActions,
       ...(fileScope ? { fileScope } : {}),
-      ...(egress && root
+      ...((egress && root) || sandbox?.commandEnvironment
         ? {
             commandEnvironment: {
-              ...egress.variables,
+              ...sandbox?.commandEnvironment,
+              ...egress?.variables,
               ...Object.fromEntries(
                 [
                   "SSL_CERT_FILE",
@@ -593,7 +601,9 @@ export function createSandboxWorkspaceSession(
                   "NODE_EXTRA_CA_CERTS",
                   "GIT_SSL_CAINFO",
                   "PIP_CERT",
-                ].map((name) => [name, `${root}/egress-ca.pem`]),
+                ]
+                  .filter(() => egress && root)
+                  .map((name) => [name, `${root}/egress-ca.pem`]),
               ),
             },
           }
@@ -640,6 +650,7 @@ export function createSandboxWorkspaceSession(
         preparedArtifact?: string;
         prepare?: boolean;
         egress?: SandboxEgress;
+        dependencyCache?: string;
       },
       caller?: AbortSignal,
     ): Promise<{ sandboxId: string }> {
@@ -663,6 +674,12 @@ export function createSandboxWorkspaceSession(
       // A preparation sandbox holds trusted content only and exposes no file tools.
       if (request.prepare && request.allowedActions.length > 0)
         throw workspaceError("preparation sandbox takes no file actions");
+      // A preparation sandbox's result becomes trusted, so no Task-written cache reaches it.
+      if (
+        request.dependencyCache !== undefined &&
+        (request.prepare || !/^[0-9a-f]{64}$/u.test(request.dependencyCache))
+      )
+        throw workspaceError("dependency cache is invalid");
       const build =
         request.prepare ||
         (preparedArtifact === undefined && (environment?.dockerfileCommands.length ?? 0) > 0);
@@ -688,6 +705,7 @@ export function createSandboxWorkspaceSession(
           environment,
           preparedArtifact,
           request.egress,
+          request.dependencyCache,
         );
         signal.throwIfAborted();
         sandboxId = sandbox.sandboxId;

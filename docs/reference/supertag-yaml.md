@@ -224,6 +224,10 @@ every process the Task left running; the Task cannot hide a process from that st
 Task Attempt on a machine builds the container image, which takes a few minutes; the host's log
 shows the progress.
 
+Package managers' downloads persist across a Tag's Task Attempts on a Workspace: npm, pnpm, yarn,
+pip, uv, and Go keep their caches in a volume at `/supertag/cache`, so a reinstall needs no
+network. Each Tag has its own cache; caches unused for 14 days are removed.
+
 A local-vm host needs a Workspace and cannot take `allow-unsandboxed-commands`. When both a local-vm host and a host with `allow-unsandboxed-commands` could run a
 Task with `commands:execute`, the local-vm host gets it unless it is busy. These variables, in the
 shell or `env_file`, change the container:

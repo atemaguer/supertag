@@ -195,9 +195,23 @@ pub(crate) async fn prepare(
                 .any(|action| action == "commands:execute")
         })
         .map(|egress| egress.remote(EGRESS_CLIENT_PORT));
+    // Package managers' downloads persist per Workspace and Tag, for commands only.
+    let dependency_cache = allowed_actions
+        .iter()
+        .any(|action| action == "commands:execute")
+        .then(|| {
+            dependency_cache_key(
+                &registration.host_id,
+                task.workspace
+                    .as_ref()
+                    .map_or("", |workspace| workspace.workspace_id.as_str()),
+                &task.tag_id,
+            )
+        });
     let restart = Restart {
         allowed_actions,
         egress,
+        dependency_cache,
         file_scope: supertag_protocol::file_scope::of_task(task).cloned(),
         environment,
         start,
@@ -235,6 +249,8 @@ pub(crate) struct Restart {
     allowed_actions: Vec<String>,
     /// The relay to the Attempt's egress proxy each sandbox, a replacement too, gets.
     egress: Option<supertag_protocol::v2::RemoteWorkspaceEgress>,
+    /// The dependency cache each sandbox, a replacement too, may reuse.
+    dependency_cache: Option<String>,
     file_scope: Option<supertag_protocol::v2::FileScope>,
     environment: Option<RemoteWorkspaceEnvironment>,
     start: Start,
@@ -271,6 +287,9 @@ async fn start_sandbox(
         .as_ref()
         .context("remote Workspace provider is unavailable")?;
     let mut provider = RemoteProvider::spawn(config, &journal.remote_scratch()?, cancel).await?;
+    if let Some(key) = &restart.dependency_cache {
+        provider.set_dependency_cache(key.clone());
+    }
     if let Some(egress) = &restart.egress {
         provider.set_egress(egress.clone());
     }
@@ -527,5 +546,40 @@ mod tests {
         let largest = copy_capture_margin([(20 * GIB, 20 * GIB)].into_iter());
         assert_eq!(largest, Duration::from_secs(1920));
         assert!(largest + SANDBOX_CLEANUP_MARGIN < MAX_SANDBOX_LIFETIME);
+    }
+}
+
+/// The dependency cache a Tag's Task Attempts on a Workspace share on this Worker Host: a digest,
+/// so the provider never learns the names. Another Tag, even on the same Workspace, gets another
+/// cache, so a Tag with weaker permissions cannot plant packages another Tag later installs.
+pub(crate) fn dependency_cache_key(host_id: &str, workspace_id: &str, tag_id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(b"supertag-dependency-cache-v1\0");
+    for value in [host_id, workspace_id, tag_id] {
+        hash.update((value.len() as u64).to_be_bytes());
+        hash.update(value.as_bytes());
+    }
+    format!("{:x}", hash.finalize())
+}
+
+#[cfg(test)]
+mod dependency_cache_tests {
+    use super::dependency_cache_key;
+
+    #[test]
+    fn each_tag_on_a_workspace_gets_its_own_cache() {
+        let key = dependency_cache_key("host", "repo", "builder");
+        assert!(key.len() == 64 && key.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_eq!(key, dependency_cache_key("host", "repo", "builder"));
+        for other in [
+            dependency_cache_key("host", "repo", "reviewer"),
+            dependency_cache_key("host", "other", "builder"),
+            dependency_cache_key("other", "repo", "builder"),
+            // Lengths are bound, so moving a boundary is another key.
+            dependency_cache_key("host", "repob", "uilder"),
+        ] {
+            assert_ne!(key, other);
+        }
     }
 }

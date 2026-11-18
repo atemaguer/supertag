@@ -67,7 +67,29 @@ export interface ContainerProviderOptions {
   readonly runFlags?: readonly string[];
   /** Progress lines for a long step, such as an image build. */
   readonly log?: (line: string) => void;
+  /**
+   * Keeps a dependency cache volume per Workspace and Tag (the allocation's `dependencyCache`),
+   * at `/supertag/cache`, for package managers' downloads.
+   */
+  readonly dependencyCaches?: boolean;
 }
+
+/** Where a dependency cache volume is mounted, and what points package managers at it. */
+export const DEPENDENCY_CACHE = "/supertag/cache";
+const CACHE_LABEL = "supertag.local-vm.cache";
+/** A cache volume older than this is removed when no container uses it. */
+const CACHE_MAX_AGE_MS = 14 * 24 * 3_600_000;
+/** At most this many cache volumes stay; the oldest unused ones go first. */
+const MAX_CACHES = 64;
+export const DEPENDENCY_CACHE_VARIABLES: Readonly<Record<string, string>> = {
+  npm_config_cache: `${DEPENDENCY_CACHE}/npm`,
+  npm_config_store_dir: `${DEPENDENCY_CACHE}/pnpm`,
+  YARN_CACHE_FOLDER: `${DEPENDENCY_CACHE}/yarn`,
+  PIP_CACHE_DIR: `${DEPENDENCY_CACHE}/pip`,
+  UV_CACHE_DIR: `${DEPENDENCY_CACHE}/uv`,
+  GOMODCACHE: `${DEPENDENCY_CACHE}/go/mod`,
+  GOCACHE: `${DEPENDENCY_CACHE}/go/build`,
+};
 
 /** The allocation limit when the provider's own image may be built first. */
 export const CONTAINER_ALLOCATE_TIMEOUT_MS = BUILD_TIMEOUT_MS;
@@ -529,6 +551,48 @@ export function containerSandboxProvider(
     return host;
   }
 
+  /**
+   * Removes cache volumes no container uses that are older than `CACHE_MAX_AGE_MS`, or beyond
+   * the newest `MAX_CACHES`. A volume in use refuses removal, which is fine.
+   */
+  async function pruneCaches(): Promise<void> {
+    try {
+      const listed = await cli(runtime, [
+        "volume",
+        "ls",
+        "-q",
+        "--filter",
+        `label=${CACHE_LABEL}=1`,
+      ]);
+      const names = listed.stdout
+        .split("\n")
+        .filter((name) => /^supertag-cache-[0-9a-f]{40}$/u.test(name));
+      if (listed.exitCode !== 0 || names.length === 0) return;
+      const inspected = await cli(runtime, [
+        "volume",
+        "inspect",
+        "--format",
+        "{{.Name}} {{.CreatedAt}}",
+        ...names,
+      ]);
+      const volumes = inspected.stdout
+        .split("\n")
+        .map((line) => {
+          const [name, ...created] = line.split(" ");
+          return { name: name ?? "", created: Date.parse(created.slice(0, 2).join("T")) };
+        })
+        .filter(({ name, created }) => names.includes(name) && Number.isFinite(created))
+        .sort((a, b) => b.created - a.created);
+      const now = Date.now();
+      const stale = volumes.filter(
+        ({ created }, index) => index >= MAX_CACHES || now - created > CACHE_MAX_AGE_MS,
+      );
+      if (stale.length > 0) await cli(runtime, ["volume", "rm", ...stale.map(({ name }) => name)]);
+    } catch {
+      /* the next allocation tries again */
+    }
+  }
+
   /** The provider's own image, built first when it is a Dockerfile. */
   async function base(signal: AbortSignal): Promise<Built> {
     if (typeof options.image !== "string") return build(options.image.dockerfile, signal);
@@ -550,12 +614,32 @@ export function containerSandboxProvider(
   return {
     label: options.name ?? "Container",
     validateOwner: (owner) => void labels(owner, label),
-    async allocate(owner, timeoutMs, signal, environment, artifact, egress) {
+    async allocate(owner, timeoutMs, signal, environment, artifact, egress, dependencyCache) {
       // Every process but the seal's runs as this user; a devcontainer's `user` replaces it.
       const user = environment?.user || options.user;
       const runs = artifact ?? (await image(environment, signal));
       const owned = labels(owner, label);
       const seconds = Math.ceil(Math.min(timeoutMs, MAX_LIFETIME_MS) / 1000);
+      // One cache per Workspace and Tag, image, and platform: another image's packages or
+      // platform's binaries never mix in.
+      const cache =
+        options.dependencyCaches && dependencyCache
+          ? `supertag-cache-${createHash("sha256")
+              .update(`${dependencyCache}\n${runs}\n${platform}`)
+              .digest("hex")
+              .slice(0, 40)}`
+          : undefined;
+      if (cache) {
+        void pruneCaches();
+        const made = await cli(
+          runtime,
+          ["volume", "create", "--label", `${CACHE_LABEL}=1`, cache],
+          {
+            signal,
+          },
+        );
+        if (made.exitCode !== 0) throw new Error("Dependency cache could not be created");
+      }
       const created = await cli(
         runtime,
         [
@@ -577,6 +661,9 @@ export function containerSandboxProvider(
           "--user",
           user,
           ...(options.runFlags ?? []),
+          ...(cache
+            ? ["--mount", `type=volume,src=${cache},dst=${DEPENDENCY_CACHE},volume-nocopy`]
+            : []),
           ...Object.entries(owned).flatMap(([key, value]) => ["--label", `${key}=${value}`]),
           runs,
           "sleep",
@@ -618,12 +705,31 @@ export function containerSandboxProvider(
             : "The Workspace image has no usable python3",
         );
       }
+      // A new cache volume belongs to root; the Workspace user gets its top directory.
+      if (cache) {
+        const ids = await exec(id, ["sh", "-c", 'echo "$(id -u):$(id -g)"'], { signal });
+        const owner = ids.stdout.trim();
+        if (
+          ids.exitCode !== 0 ||
+          !/^[0-9]+:[0-9]+$/u.test(owner) ||
+          (
+            await exec(id, ["chown", owner, DEPENDENCY_CACHE], {
+              privileged: true,
+              signal,
+            })
+          ).exitCode !== 0
+        ) {
+          await cli(runtime, ["rm", "-f", id]);
+          throw new Error("Dependency cache could not be prepared");
+        }
+      }
       const sandbox = instance(id);
       const relay = egress ? await startEgressRelay(id, egress, interpreter) : undefined;
       if (relay) relays.set(id, relay);
       const workspace: SandboxWorkspace = {
         sandboxId: id,
         ...(relay ? { egressRelay: true as const } : {}),
+        ...(cache ? { commandEnvironment: DEPENDENCY_CACHE_VARIABLES } : {}),
         environment: (root) =>
           sandboxExecutionEnvironment(sandbox, root, {
             id: label,
