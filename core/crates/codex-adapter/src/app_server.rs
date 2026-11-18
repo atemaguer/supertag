@@ -628,7 +628,7 @@ impl Stream {
                 }
             }
             // Other output deltas are represented by the authoritative completed item.
-            method if method.starts_with("item/") && method.ends_with("/delta") => {}
+            method if streamed_item_delta(method) => {}
             method
                 if method.starts_with("codex/")
                     || method.starts_with("thread/")
@@ -1130,11 +1130,39 @@ fn plan_progress(params: &Value) -> Option<String> {
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 
+/// A streamed fragment of an item, such as `item/agentMessage/delta` or
+/// `item/commandExecution/outputDelta`. The completed item is authoritative.
+fn streamed_item_delta(method: &str) -> bool {
+    method.starts_with("item/") && (method.ends_with("/delta") || method.ends_with("Delta"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::{os::unix::fs::PermissionsExt, process::Stdio};
     use tokio::process::Command;
+
+    #[test]
+    fn streamed_item_deltas_are_ignored_in_both_spellings() {
+        // Codex 0.163.0 streams command output as `item/commandExecution/outputDelta`; the
+        // completed `commandExecution` item carries the output, so a delta must not fail the turn.
+        for method in [
+            "item/commandExecution/outputDelta",
+            "item/reasoning/summaryTextDelta",
+            "item/reasoning/delta",
+            "item/plan/delta",
+        ] {
+            assert!(streamed_item_delta(method), "{method}");
+        }
+        for method in [
+            "item/completed",
+            "item/started",
+            "turn/delta",
+            "item/Delta/completed",
+        ] {
+            assert!(!streamed_item_delta(method), "{method}");
+        }
+    }
 
     #[tokio::test]
     #[ignore = "requires SUPERTAG_TEST_CODEX_BINARY; credential-free native Skill inventory probe"]
