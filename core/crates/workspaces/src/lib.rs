@@ -645,41 +645,97 @@ impl Workspace {
             // Capture refuses a file with other links, but this names the path and why.
             hidden_links(rules, &checkout.path, &all_files, &ignored)?;
         }
-        let mut entries = BTreeMap::new();
-        let mut captured_bytes = 0_usize;
-        for path in all_files.keys() {
-            check_cancelled(cancel)?;
-            if ignored.contains(path)
-                || (output_prefix
+        let captured: Vec<String> = all_files
+            .keys()
+            .filter(|path| {
+                // Ignored files, and new files in the output directory, are not delivered.
+                let new_output = output_prefix
                     .as_ref()
                     .is_some_and(|prefix| path.starts_with(prefix))
-                    && !base_tree.contains_key(path))
-            {
-                continue;
-            }
-            let file = paths::read_checkout_file(&checkout.path, path)?;
+                    && !base_tree.contains_key(*path);
+                !ignored.contains(*path) && !new_output
+            })
+            .cloned()
+            .collect();
+        // Every file is read and hashed on several threads; only a changed file's bytes are kept,
+        // to be written as a blob. Most of a turn's files are unchanged.
+        let hashed = {
+            let (root, oid_length, cancel) = (
+                checkout.path.clone(),
+                self.inner.config.base_commit.len(),
+                cancel.clone(),
+            );
+            let known: BTreeMap<String, String> = base_tree
+                .iter()
+                .map(|(path, entry)| (path.clone(), entry.oid.clone()))
+                .collect();
+            tokio::task::spawn_blocking(move || {
+                // The capture limit holds across the workers, so a huge Workspace stops early
+                // instead of being read whole.
+                let total = std::sync::atomic::AtomicUsize::new(0);
+                let chunk = captured.len().div_ceil(git::parallelism()).max(1);
+                std::thread::scope(|scope| {
+                    let workers: Vec<_> = captured
+                        .chunks(chunk)
+                        .map(|part| {
+                            let (root, known, cancel, total) = (&root, &known, &cancel, &total);
+                            scope.spawn(move || -> Result<Vec<_>> {
+                                let mut out = Vec::with_capacity(part.len());
+                                for path in part {
+                                    check_cancelled(cancel)?;
+                                    let file = paths::read_checkout_file(root, path)?;
+                                    let size = file.bytes.len();
+                                    ensure!(
+                                        total.fetch_add(size, std::sync::atomic::Ordering::Relaxed)
+                                            + size
+                                            <= CAPTURE_LIMIT,
+                                        "workspace capture exceeds 256 MiB"
+                                    );
+                                    let oid = git::blob_oid(&file.bytes, oid_length);
+                                    let changed = known.get(path) != Some(&oid);
+                                    out.push((
+                                        path.clone(),
+                                        file.mode,
+                                        oid,
+                                        size,
+                                        changed.then_some(file.bytes),
+                                    ));
+                                }
+                                Ok(out)
+                            })
+                        })
+                        .collect();
+                    workers.into_iter().try_fold(Vec::new(), |mut all, worker| {
+                        all.extend(
+                            worker
+                                .join()
+                                .map_err(|_| anyhow::anyhow!("workspace capture stopped"))??,
+                        );
+                        anyhow::Ok(all)
+                    })
+                })
+            })
+            .await
+            .context("workspace capture stopped")??
+        };
+        let mut entries = BTreeMap::new();
+        let mut captured_bytes = 0_usize;
+        for (path, mode, oid, size, changed) in hashed {
+            check_cancelled(cancel)?;
             captured_bytes = captured_bytes
-                .checked_add(file.bytes.len())
+                .checked_add(size)
                 .context("workspace size overflow")?;
             ensure!(
-                captured_bytes <= 268_435_456,
+                captured_bytes <= CAPTURE_LIMIT,
                 "workspace capture exceeds 256 MiB"
             );
-            let oid = git::blob_oid(&file.bytes, self.inner.config.base_commit.len());
-            if base_tree.get(path).is_none_or(|entry| entry.oid != oid) {
+            if let Some(bytes) = changed {
                 ensure!(
-                    repository.write_blob(&file.bytes, cancel).await? == oid,
+                    repository.write_blob(&bytes, cancel).await? == oid,
                     "Git returned an unexpected blob identity"
                 );
             }
-            entries.insert(
-                path.clone(),
-                git::TreeEntry {
-                    path: path.clone(),
-                    mode: file.mode,
-                    oid,
-                },
-            );
+            entries.insert(path.clone(), git::TreeEntry { path, mode, oid });
         }
         if let Some(rules) = scope {
             check_scope(rules, (&base_tree, &entries))?;
@@ -1294,6 +1350,8 @@ pub async fn complete_delivery_bundle(
 
 /// Where removed checkouts wait for `purge_discarded`, inside the workspace state directory.
 const DISCARDED: &str = "discarded";
+/// The most file bytes one delivery captures.
+const CAPTURE_LIMIT: usize = 268_435_456;
 /// Each Session's last delivered checkout, kept for its next Attempt.
 const PARKED: &str = "parked";
 /// The packs SuperTag wrote into each prepared checkout's `.git`, where its harness cannot write.

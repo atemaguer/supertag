@@ -1333,7 +1333,7 @@ impl Repository {
 }
 
 /// How many workers write and verify a checkout: the machine's cores, at most 8.
-fn parallelism() -> usize {
+pub(crate) fn parallelism() -> usize {
     std::thread::available_parallelism().map_or(1, |cores| cores.get().min(8))
 }
 
