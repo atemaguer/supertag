@@ -11,6 +11,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- Claude Code's own memory is on and lasts per Tag: the Worker Host keeps a shared store and one
+  per person, copies it into each turn and merges it back afterwards, file by file. `supertag
+  describe tag` shows each host's copy; `supertag delete memory --native TAG` resets it.
 - Unprompted messages are paced: at most one reaches a person's conversation or a surface thread
   in 30 minutes. Later ones wait and go out together when the window ends, or at once when the
   person writes; in a surface thread they post as one reply listing the earlier updates.
