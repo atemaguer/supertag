@@ -25,11 +25,6 @@ within the pre-1.0 compatibility policy described in
   binary files are listed only. The app reads them from disk after `TaskFiles.Locate`, which returns
   only where the files are; a Task on another machine says "Files on Worker Host NAME are
   unreachable from here".
-- A Tag can name a Volume (`supertag tag put --volume`, `spec.volume`). Its Tasks' captures go
-  there, written by the Worker Host itself: S3 through 15-minute presigned uploads bound to the
-  file's length and SHA-256 and checked with a HEAD, file Volumes only on hosts that map them
-  (`supertag worker-host --volume ID=DIR`, placement label `volume:ID`). S3 signing settings live
-  in the Control Plane's credential vault (`supertag volume credential set`).
 - Claude Code, Cursor, and OpenCode Tasks can run in local-vm containers on the Worker Host's own
   Docker or Podman (`environment: local-vm`, or `supertag worker-host --local-vm`): their file and
   command tools run in a container with no network and no root, while the harness and its keys
@@ -43,7 +38,7 @@ within the pre-1.0 compatibility policy described in
 - A Tag keeps its work on a Volume beyond any one Worker Host (`supertag tag put --volume NAME`,
   `spec.volume`): the capturing host writes a copy of every capture there itself, and the
   Control Plane never maps a Volume or carries a Volume byte. For an S3 Volume the Control Plane
-  presigns one PUT per file that binds its length and SHA-256 checksum, and checks each object
+  presigns one 15-minute PUT per file that binds its length and SHA-256 checksum, and checks each object
   with a HEAD before the capture succeeds; its signing credential lives in the Control Plane's
   credential vault (`supertag volume credential set`). A file Volume is written only by hosts
   that map it (`supertag worker-host --volume ID=DIR`, `volumes:` on a host service), which carry
@@ -56,8 +51,9 @@ within the pre-1.0 compatibility policy described in
   person writes; in a surface thread they post as one reply listing the earlier updates.
 - GitHub review landings: a Workspace with `land: {review: {base}}` opens a draft pull request
   for each work Session and updates it on later Tasks; merging it closes the work Session
-  (`pull request merged`). `supertag workspace credential add NAME --github-app` stores a GitHub
-  App whose per-operation tokens are narrowed to one repository and one permission.
+  (`closed: pull request merged`); one closed without merging leaves it open for a revision.
+  `supertag workspace credential add NAME --github-app` stores a GitHub App whose per-operation
+  tokens are narrowed to one repository and one permission.
 - The desktop app's Tag details open with **Activity**, and the terminal UI's command palette has
   **Activity**: how the Tag's unprompted messages landed over 30 days (posted, read, answered,
   stayed quiet) and its start rate with the starts in the current window.
@@ -116,10 +112,8 @@ within the pre-1.0 compatibility policy described in
   Worker Host's egress proxy, and SuperTag checks each `WebFetch` URL; such a scope cannot name a
   credential. A Claude Code host reports whether it can run the sandbox: on Linux it needs
   bubblewrap and socat.
-- Merging a pull request that a work Session delivered closes that Session (`closed: pull request
-  merged`). A pull request closed without merging leaves it open for a revision.
-- A pull request publication queued because its Worker Host was offline retries as soon as that
-  host is back, instead of waiting for the next minute's retry.
+- A Workspace landing queued because the Worker Host holding its delivery was offline retries as
+  soon as that host is back, instead of waiting for the next minute's retry.
 - `supertag placement explain` names each Worker Host's own reason a Task can't run there: `harness`, `file-scope` or `unsandboxed-commands`.
 - A Tag speaks when it has something to say. A turn no person is waiting on (a Schedule's
   wake-up, an Objective's notice, a memory review, or an inbox turn) may end with a new
@@ -287,8 +281,12 @@ within the pre-1.0 compatibility policy described in
   queued Task waits up to 10 minutes for that host; after that, or if it is offline, another
   host starts the Session from its recap (`placement explain` shows `checkpoint-holder`).
   Existing checkpoints are dropped on upgrade, so those Sessions restart from their recap.
-- SuperTag now speaks protocol 5. Peers on protocol 4 are refused when they connect; upgrade
-  every service and client together.
+- SuperTag now speaks protocol 5; 0.3.0 spoke protocol 2. Upgrade every service and client
+  together. A CLI, terminal UI, desktop app, or Worker Host from this release refuses an older
+  Control Plane when it connects, and the error names both releases and which to upgrade, for
+  example: "This app speaks SuperTag protocol 5, but the Control Plane at http://127.0.0.1:3434
+  runs SuperTag 0.3.0 (protocol 2). Upgrade the Control Plane." Before, a newer desktop app
+  connected and then failed every conversation request.
 - The terminal UI shows times of day on one 12-hour clock, "4:01 PM", in its Tag list, notes, and
   Schedules as in its conversation dividers. Esc closes the desktop app's Tag details panel.
 - Workspaces deliver through git to any remote. A remote Workspace names a git URL, read and
@@ -343,12 +341,6 @@ within the pre-1.0 compatibility policy described in
   accepted but never honoured: no Tag decides an approval request.
 - The README's multiplayer diagram shows personal and shared Tags coordinating work across local
   machines, teammates' machines, and VMs.
-- The SuperTag protocol version is now 3, because conversations changed on the wire since 0.3.0.
-  A CLI, terminal UI, desktop app, or Worker Host from this release refuses a 0.3.0 Control Plane
-  (protocol 2) when it connects, and the error names both releases and which to upgrade, for
-  example: "This app speaks SuperTag protocol 3, but the Control Plane at http://127.0.0.1:3434
-  runs SuperTag 0.3.0 (protocol 2). Upgrade the Control Plane." Before, a newer desktop app
-  connected and then failed every conversation request.
 - The desktop app shows the Control Plane's reason when it rejects a request as invalid, instead
   of "Check its values".
 
@@ -372,31 +364,26 @@ within the pre-1.0 compatibility policy described in
   Tag's tools changed. The next turn then starts a fresh native session from a recap of the
   Session's last ten turns, with the messages the Tag wrote in them, on every harness. A dropped
   checkpoint's file leaves the checkpoint directory. `AttemptHistoryEntry` carries `messages`.
-- A Tag can change harness without losing its Sessions: they continue on the new harness from
-  their recaps, instead of refusing new turns.
-- Claude Code runs without its own auto memory, which lasted only one Task Attempt.
 
 ### Removed
 
 - `supertag fetch`, `land: branch` (it is now the default), and the Control Plane's delivery
   bundle relay.
-- `supertag volume copy`, `supertag volume download`, and the Control Plane's `--artifact-volume`
-  and `--artifact-s3-volumes`; the Control Plane no longer reads or writes Volume files.
 - `--checkpoint-directory` and the Control Plane's checkpoint storage.
 - `supertag volume copy` and the Control Plane's `--artifact-volume` and `--artifact-s3-volumes`:
-  the Control Plane maps no Volume. Starting it with either flag is refused with the replacement:
-  `--volume ID=DIR` on the Worker Hosts that write a file Volume, and `supertag volume credential
-  set` for an S3 Volume. Existing operator-made copies are dropped from the catalog; their objects
+  the Control Plane maps no Volume and no longer reads or writes Volume files. Starting it with
+  either flag is refused with the replacement: `--volume ID=DIR` on the Worker Hosts that write a
+  file Volume, and `supertag volume credential set` for an S3 Volume. Existing operator-made copies are dropped from the catalog; their objects
   stay under `attempts/` in the Volume, which you can delete.
 - Client file downloads: `supertag artifact download`, `supertag task download`, `supertag volume
   download`, the desktop app's Task result files, the terminal UI's Task files view, and the SDK
   Gateway clients' download methods. The Control Plane no longer passes files to clients;
   `supertag get artifact` still lists them.
 - GitHub Workspaces (`github:` spec, `--account`, `--repository-id`, `--pull-request-base`,
-  the `SUPERTAG_GITHUB_*` publisher settings), draft pull request publication and its approval,
-  closing a work Session when its pull request merges, and choosing a repository from a surface
-  message. A GitHub repository works as a plain remote with an HTTPS token Workspace Credential;
-  pull requests return with the GitHub review adapter.
+  the `SUPERTAG_GITHUB_*` publisher settings), their draft pull request publication and its
+  approval, and choosing a repository from a surface message. A GitHub repository works as a plain
+  remote with an HTTPS token Workspace Credential; pull requests now come from review landings
+  (`land: {review: {base}}`).
 - The Gateway's `desktop` notification destination, which notified the Gateway's own machine.
   `notify: desktop` is now refused; the desktop app and terminal UI notify on their device, and
   `webhook:` and `slack:` reach people away from them. A local `supertag up` configures no
@@ -408,7 +395,6 @@ within the pre-1.0 compatibility policy described in
 - The `create_objective` tool, the `AttemptTagSessions.CreateObjective` and
   `HarnessTagSessions.CreateObjective` RPCs, and `AttemptCapabilities.may_create_objective`. No
   turn creates an Objective.
-
 - Releases no longer include an Intel Mac (`darwin-amd64`) archive, and the installer script
   refuses Intel Macs. Build the CLI from source there, as
   [Install SuperTag](docs/operations/install.md#build-only-the-cli) describes.
