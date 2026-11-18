@@ -1,6 +1,6 @@
 [[permission]]
 identifier = "gateway-client"
-description = "Connect to a saved or the local Gateway, create Tags, read, follow or send personal conversation messages and why a sent one waits, list and delete a Tag's notes, read a Tag's network log, read, pause, resume and delete a Tag's Schedules, cache what it shows on launch, and save Task result files."
+description = "Connect to a saved or the local Gateway, create Tags, read, follow or send personal conversation messages and why a sent one waits, list and delete a Tag's notes, read a Tag's activity and network log, read, pause, resume and delete a Tag's Schedules, cache what it shows on launch, and save Task result files."
 commands.allow = [
   "list_gateways",
   "save_gateway",
@@ -13,6 +13,7 @@ commands.allow = [
   "list_notes",
   "delete_note",
   "list_network_logs",
+  "tag_activity",
   "list_schedules",
   "change_schedule",
   "list_tag_options",
