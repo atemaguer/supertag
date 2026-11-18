@@ -2,7 +2,12 @@
 //!
 //! - `start: TITLE | INSTRUCTION` starts one Work Session on this Tag with that instruction.
 //! - `edit: LINE` appends LINE to `workspace.txt` in the Task's checkout, creating it.
-//! - Anything else, such as a Work Session's report or a merge follow-up, changes nothing.
+//! - A merge follow-up, whose prompt lists files with conflict markers, keeps both sides of each
+//!   conflict and removes the markers, as its prompt asks.
+//! - Anything else, such as a Work Session's report, changes nothing.
+//!
+//! With `--journey-environment=DIR`, each turn first writes the environment it received to
+//! `DIR/TASK_ID.env`, so the script can check that no Workspace credential reached the harness.
 use anyhow::{Context, Result, ensure};
 use supertag_protocol::{
     authenticated_request,
@@ -29,6 +34,17 @@ pub async fn exercise(
     run: &HarnessRun,
     task: &Task,
 ) -> Result<String> {
+    if let Some(directory) = std::env::args().find_map(|arg| {
+        arg.strip_prefix("--journey-environment=")
+            .map(std::path::PathBuf::from)
+    }) {
+        let received = std::env::vars_os()
+            .map(|(name, value)| {
+                format!("{}={}\n", name.to_string_lossy(), value.to_string_lossy())
+            })
+            .collect::<String>();
+        std::fs::write(directory.join(format!("{}.env", task.task_id)), received)?;
+    }
     if let Some(rest) = directive(&task.prompt, "start: ") {
         let (title, instruction) = rest
             .split_once(" | ")
@@ -70,6 +86,41 @@ pub async fn exercise(
         };
         std::fs::write(&path, format!("{before}{line}\n"))?;
         return Ok(format!("Change: {line}"));
+    }
+    if task.prompt.contains("These files have conflict markers:") {
+        let workspace = std::env::var_os(supertag_worker_host::WORKSPACE_DIRECTORY)
+            .map(std::path::PathBuf::from)
+            .context("prepared workspace was not supplied")?;
+        let mut resolved = Vec::new();
+        for path in task
+            .prompt
+            .lines()
+            .filter_map(|line| line.strip_prefix("- "))
+        {
+            ensure!(
+                !path.starts_with('/') && !path.split('/').any(|part| part == ".."),
+                "conflicting path {path} leaves the checkout"
+            );
+            let file = workspace.join(path);
+            let text = std::fs::read_to_string(&file)?;
+            let kept = text
+                .lines()
+                .filter(|line| {
+                    !(line.starts_with("<<<<<<<")
+                        || line.starts_with("=======")
+                        || line.starts_with(">>>>>>>"))
+                })
+                .map(|line| format!("{line}\n"))
+                .collect::<String>();
+            ensure!(kept != text, "{path} has no conflict markers");
+            std::fs::write(&file, kept)?;
+            resolved.push(path.to_owned());
+        }
+        ensure!(!resolved.is_empty(), "the follow-up names no file");
+        return Ok(format!(
+            "Resolved {}, keeping both sides",
+            resolved.join(", ")
+        ));
     }
     Ok("Noted".into())
 }

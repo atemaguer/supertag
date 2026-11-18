@@ -10,7 +10,19 @@ server. The journeys:
 - continuation: a second turn of that Session commits on top of the first;
 - remote: a remote Workspace with `land` omitted pushes the Session's branch to the server;
 - merge: `land: merge` merges a Work Session into its target only once it is closed;
-- conflict: two Work Sessions change the same line; closing the second gives it a follow-up Task.
+- conflict: two Work Sessions change the same line; closing the second gives it a follow-up Task,
+  which resolves the conflict, and the Session merges again with both changes;
+- HTTPS token: a remote behind `git http-backend` that requires basic auth, with a Workspace
+  Credential the Control Plane grants for each read and push;
+- SSH key: a remote served by sshd in a disposable Docker container (skipped without Docker).
+
+The credentialed journeys also check that the secret never reaches the harness's environment or
+the host's disk (its state directory, which holds every checkout).
+
+`land: review` is not covered: it opens pull requests through the GitHub API only. A live run
+needs a GitHub repository, a GitHub App installed on it with Contents and Pull requests read and
+write (or an HTTPS token), `supertag workspace credential add --github-app`, and
+`supertag workspace put --land review --base main`; no fake forge stands in for it here.
 
 By default the host runs the fixture adapter, so no model is called. It needs a CLI built with
 the fixture adapter beside it:
@@ -25,10 +37,13 @@ SUPERTAG_E2E_BINARY every journey is skipped, as in CI.
 """
 from __future__ import annotations
 
+import base64
+import http.server
 import json
 import os
 import shutil
 import socket
+import threading
 import subprocess
 import sys
 import tempfile
@@ -48,6 +63,57 @@ def git(directory: Path, *args: str) -> str:
         ["git", "-C", str(directory), "-c", "user.name=Operator", "-c", "user.email=operator@example.com", *args],
         check=True, capture_output=True, text=True, env=environment,
     ).stdout
+
+
+TOKEN = "e2e-" + os.urandom(16).hex()
+
+
+class GitHttp(http.server.BaseHTTPRequestHandler):
+    """`git http-backend` over HTTP that requires basic auth with the user `supertag` and TOKEN."""
+
+    root = ""
+    expected = "Basic " + base64.b64encode(f"supertag:{TOKEN}".encode()).decode()
+
+    def log_message(self, *args):
+        pass
+
+    def serve(self):
+        if self.headers.get("Authorization") != self.expected:
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="e2e"')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        path, _, query = self.path.partition("?")
+        length = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(length) if length else b""
+        environment = {
+            "PATH": os.environ["PATH"], "GIT_PROJECT_ROOT": self.root, "GIT_HTTP_EXPORT_ALL": "1",
+            "REQUEST_METHOD": self.command, "PATH_INFO": path, "QUERY_STRING": query,
+            "CONTENT_TYPE": self.headers.get("Content-Type", ""), "CONTENT_LENGTH": str(len(body)),
+            "REMOTE_USER": "supertag", "REMOTE_ADDR": "127.0.0.1",
+            "HTTP_CONTENT_ENCODING": self.headers.get("Content-Encoding", ""),
+            "GIT_PROTOCOL": self.headers.get("Git-Protocol", ""),
+        }
+        done = subprocess.run(["git", "http-backend"], input=body, env=environment, capture_output=True)
+        head, _, payload = done.stdout.partition(b"\r\n\r\n")
+        status = 200
+        headers = []
+        for line in head.decode().split("\r\n"):
+            name, _, value = line.partition(": ")
+            if name.lower() == "status":
+                status = int(value.split()[0])
+            elif name:
+                headers.append((name, value))
+        self.send_response(status)
+        for name, value in headers:
+            self.send_header(name, value)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    do_GET = serve
+    do_POST = serve
 
 
 def free_port() -> int:
@@ -97,6 +163,22 @@ class Journeys(unittest.TestCase):
         for target in ("drafts", "conflicts"):
             git(cls.server, "branch", target, "main")
 
+        # HTTPS token: the same repository behind basic auth on a loopback HTTP server.
+        cls.http_root = cls.root / "http"
+        cls.http_root.mkdir()
+        git(cls.root, "clone", "-q", "--bare", str(cls.server), str(cls.http_root / "handbook.git"))
+        GitHttp.root = str(cls.http_root)
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), GitHttp)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        cls.addClassCleanup(server.shutdown)
+        cls.http_remote = f"http://127.0.0.1:{server.server_address[1]}/handbook.git"
+
+        # SSH key: sshd in a disposable container, when Docker runs here.
+        cls.ssh_remote = cls.start_sshd()
+
+        cls.environment_dumps = cls.root / "environment"
+        cls.environment_dumps.mkdir()
+
         if HARNESS:
             runner = f"    harnesses: [{HARNESS}]\n"
             if HARNESS == "claude-code":
@@ -105,7 +187,8 @@ class Journeys(unittest.TestCase):
             adapter = cls.binary.with_name("supertag-fixture-adapter")
             if not adapter.exists():
                 raise unittest.SkipTest(f"{adapter} is missing: build it with --features test-fixtures")
-            runner = f"    adapter: {adapter}\n    adapter-args: [--journey]\n"
+            runner = (f"    adapter: {adapter}\n"
+                      f"    adapter-args: [--journey, --journey-environment={cls.environment_dumps}]\n")
         cls.port = free_port()
         (cls.state / "supertag.yaml").write_text(f"""version: 1
 name: st-e2e
@@ -137,6 +220,8 @@ services:
       handbook: {{ remote: true }}
       handbook-m: {{ remote: true }}
       handbook-c: {{ remote: true }}
+      handbook-https: {{ remote: true }}
+      handbook-ssh: {{ remote: true }}
 """)
         cls.cli("up")
         cls.addClassCleanup(cls.down)
@@ -146,10 +231,22 @@ services:
                 "--land", "merge", "--target", "drafts")
         cls.cli("workspace", "put", "handbook-c", "--remote", remote, "--ref", "main",
                 "--land", "merge", "--target", "conflicts")
+        cls.cli("workspace", "credential", "add", "https-token", "--https-token", "--username", "supertag",
+                extra={"SUPERTAG_WORKSPACE_TOKEN": TOKEN})
+        cls.cli("workspace", "put", "handbook-https", "--remote", cls.http_remote, "--ref", "main",
+                "--credential", "https-token")
+        bound = [("local", "{ id: app, ref: main }"), ("remote", "{ id: handbook }"),
+                 ("merge", "{ id: handbook-m }"), ("conflict", "{ id: handbook-c }"),
+                 ("https", "{ id: handbook-https }")]
+        if cls.ssh_remote:
+            cls.cli("workspace", "credential", "add", "ssh-key", "--ssh-key", str(cls.ssh_key),
+                    "--known-hosts", str(cls.known_hosts))
+            cls.cli("workspace", "put", "handbook-ssh", "--remote", cls.ssh_remote, "--ref", "main",
+                    "--credential", "ssh-key")
+            bound.append(("ssh", "{ id: handbook-ssh }"))
         execution = f"  execution: {{ harness: {HARNESS} }}\n" if HARNESS else ""
         tags = []
-        for name, workspace in (("local", "{ id: app, ref: main }"), ("remote", "{ id: handbook }"),
-                                ("merge", "{ id: handbook-m }"), ("conflict", "{ id: handbook-c }")):
+        for name, workspace in bound:
             tags.append(f"""apiVersion: supertag/v1
 kind: Tag
 metadata: {{ name: {name} }}
@@ -163,6 +260,52 @@ spec:
         cls.cli("apply", "-f", str(manifest))
 
     @classmethod
+    def start_sshd(cls) -> str | None:
+        """A bare repository served over SSH by a disposable container, or None without Docker."""
+        if shutil.which("docker") is None or subprocess.run(["docker", "info"], capture_output=True).returncode:
+            return None
+        ssh = cls.root / "ssh"
+        ssh.mkdir(mode=0o700)
+        cls.ssh_key = ssh / "id_ed25519"
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(cls.ssh_key)], check=True)
+        public = (ssh / "id_ed25519.pub").read_text().strip()
+        script = (
+            "set -e; apk add --no-cache openssh-server git >/dev/null; ssh-keygen -A >/dev/null; "
+            "adduser -D -s /usr/bin/git-shell git; sed -i 's/^git:!/git:*/' /etc/shadow; "
+            "mkdir -p /home/git/.ssh; echo \"$KEY\" > /home/git/.ssh/authorized_keys; "
+            "git init -q --bare -b main /srv/handbook.git; chown -R git:git /home/git /srv/handbook.git; "
+            "chmod 700 /home/git/.ssh; chmod 600 /home/git/.ssh/authorized_keys; touch /ready; "
+            "exec /usr/sbin/sshd -D -e")
+        container = subprocess.run(
+            ["docker", "run", "-d", "--rm", "-e", f"KEY={public}", "-p", "127.0.0.1::22", "alpine:3.20",
+             "sh", "-c", script], check=True, capture_output=True, text=True).stdout.strip()
+        cls.addClassCleanup(subprocess.run, ["docker", "rm", "-f", container], capture_output=True)
+        port = subprocess.run(["docker", "port", container, "22/tcp"], check=True, capture_output=True,
+                              text=True).stdout.split(":")[-1].strip()
+        deadline = time.monotonic() + 120
+        while subprocess.run(["docker", "exec", container, "test", "-f", "/ready"]).returncode:
+            if time.monotonic() > deadline:
+                raise AssertionError("sshd did not start")
+            time.sleep(1)
+        cls.known_hosts = ssh / "known_hosts"
+        while True:
+            scanned = subprocess.run(["ssh-keyscan", "-p", port, "-t", "ed25519", "127.0.0.1"],
+                                     capture_output=True, text=True).stdout
+            if scanned.strip():
+                cls.known_hosts.write_text(scanned)
+                break
+            if time.monotonic() > deadline:
+                raise AssertionError("sshd does not answer")
+            time.sleep(1)
+        remote = f"ssh://git@127.0.0.1:{port}/srv/handbook.git"
+        ssh_command = (f"ssh -i {cls.ssh_key} -o IdentitiesOnly=yes -o UserKnownHostsFile={cls.known_hosts} "
+                       "-o StrictHostKeyChecking=yes")
+        subprocess.run(["git", "-C", str(cls.repository), "push", "-q", remote, "main"], check=True,
+                       env={**os.environ, "GIT_SSH_COMMAND": ssh_command}, capture_output=True)
+        cls.ssh_command = ssh_command
+        return remote
+
+    @classmethod
     def down(cls):
         subprocess.run([str(cls.binary), "down", "--force"], env=cls.environment(), capture_output=True)
         cls.temporary.cleanup()
@@ -174,9 +317,9 @@ spec:
         return environment
 
     @classmethod
-    def cli(cls, *args: str):
-        done = subprocess.run([str(cls.binary), *args], env=cls.environment(), capture_output=True, text=True,
-                              timeout=300)
+    def cli(cls, *args: str, extra: dict[str, str] | None = None):
+        done = subprocess.run([str(cls.binary), *args], env={**cls.environment(), **(extra or {})},
+                              capture_output=True, text=True, timeout=300)
         if done.returncode != 0:
             raise AssertionError(f"supertag {' '.join(args)} failed:\n{done.stdout}\n{done.stderr}")
         try:
@@ -209,9 +352,16 @@ spec:
         self.assertEqual(value["state"], "TASK_STATE_SUCCEEDED", value)
         return value
 
-    def landing(self, session: str, mode: str) -> dict:
+    def landing(self, session: str, mode: str, after: str | None = None) -> dict:
+        """The Session's first `mode` landing, or the first one after the landing `after`, once
+        it has finished."""
         def read():
-            for landing in self.cli("get", "landings", "--session-id", session)["landings"]:
+            landings = sorted(self.cli("get", "landings", "--session-id", session)["landings"],
+                              key=lambda landing: landing["created_order"])
+            if after is not None:
+                ids = [landing["landing_id"] for landing in landings]
+                landings = landings[ids.index(after) + 1:] if after in ids else []
+            for landing in landings:
                 if landing["mode"] == mode:
                     return landing
             return None
@@ -286,7 +436,7 @@ spec:
         self.assertIn("Co-authored-by: local <local@noreply.supertag.invalid>", message)
         self.assertEqual(self.read(self.server, "main"), BASE)
 
-    def test_4_a_conflicting_merge_gives_the_session_a_follow_up_task(self):
+    def test_4_a_conflicting_merge_is_resolved_by_a_follow_up_and_lands_again(self):
         self.finished(self.submit("conflict", "journey-conflict-one", start("One", "epsilon")))
         self.finished(self.submit("conflict", "journey-conflict-two", start("Two", "zeta")))
         one = self.work_session("conflict", "journey-conflict-one")["work_session_id"]
@@ -298,12 +448,67 @@ spec:
         conflict = self.landing(two, "merge")
         self.assertEqual(conflict["state"], "conflict", conflict)
         self.assertIn("workspace.txt", conflict["conflicts"])
+        self.assertEqual(conflict["target_commit"], landed["landed_commit"])
         follow_up = self.cli("get", "task", conflict["follow_up_task_id"])
         self.assertEqual(follow_up["session_id"], two)
         self.assertEqual(follow_up["workspace"]["merge_commit"], landed["landed_commit"])
-        # The target keeps the first Session's change until the second resolves its conflict.
-        self.assertIn("epsilon", self.read(self.server, "conflicts"))
-        self.assertNotIn("zeta", self.read(self.server, "conflicts"))
+
+        # The follow-up resolves the conflict, keeping both sides, and the Session merges again.
+        self.finished(follow_up["task_id"])
+        relanded = self.landing(two, "merge", after=conflict["landing_id"])
+        self.assertEqual(relanded["state"], "landed", relanded)
+        head = git(self.server, "rev-parse", "conflicts").strip()
+        self.assertEqual(head, relanded["landed_commit"])
+        git(self.server, "merge-base", "--is-ancestor", landed["landed_commit"], head)
+        text = self.read(self.server, "conflicts")
+        self.assertIn("epsilon", text)
+        self.assertIn("zeta", text)
+        for marker in ("<<<<<<<", "=======", ">>>>>>>"):
+            self.assertNotIn(marker, text)
+        self.assertEqual(self.read(self.server, "main"), BASE)
+
+    def credentialed_journey(self, tag: str, session: str, line: str, secrets: list[str]) -> dict:
+        """A turn on a credentialed remote: the Session's branch lands, and no secret reaches the
+        harness's environment or the host's disk."""
+        task = self.finished(self.submit(tag, session, edit(line)))
+        landing = self.landing(session, "branch")
+        self.assertEqual(landing["state"], "landed", landing)
+        self.assertEqual(landing["landed_commit"], task["workspace_delivery"]["head_commit"])
+        if not HARNESS:
+            received = (self.environment_dumps / f"{task['task_id']}.env").read_text()
+            for secret in secrets:
+                self.assertNotIn(secret, received)
+        host = self.state / "hosts"
+        self.assertTrue(host.is_dir(), host)
+        for path in host.rglob("*"):
+            if path.is_file() and not path.is_symlink():
+                data = path.read_bytes()
+                for secret in secrets:
+                    self.assertNotIn(secret.encode(), data, f"{secret[:12]}... found in {path}")
+        return landing
+
+    def test_5_https_token_remote_lands_without_the_token_reaching_the_host(self):
+        # The server refuses anyone without the token.
+        anonymous = subprocess.run(["git", "ls-remote", self.http_remote], capture_output=True, text=True,
+                                   env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "true"})
+        self.assertNotEqual(anonymous.returncode, 0, anonymous.stdout)
+        steps = {step["step"]: step["status"] for step in self.cli("workspace", "check", "handbook-https")["steps"]}
+        self.assertEqual((steps["read"], steps["push"]), ("ok", "ok"), steps)
+        landing = self.credentialed_journey("https", "journey-https", "eta", [TOKEN])
+        self.assertIn("eta", self.read(self.http_root / "handbook.git", landing["branch"]))
+
+    def test_6_ssh_key_remote_lands_without_the_key_reaching_the_host(self):
+        if not self.ssh_remote:
+            self.skipTest("Docker is not running")
+        steps = {step["step"]: step["status"] for step in self.cli("workspace", "check", "handbook-ssh")["steps"]}
+        self.assertEqual((steps["read"], steps["push"]), ("ok", "ok"), steps)
+        key = self.ssh_key.read_text().splitlines()
+        body = [line for line in key if line and not line.startswith("-----")]
+        landing = self.credentialed_journey("ssh", "journey-ssh", "theta", body)
+        shown = subprocess.run(["git", "ls-remote", self.ssh_remote, landing["branch"]], check=True,
+                               capture_output=True, text=True,
+                               env={**os.environ, "GIT_SSH_COMMAND": self.ssh_command}).stdout
+        self.assertTrue(shown.startswith(landing["landed_commit"]), shown)
 
 
 if __name__ == "__main__":

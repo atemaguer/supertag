@@ -57,8 +57,9 @@ python3 scripts/release_version.py --check
 ```
 
 After changes to Workspaces, delivery, landing, Work Sessions, or a harness adapter, run the
-end-to-end journeys on a disposable `supertag up`: local, continuation, remote, merge, and merge
-conflict. They use the fixture adapter, so no model is called. Add `--harness codex` or
+end-to-end journeys on a disposable `supertag up`: local, continuation, remote, merge, a merge
+conflict and its re-land, and remotes that need an HTTPS token or an SSH key (the SSH one needs
+Docker). They use the fixture adapter, so no model is called. Add `--harness codex` or
 `--harness claude-code` to run that harness with this machine's own login, which spends about a
 dozen small turns:
 
