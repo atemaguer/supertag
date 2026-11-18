@@ -148,7 +148,9 @@ While a Task runs on a Worker Host on your own machine, the desktop app shows it
 show a file in Finder. Binary files are listed but don't open. The list refreshes while the Task
 runs. The app reads the files from your disk; they never pass through the Control Plane. A Task on
 another machine says "Files on Worker Host NAME are unreachable from here", and a finished Task's
-work is on its Session branch.
+work is on its Session branch. The app and the Worker Host know they share a machine from
+`~/.supertag/machine-id`, a random identifier created on first use, whichever state directory
+each one uses.
 
 ## See what a Tag fetched
 

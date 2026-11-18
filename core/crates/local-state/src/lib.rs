@@ -239,36 +239,21 @@ pub fn loopback_address(value: &str) -> Result<SocketAddr> {
     Ok(address)
 }
 
-/// The per-user configuration directory used by Go's `os.UserConfigDir` and Tauri's
-/// `app_config_dir` on this platform.
-fn user_config_directory() -> Result<PathBuf> {
-    let home = std::env::var_os("HOME").filter(|home| !home.is_empty());
-    if cfg!(target_os = "macos") {
-        let home = home.context("HOME is required to find this machine's identifier")?;
-        return Ok(PathBuf::from(home).join("Library/Application Support"));
-    }
-    if let Some(directory) = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-    {
-        return Ok(directory);
-    }
-    let home =
-        home.context("HOME or XDG_CONFIG_HOME is required to find this machine's identifier")?;
-    Ok(PathBuf::from(home).join(".config"))
-}
-
-/// This machine and user's random identifier, created on first use in the per-user
-/// configuration directory (`supertag/machine-id`). Every state directory shares it, so a Worker
-/// Host and a client on the same machine present the same one. It proves nothing to anyone else:
-/// a Control Plane only uses it to tell a client that a host's files are on the client's disk.
+/// This machine and user's random identifier, created on first use at `~/.supertag/machine-id`.
+/// The path is fixed, independent of `SUPERTAG_STATE_DIR` and `--state-directory`, so a Worker
+/// Host and a client on the same machine present the same one whichever state directory each
+/// uses. It proves nothing to anyone else: a Control Plane only uses it to tell a client that a
+/// host's files are on the client's disk.
 pub fn machine_id() -> Result<String> {
-    let directory = user_config_directory()?.join("supertag");
+    let home = std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .context("HOME is required to find this machine's identifier")?;
+    let directory = PathBuf::from(home).join(".supertag");
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(&directory)
-        .context("create the per-user SuperTag configuration directory")?;
+        .context("create ~/.supertag")?;
     let path = directory.join("machine-id");
     let valid =
         |id: &str| id.len() == 32 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));

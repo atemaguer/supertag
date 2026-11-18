@@ -12,7 +12,7 @@ use crate::{
 
 const MAX_LOCAL_PATH: usize = 4096;
 
-/// A machine identifier as hosts and clients keep it in the per-user `supertag/machine-id`.
+/// A machine identifier as hosts and clients keep it in `~/.supertag/machine-id`.
 pub(crate) fn valid_machine_id(id: &str) -> bool {
     id.len() == 32
         && id
