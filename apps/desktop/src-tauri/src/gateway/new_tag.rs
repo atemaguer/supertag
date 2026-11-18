@@ -65,7 +65,46 @@ impl NewTag {
     }
 }
 
+/// The branch a new Tag on a local Workspace follows: the one the Workspace's other Tags follow,
+/// such as the lead Tag `supertag init` created, preferring a lead. A local Workspace needs a
+/// branch or a commit, and the desktop knows neither on its own.
+fn branch_to_follow(tags: &[v2::Tag], workspace_id: &str) -> Option<String> {
+    tags.iter()
+        .filter_map(|tag| {
+            let workspace = tag.workspace.as_ref()?;
+            (workspace.workspace_id == workspace_id
+                && workspace.remote.is_none()
+                && !workspace.base_ref.is_empty())
+            .then_some((tag.lead, &workspace.base_ref))
+        })
+        .max_by_key(|(lead, _)| *lead)
+        .map(|(_, branch)| branch.clone())
+}
+
 impl Session {
+    async fn followed_branch(&self, workspace_id: &str) -> Result<Option<String>> {
+        let mut tags = Vec::new();
+        let mut cursor = String::new();
+        for _ in 0..MAX_PAGES {
+            let page = self
+                .operator()
+                .list_tags(self.request(v2::ListTagsRequest {
+                    limit: 100,
+                    cursor: cursor.clone(),
+                    include_retired: false,
+                }))
+                .await
+                .map_err(rpc_error)?
+                .into_inner();
+            tags.extend(page.tags);
+            if page.next_cursor.is_empty() || page.next_cursor == cursor {
+                break;
+            }
+            cursor = page.next_cursor;
+        }
+        Ok(branch_to_follow(&tags, workspace_id))
+    }
+
     async fn tag_options(&self) -> Result<TagOptions> {
         let mut options = TagOptions::default();
         let mut cursor = String::new();
@@ -119,8 +158,15 @@ impl GatewayState {
 
     /// Creates a Tag, refusing an ID or name another Tag holds.
     pub async fn create_tag(&self, connection_id: &str, tag: NewTag) -> Result<Tag> {
-        let request = tag.request()?;
+        let mut request = tag.request()?;
         let session = self.session(connection_id).await?;
+        if let Some(workspace) = request.workspace.as_mut()
+            && workspace.base_ref.is_empty()
+            && workspace.base_commit.is_empty()
+            && let Some(branch) = session.followed_branch(&workspace.workspace_id).await?
+        {
+            workspace.base_ref = branch;
+        }
         let tag = session
             .operator()
             .put_tag(session.request(request))
@@ -138,6 +184,34 @@ impl GatewayState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_tag_follows_the_branch_its_workspace_s_lead_follows() {
+        let tag = |tag_id: &str, lead: bool, workspace: &str, base_ref: &str| v2::Tag {
+            tag_id: tag_id.into(),
+            lead,
+            workspace: Some(v2::WorkspaceSpec {
+                workspace_id: workspace.into(),
+                base_ref: base_ref.into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let tags = [
+            tag("other", false, "demo", "feature"),
+            tag("lead", true, "demo", "main"),
+            tag("elsewhere", true, "site", "trunk"),
+            tag("pinned", false, "pinned", ""),
+        ];
+        assert_eq!(branch_to_follow(&tags, "demo").as_deref(), Some("main"));
+        assert_eq!(branch_to_follow(&tags, "site").as_deref(), Some("trunk"));
+        assert_eq!(
+            branch_to_follow(&tags[..1], "demo").as_deref(),
+            Some("feature")
+        );
+        assert_eq!(branch_to_follow(&tags, "pinned"), None);
+        assert_eq!(branch_to_follow(&tags, "unknown"), None);
+    }
 
     #[test]
     fn a_new_tag_gets_the_lead_tag_defaults_and_never_replaces_another() {
