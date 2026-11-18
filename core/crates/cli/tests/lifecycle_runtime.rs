@@ -720,9 +720,9 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
         stdout.contains("Tag lead runs codex on this machine, in Workspace my-project"),
         "{stdout}"
     );
-    assert!(stdout.contains("  codex: signed in"), "{stdout}");
+    assert_eq!(stdout.matches("  codex: signed in").count(), 1, "{stdout}");
     assert!(
-        stdout.contains("Gave the Codex lead web:fetch in the local-tools Permission Set"),
+        stdout.contains("Gave the Codex lead web:fetch, which current Codex models need"),
         "{stdout}"
     );
     let file = machine.state.join("supertag.yaml");

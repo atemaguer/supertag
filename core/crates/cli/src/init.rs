@@ -501,7 +501,10 @@ pub async fn init(args: InitArgs) -> Result<()> {
     let mut without_node = false;
     for harness in &installed {
         if *harness == Found::Opencode {
-            outln!("  opencode: sign-in not checked (choose a model)");
+            // `--yes` never selects OpenCode, which needs a model answer first.
+            if prompter.is_some() {
+                outln!("  opencode: sign-in not checked (choose a model)");
+            }
             continue;
         }
         // SuperTag runs Claude Code through its Node bridge: without a Node it can use, the
@@ -540,10 +543,17 @@ pub async fn init(args: InitArgs) -> Result<()> {
         outln!("Press Enter to accept the default in [brackets].");
     }
     let answers = answers(prompter.as_mut(), &installed, &signed_in, &repository)?;
+    // A harness checked above already said whether it is signed in.
+    let checked = sign_ins
+        .results
+        .iter()
+        .any(|(harness, model, _)| *harness == answers.harness && *model == answers.model);
     let result = sign_ins
         .check(answers.harness, answers.model.as_deref())
         .await?;
-    report(answers.harness, result);
+    if !checked {
+        report(answers.harness, result);
+    }
     if !result {
         return Err(no_sign_in(&[answers.harness]));
     }
@@ -919,7 +929,7 @@ fn unsandboxed(harness: Found, ask: Option<&mut Prompter>) -> Result<Commands> {
         }
         (Found::Codex, _) => {
             outln!(
-                "  Gave the Codex lead web:fetch in the local-tools Permission Set: current Codex models run commands only in Codex code mode, which SuperTag starts only for Tasks that may also fetch from the web, so its commands can reach the network. To keep them offline, remove web:fetch from supertag.yaml, select a Codex model that is not code-mode-only, and run supertag up."
+                "  Gave the Codex lead web:fetch, which current Codex models need to run commands, so its commands can reach the network. To keep them offline, remove web:fetch from supertag.yaml and select a Codex model that isn't code-mode-only."
             );
             Commands::Unset
         }

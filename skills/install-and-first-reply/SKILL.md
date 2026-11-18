@@ -36,7 +36,7 @@ supertag init
 `init` finds `claude` and `codex` on `PATH` (and `opencode`, or Cursor through `CURSOR_API_KEY`),
 and stops without changing anything when none is available. It checks each harness's sign-in with
 the credentials the Worker Host will have and labels it `signed in` or not, with sign-in
-instructions. OpenCode prints `sign-in not checked (choose a model)` until you choose a model.
+instructions. Asked in a terminal, OpenCode prints `sign-in not checked (choose a model)` until you choose a model.
 Claude Code also needs Node.js 22.13.0 or later on `PATH`; without it, `init` says
 so and doesn't offer Claude Code.
 It then asks for the Control Plane port, the harness (and a `provider/model` for OpenCode), the
