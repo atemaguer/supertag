@@ -8,7 +8,6 @@ use std::{
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     process::Stdio,
-    time::SystemTime,
 };
 
 use anyhow::{Context, Result};
@@ -162,13 +161,6 @@ impl Drop for KeepAwake {
     }
 }
 
-fn now() -> String {
-    let elapsed = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("{}ms since the Unix epoch", elapsed.as_millis())
-}
-
 async fn hold(
     command: KeepAwakeCommand,
     mut running: watch::Receiver<(bool, u64)>,
@@ -209,9 +201,8 @@ async fn hold(
                 }
             };
             supertag_protocol::terminal_text::warn(&format!(
-                "Keeping the machine awake ({}) since {} while Task Attempts run.",
+                "Keeping the machine awake ({}) while Task Attempts run.",
                 command.label,
-                now()
             ));
             let idle = tokio::select! {
                 _ = shutdown.cancelled() => None,
