@@ -84,18 +84,25 @@ it("carries a Task client's connection to the egress proxy and back over the rel
   client.destroy();
 }, 30_000);
 
-it("closes a client beyond the connection cap, and one idle past its limit", async () => {
+it("holds a client beyond the connection cap until one closes, and closes one idle past its limit", async () => {
   const upstream = await proxy("HTTP/1.1 200 Connection established\r\n\r\n");
   const { host, port } = await relay(upstream.port, { maxStreams: 1, idleMs: 500 });
   const first = connect(port, "127.0.0.1");
   const firstAnswer = received(first);
   first.write("CONNECT a.example:443 HTTP/1.1\r\n\r\n");
   await firstAnswer.until("200");
-  const second = received(connect(port, "127.0.0.1"));
-  await second.closed();
+  // The second waits, with what it already sent, while the first holds the only connection.
+  const second = connect(port, "127.0.0.1");
+  const secondAnswer = received(second);
+  second.write("CONNECT b.example:443 HTTP/1.1\r\n\r\n");
+  await settle(200);
   expect(host.streams).toBe(1);
-  // No bytes either way for longer than the idle limit: the relay connection closes.
+  expect(upstream.seen).toEqual(["CONNECT a.example:443 HTTP/1.1\r\n\r\n"]);
+  // No bytes either way for longer than the idle limit: the first closes, and the second runs.
   await firstAnswer.closed();
+  await secondAnswer.until("200");
+  expect(upstream.seen.at(-1)).toBe("CONNECT b.example:443 HTTP/1.1\r\n\r\n");
+  await secondAnswer.closed();
   expect(host.streams).toBe(0);
 }, 30_000);
 
@@ -241,22 +248,20 @@ it("drops everything after its output overflows a line, and stops the relay", as
   expect(sandbox.lines).toEqual([]);
 });
 
-it("rate-limits opens, and drops them without a reply once backed up", async () => {
+it("rate-limits opens, refuses those beyond the waiting ones, and drops them once backed up", async () => {
   const { port } = await proxy("");
   const sandbox = stalledPeer();
   sandbox.release();
   const host = createEgressRelayHost(
     sandbox.peer,
     { host: "127.0.0.1", port },
-    { openBurst: 4, openRate: 0 },
+    { openBurst: 4, openRate: 0, maxWaitingOpens: 3 },
   );
   for (let id = 1; id <= 10; id += 1) host.receive(`O ${id}\n`);
+  // Four connect at once, three wait for a token, and the rest are refused.
   expect(host.streams).toBe(4);
   await settle(50);
   expect(sandbox.lines.filter((line) => line.startsWith("C "))).toEqual([
-    "C 5\n",
-    "C 6\n",
-    "C 7\n",
     "C 8\n",
     "C 9\n",
     "C 10\n",
@@ -294,9 +299,9 @@ it("closes the relay when the Attempt's egress proxy is gone", async () => {
 });
 
 it("counts a closed client still finishing toward the cap, and destroys it on close", async () => {
-  // A proxy that never reads, so a finished socket lingers with its last bytes.
+  // A proxy that never ends its side, so a finished socket lingers.
   const sockets: Socket[] = [];
-  const server = createServer((socket) => {
+  const server = createServer({ allowHalfOpen: true }, (socket) => {
     sockets.push(socket);
     socket.pause();
   }).listen(0, "127.0.0.1");
@@ -316,10 +321,13 @@ it("counts a closed client still finishing toward the cap, and destroys it on cl
   await settle(200);
   host.receive("C 1\n");
   expect(host.streams).toBe(1);
-  // Stream 1 still finishes, so a third open is refused.
+  // Stream 1 still finishes, so a third open waits for its connection.
   host.receive("O 3\n");
   await settle(50);
   expect(host.streams).toBe(1);
-  expect(sandbox.lines).toContain("C 3\n");
+  expect(sandbox.lines).not.toContain("C 3\n");
+  // Five seconds on, the finishing socket is gone and the waiting open takes its place.
+  await settle(5_300);
+  expect(host.streams).toBe(2);
   host.close();
-});
+}, 15_000);

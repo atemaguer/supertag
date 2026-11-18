@@ -149,8 +149,14 @@ const LOW_WATER = 1024 * 1024;
 /** Past this many waiting bytes the sandbox has stopped reading, and the relay is closed. */
 const HARD_LIMIT = 16 * 1024 * 1024;
 /** New connections the relay may open: a burst of this many, refilled at `OPEN_RATE` a second. */
-const OPEN_BURST = 32;
-const OPEN_RATE = 8;
+const OPEN_BURST = 64;
+const OPEN_RATE = 16;
+/**
+ * Opens past the rate or the connection cap wait their turn, up to this many; one beyond is
+ * refused. A package manager opens dozens at once and retries a refused one only after a long
+ * backoff, so waiting serves it far better than refusing.
+ */
+const MAX_WAITING_OPENS = 256;
 
 export interface EgressRelayPeer {
   /** Writes one line, newline included, to the relay's standard input. */
@@ -168,6 +174,7 @@ export interface EgressRelayLimits {
   readonly hardLimit?: number;
   readonly openBurst?: number;
   readonly openRate?: number;
+  readonly maxWaitingOpens?: number;
 }
 
 interface Stream {
@@ -199,6 +206,10 @@ export function createEgressRelayHost(
   const hardLimit = limits.hardLimit ?? HARD_LIMIT;
   const openBurst = limits.openBurst ?? OPEN_BURST;
   const openRate = limits.openRate ?? OPEN_RATE;
+  const maxWaitingOpens = limits.maxWaitingOpens ?? MAX_WAITING_OPENS;
+  /** Opens waiting for a token or a free connection, with the bytes their clients sent. */
+  const waiting = new Map<number, { chunks: Buffer[]; bytes: number }>();
+  let pumping: ReturnType<typeof setTimeout> | undefined;
   const streams = new Map<number, Stream>();
   /** Sockets whose client closed, still sending the proxy their last bytes. */
   const finishing = new Set<Socket>();
@@ -253,6 +264,7 @@ export function createEgressRelayHost(
     clearTimeout(stream.idle);
     stream.socket.destroy();
     if (notify) send(`C ${id}`);
+    queueMicrotask(pump);
   }
   /**
    * The client closed: the proxy still gets the bytes it sent before, then the end, for at most
@@ -265,7 +277,10 @@ export function createEgressRelayHost(
     clearTimeout(stream.idle);
     const { socket } = stream;
     finishing.add(socket);
-    socket.once("close", () => finishing.delete(socket));
+    socket.once("close", () => {
+      finishing.delete(socket);
+      pump();
+    });
     socket.end();
     setTimeout(() => {
       finishing.delete(socket);
@@ -288,13 +303,38 @@ export function createEgressRelayHost(
     return true;
   }
   function open(id: number) {
-    if (streams.has(id)) return;
+    if (streams.has(id) || waiting.has(id)) return;
     // Backed up, an open is dropped without a reply: replying would only add to the backlog.
     if (backedUp) return;
-    if (streams.size + finishing.size >= maxStreams || !admit()) {
+    if (waiting.size >= maxWaitingOpens) {
       send(`C ${id}`);
       return;
     }
+    waiting.set(id, { chunks: [], bytes: 0 });
+    pump();
+  }
+  /** Connects waiting opens, in order, while tokens and connections allow; then waits again. */
+  function pump() {
+    if (closed) return;
+    while (waiting.size > 0 && streams.size + finishing.size < maxStreams && admit()) {
+      const [id, early] = waiting.entries().next().value as [
+        number,
+        { chunks: Buffer[]; bytes: number },
+      ];
+      waiting.delete(id);
+      connectStream(id);
+      for (const chunk of early.chunks) write(id, chunk);
+    }
+    if (waiting.size > 0 && pumping === undefined && streams.size + finishing.size < maxStreams)
+      pumping = setTimeout(
+        () => {
+          pumping = undefined;
+          pump();
+        },
+        Math.max(10, Math.ceil(1000 / Math.max(openRate, 0.001))),
+      );
+  }
+  function connectStream(id: number) {
     const socket = connect(proxy.port, proxy.host);
     socket.setNoDelay(true);
     const stream: Stream = {
@@ -324,10 +364,25 @@ export function createEgressRelayHost(
     if (flowing(stream)) stream.socket.resume();
   }
   function deliver(id: number, data: string) {
+    const bytes = Buffer.from(data, "base64");
+    // A waiting open keeps what its client sent, within its window, until it connects.
+    const early = waiting.get(id);
+    if (early) {
+      if (early.bytes + bytes.length > 2 * window) {
+        waiting.delete(id);
+        send(`C ${id}`);
+        return;
+      }
+      early.chunks.push(bytes);
+      early.bytes += bytes.length;
+      return;
+    }
+    write(id, bytes);
+  }
+  function write(id: number, bytes: Buffer) {
     const stream = streams.get(id);
     if (!stream) return;
     touch(id);
-    const bytes = Buffer.from(data, "base64");
     // The relay keeps to its window, overshooting by at most one read; past twice the window,
     // the connection is broken. The count is the relay's bytes this host has not yet credited,
     // not the socket's buffer, which a large kernel buffer (as on Linux loopback) keeps empty.
@@ -351,8 +406,9 @@ export function createEgressRelayHost(
     const id = Number(raw);
     if (!Number.isSafeInteger(id) || id < 1) return;
     if (kind === "O") open(id);
-    else if (kind === "C") finish(id);
-    else if (kind === "D" && data !== undefined) deliver(id, data);
+    else if (kind === "C") {
+      if (!waiting.delete(id)) finish(id);
+    } else if (kind === "D" && data !== undefined) deliver(id, data);
     else if (kind === "A" && data !== undefined && /^[0-9]{1,9}$/u.test(data))
       credit(id, Number(data));
   }
@@ -363,6 +419,8 @@ export function createEgressRelayHost(
     for (const id of [...streams.keys()]) end(id, false);
     for (const socket of finishing) socket.destroy();
     finishing.clear();
+    waiting.clear();
+    clearTimeout(pumping);
     peer.abort?.();
   }
   return {
