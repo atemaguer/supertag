@@ -32,6 +32,35 @@ use uuid::Uuid;
 const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
 const ADAPTER: &str = env!("CARGO_BIN_EXE_supertag-fixture-adapter");
 const WAIT: Duration = Duration::from_secs(20);
+/// A `worker-host --once` run is a whole Task turn: host start, claim, the adapter's runtime, the
+/// harness fixture, and finalization. Its time grows with the machine's load, unlike a single
+/// operator call, so it gets a longer deadline.
+const TURN_WAIT: Duration = Duration::from_secs(60);
+
+/// Runs the SuperTag binary once per test process before any deadline starts: the first launch
+/// of a freshly built binary can wait seconds on the operating system's checks (on macOS), and
+/// every case would otherwise pay that inside its first deadline at once.
+async fn warm() {
+    static WARM: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
+    WARM.get_or_init(|| async {
+        for binary in [BINARY, ADAPTER] {
+            // Only the launch matters; the exit status does not.
+            let _ = timeout(
+                Duration::from_secs(60),
+                Command::new(binary)
+                    .arg("--version")
+                    .env_clear()
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .kill_on_drop(true)
+                    .status(),
+            )
+            .await;
+        }
+    })
+    .await;
+}
 
 fn command(args: &[&str]) -> Command {
     let mut command = reaped(Command::new(BINARY));
@@ -45,17 +74,48 @@ fn command(args: &[&str]) -> Command {
 }
 
 async fn service(mut command: Command) -> Result<(Child, String)> {
+    warm().await;
+    let started = std::time::Instant::now();
+    let backend = command
+        .as_std()
+        .get_envs()
+        .find(|(key, _)| *key == "SUPERTAG_DATABASE_URL")
+        .and_then(|(_, value)| value)
+        .map(|value| {
+            value
+                .to_string_lossy()
+                .split(':')
+                .next()
+                .unwrap_or("")
+                .to_owned()
+        })
+        .unwrap_or_default();
+    let label = format!("service {:?} {backend}", command.as_std().get_args().next());
     let mut child = command.stdout(Stdio::piped()).spawn()?;
     let mut stdout = BufReader::new(child.stdout.take().context("service stdout missing")?);
     let mut line = String::new();
     timeout(WAIT, stdout.read_line(&mut line)).await??;
+    crate::database::timing(&label, started);
     let address: SocketAddr = line.trim().parse().context("service did not bind")?;
     ensure!(address.ip().is_loopback() && address.port() != 0);
     Ok((child, format!("http://{address}")))
 }
 
 async fn success(mut command: Command) -> Result<Vec<u8>> {
-    let output = timeout(WAIT, command.output()).await??;
+    warm().await;
+    let started = std::time::Instant::now();
+    let label = format!(
+        "success {:?}",
+        command.as_std().get_args().take(2).collect::<Vec<_>>()
+    );
+    let turn = command.as_std().get_args().next() == Some(std::ffi::OsStr::new("worker-host"));
+    let output = timeout(if turn { TURN_WAIT } else { WAIT }, command.output())
+        .await
+        .map_err(|_| {
+            crate::database::timing(&format!("TIMEOUT {label}"), started);
+            anyhow::anyhow!("{label} timed out")
+        })??;
+    crate::database::timing(&label, started);
     ensure!(
         output.status.success(),
         "SuperTag process failed: {}",

@@ -3,7 +3,7 @@
 //! The test crate must declare `prerequisites` (from `core/test-support`) before this module.
 #![allow(dead_code)]
 
-use std::{future::Future, panic::AssertUnwindSafe, str::FromStr};
+use std::{future::Future, os::unix::fs::PermissionsExt, panic::AssertUnwindSafe, str::FromStr};
 
 use anyhow::{Context, Result};
 use futures_util::FutureExt;
@@ -30,10 +30,12 @@ where
     match backend {
         Backend::Sqlite => {
             let directory = tempfile::TempDir::new()?;
-            let url = format!(
-                "sqlite://{}?mode=rwc",
-                directory.path().join("control-plane.db").display()
-            );
+            let database = directory.path().join("control-plane.db");
+            // A copy of this process's migrated store, so the Control Plane starts without
+            // replaying every migration.
+            std::fs::copy(sqlite_template().await?, &database)?;
+            std::fs::set_permissions(&database, std::fs::Permissions::from_mode(0o600))?;
+            let url = format!("sqlite://{}?mode=rwc", database.display());
             Box::pin(test(url)).await
         }
         Backend::Postgres => {
@@ -45,6 +47,7 @@ where
             let admin_url = std::fs::read_to_string(&path)
                 .context("read SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")?;
             let options = PgConnectOptions::from_str(admin_url.trim())?;
+            let started = std::time::Instant::now();
             let mut admin = PgConnection::connect_with(&options).await?;
             drop_abandoned_databases(&mut admin, false).await?;
             let name = format!(
@@ -52,15 +55,19 @@ where
                 std::process::id(),
                 uuid::Uuid::new_v4().simple()
             );
-            // template0 never accepts connections, so concurrent cases cannot contend for it.
+            // A copy of the migrated template, so the Control Plane starts without replaying
+            // every migration. The template accepts no connections, so concurrent cases cannot
+            // contend for it.
+            let template = postgres_template(&mut admin, &options).await?;
             admin
-                .execute(format!("CREATE DATABASE {name} TEMPLATE template0").as_str())
+                .execute(format!("CREATE DATABASE {name} TEMPLATE {template}").as_str())
                 .await?;
             let mut guard = DatabaseGuard {
                 options: options.clone(),
                 name: Some(name.clone()),
             };
             let url = options.database(&name).to_url_lossy().to_string();
+            timing("pg-create", started);
             let outcome = AssertUnwindSafe(Box::pin(test(url))).catch_unwind().await;
             guard.name = None;
             let cleanup = drop_database(&mut admin, &name).await;
@@ -74,6 +81,154 @@ where
             }
         }
     }
+}
+
+/// Appends `label elapsed_ms` to the file named by SUPERTAG_TEST_TIMINGS, when set.
+pub fn timing(label: &str, started: std::time::Instant) {
+    if let Some(path) = std::env::var_os("SUPERTAG_TEST_TIMINGS") {
+        use std::io::Write;
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let _ =
+                file.write_all(format!("{label}\t{}\n", started.elapsed().as_millis()).as_bytes());
+        }
+    }
+}
+
+/// A digest of the Control Plane's migrations, naming the migrated templates: a changed
+/// migration gets a new template.
+fn migrations_digest() -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../control-plane/migrations");
+    let mut digest = Sha256::new();
+    for backend in ["sqlite", "postgresql"] {
+        let mut files: Vec<_> = std::fs::read_dir(root.join(backend))?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<std::io::Result<_>>()?;
+        files.sort();
+        for file in files {
+            digest.update(file.file_name().unwrap_or_default().as_encoded_bytes());
+            digest.update(std::fs::read(&file)?);
+        }
+    }
+    Ok(format!("{:x}", digest.finalize())[..16].to_owned())
+}
+
+/// This test process's migrated SQLite store, made once and copied for each case.
+async fn sqlite_template() -> Result<&'static std::path::Path> {
+    static TEMPLATE: tokio::sync::OnceCell<tempfile::TempDir> = tokio::sync::OnceCell::const_new();
+    let directory = TEMPLATE
+        .get_or_try_init(|| async {
+            let directory = tempfile::TempDir::new()?;
+            let url = format!(
+                "sqlite://{}?mode=rwc",
+                directory.path().join("template.db").display()
+            );
+            let store = supertag_control_plane::Store::open(&url).await?;
+            store.close().await;
+            anyhow::Ok(directory)
+        })
+        .await?;
+    Ok(Box::leak(
+        directory.path().join("template.db").into_boxed_path(),
+    ))
+}
+
+/// Every migrated PostgreSQL template's name starts with this, then the migrations' digest.
+const TEMPLATE_PREFIX: &str = "supertag_rust_template_";
+/// `pg_advisory_lock` key that serializes template creation across test processes.
+const TEMPLATE_LOCK: i64 = 0x5375_7065_7254_706c;
+
+async fn template_exists(admin: &mut PgConnection, name: &str) -> Result<bool> {
+    Ok(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM pg_database WHERE datname=$1")
+            .bind(name)
+            .fetch_one(admin)
+            .await?
+            == 1,
+    )
+}
+
+/// The migrated PostgreSQL template for these migrations, made once per cluster. Templates of
+/// other migrations are dropped when nothing uses them.
+async fn postgres_template(admin: &mut PgConnection, options: &PgConnectOptions) -> Result<String> {
+    let name = format!("{TEMPLATE_PREFIX}{}", migrations_digest()?);
+    if template_exists(&mut *admin, &name).await? {
+        return Ok(name);
+    }
+    sqlx::query("SELECT pg_advisory_lock($1)")
+        .bind(TEMPLATE_LOCK)
+        .execute(&mut *admin)
+        .await?;
+    let made = async {
+        if template_exists(&mut *admin, &name).await? {
+            return anyhow::Ok(());
+        }
+        let stale: Vec<String> = sqlx::query_scalar(
+            "SELECT datname FROM pg_database WHERE starts_with(datname, $1) AND datname<>$2",
+        )
+        .bind(TEMPLATE_PREFIX)
+        .bind(&name)
+        .fetch_all(&mut *admin)
+        .await?;
+        for old in stale {
+            // Another process may still be copying it; it goes on a later run.
+            let _ = admin
+                .execute(format!("DROP DATABASE IF EXISTS {old}").as_str())
+                .await;
+        }
+        // Migrate under a temporary name, so a template exists only once complete.
+        let building = format!("{name}_building");
+        admin
+            .execute(format!("DROP DATABASE IF EXISTS {building} WITH (FORCE)").as_str())
+            .await?;
+        admin
+            .execute(format!("CREATE DATABASE {building} TEMPLATE template0").as_str())
+            .await?;
+        let url = options
+            .clone()
+            .database(&building)
+            .to_url_lossy()
+            .to_string();
+        let store = supertag_control_plane::Store::open(&url).await?;
+        store.close().await;
+        // A closed pool's backends exit asynchronously; a rename needs them gone.
+        admin
+            .execute(format!("ALTER DATABASE {building} ALLOW_CONNECTIONS false").as_str())
+            .await?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        loop {
+            let remaining: i64 = sqlx::query_scalar(
+                "SELECT COUNT(pg_terminate_backend(pid)) FROM pg_stat_activity \
+                 WHERE datname = $1 AND pid <> pg_backend_pid()",
+            )
+            .bind(&building)
+            .fetch_one(&mut *admin)
+            .await?;
+            if remaining == 0 {
+                break;
+            }
+            anyhow::ensure!(
+                std::time::Instant::now() < deadline,
+                "the template's migration connections did not exit"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        admin
+            .execute(format!("ALTER DATABASE {building} RENAME TO {name}").as_str())
+            .await?;
+        Ok(())
+    }
+    .await;
+    sqlx::query("SELECT pg_advisory_unlock($1)")
+        .bind(TEMPLATE_LOCK)
+        .execute(&mut *admin)
+        .await?;
+    made?;
+    Ok(name)
 }
 
 /// Every per-case database name starts with this, then the owning test process's PID.

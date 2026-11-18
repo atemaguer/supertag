@@ -103,14 +103,22 @@ cargo test --manifest-path core/Cargo.toml --locked --workspace --all-features
 For PostgreSQL coverage, put the disposable test server URL in a private file and set
 `SUPERTAG_RUST_TEST_POSTGRES_URL_FILE` to its path. Run the same command with
 `-- --include-ignored` to run the PostgreSQL cases. Stateful process tests run once per backend,
-as `NAME::sqlite` and `NAME::postgres`; each PostgreSQL case creates its own database and drops
-it afterwards, and first drops any database left by a test process that was killed. To clear
+as `NAME::sqlite` and `NAME::postgres`. Each case starts from a copy of an already migrated
+store, so its Control Plane does not replay every migration: a SQLite file each test process
+migrates once, or a PostgreSQL template database (`supertag_rust_template_<digest>`) made once
+per set of migrations and replaced when they change. Each PostgreSQL case creates its own
+database from that template and drops it afterwards, and first drops any database left by a test
+process that was killed. To clear
 older leftovers, run
 `cargo test -p supertag-cli --test test_databases -- --ignored drop_abandoned` with the same
 variable set. The process tests also use temporary state directories and a local HTTP provider
 fixture. The partition case waits for the production 30-second execution lease to expire.
 
 Ignored tests that need a local fixture report `SKIPPED` on stderr and pass when it is missing.
+To see where a slow `language_runtime` run spends its time, set `SUPERTAG_TEST_TIMINGS` to a
+file: each database creation, Control Plane start, and CLI or Worker Host run appends its label
+and milliseconds, and a run that misses its deadline is marked `TIMEOUT`.
+
 Set `SUPERTAG_RUST_TEST_REQUIRE` to a comma-separated list of the prerequisites a run must have,
 or `all`; a listed prerequisite that is missing then fails the test. The prerequisites are
 `postgres` (`SUPERTAG_RUST_TEST_POSTGRES_URL_FILE`), `node` (`SUPERTAG_RUST_TEST_NODE`),
