@@ -377,6 +377,47 @@ async fn orphans(url: &str) {
     age_pending(url, 2).await;
     assert_eq!(store.sweep_native_memory_objects().await.unwrap(), 1);
     assert_eq!(garbage(&store, &host).await, shas(&['7']));
+
+    // Deleting the Volume sends everything still on it to garbage: the store's head manifest and
+    // the file it names, and an object a turn wrote that no store names yet. The store is gone.
+    let (third, _) = turn(&store, &host).await;
+    store
+        .grant_volume_object(&host, &write(&third, file('6')))
+        .await
+        .unwrap();
+    finish(&store, &host, &third).await;
+    store
+        .put_tag_spec(PutTagRequest {
+            tag_id: "keeper".into(),
+            instructions: "Keep the work".into(),
+            harness_kind: HarnessKind::Codex.into(),
+            allowed_actions: vec!["files:read".into()],
+            volume: Some(String::new()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    store
+        .delete_artifact_volume(
+            OP,
+            &DeleteArtifactVolumeRequest {
+                operation_id: "delete".into(),
+                volume_id: "vault".into(),
+                expected_revision: 1,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(garbage(&store, &host).await, shas(&['6', '7', '8', '9']));
+    assert!(
+        store
+            .native_memory_stores(OP, "keeper")
+            .await
+            .unwrap()
+            .iter()
+            .all(|store| store.volume_id.is_empty())
+    );
     store.close().await;
 }
 

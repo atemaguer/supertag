@@ -412,11 +412,21 @@ Volume copy: through a presigned GET, valid for 15 minutes, for an S3 Volume, or
 A Tag's Session checkpoints also go on its Volume, as described in
 [Session checkpoints](control-plane.md#session-checkpoints). When the Control Plane drops one,
 its object is deleted: the Control Plane deletes it from an S3 Volume within seconds, and a
-Worker Host that maps a file Volume deletes it within 10 minutes. Captures and native memory
-objects are not deleted.
+Worker Host that maps a file Volume deletes it within 10 minutes. A native memory object no
+store names any more is deleted the same way. Captures are not deleted.
 
 The Volume must be registered before a Tag names it, and it cannot be retargeted or deleted while
-a Tag names it. Captures made before a Tag named the Volume keep only their Worker Host copy.
+a Tag names it, or while it holds captures. Captures made before a Tag named the Volume keep only
+their Worker Host copy.
+
+Deleting a Volume (`supertag delete volume`) also sends the Session checkpoints and native memory
+still on it for deletion, from where they are now: those Sessions start fresh with a recap, and
+those memory stores start empty. The objects go as above, so keep an S3 Volume's credential, or a
+Worker Host that maps a file Volume, until they are gone. A Volume can't move to another source
+(`supertag volume put` with a new source) while it holds checkpoints or native memory, or while
+objects at its previous source still wait for deletion, because the Volume's one credential then
+belongs to the new storage. To move it, delete it, wait until its objects are gone, and register
+it again; the refusal says how many objects are still waiting.
 
 ### Client downloads
 

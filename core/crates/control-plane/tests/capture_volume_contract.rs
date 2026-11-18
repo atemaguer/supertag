@@ -37,6 +37,17 @@ async fn attempt(
     host: &supertag_control_plane::HostAuthority,
     operation: &str,
 ) -> InspectAttemptRequest {
+    attempt_on(store, host, operation, ("vault", "file:///srv/vault")).await
+}
+
+/// Starts one Attempt of the keeper Tag, whose work is on `volume`, on a host that maps it at
+/// `source`.
+async fn attempt_on(
+    store: &Store,
+    host: &supertag_control_plane::HostAuthority,
+    operation: &str,
+    (volume, source): (&str, &str),
+) -> InspectAttemptRequest {
     let task = store
         .send_message(
             OP,
@@ -63,7 +74,7 @@ async fn attempt(
     assert!(
         placement
             .required_labels
-            .contains(&"volume:vault".to_owned()),
+            .contains(&format!("volume:{volume}")),
         "{placement:?}"
     );
     let assignment = store
@@ -73,8 +84,8 @@ async fn attempt(
                 operation_id: operation.into(),
                 execution_profile: Some(HarnessExecutionProfile {
                     volumes: vec![VolumeMapping {
-                        volume_id: "vault".into(),
-                        source: "file:///srv/vault".into(),
+                        volume_id: volume.into(),
+                        source: source.into(),
                     }],
                     ..Default::default()
                 }),
@@ -556,6 +567,176 @@ async fn exercise(url: &str) {
             .objects
             .is_empty()
     );
+
+    // Deleting a Volume sends what it still stores to garbage, under its source, and drops the
+    // rows that named it; until that garbage is gone the Volume can't move to another source.
+    retire_scratch(&store, &host).await;
+}
+
+/// A Volume that holds only a Session checkpoint: it can't move to another source while it holds
+/// one, deleting it queues the checkpoint for a host that maps it, and it can't be registered at
+/// another source until that is gone.
+async fn retire_scratch(store: &Store, host: &supertag_control_plane::HostAuthority) {
+    let scratch = store
+        .put_artifact_volume(OP, &volume("scratch", "scratch", 0))
+        .await
+        .unwrap();
+    store.put_tag_spec(tag(Some("scratch"))).await.unwrap();
+    let turn = attempt_on(
+        store,
+        host,
+        "scratch-turn",
+        ("scratch", "file:///srv/scratch"),
+    )
+    .await;
+    let checkpoint = CheckpointReference {
+        harness: "codex".into(),
+        format: "codex-session-v1".into(),
+        byte_length: 512,
+        sha256: "d".repeat(64),
+    };
+    let commit = CommitCheckpointRequest {
+        attempt: Some(turn.clone()),
+        reference: Some(checkpoint.clone()),
+    };
+    store.reserve_checkpoint(host, &commit).await.unwrap();
+    // The host writes the checkpoint to the Volume under a write grant.
+    store
+        .grant_volume_object(
+            host,
+            &VolumeObjectGrantRequest {
+                attempt: Some(turn.clone()),
+                purpose: VolumeObjectPurpose::SessionCheckpoint as i32,
+                access: VolumeAccess::Write as i32,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    store.commit_checkpoint(host, &commit).await.unwrap();
+    store
+        .finish_task(
+            host,
+            &FinishTaskRequest {
+                task_id: turn.task_id.clone(),
+                attempt_id: turn.attempt_id.clone(),
+                lease_token: turn.lease_token.clone(),
+                result: "Kept".into(),
+                succeeded: true,
+                objective_signal: ObjectiveSignal::Progress.into(),
+                checkpoint_sha256: Some(checkpoint.sha256.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    store.put_tag_spec(tag(Some(""))).await.unwrap();
+    let moved = |operation: &str, source: &str, revision: u64| PutArtifactVolumeRequest {
+        source: source.into(),
+        ..volume("scratch", operation, revision)
+    };
+    match store
+        .put_artifact_volume(
+            OP,
+            &moved("move", "file:///srv/elsewhere", scratch.revision),
+        )
+        .await
+    {
+        Err(StoreError::FailedPrecondition(message)) => {
+            assert!(
+                message.contains("still holds Session checkpoints"),
+                "{message}"
+            )
+        }
+        other => panic!("moved a Volume that holds a checkpoint: {other:?}"),
+    }
+    let mapped = ListVolumeGarbageRequest {
+        volume_id: "scratch".into(),
+        source: "file:///srv/scratch".into(),
+        limit: 0,
+    };
+    assert!(
+        store
+            .list_volume_garbage(host, &mapped)
+            .await
+            .unwrap()
+            .objects
+            .is_empty()
+    );
+    store
+        .delete_artifact_volume(
+            OP,
+            &DeleteArtifactVolumeRequest {
+                operation_id: "delete-scratch".into(),
+                volume_id: "scratch".into(),
+                expected_revision: scratch.revision,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let task = store.get_task(&turn.task_id).await.unwrap();
+    let garbage = store.list_volume_garbage(host, &mapped).await.unwrap();
+    assert_eq!(garbage.objects.len(), 1, "{garbage:?}");
+    assert_eq!(
+        garbage.objects[0].key,
+        format!(
+            "tags/{:x}/sessions/{:x}/checkpoint/{}.bin",
+            sha2::Sha256::digest("keeper"),
+            sha2::Sha256::digest(task.session_id.as_bytes()),
+            checkpoint.sha256
+        )
+    );
+    // Registered again at another source, its old objects would be stranded: refused until the
+    // host that maps the old source has deleted them.
+    match store
+        .put_artifact_volume(OP, &moved("re-register", "file:///srv/elsewhere", 0))
+        .await
+    {
+        Err(StoreError::FailedPrecondition(message)) => {
+            assert!(message.contains("1 objects"), "{message}")
+        }
+        other => panic!("re-registered over waiting garbage: {other:?}"),
+    }
+    store
+        .forget_volume_garbage(
+            host,
+            &ForgetVolumeGarbageRequest {
+                volume_id: "scratch".into(),
+                source: "file:///srv/scratch".into(),
+                objects: garbage.objects,
+            },
+        )
+        .await
+        .unwrap();
+    let again = store
+        .put_artifact_volume(OP, &moved("re-register-clean", "file:///srv/elsewhere", 0))
+        .await
+        .unwrap();
+    assert_eq!(again.source, "file:///srv/elsewhere");
+    // The Session's next turn on the new storage starts fresh: no checkpoint names it.
+    store.put_tag_spec(tag(Some("scratch"))).await.unwrap();
+    let next = attempt_on(
+        store,
+        host,
+        "scratch-next",
+        ("scratch", "file:///srv/elsewhere"),
+    )
+    .await;
+    assert!(matches!(
+        store
+            .grant_volume_object(
+                host,
+                &VolumeObjectGrantRequest {
+                    attempt: Some(next),
+                    purpose: VolumeObjectPurpose::SessionCheckpoint as i32,
+                    access: VolumeAccess::Read as i32,
+                    ..Default::default()
+                }
+            )
+            .await,
+        Err(StoreError::NotFound(_))
+    ));
 }
 
 #[tokio::test]

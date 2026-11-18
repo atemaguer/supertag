@@ -459,6 +459,7 @@ pub(crate) async fn delete_in(
         return Err(conflict());
     }
     unused(tx, id).await?;
+    abandon_in(tx, id).await?;
     let revision = i64::try_from(volume.revision)
         .ok()
         .and_then(|v| v.checked_add(1))
@@ -469,6 +470,104 @@ pub(crate) async fn delete_in(
         .execute(&mut **tx)
         .await?;
     crate::apply_sets::forget(tx, "Volume", id).await
+}
+
+/// Sends everything still stored on a Volume that is being deleted to Volume garbage, under its
+/// current source, and drops the rows that named it: Sessions whose checkpoint was there start
+/// fresh with a recap, and native memory stores there start empty. The garbage rows keep the
+/// source, so the S3 sweep (signing with the Volume's credential, which stays in the vault) or a
+/// Worker Host that still maps the file Volume deletes the objects after the Volume is gone.
+async fn abandon_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<()> {
+    let attempts: Vec<String> =
+        sqlx::query_scalar("SELECT attempt_id FROM supertag_v2_checkpoints WHERE volume_id=$1")
+            .bind(id)
+            .fetch_all(&mut **tx)
+            .await?;
+    for attempt in attempts {
+        crate::volume_garbage::queue_checkpoint_in(tx, &attempt).await?;
+        sqlx::query("DELETE FROM supertag_v2_session_checkpoints WHERE attempt_id=$1")
+            .bind(&attempt)
+            .execute(&mut **tx)
+            .await?;
+        sqlx::query("DELETE FROM supertag_v2_checkpoints WHERE attempt_id=$1")
+            .bind(&attempt)
+            .execute(&mut **tx)
+            .await?;
+    }
+    let objects = sqlx::query(
+        "SELECT tag_id,storage_key,sha256,byte_length FROM supertag_v2_native_memory_volume_objects
+         WHERE volume_id=$1
+         UNION ALL
+         SELECT tag_id,storage_key,sha256,byte_length FROM supertag_v2_native_memory_pending_objects
+         WHERE volume_id=$1",
+    )
+    .bind(id)
+    .fetch_all(&mut **tx)
+    .await?;
+    for object in &objects {
+        crate::volume_garbage::queue_native_object_in(
+            tx,
+            &object.try_get::<String, _>("tag_id")?,
+            id,
+            &object.try_get::<String, _>("storage_key")?,
+            &BlobReference {
+                sha256: object.try_get("sha256")?,
+                byte_length: object.try_get::<i64, _>("byte_length")?.max(0) as u64,
+            },
+        )
+        .await?;
+    }
+    for table in [
+        "supertag_v2_native_memory_volume_objects",
+        "supertag_v2_native_memory_pending_objects",
+        "supertag_v2_native_memory_volume_heads",
+    ] {
+        sqlx::query(&format!("DELETE FROM {table} WHERE volume_id=$1"))
+            .bind(id)
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(())
+}
+
+/// A Volume's storage can change only once nothing is left at the old one: neither rows that name
+/// objects there, nor garbage the sweep has yet to delete. The sweep signs with the Volume's one
+/// credential, which then belongs to the new storage, so it could not be trusted to reach the old.
+async fn storage_movable(
+    tx: &mut Transaction<'_, Any>,
+    id: &str,
+    source: &str,
+    live: bool,
+) -> Result<()> {
+    if live {
+        let held: i64 = sqlx::query_scalar(
+            "SELECT (SELECT COUNT(*) FROM supertag_v2_checkpoints WHERE volume_id=$1)
+                  + (SELECT COUNT(*) FROM supertag_v2_native_memory_volume_objects WHERE volume_id=$1)
+                  + (SELECT COUNT(*) FROM supertag_v2_native_memory_pending_objects WHERE volume_id=$1)
+                  + (SELECT COUNT(*) FROM supertag_v2_native_memory_volume_heads WHERE volume_id=$1)",
+        )
+        .bind(id)
+        .fetch_one(&mut **tx)
+        .await?;
+        if held != 0 {
+            return Err(StoreError::FailedPrecondition(format!(
+                "Volume {id} still holds Session checkpoints or native memory: delete the Volume, which sends them for deletion (those Sessions and memories start fresh), then register it with the new source once they are gone"
+            )));
+        }
+    }
+    let waiting: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM supertag_v2_volume_garbage WHERE volume_id=$1 AND source<>$2",
+    )
+    .bind(id)
+    .bind(source)
+    .fetch_one(&mut **tx)
+    .await?;
+    if waiting != 0 {
+        return Err(StoreError::FailedPrecondition(format!(
+            "{waiting} objects at Volume {id}'s previous source are still waiting for deletion: keep its credential (S3) or a Worker Host that maps it (file) until they are gone, then try again"
+        )));
+    }
+    Ok(())
 }
 
 async fn unused(tx: &mut Transaction<'_, Any>, id: &str) -> Result<()> {
@@ -704,6 +803,7 @@ impl Store {
                 old
             } else {
                 unused(&mut tx, &input.volume_id).await?;
+                storage_movable(&mut tx, &input.volume_id, &input.source, !deleted).await?;
                 old.checked_add(1)
                     .ok_or_else(|| invalid("Volume revision exhausted"))?
             }
