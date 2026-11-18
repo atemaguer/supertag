@@ -1,14 +1,17 @@
 /**
- * A reference sandbox provider on local Docker containers, for tests only. It shows the smallest
- * provider the contract allows (docs/reference/sandbox-providers.md) and runs the conformance
- * suite against a real, separate sandbox: the seal program really stops processes, and a
- * command cannot reach the machine running the tests.
+ * A sandbox provider on a local container runtime (Docker, Podman, or a compatible CLI): the
+ * `local-vm` environment's provider, and the reference provider the conformance suite runs
+ * against (docs/reference/sandbox-providers.md).
  *
  * Each sandbox is a container with no network, labelled with its owner, whose first process
- * ends at the requested lifetime. Commands run as the image's unprivileged user; the seal runs
- * as root. It builds no devcontainer image. Snapshots are `docker commit` images.
+ * ends at the requested lifetime. Task processes run as the image's unprivileged user with every
+ * capability dropped and no way to gain privileges, so the seal, which runs as root through the
+ * runtime's own exec, is a boundary here: the Task cannot replace the interpreter or hide from
+ * it. Snapshots are `<runtime> commit` images. A devcontainer's image and layers are built with
+ * an empty context, on the host's native platform.
  */
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import {
   listSandboxOutputFiles,
@@ -17,23 +20,48 @@ import {
   prepareSandboxOutputDirectory,
   type SandboxInstance,
   sandboxExecutionEnvironment,
-} from "./src/index.js";
+} from "../index.js";
 import {
+  BUILD_TIMEOUT_MS,
   createSandboxWorkspaceSession,
+  type SandboxEnvironment,
   type SandboxOwner,
   type SandboxStopResult,
   type SandboxWorkspace,
+  type SandboxWorkspaceProvider,
   type SandboxWorkspaceSession,
-} from "./src/rust-workspace-provider/index.js";
+} from "./session.js";
 
 const MAX_LIFETIME_MS = 3_600_000;
-const LABEL = "supertag.reference";
 
-export interface DockerReferenceOptions {
-  /** An image with `python3`, `git`, `/bin/sh`, and an unprivileged `user`. */
-  readonly image: string;
+export interface ContainerProviderOptions {
+  /**
+   * An image with `python3`, `git`, `/bin/sh`, and an unprivileged `user`: a name, or a
+   * Dockerfile with no build context, built on the first allocation that needs it.
+   */
+  readonly image: string | { readonly dockerfile: string };
   readonly user: string;
   readonly runtime?: string;
+  /** The label every owned container carries, so discovery finds only this provider's. */
+  readonly label?: string;
+  /** `linux/arm64` or `linux/amd64`: always the host's own, never an emulated one. */
+  readonly platform?: string;
+  /** Builds devcontainer images; a reference provider leaves it off and refuses them. */
+  readonly buildImages?: boolean;
+  /** The provider's name in messages. */
+  readonly name?: string;
+  /** Extra `run` flags, such as resource limits. */
+  readonly runFlags?: readonly string[];
+  /** Progress lines for a long step, such as an image build. */
+  readonly log?: (line: string) => void;
+}
+
+/** The allocation limit when the provider's own image may be built first. */
+export const CONTAINER_ALLOCATE_TIMEOUT_MS = BUILD_TIMEOUT_MS;
+
+/** The host's own Linux platform, so a container never runs under emulation. */
+export function nativePlatform(): string {
+  return `linux/${process.arch === "arm64" ? "arm64" : "amd64"}`;
 }
 
 interface Ran {
@@ -71,7 +99,7 @@ function cli(
   });
 }
 
-function labels(owner: SandboxOwner): Record<string, string> {
+function labels(owner: SandboxOwner, label: string): Record<string, string> {
   if (
     owner.hostGeneration < 1n ||
     [owner.hostId, owner.taskId, owner.attemptId, owner.allocationId].some(
@@ -80,7 +108,7 @@ function labels(owner: SandboxOwner): Record<string, string> {
   )
     throw new Error("Invalid sandbox ownership");
   return {
-    [LABEL]: "1",
+    [label]: "1",
     "supertag.hostId": owner.hostId,
     "supertag.hostGeneration": owner.hostGeneration.toString(),
     "supertag.taskId": owner.taskId,
@@ -126,16 +154,59 @@ finally:
     os.close(fd)
 `;
 
-export function createDockerReferenceSession(
-  options: DockerReferenceOptions,
+/**
+ * A devcontainer's Dockerfile: its image and layers, or the provider's image with only a user.
+ * Refuses COPY and ADD: the build context is empty, and a layer may name no host file.
+ */
+export function containerDockerfile(environment: SandboxEnvironment, image: string): string {
+  if (environment.image === undefined && environment.dockerfileCommands.length === 0) return "";
+  if (environment.dockerfileCommands.some((line) => /^\s*(COPY|ADD)\b/iu.test(line)))
+    throw new Error("A devcontainer layer may not copy files into the image");
+  return `${[`FROM ${environment.image ?? image}`, ...environment.dockerfileCommands].join("\n")}\n`;
+}
+
+export function createContainerWorkspaceSession(
+  options: ContainerProviderOptions,
 ): SandboxWorkspaceSession {
+  return createSandboxWorkspaceSession(
+    containerSandboxProvider(options),
+    typeof options.image === "string" ? {} : { allocateTimeoutMs: CONTAINER_ALLOCATE_TIMEOUT_MS },
+  );
+}
+
+/** The provider under the session, for a test that allocates a container directly. */
+export function containerSandboxProvider(
+  options: ContainerProviderOptions,
+): SandboxWorkspaceProvider {
   const runtime = options.runtime ?? "docker";
+  const label = options.label ?? "supertag.container";
+  const platform = options.platform ?? nativePlatform();
   const exec = (
     id: string,
     argv: readonly string[],
-    rest: { user?: string; input?: Uint8Array; signal?: AbortSignal; timeoutMs?: number } = {},
+    rest: {
+      privileged?: boolean;
+      input?: Uint8Array;
+      signal?: AbortSignal;
+      timeoutMs?: number;
+    } = {},
   ) =>
-    cli(runtime, ["exec", "-i", "-u", rest.user ?? options.user, "-w", "/tmp", id, ...argv], rest);
+    cli(
+      runtime,
+      [
+        "exec",
+        "-i",
+        // The container drops every capability, so the seal and Capture, which must stop and
+        // read the Task's processes and files, get them back here, for this one process only.
+        // Every other process runs as the container's own unprivileged user.
+        ...(rest.privileged ? ["--privileged", "-u", "0"] : []),
+        "-w",
+        "/tmp",
+        id,
+        ...argv,
+      ],
+      rest,
+    );
 
   /** The container's owner labels, or undefined when the runtime reports it absent. */
   async function inspect(id: string): Promise<Record<string, string> | undefined> {
@@ -202,8 +273,6 @@ export function createDockerReferenceSession(
           [
             "exec",
             "-i",
-            "-u",
-            options.user,
             "-w",
             spec.cwd ?? "/tmp",
             ...(spec.replaceEnvironment ? [] : environment.flatMap((value) => ["-e", value])),
@@ -257,14 +326,77 @@ export function createDockerReferenceSession(
     return sandbox;
   }
 
-  return createSandboxWorkspaceSession({
-    label: "Docker",
-    validateOwner: (owner) => void labels(owner),
+  interface Built {
+    /** The name a later Dockerfile starts `FROM`. */
+    readonly tag: string;
+    /** The image ID a container runs, so a retagged name changes nothing already built. */
+    readonly id: string;
+  }
+  const builds = new Map<string, Promise<Built>>();
+
+  async function imageId(reference: string): Promise<string | undefined> {
+    const found = await cli(runtime, ["image", "inspect", "--format", "{{.Id}}", reference]);
+    const id = found.stdout.trim();
+    return found.exitCode === 0 && /^sha256:[0-9a-f]{64}$/u.test(id) ? id : undefined;
+  }
+
+  /**
+   * Builds an image once per Dockerfile and platform, with no build context: `-` reads the
+   * Dockerfile from standard input. A build an earlier run left is reused by its tag.
+   */
+  function build(dockerfile: string, signal: AbortSignal): Promise<Built> {
+    const tag = `supertag-workspace:${createHash("sha256")
+      .update(`${platform}\n${dockerfile}`)
+      .digest("hex")
+      .slice(0, 32)}`;
+    let pending = builds.get(tag);
+    if (pending === undefined) {
+      pending = (async () => {
+        const existing = await imageId(tag);
+        if (existing !== undefined) return { tag, id: existing };
+        options.log?.(`Building the Workspace image ${tag} for ${platform}; this runs once.`);
+        const built = await cli(runtime, ["build", "--platform", platform, "-t", tag, "-"], {
+          input: new TextEncoder().encode(dockerfile),
+          signal,
+          timeoutMs: BUILD_TIMEOUT_MS,
+        });
+        const id = built.exitCode === 0 ? await imageId(tag) : undefined;
+        if (id === undefined) throw new Error("The Workspace image could not be built");
+        options.log?.(`Built the Workspace image ${tag} as ${id}.`);
+        return { tag, id };
+      })();
+      builds.set(tag, pending);
+      pending.catch(() => builds.delete(tag));
+    }
+    return pending;
+  }
+
+  /** The provider's own image, built first when it is a Dockerfile. */
+  async function base(signal: AbortSignal): Promise<Built> {
+    if (typeof options.image !== "string") return build(options.image.dockerfile, signal);
+    return { tag: options.image, id: options.image };
+  }
+
+  /** The image a container runs: a snapshot, a devcontainer build, or the provider's own. */
+  async function image(
+    environment: SandboxEnvironment | undefined,
+    signal: AbortSignal,
+  ): Promise<string> {
+    const own = await base(signal);
+    const dockerfile = environment ? containerDockerfile(environment, own.tag) : "";
+    if (dockerfile === "") return own.id;
+    if (!options.buildImages) throw new Error("This provider builds no image");
+    return (await build(dockerfile, signal)).id;
+  }
+
+  return {
+    label: options.name ?? "Container",
+    validateOwner: (owner) => void labels(owner, label),
     async allocate(owner, timeoutMs, signal, environment, artifact) {
-      // A reference: it builds no devcontainer image.
-      if (environment && (environment.dockerfileCommands.length > 0 || environment.image))
-        throw new Error("The reference provider builds no image");
-      const owned = labels(owner);
+      // Every process but the seal's runs as this user; a devcontainer's `user` replaces it.
+      const user = environment?.user || options.user;
+      const runs = artifact ?? (await image(environment, signal));
+      const owned = labels(owner, label);
       const seconds = Math.ceil(Math.min(timeoutMs, MAX_LIFETIME_MS) / 1000);
       const created = await cli(
         runtime,
@@ -273,14 +405,21 @@ export function createDockerReferenceSession(
           "-d",
           "--rm",
           "--init",
+          "--platform",
+          platform,
           "--network",
           "none",
+          "--cap-drop",
+          "ALL",
           "--security-opt",
           "no-new-privileges",
           "--pids-limit",
           "512",
+          "--user",
+          user,
+          ...(options.runFlags ?? []),
           ...Object.entries(owned).flatMap(([key, value]) => ["--label", `${key}=${value}`]),
-          artifact ?? options.image,
+          runs,
           "sleep",
           String(seconds),
         ],
@@ -293,12 +432,18 @@ export function createDockerReferenceSession(
       const found = await inspect(id);
       if (!found || !Object.entries(owned).every(([key, value]) => found[key] === value))
         throw new Error("Unexpected container ownership");
+      // The seal is a boundary only while no Task process shares root's user ID.
+      const uid = await exec(id, ["id", "-u"], { signal });
+      if (uid.exitCode !== 0 || !/^[1-9][0-9]*$/u.test(uid.stdout.trim())) {
+        await cli(runtime, ["rm", "-f", id]);
+        throw new Error("The Workspace user must not be root");
+      }
       const sandbox = instance(id);
       const workspace: SandboxWorkspace = {
         sandboxId: id,
         environment: (root) =>
           sandboxExecutionEnvironment(sandbox, root, {
-            id: "docker-reference",
+            id: label,
             maxOutputCharacters: 65_536,
             backend: {
               capabilities: {
@@ -322,7 +467,7 @@ export function createDockerReferenceSession(
           if (result.exitCode !== 0) throw new Error("Transfer could not be written");
         },
         async readTransfer(path, readSignal) {
-          const child = spawn(runtime, ["exec", "-u", options.user, id, "cat", "--", path], {
+          const child = spawn(runtime, ["exec", id, "cat", "--", path], {
             stdio: ["ignore", "pipe", "ignore"],
             signal: readSignal,
           });
@@ -337,12 +482,16 @@ export function createDockerReferenceSession(
           return image;
         },
         runPrivileged: (argv, privilegedTimeoutMs, privilegedSignal) =>
-          exec(id, argv, { user: "0", signal: privilegedSignal, timeoutMs: privilegedTimeoutMs }),
+          exec(id, argv, {
+            privileged: true,
+            signal: privilegedSignal,
+            timeoutMs: privilegedTimeoutMs,
+          }),
       };
       return workspace;
     },
     async stop(owner, sandboxId): Promise<SandboxStopResult> {
-      const owned = labels(owner);
+      const owned = labels(owner, label);
       const matches = (found: Record<string, string>) =>
         Object.entries(owned).every(([key, value]) => found[key] === value);
       try {
@@ -380,5 +529,5 @@ export function createDockerReferenceSession(
       if (result.exitCode !== 0 && !/no such image/iu.test(result.stderr))
         throw new Error("Image could not be removed");
     },
-  });
+  };
 }

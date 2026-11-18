@@ -29,6 +29,7 @@ PACKAGES = {
     "opencode": "@supertag/worker-opencode",
     "e2b": "@supertag/worker-environment-e2b",
     "modal": "@supertag/worker-environment-modal",
+    "local-vm": "@supertag/worker-environment-local-vm",
 }
 HARNESS_BRIDGES = {"claude-code", "cursor", "opencode"}
 STARTUP_ERRORS = {
@@ -37,6 +38,7 @@ STARTUP_ERRORS = {
     "opencode": "OpenCode adapter could not complete its execution safely.",
     "e2b": "SuperTag E2B Workspace provider stopped after an error.",
     "modal": "SuperTag Modal Workspace provider stopped after an error.",
+    "local-vm": "SuperTag local-vm Workspace provider stopped after an error.",
 }
 ENTRY = Path("dist/rust-adapter/entry.js")
 

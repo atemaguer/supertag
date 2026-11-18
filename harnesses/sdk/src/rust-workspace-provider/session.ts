@@ -350,9 +350,14 @@ function observedEnvironment(
  */
 export function createSandboxWorkspaceSession(
   provider: SandboxWorkspaceProvider,
-  options: { readonly preparedRoot?: string } = {},
+  options: {
+    readonly preparedRoot?: string;
+    /** The allocation limit, for a provider whose first allocation builds its own image. */
+    readonly allocateTimeoutMs?: number;
+  } = {},
 ) {
   const preparedRoot = options.preparedRoot ?? PREPARED_ROOT;
+  const allocateTimeoutMs = options.allocateTimeoutMs ?? ALLOCATE_TIMEOUT_MS;
   const workspaceError = (message: string) => new Error(`${provider.label} Workspace ${message}`);
   const lifetime = new AbortController();
   let toolTail = Promise.resolve();
@@ -591,7 +596,7 @@ export function createSandboxWorkspaceSession(
       const build =
         request.prepare ||
         (preparedArtifact === undefined && (environment?.dockerfileCommands.length ?? 0) > 0);
-      const signal = signalFor(caller, build ? BUILD_TIMEOUT_MS : ALLOCATE_TIMEOUT_MS);
+      const signal = signalFor(caller, build ? BUILD_TIMEOUT_MS : allocateTimeoutMs);
       signal.throwIfAborted();
       phase = "allocating";
       allocationStarted = true;

@@ -265,7 +265,7 @@ and after a lost sandbox, and that a host directory the suite watches never chan
 process running. The cases need `git` on the machine running them.
 
 A provider must pass the suite with `isolated` set. E2B and Modal run it against their test
-doubles. A reference provider on local Docker containers, used only in tests
-([`harnesses/sdk/docker-reference.ts`](../../harnesses/sdk/docker-reference.ts)), runs it with
-`isolated` set: the seal stops real processes, and a lost container fails every call. It is the
-shortest complete provider to start from.
+doubles. The container provider behind the `local-vm` environment
+([`harnesses/sdk/src/rust-workspace-provider/container.ts`](../../harnesses/sdk/src/rust-workspace-provider/container.ts))
+runs it against real containers with `isolated` set: the seal stops real processes, and a lost
+container fails every call. It is the shortest complete provider to start from.

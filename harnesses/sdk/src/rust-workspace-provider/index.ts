@@ -1,3 +1,11 @@
+export {
+  CONTAINER_ALLOCATE_TIMEOUT_MS,
+  type ContainerProviderOptions,
+  containerDockerfile,
+  containerSandboxProvider,
+  createContainerWorkspaceSession,
+  nativePlatform,
+} from "./container.js";
 export { type CopySandbox, createWorkspaceCopies } from "./copies.js";
 export { createWorkspaceHandlers } from "./handlers.js";
 export {
@@ -21,6 +29,7 @@ export {
   type SandboxOwner,
   type SandboxStopResult,
   type SandboxWorkspace,
+  type SandboxWorkspaceProvider,
   type SandboxWorkspaceSession,
   validSandboxEnvironment,
 } from "./session.js";
