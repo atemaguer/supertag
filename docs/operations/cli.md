@@ -87,6 +87,21 @@ Tag manifest; see
 `supertag init --yes` accepts every default. See [supertag.yaml and local state](../reference/supertag-yaml.md)
 for the file.
 
+A script or app can run `init` without a terminal:
+
+- `supertag init --check --json --directory PATH` prints what `init` would find, and changes
+  nothing: whether `PATH` is a Git repository with commits, and its branch; for each harness
+  (Codex, Claude Code, Cursor, OpenCode), whether it is installed, signed in with the credentials
+  a Worker Host would use, and, for a harness that runs through Node.js, whether that Node.js can
+  run it; and whether `~/.supertag/supertag.yaml` exists and already maps the repository. Each
+  problem carries one `fix` line. `ready` is true when the folder and at least one harness are
+  usable.
+- `supertag init --yes --harness codex --directory PATH` (or `--harness claude-code`) sets up that
+  folder with that harness and starts SuperTag, as `init` does. It stops before writing anything
+  when the harness is not installed or not signed in. On a machine that is already set up, it adds
+  the folder as described in [Add another repository](#add-another-repository), and the Tag uses
+  the lead's harness.
+
 ### Run and stop SuperTag
 
 | Command | Does |

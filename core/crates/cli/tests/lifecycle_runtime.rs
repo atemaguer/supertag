@@ -696,6 +696,57 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
         "{stderr}"
     );
     assert!(!machine.state.join("supertag.yaml").exists());
+
+    // `--check --json` reports the same findings for another folder, changing nothing.
+    let check = |directory: &Path| -> Result<Value> {
+        let mut command = machine.command(&[
+            "init",
+            "--check",
+            "--json",
+            "--directory",
+            directory.to_str().unwrap(),
+        ]);
+        command.current_dir(&machine.home);
+        let output = command.output()?;
+        ensure!(output.status.success(), "{output:?}");
+        Ok(serde_json::from_slice(&output.stdout)?)
+    };
+    let found = check(&repository)?;
+    assert_eq!(found["version"], 1, "{found}");
+    assert_eq!(found["ready"], false, "{found}");
+    assert_eq!(found["repository"]["git"], true, "{found}");
+    assert_eq!(found["repository"]["branch"], "main", "{found}");
+    assert_eq!(found["repository"]["name"], "my-project", "{found}");
+    let codex_fact = &found["harnesses"][0];
+    assert_eq!(codex_fact["harness"], "codex", "{found}");
+    assert_eq!(codex_fact["installed"], true, "{found}");
+    assert_eq!(codex_fact["signed_in"], false, "{found}");
+    assert!(
+        codex_fact["fix"]
+            .as_str()
+            .unwrap()
+            .starts_with("Codex: run codex"),
+        "{found}"
+    );
+    let claude_fact = &found["harnesses"][1];
+    assert_eq!(claude_fact["harness"], "claude-code", "{found}");
+    assert_eq!(claude_fact["installed"], false, "{found}");
+    assert!(claude_fact["signed_in"].is_null(), "{found}");
+    assert!(claude_fact["fix"].is_string(), "{found}");
+    assert_eq!(found["state"]["configured"], false, "{found}");
+    let elsewhere = check(&machine.home)?;
+    assert_eq!(elsewhere["repository"]["git"], false, "{elsewhere}");
+    assert!(elsewhere["repository"]["fix"].is_string(), "{elsewhere}");
+    assert!(!machine.state.join("supertag.yaml").exists());
+
+    // A named harness must be installed and signed in.
+    let output = init(&["--yes", "--harness", "claude-code"])?;
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Claude Code"),
+        "{output:?}"
+    );
+    assert!(!machine.state.join("supertag.yaml").exists());
     // A file-backed Codex login is checked without a model turn.
     fs::create_dir_all(machine.home.join(".codex"))?;
     fs::write(
@@ -703,7 +754,19 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
         r#"{"tokens":{"refresh_token":"refresh"}}"#,
     )?;
 
-    let output = init(&["--yes"])?;
+    assert_eq!(check(&repository)?["ready"], true);
+
+    // The desktop app's apply: a named harness and folder, from anywhere, with no prompt.
+    let mut apply = machine.command(&[
+        "init",
+        "--yes",
+        "--harness",
+        "codex",
+        "--directory",
+        repository.to_str().unwrap(),
+    ]);
+    apply.current_dir(&machine.home);
+    let output = apply.output()?;
     ensure!(
         output.status.success(),
         "init failed: {}{}\n{}",
@@ -750,6 +813,9 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
 
     let ps = machine.ps()?;
     assert_eq!(service(&ps, &host)?["state"], "running", "{ps}");
+    let found = check(&repository)?;
+    assert_eq!(found["state"]["configured"], true, "{found}");
+    assert_eq!(found["state"]["repository_mapped"], true, "{found}");
     let state = machine.state.to_str().unwrap().to_owned();
     let tag: Value =
         serde_json::from_str(&machine.ok(&["get", "tag", "--state-directory", &state, "lead"])?)?;

@@ -89,6 +89,14 @@ Options:
           Accept every default without asking
       --state-directory <STATE_DIRECTORY>
           Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR)
+      --directory <PATH>
+          The git repository to set up, instead of the current directory
+      --harness <HARNESS>
+          The harness the lead Tag runs on, instead of the first signed-in one. Applies to a new setup only: another repository's Tag uses the lead's harness [possible values: codex, claude-code]
+      --check
+          Check this machine and folder without changing anything: whether the folder is a git repository, which harnesses are installed and signed in, and whether SuperTag is set up
+      --json
+          With --check, print the result as one JSON object
   -h, --help
           Print help
 ```

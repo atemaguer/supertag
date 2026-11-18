@@ -32,6 +32,36 @@ pub struct InitArgs {
     /// Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR).
     #[arg(long)]
     state_directory: Option<PathBuf>,
+    /// The git repository to set up, instead of the current directory.
+    #[arg(long, value_name = "PATH")]
+    directory: Option<PathBuf>,
+    /// The harness the lead Tag runs on, instead of the first signed-in one. Applies to a new
+    /// setup only: another repository's Tag uses the lead's harness.
+    #[arg(long, value_enum)]
+    harness: Option<InitHarness>,
+    /// Check this machine and folder without changing anything: whether the folder is a git
+    /// repository, which harnesses are installed and signed in, and whether SuperTag is set up.
+    #[arg(long, requires = "json", conflicts_with_all = ["yes", "harness"])]
+    check: bool,
+    /// With --check, print the result as one JSON object.
+    #[arg(long, requires = "check")]
+    json: bool,
+}
+
+/// A harness `--harness` may choose.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum InitHarness {
+    Codex,
+    ClaudeCode,
+}
+
+impl InitHarness {
+    fn found(self) -> Found {
+        match self {
+            Self::Codex => Found::Codex,
+            Self::ClaudeCode => Found::ClaudeCode,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -126,6 +156,8 @@ fn on_path(program: &str) -> bool {
 struct SignIns {
     environment: local_config::Environment,
     supervisor: harness_checks::Supervisor,
+    /// `--check --json` prints only its JSON.
+    quiet: bool,
     results: Vec<(Found, Option<String>, bool)>,
 }
 
@@ -138,10 +170,12 @@ impl SignIns {
         {
             return Ok(*signed_in);
         }
-        outln!(
-            "Checking {} sign-in with the Worker Host credentials...",
-            harness.harness()
-        );
+        if !self.quiet {
+            outln!(
+                "Checking {} sign-in with the Worker Host credentials...",
+                harness.harness()
+            );
+        }
         let variables = harness_checks::worker_variables(
             harness.check(),
             model,
@@ -149,7 +183,7 @@ impl SignIns {
             self.supervisor,
         )?;
         let result = harness_checks::probe_sign_in(harness.check(), model, &variables).await;
-        if let Some(detail) = &result.detail {
+        if let Some(detail) = result.detail.as_ref().filter(|_| !self.quiet) {
             outln!("  {detail}");
         }
         let signed_in = result.signed_in;
@@ -215,26 +249,59 @@ fn start(branch: Option<&str>, head: &str) -> Start {
     }
 }
 
-fn repository() -> Result<Repository> {
-    let output = Command::new("git")
+/// Why a folder can't be set up, in words a person can act on.
+#[derive(Debug)]
+enum RepositoryProblem {
+    NoGit,
+    NotRepository,
+    NoCommits(PathBuf),
+}
+
+impl std::fmt::Display for RepositoryProblem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoGit => write!(
+                f,
+                "supertag init needs git on PATH; install it and run supertag init again"
+            ),
+            Self::NotRepository => write!(
+                f,
+                "supertag init sets up SuperTag for a git repository; run it inside one, or run git init and make a first commit"
+            ),
+            Self::NoCommits(root) => write!(
+                f,
+                "{} has no commits yet; Tasks start from a commit, so make one and run supertag init again",
+                root.display()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RepositoryProblem {}
+
+/// The git repository at `directory`, or the current directory.
+fn repository(directory: Option<&Path>) -> Result<Repository> {
+    let mut command = Command::new("git");
+    if let Some(directory) = directory {
+        command.arg("-C").arg(directory);
+    }
+    let output = command
         .args(["rev-parse", "--show-toplevel"])
+        .stderr(std::process::Stdio::null())
         .output()
-        .context("supertag init needs git on PATH; install it and run supertag init again")?;
-    ensure!(
-        output.status.success(),
-        "supertag init sets up SuperTag for a git repository; run it inside one"
-    );
+        .map_err(|_| RepositoryProblem::NoGit)?;
+    if !output.status.success() {
+        return Err(RepositoryProblem::NotRepository.into());
+    }
     let root = PathBuf::from(String::from_utf8(output.stdout)?.trim()).canonicalize()?;
     let commits = Command::new("git")
         .arg("-C")
         .arg(&root)
         .args(["rev-parse", "--verify", "--quiet", "HEAD"])
         .output()?;
-    ensure!(
-        commits.status.success(),
-        "{} has no commits yet; Tasks start from a commit, so make one and run supertag init again",
-        root.display()
-    );
+    if !commits.status.success() {
+        return Err(RepositoryProblem::NoCommits(root).into());
+    }
     let head = String::from_utf8(commits.stdout)?.trim().to_owned();
     // Fails with a detached HEAD.
     let branch = Command::new("git")
@@ -406,8 +473,22 @@ struct Answers {
 }
 
 pub async fn init(args: InitArgs) -> Result<()> {
+    if args.check {
+        let report = check(args.directory.as_deref(), args.state_directory).await?;
+        outln!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
     // First, before any question or side effect: a harness must be installed.
     let installed = installed_harnesses();
+    let named = args.harness.map(InitHarness::found);
+    if let Some(harness) = named {
+        ensure!(
+            installed.contains(&harness),
+            "{} is not installed on this machine. {}",
+            harness.harness(),
+            install_line(harness)
+        );
+    }
     ensure!(
         !installed.is_empty(),
         "SuperTag runs Tasks with an installed coding agent, and none was found. Install Claude Code or Codex:
@@ -426,7 +507,7 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
             "supertag init asks a few questions, so it needs a terminal. Run it in one, or pass --yes to accept the defaults."
         );
     }
-    let repository = repository()?;
+    let repository = repository(args.directory.as_deref())?;
     let state = local_config::state_directory(args.state_directory)?;
     let path = state.join("supertag.yaml");
     let mut prompter = ask.then(|| Prompter {
@@ -464,6 +545,7 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
             environment: config.environment.clone(),
             // A service unit carries no credential from this shell, so neither does the check.
             supervisor: harness_checks::Supervisor::of(&config),
+            quiet: false,
             results: Vec::new(),
         };
         let mut checked = Vec::new();
@@ -498,11 +580,16 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
         environment: local_config::default_environment(&state)?,
         // The supertag.yaml init writes runs a background supervisor, which inherits this shell.
         supervisor: harness_checks::Supervisor::ThisProcess,
+        quiet: false,
         results: Vec::new(),
     };
     let mut signed_in = Vec::new();
     let mut without_node = false;
-    for harness in &installed {
+    // A named harness is the only one checked.
+    for harness in installed
+        .iter()
+        .filter(|harness| named.is_none_or(|named| named == **harness))
+    {
         if *harness == Found::Opencode {
             // `--yes` never selects OpenCode, which needs a model answer first.
             if prompter.is_some() {
@@ -520,6 +607,10 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
                 "  claude-code: can't run: {problem}. SuperTag runs Claude Code through Node.js 22.13 or later. Install it from https://nodejs.org/en/download (or brew install node), then run supertag init again."
             );
             without_node = true;
+            ensure!(
+                named.is_none(),
+                "Claude Code can't run: {problem}. Install Node.js 22.13 or later from https://nodejs.org/en/download, then run supertag init again."
+            );
             continue;
         }
         let result = sign_ins.check(*harness, None).await?;
@@ -539,13 +630,27 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
         !installed.is_empty(),
         "Claude Code is the only harness on this machine, and it needs Node.js 22.13 or later on PATH. Install that, or install Codex (npm install -g @openai/codex), then run supertag init again."
     );
+    if let Some(harness) = named {
+        ensure!(
+            signed_in.contains(&harness),
+            "{} is not signed in. {}",
+            harness.harness(),
+            first_line(harness_checks::instructions(harness.check()))
+        );
+    }
     if prompter.is_none() && signed_in.is_empty() {
         return Err(no_sign_in(&installed));
     }
     if prompter.is_some() {
         outln!("Press Enter to accept the default in [brackets].");
     }
-    let answers = answers(prompter.as_mut(), &installed, &signed_in, &repository)?;
+    let answers = answers(
+        prompter.as_mut(),
+        &installed,
+        &signed_in,
+        &repository,
+        named,
+    )?;
     // A harness checked above already said whether it is signed in.
     let checked = sign_ins
         .results
@@ -619,35 +724,10 @@ fn add_repository(
     prompter: Option<&mut Prompter>,
 ) -> Result<()> {
     let text = std::fs::read_to_string(path)?;
-    let options = serde_saphyr::options! {budget:serde_saphyr::budget!{max_documents:1,max_depth:24,max_nodes:10000}};
-    let mut document: Value = serde_saphyr::from_str_with_options(&text, options)
-        .context("supertag.yaml is not valid YAML")?;
-    let hosts: Vec<String> = document["services"]
-        .as_object()
-        .map(|services| {
-            services
-                .iter()
-                .filter(|(_, service)| {
-                    service["type"] == "host" && service.get("control-plane").is_none()
-                })
-                .map(|(name, _)| name.clone())
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut document = yaml_document(&text)?;
+    let hosts = local_hosts(&document);
     let root = repository.root.canonicalize()?;
-    let mapped = hosts.iter().any(|host| {
-        document["services"][host]["workspaces"]
-            .as_object()
-            .is_some_and(|workspaces| {
-                workspaces.values().any(|mapping| {
-                    let source = mapping.as_str().or_else(|| mapping["path"].as_str());
-                    source.is_some_and(|source| {
-                        expand_home(source).canonicalize().ok().as_ref() == Some(&root)
-                    })
-                })
-            })
-    });
-    if mapped || hosts.is_empty() {
+    if maps(&document, &hosts, &root) || hosts.is_empty() {
         return Ok(());
     }
     let name = repository.name.clone();
@@ -749,6 +829,44 @@ fn add_repository(
     Ok(())
 }
 
+/// supertag.yaml as written, without resolving variables.
+fn yaml_document(text: &str) -> Result<Value> {
+    let options = serde_saphyr::options! {budget:serde_saphyr::budget!{max_documents:1,max_depth:24,max_nodes:10000}};
+    serde_saphyr::from_str_with_options(text, options).context("supertag.yaml is not valid YAML")
+}
+
+/// The host services of this machine's own Control Plane.
+fn local_hosts(document: &Value) -> Vec<String> {
+    document["services"]
+        .as_object()
+        .map(|services| {
+            services
+                .iter()
+                .filter(|(_, service)| {
+                    service["type"] == "host" && service.get("control-plane").is_none()
+                })
+                .map(|(name, _)| name.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Whether one of `hosts` maps the repository at `root` as a Workspace.
+fn maps(document: &Value, hosts: &[String], root: &Path) -> bool {
+    hosts.iter().any(|host| {
+        document["services"][host]["workspaces"]
+            .as_object()
+            .is_some_and(|workspaces| {
+                workspaces.values().any(|mapping| {
+                    let source = mapping.as_str().or_else(|| mapping["path"].as_str());
+                    source.is_some_and(|source| {
+                        expand_home(source).canonicalize().ok().as_deref() == Some(root)
+                    })
+                })
+            })
+    })
+}
+
 fn expand_home(path: &str) -> PathBuf {
     match path.strip_prefix("~/") {
         Some(rest) => std::env::var_os("HOME")
@@ -756,6 +874,186 @@ fn expand_home(path: &str) -> PathBuf {
             .unwrap_or_else(|| PathBuf::from(path)),
         None => PathBuf::from(path),
     }
+}
+
+/// The command that installs a harness, or what to set for Cursor.
+fn install_line(harness: Found) -> &'static str {
+    match harness {
+        Found::Codex => "Install Codex: npm install -g @openai/codex",
+        Found::ClaudeCode => "Install Claude Code: npm install -g @anthropic-ai/claude-code",
+        Found::Opencode => "Install OpenCode: npm install -g opencode-ai",
+        Found::Cursor => {
+            "Cursor: generate an API key at https://cursor.com/dashboard/api and set CURSOR_API_KEY in ~/.supertag/.env."
+        }
+    }
+}
+
+fn first_line(text: &str) -> &str {
+    text.lines().next().unwrap_or(text)
+}
+
+/// The Node bridge a harness runs through, if any.
+fn bridge(harness: Found) -> Option<crate::node_bridges::NodeBridge> {
+    use crate::node_bridges::NodeBridge;
+    match harness {
+        Found::Codex => None,
+        Found::ClaudeCode => Some(NodeBridge::ClaudeCode),
+        Found::Cursor => Some(NodeBridge::Cursor),
+        Found::Opencode => Some(NodeBridge::Opencode),
+    }
+}
+
+/// What `--check` found about one harness.
+struct HarnessFact {
+    harness: Found,
+    installed: bool,
+    /// `None` when it was not checked: not installed, or OpenCode, whose check needs a model.
+    signed_in: Option<bool>,
+    /// `None` for a harness without a Node bridge; otherwise why its Node can't run, if it can't.
+    node: Option<Option<String>>,
+}
+
+/// `supertag init --check --json`: what `init` would find, without changing anything. The same
+/// probes `init` runs: the repository, installed harnesses and their sign-in with the Worker
+/// Host's credentials, the Node a bridge needs, and the local setup.
+async fn check(directory: Option<&Path>, state_directory: Option<PathBuf>) -> Result<Value> {
+    let state = local_config::state_directory(state_directory)?;
+    let path = state.join("supertag.yaml");
+    let configured = path.exists();
+    let shown = directory
+        .map(Path::to_path_buf)
+        .map_or_else(std::env::current_dir, Ok)?;
+    let found = repository(directory);
+    let environment = match configured
+        .then(|| local_config::load(Some(path.clone()), &state))
+        .transpose()?
+        .flatten()
+    {
+        Some(config) => config.environment,
+        None => local_config::default_environment(&state)?,
+    };
+    let mut sign_ins = SignIns {
+        environment,
+        supervisor: harness_checks::Supervisor::ThisProcess,
+        quiet: true,
+        results: Vec::new(),
+    };
+    let installed = installed_harnesses();
+    let mut facts = Vec::new();
+    for harness in [
+        Found::Codex,
+        Found::ClaudeCode,
+        Found::Cursor,
+        Found::Opencode,
+    ] {
+        let is_installed = installed.contains(&harness);
+        // OpenCode's check needs a model, which only an interactive init asks for.
+        let signed_in = if is_installed && harness != Found::Opencode {
+            Some(sign_ins.check(harness, None).await?)
+        } else {
+            None
+        };
+        facts.push(HarnessFact {
+            harness,
+            installed: is_installed,
+            signed_in,
+            node: bridge(harness).map(crate::node_bridges::node_problem),
+        });
+    }
+    let repository_mapped = match (&found, configured) {
+        (Ok(repository), true) => {
+            let document = yaml_document(&std::fs::read_to_string(&path)?)?;
+            maps(&document, &local_hosts(&document), &repository.root)
+        }
+        _ => false,
+    };
+    Ok(check_report(
+        &shown,
+        &found,
+        &facts,
+        (&state, configured, repository_mapped),
+    ))
+}
+
+/// The `--check --json` object.
+fn check_report(
+    shown: &Path,
+    found: &Result<Repository>,
+    facts: &[HarnessFact],
+    (state, configured, repository_mapped): (&Path, bool, bool),
+) -> Value {
+    let repository = match found {
+        Ok(repository) => {
+            let (branch, detached) = match &repository.start {
+                Start::Branch(branch) => (Some(branch.clone()), None),
+                Start::Commit(commit) => (None, Some(commit.clone())),
+            };
+            json!({
+                "directory": shown,
+                "git": true,
+                "root": repository.root,
+                "name": repository.name,
+                "has_commits": true,
+                "branch": branch,
+                "detached_commit": detached,
+                "fix": null,
+            })
+        }
+        Err(error) => {
+            let no_commits = match error.downcast_ref::<RepositoryProblem>() {
+                Some(RepositoryProblem::NoCommits(root)) => Some(root.clone()),
+                _ => None,
+            };
+            json!({
+                "directory": shown,
+                "git": no_commits.is_some(),
+                "root": no_commits,
+                "name": null,
+                "has_commits": false,
+                "branch": null,
+                "detached_commit": null,
+                "fix": format!("{error:#}"),
+            })
+        }
+    };
+    let mut ready_harness = false;
+    let harnesses: Vec<Value> = facts
+        .iter()
+        .map(|fact| {
+            let node_problem = fact.node.clone().flatten();
+            let fix = if !fact.installed {
+                Some(install_line(fact.harness).to_owned())
+            } else if fact.signed_in == Some(false) {
+                Some(first_line(harness_checks::instructions(fact.harness.check())).to_owned())
+            } else {
+                node_problem
+                    .as_ref()
+                    .map(|problem| format!("Node.js: {problem}"))
+            };
+            ready_harness |= fact.signed_in == Some(true) && node_problem.is_none();
+            json!({
+                "harness": fact.harness.harness(),
+                "installed": fact.installed,
+                "signed_in": fact.signed_in,
+                "node": fact.node.as_ref().map(|problem| json!({
+                    "ok": problem.is_none(),
+                    "fix": problem.as_ref().map(|problem| format!("Node.js: {problem}")),
+                })),
+                "fix": fix,
+            })
+        })
+        .collect();
+    json!({
+        "version": 1,
+        "ready": found.is_ok() && ready_harness,
+        "repository": repository,
+        "harnesses": harnesses,
+        "state": {
+            "directory": state,
+            "configured": configured,
+            "repository_mapped": repository_mapped,
+        },
+    })
 }
 
 async fn up(state: &Path, config: local_config::Config) -> Result<()> {
@@ -791,6 +1089,7 @@ fn answers(
     installed: &[Found],
     signed_in: &[Found],
     repository: &Repository,
+    chosen: Option<Found>,
 ) -> Result<Answers> {
     let free = (DEFAULT_PORT..=u16::MAX)
         .find(|port| port_free(*port))
@@ -807,8 +1106,9 @@ fn answers(
         },
     };
     // Prefer a signed-in harness; with --yes, only a signed-in one that needs no model answer.
-    let default = signed_in
-        .first()
+    let default = chosen
+        .as_ref()
+        .or(signed_in.first())
         .or_else(|| {
             installed
                 .iter()
@@ -817,7 +1117,7 @@ fn answers(
         .copied()
         .unwrap_or(installed[0]);
     let harness = match ask.as_deref_mut() {
-        Some(prompter) if installed.len() > 1 => {
+        Some(prompter) if installed.len() > 1 && chosen.is_none() => {
             let names: Vec<_> = installed.iter().map(|harness| harness.harness()).collect();
             outln!("Harnesses on this machine: {}", names.join(", "));
             loop {
@@ -1028,6 +1328,109 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn check_reports_the_folder_harnesses_and_setup_with_one_fix_line_each() {
+        let repository = Ok(Repository {
+            root: PathBuf::from("/work/app"),
+            name: "app".into(),
+            start: Start::Branch("main".into()),
+        });
+        let facts = [
+            HarnessFact {
+                harness: Found::Codex,
+                installed: true,
+                signed_in: Some(false),
+                node: None,
+            },
+            HarnessFact {
+                harness: Found::ClaudeCode,
+                installed: true,
+                signed_in: Some(true),
+                node: Some(None),
+            },
+            HarnessFact {
+                harness: Found::Cursor,
+                installed: false,
+                signed_in: None,
+                node: Some(Some("Node.js is not on PATH".into())),
+            },
+        ];
+        let state = Path::new("/home/me/.supertag");
+        let value = check_report(
+            Path::new("/work/app"),
+            &repository,
+            &facts,
+            (state, false, false),
+        );
+        assert_eq!(value["version"], 1);
+        assert_eq!(value["ready"], true, "{value}");
+        assert_eq!(value["repository"]["branch"], "main");
+        assert!(value["repository"]["detached_commit"].is_null());
+        assert!(value["repository"]["fix"].is_null());
+        let harnesses = value["harnesses"].as_array().unwrap();
+        assert_eq!(harnesses[0]["harness"], "codex");
+        assert!(harnesses[0]["node"].is_null(), "Codex needs no Node");
+        let codex_fix = harnesses[0]["fix"].as_str().unwrap();
+        assert!(codex_fix.starts_with("Codex: run codex"), "{codex_fix}");
+        assert!(!codex_fix.contains('\n'), "one line: {codex_fix}");
+        assert_eq!(harnesses[1]["signed_in"], true);
+        assert_eq!(harnesses[1]["node"]["ok"], true);
+        assert!(harnesses[1]["fix"].is_null());
+        assert_eq!(harnesses[2]["installed"], false);
+        assert!(harnesses[2]["signed_in"].is_null());
+        assert_eq!(harnesses[2]["node"]["ok"], false);
+        assert_eq!(value["state"]["configured"], false);
+
+        // A signed-in harness whose Node can't run is not ready, and says so.
+        let facts = [HarnessFact {
+            harness: Found::ClaudeCode,
+            installed: true,
+            signed_in: Some(true),
+            node: Some(Some("Node.js is not on PATH".into())),
+        }];
+        let value = check_report(
+            Path::new("/work/app"),
+            &repository,
+            &facts,
+            (state, true, true),
+        );
+        assert_eq!(value["ready"], false, "{value}");
+        assert_eq!(
+            value["harnesses"][0]["fix"],
+            "Node.js: Node.js is not on PATH"
+        );
+        assert_eq!(value["state"]["repository_mapped"], true);
+
+        // A folder that is no repository says what to do, and nothing is ready.
+        let missing: Result<Repository> = Err(RepositoryProblem::NotRepository.into());
+        let value = check_report(
+            Path::new("/tmp/notes"),
+            &missing,
+            &facts,
+            (state, false, false),
+        );
+        assert_eq!(value["ready"], false);
+        assert_eq!(value["repository"]["git"], false);
+        assert!(
+            value["repository"]["fix"]
+                .as_str()
+                .unwrap()
+                .contains("git init"),
+            "{value}"
+        );
+        let empty: Result<Repository> =
+            Err(RepositoryProblem::NoCommits(PathBuf::from("/work/new")).into());
+        let value = check_report(
+            Path::new("/work/new"),
+            &empty,
+            &facts,
+            (state, false, false),
+        );
+        assert_eq!(value["repository"]["git"], true);
+        assert_eq!(value["repository"]["has_commits"], false);
+        assert_eq!(value["repository"]["root"], "/work/new");
+    }
 
     #[test]
     fn names_are_sanitized_to_identifiers() {
