@@ -523,7 +523,7 @@ fn rpc_error(status: Status) -> String {
         Code::FailedPrecondition => "This action is not available in the current state.",
         Code::ResourceExhausted => "The Gateway limit was reached. Try a smaller request.",
         Code::DeadlineExceeded | Code::Unavailable => {
-            "The Gateway is unavailable. Retry with the same message operation."
+            "The Gateway is unavailable. Try again once it is running."
         }
         _ => "The Gateway request failed.",
     }
