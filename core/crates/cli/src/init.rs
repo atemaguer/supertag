@@ -430,8 +430,8 @@ pub async fn init(args: InitArgs) -> Result<()> {
     outln!("SuperTag setup for {}", repository.root.display());
 
     if path.exists() {
-        let config =
-            local_config::load(Some(path.clone()), &state)?.context("supertag.yaml disappeared")?;
+        // Refuse a file that does not load before changing anything.
+        local_config::load(Some(path.clone()), &state)?.context("supertag.yaml disappeared")?;
         outln!(
             "\nSuperTag is already set up on this machine: {}",
             path.display()
@@ -442,6 +442,9 @@ pub async fn init(args: InitArgs) -> Result<()> {
             }
             None => true,
         };
+        if keep {
+            add_repository(&path, &repository, prompter.as_mut())?;
+        }
         if !keep {
             outln!(
                 "Nothing was changed. To try another harness, see https://github.com/atemaguer/supertag/blob/main/docs/operations/cli.md#try-another-harness; to start over, run supertag down and move {} aside, which leaves your Tags and conversations behind.",
@@ -449,6 +452,9 @@ pub async fn init(args: InitArgs) -> Result<()> {
             );
             return Ok(());
         }
+        // Adding this repository may have changed the file.
+        let config =
+            local_config::load(Some(path.clone()), &state)?.context("supertag.yaml disappeared")?;
         let mut sign_ins = SignIns {
             environment: config.environment.clone(),
             // A service unit carries no credential from this shell, so neither does the check.
@@ -586,6 +592,155 @@ pub async fn init(args: InitArgs) -> Result<()> {
         path.display()
     );
     Ok(())
+}
+
+/// On an existing setup, run in a repository no local host maps yet: offers (default yes) to add
+/// it as a Workspace of the local host, with a Tag of its own that works in it on the lead's
+/// harness and Roles. `supertag up` then creates the Tag. A file with comments or more than one
+/// local host is left alone, with the steps to do it by hand.
+fn add_repository(
+    path: &Path,
+    repository: &Repository,
+    prompter: Option<&mut Prompter>,
+) -> Result<()> {
+    let text = std::fs::read_to_string(path)?;
+    let options = serde_saphyr::options! {budget:serde_saphyr::budget!{max_documents:1,max_depth:24,max_nodes:10000}};
+    let mut document: Value = serde_saphyr::from_str_with_options(&text, options)
+        .context("supertag.yaml is not valid YAML")?;
+    let hosts: Vec<String> = document["services"]
+        .as_object()
+        .map(|services| {
+            services
+                .iter()
+                .filter(|(_, service)| {
+                    service["type"] == "host" && service.get("control-plane").is_none()
+                })
+                .map(|(name, _)| name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    let root = repository.root.canonicalize()?;
+    let mapped = hosts.iter().any(|host| {
+        document["services"][host]["workspaces"]
+            .as_object()
+            .is_some_and(|workspaces| {
+                workspaces.values().any(|mapping| {
+                    let source = mapping.as_str().or_else(|| mapping["path"].as_str());
+                    source.is_some_and(|source| {
+                        expand_home(source).canonicalize().ok().as_ref() == Some(&root)
+                    })
+                })
+            })
+    });
+    if mapped || hosts.is_empty() {
+        return Ok(());
+    }
+    let name = repository.name.clone();
+    let lead = document["services"]["control-plane"]["provision"]
+        .as_array()
+        .and_then(|manifests| {
+            manifests
+                .iter()
+                .find(|manifest| manifest["kind"] == "Tag" && manifest["spec"]["lead"] == true)
+        })
+        .cloned();
+    let taken = |name: &str| {
+        hosts
+            .iter()
+            .any(|host| !document["services"][host]["workspaces"][name].is_null())
+            || document["services"]["control-plane"]["provision"]
+                .as_array()
+                .is_some_and(|manifests| {
+                    manifests
+                        .iter()
+                        .any(|manifest| manifest["metadata"]["name"] == name)
+                })
+    };
+    let by_hand = |reason: &str| {
+        outln!(
+            "\nThis repository is not a Workspace of this machine yet, and {reason}, so supertag init leaves supertag.yaml alone. Add {name}: {} under a host's workspaces in {}, run supertag up, then create a Tag for it with supertag tag put {name} --workspace-id {name}.",
+            root.display(),
+            path.display()
+        );
+    };
+    let (Some(lead), [host]) = (lead, hosts.as_slice()) else {
+        by_hand("the file has no single local host and lead Tag that init set up");
+        return Ok(());
+    };
+    if text.lines().any(|line| line.trim_start().starts_with('#')) || text.contains("${") {
+        by_hand("the file has comments or variables that rewriting it would lose");
+        return Ok(());
+    }
+    if taken(&name) {
+        by_hand(&format!("the name {name} is already used"));
+        return Ok(());
+    }
+    outln!(
+        "\n{} is not a Workspace of this machine yet.",
+        root.display()
+    );
+    let add = match prompter {
+        Some(prompter) => prompter.confirm(
+            &format!("Add it as Workspace {name}, with a Tag {name} that works in it?"),
+            true,
+        )?,
+        None => true,
+    };
+    if !add {
+        return Ok(());
+    }
+    document["services"][host]["workspaces"][&name] = json!(root);
+    let mut spec = json!({
+        "roles": lead["spec"]["roles"].clone(),
+        "workspace": repository.start.binding(&name),
+    });
+    if !lead["spec"]["execution"].is_null() {
+        spec["execution"] = lead["spec"]["execution"].clone();
+    }
+    document["services"]["control-plane"]["provision"]
+        .as_array_mut()
+        .context("supertag.yaml has no provision list")?
+        .push(json!({
+            "apiVersion": "supertag/v1",
+            "kind": "Tag",
+            "metadata": { "name": name },
+            "spec": spec,
+        }));
+    let temporary = path.with_file_name(format!(
+        ".supertag.yaml.{}.tmp",
+        uuid::Uuid::new_v4().simple()
+    ));
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
+        file.write_all(local_config::to_yaml(&document).as_bytes())?;
+        file.sync_all()?;
+    }
+    let state = path.parent().context("supertag.yaml has no directory")?;
+    if let Err(error) = local_config::load(Some(temporary.clone()), state) {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error.context("adding this repository would make supertag.yaml invalid"));
+    }
+    std::fs::rename(&temporary, path)?;
+    outln!(
+        "Added Workspace {name} ({}) to host {host}, and Tag {name}, which works in it on the lead's harness, {}.",
+        root.display(),
+        repository.start.describe()
+    );
+    Ok(())
+}
+
+fn expand_home(path: &str) -> PathBuf {
+    match path.strip_prefix("~/") {
+        Some(rest) => std::env::var_os("HOME")
+            .map(|home| PathBuf::from(home).join(rest))
+            .unwrap_or_else(|| PathBuf::from(path)),
+        None => PathBuf::from(path),
+    }
 }
 
 async fn up(state: &Path, config: local_config::Config) -> Result<()> {

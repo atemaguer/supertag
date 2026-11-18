@@ -762,9 +762,71 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
     assert!(again.contains("already set up"), "{again}");
     assert!(again.contains("left alone"), "{again}");
     assert_eq!(pids(&machine.ps()?), first);
+    assert!(!again.contains("Added Workspace"), "{again}");
+
+    // In a second repository, init adds it as a Workspace with a Tag of its own.
+    let other = machine.home.join("Other Repo");
+    fs::create_dir_all(&other)?;
+    let git_in = |directory: &Path, args: &[&str]| -> Result<()> {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(directory)
+            .env("HOME", &machine.home)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .stdout(Stdio::null())
+            .status()?;
+        ensure!(status.success(), "git {args:?} failed");
+        Ok(())
+    };
+    git_in(&other, &["init", "-q", "-b", "trunk"])?;
+    fs::write(other.join("README.md"), "other\n")?;
+    git_in(&other, &["add", "README.md"])?;
+    git_in(
+        &other,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-qm",
+            "first",
+        ],
+    )?;
+    let mut second = machine.command(&["init", "--yes"]);
+    second.current_dir(&other);
+    let output = second.output()?;
+    let added = String::from_utf8(output.stdout)?;
+    ensure!(
+        output.status.success(),
+        "{added}{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        added.contains("Added Workspace other-repo") && added.contains("following branch trunk"),
+        "{added}"
+    );
+    let rendered = machine.ok(&["config"])?;
+    assert!(rendered.contains("      other-repo: "), "{rendered}");
+    let tag: Value = serde_json::from_str(&machine.ok(&[
+        "get",
+        "tag",
+        "--state-directory",
+        &state,
+        "other-repo",
+    ])?)?;
+    assert_eq!(tag["harness"], "HARNESS_KIND_CODEX", "{tag}");
+    assert_eq!(tag["workspace"]["workspace_id"], "other-repo", "{tag}");
+    assert_eq!(tag["workspace"]["ref"], "trunk", "{tag}");
+    assert_eq!(tag["lead"], false, "{tag}");
+    // Once mapped, init in it adds nothing more.
+    let mut third = machine.command(&["init", "--yes"]);
+    third.current_dir(&other);
+    let again = String::from_utf8(third.output()?.stdout)?;
+    assert!(!again.contains("Added Workspace"), "{again}");
 
     machine.ok(&["down"])?;
-    wait_gone(&first)?;
+    wait_gone(&pids(&machine.ps()?))?;
     Ok(())
 }
 

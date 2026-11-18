@@ -113,6 +113,15 @@ A service with `restart: unless-stopped` makes `supertag up` install a per-user 
 `supertag down --remove-services` also uninstalls the unit.
 
 
+### Add another repository
+
+Run `supertag init` in another repository to add it. On a machine that is already set up, `init`
+offers, defaulting to yes, to add the repository as a Workspace of the local host and to create a
+Tag named after it, on the lead's harness and Roles, that works in it. It then restarts the
+services. Talk to that Tag to work in that repository. If you have edited `supertag.yaml` by hand
+(comments, variables, or several local hosts), `init` leaves the file alone and prints the steps
+instead.
+
 ### Try another harness
 
 A Tag keeps the harness it was created with, so `lead` can't switch from Claude Code to Codex.

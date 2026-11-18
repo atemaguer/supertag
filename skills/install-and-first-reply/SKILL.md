@@ -54,7 +54,8 @@ on later. `--yes` accepts every default and needs no terminal. It writes `~/.sup
   named after the repository by default, and runs up to three Task Attempts at once
   (`concurrency: 3`).
 
-Nothing is written to the repository; state lives in `~/.supertag/`. Each new Session of `lead`
+Nothing is written to the repository; state lives in `~/.supertag/`. Running `init` again in
+another repository offers to add it, with a Tag named after it that works there. Each new Session of `lead`
 starts from the current commit of the branch `init` found (`workspace.ref`). When HEAD is
 detached, `init` pins the checked-out commit (`workspace.baseCommit`) instead and says so in its
 output. To follow another branch or pin a commit, apply a Tag manifest; see [Workspaces](../../docs/guides/workspaces.md#2-bind-a-tag-to-the-workspace).
