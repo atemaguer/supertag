@@ -22,8 +22,16 @@ import {
   sandboxExecutionEnvironment,
 } from "../index.js";
 import {
+  createEgressRelayHost,
+  EGRESS_RELAY_PROGRAM,
+  type EgressRelayHost,
+} from "./egress-relay.js";
+import {
   BUILD_TIMEOUT_MS,
   createSandboxWorkspaceSession,
+  EGRESS_CLIENT_PORT,
+  egressProxy,
+  type SandboxEgress,
   type SandboxEnvironment,
   type SandboxOwner,
   type SandboxStopResult,
@@ -371,6 +379,71 @@ export function containerSandboxProvider(
     return pending;
   }
 
+  const relays = new Map<string, EgressRelayHost>();
+
+  /**
+   * Starts the egress relay in the container as one long-lived exec, as root with no
+   * capability, so no Task process can signal or replace it. Its standard input and output carry
+   * every Task connection to the Attempt's egress proxy on this host; the container keeps no
+   * network. It starts before the session records the container's processes, so the seal spares it.
+   */
+  async function startEgressRelay(id: string, egress: SandboxEgress): Promise<EgressRelayHost> {
+    const proxy = egressProxy(egress);
+    if (!proxy) throw new Error("Container egress proxy is invalid");
+    const child = spawn(
+      runtime,
+      [
+        "exec",
+        "-i",
+        "-u",
+        "0",
+        id,
+        "/usr/bin/env",
+        "-i",
+        "PATH=/usr/local/bin:/usr/bin:/bin",
+        "python3",
+        "-I",
+        "-S",
+        "-c",
+        EGRESS_RELAY_PROGRAM,
+        String(EGRESS_CLIENT_PORT),
+      ],
+      { stdio: ["pipe", "pipe", "ignore"] },
+    );
+    child.stdin.on("error", () => {});
+    const host = createEgressRelayHost(
+      {
+        write: (line) =>
+          new Promise<void>((resolve, reject) =>
+            child.stdin.write(line, (error) => (error ? reject(error) : resolve())),
+          ),
+        abort: () => child.kill("SIGKILL"),
+      },
+      proxy,
+    );
+    child.stdout.setEncoding("utf8").on("data", (text: string) => host.receive(text));
+    child.once("close", () => host.close());
+    child.once("error", () => host.close());
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        host.started,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Container egress relay did not start")),
+            30_000,
+          );
+        }),
+      ]);
+    } catch (error) {
+      host.close();
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+    return host;
+  }
+
   /** The provider's own image, built first when it is a Dockerfile. */
   async function base(signal: AbortSignal): Promise<Built> {
     if (typeof options.image !== "string") return build(options.image.dockerfile, signal);
@@ -392,7 +465,7 @@ export function containerSandboxProvider(
   return {
     label: options.name ?? "Container",
     validateOwner: (owner) => void labels(owner, label),
-    async allocate(owner, timeoutMs, signal, environment, artifact) {
+    async allocate(owner, timeoutMs, signal, environment, artifact, egress) {
       // Every process but the seal's runs as this user; a devcontainer's `user` replaces it.
       const user = environment?.user || options.user;
       const runs = artifact ?? (await image(environment, signal));
@@ -439,8 +512,11 @@ export function containerSandboxProvider(
         throw new Error("The Workspace user must not be root");
       }
       const sandbox = instance(id);
+      const relay = egress ? await startEgressRelay(id, egress) : undefined;
+      if (relay) relays.set(id, relay);
       const workspace: SandboxWorkspace = {
         sandboxId: id,
+        ...(relay ? { egressRelay: true as const } : {}),
         environment: (root) =>
           sandboxExecutionEnvironment(sandbox, root, {
             id: label,
@@ -491,6 +567,10 @@ export function containerSandboxProvider(
       return workspace;
     },
     async stop(owner, sandboxId): Promise<SandboxStopResult> {
+      if (sandboxId !== undefined) {
+        relays.get(sandboxId)?.close();
+        relays.delete(sandboxId);
+      }
       const owned = labels(owner, label);
       const matches = (found: Record<string, string>) =>
         Object.entries(owned).every(([key, value]) => found[key] === value);

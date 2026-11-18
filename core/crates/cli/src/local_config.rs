@@ -858,9 +858,10 @@ pub(crate) fn parse(
                 selections.push(args);
             }
         }
+        // A local-vm host's egress relay carries every lane's scoped traffic through the proxy.
         ensure!(
-            network_credentials.is_empty() || harnesses.iter().any(|h| h == "codex"),
-            "network-credentials are injected only for the codex harness"
+            network_credentials.is_empty() || local_vm || harnesses.iter().any(|h| h == "codex"),
+            "network-credentials are injected only for the codex harness, or on a local-vm host"
         );
         let mut credential_secrets = Vec::new();
         let mut credential_args = Vec::new();
@@ -879,7 +880,7 @@ pub(crate) fn parse(
         }
         for args in &mut selections {
             if args.get(1).is_some_and(|flag| flag == "--harness")
-                && args.get(2).is_some_and(|harness| harness == "codex")
+                && (local_vm || args.get(2).is_some_and(|harness| harness == "codex"))
             {
                 args.extend(credential_args.iter().cloned());
             }
@@ -1908,6 +1909,14 @@ secrets:
         )
         .unwrap();
         assert!(config.hosts[0].local_vm);
+        // Every lane's scoped traffic goes through the relay to the proxy, which injects these.
+        let input = b"secrets: {token: {environment: PYPI_TOKEN}}
+services: {vm: {type: host, control-plane: https://example.com, environment: local-vm, harnesses: [claude-code], workspaces: {repo: ./source}, network-credentials: {pypi: {secret: token, environment: PYPI_TOKEN}}}}";
+        let config = parse(input, Path::new("/trusted"), |_| None).unwrap();
+        assert_eq!(
+            config.hosts[0].harnesses[0].network_credentials().unwrap(),
+            [("pypi".to_owned(), "PYPI_TOKEN".to_owned())]
+        );
         for (fields, reason) in [
             (", harnesses: [claude-code]", "needs a Workspace"),
             (

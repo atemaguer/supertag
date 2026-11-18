@@ -31,8 +31,9 @@ within the pre-1.0 compatibility policy described in
   Docker or Podman (`environment: local-vm`, or `supertag worker-host --local-vm`): their file and
   command tools run in a container with no network and no root, while the harness and its keys
   stay on the host. `supertag init` offers it by default when Docker or Podman is running, and a
-  Task that runs commands goes to a waiting local-vm host before an unsandboxed one. OpenCode now
-  also runs with its Workspace in an E2B or Modal sandbox.
+  Task that runs commands goes to a waiting local-vm host before an unsandboxed one. A scoped
+  `web:fetch` reaches its hosts through the same relay as Modal's, and a local-vm host can take
+  `network-credentials`. OpenCode now also runs with its Workspace in an E2B or Modal sandbox.
 - Claude Code's own memory is on and lasts per Tag: the Worker Host keeps a shared store and one
   per person, copies it into each turn and merges it back afterwards, file by file. `supertag
   describe tag` shows each host's copy; `supertag delete memory --native TAG` resets it.

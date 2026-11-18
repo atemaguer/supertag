@@ -156,7 +156,7 @@ echoing secret values.
 | `labels` | none | Placement labels the host carries, such as `[gpu]`, for a Tag's `runsOn`. See [Worker Host labels](resource-model.md#worker-host-labels) |
 | `environment` | none | `local-vm` runs Claude Code, Cursor, and OpenCode Tasks' commands and file tools in containers on this machine. See [local-vm containers](#local-vm-containers) |
 | `allow-unsandboxed-commands` | none | `claude-code`, `cursor`, or `opencode` from `harnesses`. See [Unsandboxed harnesses](#unsandboxed-harnesses) |
-| `network-credentials` | none | Credential name to `{ secret, environment }`, added to a Task's requests by the egress proxy. Codex only. See [Network credentials](#network-credentials) |
+| `network-credentials` | none | Credential name to `{ secret, environment }`, added to a Task's requests by the egress proxy. Codex, or every harness on a local-vm host. See [Network credentials](#network-credentials) |
 | `volumes` | none | Volume ID to an absolute, owner-only directory: a file Volume this host maps and writes directly, such as the copies of a Tag's captures. Tags on that Volume run only on hosts that map it. See [Keep every capture on a Volume](artifacts.md#keep-every-capture-on-a-volume) |
 | `concurrency` | `1` | Task Attempts each harness runs at once, from 1 through 16. See [Host concurrency](#host-concurrency) |
 | `attempt-timeout-seconds` | `3600` | Seconds a Task Attempt may run, from 1 through 86400 |
@@ -215,7 +215,10 @@ the host. This is the setup `supertag init` writes when Docker or Podman is runn
       app: ~/code/app
 ```
 
-The container has no network, no capabilities, and none of your files but the Workspace copy. Its
+The container has no network, no capabilities, and none of your files but the Workspace copy. A
+Task whose commands have a scoped `web:fetch` reaches only the hosts its
+[network scope](iam.md#network-scopes) allows, through a relay to the Attempt's egress proxy on
+the host; names do not resolve otherwise. Such a host can also take `network-credentials`. Its
 commands run as an unprivileged user without sudo. Before the Workspace returns, SuperTag stops
 every process the Task left running; the Task cannot hide a process from that step. The first
 Task Attempt on a machine builds the container image, which takes a few minutes; the host's log

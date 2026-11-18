@@ -221,10 +221,10 @@ has no built-in tool that could run on the host:
 A Task that may run commands (`commands:execute`) runs them in its sandbox, so such a host needs
 no `allow-unsandboxed-commands` (and cannot take it). The sandbox has no network access, DNS
 included, and a Task with `web:search`, or with a `web:fetch` that has no
-[network scope](../reference/iam.md#network-scopes), doesn't run on such a host. With a Modal
-Workspace, a Task whose commands have a scoped `web:fetch` reaches the hosts it allows: a relay
-in the sandbox carries each connection over Modal's command channel to the Attempt's egress
-proxy on the Worker Host, and nothing else leaves the sandbox. Such a host can also take
+[network scope](../reference/iam.md#network-scopes), doesn't run on such a host. With a
+local-vm or Modal Workspace, a Task whose commands have a scoped `web:fetch` reaches the hosts it
+allows: a relay in the sandbox carries each connection over the provider's command channel to
+the Attempt's egress proxy on the Worker Host, and nothing else leaves the sandbox. Such a host can also take
 `--network-credential`. Each
 command stops at its own time limit inside the sandbox. Before the Workspace returns, SuperTag
 stops every process the Task left running there. Files your ignore rules match, such as

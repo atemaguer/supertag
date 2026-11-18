@@ -173,7 +173,7 @@ sandbox ends everything in it. Capture leaves out every `.git` entry and every u
 the checkout's `.gitignore` files match, except the Task output directory. A Task whose
 Permission Sets hide paths does not run commands on such a host, and a Task with `web:search`,
 `browser:use`, or a `web:fetch` without a network scope does not run on it at all: those tools
-would run on the host. With a Modal Workspace, a scoped `web:fetch` reaches its hosts through a
+would run on the host. With a local-vm or Modal Workspace, a scoped `web:fetch` reaches its hosts through a
 relay in the sandbox, for the Task's commands; see [Run a harness in a sandbox](../guides/workers.md#run-a-harness-in-a-sandbox). A repository's
 `.devcontainer` settings choose the sandbox image, user, and setup; see
 [Devcontainer settings](devcontainer-subset.md). The

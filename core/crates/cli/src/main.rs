@@ -1189,8 +1189,10 @@ async fn run(command: Command) -> Result<()> {
             ensure!(
                 network_credentials.is_empty()
                     || harness == HarnessKind::Codex
-                    || modal_workspace_provider.is_some(),
-                "network credentials are injected only for Codex, or through a Modal Workspace's egress relay, in this release"
+                    || modal_workspace_provider.is_some()
+                    || local_vm
+                    || local_vm_workspace_provider.is_some(),
+                "network credentials are injected only for Codex, or through a Modal or local-vm Workspace's egress relay, in this release"
             );
             let workspaces = adapter.workspace_mappings()?;
             use supertag_worker_host::{ProviderAuthority, ProviderConfig};
@@ -1269,12 +1271,13 @@ async fn run(command: Command) -> Result<()> {
                 execution_profile.unverified_workspace_provider = remote_provider
                     .as_ref()
                     .is_some_and(|provider| !provider.verified());
-                // Modal carries the egress relay over its exec stream while the sandbox keeps
-                // blockNetwork, DNS included (verified live 2026-11-17). E2B's carrier is built
-                // but unverified without credentials, so E2B hosts keep refusing network scopes.
+                // Modal and local-vm carry the egress relay over their exec stream while the
+                // sandbox has no network, DNS included (verified live 2026-11-17). E2B's carrier
+                // is built but unverified without credentials, so E2B hosts keep refusing
+                // network scopes.
                 execution_profile.remote_egress_relay = matches!(
                     remote_provider.as_ref().map(|config| &config.authority),
-                    Some(ProviderAuthority::Modal { .. })
+                    Some(ProviderAuthority::Modal { .. } | ProviderAuthority::LocalVm { .. })
                 );
             }
             let (adapter, adapter_args) = adapter.launch(attempt_timeout_seconds)?;

@@ -1135,7 +1135,8 @@ impl ManagedHost {
                 .into_iter()
                 .filter_map(|name| std::env::var_os(name).map(|value| (name, value))),
         );
-        // Network credentials reach only the Codex lanes that inject them, never a harness.
+        // Network credentials reach only the lanes whose egress proxy injects them (Codex, or every
+        // lane of a local-vm host), never a harness.
         for (name, variable) in adapter.network_credentials()? {
             let (_, secret) = self
                 .definition

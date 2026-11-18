@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
+import { createServer } from "node:net";
 import {
   containerDockerfile,
   containerSandboxProvider,
@@ -122,6 +124,67 @@ describe.skipIf(!answers)("local-vm provider", () => {
     },
     BUILD_MS,
   );
+
+  it("carries a command's connection to the egress proxy over the relay, with no other network", async () => {
+    // The Attempt's egress proxy, on this host's loopback.
+    const seen: string[] = [];
+    const proxy = createServer((socket) => {
+      socket.once("data", (data) => {
+        seen.push(data.toString().split("\r\n")[0] ?? "");
+        socket.end("HTTP/1.1 200 Connection established\r\n\r\nrelayed");
+      });
+    }).listen(0, "127.0.0.1");
+    await once(proxy, "listening");
+    const who = owner();
+    const workspace = await provider.allocate(
+      who,
+      60_000,
+      AbortSignal.timeout(60_000),
+      undefined,
+      undefined,
+      {
+        proxy: `127.0.0.1:${(proxy.address() as { port: number }).port}`,
+        variables: {},
+        caPem: "-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----\n",
+      },
+    );
+    try {
+      expect(workspace.egressRelay).toBe(true);
+      const run = (script: string) =>
+        workspace.run(["python3", "-c", script], 30_000, AbortSignal.timeout(30_000));
+      const relayed = await run(
+        [
+          "import socket",
+          "s = socket.create_connection(('127.0.0.1', 3128), timeout=10)",
+          "s.sendall(b'CONNECT pypi.org:443 HTTP/1.1\\r\\n\\r\\n')",
+          "data = b''",
+          "while chunk := s.recv(4096): data += chunk",
+          "print(data.decode())",
+        ].join("\n"),
+      );
+      expect(relayed.stdout).toContain("relayed");
+      expect(seen).toEqual(["CONNECT pypi.org:443 HTTP/1.1"]);
+      // No name resolves and nothing else leaves the container.
+      const dns = await run(
+        "import socket\ntry:\n socket.getaddrinfo('example.com', 443)\n print('resolved')\nexcept OSError as e:\n print('dns', e.errno)",
+      );
+      expect(dns.stdout).toMatch(/^dns /u);
+      const direct = await run(
+        "import socket\ntry:\n socket.create_connection(('1.1.1.1', 443), timeout=5)\n print('connected')\nexcept OSError:\n print('blocked')",
+      );
+      expect(direct.stdout.trim()).toBe("blocked");
+      // The Task's user cannot stop the relay, which runs as root.
+      const kill = await workspace.run(
+        ["sh", "-c", "pkill -x python3; pgrep -x -u 0 python3 >/dev/null && echo alive"],
+        30_000,
+        AbortSignal.timeout(30_000),
+      );
+      expect(kill.stdout).toContain("alive");
+    } finally {
+      await provider.stop(who, workspace.sandboxId);
+      proxy.close();
+    }
+  }, 120_000);
 
   it(
     "refuses a Workspace user that is root",
