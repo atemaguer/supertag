@@ -5205,19 +5205,12 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "chrono",
- "libc",
  "reqwest 0.12.28",
  "ring",
  "rustls-pki-types",
  "serde_json",
  "sha2 0.10.9",
- "supertag-protocol",
- "supertag-workspaces",
- "tempfile",
  "tokio",
- "tokio-util",
- "tonic",
- "uuid",
 ]
 
 [[package]]
