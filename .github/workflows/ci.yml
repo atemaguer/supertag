@@ -112,6 +112,10 @@ jobs:
       - run: pnpm check
       - run: pnpm build
       - run: pnpm --filter supertag-ai typecheck
+      # The Docker reference provider's conformance test runs on this image and never pulls it.
+      - run: |
+          docker pull node@sha256:9d266751ca3d7fdbe651c878ffd5ad0a42fed49a18c283509267c97f025b7496
+          docker tag node@sha256:9d266751ca3d7fdbe651c878ffd5ad0a42fed49a18c283509267c97f025b7496 node:24-bookworm
       # The runner has Docker, so the real seal programs run in a container and never skip.
       - run: pnpm test
         env:
