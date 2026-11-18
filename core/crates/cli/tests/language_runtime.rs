@@ -124,6 +124,9 @@ database_tests! {
     claude_code_sdk_resumes_from_its_tags_volume_on_any_host;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+    volume_journey_continues_a_session_on_another_host_after_the_first_is_gone;
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
     claude_keeps_native_memory_on_its_host_across_tasks;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
@@ -991,6 +994,224 @@ async fn claude_code_sdk_resumes_from_its_tags_volume_on_any_host(database: Stri
             "{state} keeps no copy of a Volume-held checkpoint"
         );
     }
+    services.stop().await
+}
+
+/// The Volume-backed journey. A Tag names a file Volume. Its first turn, on host A, leaves a
+/// Task output: the capture's copy and the Session checkpoint both land on the Volume, and host
+/// A keeps no checkpoint of its own. Host A then goes away with all its storage. Host B, which
+/// maps the same Volume, continues the Session from the checkpoint there, and once that turn
+/// supersedes the first checkpoint, a host that maps the Volume deletes the old object.
+async fn volume_journey_continues_a_session_on_another_host_after_the_first_is_gone(
+    database: String,
+) -> Result<()> {
+    let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
+        return Ok(());
+    };
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().canonicalize()?;
+    let native = claude_fixture(&root)?;
+    let vault = root.join("vault");
+    std::fs::create_dir(&vault)?;
+    std::fs::set_permissions(&vault, std::fs::Permissions::from_mode(0o700))?;
+    let source = root.join("source");
+    std::fs::create_dir(&source)?;
+    let git = |args: &[&str]| {
+        let mut command = Command::new("git");
+        command
+            .current_dir(&source)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .arg("-c")
+            .arg("user.name=SuperTag Fixture")
+            .arg("-c")
+            .arg("user.email=fixture@example.invalid")
+            .args(args);
+        command
+    };
+    success(git(&["init", "--quiet"])).await?;
+    std::fs::write(source.join("README.md"), b"Volume journey\n")?;
+    success(git(&["add", "README.md"])).await?;
+    success(git(&["commit", "--quiet", "-m", "Fixture source"])).await?;
+    let base = String::from_utf8(success(git(&["rev-parse", "HEAD"])).await?)?;
+    let services = LanguageServices::start(&root, &database).await?;
+    services
+        .operator(&[
+            "volume",
+            "put",
+            "vault",
+            "--source",
+            &format!("file://{}", vault.display()),
+            "--operation-id",
+            "register-vault",
+        ])
+        .await?;
+    services
+        .operator(&[
+            "tag",
+            "put",
+            "journey",
+            "--instructions",
+            "Keep your work on the Volume.",
+            "--harness",
+            "claude-code",
+            "--allow",
+            "files:read",
+            "--allow",
+            "files:write",
+            "--workspace-id",
+            "journey",
+            "--workspace-base",
+            base.trim(),
+            "--volume",
+            "vault",
+        ])
+        .await?;
+    let host = |state: &str| {
+        let mut host = services.worker(
+            "claude-code",
+            &root.join(state),
+            Path::new(&interpreter),
+            &entry,
+        );
+        host.arg("--claude-path")
+            .arg(&native)
+            .arg("--volume")
+            .arg(format!("vault={}", vault.display()))
+            .arg("--workspace-id")
+            .arg("journey")
+            .arg("--workspace-source")
+            .arg(&source)
+            .env("ANTHROPIC_API_KEY", "fixture-provider-key");
+        host
+    };
+    let shared = &services;
+    let turn = |prompt: &'static str| async move {
+        shared
+            .operator(&[
+                "task",
+                "submit",
+                "--tag",
+                "journey",
+                "--session",
+                "journey-session",
+                prompt,
+            ])
+            .await
+    };
+    let tag = format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(b"journey"));
+    let session = format!(
+        "{:x}",
+        <sha2::Sha256 as sha2::Digest>::digest(b"journey-session")
+    );
+    let checkpoints = |base: &Path| -> Result<Vec<String>> {
+        let directory = base.join(format!("tags/{tag}/sessions/{session}/checkpoint"));
+        if !directory.exists() {
+            return Ok(vec![]);
+        }
+        let mut names = std::fs::read_dir(directory)?
+            .map(|entry| Ok(entry?.file_name().to_string_lossy().into_owned()))
+            .collect::<Result<Vec<_>>>()?;
+        names.sort();
+        Ok(names)
+    };
+
+    // Host A's turn leaves a Task output; the capture and the checkpoint land on the Volume.
+    let first = turn("volume-journey-output").await?;
+    let first_id = first["task_id"].as_str().context("Task ID missing")?;
+    success(host("host-a")).await.context("host A turn")?;
+    let first = services.operator(&["get", "task", first_id]).await?;
+    assert_eq!(first["state"], "TASK_STATE_SUCCEEDED", "{first}");
+    assert_eq!(first["result"], "fixture first turn");
+    let copies = services
+        .operator(&["get", "volume-copies", "--volume-id", "vault"])
+        .await?;
+    let copies = copies["copies"].as_array().context("no copies")?;
+    let copy = copies
+        .iter()
+        .find(|copy| {
+            copy["file"]["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("journey.txt"))
+        })
+        .with_context(|| format!("the Task output has no Volume copy: {copies:?}"))?;
+    assert_eq!(
+        copy["state"], "ARTIFACT_VOLUME_COPY_STATE_VERIFIED",
+        "{copy}"
+    );
+    assert_eq!(copy["host_attested"], true, "{copy}");
+    let key = copy["storage_key"].as_str().context("no storage key")?;
+    assert!(key.starts_with(&format!("tags/{tag}/attempts/")), "{key}");
+    assert_eq!(
+        std::fs::read(vault.join(key))?,
+        b"kept on the Tag's Volume\n"
+    );
+    let kept = checkpoints(&vault)?;
+    assert_eq!(
+        kept.len(),
+        1,
+        "the first checkpoint is on the Volume: {kept:?}"
+    );
+    assert!(kept[0].ends_with(".bin"), "{kept:?}");
+    assert!(
+        checkpoints(&root.join("host-a").join("artifacts"))?.is_empty(),
+        "host A keeps no copy of a Volume-held checkpoint"
+    );
+
+    // Host A goes away with everything it held.
+    std::fs::remove_dir_all(root.join("host-a"))?;
+
+    // Host B continues the Session from the Volume: the fixture checks the resumed transcript.
+    let second = turn("Continue this Session").await?;
+    let second_id = second["task_id"].as_str().context("Task ID missing")?;
+    success(host("host-b")).await.context("host B turn")?;
+    let second = services.operator(&["get", "task", second_id]).await?;
+    assert_eq!(second["state"], "TASK_STATE_SUCCEEDED", "{second}");
+    assert_eq!(second["result"], "fixture resumed turn");
+    // The capture outlives host A on the Volume.
+    assert_eq!(
+        std::fs::read(vault.join(key))?,
+        b"kept on the Tag's Volume\n"
+    );
+
+    // The second checkpoint superseded the first; a host that maps the Volume deletes it.
+    let mut sweeper = services.serving_worker(
+        "claude-code",
+        &root.join("host-c"),
+        Path::new(&interpreter),
+        &entry,
+    );
+    sweeper
+        .arg("--claude-path")
+        .arg(&native)
+        .arg("--volume")
+        .arg(format!("vault={}", vault.display()))
+        .env("ANTHROPIC_API_KEY", "fixture-provider-key")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let mut sweeper = sweeper.spawn()?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let remaining = loop {
+        let remaining = checkpoints(&vault)?;
+        if !remaining.contains(&kept[0]) || tokio::time::Instant::now() > deadline {
+            break remaining;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    };
+    sweeper.kill().await?;
+    assert_eq!(
+        remaining.len(),
+        1,
+        "only the current checkpoint stays on the Volume: {remaining:?}"
+    );
+    assert_ne!(
+        remaining[0], kept[0],
+        "the superseded checkpoint was deleted"
+    );
     services.stop().await
 }
 

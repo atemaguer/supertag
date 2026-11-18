@@ -793,6 +793,15 @@ async function turn(message) {
   if (prompt === "direct-mailbox") result = await directMailbox();
   if (prompt === "scoped-http-mcp") result = await httpCatalog();
   if (prompt === "workspace-mcp") result = await workspaceMcp();
+  if (prompt === "volume-journey-output") {
+    // An ordinary turn that leaves one Task output, captured automatically.
+    const outputDirectory = process.env.SUPERTAG_OUTPUT_DIR;
+    if (!outputDirectory) throw new Error("No managed output directory");
+    const output = join(outputDirectory, "journey.txt");
+    if (!(await hook("Write", { file_path: output })))
+      throw new Error("Accepted file writes did not reach the managed output directory");
+    await writeFile(output, "kept on the Tag's Volume\n");
+  }
   if (prompt === "capture-evidence") {
     try {
       result = await captureArtifact();
