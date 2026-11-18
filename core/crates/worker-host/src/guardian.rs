@@ -24,6 +24,9 @@ pub(crate) const MAX_BOOTSTRAP_BYTES: usize = 4096;
 pub(crate) const ADAPTER_STOP_GRACE: Duration = Duration::from_secs(2);
 pub(crate) const ADAPTER_SCRATCH_PARENT: &str = "SUPERTAG_ADAPTER_SCRATCH_PARENT";
 pub const ADAPTER_STATE_DIRECTORY: &str = "SUPERTAG_ADAPTER_STATE_DIRECTORY";
+/// The adapter's child subreaper: this guardian's PID, on Linux.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) const ADAPTER_REAPER: &str = "SUPERTAG_ADAPTER_REAPER";
 /// How often the guardian records the adapter's processes where the OS cannot adopt orphans.
 const DESCENDANT_SCAN_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -123,6 +126,10 @@ pub fn guard_adapter(adapter: &Path, args: &[OsString]) -> Result<()> {
         .stdin(Stdio::piped())
         .env_remove(ADAPTER_SCRATCH_PARENT)
         .env_remove(ADAPTER_STATE_DIRECTORY);
+    // On Linux this guardian is the adapter's child subreaper (see `Descendants`): name it, so
+    // the adapter's cleanup checks count only it as a parent that may hold the Attempt's orphans.
+    #[cfg(target_os = "linux")]
+    command.env(ADAPTER_REAPER, std::process::id().to_string());
     if let Some(directory) = &scratch {
         let temporary = directory.path().join("tmp");
         std::fs::DirBuilder::new()

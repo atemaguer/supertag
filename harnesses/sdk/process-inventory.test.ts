@@ -4,7 +4,7 @@ import { chmod, mkdir, mkdtemp, open, rm, symlink, writeFile } from "node:fs/pro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ProcessDescendants } from "./src/process-descendants.ts";
+import { ADAPTER_REAPER, ProcessDescendants } from "./src/process-descendants.ts";
 import {
   type ProcessInventory,
   type ProcessInventoryRequest,
@@ -650,6 +650,52 @@ describe("ProcessDescendants with an inventory", () => {
       await tracker.scan(true);
       await expect(tracker.gone()).resolves.toBe(true);
     } finally {
+      await tracker.close();
+    }
+  });
+});
+
+describe("a guardian that names itself as the adapter's subreaper", () => {
+  it("links uncertain orphans only to it, never to init or its own ancestors", async () => {
+    // 800_000 started the Worker Host 800_001, whose guardian 800_002 runs the Worker. Another
+    // Worker Host (800_010) that 800_000 started during the Attempt is unreadable on Linux.
+    const worker = process.pid;
+    const entries = [
+      { pid: 800_000, parent: 1, started: "1" },
+      { pid: 800_001, parent: 800_000, started: "2" },
+      { pid: 800_002, parent: 800_001, started: "3" },
+      { pid: worker, parent: 800_002, started: "4" },
+      { pid: 900_000, parent: worker, started: "600" },
+      { pid: 800_010, parent: 800_000, started: "610" },
+      { pid: 800_011, parent: 800_001, started: "611" },
+      { pid: 800_012, parent: 1, started: "612" },
+      // An orphan of this Attempt, adopted by the guardian.
+      { pid: 900_010, parent: 800_002, started: "620" },
+    ];
+    let uncertain = new Set([800_010, 800_011, 800_012]);
+    const inventory = fakeInventory(
+      () => ({ entries, marked: new Set(), inDirectory: new Set(), uncertain }),
+      (pid) => entries.find((entry) => entry.pid === pid)?.started,
+      "500",
+    );
+    const previous = process.env[ADAPTER_REAPER];
+    process.env[ADAPTER_REAPER] = "800002";
+    const tracker = ProcessDescendants.start(900_000, "m-1", "500", inventory);
+    try {
+      // The unrelated unreadable processes don't hold cleanup open.
+      await tracker.scan(true);
+      await expect(tracker.gone()).resolves.toBe(true);
+      uncertain = new Set([900_010]);
+      await tracker.scan(true);
+      await expect(tracker.gone()).resolves.toBe(false);
+      // Without a guardian that names itself, every ancestor and init may still hold orphans.
+      delete process.env[ADAPTER_REAPER];
+      uncertain = new Set([800_010]);
+      await tracker.scan(true);
+      await expect(tracker.gone()).resolves.toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env[ADAPTER_REAPER];
+      else process.env[ADAPTER_REAPER] = previous;
       await tracker.close();
     }
   });

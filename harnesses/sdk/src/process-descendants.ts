@@ -6,6 +6,12 @@ import {
   platformProcessInventory,
 } from "./process-inventory.js";
 
+/**
+ * Names the adapter's nearest child subreaper, set by the Worker Host's guardian. Its value is a
+ * PID, never a secret.
+ */
+export const ADAPTER_REAPER = "SUPERTAG_ADAPTER_REAPER";
+
 /** Tracks descendants by process identity, including children that reparent and chdir. */
 export class ProcessDescendants {
   readonly #root: number;
@@ -123,19 +129,29 @@ export class ProcessDescendants {
 
   /**
    * Keeps the uncertain PIDs that could belong to this Attempt. A tracked process's children
-   * are already tracked, so the rest are orphans. An orphan reparents to init or to a
-   * subreaper among its ancestors, which are the Worker's ancestors; the Worker sets no
-   * subreaper, so its other children are its own spawns. An uncertain PID is linked when it
-   * has no readable entry, or its parent is a possible reaper, tracked, or linked itself.
+   * are already tracked, so the rest are orphans. An orphan reparents to the nearest subreaper
+   * among the Worker's ancestors, or init; the Worker sets no subreaper, so its other children
+   * are its own spawns. Under a guardian that names itself in `SUPERTAG_ADAPTER_REAPER`, only
+   * the guardian can adopt them. An uncertain PID is linked when it has no readable entry, or
+   * its parent is a possible reaper, tracked, or linked itself.
    */
   #linked(uncertain: ReadonlySet<number>, current: ReadonlyMap<number, ProcessEntry>): Set<number> {
-    const reapers = new Set([1]);
+    const ancestors: number[] = [];
     for (
       let pid = current.get(process.pid)?.parent;
-      pid !== undefined && pid > 0 && !reapers.has(pid);
+      pid !== undefined && pid > 0 && pid !== 1 && !ancestors.includes(pid);
       pid = current.get(pid)?.parent
     )
-      reapers.add(pid);
+      ancestors.push(pid);
+    // A Worker Host's guardian is a child subreaper and says so. It outlives the adapter, so
+    // every orphan below it reparents to it, never to init or its own ancestors. Those (the
+    // Worker Host, which is non-dumpable on Linux, and whatever started it) start unreadable
+    // processes of their own, such as other Worker Hosts, that were never this Attempt's.
+    const reaper = Number(process.env[ADAPTER_REAPER]);
+    const reapers =
+      Number.isSafeInteger(reaper) && reaper > 1 && ancestors.includes(reaper)
+        ? new Set([reaper])
+        : new Set([1, ...ancestors]);
     const linked = new Set<number>();
     let changed = true;
     while (changed) {
