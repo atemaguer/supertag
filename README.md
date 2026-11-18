@@ -9,7 +9,7 @@
 
 Open source and self-hosted, on the coding agents you already use.
 
-**Give them jobs, not tasks.** A Tag is an AI actor with its own identity, permissions, and memory. Give it a job: the responsibilities it keeps up and the outcomes it delivers. It keeps the work going between sessions, acts without being asked, and works with your teammates' Tags. Your coding agents, Claude Code, Codex, Cursor, or OpenCode, still write the code.
+**Give them jobs, not tasks.**
 
 [Jobs, not tasks](#give-them-jobs-not-tasks) · [Persistent](#persistent) · [Proactive](#proactive) · [Multiplayer](#multiplayer) · [Run it yourself](#run-it-yourself) · [Run your first Tag](#run-your-first-tag) · [Documentation](docs/README.md)
 
@@ -18,6 +18,11 @@ Open source and self-hosted, on the coding agents you already use.
 </p>
 
 </div>
+
+A Tag is an AI actor with its own identity, permissions, and memory. Give it a job: the
+responsibilities it keeps up and the outcomes it delivers. It keeps the work going between
+sessions, acts without being asked, and works with your teammates' Tags. Your coding agents,
+Claude Code, Codex, Cursor, or OpenCode, still write the code.
 
 ## Give them jobs, not tasks
 
