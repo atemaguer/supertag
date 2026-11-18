@@ -173,16 +173,21 @@ async fn check_version(binary: &Path) -> Result<()> {
         "the terminal UI is not installed: {} is missing. Reinstall SuperTag, or run supertag --help for the commands",
         binary.display()
     );
-    // macOS scans a newly installed binary on its first run, which can take several seconds.
+    // macOS scans a newly installed binary on its first run, which can take many seconds.
     let output = timeout(
-        Duration::from_secs(30),
+        Duration::from_secs(60),
         terminal_command(binary, None)
             .arg("--version")
             .stdin(Stdio::null())
             .output(),
     )
     .await
-    .context("terminal UI version check timed out")?
+    .with_context(|| {
+        format!(
+            "{} --version did not answer within 60 seconds",
+            binary.display()
+        )
+    })?
     .context("run supertag-tui --version")?;
     let version = std::str::from_utf8(&output.stdout)
         .context("invalid terminal UI version")?
