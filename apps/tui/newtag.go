@@ -319,5 +319,5 @@ func (m model) tagFormHint() string {
 	if m.tagForm != nil && m.tagForm.sending {
 		return "Creating the Tag…"
 	}
-	return "↑ ↓ fields · ← → choose · enter on Workspace creates the Tag · esc cancels"
+	return "↑ ↓ fields · ← → choose · enter moves on, and creates the Tag on the last field · esc cancels"
 }
