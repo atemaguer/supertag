@@ -538,7 +538,7 @@ async fn run(
     shutdown: &CancellationToken,
 ) -> Result<HarnessCompleteRequest> {
     ensure!(assignment.task.is_some(), "assignment is missing its Task");
-    let native_memory = prepare_native_memory(options, &assignment).await;
+    let native_memory = prepare_native_memory(options, &assignment, &coordination).await;
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let bootstrap = AdapterBootstrap {
         endpoint: format!("http://{}", listener.local_addr()?),
@@ -663,6 +663,7 @@ async fn run(
 async fn prepare_native_memory(
     options: &HostOptions,
     assignment: &Assignment,
+    coordination: &CoordinationClients,
 ) -> Option<crate::native_memory::Prepared> {
     let grant = assignment.native_memory.clone()?;
     let harness = crate::native_memory::harness_directory(options.harness)?;
@@ -670,10 +671,9 @@ async fn prepare_native_memory(
     let state = options.state_directory.clone();
     // The store lives in the host's artifact storage, which every lane shares, so any lane of
     // the host finds the Tag's memory; the Attempt's copy stays in this lane's state directory.
-    let storage = options.artifact_source.as_ref().map_or_else(
-        || state.join("artifacts"),
-        |source| source.directory.clone(),
-    );
+    // The live storage the host serves from, which `run` opened from `--artifact-directory`;
+    // `options.artifact_source` is taken before any turn runs.
+    let storage = coordination.artifact_source.as_ref()?.root().to_owned();
     let attempt = assignment.attempt_id.clone();
     match tokio::task::spawn_blocking(move || {
         crate::native_memory::Prepared::prepare((&storage, &state), &tag, harness, &attempt, &grant)

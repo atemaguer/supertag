@@ -999,6 +999,7 @@ async fn claude_keeps_native_memory_on_its_host_across_tasks(database: String) -
     let run = |prompt: &'static str| {
         let services = &services;
         let state = directory.path().join("host");
+        let storage = directory.path().join("shared-storage");
         let interpreter = interpreter.clone();
         let entry = entry.clone();
         let native = native.clone();
@@ -1021,8 +1022,12 @@ async fn claude_keeps_native_memory_on_its_host_across_tasks(database: String) -
                 .context("Task ID missing")?
                 .to_owned();
             let mut host = services.worker("claude-code", &state, Path::new(&interpreter), &entry);
+            // A configured artifact storage outside the state directory, as lanes of one host
+            // share: the store must follow it.
             host.arg("--claude-path")
                 .arg(&native)
+                .arg("--artifact-directory")
+                .arg(&storage)
                 .env("ANTHROPIC_API_KEY", "fixture-provider-key");
             success(host).await?;
             let task = services.operator(&["get", "task", &task_id]).await?;
@@ -1049,9 +1054,13 @@ async fn claude_keeps_native_memory_on_its_host_across_tasks(database: String) -
     assert!(
         directory
             .path()
-            .join(format!("host/artifacts/tags/{tag}/native-memory"))
+            .join(format!("shared-storage/tags/{tag}/native-memory"))
             .is_dir(),
-        "the host keeps the files in its artifact storage"
+        "the host keeps the files in its configured artifact storage"
+    );
+    assert!(
+        !directory.path().join("host/artifacts/tags").exists(),
+        "nothing goes to the default storage when another is configured"
     );
 
     assert!(run("recall-native").await?.contains("- fixture memory"));
