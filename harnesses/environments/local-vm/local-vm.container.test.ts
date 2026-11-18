@@ -28,6 +28,8 @@ const answers =
 if (wanted && !answers && process.env["SUPERTAG_TEST_REQUIRE_CONTAINER"] === "1")
   throw new Error(`${runtime} is required for the local-vm provider`);
 const options = { ...localVmOptions({}), runtime };
+// local-vm refuses Podman; its CI leg runs the suite anyway, to show when Podman reaches parity.
+const testing = { allowPodman: runtime === "podman" };
 const BUILD_MS = 20 * 60_000;
 
 function owner(): SandboxOwner {
@@ -489,7 +491,7 @@ describe.skipIf(!answers)("local-vm provider", () => {
   it(
     "keeps every Codex configuration layer out of Codex's exec-server, whatever the Task plants",
     async () => {
-      const session = createLocalVmWorkspaceSession(options);
+      const session = createLocalVmWorkspaceSession(options, () => {}, testing);
       const who = owner();
       const source = await mkdtemp(join(tmpdir(), "supertag-codex-layers-"));
       try {
@@ -612,7 +614,7 @@ describe.skipIf(!answers)("local-vm provider", () => {
 
   for (const check of sandboxProviderConformance(
     async ({ hostId }) => ({
-      session: createLocalVmWorkspaceSession(options),
+      session: createLocalVmWorkspaceSession(options, () => {}, testing),
       async lose() {
         for (const id of ownedContainers(hostId)) spawnSync(runtime, ["rm", "-f", id]);
       },

@@ -10,6 +10,7 @@ import {
   createContainerWorkspaceSession,
   nativePlatform,
   type SandboxWorkspaceSession,
+  WorkspaceConfigurationError,
 } from "@supertag/worker-sdk/internal/rust-workspace-provider";
 
 /**
@@ -73,11 +74,21 @@ export function localVmOptions(environment: NodeJS.ProcessEnv = process.env): Lo
   return { runtime, image: image ?? { dockerfile: BASE_DOCKERFILE }, user, memory };
 }
 
+/**
+ * Why a Podman host's Task Attempts fail to start. Under Podman a Task process keeps inheritable
+ * capabilities, can signal the egress relay, and reaches places Docker keeps from it, so local-vm
+ * refuses it until its isolation suite passes there.
+ */
+export const PODMAN_REFUSAL =
+  "Podman doesn't yet give local-vm the isolation it requires; use Docker";
+
 export function createLocalVmWorkspaceSession(
   options: LocalVmOptions = localVmOptions(),
   log: (line: string) => void = () => {},
+  /** Only the isolation suite sets this, to watch for Podman's parity in CI. */
+  testing: { readonly allowPodman?: boolean } = {},
 ): SandboxWorkspaceSession {
-  return createContainerWorkspaceSession({
+  const session = createContainerWorkspaceSession({
     name: "local-vm",
     label: "supertag.local-vm",
     runtime: options.runtime,
@@ -89,4 +100,9 @@ export function createLocalVmWorkspaceSession(
     runFlags: ["--memory", options.memory],
     log,
   });
+  if (options.runtime === "podman" && !testing.allowPodman)
+    session.allocate = async () => {
+      throw new WorkspaceConfigurationError(PODMAN_REFUSAL);
+    };
+  return session;
 }

@@ -132,7 +132,7 @@ whole system rather than another first-class resource.
 - <a id="execution-environment"></a>**execution environment** — where a Task's files and commands live: a local checkout, a
   local-vm container, an E2B or Modal sandbox, or a shared execution environment.
 - <a id="local-vm"></a>**local-vm** — a Worker Host `environment` that keeps each Task Attempt's Workspace in a
-  container on the host's own Docker or Podman, with no network. See
+  container on the host's own Docker, with no network. See
   [local-vm containers](supertag-yaml.md#local-vm-containers).
 - <a id="unsandboxed-harness"></a>**unsandboxed harness** — a harness that runs a Task's commands as the Worker Host's user,
   without an operating-system sandbox: Claude Code, Cursor, or OpenCode on a local host. A host runs their Tasks

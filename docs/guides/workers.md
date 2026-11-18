@@ -38,14 +38,15 @@ shows the host, and `supertag logs -f studio` shows its log. See
 
 Codex runs commands inside its own sandbox. Claude Code, OpenCode, and Cursor have no
 operating-system sandbox that SuperTag can enforce. Run their Tasks in containers on this
-machine's Docker or Podman instead:
+machine's Docker instead:
 
 ```yaml
     environment: local-vm
 ```
 
 Their file tools and commands then run in a container with no network, and the harness and its
-keys stay on the host. `supertag init` sets this up when Docker or Podman is running. See
+keys stay on the host. `supertag init` sets this up when Docker is running. Podman is not
+supported yet. See
 [local-vm containers](../reference/supertag-yaml.md#local-vm-containers).
 
 Otherwise a host does not run their Tasks that may run commands until you consent:
@@ -212,7 +213,7 @@ has no built-in tool that could run on the host:
 
 | Option | Runs the Workspace in |
 | --- | --- |
-| `--local-vm` (`environment: local-vm`) | A container on this machine's Docker or Podman per Task Attempt |
+| `--local-vm` (`environment: local-vm`) | A container on this machine's Docker per Task Attempt |
 | `--e2b-workspace-provider` | An E2B sandbox per Task Attempt |
 | `--modal-workspace-provider` | A Modal sandbox per Task Attempt, in the existing Modal app named by `SUPERTAG_MODAL_WORKSPACE_APP` (the host never creates one; a missing app fails the Task naming it), with optionally `SUPERTAG_MODAL_WORKSPACE_IMAGE` and the token in `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` |
 | `--workspace-provider` | Your own provider's sandbox per Task Attempt, given only the variables you name with `--workspace-provider-env`; see [Run your own provider](../reference/sandbox-providers.md#run-your-own-provider) |

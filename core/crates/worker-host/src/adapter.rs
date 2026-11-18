@@ -868,7 +868,7 @@ fn opencode_file_key(options: &HostOptions, provider: &str) -> Option<String> {
 /// Worker Host that starts with `allow-unsandboxed-commands`.
 pub fn unsandboxed_caveat(name: &str) -> String {
     format!(
-        "{name} runs commands without a sandbox, as this host's user: they can read and change anything that user can, including its files, the env_file, and harness sign-ins, and reach the network. Give its Tags only trusted work. SuperTag keeps model keys out of those commands' environment, which stops accidental leaks but is not a boundary. For one, run the host with environment: local-vm on Docker or Podman."
+        "{name} runs commands without a sandbox, as this host's user: they can read and change anything that user can, including its files, the env_file, and harness sign-ins, and reach the network. Give its Tags only trusted work. SuperTag keeps model keys out of those commands' environment, which stops accidental leaks but is not a boundary. For one, run the host with environment: local-vm on Docker."
     )
 }
 

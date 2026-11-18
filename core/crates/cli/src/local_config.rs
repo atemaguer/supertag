@@ -112,7 +112,7 @@ enum Service {
         #[serde(default)]
         volumes: BTreeMap<String, PathBuf>,
         /// Where Tasks' commands and file tools run: `local-vm` runs them in a container on this
-        /// machine's Docker or Podman; unset runs them on the host itself.
+        /// machine's Docker; unset runs them on the host itself.
         #[serde(default)]
         environment: Option<String>,
     },

@@ -65,7 +65,7 @@ impl Found {
 /// Where a harness without its own sandbox runs commands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Commands {
-    /// In a container on this machine's Docker or Podman (`environment: local-vm`).
+    /// In a container on this machine's Docker (`environment: local-vm`).
     LocalVm,
     /// On this machine, as the operator (`allow-unsandboxed-commands`).
     Unsandboxed,
@@ -79,12 +79,11 @@ enum Commands {
 fn container_runtime() -> Option<&'static str> {
     #[cfg(feature = "test-fixtures")]
     if let Ok(runtime) = std::env::var("SUPERTAG_TEST_INIT_CONTAINER_RUNTIME") {
-        return ["docker", "podman"]
-            .into_iter()
-            .find(|candidate| *candidate == runtime);
+        return (runtime == "docker").then_some("docker");
     }
     crate::harness::local_vm_bridge().ok()?;
-    ["docker", "podman"].into_iter().find(|runtime| {
+    // local-vm refuses Podman until it gives a Task the same isolation as Docker.
+    ["docker"].into_iter().find(|runtime| {
         Command::new(runtime)
             .arg("info")
             .stdin(std::process::Stdio::null())
@@ -716,7 +715,7 @@ fn unsandboxed(harness: Found, ask: Option<&mut Prompter>) -> Result<Commands> {
         (Found::ClaudeCode | Found::Opencode | Found::Cursor, Some(prompter)) => {
             let name = harness.harness();
             outln!(
-                "{name} has no sandbox of its own, so SuperTag suggests running its commands in local-vm containers: with Docker or Podman running, set environment: local-vm on its host in supertag.yaml. Codex sandboxes its commands."
+                "{name} has no sandbox of its own, so SuperTag suggests running its commands in local-vm containers: with Docker running, set environment: local-vm on its host in supertag.yaml. Codex sandboxes its commands."
             );
             if prompter.confirm(
                 &format!("Allow {name} to run commands without a sandbox instead?"),
@@ -738,7 +737,7 @@ fn unsandboxed(harness: Found, ask: Option<&mut Prompter>) -> Result<Commands> {
         }
         (Found::ClaudeCode | Found::Opencode | Found::Cursor, None) => {
             outln!(
-                "  {} has no sandbox of its own, and no Docker or Podman is running for local-vm containers, so its Tasks that run commands will wait. Start one and set environment: local-vm on its host in supertag.yaml, or opt in to commands without a sandbox with allow-unsandboxed-commands; then run supertag up.",
+                "  {} has no sandbox of its own, and no Docker is running for local-vm containers, so its Tasks that run commands will wait. Start Docker and set environment: local-vm on its host in supertag.yaml, or opt in to commands without a sandbox with allow-unsandboxed-commands; then run supertag up.",
                 harness.harness()
             );
             Commands::Unset

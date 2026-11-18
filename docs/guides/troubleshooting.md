@@ -105,7 +105,8 @@ runs the host, and run `supertag up`. Keys belong in `~/.supertag/.env`: a servi
 inherit your shell. Claude Code, Cursor, and OpenCode Tasks that may run commands also need
 `environment: local-vm` or `allow-unsandboxed-commands` on the host; see
 [Run Worker Hosts](workers.md#harnesses-without-a-sandbox). A local-vm host whose Tasks fail to
-start needs Docker or Podman running for the host's user.
+start needs Docker running for the host's user. local-vm refuses Podman for now; switch the
+host to Docker.
 A Codex Tag on a code-mode-only model needs `web:fetch` as well as `commands:execute` to run
 commands; see [Codex commands and models](../operations/requirements.md#codex-commands-and-models).
 

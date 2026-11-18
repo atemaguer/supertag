@@ -205,8 +205,10 @@ sets `concurrency: 3`.
 
 Claude Code, Cursor, and OpenCode have no sandbox of their own that SuperTag can enforce. `environment:
 local-vm` gives them one: each Task Attempt's Workspace lives in a container on this machine's
-Docker or Podman, and every file and command tool runs there. The harness and its keys stay on
-the host. This is the setup `supertag init` writes when Docker or Podman is running.
+Docker, and every file and command tool runs there. The harness and its keys stay on the host.
+This is the setup `supertag init` writes when Docker is running. Docker is the supported runtime.
+A local-vm host refuses Podman for now: under Podman, a Task gets more privilege than local-vm
+promises, so its Task Attempts fail to start and name Docker instead.
 
 ```yaml
     harnesses: [claude-code, cursor]
@@ -234,7 +236,7 @@ shell or `env_file`, change the container:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `SUPERTAG_LOCAL_VM_RUNTIME` | `docker`, or `podman` when only it is installed | The container runtime |
+| `SUPERTAG_LOCAL_VM_RUNTIME` | `docker`, or `podman` when only it is installed | The container runtime. Podman is refused for now |
 | `SUPERTAG_LOCAL_VM_IMAGE` | a Debian image with Git, Python, Node, and ripgrep | An image with `python3`, `git`, and a POSIX shell. A Task Attempt fails to start when the image lets its user write `python3`, `git`, or what they load, such as a Python installed under the user's home |
 | `SUPERTAG_LOCAL_VM_USER` | `user` | The image's unprivileged user. Root is refused |
 | `SUPERTAG_LOCAL_VM_MEMORY` | `8g` | The container's memory limit |

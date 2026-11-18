@@ -1,5 +1,11 @@
+import { WorkspaceConfigurationError } from "@supertag/worker-sdk/internal/rust-workspace-provider";
 import { describe, expect, it } from "vitest";
-import { BASE_DOCKERFILE, localVmOptions } from "./src/index.js";
+import {
+  BASE_DOCKERFILE,
+  createLocalVmWorkspaceSession,
+  localVmOptions,
+  PODMAN_REFUSAL,
+} from "./src/index.js";
 
 describe("local-vm options", () => {
   it("builds the pinned base image by default", () => {
@@ -47,6 +53,20 @@ describe("local-vm options", () => {
     const directory = await mkdtemp(join(tmpdir(), "local-vm-path-"));
     await writeFile(join(directory, "podman"), "#!/bin/sh\n", { mode: 0o755 });
     expect(localVmOptions({ PATH: directory }).runtime).toBe("podman");
+  });
+
+  it("refuses Podman at allocation, naming Docker, until it isolates a Task as Docker does", async () => {
+    const session = createLocalVmWorkspaceSession(
+      localVmOptions({ SUPERTAG_LOCAL_VM_RUNTIME: "podman" }),
+    );
+    const allocation = session.allocate({
+      owner: { hostId: "host", taskAttemptId: "attempt" } as never,
+      timeoutMs: 60_000,
+      allowedActions: [],
+    });
+    await expect(allocation).rejects.toBeInstanceOf(WorkspaceConfigurationError);
+    await expect(allocation).rejects.toThrow(PODMAN_REFUSAL);
+    expect(PODMAN_REFUSAL).toMatch(/use Docker/u);
   });
 
   it("refuses an unknown runtime, user, or memory", () => {

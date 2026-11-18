@@ -2348,7 +2348,7 @@ Options:
           A Worker Host variable passed to your own sandbox provider, such as its API key. Repeat for more; no other variable reaches it
 
       --local-vm
-          Run each Task's commands and file tools in a container on this machine's Docker or Podman, through the installed local-vm provider
+          Run each Task's commands and file tools in a container on this machine's Docker, through the installed local-vm provider
 
       --local-vm-workspace-provider <LOCAL_VM_WORKSPACE_PROVIDER>
           Executable for the local-vm provider instead of the installed one, such as Node from a source checkout

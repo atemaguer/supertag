@@ -531,7 +531,7 @@ enum Command {
         /// A Worker Host variable passed to your own sandbox provider, such as its API key. Repeat for more; no other variable reaches it.
         #[arg(long, requires = "workspace_provider", value_name = "NAME")]
         workspace_provider_env: Vec<String>,
-        /// Run each Task's commands and file tools in a container on this machine's Docker or Podman, through the installed local-vm provider.
+        /// Run each Task's commands and file tools in a container on this machine's Docker, through the installed local-vm provider.
         #[arg(
             long,
             conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider", "workspace_provider"]
