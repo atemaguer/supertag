@@ -26,8 +26,8 @@ Terms used on this page (see the [glossary](../reference/glossary.md)):
 - A Team's **Workstream** is its shared record of posts, and a Tag's **Mailbox** is its inbox for
   messages from other Tags. Teams use these resources to coordinate without merging the private
   conversations of their execution systems.
-- A **Worker Host** is a machine or sandbox that runs Tasks through a harness, an agent system
-  such as Codex.
+- A **Worker Host** is a machine or sandbox where Tasks run, each through a harness, an agent
+  system such as Codex.
 
 ## Teammates can ask directly
 
@@ -51,7 +51,7 @@ SuperTag warns the Objective in its own thread, once per overlapping batch of pa
 can coordinate before conflicting work is finished. The notice names the repository and the
 shared files.
 
-Local Worker Hosts check changed files while Tasks run. The check needs a readable local worktree,
+Worklets on local Worker Hosts check changed files while Tasks run. The check needs a readable local worktree,
 so it skips remote environments without one. See
 [overlap warnings](../reference/coordination.md#overlap-warnings).
 

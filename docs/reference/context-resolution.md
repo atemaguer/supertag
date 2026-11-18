@@ -30,14 +30,14 @@ stores a policy snapshot with it that holds two independent parts:
 - **Authorization snapshot** — the applicable Role policy, active Permission Sets, and allowed
   resources and actions.
 
-A **Worker Host** is a machine or sandbox that provides execution capacity. It claims the Task
-from the Control Plane and runs a harness adapter for it. The Worker Host receives these fixed
-inputs with the claim, without database access. Policy changes affect later Tasks.
+A **Worker Host** is a machine or sandbox that provides execution capacity. Its **Worklet** claims
+the Task from the Control Plane and starts a **Worker**, a harness adapter and its harness, for
+it. The Worklet receives these fixed inputs with the claim, without database access. Policy changes affect later Tasks.
 
 ## Same-Session continuity
 
 Each Session maps to one native harness session. When a Task Attempt finishes, its harness may
-save the native session as a checkpoint. The Worker Host that ran it keeps the latest checkpoint for
+save the native session as a checkpoint. The Worklet that ran it keeps the latest checkpoint for
 each Tag and Session, and the Control Plane records which host holds it; a Task Attempt that
 finishes without one, such as a failed one, clears it, so the Session's next Task starts a new
 native session.
@@ -109,10 +109,10 @@ and Claude Code receives it as an isolated plugin.
 | `supertag/artifacts` | 1 | The Control Plane, at admission | Bounded artifact metadata summaries |
 
 Each Item has a `type`, a `version`, an `itemKey` unique within its Context Set, `required`, and a
-bounded, non-secret `config`. A Worker Host advertises the types it can resolve: `supertag/skill`
-only when it has a Skill catalog. Only a Worker Host that advertises every required Item's type
+bounded, non-secret `config`. A Worklet advertises the types its host can resolve: `supertag/skill`
+only when the host has a Skill catalog. Only a Worklet that advertises every required Item's type
 claims the Task; an optional Item the host cannot resolve is recorded as an omission. The Control
-Plane stores other types, but no Worker Host resolves them.
+Plane stores other types, but no Worklet resolves them.
 
 ## Operational targets are not context
 
@@ -120,5 +120,5 @@ A repository needed for one Task is an operational target, not a Context Item. A
 Control Plane copies the Workspace from the Tag's binding into the Task. For a remote Workspace,
 the Session's first Task pins the commit its branch names, and later turns of the Session keep it.
 
-The Worker Host checks out the pinned commit and records provenance without recording a credential
+The Worklet checks out the pinned commit and records provenance without recording a credential
 or cache path. See [Work in a repository with Workspaces](../guides/workspaces.md).

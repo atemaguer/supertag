@@ -6,7 +6,8 @@ of Tags make up an **autonomous organization**: Teams may pursue different goals
 of rules and one record of the work. For example, a laptop can run the **Control Plane**, which
 stores your organization and accepts work, and act as a **Worker Host**, which provides execution
 capacity. A Worker Host runs each **Task**, one turn of a Tag's work, on a **harness**: an agent
-system such as Codex, Claude Code, or Cursor.
+system such as Codex, Claude Code, or Cursor. Its **Worklet**, `supertag worker-host`, claims the
+Tasks and starts a **Worker** for each Task Attempt.
 Check this page before [installing SuperTag](install.md).
 
 ## System and tools
@@ -153,7 +154,7 @@ client. Sandboxed SDK runs reject inline MCP server tools because they cannot as
 
 ### Cursor with a remote environment
 
-A Worker Host run with `--local-vm`, `--e2b-workspace-provider`, `--modal-workspace-provider`,
+A Worklet run with `--local-vm`, `--e2b-workspace-provider`, `--modal-workspace-provider`,
 or `--workspace-provider` runs Cursor's
 SDK on the host and keeps the Workspace in a sandbox; see
 [Run a harness in a sandbox](../guides/workers.md#run-a-harness-in-a-sandbox). Its API key and native Session state stay there; provider keys never enter
@@ -178,7 +179,7 @@ protection in split mode; the bridge checks file paths and permissions. See [Cur
 The SDK and local commands each get a private `HOME` and private XDG directories. Commands run
 from the Task checkout and use the Worker Host's `PATH`, with the adapter's Node directory first.
 They do not inherit `CURSOR_API_KEY`, `COREPACK_HOME`, `PNPM_HOME`, or `npm_config_*` variables.
-Run the Worker Host with a Node version that meets the project's requirements and put the project’s
+Run the Worklet with a Node version that meets the project's requirements and put the project’s
 package manager or a compatible Corepack shim on its `PATH`. For example, Corepack can use
 `"packageManager": "pnpm@10.15.1"` in `package.json` to install and run the pinned version.
 The private home keeps operator configuration and caches separate.
@@ -198,7 +199,7 @@ See [usage reporting](../reference/worker.md#built-in-harnesses).
 
 ### Credentials available during Tasks
 
-When using a file-backed Codex sign-in, a local Codex Worker Host copies `~/.codex/auth.json`
+When using a file-backed Codex sign-in, a local Codex host's Worklet copies `~/.codex/auth.json`
 (or the file under the host's `CODEX_HOME`) into each Task's working area. That copy can contain
 a long-lived ChatGPT refresh token; its file permissions are restricted to the OS user.
 Local Claude Code Tasks can use that user's secure credential store, including macOS Keychain.
@@ -209,8 +210,8 @@ credentials with appropriate provider limits. `CODEX_API_KEY` takes precedence o
 the Codex sign-in file; `OPENAI_API_KEY` is only a fallback when that file is missing.
 
 On a Worker Host with `allow-unsandboxed-commands` for Claude Code, an `ANTHROPIC_API_KEY`,
-`ANTHROPIC_AUTH_TOKEN`, or `CLAUDE_CODE_OAUTH_TOKEN` given to the host stays in the Worker
-Host. Each Task's Claude Code gets a stand-in value and the address of a proxy on `127.0.0.1` that
+`ANTHROPIC_AUTH_TOKEN`, or `CLAUDE_CODE_OAUTH_TOKEN` given to the host stays in the
+Worklet. Each Task's Claude Code gets a stand-in value and the address of a proxy on `127.0.0.1` that
 puts the real key on its requests to `api.anthropic.com`, and on nothing else. Claude Code also
 removes its credentials from the environment of the commands it runs. A command can still call
 Anthropic through that proxy while its Task runs, but it can't read the key from Claude Code or
@@ -218,27 +219,27 @@ the adapter.
 
 OpenCode works the same way on such a host for its `anthropic` and `openai` providers: the
 provider's API key, given to the host (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) or from an
-`api` entry in the OpenCode auth file, stays in the Worker Host, and OpenCode's provider `baseURL`
+`api` entry in the OpenCode auth file, stays in the Worklet, and OpenCode's provider `baseURL`
 points at the proxy, which forwards only to `api.anthropic.com` or `api.openai.com`. Other
 providers, and an OpenCode sign-in that isn't an API key, stay readable to the commands OpenCode
-runs; the Worker Host warns about that when it starts.
+runs; the Worklet warns about that when it starts.
 
 Cursor's key doesn't go behind the proxy. The Cursor SDK trades `CURSOR_API_KEY` for an access
 token that it then sends itself, and Cursor's service can switch it to streams the proxy doesn't
-carry. The Worker Host hands the key to the Cursor adapter in a private file the adapter reads
+carry. The Worklet hands the key to the Cursor adapter in a private file the adapter reads
 and deletes as it starts, and the adapter passes it to Cursor over a pipe, so it is in no
 process's environment, including that of the commands Cursor runs. That closes accidental leaks
 only: on a host with `allow-unsandboxed-commands: [cursor]`, a command running as the same user
 can still read the key from the host's `env_file` or, where the OS allows it, the adapter's
-memory. The Worker Host warns about this when it starts. Use `environment: local-vm` to keep the
+memory. The Worklet warns about this when it starts. Use `environment: local-vm` to keep the
 key out of their reach.
 
-`supertag up` hands each Worker Host its harness's provider keys and tokens in a private file
+`supertag up` hands each Worker Host's Worklet its harness's provider keys and tokens in a private file
 that the host reads and deletes as it starts, rather than in its environment, so `ps eww`,
 `/proc/<pid>/environ`, and tools that dump a process's environment don't show them. On Linux the
-Worker Host also marks itself non-dumpable, so other processes of the same user can't read its
+Worklet also marks itself non-dumpable, so other processes of the same user can't read its
 memory or environment through `/proc` or attach a debugger to it, and it writes no core dump.
-A host started directly with `supertag worker-host` reads keys from its environment, unless it is
+A Worklet started directly with `supertag worker-host` reads keys from its environment, unless it is
 given the same kind of file, a JSON object of variable names to values, with
 `--provider-credentials-file`.
 
@@ -248,7 +249,7 @@ OS allows it, the host's memory. These measures close accidental leaks only. Onl
 as `environment: local-vm`, keeps the key out of reach.
 
 A sign-in made with `/login` lives in the system's secure store (the macOS Keychain) and can't go
-behind the proxy, so commands Claude Code runs without a sandbox can reach it. The Worker Host
+behind the proxy, so commands Claude Code runs without a sandbox can reach it. The Worklet
 warns about this when it starts.
 
 ## Telemetry and network traffic

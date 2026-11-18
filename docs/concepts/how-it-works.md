@@ -12,19 +12,20 @@ If these terms are new, start with [core concepts](README.md).
 
 SuperTag has three kinds of services, all run by the one `supertag` program:
 
-- The **Control Plane** stores and coordinates the organization. It is the one public API, for
-  operator clients, Worker Hosts, and Gateways.
+- The **Control Plane** stores and coordinates the organization. Worker Hosts and Gateways
+  connect to its API.
 - **Worker Hosts** are machines or sandboxes that provide execution capacity. On each, a
   **Worklet** (`supertag worker-host`) connects the host to the Control Plane and claims Tasks.
   For each Task Attempt it starts a **Worker**: a **harness adapter**, the process that drives an
   agent system such as Codex or Claude Code, and that harness.
-- A **Gateway** connects collaboration surfaces, such as Slack or GitHub, to the Control Plane.
-  It is optional.
+- A **Gateway** is the endpoint clients connect to: the CLI, the terminal UI, the desktop app,
+  and applications built on the SDKs. It forwards their calls to the Control Plane, and it
+  connects collaboration surfaces, such as Slack or GitHub.
 
 SuperTag stores each accepted turn of work as a **Task** for a Tag. The Tag exists independently
 of the model or harness that executes the Task.
 
-This separation also protects the organization. Before a Worker Host receives a Task, the Control
+This separation also protects the organization. Before a Worklet receives a Task, the Control
 Plane records who is acting, who requested the work, where the request came from, which reusable
 knowledge may be added, which actions are allowed, which approvals apply, and which execution
 limits must be followed. A harness cannot expand the Task's permissions.
@@ -32,8 +33,9 @@ limits must be followed. A harness cannot expand the Task's permissions.
 ```text
 Slack / GitHub / Linear / Lark / Teams     CLI / terminal UI / desktop app / your application
                  |                                         |
-              Gateway ── client of ──┐                     |
-                                     v                     v
+                 └──────────────> Gateway <────────────────┘
+                                     |  forwards calls as a client
+                                     v
                           Control Plane: one gRPC API (https:// or wss://)
                           - organizational resources and policy
                           - scheduling, leases, and recovery
@@ -50,8 +52,8 @@ Slack / GitHub / Linear / Lark / Teams     CLI / terminal UI / desktop app / you
                             execution environment
 ```
 
-On a laptop, `supertag up` runs a Control Plane, a Gateway, and a Worker Host side by side. A
-shared deployment runs the Control Plane and Gateway on a server or hosting platform, and
+On a laptop, `supertag up` runs a Control Plane, a Gateway, and this machine's Worklet side by
+side. A shared deployment runs the Control Plane and Gateway on a server or hosting platform, and
 teammates' machines connect as Worker Hosts. See
 [SuperTag and other agent systems](supertag-and-other-agent-systems.md) for how the
 organizational layer relates to assistants, agent runtimes, and coding harnesses.
@@ -73,9 +75,12 @@ against one table of roles: operators, client devices, Worker Hosts, and Gateway
 
 ## The Gateway
 
-The Gateway is the collaboration surface boundary. It receives and authenticates surface
-traffic, turns it into Tasks through the Control Plane's connector API, delivers replies, and sends
-operator notifications. It is an ordinary client of the Control Plane with its own credential.
+The Gateway is the boundary for clients and collaboration surfaces. The CLI, the terminal UI,
+the desktop app, and SDK applications connect to it, and it forwards their calls to the Control
+Plane under the caller's own credential. It also receives and authenticates surface traffic,
+turns it into Tasks through the Control Plane's connector API, delivers replies, and sends
+operator notifications. For that work it is an ordinary client of the Control Plane with its own
+credential. Worker Hosts do not go through it: their Worklets connect to the Control Plane.
 
 For example, when someone mentions `@SuperTag` in Slack, the Gateway passes the message, its
 origin, and its requester to the Control Plane. The Control Plane finds the Tag configured for
@@ -99,24 +104,24 @@ expand the allowed actions.
 
 ## How the work runs
 
-Worker Hosts connect outbound and report their harnesses, models, labels, and capacity. The
-Control Plane places a Task only on a ready Worker Host that may run its Tag and carries the
+Each Worker Host's Worklet connects outbound and reports the host's harnesses, models, labels, and
+capacity. The Control Plane places a Task only on a ready Worker Host that may run its Tag and carries the
 labels the Tag requires. A Task stays queued when none is available, and
 `supertag placement explain` says why. A Task that asks for an execution limit its Tag's harness
 cannot enforce is refused when it is submitted, instead of waiting forever.
 
 On the Worker Host, each **Task Attempt**, one execution of a Task, runs in its own pinned
-checkout of the Tag's Workspace. The host resolves the Task's Skills, starts the harness adapter,
-and supervises its processes. The adapter drives the agent and reports progress, usage, and the
-result through the harness protocol. When the Task changes the Workspace, the host delivers a
-verified Git bundle, which your machine imports as a `supertag/session/...` branch. Deliveries
-stay on the Worker Host that produced them, and artifacts stay there or on a Volume. The Control
-Plane stores only their records: other Tasks read artifacts from the host directly, and the
-Control Plane still relays deliveries to whoever imports them.
+checkout of the Tag's Workspace. The Worklet resolves the Task's Skills, starts a Worker, and
+supervises its processes. The Worker's harness adapter drives the agent and reports progress,
+usage, and the result through the harness protocol. When the Task changes the Workspace, the
+Worklet verifies the commits and delivers them as a `supertag/session/...` branch: it writes the
+branch into the repository a local Workspace maps, or pushes it to a remote Workspace's git
+server. Artifacts stay on the Worker Host that produced them or on a Volume. The Control Plane
+stores only their records and relays no files: other Tasks read artifacts from the host directly.
 
 ## What survives a failure
 
-The Control Plane stores each Task before a Worker Host claims it. Task Attempts, events,
+The Control Plane stores each Task before a Worklet claims it. Task Attempts, events,
 results, and outbound replies have their own recovery paths. A crashed adapter, a lost connection,
 or a collaboration surface failure does not erase accepted work. See
 [Scheduling and interrupted execution](../reference/scheduling-and-recovery.md).

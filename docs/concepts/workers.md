@@ -73,7 +73,7 @@ left when the Task Attempt ends. A Workspace checkout, a Session checkpoint, and
 artifacts outlast the Worker; the Worklet keeps them.
 
 The harness is the agent system that does the work. The harness adapter connects one Task Attempt
-to it: it receives the Task, its Session checkpoint, and its allowed capabilities from the host,
+to it: it receives the Task, its Session checkpoint, and its allowed capabilities from the Worklet,
 drives the agent, and reports back. Codex's adapter is built into `supertag`. Claude Code, Cursor,
 and OpenCode use Node bridges, and OpenAI Agents uses the `supertag` Python package. You can write
 your own; see [Write a harness adapter](../guides/harness-adapters.md).
@@ -99,10 +99,10 @@ Either way, the harness and its credentials stay on the host. See [Run a harness
 
 A host's state directory holds its credential, its execution journal, Workspace checkouts, and
 the artifacts and Workspace deliveries its Tasks produce. The Control Plane stores none of those
-files and passes none of them on. Other Worker Hosts read artifacts from the host directly or
-from a Volume, and the host pushes each delivery to its Session branch in the Workspace's git
-remote, or writes it into a local Workspace's repository. The journal lets a restarted host recover an
-interrupted Task Attempt without running it twice. See [Persistence](persistence.md).
+files and passes none of them on. Other hosts' Worklets read artifacts from the host directly or
+from a Volume, and its Worklet pushes each delivery to its Session branch in the Workspace's git
+remote, or writes it into a local Workspace's repository. The journal lets a restarted Worklet
+recover an interrupted Task Attempt without running it twice. See [Persistence](persistence.md).
 
 ## Next
 

@@ -215,7 +215,7 @@ conversation is told why.
 ### Where a work Session's edits go
 
 A work Session keeps its edits the way an Objective Task does. It works in the Workspace of the
-Task that started it, even when it runs on another Tag, and the Worker Host commits its changes
+Task that started it, even when it runs on another Tag, and the Worklet commits its changes
 to the work Session's own branch, such as `supertag/session/0f3c2a9e`. A Task with no Workspace
 starts its work Sessions without one. See
 [Workspaces](../reference/resource-model.md#workspaces).
@@ -322,8 +322,8 @@ how the Control Plane ranks hosts and orders the queue.
 ### Execution settings
 
 A Tag's or Role's `execution` names the harness, models, and reasoning efforts its Tasks may use,
-with the defaults first; a Tag's own settings override its Roles'. Worker Hosts advertise the
-harnesses and models they serve, and a Tag's `runsOn` labels narrow which hosts may run it. These
+with the defaults first; a Tag's own settings override its Roles'. Worklets advertise the
+harnesses and models their Worker Hosts serve, and a Tag's `runsOn` labels narrow which hosts may run it. These
 settings choose where work runs; they grant no permission. A Task that asks for an execution
 limit its harness cannot enforce, such as a token limit on Claude Code, is
 refused when it is submitted. See
@@ -339,9 +339,9 @@ harness that produced it. A Tag keeps the harness it was created with: `supertag
 
 An operator cancels one Task with `supertag task cancel ID`, and every open Task of an Objective
 with `supertag objective cancel ID`. Cancellation stops further
-results from that execution from being accepted, and the Worker Host stops the harness adapter.
+results from that execution from being accepted, and the Worklet stops its Worker.
 The Task event history records who cancelled it, when, and its previous status. This event is
-saved with the cancellation itself, so an interrupted Worker Host does not need to report the
+saved with the cancellation itself, so an interrupted Worklet does not need to report the
 action afterward.
 
 A harness adapter completes its own Task by returning its result. It should not cancel its Task to
@@ -413,7 +413,7 @@ or a replayed claim presents the same ones.
 
 If delivery or execution completion is uncertain, SuperTag blocks further execution in that
 Session rather than retrying the message or resuming an older session state. Uncertain execution
-blocks the Session only while it may still run: once its Worker Host records that it stopped, the
+blocks the Session only while it may still run: once its Worklet records that it stopped, the
 Session's next turns run, and the uncertain Task still never runs again. The durable delivery
 record retains the exact target Task Attempt. If that Task Attempt later withdraws the input as
 unread before SuperTag queues a recovery notice, the message returns to the Session's next turn

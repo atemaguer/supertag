@@ -77,7 +77,7 @@ activate`. See [Manage Control Plane resources](../operations/resources.md).
 
 ## Credentials
 
-Gateway credentials, for events and replies, are separate from the credentials a Worker Host uses
+Gateway credentials, for events and replies, are separate from the credentials a Worker Host's Worklet uses
 for optional provider MCP tools. Neither grants authority by itself: the Tag's active Permission
 Sets still decide what a Task may use. See [credential storage](../reference/credential-storage.md).
 

@@ -90,8 +90,8 @@ whole system rather than another first-class resource.
 ## Runtime
 
 - <a id="control-plane"></a>**Control Plane** — the SuperTag service that stores the organization, accepts and
-  schedules work, applies policy, recovers interrupted work, and preserves audit history. It is the
-  one public API for operator clients, Worker Hosts, and Gateways. See
+  schedules work, applies policy, recovers interrupted work, and preserves audit history. Worklets and
+  Gateways connect to its API, and clients reach it through a Gateway. See
   [Control Plane API](control-plane-api.md).
 - <a id="collaboration-surface"></a>**collaboration surface** — how SuperTag meets people in an external work tool such as Slack, GitHub, Linear,
   Lark, or Teams. It receives events at a Tag's locations and replies there.
@@ -99,8 +99,9 @@ whole system rather than another first-class resource.
   receives events and replies.
 - <a id="surface-account"></a>**Surface Account** — one connected external workspace or account and the Gateway that serves
   it. Its credentials stay with that Gateway, in a credential vault.
-- <a id="gateway"></a>**Gateway** — the service that carries collaboration surface traffic and operator notifications.
-  It is an optional client of the Control Plane with its own credential, `gateway:NAME`.
+- <a id="gateway"></a>**Gateway** — the service clients connect to: the CLI, the terminal UI, the desktop app, and SDK
+  applications. It forwards their calls to the Control Plane, and carries collaboration surface
+  traffic and operator notifications as a client with its own credential, `gateway:NAME`.
 - <a id="worker-host"></a>**Worker Host** — a machine, container, VM, or sandbox that provides execution capacity,
   enrolled under a name, `host:NAME`. Its Worklet connects it outbound to the Control Plane. See
   [Run Worker Hosts](../guides/workers.md).
@@ -136,7 +137,7 @@ whole system rather than another first-class resource.
   [Work in a repository with Workspaces](../guides/workspaces.md).
 - <a id="harness"></a>**harness** — the agent system a Task runs on, such as Codex, Claude Code, Cursor, OpenCode, or
   OpenAI Agents. See [Worker Hosts, Worklets, Workers, and harnesses](../concepts/workers.md).
-- <a id="harness-adapter"></a>**harness adapter** — the process a Worker Host starts for each Task Attempt to drive a
+- <a id="harness-adapter"></a>**harness adapter** — the process a Worklet starts for each Task Attempt to drive a
   harness through the harness protocol. See [Write a harness adapter](../guides/harness-adapters.md).
 - <a id="execution-environment"></a>**execution environment** — where a Task's files and commands live: a local checkout, a
   local-vm container, an E2B or Modal sandbox, or a shared execution environment.
@@ -154,10 +155,10 @@ whole system rather than another first-class resource.
 ## Execution and recovery terms
 
 - <a id="connection-generation"></a>**Task Attempt generation** — an increasing number that fences a Task Attempt's lease.
-  SuperTag rejects reports from a host that lost the lease. See
+  SuperTag rejects reports from a Worklet that lost the lease. See
   [Leases and unknown outcomes](scheduling-and-recovery.md#leases-and-unknown-outcomes).
 - <a id="git-delivery"></a>**git delivery** — the part of the Control Plane that talks to remote Workspaces' git servers: it
-  reads each Session's source and opens review pull requests. Worker Hosts push the changes. See
+  reads each Session's source and opens review pull requests. Worklets push the changes. See
   [Landing](resource-model.md#landing).
-- <a id="landing"></a>**Landing** — where a Worker Host put one Session's changes: its `supertag/session/...` branch, or a
+- <a id="landing"></a>**Landing** — where a Worklet put one Session's changes: its `supertag/session/...` branch, or a
   merge into the Workspace's target branch. See [Landing](resource-model.md#landing).

@@ -39,7 +39,7 @@ Terms used on this page (see the [glossary](../reference/glossary.md)):
 - A **Context Set** selects reusable knowledge that may be added to a Task; a **Permission Set**
   selects allowed actions.
 - A **harness** is the agent system a Task runs on, such as Codex, Claude Code, or Cursor; a
-  **Worker Host** runs it.
+  **Worker Host** is the machine it runs on.
 - A **Skill** is a reusable instruction package.
 - The **Control Plane** is the service that stores and coordinates the organization; a
   **collaboration surface** links it to an external work tool such as Slack.

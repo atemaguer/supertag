@@ -3,7 +3,8 @@
 The **Control Plane** maintains the durable state of an AI
 [organization](glossary.md#autonomous-organization) and decides what work it accepts and where
 that work runs. [Worker Hosts](glossary.md#worker-host) form the execution side of the system,
-and an optional [Gateway](glossary.md#gateway) connects collaboration surfaces.
+each connected by its [Worklet](glossary.md#worklet). A [Gateway](glossary.md#gateway) is the
+endpoint clients connect to, and it connects collaboration surfaces.
 
 This page uses these SuperTag terms, each defined in the glossary: [Tag](glossary.md#tag),
 [Role](glossary.md#role), [Objective](glossary.md#objective), [Team](glossary.md#team),
@@ -17,8 +18,9 @@ This page uses these SuperTag terms, each defined in the glossary: [Tag](glossar
 ```text
 Slack / GitHub / Linear / Lark / Teams     CLI / terminal UI / desktop app / applications
                  |                                         |
-              Gateway (client) ─────────┐                  |
-                                        v                  v
+                 └───────────────> Gateway <───────────────┘
+                                        |  forwards calls as a client
+                                        v
                         Control Plane: one gRPC API, supertag.runtime.v2
                         - authentication and the role table
                         - admission, policy, and budgets
@@ -26,8 +28,9 @@ Slack / GitHub / Linear / Lark / Teams     CLI / terminal UI / desktop app / app
                         - durable state and audit (SQLite or PostgreSQL)
                                         ^
                                         | outbound connections
-                                  Worker Hosts
-                        - harness adapters and Workspace checkouts
+                         Worker Hosts, each running a Worklet
+                        - a Worker per Task Attempt: harness adapter and harness
+                        - Workspace checkouts
 ```
 
 The Control Plane owns:
@@ -37,9 +40,9 @@ The Control Plane owns:
 - scheduling, leases, recovery decisions, cancellation, and reconciliation; and
 - events and audit history.
 
-It stores no files. Session checkpoints stay on the Worker Host that wrote them, and the Control
+It stores no files. Session checkpoints stay on the Worker Host whose Worklet wrote them, and the Control
 Plane records only which host holds each one. Artifact and Workspace delivery bytes stay on the
-Worker Host that produced them, and no file passes through the Control Plane. Other Worker Hosts
+Worker Host that produced them, and no file passes through the Control Plane. Other Worklets
 read artifacts from that host directly or from a Volume, and read deliveries from their Session
 branches in the Workspace's git remote. Several Control Plane processes can share one PostgreSQL database; a SQLite
 database serves one process.
@@ -51,8 +54,8 @@ Session can resume it. It is a cache: the Session's Tasks and their events are t
 turn without a checkpoint starts from a recap of them (see
 [Continuity and recaps](../concepts/tasks.md#continuity-and-recaps)).
 
-The Worker Host that ran the turn keeps the checkpoint in its artifact storage, which every lane of
-the host shares. The Control Plane records only its holder, size, and digest. Only the holder
+The Worklet that ran the turn keeps the checkpoint in its host's artifact storage, which every
+lane of the host shares. The Control Plane records only its holder, size, and digest. Only the holder
 resumes it:
 
 - The Session's next Task waits up to 10 minutes for the holder while the holder is ready, bound
@@ -64,12 +67,12 @@ resumes it:
 
 A Tag that names a [Volume](resource-model.md#volumes) (`supertag tag put TAG --volume NAME`) keeps its
 checkpoints on that Volume instead, at `tags/<SHA-256 of TAG>/sessions/<SHA-256 of SESSION>/checkpoint/`.
-The turn's host writes it there, through its own `--volume` mapping for a file Volume or a
+The turn's Worklet writes it there, through its own `--volume` mapping for a file Volume or a
 presigned request for an S3 one, and keeps no copy. Any host that reaches the Volume resumes it,
 so the next Task waits for no particular host. The reader checks the checkpoint's size and SHA-256,
 and a missing or changed checkpoint starts the turn fresh. A dropped checkpoint's object is
 deleted from the Volume: by the Control Plane within seconds for an S3 Volume, and within 10
-minutes by a Worker Host that maps a file Volume.
+minutes by the Worklet of a Worker Host that maps a file Volume.
 
 | Rule | When |
 | --- | --- |
@@ -79,31 +82,33 @@ minutes by a Worker Host that maps a file Volume.
 | An ended Objective's checkpoints are dropped | 3 days after the Objective completes or is cancelled, before its Sessions would go idle |
 | A failed or cancelled Task Attempt's checkpoint is dropped | At the next maintenance pass |
 
-A Worker Host deletes a checkpoint file when a newer one replaces it, when the Control Plane no
+A Worklet deletes a checkpoint file when a newer one replaces it, when the Control Plane no
 longer names it (checked at start and every hour), and when it has not been written for 14 days.
 These periods are fixed; there is no setting.
 
-The Gateway terminates collaboration surface connections, turns their events into Tasks through
-the `Connector` service, and delivers replies and operator notifications. It does not decide
-policy, create work on its own, or schedule Worker Hosts. Worker Hosts do not become part of the
-Control Plane; each claims work and reports its execution. See the
+The Gateway forwards client calls to the Control Plane. It terminates collaboration surface
+connections, turns their events into Tasks through the `Connector` service, and delivers replies
+and operator notifications. It does not decide policy, create work on its own, or schedule Worker
+Hosts. Worker Hosts do not become part of the Control Plane; each host's Worklet claims work and
+reports its execution. See the
 [Worker Host reference](worker.md).
 
 ## Connections
 
-Clients reach the Control Plane at one URL: `https://` for native gRPC, `wss://` for the
-WebSocket tunnel behind platforms that forward only HTTP, or `http://` on loopback. Every
+Worklets and Gateways reach the Control Plane at one URL: `https://` for native gRPC, `wss://` for
+the WebSocket tunnel behind platforms that forward only HTTP, or `http://` on loopback. Clients
+reach it through a Gateway, which takes the same kinds of URL. Every
 connection first negotiates a protocol version. See [Control Plane API](control-plane-api.md).
 
-The CLI, the terminal UI, and the desktop app share saved Control Planes: `supertag connect URL
+The CLI, the terminal UI, and the desktop app share saved Gateways: `supertag connect URL
 --name NAME` saves one, and `--gateway NAME` uses it. `--state-directory` reaches the local
 services that `supertag up` runs.
 
-Every client finds the local Control Plane the same way. The state directory
+Every client finds the local Gateway the same way. The state directory
 (`SUPERTAG_STATE_DIR`, else `~/.supertag`) must be private to the user, the `supertag up`
 supervisor must hold its lock, and the endpoint must be a loopback address. The client then reads
 the admin operator token from `credentials.json`. The terminal UI and the desktop app show this
-Control Plane as **Local**, read its token at each connect, and never save it.
+Gateway as **Local**, read its token at each connect, and never save it.
 
 ## Callers and roles
 
@@ -129,7 +134,7 @@ credential is refused on the next call and ends open streams within about a seco
 | Admin operator | Everything an operator may, plus Operator Tokens |
 | Operator | Configuration, fleet, recovery, audit, Auth Keys and enrollments, and all work |
 | Client | Tags its Auth Key allows, Teams made only of those Tags, its own conversations and Objectives, and their Inbox items |
-| Worker Host | Execution of the work it claims, for its current generation |
+| Worker Host | Execution of the work its Worklet claims, for its current generation |
 | Gateway | Connector and reply progress calls for the Surface Accounts that name it. With `--all-tags` on its key, also accounts no Surface Account names and the admin operator's notifications |
 
 A client is a device. It sees only the work it started, never work without an owner, and never

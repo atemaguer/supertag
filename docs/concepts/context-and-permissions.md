@@ -67,7 +67,7 @@ available on an Objective's own Tasks through Roles; those Tasks use the catalog
 visibility rules instead.
 
 A **Context Item** is one entry in a Context Set. Two types exist: `supertag/skill`, a Skill the
-Worker Host resolves from its catalog, and `supertag/artifacts`, artifact selections the Control
+Worklet resolves from its Worker Host's catalog, and `supertag/artifacts`, artifact selections the Control
 Plane resolves. A Task with a required Item runs only on a Worker Host that can resolve it. See
 the [context resolution reference](../reference/context-resolution.md).
 

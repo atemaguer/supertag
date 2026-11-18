@@ -1,9 +1,10 @@
 # Control Plane operations
 
 Run, observe, back up, and upgrade a **Control Plane**, the service that stores a SuperTag
-organization and schedules its work. It is the one public API for operator clients (the CLI, the
-terminal UI, the desktop app, and applications), for **Worker Hosts**, the machines that run the
-work, and for **Gateways**, the services that connect collaboration surfaces such as Slack. See
+organization and schedules its work. Its API serves the Worklets of **Worker Hosts**, the
+machines that run the work, and **Gateways**, the services that clients (the CLI, the terminal
+UI, the desktop app, and applications) connect to and that connect collaboration surfaces such as
+Slack. See
 the [glossary](../reference/glossary.md) for other terms, and
 [Self-host SuperTag](../guides/self-hosting.md) to deploy one.
 
@@ -153,8 +154,8 @@ one Worker Host is connected and ready; `verify deployment --require-ready` fail
 backlogs. For the last 500 started Task Attempts it shows the median and longest time from start
 until the Workspace was ready, the harness adapter attached, and the harness's first event, so you
 can see where the wait before a model's first token goes, and the time from the harness finishing
-to the Worker Host reporting the result (`finalization`: Workspace capture, delivery, checkpoint,
-and outputs). The Control Plane stamps each point by its own clock; a Worker Host reports when the
+to the Worklet reporting the result (`finalization`: Workspace capture, delivery, checkpoint,
+and outputs). The Control Plane stamps each point by its own clock; a Worklet reports when the
 Workspace was ready, when the adapter attached, and when the harness finished, best-effort, so a
 Task Attempt may lack them. It also reports how long the Control Plane process that answered took to admit each
 collaboration surface's events since it started: admitted and failed calls, average and longest
@@ -164,24 +165,23 @@ replica counts only the events it served.
 ## Artifact storage
 
 An artifact is saved output from a Task, such as a report or a file. The Control Plane keeps its
-catalog in the database and never stores its files. The Worker Host whose Task captured them keeps
-them. A Task on the same host, or on a host sharing its artifact storage, reads them there; a Task
+catalog in the database and never stores its files. The Worklet on the Worker Host whose Task captured them
+keeps them. A Task on the same host, or on a host sharing its artifact storage, reads them there; a Task
 on another host reads them directly from a host run with `--artifact-transfer-listen`. Clients
 can't download artifacts. For copies that outlive the host, give a
-Tag a `volume`: the capturing host writes each copy there itself. The Control Plane maps no
+Tag a `volume`: the capturing host's Worklet writes each copy there itself. The Control Plane maps no
 Volume; for an S3 Volume it only signs, with the credential `supertag volume credential set`
 stores in its credential vault on this machine. See
 [Keep every capture on a Volume](../reference/artifacts.md#keep-every-capture-on-a-volume).
-Workspace deliveries stay on the Worker Host that ran the Task: it writes or pushes each Session
-branch itself. See
+Workspace deliveries stay on the Worker Host that ran the Task: its Worklet writes or pushes each
+Session branch itself. See
 [Artifacts](../reference/artifacts.md).
 
 ## Replicas
 
 Several Control Plane processes can share one PostgreSQL database. Put them behind one TCP load balancer or private DNS name, keep their clocks in
-sync, and run the same release on all of them. Each Worker Host's relay stream reaches one
-replica, so only that replica can relay its artifacts and Workspace deliveries. A read through
-another replica fails with the offline error. Every replica signs S3 Volume URLs with the same
+sync, and run the same release on all of them. No replica relays artifacts or Workspace
+deliveries. Every replica signs S3 Volume URLs with the same
 vault credential, so give the replicas one credential vault. A SQLite database serves one process. See
 [Control Plane replicas](../../deploy/native/README.md#control-plane-replicas).
 
@@ -217,6 +217,6 @@ none of theirs, so upgrade clients and the Control Plane together.
   from the environment or a masked prompt and writes them only to owner-only files.
 - Only the Control Plane holds the database credential. Only the Gateway holds collaboration
   surface credentials. Harness and MCP credentials stay on Worker Hosts.
-- A Worker Host connects outbound and needs no inbound port.
+- A Worker Host's Worklet connects outbound and needs no inbound port.
 
 See [Credential storage](../reference/credential-storage.md).

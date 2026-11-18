@@ -44,7 +44,7 @@ The terminal UI and the desktop app read like a messaging app. The lead Tag sits
 the rail with a star, and the other Tags follow by their latest activity. Your messages and the
 Tag's are grouped by sender, and a time divider marks a pause of more than fifteen minutes.
 Under your last message they show **Sent** once the Control Plane has it and **Seen** once a
-Worker Host has taken it up, and the animated `···` stays at the end of the Tag's reply until
+Worker Host's Worklet has taken it up, and the animated `···` stays at the end of the Tag's reply until
 its answer arrives. Each of the Tag's messages appears as soon as the Control Plane records it,
 and with Codex or Claude Code its text appears as it is written. A message that is not
 delivered stays in the conversation with **Retry**, which sends it at most once, and **Edit**. What you have not sent stays with each Tag
@@ -149,14 +149,14 @@ show a file in Finder. Binary files are listed but don't open. The list refreshe
 runs. The app reads the files from your disk; they never pass through the Control Plane. A Task on
 another machine says "Files on Worker Host NAME are unreachable from here". For a finished Task,
 **Files** names its Session branch, `supertag/session/ID`, with `git diff` and `git checkout`
-commands to copy and run in the Workspace's repository. The app and the Worker Host know they share a machine from
+commands to copy and run in the Workspace's repository. The app and the Worklet know they share a machine from
 `~/.supertag/machine-id`, a random identifier created on first use, whichever state directory
 each one uses.
 
 ## See what a Tag fetched
 
 When a Tag's Permission Sets limit `web:fetch` to named hosts, each Task Attempt's web requests go
-through the Worker Host, which keeps a log of what it allowed and refused. Operators see it in the
+through an egress proxy on the Worker Host, which keeps a log of what it allowed and refused. Operators see it in the
 desktop app's Tag details, under **Network**, and in the terminal UI by choosing **Network** in the
 command palette. See [Network log](../reference/iam.md#network-log).
 

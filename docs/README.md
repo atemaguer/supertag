@@ -93,8 +93,9 @@ Once those ideas are clear, learn where the organization and its work run:
 - [Multiplayer](concepts/multiplayer.md) explains how teammates and their Tags work together and share completed work safely.
 - [Persistence](concepts/persistence.md) explains what survives when a sandbox or host dies.
 
-The **Gateway** is a separate, optional service that receives and sends collaboration surface
-traffic. It connects to the Control Plane as a client, like the CLI and Worker Hosts.
+The **Gateway** is the service the CLI, the terminal UI, the desktop app, and SDK applications
+connect to. It forwards their calls to the Control Plane, and it receives and sends collaboration
+surface traffic. Worker Hosts connect to the Control Plane directly.
 
 Concept pages explain what each part means and when to use it. They link to commands and technical
 reference only when you need to configure or extend that part.
@@ -122,7 +123,7 @@ Choose the tool your team already uses:
 - [Control Plane operations](operations/control-plane.md) — health, persistence, deployment, and databases
 - [Operator notifications](guides/notifications.md) — alert the operator about inbox items
 - [Manage resources](operations/resources.md) — get, describe, diff, apply, delete, watch, and cancel
-- [supertag.yaml and local state](reference/supertag-yaml.md) — the services `supertag up` runs (a local Control Plane, a Gateway, and this machine as a Worker Host), their settings, and what lives in `~/.supertag/`
+- [supertag.yaml and local state](reference/supertag-yaml.md) — the services `supertag up` runs (a local Control Plane, a Gateway, and a Worklet that connects this machine as a Worker Host), their settings, and what lives in `~/.supertag/`
 - [Troubleshoot the first reply](guides/troubleshooting.md) — trace a request from its source to its Worker Host
 - [Credential storage](reference/credential-storage.md) — where secrets live and which process can read them
 - [MCP tools for GitHub, Slack, Linear, Teams, and Lark](surfaces/worker-tools.md) — preset tools and resource grants

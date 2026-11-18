@@ -8,9 +8,9 @@
   most one. `supertag up` always runs a local **Gateway** beside it: the service the CLI, the
   terminal UI, and the desktop app connect to, which also carries collaboration surfaces and
   operator notifications.
-- A **`host` service** connects this machine as a **Worker Host**, a computer that runs
-  [Tasks](glossary.md#task) for Tags, the persistent AI actors with their own responsibilities
-  and permissions. A file can have any number.
+- A **`host` service** runs a **Worklet** that connects this machine as a **Worker Host**, a
+  computer that runs [Tasks](glossary.md#task) for Tags, the persistent AI actors with their own
+  responsibilities and permissions. A file can have any number.
 
 The file declares how SuperTag runs on this machine, not what your organization contains:
 

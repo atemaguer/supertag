@@ -470,7 +470,7 @@ Only the root harness actor receives SuperTag coordination tools. Harness-native
 local to one execution and are not Tags. Codex native subagents are disabled, because Codex cannot
 yet give them a tool set distinct from the root actor's. The Codex adapter and the Claude Code,
 Cursor, and OpenCode adapters offer the same tools; a custom harness adapter calls the matching
-Worker Host services.
+services its Worklet serves.
 
 Which tools a Task gets depends on the kind of turn it is. SuperTag refuses a direct call to a
 tool the turn does not get; it does not only leave it out of the list.
@@ -695,7 +695,7 @@ memory too, beside its [notes](#memory), across Tasks:
   `MEMORY.md` index keeps both turns' lines.
 - **Limits.** A store holds at most 1,000 files and 4 MiB, and a file at most 256 KiB. A turn's
   changes that would pass a limit, or that add a link or special file, are not kept.
-- **Another host.** Each Worker Host keeps its own copy. A Tag whose next turn runs on another
+- **Another host.** Each Worker Host's Worklet keeps its own copy. A Tag whose next turn runs on another
   host starts from that host's copy, or from none, and a host that is removed takes its copy with
   it. The Tag's notes and Sessions stay; harness memory is a convenience on top of them.
 - **On a Volume.** A Tag that names a Volume (`supertag tag put TAG --volume NAME`) keeps its
@@ -904,7 +904,7 @@ number of Objectives may name one Team.
 
 An approval request records one ask for a person or a named approver. SuperTag creates one when
 a Task is about to perform an action whose permission has `approvalRequired: true`: an MCP tool
-call that the Worker Host's policy proxy forwards, a Mailbox message, or a Workstream post.
+call that the Worklet's policy proxy forwards, a Mailbox message, or a Workstream post.
 
 Each request stores the Objective, Task, Task Attempt, Session, requesting Tag, the action and
 resource, the canonical tool arguments and their `sha256` digest, a short summary, and who may
@@ -1087,7 +1087,7 @@ in [Operator notifications](../operations/control-plane.md#operator-notification
 
 - Restarting the Control Plane preserves admitted work. Acceptance is recorded before
   acknowledgement, and disconnecting an event observer does not cancel execution.
-- A Worker Host keeps running its Task Attempts while it reconnects, and it records their events,
+- A Worklet keeps running its Task Attempts while it reconnects, and it records their events,
   results and deliveries only while it still holds their leases. A Task Attempt whose host lost
   its lease is never run again on its own: it becomes uncertain and needs an operator decision.
   See [Leases and unknown outcomes](scheduling-and-recovery.md#leases-and-unknown-outcomes).

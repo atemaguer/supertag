@@ -62,7 +62,7 @@ The CLI is `supertag`, installed with the installer script from a GitHub Release
 
 Local state and credentials live in `~/.supertag`; override with `SUPERTAG_STATE_DIR`.
 `~/.supertag/supertag.yaml` lists the services `supertag up` runs on a machine, like a compose
-file: a `control-plane` service and `host` services (the machine as a Worker Host); `supertag up`
+file: a `control-plane` service and `host` services (a Worklet that connects the machine as a Worker Host); `supertag up`
 also runs a local Gateway. Local state uses SQLite; shared deployments use PostgreSQL.
 
 Operator commands use this machine's local services (`SUPERTAG_STATE_DIR` or `~/.supertag`)

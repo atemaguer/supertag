@@ -116,7 +116,8 @@ stores only a SHA-256 digest of each `stak_` secret and of each enrolled `stcr_`
 compares them in constant time. Operator Tokens (`stop_`) are stored the same way.
 
 A Worker Host enrolls from its own side and keeps its credential in its owner-only state
-directory, outside any checkout a harness can read:
+directory, outside any checkout a harness can read. Its Worklet uses that credential, and no Worker receives
+it:
 
 ```bash
 supertag host enroll build-east-1 --control-plane https://supertag.example.com \
@@ -137,7 +138,7 @@ outside the Task Attempt sandbox or run the harness under a separately confined 
 ## MCP and git credentials
 
 MCP tool credentials, including those for the GitHub, Slack, Linear, Teams, and Lark presets, come
-from references in the Worker Host's MCP catalog, which the host resolves for each Task Attempt.
+from references in the Worker Host's MCP catalog, which its Worklet resolves for each Task Attempt.
 `supertag mcp login` keeps OAuth tokens in `mcp-logins/` in the state directory
 (`SUPERTAG_STATE_DIR`, else `~/.supertag`). They never enter the Surface Account vault. Git repository
 source and pull-request delivery use a separate host-local `GITHUB_TOKEN`. See
@@ -173,9 +174,9 @@ Gateway that serves it, never a secret. Its credentials reach that Gateway's vau
   or physical locations.
 - Tags, Permission Sets, Tasks, Worker Hosts, and harness prompts never contain Gateway
   collaboration surface credentials.
-- A Worker Host resolves MCP and git credential references itself. A Workspace `.mcp.json` can
-  reach only `SUPERTAG_MCP_*` variables. The Worker Host contains the process-level secret
-  boundary for its harness adapters.
+- A Worklet resolves MCP and git credential references itself. A Workspace `.mcp.json` can
+  reach only `SUPERTAG_MCP_*` variables. The Worklet holds the process-level secret boundary for
+  the harness adapters of its Workers.
 - A shared backend must enforce distinct workload identities and policies; namespace names alone
   are not a security boundary.
 

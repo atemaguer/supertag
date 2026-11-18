@@ -43,7 +43,7 @@ implements these calls:
 
 ## The helper process
 
-The Worker Host starts one helper process per Task Attempt:
+The Worklet starts one helper process per Task Attempt:
 
 1. It runs the helper's executable with a cleared environment: `PATH`, `LANG=C`, a private
    `TMPDIR`, and the provider's own credentials, nothing else.
@@ -121,7 +121,7 @@ the Task's path scope. No tool reaches `.git`. Edits run one at a time. Each com
 ### A lost sandbox
 
 When a tool call fails because its sandbox no longer exists, the provider answers that call with
-`sandbox_lost` set, and every later call the same way. The Worker Host then stops and journals the
+`sandbox_lost` set, and every later call the same way. The Worklet then stops and journals the
 lost sandbox and replaces it from the turn's starting files, at most twice per Task Attempt; the call
 tells the harness that its earlier changes in the turn are gone. Set `sandbox_lost` only on the
 provider's own confirmation: a timeout, a network error, or a sandbox that is merely unresponsive
@@ -188,7 +188,7 @@ an outside caller can observe.
 5. **Capture rules.** Capture returns exactly what [Capture](#capture) lists, within the size
    limit, with a receipt. It never follows a link out of the checkout.
 6. **Network rules.** The sandbox has no network access, DNS included. Egress, if offered, must
-   go only to the Worker Host's egress proxy, with no other egress, DNS included. SuperTag's own
+   go only to the Worklet's egress proxy, with no other egress, DNS included. SuperTag's own
    E2B, Modal, and local-vm providers offer it through an egress relay in the sandbox, carried
    over the provider's own command channel. A Task with `web:search`, `browser:use`, or a
    `web:fetch` without a [network scope](iam.md#network-scopes) never runs on such a host,
@@ -224,7 +224,7 @@ These will become requirements when they ship. A provider written now should lea
 them.
 
 - **Egress relay.** A sandbox will reach the network only through a relay that carries its
-  traffic over the provider's exec stream to the Worker Host's egress proxy, while the sandbox's
+  traffic over the provider's exec stream to the Worklet's egress proxy, while the sandbox's
   own network stays fully blocked. The proxy applies the Task's
   [network scope](iam.md#network-scopes). Egress, if offered, must go only to the host's proxy,
   with no other egress, DNS included. A tunnel that leaves the sandbox's resolver working does
@@ -232,7 +232,7 @@ them.
 
 ## Run your own provider
 
-A Worker Host runs your provider's helper with `--workspace-provider`:
+A Worklet runs your provider's helper with `--workspace-provider`:
 
 ```sh
 supertag worker-host --harness claude-code --workspace-id repository \
@@ -244,7 +244,7 @@ supertag worker-host --harness claude-code --workspace-id repository \
 
 - `--workspace-provider-env NAME` names one Worker Host variable to pass to the helper. The named
   variables are the only ones it gets, besides `PATH`, `LANG`, and `TMPDIR`. A variable that is
-  not set stops the Worker Host at start.
+  not set stops the Worklet at start.
 - The helper's executable, its arguments, and every passed name and value bind the sandboxes it
   allocates. A host restarted with another value, such as a rotated key, never stops or recovers
   a sandbox the earlier one made.
@@ -253,12 +253,12 @@ supertag worker-host --harness claude-code --workspace-id repository \
   as `network-scope`. Only SuperTag's own E2B, Modal, and local-vm providers carry the egress
   relay.
 - Your provider must pass the [conformance suite](#conformance-suite) with `isolated` set before
-  a Worker Host runs it. SuperTag does not check this at start.
+  a Worklet runs it. SuperTag does not check this at start.
 
 ## Conformance suite
 
 `sandboxProviderConformance` in `@supertag/worker-sdk/internal/rust-workspace-provider/conformance`
-drives a provider through the production handlers and the real gRPC transport, as the Worker Host
+drives a provider through the production handlers and the real gRPC transport, as the Worklet
 does. It returns named cases whose `run` throws on a failure, so any test runner can register
 them. With Vitest:
 

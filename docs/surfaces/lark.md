@@ -84,8 +84,8 @@ without another mention.
 
 - The App ID and App Secret authorize only Gateway ingress and replies. They never reach a
   Worker Host or the Tag's agent. See [credential storage](../reference/credential-storage.md).
-- Adding a Tag to a chat does not give the harness Lark tools. A **Worker Host**, the machine or
-  sandbox that runs the Task, provides them with the `lark` MCP preset, and the Tag's
+- Adding a Tag to a chat does not give the harness Lark tools. The **Worklet** on the **Worker Host**, the
+  machine or sandbox that runs the Task, provides them with the `lark` MCP preset, and the Tag's
   **Permission Sets**, its allowed actions, grant them. See
   [MCP tools](worker-tools.md#lark--feishu).
 - Several quick messages in a thread get one answer. A message sent while the Tag works goes into

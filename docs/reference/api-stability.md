@@ -48,7 +48,7 @@ require changes at any time.
 The Python SDK (`supertag` on PyPI) has two Experimental modules, both installed with the
 `runtime` extra. `supertag.gateway_client` provides `GatewayClient` and `GatewayClientSync`,
 which connect to a Gateway over gRPC and expose the operator services it forwards to the Control
-Plane. `supertag.harness_adapter` provides `open_harness`, which opens a Worker Host's
+Plane. `supertag.harness_adapter` provides `open_harness`, which opens a Worklet's
 execution-scoped services for a custom harness adapter from its standard input. The OpenAI Agents
 harness adapter, `python -m supertag.openai_agents_adapter`, is Experimental. Other Python
 modules are internal.
@@ -72,7 +72,7 @@ longer, unless keeping the behavior would create a security or data-integrity ri
 ## CLI and Control Plane versions
 
 Every client and service negotiates a protocol version when it connects: the CLI, the terminal
-UI, the desktop app, applications, Worker Hosts, and Gateways. A pair that shares a version works;
+UI, the desktop app, applications, Worklets, and Gateways. A pair that shares a version works;
 a pair that shares none is refused before any other call, with both sides' releases and protocol
 versions in the error and which one to upgrade. Before 1.0, a release that changes the protocol
 speaks only its new version: SuperTag 0.3.0 speaks protocol 2, and 0.3.1 speaks protocol 5. `supertag version` prints this CLI's version and the running local services' versions.

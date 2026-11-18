@@ -7,7 +7,7 @@ in the [glossary](glossary.md); the host's side is in the [Worker Host reference
 
 ## Worker Host selection
 
-Worker Hosts claim work: each connected host asks for a Task it can run. The Control Plane offers
+Worker Hosts claim work: each connected host's Worklet asks for a Task it can run. The Control Plane offers
 a queued Task only to a host that:
 
 1. may run the Task's Tag: a local host in the same `supertag.yaml` as its Control Plane runs
@@ -59,7 +59,7 @@ limited in three places:
 `supertag metrics` shows queued Tasks, host capacity, and how long Tasks waited: before a claim,
 between claim and start, and, for the last 500 started Task Attempts, the median and longest time from
 start to a ready Workspace, an attached harness adapter, and the harness's first event, and from
-the harness finishing to the Worker Host reporting the result.
+the harness finishing to the Worklet reporting the result.
 
 ### Start rates
 
@@ -100,21 +100,21 @@ without holding back turns of other Sessions, of the same Tag or another.
 
 A Task Attempt may run for 60 minutes; a host service's `attempt-timeout-seconds`, or
 `--attempt-timeout-seconds`, changes that, up to 86400. A host whose Workspaces run in E2B or Modal
-sandboxes accepts at most 3600 seconds. The host stops a Task Attempt that reaches its limit.
+sandboxes accepts at most 3600 seconds. The Worklet stops a Task Attempt that reaches its limit.
 
 ## Leases and unknown outcomes
 
-A host holds a lease on each running Task Attempt and renews it while the Task Attempt runs. Each
-lease is fenced by the Task Attempt's generation: once a lease is lost, the host can no longer
+A host's Worklet holds a lease on each running Task Attempt and renews it while the Task Attempt
+runs. Each lease is fenced by the Task Attempt's generation: once a lease is lost, the Worklet can no longer
 record events, results, or deliveries for that Task Attempt.
 
 ### Uncertain Task Attempts
 
-When a host stops or loses contact while a Task Attempt runs, the Control Plane cannot know
+When a host or its Worklet stops or loses contact while a Task Attempt runs, the Control Plane cannot know
 whether the work finished or changed anything outside SuperTag. It does not run the Task again on
 its own:
 
-- A host restarted after it was killed checks the processes it recorded for the Task Attempt. When
+- A Worklet restarted after it was killed checks the processes it recorded for the Task Attempt. When
   every one is gone, it records the Task Attempt as failed with an unknown outcome and takes new
   work.
 - Otherwise, and always for a Task Attempt that used a remote sandbox or shared execution, the

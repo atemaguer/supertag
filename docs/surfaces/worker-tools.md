@@ -2,8 +2,8 @@
 
 An MCP server gives a **Task**, one request accepted for a **Tag** (a persistent AI actor with
 its own responsibilities and permissions), tools to read or change an external service. The
-**Worker Host**, the machine that runs the Task, offers MCP servers from its own catalog and holds
-their credentials. A **Permission Set**, a set of allowed actions, selects which tools and
+**Worklet** on the **Worker Host**, the machine that runs the Task, offers MCP servers from the
+host's catalog and holds their credentials. A **Permission Set**, a set of allowed actions, selects which tools and
 resources a Task may use. The **Surface Account**, the connected account the Gateway uses for
 incoming messages and thread replies, is separate. See the [glossary](../reference/glossary.md)
 for other terms.
@@ -12,7 +12,7 @@ Catalog tools serve Claude Code Tasks.
 
 ## Write the host's catalog
 
-The catalog is an owner-only JSON file that the Worker Host reads with `--mcp-catalog`. A
+The catalog is an owner-only JSON file that the Worklet reads with `--mcp-catalog`. A
 **preset** names an official server, its URL, and how its tool arguments map to resources:
 
 ```json
@@ -27,7 +27,7 @@ The catalog is an owner-only JSON file that the Worker Host reads with `--mcp-ca
 
 Each `headerEnv` value names a Worker Host environment variable that holds the full header value,
 such as `Bearer TOKEN`. Use credentials restricted by the provider to the repositories and
-channels the Tags need. The host injects the headers for each Task Attempt; the agent and its
+channels the Tags need. The Worklet injects the headers for each Task Attempt; the agent and its
 shell never receive them.
 
 ```sh
@@ -96,7 +96,7 @@ Lark's server runs only over stdio. The `lark` preset runs `lark-mcp`, from the
 { "name": "lark", "preset": "lark", "env": { "APP_ID": "LARK_APP_ID", "APP_SECRET": "LARK_APP_SECRET" } }
 ```
 
-The host starts the server for each Task Attempt with only the variables its `env` names, and
+The Worklet starts the server for each Task Attempt with only the variables its `env` names, and
 stops it when the Task Attempt ends. A chat-scoped grant names `chat:ID`.
 
 ## Other servers

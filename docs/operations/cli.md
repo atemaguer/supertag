@@ -112,7 +112,7 @@ A script or app can run `init` without a terminal:
 | --- | --- |
 | `supertag up` | Starts the services in `supertag.yaml` in the background and returns when they are ready |
 | `supertag up --foreground` | Runs them in this terminal, with their logs, until you interrupt it |
-| `supertag down` | Drains this machine's Worker Hosts, waits for running Task Attempts, and stops every service |
+| `supertag down` | Drains this machine's Worker Hosts through their Worklets, waits for running Task Attempts, and stops every service |
 | `supertag down --force` | Stops without waiting for running Task Attempts |
 | `supertag ps` | Lists this machine's services and their state |
 | `supertag logs -f` | Follows the service logs; name `control-plane`, `gateway`, or a host to narrow them |
@@ -309,7 +309,7 @@ answer out of the shell history and the process list. See
 ## Bring delivered work into your repository
 
 A Task that changes a Workspace delivers its commits as the branch `supertag/session/HASH`, one
-branch per Session. The Worker Host that ran the Task writes it into the repository it maps for a
+branch per Session. The Worklet that ran the Task writes it into the repository its host maps for a
 local Workspace, or pushes it to a remote Workspace's git server, where you `git fetch` it. See [Work in a repository with Workspaces](../guides/workspaces.md).
 
 ## Spend and audit

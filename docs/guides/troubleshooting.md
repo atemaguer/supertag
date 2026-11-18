@@ -4,8 +4,9 @@ Trace a request from where someone asked a **Tag**, a persistent AI actor with i
 responsibilities and permissions, to the **Worker Host** that runs it and back. Work through the
 steps in order; each checks one layer. Terms are defined in the [glossary](../reference/glossary.md).
 
-Commands talk to a **Control Plane**, the service that stores your organization. Without
-`--gateway NAME`, they use this machine's local services, as shown.
+Commands talk to a **Gateway**, which forwards them to the **Control Plane**, the service that
+stores your organization. Without `--gateway NAME`, they use this machine's local services, as
+shown.
 
 If you asked in the terminal UI or desktop app, skip steps 2 and 3: they cover Slack, GitHub and
 other surfaces. Start with step 1, then find the Task with `supertag watch task` while you send the
@@ -32,8 +33,8 @@ To have SuperTag started again after a failure without you, set `restart: unless
 [Run as a service](../operations/cli.md#run-as-a-service).
 
 If a command says `no local Control Plane is running`, start the local services with
-`supertag up`, or pass `--gateway URL` or the `--gateway NAME` of a saved Control
-Plane.
+`supertag up`, or pass `--gateway URL` or the `--gateway NAME` of a saved
+Gateway.
 
 ## 2. Check the Surface Account
 
@@ -133,8 +134,8 @@ supertag get reply
 `task events` shows the run's progress and result: each line has a `kind`, `message` for what
 the Tag wrote, `activity` for what it did, or `progress` for its plan. `get reply` shows whether
 the Gateway delivered the reply. When a Task failed, `supertag logs HOST_NAME` shows why: the
-Worker Host logs the failure with the last lines its harness adapter wrote to standard error,
-secrets hidden. When the Worker Host itself failed the Task, for example because it could not
+Worklet logs the failure with the last lines its harness adapter wrote to standard error,
+secrets hidden. When the Worklet itself failed the Task, for example because it could not
 capture the output, the result is a fixed message and `supertag describe task TASK_ID` shows the
 reason under the execution report's `failure_detail`: at most eight lines, secrets hidden, shown
 to operators only and never in a reply, conversation, or client's view of the Task. A reply whose delivery is uncertain waits for
@@ -142,9 +143,9 @@ to operators only and never in a reply, conversation, or client's view of the Ta
 
 ## A Task Attempt is uncertain
 
-A Worker Host that was killed or lost its execution lease while running a **Task Attempt**, one
+A Worklet that was killed or lost its execution lease while running a **Task Attempt**, one
 execution of a Task, may not know whether the work finished. It shows in the inbox as
-`task-attention`, in `supertag metrics` under recovery, and in `supertag ps`. The Worker Host log
+`task-attention`, in `supertag metrics` under recovery, and in `supertag ps`. The Worker Host's log
 names it, and the host's slot for its harness stays taken until you decide, so later messages to
 Tags on that host wait. Check what the Task Attempt did, then record a decision:
 

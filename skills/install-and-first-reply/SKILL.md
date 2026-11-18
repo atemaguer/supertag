@@ -91,7 +91,7 @@ supertag describe objective readme-setup
 
 `watch objective` follows the Objective as a timeline until it closes. `describe` shows status,
 owner, **Delivered**, **Needs you**, and each Session. When a Task changes the repository, the
-Worker Host writes its commits into your repository as the branch `supertag/session/HASH`. It
+Worklet writes its commits into your repository as the branch `supertag/session/HASH`. It
 never switches your checked-out branch or touches your working tree:
 
 ```sh

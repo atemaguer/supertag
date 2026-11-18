@@ -13,8 +13,8 @@ recoverable, with different guarantees.
 
 In **adapter-managed mode**, a harness adapter supplies a stable idempotency key for the intended
 effect and records a durable effect receipt before and after the provider call. It calls the
-Worker Host's `HarnessEffects` service: `Begin` before the call, then `Complete` with the result or
-`Fail`. The Worker Host forwards each call with the Task Attempt's authority, and the Control Plane
+Worklet's `HarnessEffects` service: `Begin` before the call, then `Complete` with the result or
+`Fail`. The Worklet forwards each call with the Task Attempt's authority, and the Control Plane
 keeps the receipts, keyed by Tag and idempotency key, so a later Task of the same Tag sees them
 too. `Begin` answers with the receipt's state:
 
@@ -34,7 +34,7 @@ TypeScript adapters get this client as the `effects` of the connection `openHarn
 `supertag-ai/harness` returns, and Python adapters as `HarnessConnection.effects`. See
 [Write a harness adapter](../guides/harness-adapters.md).
 
-In **harness-managed mode**, the harness calls an MCP server through the Worker Host's policy
+In **harness-managed mode**, the harness calls an MCP server through the Worklet's policy
 proxy. Before it forwards a call that needs approval, the proxy records a durable dispatch, and it
 records the result when the call returns. A dispatch that never recorded a result is unconfirmed:
 the provider may already have changed. The proxy refuses to send the same tool call with the same

@@ -5,7 +5,7 @@ and permissions, on your repositories. One installation holds everything a machi
 
 | Part | What it is |
 | --- | --- |
-| `supertag` | The CLI. It also runs the **Control Plane** (the service that stores your organization and schedules work), the **Gateway** (the service that connects collaboration surfaces such as Slack), and the **Worker Host** (the process that runs work on a machine) |
+| `supertag` | The CLI. It also runs the **Control Plane** (the service that stores your organization and schedules work), the **Gateway** (the service clients connect to, which also connects collaboration surfaces such as Slack), and the **Worklet** (`supertag worker-host`, the program that connects a machine to the Control Plane as a **Worker Host** and runs its work) |
 | `supertag-tui` | The terminal UI that plain `supertag` opens |
 | `supertag-shared-execution` | An optional shared execution provider for Cursor Tasks |
 | Node bridges | The harness adapters for Claude Code, Cursor, and OpenCode, run with your Node.js |
@@ -110,7 +110,7 @@ cargo build --release --locked --manifest-path core/Cargo.toml -p supertag-cli -
 ```
 
 Put `core/target/release/supertag` on your `PATH`. Without the release archive's Node bridges, a
-Worker Host runs Claude Code, Cursor, or OpenCode only when you name a built adapter entrypoint
+Worklet runs Claude Code, Cursor, or OpenCode only when you name a built adapter entrypoint
 with `--harness-entrypoint`. Container images for hosted platforms are described in
 [Self-host SuperTag](../guides/self-hosting.md).
 
@@ -129,7 +129,7 @@ your CLI:
 python -m pip install 'supertag==0.3.1'
 ```
 
-Each SDK connects to a Control Plane and lets a custom harness adapter talk to its Worker Host;
+Each SDK connects to SuperTag and lets a custom harness adapter talk to the Worklet that started it;
 see [API stability](../reference/api-stability.md#package-entry-points). Generated Go,
 TypeScript, and Python bindings live beside the SDKs in [`sdks/`](../../sdks/README.md). See
 [Control Plane API](../reference/control-plane-api.md) for how to connect.
@@ -149,8 +149,8 @@ Migrated the database schema from version 82 to 83.
 
 When the old services speak the same protocol, `up` first drains their Worker Hosts and waits
 for running Task Attempts, as `supertag down` does. When they speak another protocol, the new CLI
-cannot drain through their Control Plane. It stops them with a signal instead, and each Worker
-Host still stops gracefully. A per-user service unit is restarted with the new executable.
+cannot drain through their Control Plane. It stops them with a signal instead, and each Worklet
+still stops gracefully. A per-user service unit is restarted with the new executable.
 
 The new Control Plane migrates the database when it starts, and `up` prints each migration. A
 migrated database belongs to the new release: an older release refuses to start against it,
@@ -166,7 +166,7 @@ hosted deployment, follow [Upgrade a deployment](control-plane.md#upgrade-a-depl
 
 ## Check the CLI and the local services
 
-Your CLI, the terminal UI, the desktop app, and Worker Hosts negotiate a protocol version with
+Your CLI, the terminal UI, the desktop app, and Worklets negotiate a protocol version with
 the Control Plane on every connection, and refuse a Control Plane that speaks none of theirs. The
 error names both releases and which to upgrade, such as `This CLI speaks SuperTag protocol 5, but
 the Control Plane at http://127.0.0.1:3434 runs SuperTag 0.3.0 (protocol 2). Upgrade the Control

@@ -20,7 +20,7 @@ that identity and is resolved before its work reaches execution.
 
 ## Identity and routing
 
-A Tag is the persistent non-human workload principal. Collaboration surface bots/apps are provider-facing invocation identities; Surface Accounts are credential boundaries; Worker Hosts execute Tasks. None is the Tag itself.
+A Tag is the persistent non-human workload principal. Collaboration surface bots/apps are provider-facing invocation identities; Surface Accounts are credential boundaries; Worker Hosts provide the capacity that executes Tasks. None is the Tag itself.
 
 An authenticated event resolves in this order:
 
@@ -46,7 +46,7 @@ The Task freezes:
 - granted actions marked `approvalRequired: true`, with the Permission Sets that require them;
 - capture time.
 
-The Worker Host receives this same snapshot. Later policy changes do not rewrite accepted work.
+The Worklet receives this same snapshot. Later policy changes do not rewrite accepted work.
 
 ## Effective authorization
 
@@ -114,11 +114,11 @@ approvers, and a gated runtime action whose approvers name none is not admitted.
 
 | Action | Check |
 | --- | --- |
-| MCP server tool (`target: mcp`), including collaboration surface tools | The Worker Host's policy proxy asks the Control Plane before forwarding each call; see [MCP server tools](#mcp-server-tools) |
+| MCP server tool (`target: mcp`), including collaboration surface tools | The Worklet's policy proxy asks the Control Plane before forwarding each call; see [MCP server tools](#mcp-server-tools) |
 | Posting to a Workstream or sending a Mailbox message (`workstream:post`, `mailbox:send`) | The harness's coordination tool asks the Control Plane before each post or message |
 | Other runtime actions, such as shell commands and file writes | Not checked per call; only through Task admission. A Task never receives one of these that requires approval |
 
-The Worker Host fails closed. A gated call without a reachable Control Plane is not forwarded. The
+The Worklet fails closed. A gated call without a reachable Control Plane is not forwarded. The
 call returns "approval pending" with the request ID. Every turn except a conversation's own ends
 waiting on that request, and the decision continues the Session as its next Task, unless the
 Tag's permissions changed while it waited. A conversation's turn keeps going and tells the person.
@@ -217,9 +217,9 @@ Matching is exact and case-sensitive. `sentry/get_*` covers `get_issue` and `get
 digits, `_`, `-`, and `.` never match any grant, so a look-alike name cannot stand in for a
 granted tool.
 
-### How the Worker Host enforces grants
+### How the Worklet enforces grants
 
-When a Task Attempt starts, the Worker Host lists the tools of each granted server and keeps the
+When a Task Attempt starts, the Worklet lists the tools of each granted server and keeps the
 granted ones. The harness reaches the server only through the per-Task policy proxy on the Worker
 Host. The harness's own MCP configuration is never read. For every call, the proxy checks in
 order:
@@ -260,7 +260,7 @@ that Workspace use the server. A host server whose login lapsed still counts as 
 turn waits for `supertag mcp login NAME`.
 
 When no bound host provides a needed server, the Task waits. `supertag describe task` shows
-`No bound Worker Host provides MCP server NAME` as the reason it waits. A Worker Host that receives a Task for a
+`No bound Worker Host provides MCP server NAME` as the reason it waits. A Worklet that receives a Task for a
 server it cannot provide fails the Task Attempt before the harness starts.
 
 ## Tool resolution and adaptation
@@ -357,7 +357,7 @@ which need `allow-unsandboxed-commands`, can still write anything the Worker Hos
 
 SuperTag's own Git commands on a Workspace also run nothing the repository configures. They turn
 off hooks, fsmonitor, the pager, external diff, and the `ext` transport. Before reading a
-checkout, the Worker Host refuses one whose Git configuration changed, or whose Git directory
+checkout, the Worklet refuses one whose Git configuration changed, or whose Git directory
 names another common directory. It never follows a `.git` file to a Git directory elsewhere.
 
 ### Path scopes
@@ -405,7 +405,7 @@ Entries follow these rules:
   the Task Attempt fails before the harness starts.
 - `~`, `/`, `~/.supertag`, and directories that hold SuperTag or harness state or credentials
   are refused, for example `~/.codex`, `~/.claude`, `~/.config/opencode`, and `~/.ssh`. So is a
-  directory that contains one of them, such as `~/.config`. The Worker Host also refuses an
+  directory that contains one of them, such as `~/.config`. The Worklet also refuses an
   entry that overlaps the Workspace or the harness's private home.
 - A path scope never makes a protected entry writable. `paths` may not name `.git`, `.codex`,
   `.agents`, `.aws`, `.claude`, `.cursor`, `.opencode`, or `.supertag`, in any letter case. An
@@ -443,7 +443,7 @@ A harness enforces a scope at one of three strengths:
 | --- | --- |
 | operating system | The kernel refuses the access, for commands and file tools alike |
 | tool | SuperTag or the harness refuses the file-tool call. Commands are not confined |
-| delivery | The Worker Host refuses to deliver Workspace changes outside the write scope |
+| delivery | The Worklet refuses to deliver Workspace changes outside the write scope |
 
 | Harness | File tools | Commands |
 | --- | --- | --- |
@@ -471,7 +471,7 @@ remove commands:execute from its Permission Sets
 
 ### Path scope delivery check
 
-When a Task Attempt completes, the Worker Host checks every Workspace path it added, changed, or
+When a Task Attempt completes, the Worklet checks every Workspace path the Task added, changed, or
 deleted. A path outside `paths`, in a read-only entry, or hidden fails the Task Attempt. Its
 result names the paths, at most 20. Nothing is delivered. This check covers commands and any
 harness tool. It does not stop a change that is undone before the Task Attempt ends, or a write
@@ -504,7 +504,7 @@ outside the Workspace.
 
 A network scope narrows a Permission Set's `web:fetch` grant to named origins, HTTP methods, and
 URL paths.
-It can also name a credential that the Worker Host adds to those requests. The Task's commands
+It can also name a credential that the Worklet adds to those requests. The Task's commands
 never see the secret, only a placeholder. Network scopes live only in Permission Sets. A Tag's
 own `allowedActions` `web:fetch` reaches every origin.
 
@@ -579,7 +579,7 @@ name.
 For each Task Attempt, the host makes a placeholder such as
 `supertag-credential-github-4f2c0d1e9b8a7c6d5e4f3a2b`. The Task's commands see it in the
 variable the host names, such as `GITHUB_TOKEN`. When a command sends a request that a grant
-naming the credential allows, the Worker Host's egress proxy replaces the placeholder with the
+naming the credential allows, the Worklet's egress proxy replaces the placeholder with the
 secret. It replaces it in any header, including inside `Authorization: Basic`, so `git` over
 HTTPS works with `x-access-token:$GITHUB_TOKEN`. It never replaces it in a URL or a body.
 
@@ -588,12 +588,12 @@ resource. Keep `methods` and origins as narrow as the work needs.
 
 ### Network scope enforcement
 
-The Worker Host runs an egress proxy for each Task Attempt whose Task has a network scope. The
+The Worklet runs an egress proxy for each Task Attempt whose Task has a network scope. The
 proxy listens on loopback and accepts only that Task Attempt's harness. It refuses an origin
 outside the scope before any TLS. For an allowed origin, it ends TLS with a certificate from a
 certificate authority made for that Task Attempt. It then checks each request's method and
 `Host`, adds credentials, and forwards the request over a verified TLS connection. The
-authority's key never leaves the Worker Host's memory. The proxy also refuses an origin whose
+authority's key never leaves the Worklet's memory. The proxy also refuses an origin whose
 address is loopback, private, link-local, or otherwise not public, such as a cloud metadata
 service.
 
@@ -652,7 +652,7 @@ Unknown runtime actions do not enable anything in the built-in harnesses. A harn
 
 When a Task's file and command tools run in a remote sandbox or a shared execution
 environment, a sandbox that cannot be reached or fails makes the tool return an error. The
-Worker Host never runs the operation itself instead.
+Worklet never runs the operation itself instead.
 
 ### Failed write calls
 
@@ -676,7 +676,7 @@ such as one serving Codex, or waits. See
 the Task's worktree, and those tools run no program. A file written there can still be run later,
 by a Task with `commands:execute` or by you, so review delivered changes before running them.
 
-Each Worker Host reports this setting in its execution profile when it registers. Like labels,
+Each Worklet reports this setting in its host's execution profile when it registers. Like labels,
 the setting is self-reported and decides placement, never access.
 
 ## Credential boundaries
@@ -687,7 +687,7 @@ boundary.
 - Gateway credentials receive events and deliver replies.
 - Worker Host credentials authenticate harness tools and request-selected resources.
 - Authorization snapshots contain identifiers and policy, never credentials.
-- collaboration surface MCP traffic stays outside the collaboration Gateway. Hosted HTTP calls pass through a Task-scoped policy proxy on the Worker Host before reaching the official provider server.
+- collaboration surface MCP traffic stays outside the collaboration Gateway. Hosted HTTP calls pass through a Task-scoped policy proxy in the Worklet before reaching the official provider server.
 
 Tool allowlists constrain operations; provider-owned resource policies constrain call arguments. When an operation cannot expose a verifiable resource, the built-in harnesses reject it rather than trusting prompt instructions. Native installations and tokens should still be no broader than the permitted repository, channel, or team envelope.
 
@@ -709,7 +709,7 @@ Tool allowlists constrain operations; provider-owned resource policies constrain
 bodies to cross Tag boundaries under an explicit directional grant. This does not relax
 Context Set isolation or give a recipient access to another Tag's artifacts. A messaging
 grant authorizes delivery, not the requested action. The recipient application must apply
-its own execution and disclosure policies. The trusted Worker Host holds a Tag-scoped
+its own execution and disclosure policies. The trusted Worklet holds a Tag-scoped
 credential; sender identity is never accepted from model-written message fields. A message is
 plain text and grants no authority. Tags in one Team message each other without a grant. Grant
 rules are in [Mailbox](coordination.md#mailbox).

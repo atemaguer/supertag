@@ -5,8 +5,9 @@ description: Connect a machine as a Worker Host so Tags run on Codex, Claude Cod
 
 # Run a Worker Host
 
-A Worker Host connects outbound to the Control Plane, claims Tasks of the Tags it may run, and
-runs each Task Attempt through a harness adapter in a pinned checkout of the Tag's Workspace.
+A Worker Host is the machine; its Worklet, `supertag worker-host`, connects outbound to the
+Control Plane and claims Tasks of the Tags the host may run. For each Task Attempt the Worklet
+starts a Worker, a harness adapter and its harness, in a pinned checkout of the Tag's Workspace.
 `supertag init` already connects the machine it runs on. The full guide is
 [Run Worker Hosts](../../docs/guides/workers.md).
 

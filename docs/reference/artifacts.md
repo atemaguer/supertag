@@ -8,18 +8,18 @@ The artifact catalog records which **Tag** (a persistent AI actor with its own r
 and permissions), **Task** (an accepted assignment), and **Task Attempt** (one execution of that
 Task) captured each artifact. The **Control Plane** keeps that catalog and decides which Tasks may
 use an artifact. A [**Worker Host**](glossary.md#worker-host) runs the Task through a **harness**
-such as Codex or Claude Code and captures the files.
+such as Codex or Claude Code, and its [**Worklet**](glossary.md#worklet) captures the files.
 
 Other terms on this page are defined in the glossary: [Role](glossary.md#role),
 [Objective](glossary.md#objective), [Team](glossary.md#team), [Session](glossary.md#session),
 [Context Set](glossary.md#context-set), [Volume](glossary.md#volume), and
 [Workspace](glossary.md#workspace).
 
-The Control Plane never stores artifact bytes, on disk or in its database. The Worker Host that
-captures an artifact keeps the files in its own artifact storage and registers only the manifest.
-Another Task reads a file on its own Worker Host. It asks the Control Plane, which checks access
-and issues a short-lived grant for that one file. The consuming Worker Host then reads the bytes
-from its own storage, when it shares the producer's, or straight from the producing Worker Host,
+The Control Plane never stores artifact bytes, on disk or in its database. The Worklet that
+captures an artifact keeps the files in its host's artifact storage and registers only the manifest.
+Another Task reads a file on its own Worker Host. Its Worklet asks the Control Plane, which checks
+access and issues a short-lived grant for that one file. The consuming Worklet then reads the bytes
+from its own storage, when it shares the producer's, or straight from the producing Worklet,
 and verifies their size and SHA-256 digest. Clients list artifacts but don't download them. A Tag
 can keep a copy of every capture on its Volume.
 
@@ -61,15 +61,15 @@ or promise that all files came from one atomic filesystem snapshot. Finish relat
 capture when the files must describe a consistent result. The capturing Task Attempt is
 responsible for the submission; it may not have authored every file in a shared workspace.
 
-Worker Hosts do not collect content from a harness's own home directory, such as Codex memories
+Worklets do not collect content from a harness's own home directory, such as Codex memories
 or Claude Code plans, as artifacts; harness memory is kept as described in
 [Harness memory](coordination.md#harness-memory). Codex runs with image generation turned off.
 
 ## Automatic Task outputs
 
-For Codex and Claude Code Tasks with allowed file writes, the Worker Host creates an output
+For Codex and Claude Code Tasks with allowed file writes, the Worklet creates an output
 directory for each Task Attempt, for files that are not part of the repository. For example, an
-agent can save a report or spreadsheet there without calling an artifact tool. The Worker Host
+agent can save a report or spreadsheet there without calling an artifact tool. The Worklet
 collects those files when execution finishes. Changes to the repository's files, including new
 files a request asks for, belong in the checkout, where they become the Task's commit; the
 instructions say so. Git-tracked files are ignored by this default policy.
@@ -85,7 +85,7 @@ permission.
 
 ### Declaring required outputs
 
-A Task can declare which files the Worker Host must preserve after the harness finishes. Write
+A Task can declare which files the Worklet must preserve after the harness finishes. Write
 the policy to a file and pass it to `supertag task submit --outputs FILE`:
 
 ```json
@@ -119,7 +119,7 @@ to 100 files and 64 MiB total, with a 32 MiB per-file ceiling. Symlinks, travers
 files, and dependency or cache directories are excluded. These protections do not detect every
 secret: select output directories deliberately and keep credentials outside them.
 
-After execution, the Worker Host checks selected files for changes during reading, freezes their bytes in a private transfer
+After execution, the Worklet checks selected files for changes during reading, freezes their bytes in a private transfer
 journal, and saves them to the catalog. Declared outputs are submitted with the Task result.
 With this policy, separately captured intermediate artifacts remain available for discovery but
 are submitted only if the result explicitly selects them. Other harnesses and read-only Tasks keep explicit capture only.
@@ -131,7 +131,7 @@ Workspace and `files:read`. Shared execution environments do not collect declare
 
 ### Git-backed files
 
-`git: "reference"` avoids copying selected committed files when the Worker Host verifies that the exact
+`git: "reference"` avoids copying selected committed files when the Worklet verifies that the exact
 commit is advertised by the configured remote. The artifact includes a Git manifest identifying
 that remote, commit, selected paths, and deletions; selected dirty files are still saved as bytes.
 If remote verification fails or the commit exists only locally, selected bytes are preserved instead.
@@ -144,7 +144,7 @@ Untracked reports are still captured when selected, including reports in a Git-i
 
 ### Transfer recovery
 
-The Worker Host freezes output bytes in its execution journal, under its state directory, before
+The Worklet freezes output bytes in its execution journal, under its state directory, before
 it releases the execution environment. After a restart it retries keeping the bytes and the catalog
 registration for the same Task Attempt; the harness is not run again. Registration uses a stable
 operation ID, so a lost response does not create a second artifact. Keep the state directory on
@@ -186,7 +186,7 @@ To pass reviewed evidence to another Task in the same Objective, use:
 Omit `requireAccepted` for independent review of a submission or repair of rejected work. The
 Control Plane checks source visibility and submission, resolves the selected catalog entries,
 and records their URI, digest, size, and exact producing Task Attempt on the accepted Task. Subsequent
-captures do not change this input. The Worker Host preserves the original entry paths beneath separate per-artifact input directories
+captures do not change this input. The Worklet preserves the original entry paths beneath separate per-artifact input directories
 in the Task's Workspace, so a Task with artifact inputs needs a Workspace and `files:read`. An operator selects inputs with
 `supertag task submit --artifact-input ARTIFACT_ID:PATH`, repeated for each file.
 
@@ -221,7 +221,7 @@ The built-in harness adapters offer these tools to the agent. They are scoped to
 Attempt and exposed to the harness's manager, rather than automatically delegated to its native
 child agents. `capture_artifact` and `attach_artifact` need a local Workspace and `files:read`; the search and
 read tools are always offered. A Task whose Workspace runs in a remote sandbox has neither: it
-keeps files by writing them to its Task output directory, which the Worker Host collects at
+keeps files by writing them to its Task output directory, which the Worklet collects at
 Capture.
 
 | Tool | Purpose |
@@ -257,7 +257,7 @@ definition fails. A new result or a different selection needs a new operation ID
 acquisition before delivering bytes and records delivery separately; delivery is evidence that
 the adapter received content, not that a model read or understood it.
 
-A custom harness adapter calls the Worker Host's `HarnessArtifacts`
+A custom harness adapter calls the Worklet's `HarnessArtifacts`
 service (`Capture`, `Find`, `Inspect`, `Read`, `Attach`); see
 [Write a harness adapter](../guides/harness-adapters.md).
 
@@ -328,7 +328,7 @@ bytes live in up to two places:
 | Copy | Where | Made by |
 | --- | --- | --- |
 | Worker Host copy | The producing Worker Host's artifact storage: `STATE_DIRECTORY/artifacts`, or the directory named by `--artifact-directory` | Every capture |
-| Volume copy | The Tag's Volume, under `tags/<SHA-256 of the Tag ID>/attempts/…` | Every capture of a Tag that names a Volume, written by the capturing Worker Host itself |
+| Volume copy | The Tag's Volume, under `tags/<SHA-256 of the Tag ID>/attempts/…` | Every capture of a Tag that names a Volume, written by the capturing host's Worklet itself |
 
 A Worker Host's artifact storage is an owner-only directory, one file per Task Attempt and
 SHA-256 digest. For a Worker Host that `supertag up` starts, it is an `artifacts` directory in
@@ -339,23 +339,23 @@ directory on persistent storage, and back it up with the database.
 
 The Control Plane passes no artifact files. A Task reads another Task's artifact on its own
 Worker Host: the Control Plane checks the read and issues a short-lived transfer grant for that
-one file. The consuming Worker Host then reads the file from its own artifact storage when it
+one file. The consuming Worklet then reads the file from its own artifact storage when it
 holds it, because the producing Task ran there or shares its storage. Otherwise it reads it
-straight from the producing Worker Host; see the next section. Either way it checks the file's size
+straight from the producing host's Worklet; see the next section. Either way it checks the file's size
 and SHA-256 digest against the catalog, and fails the read when they differ. A read fails when
 neither copy is reachable: the producing Worker Host is not connected, or the consumer has no
 artifact peer for it. A Volume copy outlives the producing Worker Host, for the hosts and people
 who use the Volume.
 
-A Worker Host lands its deliveries on a remote Workspace from scratch in the `git-delivery`
+A Worklet lands its deliveries on a remote Workspace from scratch in the `git-delivery`
 directory of its state directory, which it removes when each landing ends and, after a crash, when
 it starts again.
 
 ### Direct transfer between Worker Hosts
 
-A Worker Host with `--artifact-transfer-listen ADDRESS` also serves the files in its artifact
-storage directly to other Worker Hosts. Its TLS certificate and key come from
-`--artifact-transfer-tls-cert` and `--artifact-transfer-tls-key`. A consuming Worker Host pins each
+A Worklet run with `--artifact-transfer-listen ADDRESS` also serves the files in its host's
+artifact storage directly to other Worker Hosts. Its TLS certificate and key come from
+`--artifact-transfer-tls-cert` and `--artifact-transfer-tls-key`. A consuming Worklet pins each
 producer's origin with `--artifact-peer HOST_ID=ORIGIN`, and its CA with `--artifact-peer-ca-file`.
 The consumer asks the Control Plane for a short-lived transfer grant scoped to one file, producer,
 consumer, and expiry. It then downloads the file from the producer and checks its size and SHA-256
@@ -375,7 +375,7 @@ supertag tag put builder --instructions "..." --volume archive
 
 A Tag manifest sets it with `spec.volume`; `--volume none` or `""` removes it.
 
-The capturing Worker Host writes each file to the Volume itself, so the bytes never pass through
+The capturing host's Worklet writes each file to the Volume itself, so the bytes never pass through
 the Control Plane:
 
 - **S3 Volume.** On the Control Plane's machine, store the credential it signs with:
@@ -386,7 +386,7 @@ the Control Plane:
     --region us-east-1
   ```
 
-  It goes to the Control Plane's credential vault, and Worker Hosts never receive it. It needs
+  It goes to the Control Plane's credential vault, and Worklets never receive it. It needs
   only `PutObject`, `GetObject`, `HeadObject`, and `DeleteObject` on the Volume's prefix. When a host reserves a
   capture, the Control Plane presigns one PUT per file, valid for 15 minutes; the file's length and
   SHA-256 checksum are signed headers and the PUT cannot overwrite, so the store refuses any other
@@ -407,15 +407,15 @@ Task sees the error. The capture's copies are listed by `supertag get volume-cop
 who may read the capture. Hosts and people that mount the Volume read them; the Control Plane
 serves no Volume file.
 
-A Task that acquires a capture reads it from the producing Worker Host first. When that host
+A Task that acquires a capture reads it from the producing host's Worklet first. When that host
 can't serve it, for example because it is gone, the consumer reads the file from a verified
 Volume copy: through a presigned GET, valid for 15 minutes, for an S3 Volume, or through its own
 `--volume` mapping for a file Volume. It checks the length and SHA-256 itself.
 
 A Tag's Session checkpoints also go on its Volume, as described in
 [Session checkpoints](control-plane.md#session-checkpoints). When the Control Plane drops one,
-its object is deleted: the Control Plane deletes it from an S3 Volume within seconds, and a
-Worker Host that maps a file Volume deletes it within 10 minutes. A native memory object no
+its object is deleted: the Control Plane deletes it from an S3 Volume within seconds, and the
+Worklet of a Worker Host that maps a file Volume deletes it within 10 minutes. A native memory object no
 store names any more is deleted the same way. Captures are not deleted.
 
 The Volume must be registered before a Tag names it, and it cannot be retargeted or deleted while
@@ -452,13 +452,13 @@ storage, the Volumes, and the catalog database together.
 | Catalog search | Bounded pages; use the returned cursor for additional results. |
 | Content retention | Operator-managed; automatic garbage collection is not implemented. |
 
-The Worker Host verifies content before the catalog accepts its metadata. A capture must reference
+The Worklet verifies content before the catalog accepts its metadata. A capture must reference
 matching storage evidence for its exact Task Attempt. An interrupted capture may leave unused bytes,
 but storing bytes alone does not create a discoverable artifact. Keep referenced objects when
 configuring retention and back up the catalog alongside durable content.
 
 Agents receive artifact IDs and paths rather than storage credentials or raw locations. Transfer
-grants are internal Worker Host credentials scoped to an exact artifact entry, source Worker Host,
+grants are internal Worklet credentials scoped to an exact artifact entry, source Worker Host,
 recipient Worker Host, and expiry. Knowing an artifact ID or digest is insufficient.
 
 Availability follows configured storage, rather than catalog presence alone:

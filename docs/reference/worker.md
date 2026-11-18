@@ -9,14 +9,14 @@ host" means the Worklet acting for its Worker Host. For the ideas, read
 
 ## Boundary
 
-| The Worker Host owns | The Control Plane owns |
+| The Worklet owns, on its Worker Host | The Control Plane owns |
 | --- | --- |
 | Harness sign-ins, MCP credentials, and Volume keys on this machine | Tags, policy, admission, and the accepted Task |
 | Workspace checkouts and the Task Attempt's files | Scheduling, leases, and recovery decisions |
 | The execution journal and captured artifact bytes | The artifact catalog, events, results, and audit |
-| Supervising adapter processes | Which hosts may run which Tags |
+| Starting and supervising Workers, the adapter processes | Which hosts may run which Tags |
 
-A Worker Host never receives the database credential, a Gateway's surface credentials, or another
+A Worklet never receives the database credential, a Gateway's surface credentials, or another
 host's credential. A harness adapter receives only its own harness's provider credentials and a
 bootstrap token scoped to one Task Attempt.
 
@@ -198,7 +198,7 @@ starts, count as the sandbox's own: they keep running through Capture, and whate
 to the Workspace is captured like the Task's own work. This keeps an honest Task's leftovers (a dev server, a
 watcher) from changing the Workspace while it is read. It is not a security boundary: on Modal,
 and on E2B through sudo, the Task is root in its sandbox and could defeat it. What protects the
-host is that nothing runs on it: the Worker Host checks the returned files, and stopping the
+host is that nothing runs on it: the Worklet checks the returned files, and stopping the
 sandbox ends everything in it. Capture leaves out every `.git` entry and every untracked path
 the checkout's `.gitignore` files match, except the Task output directory. A Task whose
 Permission Sets hide paths does not run commands on such a host, and a Task with `web:search`,

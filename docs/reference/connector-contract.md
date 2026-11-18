@@ -13,7 +13,7 @@ service `supertag.runtime.v2.Connector`.
 ## Where a connector connects
 
 A connector is a client of the [Control Plane](glossary.md#control-plane). It dials the Control
-Plane's public endpoint, the same URL operators and Worker Hosts use:
+Plane's endpoint, the same URL Gateways and Worklets use:
 
 | URL scheme | Transport |
 | --- | --- |

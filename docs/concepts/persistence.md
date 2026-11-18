@@ -4,9 +4,10 @@ A few terms first:
 
 - A **Task** is one unit of work an agent runs, such as a code change or a review.
 - A **Worker Host** is a machine that runs Tasks: a laptop, a server, or a cloud machine. A remote
-  sandbox (Modal, e2b) is a short-lived machine a Worker Host starts for a Cursor Task.
-- A **harness** is the agent system a Task runs on, such as Codex, Claude Code, or Cursor. The
-  Worker Host drives it through a harness adapter.
+  sandbox (Modal, e2b) is a short-lived machine a Worker Host's Worklet starts for a Cursor Task.
+- A **harness** is the agent system a Task runs on, such as Codex, Claude Code, or Cursor. On
+  the Worker Host, a **Worker** drives it through a harness adapter for one Task Attempt, and
+  the host's **Worklet** keeps what outlasts that Worker.
 - The **Control Plane** is the service that records Tasks and their results and keeps the catalog
   of artifacts, the files Tasks produce. It never stores their bytes: the Worker Host that produced
   them keeps them.
@@ -50,17 +51,17 @@ A **Workspace** names a git repository. A Task can also receive data from a **Vo
 directory or an S3 bucket and prefix, outside its checkout. For example, an analysis Task can read
 a dataset from a bucket without adding it to git.
 
-A Task always receives a copy. The Worker Host makes it fresh for each Task Attempt, after the
-checkout and `setup`, so prepared images and snapshots never contain the data. The Worker Host
-reads the source with its own credential, and the Task and its harness see only the files. In a
+A Task always receives a copy. The Worklet makes it fresh for each Task Attempt, after the
+checkout and `setup`, so prepared images and snapshots never contain the data. The Worklet
+reads the source with the Worker Host's own credential, and the Task and its harness see only the files. In a
 remote E2B or Modal Workspace, only the files enter the sandbox.
 
 A copy pins what the Task read: a later change to the source does not reach a running Task. A
 read-only copy cannot preserve Task output. A read-write copy can: after a successful Task
-Attempt, the Worker Host writes changed and created files back to the Volume, and records what it
+Attempt, the Worklet writes changed and created files back to the Volume, and records what it
 wrote. A failed Task Attempt writes nothing, and deletions are never written.
 
-SuperTag offers no live read-write mounts: a write through one would bypass the Worker Host's
+SuperTag offers no live read-write mounts: a write through one would bypass the Worklet's
 bounded, recorded write-back. See
 [Attach data outside the repository](../guides/workspaces.md#attach-data-outside-the-repository).
 
@@ -68,21 +69,22 @@ bounded, recorded write-back. See
 
 The Control Plane keeps the artifact catalog: what each artifact is, who made it, who may use it,
 and where each copy lives. It never stores the files. The Worker Host whose Task captured them
-keeps them in its own artifact storage. When another Task or an operator reads a file, the Control
-Plane fetches it from that Worker Host and passes it along without writing it down. A GitHub
+keeps them in its own artifact storage. When another Task reads a file, the Control Plane checks
+the read and grants it, and the reading host's Worklet fetches the bytes from its own storage or
+straight from the producing host's Worklet. The Control Plane relays no files. A GitHub
 publication is the exception: it keeps the delivery in private scratch until it has pushed it.
 
 So an artifact is readable only while its Worker Host is running and connected, unless it also has
 a Volume copy. For example, a laptop's artifacts are unreachable while the laptop sleeps, and the
 error names the laptop's Worker Host. A Tag whose `volume` names a Volume gets a copy of every
-capture there, such as in a bucket prefix, written by the capturing Worker Host itself before the
+capture there, such as in a bucket prefix, written by the capturing host's Worklet itself before the
 capture succeeds; it outlives the host, for the hosts and people that use the Volume. For
 details, see [Run the Control Plane](../operations/control-plane.md#artifact-storage) and
 [Artifacts](../reference/artifacts.md).
 
 ## Credentials and local access
 
-Catalog grants control what SuperTag Worker Hosts fetch. They do not isolate a Task from files its
+Catalog grants control what SuperTag Worklets fetch. They do not isolate a Task from files its
 operating-system account can read. In particular, a Worker Host's artifact storage under `~/.supertag`, `file://` artifact
 Volumes, and Volume credential files are readable by Codex sandboxes
 and by Claude Code, OpenCode, or Cursor with `allow-unsandboxed-commands` when running under that

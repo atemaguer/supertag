@@ -1,9 +1,10 @@
 # Control Plane API
 
 The Control Plane, the service that stores a SuperTag organization and schedules its work,
-serves one gRPC API to every client: the CLI, the terminal UI, the desktop app, your own
-applications, **Worker Hosts** (the machines that run work), and **Gateways** (the services that
-connect collaboration surfaces). This page is the contract for calling it. See the
+serves one gRPC API. Clients, such as the CLI, the terminal UI, the desktop app, and your own
+applications, call it through a **Gateway**, the service that forwards their calls and connects
+collaboration surfaces. The **Worklets** of **Worker Hosts**, the machines that run work, call it
+directly. This page is the contract for calling it. See the
 [glossary](glossary.md) for terms.
 
 The API is the protobuf package `supertag.runtime.v2`, defined in
@@ -42,7 +43,7 @@ both services
 ```
 
 The part `(SuperTag BUILD) speaks protocol versions [V, ...]` names the Control Plane's release and
-versions, and every release keeps that form. The CLI, terminal UI, desktop app, and Worker Hosts
+versions, and every release keeps that form. The CLI, terminal UI, desktop app, and Worklets
 read it to show which release to upgrade, for example: `This app speaks SuperTag protocol 5, but
 the Control Plane at http://127.0.0.1:3434 runs SuperTag 0.3.0 (protocol 2). Upgrade the Control
 Plane.`
@@ -57,7 +58,7 @@ table of roles:
 | The admin operator | The admin Operator Token | Every operator service, including `OperatorAccess` |
 | A named operator, `token:NAME` | An Operator Token | Every operator service except Operator Token management in `OperatorAccess` |
 | A client device, `client:NAME` | The credential `supertag connect` saved from a client Auth Key | Operator services, limited to the Tags its key named |
-| A Worker Host, `host:NAME` | Its host credential | `WorkerHost` and the services a running Task Attempt uses |
+| A Worker Host's Worklet, `host:NAME` | Its host credential | `WorkerHost` and the services a running Task Attempt uses |
 | A Gateway, `gateway:NAME` | Its Gateway credential | `Connector`, `ReplyProgress`, and `OperatorNotifications` |
 
 An application usually runs with an Operator Token of its own, so its changes appear under its
@@ -85,13 +86,13 @@ name in `supertag audit`.
 | `AuthKeys`, `Enrollments` | Auth Keys, enrollment, and credential rotation |
 | `OperatorAccess` | Operator Tokens (admin only) and the audit log |
 | `ArtifactCatalog`, `ArtifactPublications`, `ArtifactVolumes` | Artifacts, publications to other Objectives, and Volumes |
-| `HostLandings` | Worker Hosts claim and record the landings of the Workspace deliveries they hold |
+| `HostLandings` | Worklets claim and record the landings of the Workspace deliveries they hold |
 | `Workspaces`, `WorkspaceCredentials`, `WorkspaceLandings` | Remote Workspaces, their Workspace Credentials and checks, and where Session changes landed |
 | `WorkspaceVolumes` | Workspace data Volumes |
 | `TaskFiles` | `Locate`: where a Task's files can be read, as locations only, never file content. A running Task's local checkout is returned only to a caller whose `machine_id` matches its Worker Host's (both read `supertag/machine-id` in the per-user configuration directory); others get "Files on Worker Host NAME are unreachable from here" |
 | `Spend`, `Metrics` | Spend reports and an operational snapshot |
 
-The other services in the package serve Worker Hosts, Gateways, and harness adapters.
+The other services in the package serve Worklets, Gateways, and harness adapters.
 
 ## Call it from your application
 
@@ -156,7 +157,7 @@ none and gets the newest page. Each later response holds only the messages that 
 one before. A response with nothing set is a heartbeat, sent at least every 15 seconds.
 
 While a turn runs, a response can also carry `texts`: the text of the message its Tag is writing
-now, all of it so far, as the harness streams it. The Worker Host redacts it before it leaves, and
+now, all of it so far, as the harness streams it. The Worklet redacts it before it leaves, and
 the Control Plane keeps it in memory only. Show it in the message's place; once the message is
 recorded as one of the turn's events, the same response clears the text, and the turn's result
 replaces it too. Harnesses that do not stream send no text.

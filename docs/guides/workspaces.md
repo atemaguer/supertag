@@ -17,16 +17,16 @@ your repository  <──  branch supertag/session/HASH  <── delivery
 ```
 
 1. A Worker Host maps the Workspace to a source: a local Git repository, or a **remote
-   Workspace**, a repository on any git server that Worker Hosts read with a credential the
-   Control Plane grants.
+   Workspace**, a repository on any git server that each host's **Worklet** reads with a
+   credential the Control Plane grants.
 2. A Tag is bound to the Workspace.
 3. Each Task Attempt gets a separate checkout at the pinned commit. Later Tasks of the same
    Session continue on the Session's own branch, on top of the earlier ones.
-4. After the harness finishes, the host commits the changes, verifies them, and delivers a Git
+4. After the harness finishes, the Worklet commits the changes, verifies them, and delivers a Git
    bundle and a patch. New files your `.gitignore` matches, and untracked caches such as
    `__pycache__/` and `node_modules/`, are left out; see
    [Worker Host reference](../reference/worker.md#workspaces).
-5. The delivery **lands**: the Worker Host writes it into the repository it maps as the branch
+5. The delivery **lands**: the Worklet writes it into the repository its host maps as the branch
    `supertag/session/HASH`, one branch per Session, or pushes it to the Workspace's git server. `HASH` is a SHA-256
    digest of the Tag and Session IDs, and the Session's report names the branch.
 
@@ -94,7 +94,7 @@ both, and only a Workspace with a local checkout can follow a branch; a remote W
 its branch itself. `ref` is a short branch name such as `main` or `release/2.1`, not `refs/heads/main`, a
 tag, or a remote-tracking branch.
 
-The Worker Host that starts a Session's first Task looks the branch up in its own checkout of the
+The Worklet that starts a Session's first Task looks the branch up in its host's checkout of the
 Workspace and records the commit it names. Every later Task of that Session works from the same
 commit, even after the branch moves; the next new Session looks the branch up again.
 `supertag get task ID` shows the branch as `ref` and the recorded commit as `base_commit`, which
@@ -114,7 +114,7 @@ turn left them, and setup does not run again. Only that Session's own turns shar
 
 ## 3. See the branches appear
 
-With `land: local`, the default, the Worker Host writes each delivered Task into the mapped
+With `land: local`, the default, the Worklet writes each delivered Task into the mapped
 repository as it delivers:
 
 ```sh
@@ -160,13 +160,13 @@ checkout and the conflicting files marked, and it merges again once that Task su
 
 A **remote Workspace** keeps its repository on a git server: GitHub, GitLab, Gitea or Forgejo,
 Bitbucket, any server you reach over SSH or HTTPS, or a bare repository on the Control Plane's
-machine. Each Worker Host that serves it reads the Session's source from the server itself, so it
+machine. The Worklet on each Worker Host that serves it reads the Session's source from the server itself, so it
 needs no clone and stores no credential: the Control Plane grants a credential for each read or push,
 and the host keeps it only in memory, never in a harness or sandbox. A GitHub App credential is
 narrowed to a token for the one repository, which expires within an hour; an HTTPS token or SSH
 key is handed over as it is. A credential helper runs only on the Control Plane's machine, so a
 Workspace whose read credential is a helper can't run Tasks. A `file://` remote is a path on the
-Control Plane's machine, so only hosts that share that filesystem can read it. The Worker Host that
+Control Plane's machine, so only hosts that share that filesystem can read it. The Worklet that
 ran each Task pushes the Session's changes back the same way, with the push credential, granted
 only while it holds the landing.
 
@@ -183,10 +183,10 @@ only while it holds the landing.
 
    `--https-token` reads the token from `SUPERTAG_WORKSPACE_TOKEN` or a hidden prompt.
    `--ssh-key` takes a key without a passphrase; add `--known-hosts FILE` to pin the server's host
-   key; without it, the Control Plane and each Worker Host trust the first key they see and
+   key; without it, the Control Plane and each Worklet trust the first key they see and
    remember it. `--credential-helper` names a git
    [credential helper](https://git-scm.com/docs/gitcredentials), which may mint short-lived tokens;
-   it runs only on the Control Plane's machine, so Worker Hosts can't read with it. `--github-app` stores a GitHub App's private key: for each read or push, git delivery
+   it runs only on the Control Plane's machine, so Worklets can't read with it. `--github-app` stores a GitHub App's private key: for each read or push, git delivery
    mints a token for that one repository with only `contents: read` or `contents: write`.
 
 2. Declare the Workspace: its remote, the branch Sessions start from, its credentials, and where
@@ -240,7 +240,7 @@ Without `ref`, it follows the server's default branch.
 | `merge` | The Session's branch too, and once the Session's work is reported done it is merged into the target branch with a merge commit, which is pushed |
 | `review` | The Session's branch too, and its draft pull request against `base` is opened or updated (GitHub) |
 
-The Worker Host that ran the Task pushes from its own copy of the commits; the Control Plane opens
+The Worklet that ran the Task pushes from its own copy of the commits; the Control Plane opens
 review pull requests. SuperTag pushes only `supertag/session/...` branches and the Workspace's merge target, and
 only fast-forward. A branch someone changed outside SuperTag is never overwritten: its landing is
 held with the reason. Merge commits name the Tag as their author with a SuperTag no-reply address,
@@ -251,7 +251,7 @@ on the merge target, and protect your default branch.
 `supertag get landings --session-id SESSION` shows where each Session's changes went: `queued`,
 `landed` with the commit, `conflict` with the follow-up Task, or `held` with the reason. A Task
 succeeds whether or not its changes landed. The Control Plane keeps no copy of a result, so
-landing reads it from the Worker Host that ran the Task; while that host is away, the landing
+landing reads it from the Worklet that ran the Task; while that host is away, the landing
 waits and retries once the host reports Ready again.
 
 ### Review changes in GitHub pull requests
@@ -327,14 +327,14 @@ be at most 20 GiB. Copies require the Tag's `files:read` action, and a `read-wri
 Cursor, and OpenCode Tasks take copies. The Control Plane freezes each Volume's revision when it
 accepts the Task; `supertag get workspace-volume datasets` shows the source and revision.
 
-The Worker Host makes each copy after the checkout and `setup`, so prepared images and snapshots
-never contain the data. The Volume credential never leaves the Worker Host process. A copy is
+The Worklet makes each copy after the checkout and `setup`, so prepared images and snapshots
+never contain the data. The Volume credential never leaves the Worklet's process. A copy is
 refused when it passes its `maxBytes`, when one Task Attempt's copies together pass 20 GiB, or when
 it holds more than 10,000 files, symbolic links, or files with another hard link. A Cursor Task in
 an E2B or Modal Workspace receives only the files, uploaded to `volumes/<digest>/<name>` inside
 its checkout; the sandbox image needs `python3`.
 
-After a successful Task Attempt, the Worker Host writes a read-write copy's changed and created
+After a successful Task Attempt, the Worklet writes a read-write copy's changed and created
 files back to the Volume, never deletions or links. A failed or cancelled Task Attempt writes
 nothing. `supertag describe task ID` shows what was written: `complete`, `partial`, or `refused`.
 A Workspace Volume must stay outside artifact storage. See [Worker Host reference](../reference/worker.md#workspace-volumes).
@@ -368,9 +368,9 @@ gets at most two replacements; after a third stop, the turn fails.
 | --- | --- |
 | Your checkout | Untouched. Deliveries arrive only as `supertag/session/...` branches |
 | Task checkouts | The Worker Host's state directory, one per Task Attempt |
-| Deliveries | Bundles and patches, kept on the Worker Host that ran the Task and relayed by the Control Plane to `fetch` |
+| Deliveries | Bundles and patches, kept on the Worker Host that ran the Task. The Control Plane relays none of them |
 | Landed changes | A remote Workspace's server, on `supertag/session/...` branches and the merge target |
-| Workspace Credentials | The credential vault of the machine that runs the Control Plane. A Worker Host holds one only in memory, for a read the Control Plane granted; never in a harness or sandbox |
+| Workspace Credentials | The credential vault of the machine that runs the Control Plane. A Worklet holds one only in memory, for a read the Control Plane granted; never in a harness or sandbox |
 | Captured artifacts | The Worker Host that captured them; see [Artifacts](../reference/artifacts.md) |
 
 ## Current limits

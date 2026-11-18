@@ -22,7 +22,7 @@ data, or local state.
 ## Development setup
 
 SuperTag's services and CLI are written in Rust, in the `core/` workspace, from the protobuf
-contract in `proto/`. The Node.js harness bridges and Workspace providers that Worker Hosts start
+contract in `proto/`. The Node.js harness bridges and Workspace providers that Worklets start
 (`harnesses/`), the TypeScript SDK (`sdks/typescript`), the desktop app's frontend, and the
 repository checks are TypeScript; the terminal UI is Go. `sdks/` holds one directory per language,
 each with its SDK and generated bindings, and `scripts/` holds the repository checks and the
@@ -38,7 +38,7 @@ npm install -g pnpm@11.18.0
 pnpm install
 ```
 
-`pnpm build` compiles the TypeScript packages. Rust Worker Hosts start the built bridges from
+`pnpm build` compiles the TypeScript packages. The Rust Worklet starts the built bridges from
 `harnesses/*/dist` and `harnesses/environments/*/dist`.
 
 ## Write documentation
@@ -92,7 +92,7 @@ protoc Go plugins pinned as tools in the `sdks/go` module, so it needs Go 1.26 o
 
 ## Rust runtime development
 
-The workspace in `core/` builds the Control Plane, Gateway, Worker Host, and native CLI.
+The workspace in `core/` builds the Control Plane, Gateway, Worklet (`supertag worker-host`), and native CLI.
 The `test-fixtures` Cargo feature builds a deterministic harness adapter for the process tests.
 Run the SQLite tests with the pinned Rust toolchain.
 
@@ -116,7 +116,7 @@ fixture. The partition case waits for the production 30-second execution lease t
 
 Ignored tests that need a local fixture report `SKIPPED` on stderr and pass when it is missing.
 To see where a slow `language_runtime` run spends its time, set `SUPERTAG_TEST_TIMINGS` to a
-file: each database creation, Control Plane start, and CLI or Worker Host run appends its label
+file: each database creation, Control Plane start, and CLI or Worklet run appends its label
 and milliseconds, and a run that misses its deadline is marked `TIMEOUT`.
 
 Set `SUPERTAG_RUST_TEST_REQUIRE` to a comma-separated list of the prerequisites a run must have,

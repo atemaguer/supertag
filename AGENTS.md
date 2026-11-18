@@ -19,16 +19,18 @@ policy recorded when SuperTag accepted it.
 
 The runtime is the Rust workspace in `core/`, one `supertag` binary. The **Control Plane** stores
 the organization, accepts and schedules work, recovers interrupted work, and preserves audit
-history. It is the one public gRPC API (`supertag.runtime.v2`) for operator clients (the CLI, the
-Go terminal UI in `apps/tui`, the Tauri desktop app in `apps/desktop`, and SDK bindings), Worker
-Hosts, and Gateways, over native gRPC or a `wss://` WebSocket tunnel. The **Gateway** is a separate,
-optional service that carries collaboration surface traffic as a client of the Control Plane. A
-**Worker Host** is a machine or sandbox that runs Tasks through a **harness adapter** for a
-**harness** such as Codex or Claude Code. Auth Keys enroll principals in one role: `host`,
-`gateway`, or `client`; operators use Operator Tokens.
+history. It serves one gRPC API (`supertag.runtime.v2`), over native gRPC or a `wss://` WebSocket
+tunnel. The **Gateway** is the endpoint clients connect to (the CLI, the Go terminal UI in
+`apps/tui`, the Tauri desktop app in `apps/desktop`, and SDK bindings): it forwards their calls to
+the Control Plane, and carries collaboration surface traffic as a client of the Control Plane. A
+**Worker Host** is a machine or sandbox that provides execution capacity. Its **Worklet**
+(`supertag worker-host`) connects it to the Control Plane, claims Tasks, and holds their leases;
+for each Task Attempt it starts a **Worker**: a **harness adapter** and the **harness** it drives,
+such as Codex or Claude Code. Keep the four layers apart in code and docs. Auth Keys enroll
+principals in one role: `host`, `gateway`, or `client`; operators use Operator Tokens.
 
 The services and CLI are Rust (`core/`), built from the protobuf contract in `proto/`. The
-TypeScript that remains is the Node harness bridges and Workspace providers that Worker Hosts
+TypeScript that remains is the Node harness bridges and Workspace providers that Worklets
 start, with the Worker SDK they share (`harnesses/`), the `supertag-ai` SDK (`sdks/typescript`),
 and the desktop app's frontend (`apps/desktop`). `sdks/` holds one directory per language, each
 with its hand-written SDK and generated bindings. The terminal UI is Go (`apps/tui`). The
@@ -86,9 +88,9 @@ environment variables. Preserve this when touching setup or worker credential pa
 bootstrap secrets, such as Auth Keys, may also be flags, following Tailscale's `--auth-key`; always
 offer an environment variable and a `file:PATH` form beside the flag.
 
-**Custom execution is a harness adapter.** A Worker Host runs built-in harnesses or one adapter
+**Custom execution is a harness adapter.** A Worklet runs built-in harnesses or one adapter
 executable (`--adapter`) that speaks the harness protocol. SDKs provide adapters and client
-bindings, not Worker runtimes.
+bindings, not Worklets.
 
 **Docs describe SuperTag as it is now.** Design notes, experiment records, and planning stay in
 the gitignored `contributing/`, `docs/**/*architecture*.md`, and `docs/**/*product-brief*.md`.

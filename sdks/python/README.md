@@ -2,9 +2,9 @@
 
 The Python SDK has three parts:
 
-- `supertag.harness_adapter`: write a harness adapter that a SuperTag Worker Host starts to run one
+- `supertag.harness_adapter`: write a harness adapter that a SuperTag Worklet starts to run one
   Task Attempt.
-- `supertag.openai_agents_adapter`: the OpenAI Agents harness adapter that a Worker Host starts for
+- `supertag.openai_agents_adapter`: the OpenAI Agents harness adapter that a Worklet starts for
   a Tag whose harness is `openai-agents`.
 - `supertag.gateway_client`: call a SuperTag Gateway from Python.
 
@@ -34,10 +34,10 @@ python -m pip install 'supertag[codex,agents]==0.3.1'
 
 ## Run a Python harness adapter with a Worker Host
 
-A Worker Host is the machine or sandbox that provides execution. It launches a harness
-adapter to run one Task Attempt, which is a single try at completing a unit of work. Install
-the SDK with its `runtime` extra. Pass the executable to the Worker Host through its
-`--adapter` option.
+A Worker Host is the machine or sandbox that provides execution. Its Worklet, the
+`supertag worker-host` program, launches a harness adapter to run one Task Attempt, which is a
+single try at completing a unit of work. Install the SDK with its `runtime` extra. Pass the
+executable to the Worklet through its `--adapter` option.
 
 ```python
 import asyncio
@@ -62,11 +62,11 @@ async def main():
 asyncio.run(main())
 ```
 
-The Worker Host supplies a private execution connection on standard input. It records the
+The Worklet supplies a private execution connection on standard input. It records the
 outcome after the adapter exits successfully. Reuse the same sequence number and request
 body when retrying an event.
 
-The OpenAI Agents adapter runs as `python -m supertag.openai_agents_adapter`; the Worker Host starts
+The OpenAI Agents adapter runs as `python -m supertag.openai_agents_adapter`; the Worklet starts
 it for a Tag whose harness is `openai-agents`. It needs `OPENAI_API_KEY` and the `agents` extra.
 
 ## Call the Gateway

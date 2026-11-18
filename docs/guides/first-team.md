@@ -18,8 +18,8 @@ after your repository: an entry under the host's `workspaces` in `supertag.yaml`
 to your checkout, with `lead` bound to it. Commands below use the local Control Plane, which they
 find without a flag.
 
-The **Control Plane** coordinates work. Your **Worker Host** supplies execution capacity through a
-signed-in harness such as Codex or Claude Code. Check that both services are running:
+The **Control Plane** coordinates work. Your **Worker Host** supplies execution capacity: its **Worklet**
+runs each Task on a signed-in harness such as Codex or Claude Code. Check that both services are running:
 
 ```sh
 supertag up

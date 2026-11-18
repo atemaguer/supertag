@@ -46,8 +46,8 @@ the operator inbox and in the Objective overview.
 Together, your Teams of Tags make up an **autonomous organization**: Teams may pursue different
 Objectives but share one Control Plane, its rules, and its record of the work.
 The **Control Plane** stores the organization and schedules work. A **Worker Host** is a machine
-or sandbox supplying execution capacity. It runs each Task through a **harness**, an agent system
-such as Codex or Claude Code. Work can span hosts and harness sessions while the Objective
+or sandbox supplying execution capacity. Each Task Attempt runs there in a **Worker**, which
+drives a **harness**, an agent system such as Codex or Claude Code. Work can span hosts and harness sessions while the Objective
 and its results remain recorded. See [Define and complete an Objective](../guides/objectives.md).
 
 ## Or use an operator thread

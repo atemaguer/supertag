@@ -18,8 +18,9 @@ Tags, and its shared record of posts is its **Workstream**. An **Objective** is 
 owns. A **Mailbox** is a Tag's inbox for messages from other Tags. Together, your Teams of Tags make up an **autonomous
 organization**: Teams may pursue different Objectives but share one Control Plane, its rules, and
 its record of the work. The **Control Plane** is the service that stores the organization
-and applies its rules. **Worker Hosts** are machines or sandboxes that run the work. A Worker Host
-runs each Task through a **harness**, an agent system such as Codex.
+and applies its rules. **Worker Hosts** are machines or sandboxes that run the work. On a Worker
+Host, each Task Attempt runs in a **Worker** that drives a **harness**, an agent system such as
+Codex.
 
 Agent systems evolve quickly. This comparison describes what each project is mainly built around as
 of November 2026. The links point to the projects' own documentation.
@@ -58,7 +59,7 @@ or harness session:
 - **Requester and source rules, budgets, approvals, and Task policy records**
   prevent execution from silently gaining more authority.
 - **Recovery and audit** preserve accountability when work spans processes, retries, and hosts.
-- **Worker Hosts and harnesses** let the same organization use different execution
+- **Worker Hosts, Workers, and harnesses** let the same organization use different execution
   engines and run across distributed capacity.
 
 Coordination inside a harness stays local to that harness. Its manager and native subagents can use

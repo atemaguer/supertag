@@ -1,10 +1,11 @@
 # Run Worker Hosts
 
 A **Worker Host** is a machine or sandbox that runs Tasks for Tags, the persistent AI actors with
-their own responsibilities and permissions. It connects outbound to the **Control Plane**, the
-service that stores your organization and schedules its work, claims Tasks its Tags may run, and
-runs each **Task Attempt**, one execution of a Task, through a **harness adapter**: the process
-that drives an agent system such as Codex or Claude Code. See the
+their own responsibilities and permissions. Its **Worklet**, the `supertag worker-host` program,
+connects outbound to the **Control Plane**, the service that stores your organization and
+schedules its work, and claims Tasks its Tags may run. For each **Task Attempt**, one execution of
+a Task, the Worklet starts a **Worker**: a **harness adapter**, the process that drives an agent
+system such as Codex or Claude Code, and that harness. See the
 [glossary](../reference/glossary.md) for other terms.
 
 `supertag init` already connects your own computer. Use this guide to add machines, choose
@@ -12,7 +13,7 @@ harnesses and models, and control where work runs.
 
 ## Connect a machine day to day
 
-A `host` service in `~/.supertag/supertag.yaml` runs a Worker Host under `supertag up`:
+A `host` service in `~/.supertag/supertag.yaml` runs a Worker Host's Worklet under `supertag up`:
 
 ```yaml
 services:
@@ -108,7 +109,7 @@ state directory. The host may run only the Tags its key names, or every Tag for 
 
 ## Run a host without supertag.yaml
 
-On a server, CI runner, or container, enroll once and then run the host directly:
+On a server, CI runner, or container, enroll once and then run the host's Worklet directly:
 
 ```sh
 supertag host enroll build-1 --control-plane https://supertag.example.com \
@@ -118,8 +119,8 @@ supertag worker-host --control-plane https://supertag.example.com \
   --workspace-id app --workspace-source /srv/app
 ```
 
-`worker-host` reads its credential from the state directory and stays connected until you stop
-it. Use the `wss://` URL for a Control Plane behind Render, Cloudflare, or Modal. The host needs
+`supertag worker-host` runs the Worklet. It reads the host's credential from the state directory
+and stays connected until you stop it. Use the `wss://` URL for a Control Plane behind Render, Cloudflare, or Modal. The host needs
 no inbound port. `--once` exits after one Task Attempt, for a disposable runner.
 
 ## Keep a Tag's Tasks on the right hosts
@@ -246,24 +247,24 @@ a Task needs one. See [Context and permissions](../concepts/context-and-permissi
 
 ## Optional: MCP servers
 
-`--mcp-catalog` names an owner-only JSON catalog of MCP servers that the host offers Claude Code
-Tasks. A Task sees a catalog tool only when its Permission Sets grant it. See
+`--mcp-catalog` names an owner-only JSON catalog of MCP servers that the Worklet offers Claude
+Code Tasks. A Task sees a catalog tool only when its Permission Sets grant it. See
 [MCP tools for GitHub, Slack, Linear, Teams, and Lark](../surfaces/worker-tools.md).
 
 ## Keep artifacts on Worker Hosts
 
 Every artifact a Task captures, and every Workspace delivery's patch and bundle, stays on the
-Worker Host that produced it. The Control Plane stores none of them, and relays only deliveries,
-from the host while it is connected. By default the host keeps them in
+Worker Host that produced it, where its Worklet keeps them. The Control Plane stores and relays
+none of them. By default the Worklet keeps them in
 `STATE_DIRECTORY/artifacts`; `--artifact-directory` names another owner-only directory. Keep that
 directory on persistent storage: losing it loses those artifacts and deliveries, unless an
 artifact also has a Volume copy. On a host that does not last, such as a CI runner or one whose Tasks run
 in Modal or E2B sandboxes, give its Tags a `volume`: every capture then gets a Volume copy, written
-by the host, before it succeeds. A file Volume also needs `--volume VOLUME_ID=DIRECTORY` on each
+by the Worklet, before it succeeds. A file Volume also needs `--volume VOLUME_ID=DIRECTORY` on each
 host that writes it. See [Keep every capture on a Volume](../reference/artifacts.md#keep-every-capture-on-a-volume).
 
-A Task on another host reads a host's artifacts directly from it; the Control Plane passes no
-files. Give the producing host a transfer listener:
+A Task on another host reads a host's artifacts directly from that host's Worklet; the Control
+Plane passes no files. Give the producing host's Worklet a transfer listener:
 
 ```sh
 supertag worker-host --control-plane https://supertag.example.com \
@@ -335,7 +336,8 @@ confirm a reply.
   [Codex commands and models](../operations/requirements.md#codex-commands-and-models).
 - **A Cursor Task fails.** The result gives Cursor's reason, such as a model outside the
   account's plan. Choose a model the plan includes in `models`, or add credits. A result naming
-  a failed `Worker Host call` means the harness lost its own Worker Host; check that host's log.
+  a failed `Worker Host call` means the harness adapter's call through its Worklet failed; check
+  that host's log.
 
 See [Troubleshoot the first reply](troubleshooting.md).
 

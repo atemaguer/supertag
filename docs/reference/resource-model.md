@@ -28,12 +28,13 @@ Control Plane stores the organization and schedules its work, and a Worker Host 
 container, VM, or sandbox that provides the capacity to run it. On each Worker Host a **Worklet**,
 the `supertag worker-host` program, connects the host to the Control Plane, claims Tasks, and
 starts a **Worker** for each Task Attempt: a harness adapter and the harness it drives. The
-Worklet and the Worker are roles of running programs, not resources you create or apply. A separate, optional **Gateway** carries
-**collaboration surface** traffic as a client of the Control Plane. A collaboration surface is how SuperTag meets people in an external work tool, such as
+Worklet and the Worker are roles of running programs, not resources you create or apply. A
+separate **Gateway** is the service clients connect to: it forwards their calls to the Control
+Plane, and carries **collaboration surface** traffic as a client of the Control Plane. A collaboration surface is how SuperTag meets people in an external work tool, such as
 Slack, GitHub, Lark/Feishu, Linear, or Microsoft Teams: it receives events at a [Tag](#configuration-resources)'s locations and
 replies there. A location is a place on a collaboration surface, such as a channel or repository. The Control
-Plane serves one API to operator clients, Worker Hosts, and Gateways. Worker Hosts supply execution
-capacity through [harness adapters](glossary.md#harness-adapter), [harnesses](glossary.md#harness),
+Plane serves one API to Worklets and Gateways, and through Gateways to clients. Worker Hosts
+supply execution capacity through [harness adapters](glossary.md#harness-adapter), [harnesses](glossary.md#harness),
 and [execution environments](glossary.md#execution-environment).
 
 ## Configuration resources
@@ -109,7 +110,7 @@ scheduler then chooses a compatible harness and model on one of those hosts. Non
   teammate or machine. SuperTag records the changes it makes under its name. See
   [Operator Tokens](#operator-tokens).
 
-Each Worker Host reports that state to the Control Plane over its own connection. A per-host
+Each Worker Host's Worklet reports that state to the Control Plane over its own connection. A per-host
 credential binds the connection to that Worker Host. Rotation and
 revocation block older connections without exposing credentials through ordinary resource reads.
 A **connection generation** is the increasing number that identifies the current connection.
@@ -160,7 +161,7 @@ More Tag fields declare where its Tasks run, where the Tag works, and who may me
 | `spec.lead` | `true` or `false` | Whether this is the Control Plane's **lead Tag**. Omitted keeps the current value. |
 | `spec.maxWorkSessions` | 1 to 64 | How many work Sessions the Tag may have open at once, 8 by default. Omitted keeps the current value. See [Open work Sessions](coordination.md#open-work-sessions). |
 | `spec.memory` | `true` or `false` | Whether the Tag keeps [Memory](coordination.md#memory): notes it writes and a daily review. Omitted keeps the current value; a new Tag keeps memory. |
-| `spec.volume` | A Volume ID, or `""` | Keeps the Tag's work beyond any one Worker Host: the capturing host writes a copy of every capture there, and a capture fails when its copy cannot be written. Its Sessions' checkpoints live there too, so any host that reaches the Volume resumes them; see [Session checkpoints](control-plane.md#session-checkpoints). A file Volume places the Tag only on hosts that map it. Omitted keeps the current value. See [Keep every capture on a Volume](artifacts.md#keep-every-capture-on-a-volume). |
+| `spec.volume` | A Volume ID, or `""` | Keeps the Tag's work beyond any one Worker Host: the capturing host's Worklet writes a copy of every capture there, and a capture fails when its copy cannot be written. Its Sessions' checkpoints live there too, so any host that reaches the Volume resumes them; see [Session checkpoints](control-plane.md#session-checkpoints). A file Volume places the Tag only on hosts that map it. Omitted keeps the current value. See [Keep every capture on a Volume](artifacts.md#keep-every-capture-on-a-volume). |
 | `spec.startRate` | `starts` (1 to 10,000) and `per` (`1m` to `7d`) | At most how many of the Tag's Task Attempts start per period; `starts: 0` removes it. Omitted keeps the current value; a new Tag has none. See [Start rates](scheduling-and-recovery.md#start-rates). |
 
 Where a Tag answers is a separate `SurfaceLocation` resource, a Tag **location**. It names the
@@ -443,8 +444,8 @@ spec:
 
 A local Workspace needs a full `baseCommit` or a `ref`, never both. New Sessions start from the
 base commit, and later Tasks of a Session continue on the Session's branch,
-`supertag/session/HASH`. `ref` names a local branch, such as `main`, instead: the Worker Host
-that starts a Session's first Task records the commit the branch names in its checkout, and the
+`supertag/session/HASH`. `ref` names a local branch, such as `main`, instead: the Worklet
+that starts a Session's first Task records the commit the branch names in its host's checkout, and the
 whole Session works from that commit. See
 [Follow a branch instead of a commit](../guides/workspaces.md#follow-a-branch-instead-of-a-commit).
 A remote Workspace omits both. `mcp` selects servers from the `.mcp.json` at the base commit. The Tag's Tasks run only on
@@ -473,16 +474,16 @@ Tokens are never stored. The key is a separate copy from any the GitHub surface 
 
 The secret goes to the credential vault the Control Plane reads (`SUPERTAG_CREDENTIAL_VAULT`,
 in `SUPERTAG_STATE_DIR` by default) under `workspace-credential/NAME`, never to the database or a
-harness. A Worker Host that reads the Workspace gets it, or a minted GitHub App token, for that one
+harness. A Worklet that reads the Workspace gets it, or a minted GitHub App token, for that one
 read and keeps it only in memory; a credential helper is never handed to a host, so hosts can't
 read with one. An SSH key without `--known-hosts` trusts the server's first host key and
-remembers it, on the Control Plane and on each Worker Host separately. `supertag workspace credential remove NAME` refuses while a Workspace names it.
+remembers it, on the Control Plane and in each Worklet separately. `supertag workspace credential remove NAME` refuses while a Workspace names it.
 
 ### Landing
 
-The Worker Host that ran a Task lands its verified commits on a remote Workspace's server, from
+The Worklet that ran a Task lands its verified commits on a remote Workspace's server, from
 its own copy of them, right after the Task finished: the harness never pushes. Every delivered
-Task updates the Session's branch; `land` adds a merge or a review. The host pushes only
+Task updates the Session's branch; `land` adds a merge or a review. The Worklet pushes only
 `supertag/session/...` branches and the Workspace's merge target, fast-forward only, whatever the
 credential could do. A review's pull request is opened by the Control Plane's git delivery once the
 branch is pushed. Git delivery then reads each Session's latest landed branch back with
@@ -492,8 +493,8 @@ the landing's `reason` says so. That detects such a change but cannot prevent it
 
 | State | Meaning |
 | --- | --- |
-| `queued` | Waiting for the Worker Host that holds the delivery, or, for a pushed review branch, for git delivery to open its pull request |
-| `claimed` | A Worker Host is pushing, or git delivery is opening the pull request |
+| `queued` | Waiting for the Worklet that holds the delivery, or, for a pushed review branch, for git delivery to open its pull request |
+| `claimed` | A Worklet is pushing, or git delivery is opening the pull request |
 | `landed` | The branch or target names `landed_commit`; in review mode, `pull_request` is open from the branch |
 | `conflict` | The Session's changes conflict with the target in `conflicts`; nothing was merged, and `follow_up_task_id` merges `target_commit` into the Session |
 | `held` | Refused until someone acts, such as a branch changed outside SuperTag, a missing credential, or Git LFS |
@@ -533,10 +534,10 @@ outside the checkout:
 A Tag has at most eight copies. Its Tasks must allow `files:read`, may not allow
 `commands:execute` or `web:fetch`, and run on Codex, Claude Code, Cursor, or OpenCode. The Control
 Plane freezes each Volume's source, credential name, and revision when it accepts a Task. Only a
-Worker Host whose `--workspace-mount-mappings` maps that exact Volume, credential name, and
+Worklet whose `--workspace-mount-mappings` maps that exact Volume, credential name, and
 destination root claims the Task; a retargeted Volume leaves queued Tasks unplaceable.
 
-The Worker Host stages each copy for one Task Attempt and removes it when the Task Attempt ends.
+The Worklet stages each copy for one Task Attempt and removes it when the Task Attempt ends.
 A copy holds at most 10,000 files and visits at most 40,000 entries, and one Task Attempt copies
 at most 20 GiB across its copies. Links, hard-linked files, files on another filesystem, and the
 names `.git` and `.supertag-*` are refused. A remote E2B or Modal Workspace receives the staged
@@ -545,7 +546,7 @@ Read-only provider-native Modal Volume mounts are on the backlog.
 
 ### Read-write copy contract
 
-After a successful Task Attempt, the Worker Host writes each changed and created regular file of a
+After a successful Task Attempt, the Worklet writes each changed and created regular file of a
 read-write copy directly to its Volume: to a `file://` directory without following links, or to
 `s3://` with a streamed, signed `PUT`. It never writes deletions or links, and a failed or
 cancelled Task Attempt writes nothing. Before the first write it refuses more than 1,000 changed
@@ -603,7 +604,7 @@ spec:
 ```
 
 `supertag get volume` lists artifact Volumes. The Control Plane maps none of them and carries no
-Volume byte: Worker Hosts write and read them, a file Volume through each host's own `--volume`
+Volume byte: Worklets write and read them, a file Volume through each host's own `--volume`
 mapping, an S3 Volume through URLs the Control Plane presigns with the credential `supertag volume
 credential set` stores in its vault. For what a Volume keeps when a sandbox or host dies, see
 [Persistence](../concepts/persistence.md).
@@ -624,7 +625,7 @@ direction. So an endpoint alias, such as a virtual-hosted or path-style spelling
 cannot expose artifact storage to a Task. Distinct prefixes such as `artifacts` and
 `artifacts-other` remain separate.
 
-The Worker Host checks its mappings again against its own state, its Workspaces, home
+The Worklet checks its mappings again against its own state, its Workspaces, home
 configuration, and the artifact paths the Control Plane discloses for each Task Attempt. It
 compares real paths and directory identities, so a bind mount or link that reaches protected
 storage under another spelling is refused.

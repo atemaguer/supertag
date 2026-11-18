@@ -1,14 +1,14 @@
 # Devcontainer settings for remote workspaces
 
 A workspace is a repository that a [Task](glossary.md#task) can change on its own branch. A
-[Worker Host](glossary.md#worker-host) prepares that
-repository for a Task. When a Worker Host keeps Cursor Tasks' checkouts in an E2B or Modal sandbox,
+[Worker Host](glossary.md#worker-host)'s [Worklet](glossary.md#worklet) prepares that
+repository for a Task. When a Worklet keeps Cursor Tasks' checkouts in an E2B or Modal sandbox,
 SuperTag reads a `devcontainer.json` from the Task's base commit to choose the sandbox's image and
 setup. Use this when the repository needs a specific image or setup steps. Local workspaces ignore
 the file and use the workspace's `setup` command instead; a remote workspace cannot use `setup`.
 
 SuperTag reads `.devcontainer/devcontainer.json` first, then `.devcontainer.json`. The file may use
-JSON comments and trailing commas. The Worker Host reads it and any Dockerfile as git objects; it
+JSON comments and trailing commas. The Worklet reads it and any Dockerfile as git objects; it
 does not check out or execute repository content on the Worker Host. The first matching file is the whole
 definition. SuperTag refuses an unsupported property by name before a provider build begins.
 
@@ -37,7 +37,7 @@ For example, a repository can put this at `.devcontainer/devcontainer.json`:
 }
 ```
 
-The Worker Host runs those commands in a remote preparation sandbox and saves the result. Each Task
+The Worklet runs those commands in a remote preparation sandbox and saves the result. Each Task
 starts in a separate sandbox created from that prepared result, or from the image alone when the file
 has no lifecycle commands. See the [workspace guide](../guides/workspaces.md)
 for repository and delivery setup.
