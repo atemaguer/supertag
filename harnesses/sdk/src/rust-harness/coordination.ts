@@ -247,7 +247,7 @@ export function scheduleLine(schedule: Schedule, zone: string) {
 
 /** What `stay_quiet` says. Matches the Codex adapter's `questions::QUIET_DESCRIPTION`. */
 export const STAY_QUIET_DESCRIPTION =
-  "Finish this turn without posting anything, when it found nothing that needs a person's attention: no reply is posted to the thread or conversation and nothing counts as unread. The note says why in one line; it is kept in the Tag's history, never posted. Use it only when nothing changed since what you last reported. Report a change even when it seems minor, and say when a problem you reported is resolved; the person decides what matters. A problem the person already knows about and someone is handling, with nothing new, needs no message. Call this last, then finish the turn.";
+  "Finish this turn without posting anything, when it found nothing that needs a person's attention: no reply is posted to the thread or conversation and nothing counts as unread. The note says why in one line; it is kept in the Tag's history, never posted. Use it only when nothing changed since what you last reported. Report a change even when it seems minor, and say when a problem you reported is resolved; the person decides what matters. A problem the person already knows about and someone is handling, with nothing new, needs no message, and neither does movement within a stated normal range or a blip that recovered before you reported it. Call this last, then finish the turn.";
 
 /**
  * What the `remember` tool says a note is for. Matches the Codex adapter's

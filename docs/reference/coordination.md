@@ -720,7 +720,8 @@ stay_quiet(note: "CI is green on main; nothing changed since yesterday.")
   get the tool, and the Control Plane ignores a quiet finish from them.
 - **When.** Only when nothing changed since what the Tag last reported. A small change, or a
   problem it reported that is now resolved, is still reported; a problem the person already knows
-  about and someone is handling, with nothing new, is not.
+  about and someone is handling, with nothing new, is not, and neither is movement within a stated
+  normal range or a blip that recovered before the Tag reported it.
 - **What it does.** The turn succeeds and nothing is posted to its thread or conversation. The
   conversation leaves it out, and it raises nothing unread. A reported Objective status or a wait
   for approvals still posts.
