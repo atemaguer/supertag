@@ -139,6 +139,28 @@ impl Store {
         } else {
             None
         };
+        // An in-memory database has no file to log beside.
+        if process_lock.is_some() {
+            // A write-ahead log commits with one sync of the log, where a rollback journal syncs
+            // the journal and the database file and then deletes the journal. Under a busy
+            // disk that is the difference between hosts' writes keeping up and operator reads
+            // waiting seconds behind them. `synchronous = FULL` keeps every commit durable.
+            // Only after the process lock, so a second process fails on that lock instead.
+            let mode: String = match sqlx::query_scalar("PRAGMA journal_mode=WAL")
+                .fetch_one(&pool)
+                .await
+            {
+                Ok(mode) => mode,
+                Err(error) => {
+                    pool.close().await;
+                    return Err(error.into());
+                }
+            };
+            if mode != "wal" {
+                pool.close().await;
+                anyhow::bail!("SQLite refused write-ahead logging ({mode})");
+            }
+        }
         // One transaction reads and migrates the schema. On PostgreSQL a transaction-scoped
         // advisory lock serializes Control Plane replicas that start together: each rereads the
         // schema only after any concurrent migration committed.
@@ -2741,9 +2763,9 @@ mod durability_tests {
             .fetch_one(&store.pool)
             .await
             .unwrap();
-        assert!(
-            matches!(journal.as_str(), "delete" | "wal"),
-            "journal mode {journal} does not keep a durable commit"
+        assert_eq!(
+            journal, "wal",
+            "the store commits through a write-ahead log"
         );
     }
 }

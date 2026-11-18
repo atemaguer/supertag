@@ -365,7 +365,8 @@ async fn captured_artifact_survives_control_plane_restart_with_private_metadata(
 }
 
 /// The Control Plane database holds the artifact's metadata but never its bytes. SQLite:
-/// the database file itself. PostgreSQL: every row of every table, as text, where `bytea`
+/// the database file and its write-ahead log, which holds commits not yet checkpointed into the
+/// file. PostgreSQL: every row of every table, as text, where `bytea`
 /// columns (the protobuf payloads) appear as hex. Both scans must find the metadata, so a
 /// scan that sees nothing cannot pass.
 async fn control_plane_holds_no_artifact_bytes(database: &str, bytes: &[u8]) -> Result<()> {
@@ -376,7 +377,13 @@ async fn control_plane_holds_no_artifact_bytes(database: &str, bytes: &[u8]) -> 
     };
     let metadata = b"report.txt";
     if let Some(path) = database.strip_prefix("sqlite://") {
-        let file = std::fs::read(path.split('?').next().unwrap_or(path))?;
+        let path = path.split('?').next().unwrap_or(path);
+        let mut file = std::fs::read(path)?;
+        match std::fs::read(format!("{path}-wal")) {
+            Ok(log) => file.extend(log),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
         ensure!(
             contains(&file, metadata),
             "the scan saw no artifact metadata"
