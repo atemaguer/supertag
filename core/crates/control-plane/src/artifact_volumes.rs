@@ -31,48 +31,30 @@ pub(crate) fn checkpoint_key(tag_id: &str, session_id: &str, sha256: &str) -> St
     )
 }
 
-/// Where one file of a Tag's native memory store lives on its Volume: the store's `current/` tree
-/// under `native-memory/<harness>/<scope>/`, as Worker Hosts keep it in their own storage.
-pub(crate) fn native_memory_key(tag_id: &str, harness: &str, scope: &str, path: &str) -> String {
+/// Where one object of a Tag's native memory store lives on its Volume: content-addressed under
+/// the store's `objects/`, so it is never overwritten.
+pub(crate) fn native_memory_key(tag_id: &str, harness: &str, scope: &str, sha256: &str) -> String {
     format!(
-        "{}/native-memory/{harness}/{scope}/current/{path}",
+        "{}/native-memory/{harness}/{scope}/objects/{sha256}",
         tag_root(tag_id)
     )
 }
 
-/// A native memory file's path inside its store: relative, `/`-separated, and without empty,
-/// `.`, or `..` segments or control characters.
-fn valid_memory_path(path: &str) -> bool {
-    !path.is_empty()
-        && path.len() <= 1024
-        && !path.chars().any(char::is_control)
-        && path
-            .split('/')
-            .all(|part| !part.is_empty() && part != "." && part != "..")
-}
-
-/// The key and bytes of one native memory file in the store this turn was granted: its harness
+/// The key and bytes of one object of the native memory store this turn was granted: its harness
 /// and audience scope come from the Attempt, never the request.
 async fn native_memory_object_in(
     tx: &mut Transaction<'_, Any>,
     task: &Task,
     input: &VolumeObjectGrantRequest,
 ) -> Result<(String, BlobReference)> {
-    let file = input
-        .native_memory_file
-        .as_ref()
-        .ok_or_else(|| invalid("a native memory grant names its file"))?;
-    let blob = file
-        .blob
+    let blob = input
+        .native_memory_blob
         .clone()
         .filter(|blob| {
             supertag_protocol::valid_sha256(&blob.sha256)
                 && blob.byte_length <= supertag_protocol::MAX_CHECKPOINT_BYTES as u64
         })
-        .ok_or_else(|| invalid("a native memory file needs a valid blob"))?;
-    if !valid_memory_path(&file.path) {
-        return Err(invalid("a native memory file needs a relative path"));
-    }
+        .ok_or_else(|| invalid("a native memory grant needs a valid blob"))?;
     let grant = crate::native_memory::grant_in(tx, task)
         .await?
         .ok_or_else(|| StoreError::FailedPrecondition("this turn keeps no native memory".into()))?;
@@ -84,7 +66,7 @@ async fn native_memory_object_in(
             StoreError::FailedPrecondition("this turn's harness keeps no native memory".into())
         })?;
     Ok((
-        native_memory_key(&task.tag_id, harness, &grant.scope, &file.path),
+        native_memory_key(&task.tag_id, harness, &grant.scope, &blob.sha256),
         blob,
     ))
 }
@@ -518,7 +500,7 @@ impl Store {
             .ok_or_else(|| invalid("a Volume grant names its Attempt"))?;
         if !matches!(
             input.purpose(),
-            VolumeObjectPurpose::SessionCheckpoint | VolumeObjectPurpose::NativeMemoryFile
+            VolumeObjectPurpose::SessionCheckpoint | VolumeObjectPurpose::NativeMemoryBlob
         ) {
             return Err(invalid("a Volume grant needs a purpose"));
         }
@@ -541,7 +523,7 @@ impl Store {
             .await?
             .ok_or_else(|| StoreError::FailedPrecondition("the Tag names no Volume".into()))?;
         let volume = volume_in(&mut tx, &id).await?;
-        if input.purpose() == VolumeObjectPurpose::NativeMemoryFile {
+        if input.purpose() == VolumeObjectPurpose::NativeMemoryBlob {
             let (key, blob) = native_memory_object_in(&mut tx, &task, input).await?;
             tx.commit().await?;
             return Ok(VolumeObjectGrant {

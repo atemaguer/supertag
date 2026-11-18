@@ -300,7 +300,7 @@ async fn exercise(url: &str) {
             attempt: Some(attempt.clone()),
             purpose: VolumeObjectPurpose::SessionCheckpoint as i32,
             access: access as i32,
-            native_memory_file: None,
+            native_memory_blob: None,
         };
     let write = grant_request(&first, VolumeAccess::Write);
     let checkpoint = CheckpointReference {

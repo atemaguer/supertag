@@ -1,7 +1,7 @@
 //! A Tag that names a Volume keeps its Session checkpoints there, not on the Worker Host that ran
 //! the turn: once the writing host's grant marks the checkpoint as on the Volume, it has no holder,
-//! so any host that reaches the Volume resumes it and none is waited for. Native memory files get
-//! Volume grants for the store the turn was granted.
+//! so any host that reaches the Volume resumes it and none is waited for. Native memory objects
+//! get Volume grants, content-addressed in the store the turn was granted.
 mod support;
 use sha2::Digest;
 use sqlx::{Connection, Executor};
@@ -73,7 +73,7 @@ fn grant(attempt: &InspectAttemptRequest, access: VolumeAccess) -> VolumeObjectG
         attempt: Some(attempt.clone()),
         purpose: VolumeObjectPurpose::SessionCheckpoint.into(),
         access: access.into(),
-        native_memory_file: None,
+        native_memory_blob: None,
     }
 }
 
@@ -185,22 +185,19 @@ async fn exercise(url: &str) {
         )
     );
 
-    // Native memory: one file of the store this turn was granted, named by the host only by its
-    // path inside the store.
-    let memory = |path: &str| VolumeObjectGrantRequest {
+    // Native memory: one immutable object of the store this turn was granted, keyed by its own
+    // SHA-256 under the store the Control Plane derives from the turn.
+    let memory = |sha256: &str| VolumeObjectGrantRequest {
         attempt: Some(second.clone()),
-        purpose: VolumeObjectPurpose::NativeMemoryFile.into(),
+        purpose: VolumeObjectPurpose::NativeMemoryBlob.into(),
         access: VolumeAccess::Write.into(),
-        native_memory_file: Some(VolumeNativeMemoryFile {
-            path: path.into(),
-            blob: Some(BlobReference {
-                sha256: "d".repeat(64),
-                byte_length: 12,
-            }),
+        native_memory_blob: Some(BlobReference {
+            sha256: sha256.into(),
+            byte_length: 12,
         }),
     };
-    let file = store
-        .grant_volume_object(&server, &memory("notes/MEMORY.md"))
+    let object = store
+        .grant_volume_object(&server, &memory(&"d".repeat(64)))
         .await
         .unwrap();
     let root = format!(
@@ -208,19 +205,21 @@ async fn exercise(url: &str) {
         sha2::Sha256::digest("keeper")
     );
     assert!(
-        file.key.starts_with(&root) && file.key.ends_with("/current/notes/MEMORY.md"),
+        object.key.starts_with(&root)
+            && object
+                .key
+                .ends_with(&format!("/objects/{}", "d".repeat(64))),
         "{}",
-        file.key
+        object.key
     );
-    for bad in ["", "../escape", "a//b", "./a", "/abs"] {
-        assert!(
-            matches!(
-                store.grant_volume_object(&server, &memory(bad)).await,
-                Err(StoreError::InvalidArgument(_))
-            ),
-            "{bad:?}"
-        );
-    }
+    // The object must fit Volume key rules: at most 8 segments, ending in its own digest.
+    assert!(object.key.split('/').count() <= 8, "{}", object.key);
+    assert!(matches!(
+        store
+            .grant_volume_object(&server, &memory("not-a-digest"))
+            .await,
+        Err(StoreError::InvalidArgument(_))
+    ));
     finish(&store, &server, &second, None).await;
 
     // A Tag that keeps no memory gets no native memory grant.
@@ -239,7 +238,7 @@ async fn exercise(url: &str) {
     let third = turn(&store, &server, "No memory now").await;
     let refused = VolumeObjectGrantRequest {
         attempt: Some(third.clone()),
-        ..memory("MEMORY.md")
+        ..memory(&"d".repeat(64))
     };
     assert!(matches!(
         store.grant_volume_object(&server, &refused).await,

@@ -335,16 +335,9 @@ message VolumeObjectGrantRequest {
   InspectAttemptRequest attempt = 1;
   VolumeObjectPurpose purpose = 2;
   VolumeAccess access = 3;
-  // With VOLUME_OBJECT_PURPOSE_NATIVE_MEMORY_FILE: the file.
-  VolumeNativeMemoryFile native_memory_file = 4;
-}
-
-// A file of the native memory store this Attempt was granted, relative to the store's `current/`
-// directory. Native memory files have no record of their own, so the host names the bytes.
-message VolumeNativeMemoryFile {
-  // `/`-separated, relative, without empty, `.` or `..` segments.
-  string path = 1;
-  BlobReference blob = 2;
+  // With VOLUME_OBJECT_PURPOSE_NATIVE_MEMORY_BLOB: the object's bytes. Native memory objects have
+  // no record of their own, so the host names them; the key is their own SHA-256.
+  BlobReference native_memory_blob = 4;
 }
 
 // What the object is. The Control Plane resolves its bytes from its own records, so a host never
@@ -355,9 +348,11 @@ enum VolumeObjectPurpose {
   // READ: the Session's current checkpoint, the one GetCheckpoint returns. NotFound when the
   // Session has none on the Tag's current Volume; the turn then starts fresh.
   VOLUME_OBJECT_PURPOSE_SESSION_CHECKPOINT = 1;
-  // One file of the Tag's native memory store this Attempt was granted. The Control Plane
-  // derives the store (the Attempt's harness and audience scope); the host names only the file.
-  VOLUME_OBJECT_PURPOSE_NATIVE_MEMORY_FILE = 2;
+  // One immutable, content-addressed object of the Tag's native memory store this Attempt was
+  // granted (a memory file's bytes, or a manifest of the store): `objects/<sha256>` under
+  // `tags/<sha256(tag)>/native-memory/<harness>/<scope>/`. The Control Plane derives the store
+  // from the Attempt's harness and audience scope.
+  VOLUME_OBJECT_PURPOSE_NATIVE_MEMORY_BLOB = 2;
 }
 
 enum VolumeAccess {

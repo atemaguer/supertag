@@ -32,7 +32,7 @@ class VolumeObjectPurpose(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     VOLUME_OBJECT_PURPOSE_UNSPECIFIED: _ClassVar[VolumeObjectPurpose]
     VOLUME_OBJECT_PURPOSE_SESSION_CHECKPOINT: _ClassVar[VolumeObjectPurpose]
-    VOLUME_OBJECT_PURPOSE_NATIVE_MEMORY_FILE: _ClassVar[VolumeObjectPurpose]
+    VOLUME_OBJECT_PURPOSE_NATIVE_MEMORY_BLOB: _ClassVar[VolumeObjectPurpose]
 
 class VolumeAccess(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -58,7 +58,7 @@ ARTIFACT_VOLUME_COPY_STATE_RESERVED: ArtifactVolumeCopyState
 ARTIFACT_VOLUME_COPY_STATE_VERIFIED: ArtifactVolumeCopyState
 VOLUME_OBJECT_PURPOSE_UNSPECIFIED: VolumeObjectPurpose
 VOLUME_OBJECT_PURPOSE_SESSION_CHECKPOINT: VolumeObjectPurpose
-VOLUME_OBJECT_PURPOSE_NATIVE_MEMORY_FILE: VolumeObjectPurpose
+VOLUME_OBJECT_PURPOSE_NATIVE_MEMORY_BLOB: VolumeObjectPurpose
 VOLUME_ACCESS_UNSPECIFIED: VolumeAccess
 VOLUME_ACCESS_WRITE: VolumeAccess
 VOLUME_ACCESS_READ: VolumeAccess
@@ -459,24 +459,16 @@ class ArtifactVolumeCopy(_message.Message):
     def __init__(self, copy_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., volume: _Optional[_Union[ArtifactVolume, _Mapping]] = ..., artifact_id: _Optional[str] = ..., file: _Optional[_Union[ArtifactFile, _Mapping]] = ..., storage_key: _Optional[str] = ..., state: _Optional[_Union[ArtifactVolumeCopyState, str]] = ..., created_at_ms: _Optional[int] = ..., verified_at_ms: _Optional[int] = ..., upload: _Optional[_Union[ArtifactVolumeUpload, _Mapping]] = ..., host_attested: _Optional[bool] = ...) -> None: ...
 
 class VolumeObjectGrantRequest(_message.Message):
-    __slots__ = ("attempt", "purpose", "access", "native_memory_file")
+    __slots__ = ("attempt", "purpose", "access", "native_memory_blob")
     ATTEMPT_FIELD_NUMBER: _ClassVar[int]
     PURPOSE_FIELD_NUMBER: _ClassVar[int]
     ACCESS_FIELD_NUMBER: _ClassVar[int]
-    NATIVE_MEMORY_FILE_FIELD_NUMBER: _ClassVar[int]
+    NATIVE_MEMORY_BLOB_FIELD_NUMBER: _ClassVar[int]
     attempt: _runtime_pb2.InspectAttemptRequest
     purpose: VolumeObjectPurpose
     access: VolumeAccess
-    native_memory_file: VolumeNativeMemoryFile
-    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., purpose: _Optional[_Union[VolumeObjectPurpose, str]] = ..., access: _Optional[_Union[VolumeAccess, str]] = ..., native_memory_file: _Optional[_Union[VolumeNativeMemoryFile, _Mapping]] = ...) -> None: ...
-
-class VolumeNativeMemoryFile(_message.Message):
-    __slots__ = ("path", "blob")
-    PATH_FIELD_NUMBER: _ClassVar[int]
-    BLOB_FIELD_NUMBER: _ClassVar[int]
-    path: str
-    blob: _runtime_pb2.BlobReference
-    def __init__(self, path: _Optional[str] = ..., blob: _Optional[_Union[_runtime_pb2.BlobReference, _Mapping]] = ...) -> None: ...
+    native_memory_blob: _runtime_pb2.BlobReference
+    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., purpose: _Optional[_Union[VolumeObjectPurpose, str]] = ..., access: _Optional[_Union[VolumeAccess, str]] = ..., native_memory_blob: _Optional[_Union[_runtime_pb2.BlobReference, _Mapping]] = ...) -> None: ...
 
 class VolumeObjectGrant(_message.Message):
     __slots__ = ("volume", "key", "blob", "presigned")
