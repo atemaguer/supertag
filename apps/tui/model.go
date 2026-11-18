@@ -319,8 +319,11 @@ type model struct {
 	// its section could not be read, filtered for the terminal.
 	objectives    []*views.Objective
 	objectivesErr string
-	inbox         client.Inbox
-	inboxErr      string
+	// closedObjectives are the Objectives a conversation created that are no longer open, read
+	// once each, so the conversation can say how they ended.
+	closedObjectives map[string]*views.Objective
+	inbox            client.Inbox
+	inboxErr         string
 
 	// cursor is the rail row under the cursor; it picks what the main pane shows.
 	cursor int
@@ -685,6 +688,16 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(again, m.selectTag(), focusCmd)
 
+	case closedObjectiveMsg:
+		if msg.err == nil && msg.objective != nil {
+			if m.closedObjectives == nil {
+				m.closedObjectives = map[string]*views.Objective{}
+			}
+			m.closedObjectives[msg.objective.GetId()] = msg.objective
+			m.refresh()
+		}
+		return m, nil
+
 	case objectivesMsg:
 		var again tea.Cmd
 		if m.objReload.done() {
@@ -697,7 +710,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.objectives, m.objectivesErr = msg.objectives, ""
 		m.placeCursor()
 		m.refresh()
-		return m, again
+		return m, tea.Batch(again, m.readClosedObjectives())
 
 	case objectiveSentMsg:
 		return m, m.objectiveMessageSent(msg)
@@ -834,7 +847,9 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, next
 
 	case historyMsg:
-		return m, m.showHistory(msg)
+		cmd := m.showHistory(msg)
+		// A conversation that created Objectives now closed says how they ended.
+		return m, tea.Batch(cmd, m.readClosedObjectives())
 
 	case sentMsg:
 		return m, m.runtimeSent(msg)

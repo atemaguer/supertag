@@ -202,6 +202,13 @@ func (m model) renderTranscript(c *conversation, tag, name string, width int) st
 				written++
 			}
 			w.write(t.cache[i])
+			if e.kind == entryReply {
+				if objective := createdObjectiveID(e.text); objective != "" {
+					if line := m.objectiveHomeLine(objective); line != "" {
+						w.write(faint.Render(wrap.Render(line)) + "\n")
+					}
+				}
+			}
 			if i == 0 && e.kind == entryYou && id != "" && id == lastYou && len(queued) == 0 {
 				w.write(m.deliveryLine(turn) + "\n")
 				if line := waitLine(turn, width); line != "" {
