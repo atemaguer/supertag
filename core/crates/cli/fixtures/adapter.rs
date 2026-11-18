@@ -3,6 +3,7 @@ mod budget;
 mod checkpoints;
 mod commit_reviews;
 mod coordination;
+mod journey;
 mod partition_calls;
 mod tag_sessions;
 
@@ -589,6 +590,9 @@ async fn main() -> Result<()> {
         task.prompt,
         task.allowed_actions.join(",")
     );
+    if journey::enabled() {
+        result = journey::exercise(&bootstrap, &run, &task).await?;
+    }
     if std::env::args().any(|arg| arg == "--report-environment") {
         // Names only: a fixture result must never carry a credential value.
         let mut names = std::env::vars_os()

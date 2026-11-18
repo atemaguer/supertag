@@ -56,6 +56,18 @@ uv run --with PyYAML==6.0.3 python -m unittest discover -s scripts -p 'test_*.py
 python3 scripts/release_version.py --check
 ```
 
+After changes to Workspaces, delivery, landing, Work Sessions, or a harness adapter, run the
+end-to-end journeys on a disposable `supertag up`: local, continuation, remote, merge, and merge
+conflict. They use the fixture adapter, so no model is called. Add `--harness codex` or
+`--harness claude-code` to run that harness with this machine's own login, which spends about a
+dozen small turns:
+
+```sh
+cargo build --manifest-path core/Cargo.toml -p supertag-cli --features test-fixtures \
+  --bin supertag --bin supertag-fixture-adapter
+SUPERTAG_E2E_BINARY=core/target/debug/supertag python3 scripts/test_e2e_journeys.py
+```
+
 ## Notes
 
 - If a gate cannot run in your environment, say so explicitly and state what you verified
