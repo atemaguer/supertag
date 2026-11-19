@@ -2253,10 +2253,22 @@ async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
         "{printed}"
     );
     assert_eq!(shared.supervisor.child.id(), supervisor);
-    let log = fs::read_to_string(shared.state.join("logs/hosts/shared.log")).unwrap_or_default();
+    // The Worklet resizes its pool when it reads the new size, just after `up` returns.
+    let log = timeout(WAIT, async {
+        loop {
+            let log =
+                fs::read_to_string(shared.state.join("logs/hosts/shared.log")).unwrap_or_default();
+            if log.contains("codex-2 did not start and stays stopped") {
+                break log;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await;
     ensure!(
-        log.contains("codex-2 did not start and stays stopped"),
-        "{log}"
+        log.is_ok(),
+        "{}",
+        fs::read_to_string(shared.state.join("logs/hosts/shared.log")).unwrap_or_default()
     );
     let fourth = submit(&mut operator, &token, "coder", "Task-c4").await?;
     settled(&mut operator, &token, &fourth, TaskState::Succeeded).await?;
