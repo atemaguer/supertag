@@ -1,9 +1,9 @@
 //! Pushes a conversation's changes to the clients following it.
 //!
-//! A write that can change a conversation signals [`Live`] after it commits. Each follow then
-//! checks the operator watch feed for a notice about its Tag's Tasks or messages since it last
-//! read, and reads only when there is one. The database stays the truth: a follow that misses a
-//! signal finds the change on its next check, at most [`RECHECK`] later.
+//! Each follow subscribes to its Tag's notices on the replica's bus (see [`crate::bus`]) and reads
+//! the conversation only when the tail delivers one, so an idle follow does no database work. The
+//! database stays the truth: the tail reads the operator watch feed, where every change to a
+//! conversation's messages or turns lands, whether or not its write published a hint.
 use std::{
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
@@ -22,9 +22,6 @@ use crate::{Store, StoreError, store::Result};
 
 /// The most time between heartbeats.
 const HEARTBEAT: Duration = Duration::from_secs(15);
-/// How often a follow checks the feed without a signal, for changes made outside a signalled
-/// write, such as an expired Attempt lease.
-const RECHECK: Duration = Duration::from_secs(2);
 /// How long a queued turn waits before the follow says why. Most turns start at once.
 const WAIT_DELAY_MS: i64 = 2_000;
 /// How often the follow reads again why a turn still waits.
@@ -44,10 +41,10 @@ pub(crate) struct Live {
     pub(crate) closing: CancellationToken,
 }
 
-impl Default for Live {
-    fn default() -> Self {
+impl Live {
+    pub(crate) fn new(postgres: bool) -> Self {
         Self {
-            bus: Default::default(),
+            bus: crate::bus::Bus::new(postgres),
             text_changes: tokio::sync::watch::Sender::new(0),
             texts: Default::default(),
             claims: Default::default(),
@@ -82,24 +79,6 @@ impl Store {
         self.live.closing.cancel();
     }
 
-    /// The feed's head, and whether a notice after `after` up to it concerns the Tag's Tasks or
-    /// conversation messages. A position the feed no longer holds counts as a change.
-    async fn conversation_changed_since(&self, tag_id: &str, after: i64) -> Result<(i64, bool)> {
-        let (head, floor, found): (i64, i64, Option<i64>) = sqlx::query_as(
-            "SELECT s.head, s.floor, (
-                 SELECT n.position FROM supertag_v2_watch_notices n
-                 WHERE n.position > $1 AND n.tag_id = $2 AND n.kind IN ($3, $4) LIMIT 1)
-             FROM supertag_v2_watch_state s WHERE s.singleton = 1",
-        )
-        .bind(after)
-        .bind(tag_id)
-        .bind(WatchKind::Task as i64)
-        .bind(WatchKind::ConversationMessage as i64)
-        .fetch_one(&self.pool)
-        .await?;
-        Ok((head, found.is_some() || after < floor || after > head))
-    }
-
     /// Follows `principal`'s conversation with a Tag; see `Conversations.FollowConversation`.
     pub async fn follow_conversation(
         &self,
@@ -114,13 +93,14 @@ impl Store {
             conversation_id: input.conversation_id,
             refresh_task_ids: input.refresh_task_ids,
         };
-        // Refuses what ListMessages refuses before the stream opens.
-        let (mut position, _) = self.conversation_changed_since(&read.tag_id, 0).await?;
+        // Subscribe, then read, then apply: notices at or below the head read before the first
+        // page are already in it. Refuses what ListMessages refuses before the stream opens.
+        let feed = self.follow_feed(&read.tag_id).await?;
+        let mut seen = self.feed_head().await?;
         let first = self.list_messages(principal, &read).await?;
         let store = self.clone();
         let operator = principal.starts_with("operator:");
         let principal = principal.to_owned();
-        let mut changes = self.live.bus.changes.subscribe();
         let mut text_changes = self.live.text_changes.subscribe();
         let closing = self.live.closing.clone();
         let output = async_stream::try_stream! {
@@ -153,29 +133,30 @@ impl Store {
                     .then(|| waits.next_check(&copy, store.execution_now_ms()))
                     .flatten();
                 let deadline = (last_emit + HEARTBEAT)
-                    .min(Instant::now() + RECHECK)
                     .min(wait_check.unwrap_or_else(|| Instant::now() + HEARTBEAT));
                 let wake = tokio::select! {
                     biased;
                     _ = closing.cancelled() => Wake::Draining,
-                    _ = changes.changed() => Wake::Stored,
+                    wake = feed.wait() => Wake::Stored(wake),
                     _ = text_changes.changed() => Wake::Text,
                     _ = tokio::time::sleep_until(deadline) => Wake::Timer,
                 };
-                match wake {
+                let changed = match wake {
                     Wake::Draining => Err(draining())?,
+                    Wake::Stored(wake) => {
+                        // A notice at or below what the last read started from is in it.
+                        let changed = wake.gap || wake.through > seen;
+                        seen = seen.max(wake.through);
+                        changed
+                    }
                     // Text the Tag is writing needs no read, unless its message was recorded:
                     // then the message and the cleared text go out together.
-                    Wake::Text if !texts.cleared(&store.live.texts) => continue,
-                    _ => {}
-                }
-                let (head, changed) = store
-                    .conversation_changed_since(&read.tag_id, position)
-                    .await
-                    .map_err(Status::from)?;
-                position = head;
+                    Wake::Text => texts.cleared(&store.live.texts),
+                    Wake::Timer => false,
+                };
                 if changed || wait_check.is_some_and(|at| at <= Instant::now()) {
                     read.refresh_task_ids = copy.unfinished();
+                    store.live.bus.stream_reads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     page = Some(store.list_messages(&principal, &read).await.map_err(Status::from)?);
                 }
             }
@@ -186,7 +167,7 @@ impl Store {
 
 enum Wake {
     Draining,
-    Stored,
+    Stored(crate::bus::Wake),
     Text,
     Timer,
 }

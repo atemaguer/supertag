@@ -111,7 +111,7 @@ impl HeldClaims {
 
 impl Store {
     /// The operator watch feed's head; it moves with every Task created or changed.
-    async fn feed_head(&self) -> Result<i64> {
+    pub(crate) async fn feed_head(&self) -> Result<i64> {
         Ok(
             sqlx::query_scalar("SELECT head FROM supertag_v2_watch_state WHERE singleton = 1")
                 .fetch_one(&self.pool)

@@ -495,7 +495,7 @@ impl Store {
             audit_sink: None,
             migrated: (version > 0 && version < SCHEMA_VERSION)
                 .then_some((version, SCHEMA_VERSION)),
-            live: Arc::default(),
+            live: Arc::new(crate::conversations::Live::new(!sqlite)),
             time_zone: crate::schedules::default_zone(),
         })
     }

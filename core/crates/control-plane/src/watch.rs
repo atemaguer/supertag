@@ -1,5 +1,5 @@
 //! Transactional operator notices. Task events remain in their own replay log.
-use std::{pin::Pin, time::Duration};
+use std::{collections::VecDeque, pin::Pin, sync::Arc, time::Duration};
 
 use sqlx::Row;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
@@ -8,30 +8,29 @@ use tokio_stream::Stream;
 use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 
-use crate::{ControlPlane, Store, store::Result as StoreResult};
+use crate::{ControlPlane, Store, bus::Delivery, store::Result as StoreResult};
 
-const PAGE_SIZE: i64 = 128;
+pub(crate) const PAGE_SIZE: i64 = 128;
 const RETAINED: i64 = 10_000;
-const POLL: Duration = Duration::from_millis(300);
 const HEARTBEAT: Duration = Duration::from_secs(15);
 
 type Updates = Pin<Box<dyn Stream<Item = Result<WatchEvent, Status>> + Send>>;
 
-struct Notice {
-    position: i64,
-    owner: String,
-    change: WatchChange,
+pub(crate) struct Notice {
+    pub(crate) position: i64,
+    pub(crate) owner: String,
+    pub(crate) change: WatchChange,
 }
 
-struct Page {
-    feed_id: String,
-    head: i64,
-    floor: i64,
-    notices: Vec<Notice>,
+pub(crate) struct Page {
+    pub(crate) feed_id: String,
+    pub(crate) head: i64,
+    pub(crate) floor: i64,
+    pub(crate) notices: Vec<Notice>,
 }
 
 impl Store {
-    async fn watch_page(&self, after: i64) -> StoreResult<Page> {
+    pub(crate) async fn watch_page(&self, after: i64) -> StoreResult<Page> {
         // A single read snapshot keeps retention boundaries and the page consistent.
         let rows = sqlx::query(
             "WITH page AS (
@@ -192,6 +191,15 @@ impl operator_events_server::OperatorEvents for OperatorWatch {
         let cursor = Cursor::parse(&input.resume_token)?;
         let store = self.plane.store.clone();
         let shutdown = self.shutdown.clone();
+        // Subscribe before the first read; what the tail delivers at or below the position read
+        // is dropped. The tail lets through what this Watch may show without reading the store.
+        let scope = principal.clone();
+        let mut feed = store
+            .watch_feed(move |notice| {
+                follows(mask, notice.change.kind)
+                    && (notice.owner.is_empty() || crate::store::sees_owner(&scope, &notice.owner))
+            })
+            .await?;
         let mut page = tokio::select! {
             _ = shutdown.cancelled() => return Err(draining()),
             result = store.watch_page(cursor.as_ref().map_or(i64::MAX, |cursor| cursor.position)) => result?,
@@ -216,6 +224,11 @@ impl operator_events_server::OperatorEvents for OperatorWatch {
                 established = true;
                 yield frame(&feed_id, position, initial);
             }
+            // Whether the last read of the store reached its head: then the Watch follows the
+            // tail, and otherwise reads the store again from its position.
+            let mut caught_up = (page.notices.len() as i64) < PAGE_SIZE;
+            let mut pending: VecDeque<Arc<Notice>> =
+                std::mem::take(&mut page.notices).into_iter().map(Arc::new).collect();
             loop {
                 if shutdown.is_cancelled() {
                     Err(draining())?;
@@ -226,7 +239,7 @@ impl operator_events_server::OperatorEvents for OperatorWatch {
                     last_emit = Instant::now();
                     yield frame(&feed_id, position, Update::Resync(WatchResync {}));
                 }
-                for notice in std::mem::take(&mut page.notices) {
+                while let Some(notice) = pending.pop_front() {
                     if notice.position <= position {
                         continue;
                     }
@@ -245,26 +258,49 @@ impl operator_events_server::OperatorEvents for OperatorWatch {
                         }
                         established = true;
                         last_emit = Instant::now();
-                        yield frame(&feed_id, position, Update::Change(notice.change));
+                        yield frame(&feed_id, position, Update::Change(notice.change.clone()));
                     }
                 }
-                if (!established && position >= page.head) || last_emit.elapsed() >= HEARTBEAT {
+                if (!established && caught_up) || last_emit.elapsed() >= HEARTBEAT {
                     established = true;
                     last_emit = Instant::now();
                     yield frame(&feed_id, position, Update::Heartbeat(WatchHeartbeat {}));
                 }
-                if position >= page.head {
-                    let waited = tokio::select! {
+                if !caught_up {
+                    let read = tokio::select! {
                         _ = shutdown.cancelled() => Err(draining()),
-                        _ = tokio::time::sleep(POLL) => Ok(()),
+                        result = store.watch_page(position) => result.map_err(Status::from),
                     };
-                    waited?;
+                    page = read?;
+                    store.live.bus.stream_reads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    caught_up = (page.notices.len() as i64) < PAGE_SIZE;
+                    pending.extend(std::mem::take(&mut page.notices).into_iter().map(Arc::new));
+                    continue;
                 }
-                let read = tokio::select! {
+                let delivery = tokio::select! {
                     _ = shutdown.cancelled() => Err(draining()),
-                    result = store.watch_page(position) => result.map_err(Status::from),
+                    delivery = feed.next() => Ok(Some(delivery)),
+                    _ = tokio::time::sleep_until(last_emit + HEARTBEAT) => Ok(None),
                 };
-                page = read?;
+                match delivery? {
+                    Some(Delivery::Notice(notice)) => {
+                        pending.push_back(notice);
+                        while let Some(delivery) = feed.try_next() {
+                            match delivery {
+                                Delivery::Notice(notice) => pending.push_back(notice),
+                                Delivery::Gap => caught_up = false,
+                            }
+                        }
+                    }
+                    Some(Delivery::Gap) => caught_up = false,
+                    // Before a heartbeat, the token moves past what the tail read that this
+                    // Watch does not show, so a reconnect does not read it again.
+                    None => {
+                        if let Some(through) = feed.passed() {
+                            position = position.max(through);
+                        }
+                    }
+                }
             }
         };
         Ok(Response::new(Box::pin(output)))

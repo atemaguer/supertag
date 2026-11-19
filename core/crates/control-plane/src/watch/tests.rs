@@ -153,8 +153,10 @@ async fn contract(url: &str) -> anyhow::Result<()> {
         slow.next().await.transpose()?.unwrap().update,
         Some(Update::Heartbeat(_))
     ));
+    // More notices than a Watch holds undelivered, so the slow one reads the store again.
+    let bulk = crate::bus::QUEUE as i64 + PAGE_SIZE + 2;
     let (mut tx, _) = store.write().await?;
-    for number in 0..PAGE_SIZE + 2 {
+    for number in 0..bulk {
         sqlx::query("INSERT INTO supertag_v2_tags (tag_id,instructions,allowed_actions,revision) VALUES ($1,'x','[]',1)")
             .bind(format!("bulk-{number}")).execute(&mut *tx).await?;
     }
@@ -175,7 +177,7 @@ async fn contract(url: &str) -> anyhow::Result<()> {
     .await??;
     assert_eq!(
         resynced,
-        Some(format!("v1.{}.{}", page.feed_id, page.head + PAGE_SIZE + 2))
+        Some(format!("v1.{}.{}", page.feed_id, page.head + bulk))
     );
     private_work_sessions(&watch, SECRET, parent).await?;
     memory_notes(store).await?;
