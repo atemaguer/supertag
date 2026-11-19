@@ -35,6 +35,9 @@ within the pre-1.0 compatibility policy described in
   Workspaces to the form.
 - On PostgreSQL, each Control Plane replica's stream push `LISTEN` connection now gets the same
   TCP keepalives and idle limits as its pool's connections, so PostgreSQL probes it too.
+- A Worker whose connection to the data endpoint times out now logs `the data endpoint URL is
+  unreachable: connection timed out after 5s`, naming the endpoint as a refused connection does,
+  instead of tonic's bare `timed out`.
 
 ### Changed
 

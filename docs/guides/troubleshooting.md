@@ -175,7 +175,8 @@ Plane. When it cannot connect, the Task stays running with no new events, and
 a data call will be retried: the data endpoint https://gateway.example:3434 is unreachable: Connection refused
 ```
 
-The Worker keeps retrying while the Task Attempt's lease lasts. Locally, check that `supertag ps`
+`connection timed out after 5s` in place of `Connection refused` means nothing answered at that
+address, for example a firewall dropping the connection. The Worker keeps retrying while the Task Attempt's lease lasts. Locally, check that `supertag ps`
 shows `gateway` running, and run `supertag up` if it stopped. For a shared deployment, make the
 Gateway's listener reachable from every Worker Host at that exact URL, with a certificate the
 hosts trust, or correct `SUPERTAG_DATA_ENDPOINT` and restart the Control Plane. Worker Hosts

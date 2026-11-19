@@ -116,6 +116,7 @@ impl Target {
                 port,
                 proxy: None,
                 named: None,
+                connect_timeout: None,
                 tunnel: Some(Tunnel {
                     url: Arc::new(parsed),
                     outer,
@@ -145,9 +146,20 @@ impl Target {
     /// The same target, with every connection it cannot open reported as `what` at its URL,
     /// such as `the data endpoint https://gateway.example:3434 is unreachable: Connection
     /// refused`. The call still fails `Unavailable`, so callers retry it as before.
+    ///
+    /// A dial that outlasts the endpoint's connect timeout is reported the same way (`...
+    /// is unreachable: connection timed out after 5s`): the dial (TCP, any proxy `CONNECT`,
+    /// and any WebSocket upgrade) gets that timeout, and the endpoint's own TLS handshake
+    /// after it gets as long again, so tonic's unnamed timeout is only its backstop.
     pub fn named(mut self, what: &str) -> Result<Self, Error> {
         let named = format!("{what} {}", self.url().trim_end_matches('/'));
-        self.dialer()?.named = Some(named.into());
+        let connect_timeout = self.endpoint.get_connect_timeout();
+        if let Some(timeout) = connect_timeout {
+            self.endpoint = self.endpoint.connect_timeout(timeout * 2);
+        }
+        let dialer = self.dialer()?;
+        dialer.named = Some(named.into());
+        dialer.connect_timeout = connect_timeout;
         Ok(self)
     }
 
@@ -176,6 +188,7 @@ impl Target {
             port,
             proxy: None,
             named: None,
+            connect_timeout: None,
             tunnel: None,
         }))
     }
@@ -308,6 +321,8 @@ struct Dialer {
     proxy: Option<Arc<proxy::Server>>,
     /// What a failed dial reports itself as; see [`Target::named`].
     named: Option<Arc<str>>,
+    /// How long a named dial may take before it fails as timed out; see [`Target::named`].
+    connect_timeout: Option<Duration>,
     tunnel: Option<Tunnel>,
 }
 
@@ -321,7 +336,18 @@ struct Tunnel {
 impl Dialer {
     async fn dial(self) -> io::Result<TokioIo<Dialed>> {
         let named = self.named.clone();
-        self.open().await.map_err(|error| match named {
+        let opened = match self.connect_timeout {
+            Some(timeout) => tokio::time::timeout(timeout, self.open())
+                .await
+                .unwrap_or_else(|_| {
+                    Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        format!("connection timed out after {timeout:?}"),
+                    ))
+                }),
+            None => self.open().await,
+        };
+        opened.map_err(|error| match named {
             Some(named) => io::Error::new(error.kind(), format!("{named} is unreachable: {error}")),
             None => error,
         })
@@ -581,6 +607,43 @@ mod tests {
             status
                 .message()
                 .starts_with(&format!("the data endpoint {url} is unreachable: ")),
+            "{status:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_named_target_says_which_endpoint_timed_out() {
+        // Accepts TCP but never answers the WebSocket upgrade, so the dial hangs.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let _accepting = tokio::spawn(async move {
+            let mut held = vec![];
+            while let Ok((stream, _)) = listener.accept().await {
+                held.push(stream);
+            }
+        });
+        let url = format!("ws://127.0.0.1:{port}");
+        let endpoint = Endpoint::from_shared(format!("http://127.0.0.1:{port}"))
+            .unwrap()
+            .connect_timeout(Duration::from_millis(300));
+        let target = Target::tunnel(&url, endpoint, None)
+            .unwrap()
+            .named("the data endpoint")
+            .unwrap();
+        let mut client =
+            supertag_protocol::v2::worker_host_client::WorkerHostClient::new(target.connect_lazy());
+        let status = tokio::time::timeout(
+            Duration::from_secs(5),
+            client.append_event(supertag_protocol::v2::AppendEventRequest::default()),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Unavailable, "{status:?}");
+        assert!(
+            status.message().starts_with(&format!(
+                "the data endpoint {url} is unreachable: connection timed out after 300ms"
+            )),
             "{status:?}"
         );
     }

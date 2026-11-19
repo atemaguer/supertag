@@ -79,7 +79,8 @@ transport settings: the same URL rules, TLS trust, client certificate, and proxy
 connection to the Control Plane and no fallback to it.
 
 When the data endpoint is unreachable, each data call fails with `the data endpoint URL is
-unreachable: REASON` and is retried, as calls to an unreachable Control Plane are. The Worker
+unreachable: REASON`, where REASON is, for example, `Connection refused` or `connection timed out
+after 5s`, and is retried, as calls to an unreachable Control Plane are. The Worker
 logs `a data call will be retried` with that reason once per call, and keeps retrying while the
 Task Attempt's lease lasts. A Worker whose calls before launch keep failing hands its Task
 Attempt back to the Worklet, which starts the next Worker after a wait that doubles from one second
