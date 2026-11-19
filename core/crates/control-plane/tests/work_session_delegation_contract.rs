@@ -114,9 +114,8 @@ fn finish(attempt: &InspectAttemptRequest) -> FinishTaskRequest {
     }
 }
 
-fn delegate(attempt: &InspectAttemptRequest, target: &str) -> StartWorkSessionRequest {
+fn delegate(target: &str) -> StartWorkSessionRequest {
     StartWorkSessionRequest {
-        attempt: Some(attempt.clone()),
         operation_id: format!("delegate-{target}"),
         title: "Verify the patch".into(),
         instruction: "Inspect the checkout".into(),
@@ -232,7 +231,10 @@ async fn assert_delegated_gates(store: &Store, objective: &Objective, host: &Hos
         .unwrap();
     let parent = run(store, host, &parent.task_id, OWNER_HARNESS, None).await;
     let work = store
-        .start_work_session(host, &delegate(&parent, "builder"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(host, &parent),
+            &delegate("builder"),
+        )
         .await
         .unwrap();
     let task = store.get_task(&work.latest_task_id).await.unwrap();
@@ -338,7 +340,10 @@ async fn contract(url: &str) {
         .unwrap();
     let attempt = run(&store, &owner_host, &ordinary.task_id, OWNER_HARNESS, None).await;
     match store
-        .start_work_session(&owner_host, &delegate(&attempt, "builder"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&owner_host, &attempt),
+            &delegate("builder"),
+        )
         .await
     {
         Err(StoreError::FailedPrecondition(reason)) => {
@@ -391,7 +396,10 @@ async fn contract(url: &str) {
     )
     .await;
     match store
-        .start_work_session(&owner_host, &delegate(&owner, "outsider"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&owner_host, &owner),
+            &delegate("outsider"),
+        )
         .await
     {
         Err(StoreError::FailedPrecondition(reason)) => {
@@ -402,15 +410,21 @@ async fn contract(url: &str) {
         }
         other => panic!("{other:?}"),
     }
-    let request = delegate(&owner, "builder");
+    let request = delegate("builder");
     assert!(matches!(
-        store.start_work_session(&owner_host, &request).await,
+        store
+            .start_work_session(
+                &supertag_control_plane::AttemptAccess::new(&owner_host, &owner),
+                &request
+            )
+            .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     let builder_host = register(&store, "builder-host").await;
+    let access = supertag_control_plane::AttemptAccess::new(&owner_host, &owner);
     let (work, replay) = tokio::join!(
-        store.start_work_session(&owner_host, &request),
-        store.start_work_session(&owner_host, &request),
+        store.start_work_session(&access, &request),
+        store.start_work_session(&access, &request),
     );
     let work = work.unwrap();
     assert_eq!(work, replay.unwrap());
@@ -489,7 +503,10 @@ async fn contract(url: &str) {
     .await;
     assert!(matches!(
         store
-            .start_work_session(&builder_host, &delegate(&child, "owner"))
+            .start_work_session(
+                &supertag_control_plane::AttemptAccess::new(&builder_host, &child),
+                &delegate("owner")
+            )
             .await,
         Err(StoreError::PermissionDenied)
     ));
@@ -521,7 +538,6 @@ async fn contract(url: &str) {
     assert!(report.instructions.contains("Owner instructions"));
     let report_attempt = run(&store, &owner_host, &first_report, OWNER_HARNESS, None).await;
     let continuation = ContinueWorkSessionRequest {
-        attempt: Some(report_attempt.clone()),
         operation_id: "continue-builder".into(),
         work_session_id: work.work_session_id.clone(),
         message: "Verify one more condition".into(),
@@ -529,7 +545,10 @@ async fn contract(url: &str) {
 
     let team = change_members(&store, &team, &["owner"], "remove-builder").await;
     match store
-        .continue_work_session(&owner_host, &continuation)
+        .continue_work_session(
+            &supertag_control_plane::AttemptAccess::new(&owner_host, &report_attempt),
+            &continuation,
+        )
         .await
     {
         Err(StoreError::FailedPrecondition(reason)) => {
@@ -542,7 +561,10 @@ async fn contract(url: &str) {
     }
     assert_eq!(
         store
-            .start_work_session(&owner_host, &request)
+            .start_work_session(
+                &supertag_control_plane::AttemptAccess::new(&owner_host, &owner),
+                &request
+            )
             .await
             .unwrap()
             .latest_task_id,
@@ -552,7 +574,10 @@ async fn contract(url: &str) {
     store.revoke_host("builder-host").await.unwrap();
     assert!(matches!(
         store
-            .continue_work_session(&owner_host, &continuation)
+            .continue_work_session(
+                &supertag_control_plane::AttemptAccess::new(&owner_host, &report_attempt),
+                &continuation
+            )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
@@ -567,7 +592,10 @@ async fn contract(url: &str) {
         .unwrap();
     assert!(matches!(
         store
-            .continue_work_session(&owner_host, &continuation)
+            .continue_work_session(
+                &supertag_control_plane::AttemptAccess::new(&owner_host, &report_attempt),
+                &continuation
+            )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
@@ -585,7 +613,10 @@ async fn contract(url: &str) {
     execution.efforts = vec!["low".into()];
     store.put_tag_spec(builder).await.unwrap();
     let continued = store
-        .continue_work_session(&owner_host, &continuation)
+        .continue_work_session(
+            &supertag_control_plane::AttemptAccess::new(&owner_host, &report_attempt),
+            &continuation,
+        )
         .await
         .unwrap();
     assert_eq!(continued.tag_id, "builder");

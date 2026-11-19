@@ -77,6 +77,12 @@ pub const OPERATOR_TOKEN_SECRET_PREFIX: &str = "stop_";
 pub const AUTH_KEY_SECRET_PREFIX: &str = "stak_";
 /// Every enrolled credential (host, Gateway or client) starts with this prefix.
 pub const CREDENTIAL_SECRET_PREFIX: &str = "stcr_";
+/// Every Attempt credential, which `WorkerHost.StartTask` returns for one Task Attempt's data
+/// calls, starts with this prefix.
+pub const ATTEMPT_CREDENTIAL_SECRET_PREFIX: &str = "stat_";
+/// The internal principal of a call made with an Attempt credential: this prefix and the
+/// credential's SHA-256 in lowercase hex. The state owner resolves it on every call.
+pub const ATTEMPT_PRINCIPAL_PREFIX: &str = "attempt:";
 
 /// True when the text is `prefix` and 64 lowercase hex digits.
 pub fn is_secret(prefix: &str, value: &str) -> bool {

@@ -35,7 +35,7 @@ impl attempt_changed_paths_server::AttemptChangedPaths for Api {
         &self,
         request: Request<ReportChangedPathsRequest>,
     ) -> Result<Response<ReportChangedPathsResponse>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             attempt_changed_paths_client::AttemptChangedPathsClient::new(channel)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)
@@ -52,7 +52,7 @@ impl attempt_effects_server::AttemptEffects for Api {
         &self,
         request: Request<BeginEffectRequest>,
     ) -> Result<Response<EffectReceipt>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             effects(channel).begin(request).await
         })
         .await
@@ -62,7 +62,7 @@ impl attempt_effects_server::AttemptEffects for Api {
         &self,
         request: Request<CompleteEffectRequest>,
     ) -> Result<Response<EffectReceipt>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             effects(channel).complete(request).await
         })
         .await
@@ -72,7 +72,7 @@ impl attempt_effects_server::AttemptEffects for Api {
         &self,
         request: Request<FailEffectRequest>,
     ) -> Result<Response<EffectReceipt>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             effects(channel).fail(request).await
         })
         .await

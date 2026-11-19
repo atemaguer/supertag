@@ -63,9 +63,8 @@ async fn finish(s: &Store, h: &HostAuthority, a: &InspectAttemptRequest) {
     .await
     .unwrap();
 }
-fn start(a: &InspectAttemptRequest, op: &str) -> StartWorkSessionRequest {
+fn start(op: &str) -> StartWorkSessionRequest {
     StartWorkSessionRequest {
-        attempt: Some(a.clone()),
         operation_id: op.into(),
         title: "Budget fixture".into(),
         instruction: "Read fixture".into(),
@@ -81,9 +80,8 @@ async fn usage(
     cost: Option<u64>,
 ) {
     s.report_attempt_usage(
-        h,
+        &supertag_control_plane::AttemptAccess::new(h, a),
         &ReportAttemptUsageRequest {
-            attempt: Some(a.clone()),
             sequence,
             native_usage: Some(NativeTokenUsage {
                 input_tokens: tokens / 2,
@@ -130,16 +128,34 @@ async fn ordinary(url: &str) {
             .await
             .unwrap();
         let a = run(&s, &h, &p.task_id).await;
-        let request = start(&a, "one");
+        let request = start("one");
         let child = if maximum == 1 {
-            let child = s.start_work_session(&h, &request).await.unwrap();
-            assert_eq!(s.start_work_session(&h, &request).await.unwrap(), child);
+            let child = s
+                .start_work_session(
+                    &supertag_control_plane::AttemptAccess::new(&h, &a),
+                    &request,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                s.start_work_session(
+                    &supertag_control_plane::AttemptAccess::new(&h, &a),
+                    &request
+                )
+                .await
+                .unwrap(),
+                child
+            );
             Some(child)
         } else {
             None
         };
         assert!(matches!(
-            s.start_work_session(&h, &start(&a, "excess")).await,
+            s.start_work_session(
+                &supertag_control_plane::AttemptAccess::new(&h, &a),
+                &start("excess")
+            )
+            .await,
             Err(StoreError::FailedPrecondition(_))
         ));
         finish(&s, &h, &a).await;
@@ -169,10 +185,19 @@ async fn ordinary(url: &str) {
     let a = run(&s, &h, &p.task_id).await;
     usage(&s, &h, &a, 1, 1000, Some(50)).await;
     usage(&s, &h, &a, 2, 2000, None).await;
-    let first_req = start(&a, "first");
-    let one = s.start_work_session(&h, &first_req).await.unwrap();
+    let first_req = start("first");
+    let one = s
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&h, &a),
+            &first_req,
+        )
+        .await
+        .unwrap();
     let two = s
-        .start_work_session(&h, &start(&a, "second"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&h, &a),
+            &start("second"),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -186,7 +211,12 @@ async fn ordinary(url: &str) {
     );
     usage(&s, &h, &a, 3, 2500, Some(100)).await;
     assert_eq!(
-        s.start_work_session(&h, &first_req).await.unwrap(),
+        s.start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&h, &a),
+            &first_req
+        )
+        .await
+        .unwrap(),
         one,
         "exact receipt is immutable after spend"
     );
@@ -245,9 +275,8 @@ async fn ordinary(url: &str) {
     let zero = run(&s, &h, &zero.task_id).await;
     assert!(matches!(
         s.continue_work_session(
-            &h,
+            &supertag_control_plane::AttemptAccess::new(&h, &zero),
             &ContinueWorkSessionRequest {
-                attempt: Some(zero.clone()),
                 operation_id: "deny-continuation".into(),
                 work_session_id: one.work_session_id.clone(),
                 message: "Cannot continue".into()
@@ -275,9 +304,8 @@ async fn ordinary(url: &str) {
     usage(&s, &h, &n, 1, 500, Some(25)).await;
     let continued = s
         .continue_work_session(
-            &h,
+            &supertag_control_plane::AttemptAccess::new(&h, &n),
             &ContinueWorkSessionRequest {
-                attempt: Some(n.clone()),
                 operation_id: "answer".into(),
                 work_session_id: one.work_session_id,
                 message: "Continue with new allowance".into(),
@@ -295,7 +323,11 @@ async fn ordinary(url: &str) {
     );
     assert!(
         matches!(
-            s.start_work_session(&h, &start(&n, "over-one")).await,
+            s.start_work_session(
+                &supertag_control_plane::AttemptAccess::new(&h, &n),
+                &start("over-one")
+            )
+            .await,
             Err(StoreError::FailedPrecondition(_))
         ),
         "Start and Continue share the one-child bound"
@@ -361,7 +393,13 @@ async fn objective(url: &str) {
         1000
     );
     let a = run(&s, &h, &o.starting_task_id).await;
-    let one = s.start_work_session(&h, &start(&a, "first")).await.unwrap();
+    let one = s
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&h, &a),
+            &start("first"),
+        )
+        .await
+        .unwrap();
     finish(&s, &h, &a).await;
     let c = run(&s, &h, &one.latest_task_id).await;
     usage(&s, &h, &c, 1, 10, Some(600)).await;
@@ -384,7 +422,10 @@ async fn objective(url: &str) {
     );
     let r = run(&s, &h, &report).await;
     let two = s
-        .start_work_session(&h, &start(&r, "second"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&h, &r),
+            &start("second"),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -419,7 +460,11 @@ async fn objective(url: &str) {
     );
     let r = run(&s, &h, &report).await;
     assert!(matches!(
-        s.start_work_session(&h, &start(&r, "too-small")).await,
+        s.start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&h, &r),
+            &start("too-small")
+        )
+        .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     usage(&s, &h, &r, 1, 10, Some(30)).await;
@@ -526,9 +571,8 @@ async fn unenforced_cost(url: &str) {
     .await
     .unwrap();
     s.report_attempt_usage(
-        &h,
+        &supertag_control_plane::AttemptAccess::new(&h, &a),
         &ReportAttemptUsageRequest {
-            attempt: Some(a.clone()),
             sequence: 1,
             native_usage: None,
             amount_minor: Some(1200),

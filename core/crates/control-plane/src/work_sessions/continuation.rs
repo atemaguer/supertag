@@ -1,4 +1,5 @@
 //! A later parent turn may continue settled work under the same accepted permissions.
+use crate::AttemptAccess;
 use prost::Message;
 
 use super::*;
@@ -179,13 +180,11 @@ pub(super) async fn budget_in(tx: &mut Transaction<'_, Any>, parent: &Task) -> R
 impl Store {
     pub async fn continue_work_session(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &ContinueWorkSessionRequest,
     ) -> Result<WorkSession> {
-        let attempt = input
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Attempt identity is required"))?;
+        let host = authority.host();
+        let attempt = authority.lease();
         name("operation ID", &input.operation_id)?;
         name("Work Session ID", &input.work_session_id)?;
         let message = input.message.trim();

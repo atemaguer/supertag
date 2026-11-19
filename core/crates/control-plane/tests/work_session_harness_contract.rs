@@ -72,13 +72,8 @@ async fn claim(
     Some(attempt)
 }
 
-fn start(
-    attempt: &InspectAttemptRequest,
-    operation: &str,
-    harness: &str,
-) -> StartWorkSessionRequest {
+fn start(operation: &str, harness: &str) -> StartWorkSessionRequest {
     StartWorkSessionRequest {
-        attempt: Some(attempt.clone()),
         operation_id: operation.into(),
         title: "Review on another harness".into(),
         instruction: "Read the fixture".into(),
@@ -158,7 +153,10 @@ async fn contract(url: String) {
     let lead = claim(&store, &codex, HarnessKind::Codex).await.unwrap();
     assert_eq!(lead.task_id, parent.task_id);
     let started = store
-        .start_work_session(&codex, &start(&lead, "claude", "claude-code"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&codex, &lead),
+            &start("claude", "claude-code"),
+        )
         .await
         .unwrap();
     let child = store.get_task(&started.latest_task_id).await.unwrap();
@@ -173,7 +171,10 @@ async fn contract(url: String) {
     );
     // A retried start returns the same Work Session.
     let retried = store
-        .start_work_session(&codex, &start(&lead, "claude", "claude-code"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&codex, &lead),
+            &start("claude", "claude-code"),
+        )
         .await
         .unwrap();
     assert_eq!(retried.work_session_id, started.work_session_id);
@@ -181,10 +182,15 @@ async fn contract(url: String) {
     for harness in [None, Some("cursor")] {
         let changed = StartWorkSessionRequest {
             harness: harness.map(Into::into),
-            ..start(&lead, "claude", "claude-code")
+            ..start("claude", "claude-code")
         };
         assert!(matches!(
-            store.start_work_session(&codex, &changed).await,
+            store
+                .start_work_session(
+                    &supertag_control_plane::AttemptAccess::new(&codex, &lead),
+                    &changed
+                )
+                .await,
             Err(StoreError::Conflict(_))
         ));
     }
@@ -208,12 +214,18 @@ async fn contract(url: String) {
     // plain start.
     assert!(matches!(
         store
-            .start_work_session(&codex, &start(&lead, "unknown", "gemini"))
+            .start_work_session(
+                &supertag_control_plane::AttemptAccess::new(&codex, &lead),
+                &start("unknown", "gemini")
+            )
             .await,
         Err(StoreError::InvalidArgument(_))
     ));
     let missing = store
-        .start_work_session(&codex, &start(&lead, "opencode", "opencode"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&codex, &lead),
+            &start("opencode", "opencode"),
+        )
         .await;
     assert!(
         matches!(&missing, Err(StoreError::FailedPrecondition(reason))
@@ -221,7 +233,10 @@ async fn contract(url: String) {
         "{missing:?}"
     );
     let same = store
-        .start_work_session(&codex, &start(&lead, "same", "codex"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&codex, &lead),
+            &start("same", "codex"),
+        )
         .await
         .unwrap();
     let same = store.get_task(&same.latest_task_id).await.unwrap();
@@ -243,7 +258,10 @@ async fn contract(url: String) {
     let attempt = claim(&store, &codex, HarnessKind::Codex).await.unwrap();
     assert_eq!(attempt.task_id, builder.task_id);
     let mismatched = store
-        .start_work_session(&codex, &start(&attempt, "cursor", "cursor"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&codex, &attempt),
+            &start("cursor", "cursor"),
+        )
         .await;
     assert!(
         matches!(&mismatched, Err(StoreError::FailedPrecondition(reason))

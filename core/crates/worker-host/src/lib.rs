@@ -107,11 +107,14 @@ impl Interceptor for HostHeaders {
 pub(crate) type RegisteredHost = WorkerHostClient<InterceptedService<Channel, HostHeaders>>;
 pub(crate) type RegisteredInputs = AttemptInputsClient<InterceptedService<Channel, HostHeaders>>;
 /// The Attempt-scoped data clients a Worker's harness bridge and setup relay its calls through:
-/// Mailbox, Workstreams, Memory, Tag and Work Sessions, Schedules, Effects, Task files, artifact
-/// acquisition, and Workspace mounts. The Worklet builds them on its channel and also records
-/// its Volume write-back through `workspace_mounts`. The host's own storage is `HostStorage`.
+/// the data half of `WorkerHost`, Mailbox, Workstreams, Memory, Tag and Work Sessions,
+/// Schedules, Effects, Task files, artifact captures and acquisition, and Workspace mounts. The
+/// Worklet builds them on its channel; they hold no credential, and every call carries the
+/// Attempt credential. The Worklet's finalization records its Volume write-back and output
+/// captures through them with that credential too. The host's own storage is `HostStorage`.
 #[derive(Clone)]
 pub(crate) struct AttemptClients {
+    attempt: worklet::authority::AttemptClient,
     acquisitions: AttemptArtifactsClient<InterceptedService<Channel, HostHeaders>>,
     workspace_mounts: AttemptWorkspaceMountsClient<InterceptedService<Channel, HostHeaders>>,
     workstreams: AttemptWorkstreamsClient<InterceptedService<Channel, HostHeaders>>,

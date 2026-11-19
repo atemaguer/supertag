@@ -80,10 +80,15 @@ pub(crate) fn reasons(error: &anyhow::Error, secrets: &[SensitiveValue]) -> Vec<
     reasons
 }
 
-/// The values `error`'s reasons must not carry: this host's, the Attempt's lease token, and those
-/// its marker names.
-fn secrets(error: &anyhow::Error, host_token: &str, lease_token: &str) -> Vec<SensitiveValue> {
-    let mut secrets = crate::worker::adapter::host_secrets(&[host_token, lease_token]);
+/// The values `error`'s reasons must not carry: this host's, the Attempt's lease token and
+/// credential, and those its marker names.
+fn secrets(error: &anyhow::Error, credentials: &[&str]) -> Vec<SensitiveValue> {
+    let credentials = credentials
+        .iter()
+        .copied()
+        .filter(|credential| !credential.is_empty())
+        .collect::<Vec<_>>();
+    let mut secrets = crate::worker::adapter::host_secrets(&credentials);
     if let Some(marker) = error.downcast_ref::<CleanupUnconfirmed>() {
         secrets.extend(marker.secrets.iter().cloned());
     }
@@ -100,7 +105,13 @@ pub(crate) async fn report(
 ) {
     let message = ReportCleanupFailureRequest {
         attempt: Some(attempt.inspect()),
-        reasons: reasons(error, &secrets(error, token, &attempt.lease_token)),
+        reasons: reasons(
+            error,
+            &secrets(
+                error,
+                &[token, &attempt.lease_token, &attempt.attempt_credential],
+            ),
+        ),
     };
     let Ok(mut request) = authenticated_request(message, token, None) else {
         return;
@@ -160,7 +171,7 @@ mod tests {
                 SensitiveValue::High("bootstrap-5678".into()),
             ]))
             .context("Task t Attempt a needs recovery with lease-9012");
-        let secrets = secrets(&error, "host-token-3456", "lease-9012");
+        let secrets = secrets(&error, &["host-token-3456", "lease-9012"]);
         assert_eq!(
             reasons(&error, &secrets),
             [

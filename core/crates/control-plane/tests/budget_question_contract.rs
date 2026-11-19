@@ -54,9 +54,8 @@ async fn contract(url: &str) {
             .unwrap();
         store
             .report_attempt_usage(
-                &host,
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
                 &ReportAttemptUsageRequest {
-                    attempt: Some(attempt.clone()),
                     sequence: 1,
                     amount_minor: Some(900),
                     currency: Some("USD".into()),
@@ -67,9 +66,8 @@ async fn contract(url: &str) {
             .unwrap();
         store
             .ask_question(
-                &host,
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
                 &AskQuestionRequest {
-                    attempt: Some(attempt.clone()),
                     operation_id: "question".into(),
                     text: "Which release should I inspect?".into(),
                 },

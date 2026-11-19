@@ -95,16 +95,13 @@ impl Bridge {
             stream.sent_bytes = stream.raw.len();
             stream.shown.clone_from(&text);
             PublishTaskTextRequest {
-                task_id: self.task_id().into(),
-                attempt_id: self.assignment.attempt_id.clone(),
-                lease_token: self.assignment.lease_token.clone(),
                 after_sequence: stream.after_sequence,
                 revision: stream.revision,
                 text,
             }
         };
         let mut host = self.host.clone();
-        let token = self.host_token.clone();
+        let token = self.attempt_token.clone();
         tokio::spawn(async move {
             let Ok(mut request) = authenticated_request(upstream, &token, None) else {
                 return;

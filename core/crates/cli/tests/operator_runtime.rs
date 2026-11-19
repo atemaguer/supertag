@@ -260,16 +260,19 @@ async fn captured_artifact_survives_control_plane_restart_with_private_metadata(
         attempt_id: assignment.attempt_id,
         lease_token: assignment.lease_token,
     };
-    host.start_task(artifact_host_request(
-        StartTaskRequest {
-            task_id: attempt.task_id.clone(),
-            attempt_id: attempt.attempt_id.clone(),
-            lease_token: attempt.lease_token.clone(),
-        },
-        &host_token,
-        generation,
-    )?)
-    .await?;
+    let credential = host
+        .start_task(artifact_host_request(
+            StartTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+            },
+            &host_token,
+            generation,
+        )?)
+        .await?
+        .into_inner()
+        .attempt_credential;
 
     let bytes = b"artifact bytes kept on the Worker Host, never on the Control Plane";
     let mut held =
@@ -277,7 +280,6 @@ async fn captured_artifact_survives_control_plane_restart_with_private_metadata(
     let blob = held.hold(&attempt.attempt_id, bytes);
     let empty = held.hold(&attempt.attempt_id, b"");
     let capture = CommitArtifactCaptureRequest {
-        attempt: Some(attempt.clone()),
         operation_id: "capture".into(),
         description: Some(ArtifactDescription {
             title: "Evidence".into(),
@@ -300,13 +302,13 @@ async fn captured_artifact_survives_control_plane_restart_with_private_metadata(
     };
     let mut catalog = artifact_catalog_client::ArtifactCatalogClient::new(alice.clone());
     // A capture must name the host's registered storage, which holds the bytes.
-    let error = artifact_host_request(
+    let error = authenticated_request(
         CommitArtifactCaptureRequest {
             source_storage_id: Some(Uuid::new_v4().to_string()),
             ..capture.clone()
         },
-        &host_token,
-        generation,
+        &credential,
+        None,
     )?;
     let error = attempt_artifacts_client::AttemptArtifactsClient::new(alice)
         .commit_capture(error)
@@ -325,7 +327,7 @@ async fn captured_artifact_survives_control_plane_restart_with_private_metadata(
             .artifacts
             .is_empty()
     );
-    let captured = held.commit(capture.clone()).await?;
+    let captured = held.commit(&credential, capture.clone()).await?;
     assert_eq!(captured.files.len(), 2);
     control_plane_holds_no_artifact_bytes(&database, bytes).await?;
 
@@ -359,7 +361,7 @@ async fn captured_artifact_survives_control_plane_restart_with_private_metadata(
     assert_eq!(restored.files, captured.files);
     // The bytes stay with the Worker Host: a reconnected host's repeated commit is the same capture.
     held.reconnect(channel(&endpoint).await?);
-    assert_eq!(held.commit(capture).await?, captured);
+    assert_eq!(held.commit(&credential, capture).await?, captured);
     control.kill().await?;
     Ok(())
 }

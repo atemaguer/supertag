@@ -67,6 +67,7 @@ impl Attempt {
             task_id: task.task_id,
             attempt_id: assignment.attempt_id,
             lease_token: assignment.lease_token,
+            attempt_credential: String::new(),
             execution_selection: task
                 .attempt_execution
                 .map(|selection| selection.encode_to_vec()),

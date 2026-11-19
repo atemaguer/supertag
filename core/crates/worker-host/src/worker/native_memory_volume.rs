@@ -22,7 +22,6 @@ use supertag_protocol::{
         AdvanceNativeMemoryRequest, AssignedVolume, BlobReference, InspectAttemptRequest,
         NativeMemoryGrant, NativeMemoryVolumeHead, VolumeAccess, VolumeObjectGrantRequest,
         VolumeObjectPurpose, attempt_memory_client::AttemptMemoryClient,
-        volume_objects_client::VolumeObjectsClient,
     },
 };
 use tonic::{service::interceptor::InterceptedService, transport::Channel};
@@ -37,14 +36,15 @@ use crate::{
 /// How many times a turn merges onto a head another turn moved before giving up.
 const ATTEMPTS: usize = 5;
 
-type Objects = VolumeObjectsClient<InterceptedService<Channel, HostHeaders>>;
 type Memory = AttemptMemoryClient<InterceptedService<Channel, HostHeaders>>;
 
 /// What the host needs to reach the Tag's Volume for one Attempt.
 #[derive(Clone)]
 pub(crate) struct Access {
-    pub objects: Objects,
+    /// The Worklet's Volume object grants, as the host.
+    pub objects: crate::worklet::volume_objects::VolumeObjects,
     pub memory: Memory,
+    /// The Attempt credential its memory calls carry.
     pub token: String,
     pub attempt: InspectAttemptRequest,
     pub volume: AssignedVolume,
@@ -92,13 +92,10 @@ impl Access {
             native_memory_blob: Some(blob.clone()),
             ..Default::default()
         };
-        Ok(self
-            .objects
-            .clone()
-            .grant(authenticated_request(request, &self.token, None)?)
+        self.objects
+            .grant(request)
             .await
-            .map_err(|status| anyhow!("native memory Volume grant: {}", status.message()))?
-            .into_inner())
+            .map_err(|status| anyhow!("native memory Volume grant: {}", status.message()))
     }
 
     fn object<'a>(
@@ -251,7 +248,6 @@ impl Prepared {
             let manifest_bytes = serde_json::to_vec(&manifest)?;
             let manifest_blob = access.store(&manifest_bytes).await?;
             let request = AdvanceNativeMemoryRequest {
-                attempt: Some(access.attempt.clone()),
                 expected_revision: head.as_ref().map_or(0, |head| head.revision),
                 manifest: Some(manifest_blob),
                 files: merged.len() as u32,

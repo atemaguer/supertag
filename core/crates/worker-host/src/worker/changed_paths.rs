@@ -6,10 +6,7 @@ use std::time::Duration;
 use supertag_protocol::{
     authenticated_request,
     changed_paths::{MAX_CHANGED_PATHS, reportable_path},
-    v2::{
-        InspectAttemptRequest, ReportChangedPathsRequest,
-        attempt_changed_paths_client::AttemptChangedPathsClient,
-    },
+    v2::{ReportChangedPathsRequest, attempt_changed_paths_client::AttemptChangedPathsClient},
 };
 use supertag_workspaces::Checkout;
 use tokio::time;
@@ -32,7 +29,6 @@ fn interval() -> Duration {
 
 pub(crate) async fn report(
     mut client: AttemptChangedPathsClient<InterceptedService<Channel, HostHeaders>>,
-    attempt: InspectAttemptRequest,
     token: String,
     checkout: Checkout,
     stop: CancellationToken,
@@ -59,7 +55,6 @@ pub(crate) async fn report(
         }
         let Ok(mut request) = authenticated_request(
             ReportChangedPathsRequest {
-                attempt: Some(attempt.clone()),
                 paths: changed.0.clone(),
                 truncated: changed.1,
             },

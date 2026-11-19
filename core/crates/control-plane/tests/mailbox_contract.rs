@@ -31,6 +31,8 @@ async fn start(store: &Store, host: &HostAuthority, attempt: &InspectAttemptRequ
         )
         .await
         .unwrap()
+        .task
+        .unwrap()
 }
 async fn finish(
     store: &Store,
@@ -63,9 +65,8 @@ async fn post(
 ) -> PostAttemptWorkstreamResponse {
     store
         .post_attempt_workstream(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, attempt),
             &PostAttemptWorkstreamRequest {
-                attempt: Some(attempt.clone()),
                 operation_id: operation.into(),
                 body: text.into(),
                 to_tag_ids: recipients.iter().map(|s| (*s).into()).collect(),
@@ -275,7 +276,9 @@ async fn durable_delivery(url: &str) {
     // No person waits on an inbox turn, so it may finish quietly.
     assert!(
         store
-            .attempt_capabilities(&recipient, &first)
+            .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(
+                &recipient, &first
+            ))
             .await
             .unwrap()
             .may_stay_quiet
@@ -298,12 +301,14 @@ async fn durable_delivery(url: &str) {
             .all(|m| m.task_id.as_deref() == Some(&first.task_id))
     );
     let read = ReadMailboxRequest {
-        attempt: Some(first.clone()),
         ..Default::default()
     };
     assert_eq!(
         store
-            .read_attempt_mailbox(&recipient, &read)
+            .read_attempt_mailbox(
+                &supertag_control_plane::AttemptAccess::new(&recipient, &first),
+                &read
+            )
             .await
             .unwrap()
             .messages
@@ -311,7 +316,12 @@ async fn durable_delivery(url: &str) {
         3
     );
     assert!(matches!(
-        store.read_attempt_mailbox(&other, &read).await,
+        store
+            .read_attempt_mailbox(
+                &supertag_control_plane::AttemptAccess::new(&other, &first),
+                &read
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
     assert!(matches!(
@@ -658,13 +668,17 @@ async fn bounded_batches_and_hops(url: &str) {
     );
     assert_eq!(start(&store, &host, &source).await.session_id, session);
     let denied = PostAttemptWorkstreamRequest {
-        attempt: Some(source.clone()),
         operation_id: "relay-denied".into(),
         body: body.into(),
         to_tag_ids: vec![to.into()],
     };
     assert!(matches!(
-        store.post_attempt_workstream(&host, &denied).await,
+        store
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &source),
+                &denied
+            )
+            .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     assert!(

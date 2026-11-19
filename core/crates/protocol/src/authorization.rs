@@ -24,6 +24,8 @@ pub const ENROLL: u16 = 1 << 6;
 pub const INTERNAL: u16 = 1 << 7;
 /// Served by a Worker Host or Gateway on its own listener; never by the Control Plane.
 pub const PEER_LOCAL: u16 = 1 << 8;
+/// An Attempt credential: the data calls of the one Task Attempt it names, while its lease lives.
+pub const ATTEMPT: u16 = 1 << 9;
 
 const O: u16 = OPERATOR;
 const OC: u16 = OPERATOR | CLIENT;
@@ -109,7 +111,6 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     // A network log names the origins and paths of other people's Tasks.
     ("NetworkLogs", "List", O),
     ("TaskFiles", "Locate", OC),
-    ("AttemptTaskFiles", "*", HOST),
     ("ObjectiveOverviews", "*", O),
     ("ObjectiveOverviews", "GetObjectiveOverview", OC),
     ("OperatorEvents", "*", O),
@@ -132,35 +133,43 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     ("Inbox", "GetApproval", OC),
     ("Inbox", "ListApprovals", OC),
     ("Inbox", "DecideApproval", OC),
-    // Execution.
+    // Execution: a Worker Host's registration, claims, and leases, with its host credential.
     ("WorkerHost", "*", HOST),
     // Landings of deliveries the calling Worker Host holds.
     ("HostLandings", "*", HOST),
-    // A restarted host reclaiming an Attempt it proved stopped, and the limits its adapter
-    // confirmed: only the Worker Host that holds the Attempt.
-    ("WorkerHost", "ReclaimAttempt", HOST),
-    ("WorkerHost", "ReportAppliedLimits", HOST),
-    ("WorkerHost", "ReportCleanupFailure", HOST),
-    ("WorkerHost", "ReportNetworkLog", HOST),
-    ("AttemptInputs", "*", HOST),
-    ("AttemptWorkstreams", "*", HOST),
-    ("AttemptMailbox", "*", HOST),
-    // A root turn reads its own Tag's Sessions and Objectives through its Worker Host.
-    ("AttemptTagSessions", "*", HOST),
-    ("AttemptSchedules", "*", HOST),
-    ("AttemptMemory", "*", HOST),
-    ("AttemptWorkSessions", "*", HOST),
-    ("AttemptMcpEffects", "*", HOST),
-    ("AttemptChangedPaths", "*", HOST),
-    ("AttemptEffects", "*", HOST),
-    ("AttemptWorkspaceMounts", "*", HOST),
-    // A read-write Workspace copy's write-back summary, from the Attempt's own Worker Host.
-    ("AttemptWorkspaceMounts", "RecordWrites", HOST),
-    ("AttemptArtifacts", "*", HOST),
     // One object on the Tag's Volume, for a live Attempt of the calling Worker Host.
     ("VolumeObjects", "*", HOST),
     ("Transfers", "*", HOST),
     ("WorkspaceGitAccess", "*", HOST),
+    // The artifact storage a Worker Host serves its peers from, for the host as a whole.
+    ("ArtifactSources", "*", HOST),
+    // A running Attempt's data calls, with the Attempt credential StartTask returned. Each names
+    // that one Attempt, and none takes or changes a lease.
+    ("WorkerHost", "AppendEvent", ATTEMPT),
+    ("WorkerHost", "PublishText", ATTEMPT),
+    ("WorkerHost", "AskQuestion", ATTEMPT),
+    ("WorkerHost", "ReportAttemptUsage", ATTEMPT),
+    ("WorkerHost", "ReportNetworkLog", ATTEMPT),
+    ("WorkerHost", "GetAttemptHistory", ATTEMPT),
+    ("WorkerHost", "GetContextPins", ATTEMPT),
+    ("WorkerHost", "CommitContextResolution", ATTEMPT),
+    ("WorkerHost", "ReportAttemptMilestone", ATTEMPT),
+    ("WorkerHost", "GetAttemptCapabilities", ATTEMPT),
+    ("AttemptInputs", "*", ATTEMPT),
+    ("AttemptWorkstreams", "*", ATTEMPT),
+    ("AttemptMailbox", "*", ATTEMPT),
+    // A root turn reads its own Tag's Sessions and Objectives.
+    ("AttemptTagSessions", "*", ATTEMPT),
+    ("AttemptSchedules", "*", ATTEMPT),
+    ("AttemptMemory", "*", ATTEMPT),
+    ("AttemptWorkSessions", "*", ATTEMPT),
+    ("AttemptMcpEffects", "*", ATTEMPT),
+    ("AttemptChangedPaths", "*", ATTEMPT),
+    ("AttemptEffects", "*", ATTEMPT),
+    // Includes a read-write Workspace copy's write-back summary.
+    ("AttemptWorkspaceMounts", "*", ATTEMPT),
+    ("AttemptTaskFiles", "*", ATTEMPT),
+    ("AttemptArtifacts", "*", ATTEMPT),
     // Surfaces.
     ("Connector", "*", GATEWAY),
     ("ReplyProgress", "*", GATEWAY),
@@ -210,6 +219,7 @@ pub fn allowed_roles(path: &str) -> Vec<&'static str> {
         (CLIENT, "client"),
         (OPEN, "unauthenticated"),
         (ENROLL, "auth-key"),
+        (ATTEMPT, "attempt"),
     ]
     .into_iter()
     .filter(|(bit, _)| access & bit != 0)
@@ -302,9 +312,16 @@ mod tests {
         assert_eq!(roles("WorkerHost/ReclaimAttempt"), ["host"]);
         assert_eq!(roles("WorkerHost/ReportAppliedLimits"), ["host"]);
         assert_eq!(roles("WorkerHost/ReportCleanupFailure"), ["host"]);
-        assert_eq!(roles("WorkerHost/ReportNetworkLog"), ["host"]);
+        assert_eq!(roles("WorkerHost/StartTask"), ["host"]);
+        assert_eq!(roles("WorkerHost/RenewAttempt"), ["host"]);
+        assert_eq!(roles("WorkerHost/FinishTask"), ["host"]);
+        assert_eq!(roles("WorkerHost/ReportNetworkLog"), ["attempt"]);
+        assert_eq!(roles("WorkerHost/AppendEvent"), ["attempt"]);
+        assert_eq!(roles("WorkerHost/GetContextPins"), ["attempt"]);
         assert_eq!(roles("NetworkLogs/List"), ["operator"]);
-        assert_eq!(roles("AttemptWorkspaceMounts/RecordWrites"), ["host"]);
+        assert_eq!(roles("AttemptWorkspaceMounts/RecordWrites"), ["attempt"]);
+        assert_eq!(roles("AttemptMailbox/SendMessage"), ["attempt"]);
+        assert_eq!(roles("ArtifactSources/RegisterArtifactSource"), ["host"]);
         assert_eq!(roles("WorkspaceVolumes/Put"), ["operator"]);
         assert_eq!(
             roles("ManifestRelationships/ReconcileManifestFields"),
@@ -312,7 +329,7 @@ mod tests {
         );
         assert_eq!(roles("WorkerHost/GetCheckpoint"), ["host"]);
         assert_eq!(roles("HostLandings/Claim"), ["host"]);
-        assert_eq!(roles("AttemptArtifacts/CommitCapture"), ["host"]);
+        assert_eq!(roles("AttemptArtifacts/CommitCapture"), ["attempt"]);
         assert_eq!(roles("Transfers/CommitWorkspace"), ["host"]);
         assert_eq!(roles("Connector/AcceptEvent"), ["gateway"]);
         assert_eq!(roles("OperatorNotifications/Claim"), ["gateway"]);
@@ -330,6 +347,40 @@ mod tests {
             "NoSuchService/Call",
         ] {
             assert!(roles(internal).is_empty(), "{internal}");
+        }
+    }
+
+    /// An Attempt credential reaches exactly the `Attempt*` services and the data half of
+    /// `WorkerHost`; a host credential reaches none of them, and nothing else admits either.
+    #[test]
+    fn attempt_and_host_credentials_split_the_worker_host_api() {
+        let set = prost_types::FileDescriptorSet::decode(crate::FILE_DESCRIPTOR_SET)
+            .expect("compiled descriptors");
+        const DATA: &[&str] = &[
+            "AppendEvent",
+            "PublishText",
+            "AskQuestion",
+            "ReportAttemptUsage",
+            "ReportNetworkLog",
+            "GetAttemptHistory",
+            "GetContextPins",
+            "CommitContextResolution",
+            "ReportAttemptMilestone",
+            "GetAttemptCapabilities",
+        ];
+        for service in set.file.iter().flat_map(|file| &file.service) {
+            let name = service.name();
+            for method in &service.method {
+                let access = access(name, method.name()).unwrap_or(0);
+                let data = name.starts_with("Attempt")
+                    || (name == "WorkerHost" && DATA.contains(&method.name()));
+                let path = format!("{name}/{}", method.name());
+                if data {
+                    assert_eq!(access, ATTEMPT, "{path} is a data call");
+                } else {
+                    assert_eq!(access & ATTEMPT, 0, "{path} admits an Attempt credential");
+                }
+            }
         }
     }
 
@@ -351,6 +402,8 @@ mod tests {
         for path in [
             "WorkerHost/ClaimTask",
             "WorkerHost/GetCheckpoint",
+            "WorkerHost/AppendEvent",
+            "AttemptMailbox/SendMessage",
             "Connector/ClaimConnector",
             "ReplyProgress/Claim",
             "OperatorNotifications/Claim",

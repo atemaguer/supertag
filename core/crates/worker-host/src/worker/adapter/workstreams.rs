@@ -66,7 +66,6 @@ impl HarnessWorkstreams for Bridge {
         // Reads are repeated freely; a post carries an operation ID the Control
         // Plane replays, so both ride out a Control Plane partition within authority.
         let upstream = ReadAttemptWorkstreamRequest {
-            attempt: Some(self.attempt()),
             after_sequence: input.after_sequence,
             limit: input.limit,
             cursor: input.cursor,
@@ -91,7 +90,6 @@ impl HarnessWorkstreams for Bridge {
         }
         let input = request.into_inner();
         let upstream = PostAttemptWorkstreamRequest {
-            attempt: Some(self.attempt()),
             operation_id: input.operation_id,
             body: self.redact(&input.body),
             to_tag_ids: input.to_tag_ids,
@@ -129,7 +127,6 @@ impl HarnessMailbox for Bridge {
         let input = request.into_inner();
         // The Control Plane replays a send by its operation ID.
         let upstream = SendAttemptTagMessageRequest {
-            attempt: Some(self.attempt()),
             operation_id: input.operation_id,
             recipient_tag_id: input.recipient_tag_id,
             text: self.redact(&input.text),
@@ -156,7 +153,6 @@ impl HarnessMailbox for Bridge {
         }
         let input = request.into_inner();
         let upstream = ReadMailboxRequest {
-            attempt: Some(self.attempt()),
             limit: input.limit,
             cursor: input.cursor,
         };

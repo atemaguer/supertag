@@ -4,25 +4,18 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { InspectAttemptRequest } from "./runtime_pb.js";
-import { file_supertag_runtime_v2_runtime } from "./runtime_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file supertag/runtime/v2/changed_paths.proto.
  */
 export const file_supertag_runtime_v2_changed_paths: GenFile = /*@__PURE__*/
-  fileDesc("CidzdXBlcnRhZy9ydW50aW1lL3YyL2NoYW5nZWRfcGF0aHMucHJvdG8SE3N1cGVydGFnLnJ1bnRpbWUudjIiegoZUmVwb3J0Q2hhbmdlZFBhdGhzUmVxdWVzdBI7CgdhdHRlbXB0GAEgASgLMiouc3VwZXJ0YWcucnVudGltZS52Mi5JbnNwZWN0QXR0ZW1wdFJlcXVlc3QSDQoFcGF0aHMYAiADKAkSEQoJdHJ1bmNhdGVkGAMgASgIIk8KGlJlcG9ydENoYW5nZWRQYXRoc1Jlc3BvbnNlEh8KF292ZXJsYXBwaW5nX2F0dGVtcHRfaWRzGAEgAygJEhAKCGNvbXBhcmVkGAIgASgIMoABChNBdHRlbXB0Q2hhbmdlZFBhdGhzEmkKBlJlcG9ydBIuLnN1cGVydGFnLnJ1bnRpbWUudjIuUmVwb3J0Q2hhbmdlZFBhdGhzUmVxdWVzdBovLnN1cGVydGFnLnJ1bnRpbWUudjIuUmVwb3J0Q2hhbmdlZFBhdGhzUmVzcG9uc2ViBnByb3RvMw", [file_supertag_runtime_v2_runtime]);
+  fileDesc("CidzdXBlcnRhZy9ydW50aW1lL3YyL2NoYW5nZWRfcGF0aHMucHJvdG8SE3N1cGVydGFnLnJ1bnRpbWUudjIiTAoZUmVwb3J0Q2hhbmdlZFBhdGhzUmVxdWVzdBINCgVwYXRocxgCIAMoCRIRCgl0cnVuY2F0ZWQYAyABKAhKBAgBEAJSB2F0dGVtcHQiTwoaUmVwb3J0Q2hhbmdlZFBhdGhzUmVzcG9uc2USHwoXb3ZlcmxhcHBpbmdfYXR0ZW1wdF9pZHMYASADKAkSEAoIY29tcGFyZWQYAiABKAgygAEKE0F0dGVtcHRDaGFuZ2VkUGF0aHMSaQoGUmVwb3J0Ei4uc3VwZXJ0YWcucnVudGltZS52Mi5SZXBvcnRDaGFuZ2VkUGF0aHNSZXF1ZXN0Gi8uc3VwZXJ0YWcucnVudGltZS52Mi5SZXBvcnRDaGFuZ2VkUGF0aHNSZXNwb25zZWIGcHJvdG8z");
 
 /**
  * @generated from message supertag.runtime.v2.ReportChangedPathsRequest
  */
 export type ReportChangedPathsRequest = Message<"supertag.runtime.v2.ReportChangedPathsRequest"> & {
-  /**
-   * @generated from field: supertag.runtime.v2.InspectAttemptRequest attempt = 1;
-   */
-  attempt?: InspectAttemptRequest | undefined;
-
   /**
    * Sorted, unique, Workspace-relative paths; at most 500.
    *

@@ -93,7 +93,6 @@ async fn capture(
         .unwrap();
     let request = CommitArtifactCaptureRequest {
         source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
-        attempt: Some(attempt.clone()),
         operation_id: operation.into(),
         description: Some(ArtifactDescription {
             title: format!("Evidence {operation}"),
@@ -111,10 +110,19 @@ async fn capture(
         ..Default::default()
     };
     store
-        .reserve_artifact_capture(host, &request)
+        .reserve_artifact_capture(
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
+            &request,
+        )
         .await
         .unwrap();
-    let result = store.commit_artifact_capture(host, &request).await.unwrap();
+    let result = store
+        .commit_artifact_capture(
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
+            &request,
+        )
+        .await
+        .unwrap();
     store
         .finish_task(
             host,
@@ -284,9 +292,8 @@ async fn exercise(url: &str) {
         .unwrap();
     store
         .commit_context_resolution(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
             &CommitContextResolutionRequest {
-                attempt: Some(attempt.clone()),
                 manifest: Some(ContextResolutionManifest::default()),
             },
         )
@@ -294,9 +301,8 @@ async fn exercise(url: &str) {
         .unwrap();
     let found = store
         .find_attempt_artifacts(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
             &FindAttemptArtifactsRequest {
-                attempt: Some(attempt.clone()),
                 ..Default::default()
             },
         )
@@ -306,9 +312,8 @@ async fn exercise(url: &str) {
     for (index, artifact) in artifacts.iter().enumerate() {
         let inspect = store
             .inspect_attempt_artifact(
-                &host,
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
                 &InspectAttemptArtifactRequest {
-                    attempt: Some(attempt.clone()),
                     artifact_id: artifact.summary.as_ref().unwrap().artifact_id.clone(),
                 },
             )
@@ -317,9 +322,8 @@ async fn exercise(url: &str) {
     }
     let acquired = store
         .acquire_artifact(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
             &AcquireArtifactRequest {
-                attempt: Some(attempt.clone()),
                 operation_id: "read".into(),
                 artifact_id: snapshot.artifacts[0].artifact_id.clone(),
                 paths: vec!["evidence.txt".into()],
@@ -351,9 +355,8 @@ async fn exercise(url: &str) {
     store.cancel_task(&same.task_id).await.unwrap();
     let child = store
         .start_work_session(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
             &StartWorkSessionRequest {
-                attempt: Some(attempt.clone()),
                 operation_id: "context-child".into(),
                 title: "Read the same evidence".into(),
                 instruction: "Inspect selected context".into(),
@@ -403,9 +406,8 @@ async fn exercise(url: &str) {
     assert_eq!(
         store
             .inspect_attempt_artifact(
-                &host,
+                &supertag_control_plane::AttemptAccess::new(&host, &child_attempt),
                 &InspectAttemptArtifactRequest {
-                    attempt: Some(child_attempt.clone()),
                     artifact_id: snapshot.artifacts[0].artifact_id.clone()
                 }
             )

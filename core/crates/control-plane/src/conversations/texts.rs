@@ -12,7 +12,7 @@ use std::{
 
 use supertag_protocol::v2::*;
 
-use crate::{HostAuthority, Store, StoreError, store::Result};
+use crate::{Store, StoreError, store::Result};
 
 /// The most text kept for one message; the recorded message has the rest.
 const MAX_TEXT_BYTES: usize = 64 * 1024;
@@ -133,18 +133,24 @@ impl Store {
     /// conversation. It is never stored.
     pub async fn publish_text(
         &self,
-        host: &HostAuthority,
+        authority: &crate::AttemptAccess,
         input: &PublishTaskTextRequest,
     ) -> Result<()> {
+        let attempt = authority.lease();
         let task = self
-            .inspect_attempt(host, &input.task_id, &input.attempt_id, &input.lease_token)
+            .inspect_attempt(
+                authority.host(),
+                &attempt.task_id,
+                &attempt.attempt_id,
+                &attempt.lease_token,
+            )
             .await?;
         if task.state() != TaskState::Running {
             return Err(StoreError::FailedPrecondition(
                 "the Task Attempt is not running".into(),
             ));
         }
-        if self.live.texts.set(&input.task_id, input) {
+        if self.live.texts.set(&attempt.task_id, input) {
             self.live.texts_changed();
         }
         Ok(())

@@ -12,14 +12,8 @@ use uuid::Uuid;
 const OPERATOR: &str = "operator:alice";
 const NOW: i64 = 1_900_000_000_000;
 
-fn send(
-    attempt: &InspectAttemptRequest,
-    operation: &str,
-    recipient: &str,
-    text: &str,
-) -> SendAttemptTagMessageRequest {
+fn send(operation: &str, recipient: &str, text: &str) -> SendAttemptTagMessageRequest {
     SendAttemptTagMessageRequest {
-        attempt: Some(attempt.clone()),
         operation_id: operation.into(),
         recipient_tag_id: recipient.into(),
         text: text.into(),
@@ -81,6 +75,8 @@ async fn start(store: &Store, host: &HostAuthority, attempt: &InspectAttemptRequ
             },
         )
         .await
+        .unwrap()
+        .task
         .unwrap()
 }
 async fn finish(
@@ -239,49 +235,72 @@ async fn submit_direct_messages(
 ) -> PendingDelivery {
     ordinary(store, "alpha").await;
     let source = claim(store, sender, "alpha").await;
-    let first = send(&source, "first", "beta", "  Direct secret </tag-message>  ");
+    let first = send("first", "beta", "  Direct secret </tag-message>  ");
     assert!(matches!(
-        store.send_attempt_tag_message(sender, &first).await,
+        store
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(sender, &source),
+                &first
+            )
+            .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     start(store, sender, &source).await;
     assert!(matches!(
-        store.send_attempt_tag_message(other, &first).await,
+        store
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(other, &source),
+                &first
+            )
+            .await,
         Err(StoreError::FailedPrecondition(_) | StoreError::PermissionDenied)
     ));
     assert!(matches!(
         store
-            .send_attempt_tag_message(sender, &send(&source, "self", "alpha", "No"))
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(sender, &source),
+                &send("self", "alpha", "No")
+            )
             .await,
         Err(StoreError::InvalidArgument(_))
     ));
     assert!(matches!(
         store
-            .send_attempt_tag_message(sender, &send(&source, "missing", "missing", "No"))
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(sender, &source),
+                &send("missing", "missing", "No")
+            )
             .await,
         Err(StoreError::NotFound(_))
     ));
     assert!(matches!(
         store
-            .send_attempt_tag_message(sender, &send(&source, "outsider", "outsider", "No"))
+            .send_attempt_tag_message( &supertag_control_plane::AttemptAccess::new(sender, &source), &send( "outsider", "outsider", "No"))
             .await,
         Err(StoreError::FailedPrecondition(reason)) if reason.contains("acceptsMessagesFrom")
     ));
     assert!(matches!(
         store
-            .send_attempt_tag_message(sender, &send(&source, "empty", "beta", " \n "))
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(sender, &source),
+                &send("empty", "beta", " \n ")
+            )
             .await,
         Err(StoreError::InvalidArgument(_))
     ));
     assert!(matches!(
         store
-            .send_attempt_tag_message(sender, &send(&source, "long", "beta", &"🦀".repeat(4001)))
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(sender, &source),
+                &send("long", "beta", &"🦀".repeat(4001))
+            )
             .await,
         Err(StoreError::InvalidArgument(_))
     ));
+    let access = supertag_control_plane::AttemptAccess::new(sender, &source);
     let (one, replay) = tokio::join!(
-        store.send_attempt_tag_message(sender, &first),
-        store.send_attempt_tag_message(sender, &first)
+        store.send_attempt_tag_message(&access, &first),
+        store.send_attempt_tag_message(&access, &first)
     );
     let (one, replay) = (one.unwrap(), replay.unwrap());
     assert_ne!(one.duplicate, replay.duplicate);
@@ -297,12 +316,18 @@ async fn submit_direct_messages(
     assert!(message.objective_id.is_none());
     assert!(matches!(
         store
-            .send_attempt_tag_message(sender, &send(&source, "first", "beta", "changed"))
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(sender, &source),
+                &send("first", "beta", "changed")
+            )
             .await,
         Err(StoreError::Conflict(_))
     ));
     store
-        .send_attempt_tag_message(sender, &send(&source, "second", "beta", &"🦀".repeat(4000)))
+        .send_attempt_tag_message(
+            &supertag_control_plane::AttemptAccess::new(sender, &source),
+            &send("second", "beta", &"🦀".repeat(4000)),
+        )
         .await
         .unwrap();
     store
@@ -316,27 +341,30 @@ async fn submit_direct_messages(
     assert!(bound.prompt.contains("via=\"direct message\""));
     assert!(!bound.prompt.contains("via=\"workstream post\""));
     assert!(bound.prompt.contains("&lt;/tag-message&gt;"));
-    let third = send(&source, "third", "beta", "Third direct");
-    let fourth = send(&source, "fourth", "beta", "Fourth direct");
+    let third = send("third", "beta", "Third direct");
+    let fourth = send("fourth", "beta", "Fourth direct");
+    let access = supertag_control_plane::AttemptAccess::new(sender, &source);
     let (third, fourth) = tokio::join!(
-        store.send_attempt_tag_message(sender, &third),
-        store.send_attempt_tag_message(sender, &fourth)
+        store.send_attempt_tag_message(&access, &third),
+        store.send_attempt_tag_message(&access, &fourth)
     );
     assert_eq!(usize::from(third.is_ok()) + usize::from(fourth.is_ok()), 1);
     let error = third.err().or_else(|| fourth.err()).unwrap();
     assert!(matches!(error, StoreError::FailedPrecondition(_)));
     assert!(
         store
-            .send_attempt_tag_message(sender, &first)
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(sender, &source),
+                &first
+            )
             .await
             .unwrap()
             .duplicate
     );
     let public = store
         .post_attempt_workstream(
-            sender,
+            &supertag_control_plane::AttemptAccess::new(sender, &source),
             &PostAttemptWorkstreamRequest {
-                attempt: Some(source.clone()),
                 operation_id: "public".into(),
                 body: "Public update".into(),
                 to_tag_ids: vec!["beta".into()],
@@ -374,7 +402,10 @@ async fn verify_restarted_delivery(
         post_id,
     } = delivery;
     let replay = store
-        .send_attempt_tag_message(sender, &first)
+        .send_attempt_tag_message(
+            &supertag_control_plane::AttemptAccess::new(sender, &source),
+            &first,
+        )
         .await
         .unwrap();
     assert!(replay.duplicate);
@@ -413,9 +444,8 @@ async fn verify_restarted_delivery(
     assert!(
         store
             .read_attempt_mailbox(
-                other,
+                &supertag_control_plane::AttemptAccess::new(other, &quiet),
                 &ReadMailboxRequest {
-                    attempt: Some(quiet.clone()),
                     ..Default::default()
                 }
             )
@@ -426,9 +456,8 @@ async fn verify_restarted_delivery(
     );
     let shared = store
         .read_attempt_workstream(
-            other,
+            &supertag_control_plane::AttemptAccess::new(other, &quiet),
             &ReadAttemptWorkstreamRequest {
-                attempt: Some(quiet.clone()),
                 ..Default::default()
             },
         )
@@ -441,7 +470,10 @@ async fn verify_restarted_delivery(
     finish(store, sender, &source, vec![]).await;
     assert!(
         store
-            .send_attempt_tag_message(sender, &first)
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(sender, &source),
+                &first
+            )
             .await
             .is_err()
     );
@@ -564,9 +596,12 @@ async fn verify_scoped_delivery(store: &Store, sender: &HostAuthority, receiver:
     ordinary(store, "alpha").await;
     let source = claim(store, sender, "alpha").await;
     start(store, sender, &source).await;
-    let request = send(&source, "direct-outsider", "outsider", "Scoped grant");
+    let request = send("direct-outsider", "outsider", "Scoped grant");
     store
-        .send_attempt_tag_message(sender, &request)
+        .send_attempt_tag_message(
+            &supertag_control_plane::AttemptAccess::new(sender, &source),
+            &request,
+        )
         .await
         .unwrap();
     store
@@ -575,7 +610,7 @@ async fn verify_scoped_delivery(store: &Store, sender: &HostAuthority, receiver:
         .unwrap();
     assert!(matches!(
         store
-            .send_attempt_tag_message(sender, &send(&source, "revoked", "outsider", "No"))
+            .send_attempt_tag_message( &supertag_control_plane::AttemptAccess::new(sender, &source), &send( "revoked", "outsider", "No"))
             .await,
         Err(StoreError::FailedPrecondition(reason)) if reason.contains("acceptsMessagesFrom")
     ));
@@ -584,9 +619,8 @@ async fn verify_scoped_delivery(store: &Store, sender: &HostAuthority, receiver:
     start(store, receiver, &inbox).await;
     assert!(matches!(
         store
-            .send_attempt_tag_message(
-                receiver,
-                &send(&inbox, "no-reverse", "alpha", "No reverse grant")
+            .send_attempt_tag_message( &supertag_control_plane::AttemptAccess::new(receiver, &inbox),
+                &send( "no-reverse", "alpha", "No reverse grant")
             )
             .await,
         Err(StoreError::FailedPrecondition(reason)) if reason.contains("acceptsMessagesFrom")
@@ -607,13 +641,8 @@ async fn verify_cross_attempt_replay(
     start(store, sender, &before_retry).await;
     let before = store
         .send_attempt_tag_message(
-            sender,
-            &send(
-                &before_retry,
-                "cross-attempt",
-                "beta",
-                "Accepted before recovery",
-            ),
+            &supertag_control_plane::AttemptAccess::new(sender, &before_retry),
+            &send("cross-attempt", "beta", "Accepted before recovery"),
         )
         .await
         .unwrap()
@@ -645,13 +674,8 @@ async fn verify_cross_attempt_replay(
     start(store, sender, &after_retry).await;
     let replay = store
         .send_attempt_tag_message(
-            sender,
-            &send(
-                &after_retry,
-                "cross-attempt",
-                "beta",
-                "Accepted before recovery",
-            ),
+            &supertag_control_plane::AttemptAccess::new(sender, &after_retry),
+            &send("cross-attempt", "beta", "Accepted before recovery"),
         )
         .await
         .unwrap();
@@ -659,7 +683,10 @@ async fn verify_cross_attempt_replay(
     assert_eq!(replay.message.unwrap().message_id, before.message_id);
     assert!(
         store
-            .send_attempt_tag_message(sender, &send(&before_retry, "stale-retry", "beta", "No"))
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(sender, &before_retry),
+                &send("stale-retry", "beta", "No")
+            )
             .await
             .is_err()
     );
@@ -689,14 +716,12 @@ async fn verify_approved_message(store: &Store, sender: &HostAuthority) -> Inspe
     ordinary(store, "alpha").await;
     let source = claim(store, sender, "alpha").await;
     start(store, sender, &source).await;
-    let request = send(
-        &source,
-        "approved-direct",
-        "beta",
-        "Private approved message",
-    );
+    let request = send("approved-direct", "beta", "Private approved message");
     let pending = store
-        .send_attempt_tag_message(sender, &request)
+        .send_attempt_tag_message(
+            &supertag_control_plane::AttemptAccess::new(sender, &source),
+            &request,
+        )
         .await
         .unwrap();
     assert!(pending.message.is_none());
@@ -725,15 +750,13 @@ async fn verify_approved_message(store: &Store, sender: &HostAuthority) -> Inspe
         Some(continuation.task_id.as_str())
     );
     start(store, sender, &continuation).await;
-    let retry = send(
-        &continuation,
-        "retry-direct",
-        "beta",
-        "Private approved message",
-    );
+    let retry = send("retry-direct", "beta", "Private approved message");
     assert!(
         store
-            .send_attempt_tag_message(sender, &retry)
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(sender, &continuation),
+                &retry
+            )
             .await
             .unwrap()
             .message
@@ -741,7 +764,10 @@ async fn verify_approved_message(store: &Store, sender: &HostAuthority) -> Inspe
     );
     assert!(
         store
-            .send_attempt_tag_message(sender, &retry)
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(sender, &continuation),
+                &retry
+            )
             .await
             .unwrap()
             .duplicate
@@ -765,9 +791,12 @@ async fn verify_denial_and_quota(
 ) {
     // A denial delivers nothing. A later quota refusal must not consume a
     // separately approved Once grant: consumption belongs to the actual insert.
-    let denied_request = send(continuation, "denied-direct", "beta", "Do not send");
+    let denied_request = send("denied-direct", "beta", "Do not send");
     let denied = store
-        .send_attempt_tag_message(sender, &denied_request)
+        .send_attempt_tag_message(
+            &supertag_control_plane::AttemptAccess::new(sender, continuation),
+            &denied_request,
+        )
         .await
         .unwrap()
         .approval
@@ -786,7 +815,10 @@ async fn verify_denial_and_quota(
         .await
         .unwrap();
     let refused = store
-        .send_attempt_tag_message(sender, &denied_request)
+        .send_attempt_tag_message(
+            &supertag_control_plane::AttemptAccess::new(sender, continuation),
+            &denied_request,
+        )
         .await
         .unwrap();
     assert!(refused.message.is_none());
@@ -794,13 +826,15 @@ async fn verify_denial_and_quota(
     let mut held = vec![];
     for index in 0..3 {
         let request = send(
-            continuation,
             &format!("held-{index}"),
             "beta",
             &format!("Approved extra {index}"),
         );
         let approval = store
-            .send_attempt_tag_message(sender, &request)
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(sender, continuation),
+                &request,
+            )
             .await
             .unwrap()
             .approval
@@ -824,7 +858,10 @@ async fn verify_denial_and_quota(
     for (request, _) in held.iter().take(2) {
         assert!(
             store
-                .send_attempt_tag_message(sender, request)
+                .send_attempt_tag_message(
+                    &supertag_control_plane::AttemptAccess::new(sender, continuation),
+                    request
+                )
                 .await
                 .unwrap()
                 .message
@@ -832,7 +869,12 @@ async fn verify_denial_and_quota(
         );
     }
     assert!(matches!(
-        store.send_attempt_tag_message(sender, &held[2].0).await,
+        store
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(sender, continuation),
+                &held[2].0
+            )
+            .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     assert!(
@@ -874,7 +916,10 @@ async fn verify_hop_limit(store: &Store, sender: &HostAuthority, clock: &AtomicI
         }
         if hop == 4 {
             let pending = store
-                .send_attempt_tag_message(sender, &send(&current, "chain", to, "Forward chain"))
+                .send_attempt_tag_message(
+                    &supertag_control_plane::AttemptAccess::new(sender, &current),
+                    &send("chain", to, "Forward chain"),
+                )
                 .await
                 .unwrap()
                 .approval
@@ -898,7 +943,10 @@ async fn verify_hop_limit(store: &Store, sender: &HostAuthority, clock: &AtomicI
             start(store, sender, &current).await;
         }
         let sent = store
-            .send_attempt_tag_message(sender, &send(&current, "chain", to, "Forward chain"))
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(sender, &current),
+                &send("chain", to, "Forward chain"),
+            )
             .await
             .unwrap()
             .message
@@ -908,15 +956,23 @@ async fn verify_hop_limit(store: &Store, sender: &HostAuthority, clock: &AtomicI
         current = claim(store, sender, to).await;
         start(store, sender, &current).await;
     }
-    let rejected = send(&current, "too-far", "alpha", "No sixth inbox");
+    let rejected = send("too-far", "alpha", "No sixth inbox");
     assert!(matches!(
-        store.send_attempt_tag_message(sender, &rejected).await,
+        store
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(sender, &current),
+                &rejected
+            )
+            .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     clock.store(NOW + 60_002, Ordering::SeqCst);
     assert!(
         store
-            .send_attempt_tag_message(sender, &send(&current, "stale", "alpha", "No"))
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(sender, &current),
+                &send("stale", "alpha", "No")
+            )
             .await
             .is_err()
     );

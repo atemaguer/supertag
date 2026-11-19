@@ -229,7 +229,6 @@ impl Client {
         let result = match call {
             Call::Create(create) => {
                 let input = CreateAttemptScheduleRequest {
-                    attempt: None,
                     operation_id,
                     note: crate::auth::redact(create.note.trim().to_owned(), secrets),
                     at: create.at.clone().unwrap_or_default(),
@@ -242,7 +241,6 @@ impl Client {
             }
             Call::Cancel(cancel) => {
                 let input = CancelAttemptScheduleRequest {
-                    attempt: None,
                     schedule_id: cancel.schedule_id.clone(),
                 };
                 confirm(async || self.client.cancel(request(input.clone(), token)?).await)

@@ -93,11 +93,15 @@ async fn run_with(
     for (index, (kind, text)) in events.iter().enumerate() {
         store
             .append_event(
-                host,
+                &supertag_control_plane::AttemptAccess::new(
+                    host,
+                    &supertag_protocol::v2::InspectAttemptRequest {
+                        task_id: attempt.task_id.clone(),
+                        attempt_id: attempt.attempt_id.clone(),
+                        lease_token: attempt.lease_token.clone(),
+                    },
+                ),
                 &AppendEventRequest {
-                    task_id: attempt.task_id.clone(),
-                    attempt_id: attempt.attempt_id.clone(),
-                    lease_token: attempt.lease_token.clone(),
                     sequence: index as u64 + 1,
                     text: (*text).into(),
                     kind: *kind as i32,
@@ -119,9 +123,8 @@ async fn turn(
 ) -> Result<ReadTagTurnResponse, StoreError> {
     store
         .read_tag_turn(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, attempt),
             &ReadTagTurnRequest {
-                attempt: Some(attempt.clone()),
                 task_id: task.into(),
                 limit,
                 after,
@@ -170,9 +173,8 @@ async fn sessions(
 ) -> BTreeSet<String> {
     store
         .list_tag_sessions(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, attempt),
             &ListTagSessionsRequest {
-                attempt: Some(attempt.clone()),
                 ..Default::default()
             },
         )
@@ -192,9 +194,8 @@ async fn search(
 ) -> Vec<TagSessionSearchHit> {
     store
         .search_tag_sessions(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, attempt),
             &SearchTagSessionsRequest {
-                attempt: Some(attempt.clone()),
                 query: query.into(),
                 limit: 0,
             },
@@ -214,9 +215,8 @@ async fn read(
 ) -> Result<ReadTagSessionResponse, StoreError> {
     store
         .read_tag_session(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, attempt),
             &ReadTagSessionRequest {
-                attempt: Some(attempt.clone()),
                 session_id: session.into(),
                 limit,
                 before,
@@ -232,9 +232,8 @@ async fn objectives(
 ) -> Vec<String> {
     store
         .list_tag_objectives(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, attempt),
             &ListTagObjectivesRequest {
-                attempt: Some(attempt.clone()),
                 ..Default::default()
             },
         )
@@ -254,9 +253,8 @@ async fn read_objective(
 ) -> Result<TagObjectiveView, StoreError> {
     store
         .read_tag_objective(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, attempt),
             &ReadTagObjectiveRequest {
-                attempt: Some(attempt.clone()),
                 objective_id: id.map(str::to_owned),
             },
         )
@@ -340,7 +338,10 @@ async fn contract(url: &str) {
     let a2 = say(&store, ALICE, "What did we decide earlier?").await;
     let a2_session = a2.session_id.clone();
     let a2 = claim(&store, &host, &a2.task_id).await;
-    let caps = store.attempt_capabilities(&host, &a2).await.unwrap();
+    let caps = store
+        .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(&host, &a2))
+        .await
+        .unwrap();
     assert!(caps.may_read_tag_sessions);
     assert!(
         caps.tag_portfolio
@@ -467,9 +468,8 @@ async fn contract(url: &str) {
     // and the Work Session has its conversation's audience.
     let work = store
         .start_work_session(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &a2),
             &StartWorkSessionRequest {
-                attempt: Some(a2.clone()),
                 operation_id: "work".into(),
                 title: "Compare notes".into(),
                 instruction: "Compare the release notes".into(),
@@ -481,7 +481,10 @@ async fn contract(url: &str) {
         .unwrap();
     finish(&store, &host, &a2, "Started a comparison").await;
     let child = claim(&store, &host, &work.latest_task_id).await;
-    let caps = store.attempt_capabilities(&host, &child).await.unwrap();
+    let caps = store
+        .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(&host, &child))
+        .await
+        .unwrap();
     assert!(!caps.may_read_tag_sessions && caps.tag_portfolio.is_empty());
     assert!(caps.may_read_own_session);
     assert!(
@@ -498,9 +501,8 @@ async fn contract(url: &str) {
     assert!(matches!(
         store
             .list_tag_sessions(
-                &host,
+                &supertag_control_plane::AttemptAccess::new(&host, &child),
                 &ListTagSessionsRequest {
-                    attempt: Some(child.clone()),
                     ..Default::default()
                 }
             )
@@ -514,9 +516,8 @@ async fn contract(url: &str) {
     for refused in [
         store
             .search_tag_sessions(
-                &host,
+                &supertag_control_plane::AttemptAccess::new(&host, &child),
                 &SearchTagSessionsRequest {
-                    attempt: Some(child.clone()),
                     query: "notes".into(),
                     limit: 0,
                 },
@@ -525,9 +526,8 @@ async fn contract(url: &str) {
             .map(|_| ()),
         store
             .list_tag_objectives(
-                &host,
+                &supertag_control_plane::AttemptAccess::new(&host, &child),
                 &ListTagObjectivesRequest {
-                    attempt: Some(child.clone()),
                     ..Default::default()
                 },
             )
@@ -550,7 +550,7 @@ async fn contract(url: &str) {
     let report = claim(&store, &host, &report).await;
     assert!(
         store
-            .attempt_capabilities(&host, &report)
+            .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(&host, &report))
             .await
             .unwrap()
             .may_read_tag_sessions
@@ -567,9 +567,8 @@ async fn contract(url: &str) {
     let again = claim(&store, &host, &again.task_id).await;
     let continued = store
         .continue_work_session(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &again),
             &ContinueWorkSessionRequest {
-                attempt: Some(again.clone()),
                 operation_id: "again".into(),
                 work_session_id: work.work_session_id.clone(),
                 message: "Compare them once more".into(),
@@ -581,7 +580,7 @@ async fn contract(url: &str) {
     let next = claim(&store, &host, &continued.latest_task_id).await;
     assert!(
         store
-            .attempt_capabilities(&host, &next)
+            .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(&host, &next))
             .await
             .unwrap()
             .may_read_own_session
@@ -685,7 +684,7 @@ async fn contract(url: &str) {
     let turn = claim(&store, &host, &created.starting_task_id).await;
     assert!(
         store
-            .attempt_capabilities(&host, &turn)
+            .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(&host, &turn))
             .await
             .unwrap()
             .may_read_tag_sessions
@@ -729,7 +728,7 @@ async fn contract(url: &str) {
     expected.sort();
     assert_eq!(open, expected);
     let portfolio = store
-        .attempt_capabilities(&host, &a4)
+        .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(&host, &a4))
         .await
         .unwrap()
         .tag_portfolio;

@@ -87,7 +87,6 @@ async fn remote_attempt(
 fn output(attempt: &InspectAttemptRequest) -> CommitArtifactCaptureRequest {
     CommitArtifactCaptureRequest {
         source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
-        attempt: Some(attempt.clone()),
         operation_id: format!("output-{}", attempt.attempt_id),
         description: Some(ArtifactDescription {
             title: "Task output".into(),
@@ -122,11 +121,17 @@ async fn exercise(url: &str) {
         let attempt = remote_attempt(&store, &host, name, harness).await;
         let request = output(&attempt);
         store
-            .reserve_artifact_capture(&host, &request)
+            .reserve_artifact_capture(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &request,
+            )
             .await
             .unwrap_or_else(|error| panic!("{name} reserves its Task output: {error:?}"));
         let committed = store
-            .commit_artifact_capture(&host, &request)
+            .commit_artifact_capture(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &request,
+            )
             .await
             .unwrap_or_else(|error| panic!("{name} commits its Task output: {error:?}"));
         assert_eq!(
@@ -138,7 +143,12 @@ async fn exercise(url: &str) {
         stray.operation_id = format!("stray-{}", attempt.attempt_id);
         stray.files[0].path = "report.md".into();
         assert!(matches!(
-            store.reserve_artifact_capture(&host, &stray).await,
+            store
+                .reserve_artifact_capture(
+                    &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                    &stray
+                )
+                .await,
             Err(StoreError::InvalidArgument(_))
         ));
     }

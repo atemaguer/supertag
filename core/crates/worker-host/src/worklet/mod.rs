@@ -31,6 +31,23 @@ use crate::{
     WorkspaceMounts, environment, worker::egress,
 };
 
+/// This Worker Host's enrolled credential, which authenticates its lease operations. Only the
+/// Worklet reads it: the handles it lends a Worker (the lease, checkpoint and delivery transfers,
+/// Volume object grants) hold it privately, so a Worker cannot make a host call of its own. A
+/// Worker's data calls carry its Attempt credential instead.
+#[derive(Clone)]
+pub(crate) struct HostToken(String);
+
+impl HostToken {
+    pub(in crate::worklet) fn new(secret: String) -> Self {
+        Self(secret)
+    }
+
+    pub(in crate::worklet) fn secret(&self) -> &str {
+        &self.0
+    }
+}
+
 /// The host's own storage, which the Worklet owns and lends a Worker for what its Attempt reads,
 /// delivers, or checkpoints: the artifact and delivery bytes this host holds, its artifact
 /// peers, its mapped Volumes and their object transfers, checkpoint transfers, and the Git
@@ -39,11 +56,48 @@ use crate::{
 pub(crate) struct HostStorage {
     pub(crate) transfers: checkpoints::Transfers,
     pub(crate) artifact_source: Option<artifact_direct::SourceStorage>,
+    /// Redeems a direct artifact grant for bytes this host's own storage holds.
+    pub(crate) held_transfers: artifact_direct::HeldTransfers,
     pub(crate) artifact_peers: ArtifactPeers,
     pub(crate) volumes: volume_objects::HostVolumes,
     pub(crate) volume_objects: volume_objects::VolumeObjects,
     /// Git for reading a reviewed delivery from its remote Workspace's Session branch.
     pub(crate) review_git: Option<supertag_git_delivery::GitDelivery>,
+}
+
+#[cfg(test)]
+impl HostStorage {
+    /// Host storage on `channel` with a fixed host credential and nothing held, for tests.
+    pub(crate) fn unconnected(
+        channel: tonic::transport::Channel,
+        headers: crate::HostHeaders,
+    ) -> Self {
+        let credential = HostToken::new("host-token".into());
+        Self {
+            transfers: checkpoints::Transfers::new(
+                channel.clone(),
+                headers.clone(),
+                credential.clone(),
+            ),
+            artifact_source: None,
+            held_transfers: artifact_direct::HeldTransfers::new(
+                supertag_protocol::v2::artifact_sources_client::ArtifactSourcesClient::with_interceptor(
+                    channel.clone(),
+                    headers.clone(),
+                ),
+                credential.clone(),
+            ),
+            review_git: None,
+            artifact_peers: crate::ArtifactPeers::default(),
+            volumes: Default::default(),
+            volume_objects: volume_objects::VolumeObjects::new(
+                supertag_protocol::v2::volume_objects_client::VolumeObjectsClient::with_interceptor(
+                    channel, headers,
+                ),
+                credential,
+            ),
+        }
+    }
 }
 
 /// What the Worklet reads: this host's identity and connection, its state, the Workspaces and

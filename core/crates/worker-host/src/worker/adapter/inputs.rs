@@ -58,13 +58,7 @@ impl InputLane {
     ) -> Result<Response<TakeInputResponse>, Status> {
         let sent = Instant::now();
         let call_deadline = self.active_deadline()?.min(sent + CALL_TIMEOUT);
-        let mut request = authenticated_request(
-            TakeInputRequest {
-                attempt: Some(attempt.clone()),
-            },
-            token,
-            None,
-        )?;
+        let mut request = authenticated_request(TakeInputRequest {}, token, None)?;
         request.set_timeout(call_deadline.saturating_duration_since(sent));
         let mut client = self.client.clone();
         // Take can commit before its response is lost. The Control Plane never
@@ -100,7 +94,7 @@ impl InputLane {
             // take. Only when that receipt cannot be recorded does it lapse.
             let input_id = input.input_id.clone();
             return match self
-                .settle_once(attempt, input_id, LiveInputReceipt::Rejected, token)
+                .settle_once(input_id, LiveInputReceipt::Rejected, token)
                 .await
             {
                 Ok(()) => Ok(Response::new(TakeInputResponse::default())),
@@ -122,14 +116,12 @@ impl InputLane {
     /// never received.
     async fn settle_once(
         &self,
-        attempt: InspectAttemptRequest,
         input_id: String,
         receipt: LiveInputReceipt,
         token: &str,
     ) -> Result<(), Status> {
         let mut request = authenticated_request(
             SettleInputRequest {
-                attempt: Some(attempt),
                 input_id,
                 receipt: receipt.into(),
             },
@@ -157,7 +149,6 @@ impl InputLane {
         // again, so a settlement whose answer a partition lost is repeated
         // while execution authority lasts. Take is never repeated (above).
         let settle = SettleInputRequest {
-            attempt: Some(attempt.clone()),
             input_id: request.input_id.clone(),
             receipt: request.receipt,
         };

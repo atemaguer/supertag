@@ -81,11 +81,15 @@ impl Run {
         self.sequence += 1;
         store
             .append_event(
-                host,
+                &supertag_control_plane::AttemptAccess::new(
+                    host,
+                    &supertag_protocol::v2::InspectAttemptRequest {
+                        task_id: self.task_id.clone(),
+                        attempt_id: self.attempt_id.clone(),
+                        lease_token: self.lease_token.clone(),
+                    },
+                ),
                 &AppendEventRequest {
-                    task_id: self.task_id.clone(),
-                    attempt_id: self.attempt_id.clone(),
-                    lease_token: self.lease_token.clone(),
                     sequence: self.sequence,
                     text: text.into(),
                     kind: kind as i32,

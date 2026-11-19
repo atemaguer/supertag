@@ -1,4 +1,3 @@
-from . import runtime_pb2 as _runtime_pb2
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
@@ -83,25 +82,19 @@ class HarnessFailEffectRequest(_message.Message):
     def __init__(self, idempotency_key: _Optional[str] = ..., operation: _Optional[str] = ..., arguments_json: _Optional[str] = ..., error: _Optional[str] = ...) -> None: ...
 
 class BeginEffectRequest(_message.Message):
-    __slots__ = ("attempt", "effect")
-    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("effect",)
     EFFECT_FIELD_NUMBER: _ClassVar[int]
-    attempt: _runtime_pb2.InspectAttemptRequest
     effect: HarnessBeginEffectRequest
-    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., effect: _Optional[_Union[HarnessBeginEffectRequest, _Mapping]] = ...) -> None: ...
+    def __init__(self, effect: _Optional[_Union[HarnessBeginEffectRequest, _Mapping]] = ...) -> None: ...
 
 class CompleteEffectRequest(_message.Message):
-    __slots__ = ("attempt", "effect")
-    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("effect",)
     EFFECT_FIELD_NUMBER: _ClassVar[int]
-    attempt: _runtime_pb2.InspectAttemptRequest
     effect: HarnessCompleteEffectRequest
-    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., effect: _Optional[_Union[HarnessCompleteEffectRequest, _Mapping]] = ...) -> None: ...
+    def __init__(self, effect: _Optional[_Union[HarnessCompleteEffectRequest, _Mapping]] = ...) -> None: ...
 
 class FailEffectRequest(_message.Message):
-    __slots__ = ("attempt", "effect")
-    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("effect",)
     EFFECT_FIELD_NUMBER: _ClassVar[int]
-    attempt: _runtime_pb2.InspectAttemptRequest
     effect: HarnessFailEffectRequest
-    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., effect: _Optional[_Union[HarnessFailEffectRequest, _Mapping]] = ...) -> None: ...
+    def __init__(self, effect: _Optional[_Union[HarnessFailEffectRequest, _Mapping]] = ...) -> None: ...

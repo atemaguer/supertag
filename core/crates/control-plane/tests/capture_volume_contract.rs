@@ -115,14 +115,9 @@ async fn attempt_on(
     attempt
 }
 
-fn capture(
-    attempt: &InspectAttemptRequest,
-    operation: &str,
-    digit: char,
-) -> CommitArtifactCaptureRequest {
+fn capture(operation: &str, digit: char) -> CommitArtifactCaptureRequest {
     CommitArtifactCaptureRequest {
         source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
-        attempt: Some(attempt.clone()),
         operation_id: operation.into(),
         description: Some(ArtifactDescription {
             title: "Evidence".into(),
@@ -193,9 +188,12 @@ async fn exercise(url: &str) {
     let host = support::register_host(&store, "capture-writer").await;
     support::hold_artifacts(&store, &host).await;
     let first = attempt(&store, &host, "first").await;
-    let request = capture(&first, "capture", 'a');
+    let request = capture("capture", 'a');
     let reserved = store
-        .reserve_artifact_capture(&host, &request)
+        .reserve_artifact_capture(
+            &supertag_control_plane::AttemptAccess::new(&host, &first),
+            &request,
+        )
         .await
         .unwrap();
     let artifact_id = reserved.summary.as_ref().unwrap().artifact_id.clone();
@@ -217,7 +215,10 @@ async fn exercise(url: &str) {
     // A retried reservation returns the same copies.
     assert_eq!(
         store
-            .reserve_artifact_capture(&host, &request)
+            .reserve_artifact_capture(
+                &supertag_control_plane::AttemptAccess::new(&host, &first),
+                &request
+            )
             .await
             .unwrap(),
         reserved
@@ -226,7 +227,10 @@ async fn exercise(url: &str) {
         .await
         .unwrap();
     let committed = store
-        .commit_artifact_capture(&host, &request)
+        .commit_artifact_capture(
+            &supertag_control_plane::AttemptAccess::new(&host, &first),
+            &request,
+        )
         .await
         .unwrap();
     assert_eq!(committed.volume_copies.len(), 2);
@@ -242,7 +246,10 @@ async fn exercise(url: &str) {
     // A repeated commit returns the copies as they are.
     assert_eq!(
         store
-            .commit_artifact_capture(&host, &request)
+            .commit_artifact_capture(
+                &supertag_control_plane::AttemptAccess::new(&host, &first),
+                &request
+            )
             .await
             .unwrap(),
         committed
@@ -263,9 +270,12 @@ async fn exercise(url: &str) {
     assert!(listed.copies.iter().all(|copy| copy.host_attested));
 
     // The Volume cannot be moved while a Tag names it, even with a capture in flight.
-    let changed = capture(&first, "changed", 'c');
+    let changed = capture("changed", 'c');
     store
-        .reserve_artifact_capture(&host, &changed)
+        .reserve_artifact_capture(
+            &supertag_control_plane::AttemptAccess::new(&host, &first),
+            &changed,
+        )
         .await
         .unwrap();
     assert!(matches!(
@@ -282,7 +292,10 @@ async fn exercise(url: &str) {
     ));
     assert_eq!(
         store
-            .commit_artifact_capture(&host, &changed)
+            .commit_artifact_capture(
+                &supertag_control_plane::AttemptAccess::new(&host, &first),
+                &changed
+            )
             .await
             .unwrap()
             .volume_copies
@@ -412,9 +425,8 @@ async fn exercise(url: &str) {
     // for when the producing host cannot serve it.
     let acquisition = store
         .acquire_artifact(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &next),
             &AcquireArtifactRequest {
-                attempt: Some(next.clone()),
                 operation_id: "read-capture".into(),
                 artifact_id: artifact_id.clone(),
                 paths: vec!["a.txt".into()],
@@ -460,10 +472,13 @@ async fn exercise(url: &str) {
             .await
             .is_err()
     );
-    let plain = capture(&next, "plain", 'e');
+    let plain = capture("plain", 'e');
     assert!(
         store
-            .reserve_artifact_capture(&host, &plain)
+            .reserve_artifact_capture(
+                &supertag_control_plane::AttemptAccess::new(&host, &next),
+                &plain
+            )
             .await
             .unwrap()
             .volume_copies
@@ -471,7 +486,10 @@ async fn exercise(url: &str) {
     );
     assert!(
         store
-            .commit_artifact_capture(&host, &plain)
+            .commit_artifact_capture(
+                &supertag_control_plane::AttemptAccess::new(&host, &next),
+                &plain
+            )
             .await
             .unwrap()
             .volume_copies

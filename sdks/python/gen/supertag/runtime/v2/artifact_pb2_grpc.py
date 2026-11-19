@@ -698,7 +698,8 @@ class ArtifactDirectory:
 
 
 class AttemptArtifactsStub:
-    """Public Worker Host API. Identity and generation come from the authenticated Worker Host.
+    """A running Attempt's captures and acquisitions, called with its Attempt credential, which names
+    the Attempt.
     """
 
     def __init__(self, channel):
@@ -737,25 +738,16 @@ class AttemptArtifactsStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.SettleArtifactAcquisitionRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactAcquisition.FromString,
                 _registered_method=True)
-        self.RegisterArtifactSource = channel.unary_unary(
-                '/supertag.runtime.v2.AttemptArtifacts/RegisterArtifactSource',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.RegisterArtifactSourceRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.RegisterArtifactSourceResponse.FromString,
-                _registered_method=True)
         self.IssueArtifactTransfer = channel.unary_unary(
                 '/supertag.runtime.v2.AttemptArtifacts/IssueArtifactTransfer',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetAcquiredArtifactFileRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactTransferGrant.FromString,
                 _registered_method=True)
-        self.AuthorizeArtifactTransfer = channel.unary_unary(
-                '/supertag.runtime.v2.AttemptArtifacts/AuthorizeArtifactTransfer',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.AuthorizeArtifactTransferRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.AuthorizedArtifactTransfer.FromString,
-                _registered_method=True)
 
 
 class AttemptArtifactsServicer:
-    """Public Worker Host API. Identity and generation come from the authenticated Worker Host.
+    """A running Attempt's captures and acquisitions, called with its Attempt credential, which names
+    the Attempt.
     """
 
     def ReserveCapture(self, request, context):
@@ -801,19 +793,7 @@ class AttemptArtifactsServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def RegisterArtifactSource(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
     def IssueArtifactTransfer(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def AuthorizeArtifactTransfer(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -852,20 +832,10 @@ def add_AttemptArtifactsServicer_to_server(servicer, server):
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.SettleArtifactAcquisitionRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactAcquisition.SerializeToString,
             ),
-            'RegisterArtifactSource': grpc.unary_unary_rpc_method_handler(
-                    servicer.RegisterArtifactSource,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.RegisterArtifactSourceRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.RegisterArtifactSourceResponse.SerializeToString,
-            ),
             'IssueArtifactTransfer': grpc.unary_unary_rpc_method_handler(
                     servicer.IssueArtifactTransfer,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetAcquiredArtifactFileRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactTransferGrant.SerializeToString,
-            ),
-            'AuthorizeArtifactTransfer': grpc.unary_unary_rpc_method_handler(
-                    servicer.AuthorizeArtifactTransfer,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.AuthorizeArtifactTransferRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.AuthorizedArtifactTransfer.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -876,7 +846,8 @@ def add_AttemptArtifactsServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class AttemptArtifacts:
-    """Public Worker Host API. Identity and generation come from the authenticated Worker Host.
+    """A running Attempt's captures and acquisitions, called with its Attempt credential, which names
+    the Attempt.
     """
 
     @staticmethod
@@ -1042,33 +1013,6 @@ class AttemptArtifacts:
             _registered_method=True)
 
     @staticmethod
-    def RegisterArtifactSource(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.AttemptArtifacts/RegisterArtifactSource',
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.RegisterArtifactSourceRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.RegisterArtifactSourceResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
     def IssueArtifactTransfer(request,
             target,
             options=(),
@@ -1095,6 +1039,100 @@ class AttemptArtifacts:
             metadata,
             _registered_method=True)
 
+
+class ArtifactSourcesStub:
+    """Public Worker Host API, as the host: the artifact storage it serves its peers from, and a peer's
+    transfer from that storage. Neither names one Attempt of the caller.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.RegisterArtifactSource = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactSources/RegisterArtifactSource',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.RegisterArtifactSourceRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.RegisterArtifactSourceResponse.FromString,
+                _registered_method=True)
+        self.AuthorizeArtifactTransfer = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactSources/AuthorizeArtifactTransfer',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.AuthorizeArtifactTransferRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.AuthorizedArtifactTransfer.FromString,
+                _registered_method=True)
+
+
+class ArtifactSourcesServicer:
+    """Public Worker Host API, as the host: the artifact storage it serves its peers from, and a peer's
+    transfer from that storage. Neither names one Attempt of the caller.
+    """
+
+    def RegisterArtifactSource(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def AuthorizeArtifactTransfer(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_ArtifactSourcesServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'RegisterArtifactSource': grpc.unary_unary_rpc_method_handler(
+                    servicer.RegisterArtifactSource,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.RegisterArtifactSourceRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.RegisterArtifactSourceResponse.SerializeToString,
+            ),
+            'AuthorizeArtifactTransfer': grpc.unary_unary_rpc_method_handler(
+                    servicer.AuthorizeArtifactTransfer,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.AuthorizeArtifactTransferRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.AuthorizedArtifactTransfer.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.ArtifactSources', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.ArtifactSources', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class ArtifactSources:
+    """Public Worker Host API, as the host: the artifact storage it serves its peers from, and a peer's
+    transfer from that storage. Neither names one Attempt of the caller.
+    """
+
+    @staticmethod
+    def RegisterArtifactSource(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactSources/RegisterArtifactSource',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.RegisterArtifactSourceRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.RegisterArtifactSourceResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
     @staticmethod
     def AuthorizeArtifactTransfer(request,
             target,
@@ -1109,7 +1147,7 @@ class AttemptArtifacts:
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/supertag.runtime.v2.AttemptArtifacts/AuthorizeArtifactTransfer',
+            '/supertag.runtime.v2.ArtifactSources/AuthorizeArtifactTransfer',
             supertag_dot_runtime_dot_v2_dot_artifact__pb2.AuthorizeArtifactTransferRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_artifact__pb2.AuthorizedArtifactTransfer.FromString,
             options,

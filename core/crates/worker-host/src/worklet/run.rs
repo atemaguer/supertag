@@ -34,7 +34,7 @@ use crate::{
     provider_environment_for, request, retryable, wait_for_work,
     worker::{adapter, remote},
     worklet::{
-        checkpoints, cleanup_failure, enrollment,
+        HostToken, checkpoints, cleanup_failure, enrollment,
         journal::{Attempt, Entry, Journal},
         landing, readiness, workspaces,
     },
@@ -170,6 +170,7 @@ pub(crate) async fn run(
         return Ok(());
     };
     let headers = HostHeaders::new(registration.generation, protocol);
+    let credential = HostToken::new(token.clone());
     let inputs = AttemptInputsClient::with_interceptor(
         options.control_plane.clone().connect_lazy(),
         headers.clone(),
@@ -187,7 +188,16 @@ pub(crate) async fn run(
         .unwrap_or_else(|| ArtifactSourceConfig::in_state(&options.state_directory))
         .bind(&options.state_directory, &local_roots)
         .await?
-        .serve(acquisitions.clone(), &token, &shutdown)
+        .serve(
+            supertag_protocol::v2::artifact_sources_client::ArtifactSourcesClient::with_interceptor(
+                channel.clone(),
+                headers.clone(),
+            )
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES),
+            &token,
+            &shutdown,
+        )
         .await?;
     let (coordination, storage) = registration::coordination(
         &channel,
@@ -196,17 +206,18 @@ pub(crate) async fn run(
         &serving.storage,
         &options.artifact_peers,
         &options.volumes,
-        &options.state_directory,
+        (&options.state_directory, &credential),
     );
     // Workspace deliveries and Session checkpoints stay in this host's artifact storage, which
     // every lane of the host shares; only their digests go upstream.
-    let transfers = checkpoints::Transfers::new(channel.clone(), headers.clone())
-        .with_storage(serving.storage.clone())
-        .with_checkpoints(checkpoints::Held::new(
-            serving.storage.root(),
-            &registration.host_id,
-        ))
-        .with_volumes(std::sync::Arc::new(options.volumes.clone()));
+    let transfers =
+        checkpoints::Transfers::new(channel.clone(), headers.clone(), credential.clone())
+            .with_storage(serving.storage.clone())
+            .with_checkpoints(checkpoints::Held::new(
+                serving.storage.root(),
+                &registration.host_id,
+            ))
+            .with_volumes(std::sync::Arc::new(options.volumes.clone()));
     // This host lands the Workspace deliveries it holds: right after each one, and queued ones
     // (retries, merges after their Work Session closed) in the background. A `--once` host lands
     // only what it may claim before it exits.
@@ -220,14 +231,9 @@ pub(crate) async fn run(
     if !options.once {
         landings.spawn(shutdown.clone());
     }
-    background::reconcile_checkpoints(&transfers, &token, &shutdown);
+    background::reconcile_checkpoints(&transfers, &shutdown);
     if !options.volumes.is_empty() {
-        background::collect_volume_garbage(
-            &options.volumes,
-            &storage.volume_objects,
-            &token,
-            &shutdown,
-        );
+        background::collect_volume_garbage(&options.volumes, &storage.volume_objects, &shutdown);
     }
     let mut host = WorkerHostClient::with_interceptor(channel, headers)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -402,7 +408,7 @@ pub(crate) async fn run(
                     transfers: &transfers,
                     shutdown: &shutdown,
                     authority: Authority::new(
-                        (&mut host, &token, &registration),
+                        (&mut host, &credential, &registration),
                         &shutdown,
                         (&journal, &workspaces),
                         (&options.state_directory, options.once),
@@ -478,7 +484,7 @@ pub(crate) async fn run(
                     }
                     let cancellation = shutdown.child_token();
                     let frozen = with_authority(&mut host, &attempt, &token, &shutdown, &cancellation, async {
-                        pending.freeze(&workspace, &workspaces, &options.state_directory, (&transfers, &attempt, &token), &cancellation)
+                        pending.freeze(&workspace, &workspaces, &options.state_directory, (&transfers, &attempt), &cancellation)
                             .await.map(Box::new).map_err(|error| {
                                 let required = supertag_protocol::output_policy::REQUIRED_OUTPUT_MISSING;
                                 let message = if error.downcast_ref::<Status>().is_some_and(|status| status.message() == required) {
@@ -528,6 +534,8 @@ pub(crate) async fn run(
                     let attempt_id = attempt.attempt_id.clone();
                     let copy_cancel = cancellation.clone();
                     let mut client = coordination.workspace_mounts.clone();
+                    // The write-back summary is the Attempt's own record: its credential carries it.
+                    let attempt_credential = attempt.attempt_credential.clone();
                     let reported = with_authority(&mut host, &attempt, &token, &shutdown, &cancellation, async {
                         let writes = tokio::task::spawn_blocking(move || {
                             workspace_mounts::write_back(&mounts, &state, &attempt_id, &copy_cancel)
@@ -547,13 +555,10 @@ pub(crate) async fn run(
                             .iter()
                             .all(|write| write.status == WorkspaceMountWriteStatus::Complete as i32);
                         let report = RecordWorkspaceMountWritesRequest {
-                            task_id: attempt.task_id.clone(),
-                            attempt_id: attempt.attempt_id.clone(),
-                            lease_token: attempt.lease_token.clone(),
                             writes,
                         };
                         client
-                            .record_writes(request(report, &token).map_err(|error| crate::failures::noted(Status::internal("Workspace Volume write-back failed"), &error))?)
+                            .record_writes(request(report, &attempt_credential).map_err(|error| crate::failures::noted(Status::internal("Workspace Volume write-back failed"), &error))?)
                             .await
                             .map(|_| complete)
                     })
@@ -695,7 +700,7 @@ pub(crate) async fn run(
                         &mut host, &attempt, &token, &shutdown, &cancellation,
                         async {
                             tokio::select! {
-                                result = transfers.upload_workspace(&attempt, &token, &pending, receipt) => result,
+                                result = transfers.upload_workspace(&attempt, &pending, receipt) => result,
                                 _ = cancellation.cancelled() => Err(Status::cancelled("workspace transfer cancelled")),
                             }
                         },
@@ -747,7 +752,7 @@ pub(crate) async fn run(
                             )?)
                             .await?;
                             let payload = journal.read_checkpoint(&pending).map_err(|error| crate::failures::noted(Status::data_loss("staged checkpoint could not be read"), &error))?;
-                            transfers.upload(&attempt, &token, payload).await
+                            transfers.upload(&attempt, payload).await
                         }
                         .await;
                     match upload {
@@ -799,7 +804,7 @@ pub(crate) async fn run(
                     let cancellation = shutdown.child_token();
                     let upload = with_authority(&mut host, &attempt, &token, &shutdown, &cancellation, async {
                         tokio::select! {
-                            result = pending.publish(&options.state_directory, &attempt, (&coordination, &storage), &token) => result,
+                            result = pending.publish(&options.state_directory, &attempt, (&coordination, &storage), &attempt.attempt_credential) => result,
                             _ = cancellation.cancelled() => Err(Status::cancelled("Task output transfer cancelled")),
                         }
                     }).await;

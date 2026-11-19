@@ -9,9 +9,8 @@ use supertag_protocol::v2::*;
 use uuid::Uuid;
 const OPERATOR: &str = "operator:alice";
 const NOW: i64 = 1_893_456_000_000;
-fn request(attempt: &InspectAttemptRequest, operation: &str) -> StartWorkSessionRequest {
+fn request(operation: &str) -> StartWorkSessionRequest {
     StartWorkSessionRequest {
-        attempt: Some(attempt.clone()),
         operation_id: operation.into(),
         title: "Inspect fixture".into(),
         instruction: "Review only fixture data".into(),
@@ -179,9 +178,8 @@ async fn contract(url: String) {
     let sender_attempt = claim_start(&store, &host, &sender.task_id).await;
     store
         .send_attempt_tag_message(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &sender_attempt),
             &SendAttemptTagMessageRequest {
-                attempt: Some(sender_attempt.clone()),
                 operation_id: "mail".into(),
                 recipient_tag_id: "recipient".into(),
                 text: "Read this fixture notice".into(),
@@ -199,7 +197,10 @@ async fn contract(url: String) {
     start(&store, &host, &mail_attempt).await;
     assert!(matches!(
         store
-            .start_work_session(&host, &request(&mail_attempt, "mail-child"))
+            .start_work_session(
+                &supertag_control_plane::AttemptAccess::new(&host, &mail_attempt),
+                &request("mail-child")
+            )
             .await,
         Err(StoreError::PermissionDenied)
     ));
@@ -214,7 +215,10 @@ async fn contract(url: String) {
     clock.fetch_add(31_000, Ordering::SeqCst);
     assert!(matches!(
         store
-            .start_work_session(&host, &request(&stale_attempt, "stale-child"))
+            .start_work_session(
+                &supertag_control_plane::AttemptAccess::new(&host, &stale_attempt),
+                &request("stale-child")
+            )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
@@ -239,10 +243,16 @@ async fn contract(url: String) {
 
     let first = submit(&store, "owner", "parent").await;
     let first_attempt = claim_start(&store, &host, &first.task_id).await;
-    let mut wrong = request(&first_attempt, "wrong-target");
+    let mut wrong = request("wrong-target");
     wrong.target_tag_id = Some("recipient".into());
     // A conversation's turn can't delegate, and the refusal says so, so a model can recover.
-    match store.start_work_session(&host, &wrong).await {
+    match store
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &first_attempt),
+            &wrong,
+        )
+        .await
+    {
         Err(StoreError::FailedPrecondition(reason)) => assert!(
             reason.contains("only an Objective's own turn") && reason.contains("omit tag"),
             "{reason}"
@@ -251,20 +261,32 @@ async fn contract(url: String) {
     }
     assert!(matches!(
         store
-            .start_work_session(&other, &request(&first_attempt, "wrong-host"))
+            .start_work_session(
+                &supertag_control_plane::AttemptAccess::new(&other, &first_attempt),
+                &request("wrong-host")
+            )
             .await,
         Err(StoreError::PermissionDenied)
     ));
-    wrong = request(&first_attempt, "wrong-lease");
-    wrong.attempt.as_mut().unwrap().lease_token = "wrong".into();
+    wrong = request("wrong-lease");
+    let wrong_lease = InspectAttemptRequest {
+        lease_token: "wrong".into(),
+        ..first_attempt.clone()
+    };
     assert!(matches!(
-        store.start_work_session(&host, &wrong).await,
+        store
+            .start_work_session(
+                &supertag_control_plane::AttemptAccess::new(&host, &wrong_lease),
+                &wrong
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
-    let same = request(&first_attempt, "same");
+    let same = request("same");
+    let access = supertag_control_plane::AttemptAccess::new(&host, &first_attempt);
     let (left, right) = tokio::join!(
-        store.start_work_session(&host, &same),
-        store.start_work_session(&host, &same)
+        store.start_work_session(&access, &same),
+        store.start_work_session(&access, &same)
     );
     let first_child = left.unwrap();
     assert_eq!(first_child, right.unwrap());
@@ -272,19 +294,30 @@ async fn contract(url: String) {
     let mut changed = same.clone();
     changed.instruction = "Changed request".into();
     assert!(matches!(
-        store.start_work_session(&host, &changed).await,
+        store
+            .start_work_session(
+                &supertag_control_plane::AttemptAccess::new(&host, &first_attempt),
+                &changed
+            )
+            .await,
         Err(StoreError::Conflict(_))
     ));
     for index in 1..4 {
         children.push(
             store
-                .start_work_session(&host, &request(&first_attempt, &format!("child-{index}")))
+                .start_work_session(
+                    &supertag_control_plane::AttemptAccess::new(&host, &first_attempt),
+                    &request(&format!("child-{index}")),
+                )
                 .await
                 .unwrap(),
         );
     }
     let per_turn = store
-        .start_work_session(&host, &request(&first_attempt, "fifth"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &first_attempt),
+            &request("fifth"),
+        )
         .await
         .unwrap_err();
     assert!(matches!(per_turn, StoreError::FailedPrecondition(_)));
@@ -292,7 +325,10 @@ async fn contract(url: String) {
     // A replay does not consume another slot after reaching the bound.
     assert_eq!(
         store
-            .start_work_session(&host, &same)
+            .start_work_session(
+                &supertag_control_plane::AttemptAccess::new(&host, &first_attempt),
+                &same
+            )
             .await
             .unwrap()
             .work_session_id,
@@ -321,7 +357,10 @@ async fn contract(url: String) {
     for index in 4..8 {
         children.push(
             store
-                .start_work_session(&host, &request(&second_attempt, &format!("child-{index}")))
+                .start_work_session(
+                    &supertag_control_plane::AttemptAccess::new(&host, &second_attempt),
+                    &request(&format!("child-{index}")),
+                )
                 .await
                 .unwrap(),
         );
@@ -333,7 +372,10 @@ async fn contract(url: String) {
     let third = submit(&store, "owner", "parent").await;
     let third_attempt = claim_start(&store, &host, &third.task_id).await;
     let parent_limit = store
-        .start_work_session(&host, &request(&third_attempt, "ninth-open"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &third_attempt),
+            &request("ninth-open"),
+        )
         .await
         .unwrap_err();
     assert!(matches!(parent_limit, StoreError::FailedPrecondition(_)));
@@ -348,7 +390,10 @@ async fn contract(url: String) {
     }
     assert!(matches!(
         store
-            .start_work_session(&other, &request(&claimed[0], "nested-child"))
+            .start_work_session(
+                &supertag_control_plane::AttemptAccess::new(&other, &claimed[0]),
+                &request("nested-child")
+            )
             .await,
         Err(StoreError::PermissionDenied)
     ));

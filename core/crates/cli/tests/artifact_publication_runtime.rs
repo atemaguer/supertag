@@ -213,15 +213,18 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
         attempt_id: assignment.attempt_id,
         lease_token: assignment.lease_token,
     };
-    host.start_task(credentials.host(
-        StartTaskRequest {
-            task_id: attempt.task_id.clone(),
-            attempt_id: attempt.attempt_id.clone(),
-            lease_token: attempt.lease_token.clone(),
-        },
-        registered.generation,
-    ))
-    .await?;
+    let credential = host
+        .start_task(credentials.host(
+            StartTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+            },
+            registered.generation,
+        ))
+        .await?
+        .into_inner()
+        .attempt_credential;
     let bytes = b"exact durable artifact evidence\n".to_vec();
     let mut held = held_artifacts::HeldArtifacts::register(
         channel.clone(),
@@ -231,7 +234,6 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     .await?;
     let blob = held.hold(&attempt.attempt_id, &bytes);
     let capture = CommitArtifactCaptureRequest {
-        attempt: Some(attempt.clone()),
         operation_id: "capture".into(),
         description: Some(ArtifactDescription {
             title: "Evidence".into(),
@@ -245,7 +247,7 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
         }],
         ..Default::default()
     };
-    let artifact = held.commit(capture).await?;
+    let artifact = held.commit(&credential, capture).await?;
     let artifact_id = artifact.summary.unwrap().artifact_id;
     host.finish_task(credentials.host(
         FinishTaskRequest {
@@ -371,21 +373,23 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
         attempt_id: assignment.attempt_id,
         lease_token: assignment.lease_token,
     };
-    host.start_task(credentials.host(
-        StartTaskRequest {
-            task_id: live.task_id.clone(),
-            attempt_id: live.attempt_id.clone(),
-            lease_token: live.lease_token.clone(),
-        },
-        registered.generation,
-    ))
-    .await?;
+    let live_credential = host
+        .start_task(credentials.host(
+            StartTaskRequest {
+                task_id: live.task_id.clone(),
+                attempt_id: live.attempt_id.clone(),
+                lease_token: live.lease_token.clone(),
+            },
+            registered.generation,
+        ))
+        .await?
+        .into_inner()
+        .attempt_credential;
     let mut acquisitions = attempt_artifacts_client::AttemptArtifactsClient::new(channel.clone());
     let operation = supertag_protocol::task_artifact_inputs::operation_id(&artifact_id);
     let acquired = acquisitions
-        .acquire(credentials.host(
+        .acquire(authenticated_request(
             AcquireArtifactRequest {
-                attempt: Some(live.clone()),
                 operation_id: operation.clone(),
                 artifact_id: artifact_id.clone(),
                 paths: vec!["report.txt".into()],
@@ -397,19 +401,23 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
                     ),
                 ),
             },
-            registered.generation,
-        ))
+            &live_credential,
+            None,
+        )?)
         .await?
         .into_inner();
     let download = GetAcquiredArtifactFileRequest {
-        attempt: Some(live.clone()),
         acquisition_id: acquired.acquisition_id,
         path: "report.txt".into(),
     };
     // The consumer reads the bytes from the producing Worker Host, never through the Control
     // Plane, under a transfer grant for exactly the acquired file.
     let grant = acquisitions
-        .issue_artifact_transfer(credentials.host(download.clone(), registered.generation))
+        .issue_artifact_transfer(authenticated_request(
+            download.clone(),
+            &live_credential,
+            None,
+        )?)
         .await?
         .into_inner();
     assert_eq!(grant.file.as_ref(), acquired.files.first());
@@ -418,14 +426,14 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
         Some(&blob)
     );
     let delivered = acquisitions
-        .settle(credentials.host(
+        .settle(authenticated_request(
             SettleArtifactAcquisitionRequest {
-                attempt: Some(live),
                 acquisition_id: download.acquisition_id.clone(),
                 state: ArtifactAcquisitionState::Delivered.into(),
             },
-            registered.generation,
-        ))
+            &live_credential,
+            None,
+        )?)
         .await?
         .into_inner();
     assert_eq!(delivered.state(), ArtifactAcquisitionState::Delivered);

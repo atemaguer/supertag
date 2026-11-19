@@ -43,13 +43,8 @@ fn create(tag: &str, operation: &str, note: &str, at: &str, every: &str) -> Crea
     }
 }
 
-fn staged(
-    attempt: &InspectAttemptRequest,
-    operation: &str,
-    at: &str,
-) -> CreateAttemptScheduleRequest {
+fn staged(operation: &str, at: &str) -> CreateAttemptScheduleRequest {
     CreateAttemptScheduleRequest {
-        attempt: Some(attempt.clone()),
         operation_id: operation.into(),
         note: format!("Follow up {operation}"),
         at: at.into(),
@@ -448,12 +443,18 @@ async fn tag_schedules_take_effect_when_the_turn_succeeds(
     clock.store(start, Ordering::SeqCst);
     submit(store, "lead", "ops").await;
     let (_, turn) = next(store, host).await.unwrap();
-    let capabilities = store.attempt_capabilities(host, &turn).await.unwrap();
+    let capabilities = store
+        .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(host, &turn))
+        .await
+        .unwrap();
     assert!(capabilities.may_schedule);
     assert_eq!(capabilities.time_zone, "UTC");
 
     let first = store
-        .create_attempt_schedule(host, &staged(&turn, "a", "30m"))
+        .create_attempt_schedule(
+            &supertag_control_plane::AttemptAccess::new(host, &turn),
+            &staged("a", "30m"),
+        )
         .await
         .unwrap();
     let a = first.schedule.unwrap();
@@ -465,40 +466,51 @@ async fn tag_schedules_take_effect_when_the_turn_succeeds(
     assert_eq!(first.time_zone, "UTC");
     // A replay returns the same Schedule; the next one lists the first as pending.
     let replay = store
-        .create_attempt_schedule(host, &staged(&turn, "a", "30m"))
+        .create_attempt_schedule(
+            &supertag_control_plane::AttemptAccess::new(host, &turn),
+            &staged("a", "30m"),
+        )
         .await
         .unwrap();
     assert_eq!(replay.schedule.unwrap().schedule_id, a.schedule_id);
     let second = store
-        .create_attempt_schedule(host, &staged(&turn, "b", "1h"))
+        .create_attempt_schedule(
+            &supertag_control_plane::AttemptAccess::new(host, &turn),
+            &staged("b", "1h"),
+        )
         .await
         .unwrap();
     assert_eq!(second.pending.len(), 1);
     assert_eq!(second.pending[0].schedule_id, a.schedule_id);
     let b = second.schedule.unwrap();
     store
-        .create_attempt_schedule(host, &staged(&turn, "c", "1h"))
+        .create_attempt_schedule(
+            &supertag_control_plane::AttemptAccess::new(host, &turn),
+            &staged("c", "1h"),
+        )
         .await
         .unwrap();
     // At most three per turn.
     assert!(matches!(
         store
-            .create_attempt_schedule(host, &staged(&turn, "d", "1h"))
+            .create_attempt_schedule( &supertag_control_plane::AttemptAccess::new(host, &turn), &staged( "d", "1h"))
             .await,
         Err(StoreError::FailedPrecondition(reason)) if reason.contains("at most 3")
     ));
     // Invalid times are refused with a reason the model can read.
     assert!(matches!(
         store
-            .create_attempt_schedule(host, &staged(&turn, "e", "next tuesday"))
+            .create_attempt_schedule(
+                &supertag_control_plane::AttemptAccess::new(host, &turn),
+                &staged("e", "next tuesday")
+            )
             .await,
         Err(StoreError::InvalidArgument(_))
     ));
     let cancelled = store
         .cancel_attempt_schedule(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, &turn),
             &CancelAttemptScheduleRequest {
-                attempt: Some(turn.clone()),
                 schedule_id: b.schedule_id.clone(),
             },
         )
@@ -527,7 +539,10 @@ async fn tag_schedules_take_effect_when_the_turn_succeeds(
     assert!(woken.prompt.contains("Follow up a"), "{}", woken.prompt);
     // A woken turn may schedule again and cancel its Session's Schedules.
     let pending = store
-        .create_attempt_schedule(host, &staged(&identity, "again", "2h"))
+        .create_attempt_schedule(
+            &supertag_control_plane::AttemptAccess::new(host, &identity),
+            &staged("again", "2h"),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -541,7 +556,10 @@ async fn tag_schedules_take_effect_when_the_turn_succeeds(
     submit(store, "lead", "failing").await;
     let (_, failing) = next(store, host).await.unwrap();
     let dropped = store
-        .create_attempt_schedule(host, &staged(&failing, "lost", "1h"))
+        .create_attempt_schedule(
+            &supertag_control_plane::AttemptAccess::new(host, &failing),
+            &staged("lost", "1h"),
+        )
         .await
         .unwrap()
         .schedule
@@ -555,7 +573,10 @@ async fn tag_schedules_take_effect_when_the_turn_succeeds(
     submit(store, "lead", "cancelled").await;
     let (_, stopped) = next(store, host).await.unwrap();
     let orphan = store
-        .create_attempt_schedule(host, &staged(&stopped, "orphan", "1h"))
+        .create_attempt_schedule(
+            &supertag_control_plane::AttemptAccess::new(host, &stopped),
+            &staged("orphan", "1h"),
+        )
         .await
         .unwrap()
         .schedule
@@ -572,9 +593,8 @@ async fn tag_schedules_take_effect_when_the_turn_succeeds(
     assert!(matches!(
         store
             .cancel_attempt_schedule(
-                host,
+                &supertag_control_plane::AttemptAccess::new(host, &elsewhere),
                 &CancelAttemptScheduleRequest {
-                    attempt: Some(elsewhere.clone()),
                     schedule_id: a.schedule_id.clone(),
                 },
             )
@@ -607,14 +627,17 @@ async fn a_tag_without_the_action_cannot_schedule(store: &Store, host: &HostAuth
     assert_eq!(task.allowed_actions, ["files:read"]);
     assert!(
         !store
-            .attempt_capabilities(host, &turn)
+            .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(host, &turn))
             .await
             .unwrap()
             .may_schedule
     );
     assert!(matches!(
         store
-            .create_attempt_schedule(host, &staged(&turn, "plain", "1h"))
+            .create_attempt_schedule(
+                &supertag_control_plane::AttemptAccess::new(host, &turn),
+                &staged("plain", "1h")
+            )
             .await,
         Err(StoreError::PermissionDenied)
     ));
@@ -721,7 +744,10 @@ async fn objectives_wait_on_schedules(store: &Store, host: &HostAuthority, clock
     );
     // Its idle turn schedules a check, so ending again is a wait, not a block.
     let check = store
-        .create_attempt_schedule(host, &staged(&turn, "ci", "1h"))
+        .create_attempt_schedule(
+            &supertag_control_plane::AttemptAccess::new(host, &turn),
+            &staged("ci", "1h"),
+        )
         .await
         .unwrap()
         .schedule
@@ -738,7 +764,10 @@ async fn objectives_wait_on_schedules(store: &Store, host: &HostAuthority, clock
     assert!(woken.prompt.starts_with("Scheduled wake-up."));
     // Schedule another check, then pause: the fired turn stays queued.
     store
-        .create_attempt_schedule(host, &staged(&turn, "ci-2", "1h"))
+        .create_attempt_schedule(
+            &supertag_control_plane::AttemptAccess::new(host, &turn),
+            &staged("ci-2", "1h"),
+        )
         .await
         .unwrap();
     finish(store, host, &turn, true).await;
@@ -773,7 +802,10 @@ async fn objectives_wait_on_schedules(store: &Store, host: &HostAuthority, clock
         .unwrap();
     let (_, turn) = next(store, host).await.unwrap();
     let later = store
-        .create_attempt_schedule(host, &staged(&turn, "ci-3", "1h"))
+        .create_attempt_schedule(
+            &supertag_control_plane::AttemptAccess::new(host, &turn),
+            &staged("ci-3", "1h"),
+        )
         .await
         .unwrap()
         .schedule
@@ -819,7 +851,10 @@ async fn objectives_wait_on_schedules(store: &Store, host: &HostAuthority, clock
     finish(store, host, &turn, true).await;
     let (_, turn) = next(store, host).await.unwrap(); // the idle wake: idle count 1
     store
-        .create_attempt_schedule(host, &staged(&turn, "reset-check", "1h"))
+        .create_attempt_schedule(
+            &supertag_control_plane::AttemptAccess::new(host, &turn),
+            &staged("reset-check", "1h"),
+        )
         .await
         .unwrap();
     finish(store, host, &turn, true).await;

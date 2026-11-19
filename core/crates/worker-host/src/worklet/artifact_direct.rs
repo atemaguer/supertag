@@ -22,7 +22,7 @@ use supertag_protocol::{
     authenticated_request,
     v2::{
         artifact_download::Part,
-        attempt_artifacts_client::AttemptArtifactsClient,
+        artifact_sources_client::ArtifactSourcesClient,
         worker_artifact_transfers_client::WorkerArtifactTransfersClient,
         worker_artifact_transfers_server::{
             WorkerArtifactTransfers, WorkerArtifactTransfersServer,
@@ -52,7 +52,38 @@ use crate::HostHeaders;
 const GRANT_BUDGET: Duration = Duration::from_secs(10);
 const AUTHORIZATION_BUDGET: Duration = Duration::from_secs(4);
 
-type Authority = AttemptArtifactsClient<InterceptedService<Channel, HostHeaders>>;
+type Authority = ArtifactSourcesClient<InterceptedService<Channel, HostHeaders>>;
+
+/// Redeems a direct artifact grant that names this host's own storage, as the host: the Worklet
+/// handle a Worker reads a held artifact's bytes through, which holds the host credential.
+#[derive(Clone)]
+pub(crate) struct HeldTransfers {
+    client: Authority,
+    credential: crate::worklet::HostToken,
+}
+
+impl HeldTransfers {
+    pub(in crate::worklet) fn new(
+        client: Authority,
+        credential: crate::worklet::HostToken,
+    ) -> Self {
+        Self { client, credential }
+    }
+
+    /// The producing Attempt whose storage holds the granted file, when this host holds it.
+    pub(crate) async fn authorize(
+        &self,
+        request: AuthorizeArtifactTransferRequest,
+    ) -> Result<AuthorizedArtifactTransfer, Status> {
+        let request = authenticated_request(request, self.credential.secret(), None)?;
+        Ok(self
+            .client
+            .clone()
+            .authorize_artifact_transfer(request)
+            .await?
+            .into_inner())
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct ArtifactPeers(BTreeMap<String, Endpoint>);
@@ -357,28 +388,31 @@ impl SourceStorage {
         self.id == id
     }
 
+    /// Keeps the exact bytes of `attempt_id`'s capture `manifest`, and names this storage in it.
     pub(crate) fn retain(
         &self,
+        attempt_id: &str,
         manifest: &mut CommitArtifactCaptureRequest,
         selected: &[Vec<u8>],
     ) -> Result<(), Status> {
-        self.persist(manifest, selected).map_err(|error| {
-            crate::failures::noted(
-                Status::data_loss("could not retain exact Worker Host artifact copy"),
-                &error,
-            )
-        })?;
+        self.persist(attempt_id, manifest, selected)
+            .map_err(|error| {
+                crate::failures::noted(
+                    Status::data_loss("could not retain exact Worker Host artifact copy"),
+                    &error,
+                )
+            })?;
         manifest.source_storage_id = Some(self.id.clone());
         Ok(())
     }
 
-    fn persist(&self, manifest: &CommitArtifactCaptureRequest, selected: &[Vec<u8>]) -> Result<()> {
+    fn persist(
+        &self,
+        attempt: &str,
+        manifest: &CommitArtifactCaptureRequest,
+        selected: &[Vec<u8>],
+    ) -> Result<()> {
         self.current()?;
-        let attempt = &manifest
-            .attempt
-            .as_ref()
-            .context("artifact Attempt is missing")?
-            .attempt_id;
         let parent = self.root.join(attempt_dir(attempt));
         private_directory(&parent)?;
         self.directory.sync_all()?;
@@ -832,7 +866,7 @@ mod tests {
         let object = blob_path(&durable.join(attempt_dir("attempt")), &blob)?;
         fs::write(&object, b"wrong output")?;
         assert!(restarted.read("attempt", &blob).is_err());
-        assert!(restarted.retain(&mut replay, &exact).is_err());
+        assert!(restarted.retain("attempt", &mut replay, &exact).is_err());
         assert_eq!(fs::read(object)?, b"wrong output");
         Ok(())
     }

@@ -43,9 +43,9 @@ impl WorkspaceVolumes for Api {
 impl AttemptWorkspaceMounts for Api {
     async fn preflight(
         &self,
-        request: Request<InspectAttemptRequest>,
+        request: Request<PreflightWorkspaceMountsRequest>,
     ) -> Result<Response<WorkspaceMountPreflight>, Status> {
-        self.forward_host(request, true, |channel, request| async move {
+        self.forward_attempt(request, |channel, request| async move {
             AttemptWorkspaceMountsClient::new(channel)
                 .preflight(request)
                 .await
@@ -57,7 +57,7 @@ impl AttemptWorkspaceMounts for Api {
         &self,
         request: Request<RecordWorkspaceMountWritesRequest>,
     ) -> Result<Response<RecordWorkspaceMountWritesResponse>, Status> {
-        self.forward_host(request, true, |channel, request| async move {
+        self.forward_attempt(request, |channel, request| async move {
             AttemptWorkspaceMountsClient::new(channel)
                 .record_writes(request)
                 .await

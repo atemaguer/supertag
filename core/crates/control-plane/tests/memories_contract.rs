@@ -96,9 +96,8 @@ async fn remember(
 ) -> Result<AttemptMemoryResponse, StoreError> {
     store
         .attempt_remember(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, attempt),
             &AttemptRememberRequest {
-                attempt: Some(attempt.clone()),
                 operation_id: operation.into(),
                 text: text.into(),
                 replaces: replaces.map(str::to_owned),
@@ -115,9 +114,8 @@ async fn forget(
 ) -> Result<AttemptMemoryResponse, StoreError> {
     store
         .attempt_forget(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, attempt),
             &AttemptForgetRequest {
-                attempt: Some(attempt.clone()),
                 operation_id: Uuid::new_v4().to_string(),
                 memory_id: id.into(),
             },
@@ -143,7 +141,7 @@ async fn texts(store: &Store, principal: &str) -> Vec<String> {
 
 async fn portfolio(store: &Store, host: &HostAuthority, attempt: &InspectAttemptRequest) -> String {
     store
-        .attempt_capabilities(host, attempt)
+        .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(host, attempt))
         .await
         .unwrap()
         .tag_portfolio
@@ -165,7 +163,10 @@ async fn contract(url: &str) {
 
     // Alice's conversation writes a note private to her; it applies when her turn succeeds.
     let a1 = say(&store, &host, ALICE, "I prefer squash merges").await;
-    let caps = store.attempt_capabilities(&host, &a1).await.unwrap();
+    let caps = store
+        .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(&host, &a1))
+        .await
+        .unwrap();
     assert!(caps.may_remember);
     // A person waits on her message: it is always answered.
     assert!(!caps.may_stay_quiet);
@@ -514,7 +515,10 @@ async fn review_contract(url: &str) {
             .allowed_actions,
         ["files:read"]
     );
-    let caps = store.attempt_capabilities(&host, &review).await.unwrap();
+    let caps = store
+        .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(&host, &review))
+        .await
+        .unwrap();
     assert!(caps.may_remember && caps.may_read_tag_sessions);
     // The review reaches no one: it finishes quietly.
     assert!(caps.may_stay_quiet);
@@ -529,9 +533,8 @@ async fn review_contract(url: &str) {
     // It sees only shared Sessions: Alice's conversation is private to her.
     let listed = store
         .list_tag_sessions(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &review),
             &ListTagSessionsRequest {
-                attempt: Some(review.clone()),
                 ..Default::default()
             },
         )
@@ -609,7 +612,10 @@ async fn review_contract(url: &str) {
         "omitted keeps it off"
     );
     let quiet = say(&store, &host, BOB, "Anything to note?").await;
-    let caps = store.attempt_capabilities(&host, &quiet).await.unwrap();
+    let caps = store
+        .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(&host, &quiet))
+        .await
+        .unwrap();
     assert!(!caps.may_remember);
     assert!(
         !caps.tag_portfolio.contains("Notes"),

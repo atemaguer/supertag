@@ -40,7 +40,7 @@ func testRuntime(t *testing.T, handler http.Handler, secure bool) *Client {
 // secure, and returns the target that trusts it, without a URL.
 func testGateway(t *testing.T, handler http.Handler, secure bool) (*httptest.Server, Target) {
 	t.Helper()
-	negotiation := testNegotiation(t, []uint32{5})
+	negotiation := testNegotiation(t, []uint32{6})
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor != 2 || r.Header.Get("Content-Type") != "application/grpc" {
 			t.Errorf("expected binary gRPC/HTTP2, got %s %s", r.Proto, r.Header.Get("Content-Type"))
@@ -55,7 +55,7 @@ func testGateway(t *testing.T, handler http.Handler, secure bool) (*httptest.Ser
 		if r.Header.Get("Authorization") != "Bearer test-operator" || r.Header.Get(clientVersionHeader) != "test-version" {
 			t.Error("missing expected authentication or version header")
 		}
-		if r.Header.Get(protocolHeader) != "5" {
+		if r.Header.Get(protocolHeader) != "6" {
 			t.Errorf("call %s did not name the negotiated protocol version", r.URL.Path)
 		}
 		handler.ServeHTTP(w, r)
@@ -118,7 +118,7 @@ func TestRuntimeV2RefusesAGatewayFromAnotherProtocolEpoch(t *testing.T) {
 	_, err = c.ListTags(t.Context())
 	var refused *APIError
 	if !errors.As(err, &refused) || refused.Code != connect.CodeFailedPrecondition || !ProtocolMismatch(err) ||
-		refused.Message != "This TUI speaks SuperTag protocol 5, but the Gateway at "+server.URL+" runs SuperTag 0.3.0 (protocol 2). Upgrade the Gateway." {
+		refused.Message != "This TUI speaks SuperTag protocol 6, but the Gateway at "+server.URL+" runs SuperTag 0.3.0 (protocol 2). Upgrade the Gateway." {
 		t.Fatalf("ListTags against an old Gateway = %v", err)
 	}
 	if calls.Load() != 0 {

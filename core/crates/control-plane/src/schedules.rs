@@ -7,6 +7,7 @@
 //! Schedules, advances or completes each with a compare-and-set, and queues an ordinary Task in
 //! its Session. It never starts a run: the Session queue, the Objective's pause, limits and budget,
 //! and the Tag's current policy decide when and how the turn runs.
+use crate::AttemptAccess;
 use chrono::{DateTime, LocalResult, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
 use croner::{
@@ -849,9 +850,10 @@ impl Store {
     /// The `schedule` tool: stages a Schedule that takes effect when the turn succeeds.
     pub async fn create_attempt_schedule(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &CreateAttemptScheduleRequest,
     ) -> Result<AttemptScheduleResponse> {
+        let host = authority.host();
         name("operation ID", &input.operation_id)?;
         let note = note(&input.note)?;
         let now = self.execution_now_ms();
@@ -865,7 +867,7 @@ impl Store {
         )?;
         let (mut tx, _) = self.write().await?;
         let (task, attempt) =
-            scheduling_turn_in(&mut tx, host, input.attempt.as_ref(), now).await?;
+            scheduling_turn_in(&mut tx, host, Some(authority.lease()), now).await?;
         // Replays are per Task: a retried Attempt reuses its call identities.
         let principal = format!("task:{}", task.task_id);
         let request = digest(&(
@@ -930,13 +932,14 @@ impl Store {
     /// The `cancel_schedule` tool, for the Tag's own Schedules in the turn's Session.
     pub async fn cancel_attempt_schedule(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &CancelAttemptScheduleRequest,
     ) -> Result<AttemptScheduleResponse> {
+        let host = authority.host();
         name("Schedule ID", &input.schedule_id)?;
         let now = self.execution_now_ms();
         let (mut tx, _) = self.write().await?;
-        let (task, _) = scheduling_turn_in(&mut tx, host, input.attempt.as_ref(), now).await?;
+        let (task, _) = scheduling_turn_in(&mut tx, host, Some(authority.lease()), now).await?;
         let (schedule, _) = schedule_in(&mut tx, &input.schedule_id).await?;
         let audience = audience_in(&mut tx, &task.tag_id, &task.session_id).await?;
         if schedule.tag_id != task.tag_id
@@ -1442,7 +1445,7 @@ impl attempt_schedules_server::AttemptSchedules for ControlPlane {
         &self,
         request: Request<CreateAttemptScheduleRequest>,
     ) -> std::result::Result<Response<AttemptScheduleResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .create_attempt_schedule(&host, request.get_ref())
@@ -1454,7 +1457,7 @@ impl attempt_schedules_server::AttemptSchedules for ControlPlane {
         &self,
         request: Request<CancelAttemptScheduleRequest>,
     ) -> std::result::Result<Response<AttemptScheduleResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .cancel_attempt_schedule(&host, request.get_ref())

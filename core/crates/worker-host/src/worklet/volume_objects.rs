@@ -12,8 +12,8 @@ use supertag_protocol::{
     authenticated_request,
     v2::{
         ArtifactVolumeUpload, BlobReference, ForgetVolumeGarbageRequest, InspectAttemptRequest,
-        ListVolumeGarbageRequest, VolumeAccess, VolumeObjectGrantRequest, VolumeObjectPurpose,
-        volume_objects_client::VolumeObjectsClient,
+        ListVolumeGarbageRequest, VolumeAccess, VolumeObjectGrant, VolumeObjectGrantRequest,
+        VolumeObjectPurpose, volume_objects_client::VolumeObjectsClient,
     },
 };
 use supertag_workspaces::artifact_volumes::FileVolume;
@@ -22,9 +22,32 @@ use tonic::{Status, service::interceptor::InterceptedService, transport::Channel
 /// The file Volumes this host maps, by Volume ID.
 pub type HostVolumes = Arc<BTreeMap<String, FileVolume>>;
 
-/// The Control Plane's Volume object grants, as this host.
-pub(crate) type VolumeObjects =
-    VolumeObjectsClient<InterceptedService<Channel, crate::HostHeaders>>;
+/// The Control Plane's Volume object grants, as this host: a Worklet handle that holds the host
+/// credential, which a Worker asks for its Attempt's objects through.
+#[derive(Clone)]
+pub(crate) struct VolumeObjects {
+    client: VolumeObjectsClient<InterceptedService<Channel, crate::HostHeaders>>,
+    credential: crate::worklet::HostToken,
+}
+
+impl VolumeObjects {
+    pub(in crate::worklet) fn new(
+        client: VolumeObjectsClient<InterceptedService<Channel, crate::HostHeaders>>,
+        credential: crate::worklet::HostToken,
+    ) -> Self {
+        Self { client, credential }
+    }
+
+    /// The grant for one object of a live Attempt of this host, which `request` names by its
+    /// lease.
+    pub(crate) async fn grant(
+        &self,
+        request: VolumeObjectGrantRequest,
+    ) -> Result<VolumeObjectGrant, Status> {
+        let request = authenticated_request(request, self.credential.secret(), None)?;
+        Ok(self.client.clone().grant(request).await?.into_inner())
+    }
+}
 
 /// How often a host deletes its file Volumes' garbage.
 pub(crate) const GARBAGE_INTERVAL: Duration = Duration::from_secs(10 * 60);
@@ -168,26 +191,22 @@ pub(crate) async fn get(
 /// Volume, or this host's own mapping of a file Volume. `None` when there is no such copy, this
 /// host cannot reach it, or the bytes there differ, so the caller falls back.
 pub(crate) async fn acquired(
-    client: VolumeObjects,
-    token: &str,
+    objects: &VolumeObjects,
     attempt: &InspectAttemptRequest,
     (acquisition_id, path): (&str, &str),
     volumes: &HostVolumes,
 ) -> Option<Vec<u8>> {
-    let request = authenticated_request(
-        VolumeObjectGrantRequest {
+    let grant = objects
+        .grant(VolumeObjectGrantRequest {
             attempt: Some(attempt.clone()),
             purpose: VolumeObjectPurpose::AcquiredFile as i32,
             access: VolumeAccess::Read as i32,
             acquisition_id: acquisition_id.to_owned(),
             path: path.to_owned(),
             native_memory_blob: None,
-        },
-        token,
-        None,
-    )
-    .ok()?;
-    let grant = client.clone().grant(request).await.ok()?.into_inner();
+        })
+        .await
+        .ok()?;
     let volume = grant.volume.as_ref()?;
     let blob = grant.blob.as_ref()?;
     let object = ObjectGrant {
@@ -203,10 +222,10 @@ pub(crate) async fn acquired(
 /// Deletes the objects nothing keeps from every file Volume this host maps, then tells the
 /// Control Plane which went. Returns how many.
 pub(crate) async fn collect_garbage(
-    client: VolumeObjects,
-    token: &str,
+    objects: &VolumeObjects,
     volumes: &HostVolumes,
 ) -> Result<usize, Status> {
+    let (client, token) = (&objects.client, objects.credential.secret());
     let mut deleted = 0;
     for (volume_id, mapping) in volumes.iter() {
         for _ in 0..GARBAGE_PAGES {
@@ -417,9 +436,9 @@ mod tests {
                 .unwrap();
             let client =
                 VolumeObjectsClient::with_interceptor(channel, crate::HostHeaders::new(1, 2));
+            let credential = crate::worklet::HostToken::new("token".into());
             let read = acquired(
-                client,
-                "token",
+                &VolumeObjects::new(client, credential.clone()),
                 &attempt,
                 ("acquisition", "report.txt"),
                 &volumes,
@@ -428,15 +447,17 @@ mod tests {
             assert_eq!(read, expected);
             assert_eq!(
                 acquired(
-                    VolumeObjectsClient::with_interceptor(
-                        tonic::transport::Endpoint::from_shared(format!("http://{address}"))
-                            .unwrap()
-                            .connect()
-                            .await
-                            .unwrap(),
-                        crate::HostHeaders::new(1, 2),
+                    &VolumeObjects::new(
+                        VolumeObjectsClient::with_interceptor(
+                            tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+                                .unwrap()
+                                .connect()
+                                .await
+                                .unwrap(),
+                            crate::HostHeaders::new(1, 2),
+                        ),
+                        credential,
                     ),
-                    "token",
                     &attempt,
                     ("acquisition", "report.txt"),
                     &HostVolumes::default(),
@@ -496,7 +517,8 @@ mod tests {
             .await
             .unwrap();
         let client = VolumeObjectsClient::with_interceptor(channel, crate::HostHeaders::new(1, 2));
-        assert_eq!(collect_garbage(client, "token", &volumes).await.unwrap(), 1);
+        let objects = VolumeObjects::new(client, crate::worklet::HostToken::new("token".into()));
+        assert_eq!(collect_garbage(&objects, &volumes).await.unwrap(), 1);
         assert!(!path.join(&key).exists());
         let forget = seen.recv().await.unwrap();
         assert_eq!(

@@ -22,20 +22,19 @@ _runtime_version.ValidateProtobufRuntimeVersion(
 _sym_db = _symbol_database.Default()
 
 
-from supertag.runtime.v2 import runtime_pb2 as supertag_dot_runtime_dot_v2_dot_runtime__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\'supertag/runtime/v2/changed_paths.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"z\n\x19ReportChangedPathsRequest\x12;\n\x07\x61ttempt\x18\x01 \x01(\x0b\x32*.supertag.runtime.v2.InspectAttemptRequest\x12\r\n\x05paths\x18\x02 \x03(\t\x12\x11\n\ttruncated\x18\x03 \x01(\x08\"O\n\x1aReportChangedPathsResponse\x12\x1f\n\x17overlapping_attempt_ids\x18\x01 \x03(\t\x12\x10\n\x08\x63ompared\x18\x02 \x01(\x08\x32\x80\x01\n\x13\x41ttemptChangedPaths\x12i\n\x06Report\x12..supertag.runtime.v2.ReportChangedPathsRequest\x1a/.supertag.runtime.v2.ReportChangedPathsResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\'supertag/runtime/v2/changed_paths.proto\x12\x13supertag.runtime.v2\"L\n\x19ReportChangedPathsRequest\x12\r\n\x05paths\x18\x02 \x03(\t\x12\x11\n\ttruncated\x18\x03 \x01(\x08J\x04\x08\x01\x10\x02R\x07\x61ttempt\"O\n\x1aReportChangedPathsResponse\x12\x1f\n\x17overlapping_attempt_ids\x18\x01 \x03(\t\x12\x10\n\x08\x63ompared\x18\x02 \x01(\x08\x32\x80\x01\n\x13\x41ttemptChangedPaths\x12i\n\x06Report\x12..supertag.runtime.v2.ReportChangedPathsRequest\x1a/.supertag.runtime.v2.ReportChangedPathsResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'supertag.runtime.v2.changed_paths_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_REPORTCHANGEDPATHSREQUEST']._serialized_start=99
-  _globals['_REPORTCHANGEDPATHSREQUEST']._serialized_end=221
-  _globals['_REPORTCHANGEDPATHSRESPONSE']._serialized_start=223
-  _globals['_REPORTCHANGEDPATHSRESPONSE']._serialized_end=302
-  _globals['_ATTEMPTCHANGEDPATHS']._serialized_start=305
-  _globals['_ATTEMPTCHANGEDPATHS']._serialized_end=433
+  _globals['_REPORTCHANGEDPATHSREQUEST']._serialized_start=64
+  _globals['_REPORTCHANGEDPATHSREQUEST']._serialized_end=140
+  _globals['_REPORTCHANGEDPATHSRESPONSE']._serialized_start=142
+  _globals['_REPORTCHANGEDPATHSRESPONSE']._serialized_end=221
+  _globals['_ATTEMPTCHANGEDPATHS']._serialized_start=224
+  _globals['_ATTEMPTCHANGEDPATHS']._serialized_end=352
 # @@protoc_insertion_point(module_scope)

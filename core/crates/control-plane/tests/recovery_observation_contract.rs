@@ -300,34 +300,47 @@ async fn milestones(url: String) {
         lease_token: lease_token.clone(),
     };
     let reach = |milestone: AttemptMilestone| ReportAttemptMilestoneRequest {
-        attempt: Some(attempt.clone()),
         milestone: milestone as i32,
         ..Default::default()
     };
     assert!(
         store
-            .report_attempt_milestone(&host, &reach(AttemptMilestone::Unspecified))
+            .report_attempt_milestone(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &reach(AttemptMilestone::Unspecified)
+            )
             .await
             .is_err()
     );
-    let mut forged = reach(AttemptMilestone::WorkspaceReady);
-    forged.attempt.as_mut().unwrap().lease_token = "forged".into();
+    let forged = InspectAttemptRequest {
+        lease_token: "forged".into(),
+        ..attempt.clone()
+    };
     assert!(
         store
-            .report_attempt_milestone(&host, &forged)
+            .report_attempt_milestone(
+                &supertag_control_plane::AttemptAccess::new(&host, &forged),
+                &reach(AttemptMilestone::WorkspaceReady)
+            )
             .await
             .is_err()
     );
 
     clock.store(NOW + 100, Ordering::SeqCst);
     store
-        .report_attempt_milestone(&host, &reach(AttemptMilestone::WorkspaceReady))
+        .report_attempt_milestone(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &reach(AttemptMilestone::WorkspaceReady),
+        )
         .await
         .unwrap();
     clock.store(NOW + 250, Ordering::SeqCst);
     for _ in 0..2 {
         store
-            .report_attempt_milestone(&host, &reach(AttemptMilestone::AdapterAttached))
+            .report_attempt_milestone(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &reach(AttemptMilestone::AdapterAttached),
+            )
             .await
             .unwrap();
         // A repeated report keeps the first time.
@@ -337,11 +350,15 @@ async fn milestones(url: String) {
         clock.store(at, Ordering::SeqCst);
         store
             .append_event(
-                &host,
+                &supertag_control_plane::AttemptAccess::new(
+                    &host,
+                    &supertag_protocol::v2::InspectAttemptRequest {
+                        task_id: task_id.clone(),
+                        attempt_id: attempt_id.clone(),
+                        lease_token: lease_token.clone(),
+                    },
+                ),
                 &AppendEventRequest {
-                    task_id: task_id.clone(),
-                    attempt_id: attempt_id.clone(),
-                    lease_token: lease_token.clone(),
                     sequence,
                     text: format!("event {sequence}"),
                     kind: TaskEventKind::Activity as i32,
@@ -353,7 +370,10 @@ async fn milestones(url: String) {
     // Finalization runs from the harness finishing to the host's report.
     clock.store(NOW + 2_000, Ordering::SeqCst);
     store
-        .report_attempt_milestone(&host, &reach(AttemptMilestone::HarnessFinished))
+        .report_attempt_milestone(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &reach(AttemptMilestone::HarnessFinished),
+        )
         .await
         .unwrap();
     clock.store(NOW + 5_000, Ordering::SeqCst);

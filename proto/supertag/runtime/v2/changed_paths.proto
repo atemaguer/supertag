@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package supertag.runtime.v2;
 
-import "supertag/runtime/v2/runtime.proto";
 
 // A Worker Host reports the paths a running Attempt's local Workspace checkout has changed since
 // the Attempt's start commit. The Control Plane compares reports of running Attempts of one
@@ -12,7 +11,8 @@ service AttemptChangedPaths {
 }
 
 message ReportChangedPathsRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   // Sorted, unique, Workspace-relative paths; at most 500.
   repeated string paths = 2;
   // More paths changed than were reported. A truncated report is never compared.

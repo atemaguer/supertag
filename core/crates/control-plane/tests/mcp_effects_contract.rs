@@ -160,13 +160,8 @@ async fn start(store: &Store, host: &HostAuthority, provider: char) -> InspectAt
     attempt
 }
 
-fn request(
-    attempt: &InspectAttemptRequest,
-    operation: &str,
-    arguments: &str,
-) -> ReserveMcpEffectRequest {
+fn request(operation: &str, arguments: &str) -> ReserveMcpEffectRequest {
     ReserveMcpEffectRequest {
-        attempt: Some(attempt.clone()),
         operation_id: operation.into(),
         server: SERVER.into(),
         tool: TOOL.into(),
@@ -229,22 +224,35 @@ async fn approved_effect(store: &Store, host: &HostAuthority) {
     let first = start(store, host, 'a').await;
     assert_eq!(first.task_id, task.task_id);
     let ambiguous = request(
-        &first,
         "ambiguous",
         r#"{"owner":"acme","repo":"api","repository":"web"}"#,
     );
     assert!(matches!(
-        store.reserve_mcp_effect(host, &ambiguous).await,
+        store
+            .reserve_mcp_effect(
+                &supertag_control_plane::AttemptAccess::new(host, &first),
+                &ambiguous
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
     let missing = store
-        .reserve_mcp_effect(host, &request(&first, "missing", r#"{"title":"Release"}"#))
+        .reserve_mcp_effect(
+            &supertag_control_plane::AttemptAccess::new(host, &first),
+            &request("missing", r#"{"title":"Release"}"#),
+        )
         .await
         .unwrap();
     assert_eq!(missing.approval.unwrap().state(), ApprovalState::Pending);
     assert!(missing.dispatch_id.is_none());
-    let requested = request(&first, "original", ARGUMENTS);
-    let pending = store.reserve_mcp_effect(host, &requested).await.unwrap();
+    let requested = request("original", ARGUMENTS);
+    let pending = store
+        .reserve_mcp_effect(
+            &supertag_control_plane::AttemptAccess::new(host, &first),
+            &requested,
+        )
+        .await
+        .unwrap();
     let approval = pending.approval.unwrap();
     assert_eq!(approval.state(), ApprovalState::Pending);
     assert_eq!(approval.resource, "repository:acme/api");
@@ -252,7 +260,10 @@ async fn approved_effect(store: &Store, host: &HostAuthority) {
     assert!(pending.dispatch_id.is_none());
     assert_eq!(
         store
-            .reserve_mcp_effect(host, &request(&first, "original", REORDERED))
+            .reserve_mcp_effect(
+                &supertag_control_plane::AttemptAccess::new(host, &first),
+                &request("original", REORDERED)
+            )
             .await
             .unwrap()
             .approval
@@ -270,13 +281,15 @@ async fn approved_effect(store: &Store, host: &HostAuthority) {
     let resumed = start(store, host, 'a').await;
     assert_ne!(resumed.task_id, first.task_id);
     let changed = request(
-        &resumed,
         "changed",
         r#"{"owner":"acme","repo":"api","title":"Different"}"#,
     );
     assert_eq!(
         store
-            .reserve_mcp_effect(host, &changed)
+            .reserve_mcp_effect(
+                &supertag_control_plane::AttemptAccess::new(host, &resumed),
+                &changed
+            )
             .await
             .unwrap()
             .approval
@@ -284,11 +297,14 @@ async fn approved_effect(store: &Store, host: &HostAuthority) {
             .state(),
         ApprovalState::Pending
     );
-    let mut new_schema = request(&resumed, "changed-schema", ARGUMENTS);
+    let mut new_schema = request("changed-schema", ARGUMENTS);
     new_schema.tool_schema_sha256 = "d".repeat(64);
     assert_eq!(
         store
-            .reserve_mcp_effect(host, &new_schema)
+            .reserve_mcp_effect(
+                &supertag_control_plane::AttemptAccess::new(host, &resumed),
+                &new_schema
+            )
             .await
             .unwrap()
             .approval
@@ -297,15 +313,21 @@ async fn approved_effect(store: &Store, host: &HostAuthority) {
         ApprovalState::Pending
     );
 
-    let original = request(&resumed, "same-effect", REORDERED);
+    let original = request("same-effect", REORDERED);
     let another = support::register_host(store, "other-mcp-host").await;
     assert!(matches!(
-        store.reserve_mcp_effect(&another, &original).await,
+        store
+            .reserve_mcp_effect(
+                &supertag_control_plane::AttemptAccess::new(&another, &resumed),
+                &original
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
+    let access = supertag_control_plane::AttemptAccess::new(host, &resumed);
     let (left, right) = tokio::join!(
-        Box::pin(store.reserve_mcp_effect(host, &original)),
-        Box::pin(store.reserve_mcp_effect(host, &original)),
+        Box::pin(store.reserve_mcp_effect(&access, &original)),
+        Box::pin(store.reserve_mcp_effect(&access, &original)),
     );
     let (left, right) = (left.unwrap(), right.unwrap());
     let (reserved, replay) = if left.dispatch_id.is_some() {
@@ -317,35 +339,68 @@ async fn approved_effect(store: &Store, host: &HostAuthority) {
     let dispatch = reserved.dispatch_id.unwrap();
     assert!(replay.unconfirmed && replay.dispatch_id.is_none());
     let competing = store
-        .reserve_mcp_effect(host, &request(&resumed, "competing", ARGUMENTS))
+        .reserve_mcp_effect(
+            &supertag_control_plane::AttemptAccess::new(host, &resumed),
+            &request("competing", ARGUMENTS),
+        )
         .await
         .unwrap();
     assert!(competing.unconfirmed && competing.dispatch_id.is_none());
 
     let result = r#"{"content":[{"type":"text","text":"done"}]}"#;
     let settled = SettleMcpEffectRequest {
-        attempt: Some(resumed.clone()),
         operation_id: original.operation_id.clone(),
         dispatch_id: dispatch,
         result_json: Some(result.into()),
     };
     assert!(matches!(
-        store.settle_mcp_effect(&another, &settled).await,
+        store
+            .settle_mcp_effect(
+                &supertag_control_plane::AttemptAccess::new(&another, &resumed),
+                &settled
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
-    store.settle_mcp_effect(host, &settled).await.unwrap();
-    store.settle_mcp_effect(host, &settled).await.unwrap();
-    let replay = store.reserve_mcp_effect(host, &original).await.unwrap();
+    store
+        .settle_mcp_effect(
+            &supertag_control_plane::AttemptAccess::new(host, &resumed),
+            &settled,
+        )
+        .await
+        .unwrap();
+    store
+        .settle_mcp_effect(
+            &supertag_control_plane::AttemptAccess::new(host, &resumed),
+            &settled,
+        )
+        .await
+        .unwrap();
+    let replay = store
+        .reserve_mcp_effect(
+            &supertag_control_plane::AttemptAccess::new(host, &resumed),
+            &original,
+        )
+        .await
+        .unwrap();
     assert_eq!(replay.result_json.as_deref(), Some(result));
     assert!(replay.dispatch_id.is_none());
     let mut changed_receipt = settled;
     changed_receipt.result_json = None;
     assert!(matches!(
-        store.settle_mcp_effect(host, &changed_receipt).await,
+        store
+            .settle_mcp_effect(
+                &supertag_control_plane::AttemptAccess::new(host, &resumed),
+                &changed_receipt
+            )
+            .await,
         Err(StoreError::Conflict(_))
     ));
     let fresh = store
-        .reserve_mcp_effect(host, &request(&resumed, "once-consumed", ARGUMENTS))
+        .reserve_mcp_effect(
+            &supertag_control_plane::AttemptAccess::new(host, &resumed),
+            &request("once-consumed", ARGUMENTS),
+        )
         .await
         .unwrap();
     assert!(fresh.dispatch_id.is_none());
@@ -357,14 +412,20 @@ async fn denied_and_changed_provider(store: &Store, host: &HostAuthority) {
     submit(store, "denial").await;
     let denied = start(store, host, 'a').await;
     let first = store
-        .reserve_mcp_effect(host, &request(&denied, "deny", ARGUMENTS))
+        .reserve_mcp_effect(
+            &supertag_control_plane::AttemptAccess::new(host, &denied),
+            &request("deny", ARGUMENTS),
+        )
         .await
         .unwrap()
         .approval
         .unwrap();
     decide(store, OPERATOR, &first, false).await.unwrap();
     let denial = store
-        .reserve_mcp_effect(host, &request(&denied, "other-id", REORDERED))
+        .reserve_mcp_effect(
+            &supertag_control_plane::AttemptAccess::new(host, &denied),
+            &request("other-id", REORDERED),
+        )
         .await
         .unwrap();
     assert!(denial.dispatch_id.is_none());
@@ -374,7 +435,10 @@ async fn denied_and_changed_provider(store: &Store, host: &HostAuthority) {
     submit(store, "provider-change").await;
     let original = start(store, host, 'a').await;
     let first = store
-        .reserve_mcp_effect(host, &request(&original, "bound", ARGUMENTS))
+        .reserve_mcp_effect(
+            &supertag_control_plane::AttemptAccess::new(host, &original),
+            &request("bound", ARGUMENTS),
+        )
         .await
         .unwrap()
         .approval
@@ -382,13 +446,24 @@ async fn denied_and_changed_provider(store: &Store, host: &HostAuthority) {
     finish(store, host, &original, vec![first.approval_id.clone()]).await;
     decide(store, OPERATOR, &first, true).await.unwrap();
     let changed = start(store, host, 'b').await;
-    let mut effect = request(&changed, "binding", REORDERED);
+    let mut effect = request("binding", REORDERED);
     assert!(matches!(
-        store.reserve_mcp_effect(host, &effect).await,
+        store
+            .reserve_mcp_effect(
+                &supertag_control_plane::AttemptAccess::new(host, &changed),
+                &effect
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
     effect.provider_binding = "b".repeat(64);
-    let new = store.reserve_mcp_effect(host, &effect).await.unwrap();
+    let new = store
+        .reserve_mcp_effect(
+            &supertag_control_plane::AttemptAccess::new(host, &changed),
+            &effect,
+        )
+        .await
+        .unwrap();
     assert!(new.dispatch_id.is_none());
     let new = new.approval.unwrap();
     assert_ne!(new.approval_id, first.approval_id);
@@ -412,27 +487,41 @@ async fn lost_dispatch_after_restart(url: &str) {
     let task = submit(&store, "uncertain-after-restart").await;
     let attempt = start(&store, &host, 'a').await;
     assert_eq!(task.task_id, attempt.task_id);
-    let call = request(&attempt, "lost-response", ARGUMENTS);
+    let call = request("lost-response", ARGUMENTS);
     let pending = store
-        .reserve_mcp_effect(&host, &call)
+        .reserve_mcp_effect(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &call,
+        )
         .await
         .unwrap()
         .approval
         .unwrap();
     decide(&store, OPERATOR, &pending, true).await.unwrap();
-    let reserved = store.reserve_mcp_effect(&host, &call).await.unwrap();
+    let reserved = store
+        .reserve_mcp_effect(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &call,
+        )
+        .await
+        .unwrap();
     let dispatch_id = reserved.dispatch_id.unwrap();
     assert!((1..=12_000).contains(&reserved.dispatch_valid_for_ms));
     store.close().await;
 
     let store = Store::open(url).await.unwrap();
-    let observed = store.reserve_mcp_effect(&host, &call).await.unwrap();
+    let observed = store
+        .reserve_mcp_effect(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &call,
+        )
+        .await
+        .unwrap();
     assert!(observed.unconfirmed && observed.dispatch_id.is_none());
     store
         .settle_mcp_effect(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
             &SettleMcpEffectRequest {
-                attempt: Some(attempt.clone()),
                 operation_id: call.operation_id,
                 dispatch_id,
                 result_json: None,
@@ -474,15 +563,20 @@ async fn lost_dispatch_after_restart(url: &str) {
         .unwrap();
     let next = start(&store, &host, 'a').await;
     assert_eq!(next.task_id, next_task.task_id);
-    let mut retry = request(&next, "new-attempt", REORDERED);
+    let mut retry = request("new-attempt", REORDERED);
     retry.tool_schema_sha256 = "d".repeat(64);
-    let repeat = store.reserve_mcp_effect(&host, &retry).await.unwrap();
+    let repeat = store
+        .reserve_mcp_effect(
+            &supertag_control_plane::AttemptAccess::new(&host, &next),
+            &retry,
+        )
+        .await
+        .unwrap();
     assert!(repeat.unconfirmed && repeat.dispatch_id.is_none() && !repeat.ungated);
     let ordinary = store
         .reserve_mcp_effect(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &next),
             &request(
-                &next,
                 "unrelated",
                 r#"{"owner":"acme","repo":"api","title":"Another release"}"#,
             ),

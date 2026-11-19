@@ -146,7 +146,7 @@ func (UnimplementedWorkspaceVolumesHandler) Get(context.Context, *connect.Reques
 // AttemptWorkspaceMountsClient is a client for the supertag.runtime.v2.AttemptWorkspaceMounts
 // service.
 type AttemptWorkspaceMountsClient interface {
-	Preflight(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceMountPreflight], error)
+	Preflight(context.Context, *connect.Request[runtimev2.PreflightWorkspaceMountsRequest]) (*connect.Response[runtimev2.WorkspaceMountPreflight], error)
 	// Record what the Attempt's read-write copies wrote back. Idempotent per Attempt.
 	RecordWrites(context.Context, *connect.Request[runtimev2.RecordWorkspaceMountWritesRequest]) (*connect.Response[runtimev2.RecordWorkspaceMountWritesResponse], error)
 }
@@ -162,7 +162,7 @@ func NewAttemptWorkspaceMountsClient(httpClient connect.HTTPClient, baseURL stri
 	baseURL = strings.TrimRight(baseURL, "/")
 	attemptWorkspaceMountsMethods := runtimev2.File_supertag_runtime_v2_workspace_volume_proto.Services().ByName("AttemptWorkspaceMounts").Methods()
 	return &attemptWorkspaceMountsClient{
-		preflight: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceMountPreflight](
+		preflight: connect.NewClient[runtimev2.PreflightWorkspaceMountsRequest, runtimev2.WorkspaceMountPreflight](
 			httpClient,
 			baseURL+AttemptWorkspaceMountsPreflightProcedure,
 			connect.WithSchema(attemptWorkspaceMountsMethods.ByName("Preflight")),
@@ -179,12 +179,12 @@ func NewAttemptWorkspaceMountsClient(httpClient connect.HTTPClient, baseURL stri
 
 // attemptWorkspaceMountsClient implements AttemptWorkspaceMountsClient.
 type attemptWorkspaceMountsClient struct {
-	preflight    *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceMountPreflight]
+	preflight    *connect.Client[runtimev2.PreflightWorkspaceMountsRequest, runtimev2.WorkspaceMountPreflight]
 	recordWrites *connect.Client[runtimev2.RecordWorkspaceMountWritesRequest, runtimev2.RecordWorkspaceMountWritesResponse]
 }
 
 // Preflight calls supertag.runtime.v2.AttemptWorkspaceMounts.Preflight.
-func (c *attemptWorkspaceMountsClient) Preflight(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceMountPreflight], error) {
+func (c *attemptWorkspaceMountsClient) Preflight(ctx context.Context, req *connect.Request[runtimev2.PreflightWorkspaceMountsRequest]) (*connect.Response[runtimev2.WorkspaceMountPreflight], error) {
 	return c.preflight.CallUnary(ctx, req)
 }
 
@@ -196,7 +196,7 @@ func (c *attemptWorkspaceMountsClient) RecordWrites(ctx context.Context, req *co
 // AttemptWorkspaceMountsHandler is an implementation of the
 // supertag.runtime.v2.AttemptWorkspaceMounts service.
 type AttemptWorkspaceMountsHandler interface {
-	Preflight(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceMountPreflight], error)
+	Preflight(context.Context, *connect.Request[runtimev2.PreflightWorkspaceMountsRequest]) (*connect.Response[runtimev2.WorkspaceMountPreflight], error)
 	// Record what the Attempt's read-write copies wrote back. Idempotent per Attempt.
 	RecordWrites(context.Context, *connect.Request[runtimev2.RecordWorkspaceMountWritesRequest]) (*connect.Response[runtimev2.RecordWorkspaceMountWritesResponse], error)
 }
@@ -235,7 +235,7 @@ func NewAttemptWorkspaceMountsHandler(svc AttemptWorkspaceMountsHandler, opts ..
 // UnimplementedAttemptWorkspaceMountsHandler returns CodeUnimplemented from all methods.
 type UnimplementedAttemptWorkspaceMountsHandler struct{}
 
-func (UnimplementedAttemptWorkspaceMountsHandler) Preflight(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceMountPreflight], error) {
+func (UnimplementedAttemptWorkspaceMountsHandler) Preflight(context.Context, *connect.Request[runtimev2.PreflightWorkspaceMountsRequest]) (*connect.Response[runtimev2.WorkspaceMountPreflight], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptWorkspaceMounts.Preflight is not implemented"))
 }
 

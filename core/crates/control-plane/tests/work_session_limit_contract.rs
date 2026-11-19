@@ -60,9 +60,8 @@ async fn run(store: &Store, host: &HostAuthority, expected: &str) -> InspectAtte
     attempt
 }
 
-fn start(attempt: &InspectAttemptRequest, operation: &str, title: &str) -> StartWorkSessionRequest {
+fn start(operation: &str, title: &str) -> StartWorkSessionRequest {
     StartWorkSessionRequest {
-        attempt: Some(attempt.clone()),
         operation_id: operation.into(),
         title: title.into(),
         instruction: "Do this part".into(),
@@ -70,9 +69,8 @@ fn start(attempt: &InspectAttemptRequest, operation: &str, title: &str) -> Start
     }
 }
 
-fn close(attempt: &InspectAttemptRequest, session: &str) -> CloseAttemptWorkSessionRequest {
+fn close(session: &str) -> CloseAttemptWorkSessionRequest {
     CloseAttemptWorkSessionRequest {
-        attempt: Some(attempt.clone()),
         work_session_id: session.into(),
     }
 }
@@ -125,7 +123,10 @@ async fn contract(url: String) {
     let second = submit(&store, "lead", "second").await;
     let a = run(&store, &host, &first.task_id).await;
     let b = run(&store, &host, &second.task_id).await;
-    let capabilities = store.attempt_capabilities(&host, &a).await.unwrap();
+    let capabilities = store
+        .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(&host, &a))
+        .await
+        .unwrap();
     assert!(capabilities.may_start_work_session);
     assert_eq!(
         (
@@ -135,20 +136,32 @@ async fn contract(url: String) {
         (0, 2)
     );
     let one = store
-        .start_work_session(&host, &start(&a, "one", "Draft the plan"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &a),
+            &start("one", "Draft the plan"),
+        )
         .await
         .unwrap();
     let two = store
-        .start_work_session(&host, &start(&a, "two", "Check the tests"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &a),
+            &start("two", "Check the tests"),
+        )
         .await
         .unwrap();
     assert_eq!(one.closed_at_ms, None);
-    let capabilities = store.attempt_capabilities(&host, &b).await.unwrap();
+    let capabilities = store
+        .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(&host, &b))
+        .await
+        .unwrap();
     assert_eq!(capabilities.open_work_sessions, 2);
 
     // At the limit, a start is refused with the open Work Sessions, and none starts.
     let refused = store
-        .start_work_session(&host, &start(&a, "three", "One too many"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &a),
+            &start("three", "One too many"),
+        )
         .await;
     let Err(StoreError::FailedPrecondition(reason)) = refused else {
         panic!("expected the limit refusal: {refused:?}")
@@ -165,8 +178,8 @@ async fn contract(url: String) {
     assert!(reason.contains(&two.work_session_id), "{reason}");
     let elsewhere = store
         .start_work_session(
-            &host,
-            &start(&b, "elsewhere", "From the other conversation"),
+            &supertag_control_plane::AttemptAccess::new(&host, &b),
+            &start("elsewhere", "From the other conversation"),
         )
         .await;
     let Err(StoreError::FailedPrecondition(reason)) = elsewhere else {
@@ -177,28 +190,36 @@ async fn contract(url: String) {
 
     // The Tag closes one from its other conversation, and a start fits again.
     let closed = store
-        .close_attempt_work_session(&host, &close(&b, &one.work_session_id))
+        .close_attempt_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &b),
+            &close(&one.work_session_id),
+        )
         .await
         .unwrap();
     assert!(closed.closed_at_ms.is_some());
     assert_eq!(closed.close_reason(), WorkSessionCloseReason::Tag);
     // Closing again changes nothing.
     let again = store
-        .close_attempt_work_session(&host, &close(&b, &one.work_session_id))
+        .close_attempt_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &b),
+            &close(&one.work_session_id),
+        )
         .await
         .unwrap();
     assert_eq!(again.closed_at_ms, closed.closed_at_ms);
     let three = store
-        .start_work_session(&host, &start(&b, "three", "The next part"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &b),
+            &start("three", "The next part"),
+        )
         .await
         .unwrap();
 
     // A Work Session the Tag closed is final.
     let continued = store
         .continue_work_session(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &a),
             &ContinueWorkSessionRequest {
-                attempt: Some(a.clone()),
                 operation_id: "continue-closed".into(),
                 work_session_id: one.work_session_id.clone(),
                 message: "Keep going".into(),
@@ -215,8 +236,8 @@ async fn contract(url: String) {
     assert!(matches!(
         store
             .close_attempt_work_session(
-                &host,
-                &close(&a, "work/00000000-0000-0000-0000-000000000000")
+                &supertag_control_plane::AttemptAccess::new(&host, &a),
+                &close("work/00000000-0000-0000-0000-000000000000")
             )
             .await,
         Err(StoreError::NotFound(_))
@@ -304,7 +325,10 @@ async fn contract(url: String) {
         .unwrap();
     let owner = run(&store, &host, &objective.starting_task_id).await;
     let delegated = store
-        .start_work_session(&host, &start(&owner, "objective", "Objective part"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &owner),
+            &start("objective", "Objective part"),
+        )
         .await
         .unwrap();
     assert_eq!(delegated.objective_id.as_deref(), Some("ship"));
@@ -405,7 +429,10 @@ async fn reopen_and_idle(url: String) {
         .unwrap();
     let a = run(&store, &host, &first.task_id).await;
     let x = store
-        .start_work_session(&host, &start(&a, "x", "Draft"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &a),
+            &start("x", "Draft"),
+        )
         .await
         .unwrap();
     finish(&store, &host, &a).await;
@@ -453,17 +480,22 @@ async fn reopen_and_idle(url: String) {
         .unwrap();
     let b = run(&store, &host, &second.task_id).await;
     let y = store
-        .start_work_session(&host, &start(&b, "y", "Another"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &b),
+            &start("y", "Another"),
+        )
         .await
         .unwrap();
     let continuing = |session: &str, operation: &str| ContinueWorkSessionRequest {
-        attempt: Some(b.clone()),
         operation_id: operation.into(),
         work_session_id: session.into(),
         message: "Revise it".into(),
     };
     let refused = store
-        .continue_work_session(&host, &continuing(&x.work_session_id, "at-limit"))
+        .continue_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &b),
+            &continuing(&x.work_session_id, "at-limit"),
+        )
         .await;
     assert!(
         matches!(&refused, Err(StoreError::FailedPrecondition(reason)) if reason.contains("1 of 1 Work Sessions open")),
@@ -472,11 +504,17 @@ async fn reopen_and_idle(url: String) {
     assert!(read(x.work_session_id.clone()).await.closed_at_ms.is_some());
     // An explicit close is final.
     store
-        .close_attempt_work_session(&host, &close(&b, &y.work_session_id))
+        .close_attempt_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &b),
+            &close(&y.work_session_id),
+        )
         .await
         .unwrap();
     let final_close = store
-        .continue_work_session(&host, &continuing(&y.work_session_id, "closed"))
+        .continue_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &b),
+            &continuing(&y.work_session_id, "closed"),
+        )
         .await;
     assert!(
         matches!(&final_close, Err(StoreError::FailedPrecondition(reason)) if reason.contains("was closed (the Tag closed it)")),
@@ -484,7 +522,10 @@ async fn reopen_and_idle(url: String) {
     );
     // Under the limit, continuing the idle Work Session reopens it.
     let reopened = store
-        .continue_work_session(&host, &continuing(&x.work_session_id, "reopen"))
+        .continue_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &b),
+            &continuing(&x.work_session_id, "reopen"),
+        )
         .await
         .unwrap();
     assert_eq!(reopened.closed_at_ms, None);

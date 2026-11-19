@@ -706,9 +706,8 @@ async fn work_session(store: &Store, host: &HostAuthority, head: &str) -> WorkSe
     let (attempt, _) = run(store, host, &parent.task_id).await;
     let work = store
         .start_work_session(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
             &StartWorkSessionRequest {
-                attempt: Some(attempt.clone()),
                 operation_id: "start".into(),
                 title: "Notes".into(),
                 instruction: "Write the notes".into(),

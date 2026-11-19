@@ -4,7 +4,7 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { InspectAttemptRequestSchema, WorkspaceMountWrite, WorkspaceVolumeSchema } from "./runtime_pb.js";
+import type { WorkspaceMountWrite, WorkspaceVolumeSchema } from "./runtime_pb.js";
 import { file_supertag_runtime_v2_runtime } from "./runtime_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/workspace_volume.proto.
  */
 export const file_supertag_runtime_v2_workspace_volume: GenFile = /*@__PURE__*/
-  fileDesc("CipzdXBlcnRhZy9ydW50aW1lL3YyL3dvcmtzcGFjZV92b2x1bWUucHJvdG8SE3N1cGVydGFnLnJ1bnRpbWUudjIibgoZUHV0V29ya3NwYWNlVm9sdW1lUmVxdWVzdBIRCgl2b2x1bWVfaWQYASABKAkSDgoGc291cmNlGAIgASgJEhkKEWV4cGVjdGVkX3JldmlzaW9uGAMgASgEEhMKCmNyZWRlbnRpYWwY7CcgASgJIi4KGUdldFdvcmtzcGFjZVZvbHVtZVJlcXVlc3QSEQoJdm9sdW1lX2lkGAEgASgJIpcBCiFSZWNvcmRXb3Jrc3BhY2VNb3VudFdyaXRlc1JlcXVlc3QSDwoHdGFza19pZBgBIAEoCRISCgphdHRlbXB0X2lkGAIgASgJEhMKC2xlYXNlX3Rva2VuGAMgASgJEjgKBndyaXRlcxgEIAMoCzIoLnN1cGVydGFnLnJ1bnRpbWUudjIuV29ya3NwYWNlTW91bnRXcml0ZSIkCiJSZWNvcmRXb3Jrc3BhY2VNb3VudFdyaXRlc1Jlc3BvbnNlIjkKF1dvcmtzcGFjZU1vdW50UHJlZmxpZ2h0Eh4KFnByb3RlY3RlZF9maWxlX3NvdXJjZXMYASADKAkyzAEKEFdvcmtzcGFjZVZvbHVtZXMSWwoDUHV0Ei4uc3VwZXJ0YWcucnVudGltZS52Mi5QdXRXb3Jrc3BhY2VWb2x1bWVSZXF1ZXN0GiQuc3VwZXJ0YWcucnVudGltZS52Mi5Xb3Jrc3BhY2VWb2x1bWUSWwoDR2V0Ei4uc3VwZXJ0YWcucnVudGltZS52Mi5HZXRXb3Jrc3BhY2VWb2x1bWVSZXF1ZXN0GiQuc3VwZXJ0YWcucnVudGltZS52Mi5Xb3Jrc3BhY2VWb2x1bWUygAIKFkF0dGVtcHRXb3Jrc3BhY2VNb3VudHMSZQoJUHJlZmxpZ2h0Eiouc3VwZXJ0YWcucnVudGltZS52Mi5JbnNwZWN0QXR0ZW1wdFJlcXVlc3QaLC5zdXBlcnRhZy5ydW50aW1lLnYyLldvcmtzcGFjZU1vdW50UHJlZmxpZ2h0En8KDFJlY29yZFdyaXRlcxI2LnN1cGVydGFnLnJ1bnRpbWUudjIuUmVjb3JkV29ya3NwYWNlTW91bnRXcml0ZXNSZXF1ZXN0Gjcuc3VwZXJ0YWcucnVudGltZS52Mi5SZWNvcmRXb3Jrc3BhY2VNb3VudFdyaXRlc1Jlc3BvbnNlYgZwcm90bzM", [file_supertag_runtime_v2_runtime]);
+  fileDesc("CipzdXBlcnRhZy9ydW50aW1lL3YyL3dvcmtzcGFjZV92b2x1bWUucHJvdG8SE3N1cGVydGFnLnJ1bnRpbWUudjIibgoZUHV0V29ya3NwYWNlVm9sdW1lUmVxdWVzdBIRCgl2b2x1bWVfaWQYASABKAkSDgoGc291cmNlGAIgASgJEhkKEWV4cGVjdGVkX3JldmlzaW9uGAMgASgEEhMKCmNyZWRlbnRpYWwY7CcgASgJIi4KGUdldFdvcmtzcGFjZVZvbHVtZVJlcXVlc3QSEQoJdm9sdW1lX2lkGAEgASgJIiEKH1ByZWZsaWdodFdvcmtzcGFjZU1vdW50c1JlcXVlc3QikQEKIVJlY29yZFdvcmtzcGFjZU1vdW50V3JpdGVzUmVxdWVzdBI4CgZ3cml0ZXMYBCADKAsyKC5zdXBlcnRhZy5ydW50aW1lLnYyLldvcmtzcGFjZU1vdW50V3JpdGVKBAgBEAJKBAgCEANKBAgDEARSB3Rhc2tfaWRSCmF0dGVtcHRfaWRSC2xlYXNlX3Rva2VuIiQKIlJlY29yZFdvcmtzcGFjZU1vdW50V3JpdGVzUmVzcG9uc2UiOQoXV29ya3NwYWNlTW91bnRQcmVmbGlnaHQSHgoWcHJvdGVjdGVkX2ZpbGVfc291cmNlcxgBIAMoCTLMAQoQV29ya3NwYWNlVm9sdW1lcxJbCgNQdXQSLi5zdXBlcnRhZy5ydW50aW1lLnYyLlB1dFdvcmtzcGFjZVZvbHVtZVJlcXVlc3QaJC5zdXBlcnRhZy5ydW50aW1lLnYyLldvcmtzcGFjZVZvbHVtZRJbCgNHZXQSLi5zdXBlcnRhZy5ydW50aW1lLnYyLkdldFdvcmtzcGFjZVZvbHVtZVJlcXVlc3QaJC5zdXBlcnRhZy5ydW50aW1lLnYyLldvcmtzcGFjZVZvbHVtZTKKAgoWQXR0ZW1wdFdvcmtzcGFjZU1vdW50cxJvCglQcmVmbGlnaHQSNC5zdXBlcnRhZy5ydW50aW1lLnYyLlByZWZsaWdodFdvcmtzcGFjZU1vdW50c1JlcXVlc3QaLC5zdXBlcnRhZy5ydW50aW1lLnYyLldvcmtzcGFjZU1vdW50UHJlZmxpZ2h0En8KDFJlY29yZFdyaXRlcxI2LnN1cGVydGFnLnJ1bnRpbWUudjIuUmVjb3JkV29ya3NwYWNlTW91bnRXcml0ZXNSZXF1ZXN0Gjcuc3VwZXJ0YWcucnVudGltZS52Mi5SZWNvcmRXb3Jrc3BhY2VNb3VudFdyaXRlc1Jlc3BvbnNlYgZwcm90bzM", [file_supertag_runtime_v2_runtime]);
 
 /**
  * @generated from message supertag.runtime.v2.PutWorkspaceVolumeRequest
@@ -68,24 +68,24 @@ export const GetWorkspaceVolumeRequestSchema: GenMessage<GetWorkspaceVolumeReque
   messageDesc(file_supertag_runtime_v2_workspace_volume, 1);
 
 /**
+ * The Attempt the call's Attempt credential names.
+ *
+ * @generated from message supertag.runtime.v2.PreflightWorkspaceMountsRequest
+ */
+export type PreflightWorkspaceMountsRequest = Message<"supertag.runtime.v2.PreflightWorkspaceMountsRequest"> & {
+};
+
+/**
+ * Describes the message supertag.runtime.v2.PreflightWorkspaceMountsRequest.
+ * Use `create(PreflightWorkspaceMountsRequestSchema)` to create a new message.
+ */
+export const PreflightWorkspaceMountsRequestSchema: GenMessage<PreflightWorkspaceMountsRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_workspace_volume, 2);
+
+/**
  * @generated from message supertag.runtime.v2.RecordWorkspaceMountWritesRequest
  */
 export type RecordWorkspaceMountWritesRequest = Message<"supertag.runtime.v2.RecordWorkspaceMountWritesRequest"> & {
-  /**
-   * @generated from field: string task_id = 1;
-   */
-  taskId: string;
-
-  /**
-   * @generated from field: string attempt_id = 2;
-   */
-  attemptId: string;
-
-  /**
-   * @generated from field: string lease_token = 3;
-   */
-  leaseToken: string;
-
   /**
    * @generated from field: repeated supertag.runtime.v2.WorkspaceMountWrite writes = 4;
    */
@@ -97,7 +97,7 @@ export type RecordWorkspaceMountWritesRequest = Message<"supertag.runtime.v2.Rec
  * Use `create(RecordWorkspaceMountWritesRequestSchema)` to create a new message.
  */
 export const RecordWorkspaceMountWritesRequestSchema: GenMessage<RecordWorkspaceMountWritesRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_workspace_volume, 2);
+  messageDesc(file_supertag_runtime_v2_workspace_volume, 3);
 
 /**
  * @generated from message supertag.runtime.v2.RecordWorkspaceMountWritesResponse
@@ -110,7 +110,7 @@ export type RecordWorkspaceMountWritesResponse = Message<"supertag.runtime.v2.Re
  * Use `create(RecordWorkspaceMountWritesResponseSchema)` to create a new message.
  */
 export const RecordWorkspaceMountWritesResponseSchema: GenMessage<RecordWorkspaceMountWritesResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_workspace_volume, 3);
+  messageDesc(file_supertag_runtime_v2_workspace_volume, 4);
 
 /**
  * @generated from message supertag.runtime.v2.WorkspaceMountPreflight
@@ -127,7 +127,7 @@ export type WorkspaceMountPreflight = Message<"supertag.runtime.v2.WorkspaceMoun
  * Use `create(WorkspaceMountPreflightSchema)` to create a new message.
  */
 export const WorkspaceMountPreflightSchema: GenMessage<WorkspaceMountPreflight> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_workspace_volume, 4);
+  messageDesc(file_supertag_runtime_v2_workspace_volume, 5);
 
 /**
  * Configured file data sources. Artifact Volumes are managed separately.
@@ -166,7 +166,7 @@ export const AttemptWorkspaceMounts: GenService<{
    */
   preflight: {
     methodKind: "unary";
-    input: typeof InspectAttemptRequestSchema;
+    input: typeof PreflightWorkspaceMountsRequestSchema;
     output: typeof WorkspaceMountPreflightSchema;
   },
   /**

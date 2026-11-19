@@ -583,6 +583,7 @@ async fn exercise(database_url: &str) -> Result<()> {
         .await?
         .into_inner();
     let mut attempts = Vec::new();
+    let mut attempt_credentials = Vec::new();
     // The objective Attempt and a plain Attempt run on an unspecified
     // harness; the Codex Attempt runs on a harness that prices its usage.
     for (operation, session, harness) in [
@@ -627,7 +628,7 @@ async fn exercise(database_url: &str) -> Result<()> {
             attempt_id: assignment.attempt_id,
             lease_token: assignment.lease_token,
         };
-        worker
+        let started = worker
             .start_task(host_request(
                 StartTaskRequest {
                     task_id: attempt.task_id.clone(),
@@ -637,44 +638,43 @@ async fn exercise(database_url: &str) -> Result<()> {
                 &host_token,
                 host.generation,
             )?)
-            .await?;
+            .await?
+            .into_inner();
         attempts.push(attempt);
+        attempt_credentials.push(started.attempt_credential);
     }
     assert_eq!(attempts[0].task_id, objective_task);
-    let usage = |attempt: &InspectAttemptRequest, model: &str, cost: Option<u64>| {
-        ReportAttemptUsageRequest {
-            attempt: Some(attempt.clone()),
-            sequence: 1,
-            native_usage: Some(NativeTokenUsage {
-                input_tokens: 100,
-                cached_input_tokens: 10,
-                output_tokens: 20,
-                total_tokens: Some(120),
-                observed_model: Some(model.into()),
-            }),
-            amount_minor: cost,
-            currency: cost.map(|_| "USD".into()),
-            estimated: cost.is_some(),
-        }
+    let usage = |model: &str, cost: Option<u64>| ReportAttemptUsageRequest {
+        sequence: 1,
+        native_usage: Some(NativeTokenUsage {
+            input_tokens: 100,
+            cached_input_tokens: 10,
+            output_tokens: 20,
+            total_tokens: Some(120),
+            observed_model: Some(model.into()),
+        }),
+        amount_minor: cost,
+        currency: cost.map(|_| "USD".into()),
+        estimated: cost.is_some(),
     };
     worker
         .report_attempt_usage(host_request(
-            usage(&attempts[0], "priced-model", Some(42)),
-            &host_token,
+            usage("priced-model", Some(42)),
+            &attempt_credentials[0],
             host.generation,
         )?)
         .await?;
     worker
         .report_attempt_usage(host_request(
-            usage(&attempts[1], "mystery-model", None),
-            &host_token,
+            usage("mystery-model", None),
+            &attempt_credentials[1],
             host.generation,
         )?)
         .await?;
     worker
         .report_attempt_usage(host_request(
-            usage(&attempts[2], "plain-model", None),
-            &host_token,
+            usage("plain-model", None),
+            &attempt_credentials[2],
             host.generation,
         )?)
         .await?;
@@ -1005,14 +1005,13 @@ async fn exercise(database_url: &str) -> Result<()> {
     )
     .start(host_request(
         StartWorkSessionRequest {
-            attempt: Some(attempts[0].clone()),
             operation_id: "describe-session".into(),
             title: "Check the docs".into(),
             instruction: "Read the docs and report.".into(),
             target_tag_id: None,
             harness: None,
         },
-        &host_token,
+        &attempt_credentials[0],
         host.generation,
     )?)
     .await?

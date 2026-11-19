@@ -752,9 +752,8 @@ impl Store {
         let (capture, file) = self
             .acquired_source_in(
                 &mut tx,
-                host,
+                &crate::AttemptAccess::new(host, attempt),
                 &GetAcquiredArtifactFileRequest {
-                    attempt: Some(attempt.clone()),
                     acquisition_id: input.acquisition_id.clone(),
                     path: input.path.clone(),
                 },

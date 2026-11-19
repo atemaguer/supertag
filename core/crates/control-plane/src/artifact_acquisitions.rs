@@ -1,4 +1,5 @@
 //! Attempt-bound immutable path selections and confirmed input provenance.
+use crate::AttemptAccess;
 use crate::{
     HostAuthority, Store, StoreError,
     policy::decode,
@@ -15,9 +16,6 @@ use supertag_protocol::{
 };
 use tokio_stream::StreamExt;
 
-fn attempt(input: Option<&InspectAttemptRequest>) -> Result<&InspectAttemptRequest> {
-    input.ok_or_else(|| invalid("Attempt identity is required"))
-}
 async fn owner_in(
     tx: &mut Transaction<'_, Any>,
     host: &HostAuthority,
@@ -118,10 +116,11 @@ pub(crate) async fn lineage_in(
 impl Store {
     pub async fn inspect_attempt_artifact(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &InspectAttemptArtifactRequest,
     ) -> Result<CapturedArtifact> {
-        let identity = attempt(input.attempt.as_ref())?;
+        let host = authority.host();
+        let identity = authority.lease();
         let mut tx = self.pool.begin().await?;
         let row = owner_in(&mut tx, host, identity).await?;
         crate::artifact_captures::running(&row, self.execution_now_ms())?;
@@ -130,10 +129,11 @@ impl Store {
     }
     pub async fn find_attempt_artifacts(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &FindAttemptArtifactsRequest,
     ) -> Result<ListCapturedArtifactsResponse> {
-        let identity = attempt(input.attempt.as_ref())?;
+        let host = authority.host();
+        let identity = authority.lease();
         let mut tx = self.pool.begin().await?;
         let row = owner_in(&mut tx, host, identity).await?;
         crate::artifact_captures::running(&row, self.execution_now_ms())?;
@@ -197,17 +197,17 @@ impl Store {
     }
     pub async fn acquire_artifact(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &AcquireArtifactRequest,
     ) -> Result<ArtifactAcquisition> {
-        let identity = attempt(input.attempt.as_ref())?;
+        let host = authority.host();
+        let identity = authority.lease();
         name("artifact acquisition operation ID", &input.operation_id)?;
         name("artifact ID", &input.artifact_id)?;
         if !(1..=MAX_ARTIFACT_FILES).contains(&input.paths.len()) {
             return Err(invalid("acquisition requires 1–100 selected paths"));
         }
         let mut canonical = input.clone();
-        canonical.attempt = None;
         canonical.paths.sort();
         for path in &canonical.paths {
             validate_artifact_path(path).map_err(|error| invalid(error.message()))?;
@@ -302,10 +302,11 @@ impl Store {
     }
     pub async fn settle_artifact_acquisition(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &SettleArtifactAcquisitionRequest,
     ) -> Result<ArtifactAcquisition> {
-        let identity = attempt(input.attempt.as_ref())?;
+        let host = authority.host();
+        let identity = authority.lease();
         if !matches!(
             input.state(),
             ArtifactAcquisitionState::Delivered
@@ -358,20 +359,21 @@ impl Store {
     }
     pub async fn get_acquired_artifact_file(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &GetAcquiredArtifactFileRequest,
     ) -> Result<ArtifactFile> {
         let mut tx = self.pool.begin().await?;
-        Ok(self.acquired_source_in(&mut tx, host, input).await?.1)
+        Ok(self.acquired_source_in(&mut tx, authority, input).await?.1)
     }
 
     pub(crate) async fn acquired_source_in(
         &self,
         tx: &mut Transaction<'_, Any>,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &GetAcquiredArtifactFileRequest,
     ) -> Result<(CapturedArtifact, ArtifactFile)> {
-        let identity = attempt(input.attempt.as_ref())?;
+        let host = authority.host();
+        let identity = authority.lease();
         let owned = owner_in(tx, host, identity).await?;
         crate::artifact_captures::running(&owned, self.execution_now_ms())?;
         let row=sqlx::query("SELECT payload FROM supertag_v2_artifact_acquisitions WHERE acquisition_id=$1 AND attempt_id=$2 AND task_id=$3 AND state<>$4")

@@ -1099,10 +1099,7 @@ impl AttemptEgress {
     ) {
         let log = self.proxy.stop().await;
         let _ = std::fs::remove_dir_all(&self.directory);
-        let message = supertag_protocol::v2::ReportNetworkLogRequest {
-            attempt: Some(attempt.inspect()),
-            log: Some(log),
-        };
+        let message = supertag_protocol::v2::ReportNetworkLogRequest { log: Some(log) };
         let Ok(mut request) = supertag_protocol::authenticated_request(message, token, None) else {
             return;
         };

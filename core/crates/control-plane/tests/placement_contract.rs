@@ -395,7 +395,7 @@ async fn start_running(store: &Store, host: &HostAuthority, operation: &str) -> 
         )
         .await
         .unwrap();
-    assert_eq!(running.state, TaskState::Running as i32);
+    assert_eq!(running.task.unwrap().state, TaskState::Running as i32);
     task
 }
 

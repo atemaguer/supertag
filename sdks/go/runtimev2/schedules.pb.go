@@ -751,7 +751,6 @@ func (x *ListSchedulesResponse) GetSchedules() []*Schedule {
 // conversation's latest Session). Fields as in CreateScheduleRequest.
 type CreateAttemptScheduleRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Attempt       *InspectAttemptRequest `protobuf:"bytes,1,opt,name=attempt,proto3" json:"attempt,omitempty"`
 	OperationId   string                 `protobuf:"bytes,2,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
 	Note          string                 `protobuf:"bytes,3,opt,name=note,proto3" json:"note,omitempty"`
 	At            string                 `protobuf:"bytes,4,opt,name=at,proto3" json:"at,omitempty"`
@@ -789,13 +788,6 @@ func (x *CreateAttemptScheduleRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use CreateAttemptScheduleRequest.ProtoReflect.Descriptor instead.
 func (*CreateAttemptScheduleRequest) Descriptor() ([]byte, []int) {
 	return file_supertag_runtime_v2_schedules_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *CreateAttemptScheduleRequest) GetAttempt() *InspectAttemptRequest {
-	if x != nil {
-		return x.Attempt
-	}
-	return nil
 }
 
 func (x *CreateAttemptScheduleRequest) GetOperationId() string {
@@ -836,7 +828,6 @@ func (x *CreateAttemptScheduleRequest) GetTimeZone() string {
 // The `cancel_schedule` tool, for a Schedule of the turn's own Tag.
 type CancelAttemptScheduleRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Attempt       *InspectAttemptRequest `protobuf:"bytes,1,opt,name=attempt,proto3" json:"attempt,omitempty"`
 	ScheduleId    string                 `protobuf:"bytes,2,opt,name=schedule_id,json=scheduleId,proto3" json:"schedule_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -870,13 +861,6 @@ func (x *CancelAttemptScheduleRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use CancelAttemptScheduleRequest.ProtoReflect.Descriptor instead.
 func (*CancelAttemptScheduleRequest) Descriptor() ([]byte, []int) {
 	return file_supertag_runtime_v2_schedules_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *CancelAttemptScheduleRequest) GetAttempt() *InspectAttemptRequest {
-	if x != nil {
-		return x.Attempt
-	}
-	return nil
 }
 
 func (x *CancelAttemptScheduleRequest) GetScheduleId() string {
@@ -952,7 +936,7 @@ var File_supertag_runtime_v2_schedules_proto protoreflect.FileDescriptor
 
 const file_supertag_runtime_v2_schedules_proto_rawDesc = "" +
 	"\n" +
-	"#supertag/runtime/v2/schedules.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"E\n" +
+	"#supertag/runtime/v2/schedules.proto\x12\x13supertag.runtime.v2\"E\n" +
 	"\x12ScheduleRecurrence\x12\x12\n" +
 	"\x04cron\x18\x01 \x01(\tR\x04cron\x12\x1b\n" +
 	"\ttime_zone\x18\x02 \x01(\tR\btimeZone\"\xd2\x05\n" +
@@ -1020,20 +1004,18 @@ const file_supertag_runtime_v2_schedules_proto_rawDesc = "" +
 	"\x10include_finished\x18\x02 \x01(\bR\x0fincludeFinishedB\t\n" +
 	"\a_tag_id\"T\n" +
 	"\x15ListSchedulesResponse\x12;\n" +
-	"\tschedules\x18\x01 \x03(\v2\x1d.supertag.runtime.v2.ScheduleR\tschedules\"\xf1\x01\n" +
-	"\x1cCreateAttemptScheduleRequest\x12D\n" +
-	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12!\n" +
+	"\tschedules\x18\x01 \x03(\v2\x1d.supertag.runtime.v2.ScheduleR\tschedules\"\xba\x01\n" +
+	"\x1cCreateAttemptScheduleRequest\x12!\n" +
 	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12\x12\n" +
 	"\x04note\x18\x03 \x01(\tR\x04note\x12\x0e\n" +
 	"\x02at\x18\x04 \x01(\tR\x02at\x12\x14\n" +
 	"\x05every\x18\x05 \x01(\tR\x05every\x12 \n" +
 	"\ttime_zone\x18\x06 \x01(\tH\x00R\btimeZone\x88\x01\x01B\f\n" +
 	"\n" +
-	"_time_zone\"\x85\x01\n" +
-	"\x1cCancelAttemptScheduleRequest\x12D\n" +
-	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12\x1f\n" +
+	"_time_zoneJ\x04\b\x01\x10\x02R\aattempt\"N\n" +
+	"\x1cCancelAttemptScheduleRequest\x12\x1f\n" +
 	"\vschedule_id\x18\x02 \x01(\tR\n" +
-	"scheduleId\"\xaa\x01\n" +
+	"scheduleIdJ\x04\b\x01\x10\x02R\aattempt\"\xaa\x01\n" +
 	"\x17AttemptScheduleResponse\x129\n" +
 	"\bschedule\x18\x01 \x01(\v2\x1d.supertag.runtime.v2.ScheduleR\bschedule\x127\n" +
 	"\apending\x18\x02 \x03(\v2\x1d.supertag.runtime.v2.ScheduleR\apending\x12\x1b\n" +
@@ -1089,46 +1071,43 @@ var file_supertag_runtime_v2_schedules_proto_goTypes = []any{
 	(*CreateAttemptScheduleRequest)(nil), // 10: supertag.runtime.v2.CreateAttemptScheduleRequest
 	(*CancelAttemptScheduleRequest)(nil), // 11: supertag.runtime.v2.CancelAttemptScheduleRequest
 	(*AttemptScheduleResponse)(nil),      // 12: supertag.runtime.v2.AttemptScheduleResponse
-	(*InspectAttemptRequest)(nil),        // 13: supertag.runtime.v2.InspectAttemptRequest
 }
 var file_supertag_runtime_v2_schedules_proto_depIdxs = []int32{
 	1,  // 0: supertag.runtime.v2.Schedule.every:type_name -> supertag.runtime.v2.ScheduleRecurrence
 	0,  // 1: supertag.runtime.v2.Schedule.state:type_name -> supertag.runtime.v2.ScheduleState
 	2,  // 2: supertag.runtime.v2.BackfillScheduleResponse.schedule:type_name -> supertag.runtime.v2.Schedule
 	2,  // 3: supertag.runtime.v2.ListSchedulesResponse.schedules:type_name -> supertag.runtime.v2.Schedule
-	13, // 4: supertag.runtime.v2.CreateAttemptScheduleRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	13, // 5: supertag.runtime.v2.CancelAttemptScheduleRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	2,  // 6: supertag.runtime.v2.AttemptScheduleResponse.schedule:type_name -> supertag.runtime.v2.Schedule
-	2,  // 7: supertag.runtime.v2.AttemptScheduleResponse.pending:type_name -> supertag.runtime.v2.Schedule
-	3,  // 8: supertag.runtime.v2.Schedules.Create:input_type -> supertag.runtime.v2.CreateScheduleRequest
-	4,  // 9: supertag.runtime.v2.Schedules.Get:input_type -> supertag.runtime.v2.GetScheduleRequest
-	8,  // 10: supertag.runtime.v2.Schedules.List:input_type -> supertag.runtime.v2.ListSchedulesRequest
-	4,  // 11: supertag.runtime.v2.Schedules.Pause:input_type -> supertag.runtime.v2.GetScheduleRequest
-	4,  // 12: supertag.runtime.v2.Schedules.Resume:input_type -> supertag.runtime.v2.GetScheduleRequest
-	4,  // 13: supertag.runtime.v2.Schedules.Delete:input_type -> supertag.runtime.v2.GetScheduleRequest
-	5,  // 14: supertag.runtime.v2.Schedules.Put:input_type -> supertag.runtime.v2.PutScheduleRequest
-	6,  // 15: supertag.runtime.v2.Schedules.Backfill:input_type -> supertag.runtime.v2.BackfillScheduleRequest
-	10, // 16: supertag.runtime.v2.AttemptSchedules.Create:input_type -> supertag.runtime.v2.CreateAttemptScheduleRequest
-	11, // 17: supertag.runtime.v2.AttemptSchedules.Cancel:input_type -> supertag.runtime.v2.CancelAttemptScheduleRequest
-	10, // 18: supertag.runtime.v2.HarnessSchedules.Create:input_type -> supertag.runtime.v2.CreateAttemptScheduleRequest
-	11, // 19: supertag.runtime.v2.HarnessSchedules.Cancel:input_type -> supertag.runtime.v2.CancelAttemptScheduleRequest
-	2,  // 20: supertag.runtime.v2.Schedules.Create:output_type -> supertag.runtime.v2.Schedule
-	2,  // 21: supertag.runtime.v2.Schedules.Get:output_type -> supertag.runtime.v2.Schedule
-	9,  // 22: supertag.runtime.v2.Schedules.List:output_type -> supertag.runtime.v2.ListSchedulesResponse
-	2,  // 23: supertag.runtime.v2.Schedules.Pause:output_type -> supertag.runtime.v2.Schedule
-	2,  // 24: supertag.runtime.v2.Schedules.Resume:output_type -> supertag.runtime.v2.Schedule
-	2,  // 25: supertag.runtime.v2.Schedules.Delete:output_type -> supertag.runtime.v2.Schedule
-	2,  // 26: supertag.runtime.v2.Schedules.Put:output_type -> supertag.runtime.v2.Schedule
-	7,  // 27: supertag.runtime.v2.Schedules.Backfill:output_type -> supertag.runtime.v2.BackfillScheduleResponse
-	12, // 28: supertag.runtime.v2.AttemptSchedules.Create:output_type -> supertag.runtime.v2.AttemptScheduleResponse
-	12, // 29: supertag.runtime.v2.AttemptSchedules.Cancel:output_type -> supertag.runtime.v2.AttemptScheduleResponse
-	12, // 30: supertag.runtime.v2.HarnessSchedules.Create:output_type -> supertag.runtime.v2.AttemptScheduleResponse
-	12, // 31: supertag.runtime.v2.HarnessSchedules.Cancel:output_type -> supertag.runtime.v2.AttemptScheduleResponse
-	20, // [20:32] is the sub-list for method output_type
-	8,  // [8:20] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	2,  // 4: supertag.runtime.v2.AttemptScheduleResponse.schedule:type_name -> supertag.runtime.v2.Schedule
+	2,  // 5: supertag.runtime.v2.AttemptScheduleResponse.pending:type_name -> supertag.runtime.v2.Schedule
+	3,  // 6: supertag.runtime.v2.Schedules.Create:input_type -> supertag.runtime.v2.CreateScheduleRequest
+	4,  // 7: supertag.runtime.v2.Schedules.Get:input_type -> supertag.runtime.v2.GetScheduleRequest
+	8,  // 8: supertag.runtime.v2.Schedules.List:input_type -> supertag.runtime.v2.ListSchedulesRequest
+	4,  // 9: supertag.runtime.v2.Schedules.Pause:input_type -> supertag.runtime.v2.GetScheduleRequest
+	4,  // 10: supertag.runtime.v2.Schedules.Resume:input_type -> supertag.runtime.v2.GetScheduleRequest
+	4,  // 11: supertag.runtime.v2.Schedules.Delete:input_type -> supertag.runtime.v2.GetScheduleRequest
+	5,  // 12: supertag.runtime.v2.Schedules.Put:input_type -> supertag.runtime.v2.PutScheduleRequest
+	6,  // 13: supertag.runtime.v2.Schedules.Backfill:input_type -> supertag.runtime.v2.BackfillScheduleRequest
+	10, // 14: supertag.runtime.v2.AttemptSchedules.Create:input_type -> supertag.runtime.v2.CreateAttemptScheduleRequest
+	11, // 15: supertag.runtime.v2.AttemptSchedules.Cancel:input_type -> supertag.runtime.v2.CancelAttemptScheduleRequest
+	10, // 16: supertag.runtime.v2.HarnessSchedules.Create:input_type -> supertag.runtime.v2.CreateAttemptScheduleRequest
+	11, // 17: supertag.runtime.v2.HarnessSchedules.Cancel:input_type -> supertag.runtime.v2.CancelAttemptScheduleRequest
+	2,  // 18: supertag.runtime.v2.Schedules.Create:output_type -> supertag.runtime.v2.Schedule
+	2,  // 19: supertag.runtime.v2.Schedules.Get:output_type -> supertag.runtime.v2.Schedule
+	9,  // 20: supertag.runtime.v2.Schedules.List:output_type -> supertag.runtime.v2.ListSchedulesResponse
+	2,  // 21: supertag.runtime.v2.Schedules.Pause:output_type -> supertag.runtime.v2.Schedule
+	2,  // 22: supertag.runtime.v2.Schedules.Resume:output_type -> supertag.runtime.v2.Schedule
+	2,  // 23: supertag.runtime.v2.Schedules.Delete:output_type -> supertag.runtime.v2.Schedule
+	2,  // 24: supertag.runtime.v2.Schedules.Put:output_type -> supertag.runtime.v2.Schedule
+	7,  // 25: supertag.runtime.v2.Schedules.Backfill:output_type -> supertag.runtime.v2.BackfillScheduleResponse
+	12, // 26: supertag.runtime.v2.AttemptSchedules.Create:output_type -> supertag.runtime.v2.AttemptScheduleResponse
+	12, // 27: supertag.runtime.v2.AttemptSchedules.Cancel:output_type -> supertag.runtime.v2.AttemptScheduleResponse
+	12, // 28: supertag.runtime.v2.HarnessSchedules.Create:output_type -> supertag.runtime.v2.AttemptScheduleResponse
+	12, // 29: supertag.runtime.v2.HarnessSchedules.Cancel:output_type -> supertag.runtime.v2.AttemptScheduleResponse
+	18, // [18:30] is the sub-list for method output_type
+	6,  // [6:18] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_schedules_proto_init() }
@@ -1136,7 +1115,6 @@ func file_supertag_runtime_v2_schedules_proto_init() {
 	if File_supertag_runtime_v2_schedules_proto != nil {
 		return
 	}
-	file_supertag_runtime_v2_runtime_proto_init()
 	file_supertag_runtime_v2_schedules_proto_msgTypes[1].OneofWrappers = []any{}
 	file_supertag_runtime_v2_schedules_proto_msgTypes[2].OneofWrappers = []any{}
 	file_supertag_runtime_v2_schedules_proto_msgTypes[4].OneofWrappers = []any{}

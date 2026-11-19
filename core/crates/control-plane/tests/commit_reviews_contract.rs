@@ -124,14 +124,8 @@ async fn finish_waiting(
     store.finish_task(host, &input).await.unwrap();
 }
 
-fn request(
-    attempt: &InspectAttemptRequest,
-    operation: &str,
-    reviewer: &str,
-    commit: &str,
-) -> SendAttemptTagMessageRequest {
+fn request(operation: &str, reviewer: &str, commit: &str) -> SendAttemptTagMessageRequest {
     SendAttemptTagMessageRequest {
-        attempt: Some(attempt.clone()),
         operation_id: operation.into(),
         recipient_tag_id: reviewer.into(),
         text: "Review this exact commit".into(),
@@ -141,9 +135,8 @@ fn request(
     }
 }
 
-fn response(attempt: &InspectAttemptRequest, request: &str) -> SendAttemptTagMessageRequest {
+fn response(request: &str) -> SendAttemptTagMessageRequest {
     SendAttemptTagMessageRequest {
-        attempt: Some(attempt.clone()),
         operation_id: "verdict".into(),
         recipient_tag_id: "owner".into(),
         text: "Approved after inspecting the immutable patch".into(),
@@ -274,15 +267,17 @@ async fn deliver_children(store: &Store, host: &HostAuthority) -> DeliveredChild
     let owner = start(store, host, &objective.starting_task_id).await;
     assert!(matches!(
         store
-            .send_attempt_tag_message(host, &request(&owner, "undelivered", "reviewer", HEAD))
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(host, &owner),
+                &request("undelivered", "reviewer", HEAD)
+            )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     let child = store
         .start_work_session(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, &owner),
             &StartWorkSessionRequest {
-                attempt: Some(owner.clone()),
                 operation_id: "implementation".into(),
                 title: "Implement".into(),
                 instruction: "Change the fixture".into(),
@@ -293,9 +288,8 @@ async fn deliver_children(store: &Store, host: &HostAuthority) -> DeliveredChild
         .unwrap();
     let no_op_child = store
         .start_work_session(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, &owner),
             &StartWorkSessionRequest {
-                attempt: Some(owner.clone()),
                 operation_id: "unchanged".into(),
                 title: "Inspect".into(),
                 instruction: "Inspect without changes".into(),
@@ -333,7 +327,7 @@ async fn request_child_reviews(
     let report = start(store, host, child.report_task_id.as_ref().unwrap()).await;
     assert!(
         store
-            .attempt_capabilities(host, &report)
+            .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(host, &report))
             .await
             .unwrap()
             .may_request_commit_review
@@ -342,8 +336,8 @@ async fn request_child_reviews(
         matches!(
             store
                 .send_attempt_tag_message(
-                    host,
-                    &request(&report, "other-child-commit", "reviewer", BASE)
+                    &supertag_control_plane::AttemptAccess::new(host, &report),
+                    &request("other-child-commit", "reviewer", BASE)
                 )
                 .await,
             Err(StoreError::FailedPrecondition(_))
@@ -353,16 +347,17 @@ async fn request_child_reviews(
     assert!(matches!(
         store
             .send_attempt_tag_message(
-                host,
-                &request(&report, "wrong-commit", "reviewer", &"3".repeat(40))
+                &supertag_control_plane::AttemptAccess::new(host, &report),
+                &request("wrong-commit", "reviewer", &"3".repeat(40))
             )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
-    let input = request(&report, "first-review", "reviewer", HEAD);
+    let input = request("first-review", "reviewer", HEAD);
+    let access = supertag_control_plane::AttemptAccess::new(host, &report);
     let (left, right) = tokio::join!(
-        store.send_attempt_tag_message(host, &input),
-        store.send_attempt_tag_message(host, &input)
+        store.send_attempt_tag_message(&access, &input),
+        store.send_attempt_tag_message(&access, &input)
     );
     let first = left.unwrap().message.unwrap();
     assert_eq!(right.unwrap().message.unwrap(), first);
@@ -383,16 +378,18 @@ async fn request_child_reviews(
         Err(StoreError::PermissionDenied)
     ));
     let second = store
-        .send_attempt_tag_message(host, &request(&report, "second-review", "second", HEAD))
+        .send_attempt_tag_message(
+            &supertag_control_plane::AttemptAccess::new(host, &report),
+            &request("second-review", "second", HEAD),
+        )
         .await
         .unwrap()
         .message
         .unwrap();
     let continuation = store
         .continue_work_session(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, &report),
             &ContinueWorkSessionRequest {
-                attempt: Some(report.clone()),
                 operation_id: "obsolete-child".into(),
                 work_session_id: child.work_session_id.clone(),
                 message: "Inspect one more detail".into(),
@@ -402,20 +399,26 @@ async fn request_child_reviews(
         .unwrap();
     assert!(
         !store
-            .attempt_capabilities(host, &report)
+            .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(host, &report))
             .await
             .unwrap()
             .may_request_commit_review
     );
     assert!(matches!(
         store
-            .send_attempt_tag_message(host, &request(&report, "obsolete-commit", "reviewer", HEAD))
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(host, &report),
+                &request("obsolete-commit", "reviewer", HEAD)
+            )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     assert_eq!(
         store
-            .send_attempt_tag_message(host, &input)
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(host, &report),
+                &input
+            )
             .await
             .unwrap()
             .message
@@ -430,7 +433,10 @@ async fn request_child_reviews(
         .unwrap();
     let no_op_report = start(store, host, no_op_child.report_task_id.as_ref().unwrap()).await;
     let no_op_review = store
-        .send_attempt_tag_message(host, &request(&no_op_report, "no-op-review", "gated", BASE))
+        .send_attempt_tag_message(
+            &supertag_control_plane::AttemptAccess::new(host, &no_op_report),
+            &request("no-op-review", "gated", BASE),
+        )
         .await
         .unwrap()
         .message
@@ -598,10 +604,11 @@ async fn record_paused_verdict(
         )
         .await
         .unwrap();
-    let verdict = response(&reviewer, &first.message_id);
+    let verdict = response(&first.message_id);
+    let access = supertag_control_plane::AttemptAccess::new(host, &reviewer);
     let (left, right) = tokio::join!(
-        store.send_attempt_tag_message(host, &verdict),
-        store.send_attempt_tag_message(host, &verdict)
+        store.send_attempt_tag_message(&access, &verdict),
+        store.send_attempt_tag_message(&access, &verdict)
     );
     let recorded = left.unwrap().review.unwrap();
     assert_eq!(right.unwrap().review.unwrap(), recorded);
@@ -610,7 +617,12 @@ async fn record_paused_verdict(
     conflict.operation_id = "conflicting-verdict".into();
     conflict.text = "Changed opinion".into();
     assert!(matches!(
-        store.send_attempt_tag_message(host, &conflict).await,
+        store
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(host, &reviewer),
+                &conflict
+            )
+            .await,
         Err(StoreError::Conflict(_))
     ));
     store.sweep_commit_reviews().await.unwrap();
@@ -748,7 +760,10 @@ async fn close_objective_with_pending_review(
     let second_attempt = start(store, host, &second_id).await;
     assert!(matches!(
         store
-            .send_attempt_tag_message(host, &response(&second_attempt, &first.message_id))
+            .send_attempt_tag_message(
+                &supertag_control_plane::AttemptAccess::new(host, &second_attempt),
+                &response(&first.message_id)
+            )
             .await,
         Err(StoreError::PermissionDenied) | Err(StoreError::NotFound(_))
     ));
@@ -764,7 +779,10 @@ async fn close_objective_with_pending_review(
         .await
         .unwrap();
     let closed_verdict = store
-        .send_attempt_tag_message(host, &response(&second_attempt, &second.message_id))
+        .send_attempt_tag_message(
+            &supertag_control_plane::AttemptAccess::new(host, &second_attempt),
+            &response(&second.message_id),
+        )
         .await
         .unwrap()
         .review
@@ -825,9 +843,12 @@ async fn approve_no_op_verdict(
         0,
         "a no-op delivery honestly retains an empty patch"
     );
-    let gated_input = response(&gated, &no_op_review.message_id);
+    let gated_input = response(&no_op_review.message_id);
     let pending = store
-        .send_attempt_tag_message(host, &gated_input)
+        .send_attempt_tag_message(
+            &supertag_control_plane::AttemptAccess::new(host, &gated),
+            &gated_input,
+        )
         .await
         .unwrap();
     assert!(pending.review.is_none());
@@ -894,9 +915,12 @@ async fn approve_no_op_verdict(
             .unwrap(),
         patch
     );
-    let gated_input = response(&continued, &no_op_review.message_id);
+    let gated_input = response(&no_op_review.message_id);
     let approved = store
-        .send_attempt_tag_message(host, &gated_input)
+        .send_attempt_tag_message(
+            &supertag_control_plane::AttemptAccess::new(host, &continued),
+            &gated_input,
+        )
         .await
         .unwrap()
         .review
@@ -907,7 +931,7 @@ async fn approve_no_op_verdict(
     );
     let duplicate = store
         .send_attempt_tag_message(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, &continued),
             &SendAttemptTagMessageRequest {
                 operation_id: "duplicate-verdict".into(),
                 ..gated_input
@@ -955,7 +979,10 @@ async fn unrelated_reviewer_authority(
         Err(StoreError::PermissionDenied)
     ));
     let correlated = store
-        .send_attempt_tag_message(host, &response(&unrelated, &first.message_id))
+        .send_attempt_tag_message(
+            &supertag_control_plane::AttemptAccess::new(host, &unrelated),
+            &response(&first.message_id),
+        )
         .await
         .unwrap();
     assert!(correlated.duplicate);
@@ -1100,9 +1127,8 @@ async fn prepare_gated_reports(
         children.push(
             store
                 .start_work_session(
-                    host,
+                    &supertag_control_plane::AttemptAccess::new(host, &owner),
                     &StartWorkSessionRequest {
-                        attempt: Some(owner.clone()),
                         operation_id: format!("scoped-child-{id}"),
                         title: id.into(),
                         instruction: "Inspect the fixture".into(),
@@ -1143,8 +1169,8 @@ async fn approve_scoped_request(
     let original_report_task = store.get_task(&report.task_id).await.unwrap();
     let pending = store
         .send_attempt_tag_message(
-            host,
-            &request(report, "gated-request", "scoped-reviewer", HEAD),
+            &supertag_control_plane::AttemptAccess::new(host, report),
+            &request("gated-request", "scoped-reviewer", HEAD),
         )
         .await
         .unwrap();
@@ -1211,21 +1237,16 @@ async fn approve_scoped_request(
     assert!(matches!(
         store
             .send_attempt_tag_message(
-                host,
-                &request(&continued, "wrong-inherited-child", "scoped-reviewer", BASE)
+                &supertag_control_plane::AttemptAccess::new(host, &continued),
+                &request("wrong-inherited-child", "scoped-reviewer", BASE)
             )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     let sent = store
         .send_attempt_tag_message(
-            host,
-            &request(
-                &continued,
-                "approved-inherited-child",
-                "scoped-reviewer",
-                HEAD,
-            ),
+            &supertag_control_plane::AttemptAccess::new(host, &continued),
+            &request("approved-inherited-child", "scoped-reviewer", HEAD),
         )
         .await
         .unwrap()
@@ -1237,9 +1258,8 @@ async fn approve_scoped_request(
     );
     let child_continuation = store
         .continue_work_session(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, &continued),
             &ContinueWorkSessionRequest {
-                attempt: Some(continued.clone()),
                 operation_id: "same-child-after-approved-request".into(),
                 work_session_id: child_a.work_session_id.clone(),
                 message: "Follow up on the same inspected child".into(),
@@ -1350,9 +1370,8 @@ async fn record_separate_root_verdict(
     ));
     let verdict = store
         .send_attempt_tag_message(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, &root),
             &SendAttemptTagMessageRequest {
-                attempt: Some(root.clone()),
                 operation_id: "separate-root-verdict".into(),
                 recipient_tag_id: "scoped-owner".into(),
                 text: "Approved based on the inspected commit".into(),

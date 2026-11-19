@@ -62,26 +62,22 @@ class GetMemoryRequest(_message.Message):
     def __init__(self, memory_id: _Optional[str] = ...) -> None: ...
 
 class AttemptRememberRequest(_message.Message):
-    __slots__ = ("attempt", "operation_id", "text", "replaces")
-    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("operation_id", "text", "replaces")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     TEXT_FIELD_NUMBER: _ClassVar[int]
     REPLACES_FIELD_NUMBER: _ClassVar[int]
-    attempt: _runtime_pb2.InspectAttemptRequest
     operation_id: str
     text: str
     replaces: str
-    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., text: _Optional[str] = ..., replaces: _Optional[str] = ...) -> None: ...
+    def __init__(self, operation_id: _Optional[str] = ..., text: _Optional[str] = ..., replaces: _Optional[str] = ...) -> None: ...
 
 class AttemptForgetRequest(_message.Message):
-    __slots__ = ("attempt", "operation_id", "memory_id")
-    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("operation_id", "memory_id")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     MEMORY_ID_FIELD_NUMBER: _ClassVar[int]
-    attempt: _runtime_pb2.InspectAttemptRequest
     operation_id: str
     memory_id: str
-    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., memory_id: _Optional[str] = ...) -> None: ...
+    def __init__(self, operation_id: _Optional[str] = ..., memory_id: _Optional[str] = ...) -> None: ...
 
 class AttemptMemoryResponse(_message.Message):
     __slots__ = ("memory", "notes")
@@ -106,42 +102,38 @@ class ResetNativeMemoryResponse(_message.Message):
     def __init__(self, stores: _Optional[_Iterable[_Union[_runtime_pb2.NativeMemoryStore, _Mapping]]] = ..., reset_generation: _Optional[int] = ...) -> None: ...
 
 class ReportNativeMemoryRequest(_message.Message):
-    __slots__ = ("attempt", "revision", "files", "bytes", "digest", "reset_generation")
-    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("revision", "files", "bytes", "digest", "reset_generation")
     REVISION_FIELD_NUMBER: _ClassVar[int]
     FILES_FIELD_NUMBER: _ClassVar[int]
     BYTES_FIELD_NUMBER: _ClassVar[int]
     DIGEST_FIELD_NUMBER: _ClassVar[int]
     RESET_GENERATION_FIELD_NUMBER: _ClassVar[int]
-    attempt: _runtime_pb2.InspectAttemptRequest
     revision: int
     files: int
     bytes: int
     digest: str
     reset_generation: int
-    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., revision: _Optional[int] = ..., files: _Optional[int] = ..., bytes: _Optional[int] = ..., digest: _Optional[str] = ..., reset_generation: _Optional[int] = ...) -> None: ...
+    def __init__(self, revision: _Optional[int] = ..., files: _Optional[int] = ..., bytes: _Optional[int] = ..., digest: _Optional[str] = ..., reset_generation: _Optional[int] = ...) -> None: ...
 
 class ReportNativeMemoryResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
 class AdvanceNativeMemoryRequest(_message.Message):
-    __slots__ = ("attempt", "expected_revision", "manifest", "files", "bytes", "reset_generation", "objects")
-    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("expected_revision", "manifest", "files", "bytes", "reset_generation", "objects")
     EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
     MANIFEST_FIELD_NUMBER: _ClassVar[int]
     FILES_FIELD_NUMBER: _ClassVar[int]
     BYTES_FIELD_NUMBER: _ClassVar[int]
     RESET_GENERATION_FIELD_NUMBER: _ClassVar[int]
     OBJECTS_FIELD_NUMBER: _ClassVar[int]
-    attempt: _runtime_pb2.InspectAttemptRequest
     expected_revision: int
     manifest: _runtime_pb2.BlobReference
     files: int
     bytes: int
     reset_generation: int
     objects: _containers.RepeatedCompositeFieldContainer[_runtime_pb2.BlobReference]
-    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., expected_revision: _Optional[int] = ..., manifest: _Optional[_Union[_runtime_pb2.BlobReference, _Mapping]] = ..., files: _Optional[int] = ..., bytes: _Optional[int] = ..., reset_generation: _Optional[int] = ..., objects: _Optional[_Iterable[_Union[_runtime_pb2.BlobReference, _Mapping]]] = ...) -> None: ...
+    def __init__(self, expected_revision: _Optional[int] = ..., manifest: _Optional[_Union[_runtime_pb2.BlobReference, _Mapping]] = ..., files: _Optional[int] = ..., bytes: _Optional[int] = ..., reset_generation: _Optional[int] = ..., objects: _Optional[_Iterable[_Union[_runtime_pb2.BlobReference, _Mapping]]] = ...) -> None: ...
 
 class AdvanceNativeMemoryResponse(_message.Message):
     __slots__ = ("advanced", "head")

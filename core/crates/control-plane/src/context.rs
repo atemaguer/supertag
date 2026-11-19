@@ -1,6 +1,7 @@
 //! Durable resolution of admitted context, separate from immutable catalog policy.
+use crate::AttemptAccess;
 use crate::{
-    HostAuthority, Store, StoreError,
+    Store, StoreError,
     store::{Result, invalid, lease_is_live, owned, task_in},
 };
 use prost::Message;
@@ -24,9 +25,9 @@ pub(crate) fn task_supported(task: &Task, contracts: &[ContextContract]) -> bool
 impl Store {
     pub async fn get_context_pins(
         &self,
-        host: &HostAuthority,
-        attempt: &InspectAttemptRequest,
+        authority: &crate::AttemptAccess,
     ) -> Result<ContextResolutionManifest> {
+        let (host, attempt) = (authority.host(), authority.lease());
         let mut tx = self.pool.begin().await?;
         let row = owned(
             &mut tx,
@@ -45,13 +46,11 @@ impl Store {
     }
     pub async fn commit_context_resolution(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &CommitContextResolutionRequest,
     ) -> Result<ContextResolutionManifest> {
-        let attempt = input
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("context resolution requires Attempt identity"))?;
+        let host = authority.host();
+        let attempt = authority.lease();
         let mut manifest = input
             .manifest
             .clone()

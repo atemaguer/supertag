@@ -126,6 +126,8 @@ async fn start(store: &Store, host: &HostAuthority, claim: &Assignment) -> Task 
         )
         .await
         .unwrap()
+        .task
+        .unwrap()
 }
 
 async fn finish(store: &Store, host: &HostAuthority, claim: Assignment) {

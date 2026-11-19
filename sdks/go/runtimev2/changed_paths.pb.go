@@ -22,8 +22,7 @@ const (
 )
 
 type ReportChangedPathsRequest struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	Attempt *InspectAttemptRequest `protobuf:"bytes,1,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
 	// Sorted, unique, Workspace-relative paths; at most 500.
 	Paths []string `protobuf:"bytes,2,rep,name=paths,proto3" json:"paths,omitempty"`
 	// More paths changed than were reported. A truncated report is never compared.
@@ -60,13 +59,6 @@ func (x *ReportChangedPathsRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ReportChangedPathsRequest.ProtoReflect.Descriptor instead.
 func (*ReportChangedPathsRequest) Descriptor() ([]byte, []int) {
 	return file_supertag_runtime_v2_changed_paths_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *ReportChangedPathsRequest) GetAttempt() *InspectAttemptRequest {
-	if x != nil {
-		return x.Attempt
-	}
-	return nil
 }
 
 func (x *ReportChangedPathsRequest) GetPaths() []string {
@@ -141,11 +133,10 @@ var File_supertag_runtime_v2_changed_paths_proto protoreflect.FileDescriptor
 
 const file_supertag_runtime_v2_changed_paths_proto_rawDesc = "" +
 	"\n" +
-	"'supertag/runtime/v2/changed_paths.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"\x95\x01\n" +
-	"\x19ReportChangedPathsRequest\x12D\n" +
-	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12\x14\n" +
+	"'supertag/runtime/v2/changed_paths.proto\x12\x13supertag.runtime.v2\"^\n" +
+	"\x19ReportChangedPathsRequest\x12\x14\n" +
 	"\x05paths\x18\x02 \x03(\tR\x05paths\x12\x1c\n" +
-	"\ttruncated\x18\x03 \x01(\bR\ttruncated\"p\n" +
+	"\ttruncated\x18\x03 \x01(\bR\ttruncatedJ\x04\b\x01\x10\x02R\aattempt\"p\n" +
 	"\x1aReportChangedPathsResponse\x126\n" +
 	"\x17overlapping_attempt_ids\x18\x01 \x03(\tR\x15overlappingAttemptIds\x12\x1a\n" +
 	"\bcompared\x18\x02 \x01(\bR\bcompared2\x80\x01\n" +
@@ -168,17 +159,15 @@ var file_supertag_runtime_v2_changed_paths_proto_msgTypes = make([]protoimpl.Mes
 var file_supertag_runtime_v2_changed_paths_proto_goTypes = []any{
 	(*ReportChangedPathsRequest)(nil),  // 0: supertag.runtime.v2.ReportChangedPathsRequest
 	(*ReportChangedPathsResponse)(nil), // 1: supertag.runtime.v2.ReportChangedPathsResponse
-	(*InspectAttemptRequest)(nil),      // 2: supertag.runtime.v2.InspectAttemptRequest
 }
 var file_supertag_runtime_v2_changed_paths_proto_depIdxs = []int32{
-	2, // 0: supertag.runtime.v2.ReportChangedPathsRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	0, // 1: supertag.runtime.v2.AttemptChangedPaths.Report:input_type -> supertag.runtime.v2.ReportChangedPathsRequest
-	1, // 2: supertag.runtime.v2.AttemptChangedPaths.Report:output_type -> supertag.runtime.v2.ReportChangedPathsResponse
-	2, // [2:3] is the sub-list for method output_type
-	1, // [1:2] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	0, // 0: supertag.runtime.v2.AttemptChangedPaths.Report:input_type -> supertag.runtime.v2.ReportChangedPathsRequest
+	1, // 1: supertag.runtime.v2.AttemptChangedPaths.Report:output_type -> supertag.runtime.v2.ReportChangedPathsResponse
+	1, // [1:2] is the sub-list for method output_type
+	0, // [0:1] is the sub-list for method input_type
+	0, // [0:0] is the sub-list for extension type_name
+	0, // [0:0] is the sub-list for extension extendee
+	0, // [0:0] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_changed_paths_proto_init() }
@@ -186,7 +175,6 @@ func file_supertag_runtime_v2_changed_paths_proto_init() {
 	if File_supertag_runtime_v2_changed_paths_proto != nil {
 		return
 	}
-	file_supertag_runtime_v2_runtime_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

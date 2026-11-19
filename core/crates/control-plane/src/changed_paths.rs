@@ -4,6 +4,7 @@
 //! once per Attempt pair and newly shared batch of paths. A host reports through the Attempt's own
 //! execution authority on a per-Attempt timer, not on its host heartbeat, so a report from a stale
 //! or replaced Attempt is refused.
+use crate::AttemptAccess;
 use std::collections::BTreeSet;
 
 use sha2::{Digest, Sha256};
@@ -16,7 +17,7 @@ use supertag_protocol::{
 use tonic::{Request, Response, Status};
 
 use crate::{
-    ControlPlane, HostAuthority, Store, StoreError,
+    ControlPlane, Store, StoreError,
     store::{Result, invalid, lease_is_live, owned, task_row},
 };
 
@@ -26,13 +27,11 @@ const OVERLAP_PATHS_SHOWN: usize = 20;
 impl Store {
     pub async fn report_changed_paths(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &ReportChangedPathsRequest,
     ) -> Result<ReportChangedPathsResponse> {
-        let attempt = input
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Attempt identity is required"))?;
+        let host = authority.host();
+        let attempt = authority.lease();
         if input.paths.len() > MAX_CHANGED_PATHS
             || !input.paths.iter().all(|path| reportable_path(path))
         {
@@ -160,7 +159,7 @@ impl attempt_changed_paths_server::AttemptChangedPaths for ControlPlane {
         &self,
         request: Request<ReportChangedPathsRequest>,
     ) -> std::result::Result<Response<ReportChangedPathsResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .report_changed_paths(&host, request.get_ref())

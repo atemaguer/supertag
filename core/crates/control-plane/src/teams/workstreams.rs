@@ -1,3 +1,4 @@
+use crate::AttemptAccess;
 use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
@@ -40,13 +41,11 @@ impl Store {
 
     pub async fn read_attempt_workstream(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &ReadAttemptWorkstreamRequest,
     ) -> Result<ReadAttemptWorkstreamResponse> {
-        let attempt = input
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Attempt identity is required"))?;
+        let host = authority.host();
+        let attempt = authority.lease();
         // Serialize lease/Team policy with changes to membership, enrollment,
         // and the Attempt. A read does not consume a durable write order.
         let (mut tx, _) = self.write().await?;
@@ -68,13 +67,11 @@ impl Store {
 
     pub async fn post_attempt_workstream(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &PostAttemptWorkstreamRequest,
     ) -> Result<PostAttemptWorkstreamResponse> {
-        let attempt = input
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Attempt identity is required"))?;
+        let host = authority.host();
+        let attempt = authority.lease();
         name("operation ID", &input.operation_id)?;
         let body = input.body.trim();
         if body.is_empty() || body.encode_utf16().count() > MAX_BODY || body.contains('\0') {
@@ -350,7 +347,7 @@ impl attempt_workstreams_server::AttemptWorkstreams for ControlPlane {
         &self,
         request: Request<ReadAttemptWorkstreamRequest>,
     ) -> std::result::Result<Response<ReadAttemptWorkstreamResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .read_attempt_workstream(&host, &request.into_inner())
@@ -362,7 +359,7 @@ impl attempt_workstreams_server::AttemptWorkstreams for ControlPlane {
         &self,
         request: Request<PostAttemptWorkstreamRequest>,
     ) -> std::result::Result<Response<PostAttemptWorkstreamResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .post_attempt_workstream(&host, &request.into_inner())

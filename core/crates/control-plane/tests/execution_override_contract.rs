@@ -117,6 +117,7 @@ async fn start(
         )
         .await
         .unwrap();
+    let running = running.task.unwrap();
     assert_eq!(running.state(), TaskState::Running);
     assert_eq!(running.attempt_execution, Some(execution));
     InspectAttemptRequest {
@@ -200,12 +201,9 @@ async fn contract(url: &str) {
     ));
     assert!(
         store
-            .take_input(
-                &matching,
-                &TakeInputRequest {
-                    attempt: Some(attempt)
-                }
-            )
+            .take_input(&supertag_control_plane::AttemptAccess::new(
+                &matching, &attempt
+            ))
             .await
             .unwrap()
             .is_none()
@@ -232,12 +230,9 @@ async fn contract(url: &str) {
     let queued = store.queue_input(OPERATOR, &input(&default)).await.unwrap();
     assert_eq!(
         store
-            .take_input(
-                &wrong,
-                &TakeInputRequest {
-                    attempt: Some(attempt)
-                }
-            )
+            .take_input(&supertag_control_plane::AttemptAccess::new(
+                &wrong, &attempt
+            ))
             .await
             .unwrap()
             .unwrap()

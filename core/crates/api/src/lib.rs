@@ -198,6 +198,7 @@ impl Api {
             self.auth_keys_service(),
             self.attempt_workspace_mounts_service(),
             transfers.attempt_artifacts_service(),
+            transfers.artifact_sources_service(),
             transfers.clone().service(),
             self.objectives_service(),
             self.live_inputs_service(),
@@ -336,6 +337,46 @@ impl Api {
         })
         .await
         .map_err(|_| Status::deadline_exceeded("Control Plane request timed out"))?
+    }
+
+    /// Forwards a call made with an Attempt credential. The state owner resolves the credential,
+    /// named by its digest, to the one Attempt it may act for.
+    async fn forward_attempt<T, R, F>(
+        &self,
+        request: Request<T>,
+        call: impl FnOnce(ProtocolChannel, Request<T>) -> F,
+    ) -> Result<Response<R>, Status>
+    where
+        F: Future<Output = Result<Response<R>, Status>>,
+    {
+        let timeout = request_budget(&request)?;
+        let deadline = tokio::time::Instant::now() + timeout;
+        tokio::time::timeout_at(deadline, async {
+            let caller = self.attempt_caller(&request).await?;
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return Err(Status::deadline_exceeded("Control Plane request timed out"));
+            }
+            let upstream =
+                self.credentials
+                    .upstream(request.into_inner(), caller.identity()?, remaining);
+            call(self.control_plane.clone(), upstream)
+                .await
+                .map_err(supertag_protocol::upstream_status)
+        })
+        .await
+        .map_err(|_| Status::deadline_exceeded("Control Plane request timed out"))?
+    }
+
+    /// The caller of a call that must carry an Attempt credential.
+    pub(crate) async fn attempt_caller<T>(&self, request: &Request<T>) -> Result<Caller, Status> {
+        let caller = self.caller(request).await?;
+        if caller.role != Role::Attempt {
+            return Err(Status::permission_denied(
+                "caller is not allowed to use this method",
+            ));
+        }
+        Ok(caller)
     }
 
     /// Checks that a Worker Host call names its current generation, for calls that do not forward.
@@ -754,9 +795,9 @@ impl Operator for Api {
 impl WorkerHost for Api {
     async fn get_attempt_history(
         &self,
-        request: Request<InspectAttemptRequest>,
+        request: Request<GetAttemptHistoryRequest>,
     ) -> Result<Response<AttemptHistory>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             worker_host_client(channel)
                 .get_attempt_history(request)
                 .await
@@ -766,9 +807,9 @@ impl WorkerHost for Api {
 
     async fn get_context_pins(
         &self,
-        request: Request<InspectAttemptRequest>,
+        request: Request<GetContextPinsRequest>,
     ) -> Result<Response<ContextResolutionManifest>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             worker_host_client(channel).get_context_pins(request).await
         })
         .await
@@ -778,7 +819,7 @@ impl WorkerHost for Api {
         &self,
         request: Request<CommitContextResolutionRequest>,
     ) -> Result<Response<ContextResolutionManifest>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             worker_host_client(channel)
                 .commit_context_resolution(request)
                 .await
@@ -799,7 +840,7 @@ impl WorkerHost for Api {
         &self,
         request: Request<AskQuestionRequest>,
     ) -> Result<Response<ObjectiveQuestion>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             worker_host_client(channel).ask_question(request).await
         })
         .await
@@ -807,9 +848,9 @@ impl WorkerHost for Api {
 
     async fn get_attempt_capabilities(
         &self,
-        request: Request<InspectAttemptRequest>,
+        request: Request<GetAttemptCapabilitiesRequest>,
     ) -> Result<Response<AttemptCapabilities>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             worker_host_client(channel)
                 .get_attempt_capabilities(request)
                 .await
@@ -846,7 +887,7 @@ impl WorkerHost for Api {
     async fn start_task(
         &self,
         request: Request<StartTaskRequest>,
-    ) -> Result<Response<Task>, Status> {
+    ) -> Result<Response<StartTaskResponse>, Status> {
         supertag_protocol::crash_point("api.start", "before-forward");
         let task = self
             .forward_host(request, true, |channel, request| async {
@@ -927,7 +968,7 @@ impl WorkerHost for Api {
         &self,
         request: Request<ReportNetworkLogRequest>,
     ) -> Result<Response<ReportNetworkLogResponse>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             worker_host_client(channel)
                 .report_network_log(request)
                 .await
@@ -995,7 +1036,7 @@ impl WorkerHost for Api {
         &self,
         request: Request<ReportAttemptMilestoneRequest>,
     ) -> Result<Response<ReportAttemptMilestoneResponse>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             worker_host_client(channel)
                 .report_attempt_milestone(request)
                 .await
@@ -1019,7 +1060,7 @@ impl WorkerHost for Api {
         &self,
         request: Request<ReportAttemptUsageRequest>,
     ) -> Result<Response<ReportAttemptUsageResponse>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             worker_host_client(channel)
                 .report_attempt_usage(request)
                 .await
@@ -1033,7 +1074,7 @@ impl WorkerHost for Api {
     ) -> Result<Response<TaskEvent>, Status> {
         supertag_protocol::crash_point("api.append-event", "before-forward");
         let event = self
-            .forward_host(request, true, |channel, request| async {
+            .forward_attempt(request, |channel, request| async {
                 worker_host_client(channel).append_event(request).await
             })
             .await?;
@@ -1045,7 +1086,7 @@ impl WorkerHost for Api {
         &self,
         request: Request<PublishTaskTextRequest>,
     ) -> Result<Response<PublishTaskTextResponse>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             worker_host_client(channel).publish_text(request).await
         })
         .await

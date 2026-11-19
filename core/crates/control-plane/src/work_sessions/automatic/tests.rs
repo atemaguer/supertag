@@ -1,4 +1,5 @@
 use super::*;
+use crate::HostAuthority;
 use sqlx::{Connection, Executor};
 const NOW: i64 = 1_900_000_000_000;
 const OP: &str = "operator:budget";
@@ -89,9 +90,8 @@ async fn contract(url: &str) {
             .unwrap();
         let pa = run(&s, &h, &parent.task_id).await;
         s.report_attempt_usage(
-            &h,
+            &crate::AttemptAccess::new(&h, &pa.clone()),
             &ReportAttemptUsageRequest {
-                attempt: Some(pa.clone()),
                 sequence: 1,
                 native_usage: Some(NativeTokenUsage {
                     input_tokens: 1500,
@@ -108,9 +108,8 @@ async fn contract(url: &str) {
         .unwrap();
         let work = s
             .start_work_session(
-                &h,
+                &crate::AttemptAccess::new(&h, &pa.clone()),
                 &StartWorkSessionRequest {
-                    attempt: Some(pa.clone()),
                     operation_id: "child".into(),
                     title: "Review".into(),
                     instruction: "Review fixture".into(),
@@ -123,9 +122,8 @@ async fn contract(url: &str) {
         let ca = run(&s, &h, &work.latest_task_id).await;
         let spent = if scenario == "budget" { 7501 } else { 3000 };
         s.report_attempt_usage(
-            &h,
+            &crate::AttemptAccess::new(&h, &ca.clone()),
             &ReportAttemptUsageRequest {
-                attempt: Some(ca.clone()),
                 sequence: 1,
                 native_usage: Some(NativeTokenUsage {
                     input_tokens: spent,
@@ -301,9 +299,8 @@ async fn delegated_membership(s: &Store, h: &HostAuthority) {
     let a = run(s, h, &objective.starting_task_id).await;
     let work = s
         .start_work_session(
-            h,
+            &crate::AttemptAccess::new(h, &a.clone()),
             &StartWorkSessionRequest {
-                attempt: Some(a.clone()),
                 operation_id: "delegate".into(),
                 title: "Delegated fixture".into(),
                 instruction: "Review".into(),

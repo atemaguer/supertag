@@ -62,9 +62,8 @@ async fn finish(store: &Store, host: &HostAuthority, attempt: &InspectAttemptReq
         .await
         .unwrap();
 }
-fn capture(attempt: &InspectAttemptRequest, operation: &str) -> CommitArtifactCaptureRequest {
+fn capture(operation: &str) -> CommitArtifactCaptureRequest {
     CommitArtifactCaptureRequest {
-        attempt: Some(attempt.clone()),
         operation_id: operation.into(),
         description: Some(ArtifactDescription {
             title: "Evidence".into(),
@@ -95,10 +94,15 @@ fn capture(attempt: &InspectAttemptRequest, operation: &str) -> CommitArtifactCa
 async fn commit(
     store: &Store,
     host: &HostAuthority,
+    attempt: &InspectAttemptRequest,
     input: &CommitArtifactCaptureRequest,
 ) -> CapturedArtifact {
-    store.reserve_artifact_capture(host, input).await.unwrap();
-    store.commit_artifact_capture(host, input).await.unwrap()
+    let access = supertag_control_plane::AttemptAccess::new(host, attempt);
+    store
+        .reserve_artifact_capture(&access, input)
+        .await
+        .unwrap();
+    store.commit_artifact_capture(&access, input).await.unwrap()
 }
 async fn exercise(url: &str) {
     let clock = Arc::new(AtomicI64::new(1_000_000));
@@ -136,19 +140,25 @@ async fn exercise(url: &str) {
     let producing = message(&store, OP, "direct-produce").await;
     let attempt = claim(&store, &source, "direct-produce").await;
     assert_eq!(attempt.task_id, producing.task_id);
-    let mut request = capture(&attempt, "direct-capture");
+    let mut request = capture("direct-capture");
     request.source_storage_id = Some(wrong_storage.storage_id.clone());
     assert!(
         store
-            .reserve_artifact_capture(&source, &request)
+            .reserve_artifact_capture(
+                &supertag_control_plane::AttemptAccess::new(&source, &attempt),
+                &request
+            )
             .await
             .is_err()
     );
     request.source_storage_id = Some(storage.storage_id.clone());
-    let capture = commit(&store, &source, &request).await;
+    let capture = commit(&store, &source, &attempt, &request).await;
     assert_eq!(
         store
-            .commit_artifact_capture(&source, &request)
+            .commit_artifact_capture(
+                &supertag_control_plane::AttemptAccess::new(&source, &attempt),
+                &request
+            )
             .await
             .unwrap(),
         capture
@@ -161,9 +171,8 @@ async fn exercise(url: &str) {
     assert_eq!(consuming.task_id, consumer.task_id);
     let acquisition = store
         .acquire_artifact(
-            &reader,
+            &supertag_control_plane::AttemptAccess::new(&reader, &consumer),
             &AcquireArtifactRequest {
-                attempt: Some(consumer.clone()),
                 artifact_id: id.clone(),
                 operation_id: "direct-selection".into(),
                 paths: vec!["readme.txt".into()],
@@ -174,25 +183,33 @@ async fn exercise(url: &str) {
         .await
         .unwrap();
     let mut selected = GetAcquiredArtifactFileRequest {
-        attempt: Some(consumer),
         acquisition_id: acquisition.acquisition_id,
         path: "private.txt".into(),
     };
     assert!(
         store
-            .issue_artifact_transfer(&reader, &selected)
+            .issue_artifact_transfer(
+                &supertag_control_plane::AttemptAccess::new(&reader, &consumer),
+                &selected
+            )
             .await
             .is_err()
     );
     selected.path = "readme.txt".into();
     assert!(
         store
-            .issue_artifact_transfer(&source, &selected)
+            .issue_artifact_transfer(
+                &supertag_control_plane::AttemptAccess::new(&source, &consumer),
+                &selected
+            )
             .await
             .is_err()
     );
     let grant = store
-        .issue_artifact_transfer(&reader, &selected)
+        .issue_artifact_transfer(
+            &supertag_control_plane::AttemptAccess::new(&reader, &consumer),
+            &selected,
+        )
         .await
         .unwrap();
     assert_eq!(grant.source_host_id, "direct-producer");
@@ -263,7 +280,10 @@ async fn exercise(url: &str) {
     );
     assert!(
         store
-            .issue_artifact_transfer(&reader, &selected)
+            .issue_artifact_transfer(
+                &supertag_control_plane::AttemptAccess::new(&reader, &consumer),
+                &selected
+            )
             .await
             .is_err()
     );
@@ -278,7 +298,10 @@ async fn exercise(url: &str) {
             .is_err()
     );
     let renewed = store
-        .issue_artifact_transfer(&reader, &selected)
+        .issue_artifact_transfer(
+            &supertag_control_plane::AttemptAccess::new(&reader, &consumer),
+            &selected,
+        )
         .await
         .unwrap();
     redemption.token = renewed.token;
@@ -296,7 +319,10 @@ async fn exercise(url: &str) {
             .is_err()
     );
     let final_grant = store
-        .issue_artifact_transfer(&reader, &selected)
+        .issue_artifact_transfer(
+            &supertag_control_plane::AttemptAccess::new(&reader, &consumer),
+            &selected,
+        )
         .await
         .unwrap();
     redemption.token = final_grant.token;

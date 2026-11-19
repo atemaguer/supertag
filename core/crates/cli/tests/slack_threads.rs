@@ -1155,16 +1155,19 @@ async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads(
         attempt_id: claim.attempt_id,
         lease_token: claim.lease_token,
     };
-    host.start_task(host_request(
-        StartTaskRequest {
-            task_id: attempt.task_id.clone(),
-            attempt_id: attempt.attempt_id.clone(),
-            lease_token: attempt.lease_token.clone(),
-        },
-        &credentials,
-        registered.generation,
-    )?)
-    .await?;
+    let attempt_credential = host
+        .start_task(host_request(
+            StartTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+            },
+            &credentials,
+            registered.generation,
+        )?)
+        .await?
+        .into_inner()
+        .attempt_credential;
     let bytes = b"source evidence\n".to_vec();
     // The capturing host holds the bytes; the Control Plane records only the capture.
     let held = held_artifacts::HeldArtifacts::register(
@@ -1175,21 +1178,23 @@ async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads(
     .await?;
     let blob = held.hold(&attempt.attempt_id, &bytes);
     let captured = held
-        .commit(CommitArtifactCaptureRequest {
-            attempt: Some(attempt.clone()),
-            operation_id: "capture".into(),
-            description: Some(ArtifactDescription {
-                title: "Prior shared evidence".into(),
-                kind: "report".into(),
-                summary: Some("Frozen source result".into()),
-            }),
-            files: vec![ArtifactFile {
-                path: "report.txt".into(),
-                blob: Some(blob.clone()),
+        .commit(
+            &attempt_credential,
+            CommitArtifactCaptureRequest {
+                operation_id: "capture".into(),
+                description: Some(ArtifactDescription {
+                    title: "Prior shared evidence".into(),
+                    kind: "report".into(),
+                    summary: Some("Frozen source result".into()),
+                }),
+                files: vec![ArtifactFile {
+                    path: "report.txt".into(),
+                    blob: Some(blob.clone()),
+                    ..Default::default()
+                }],
                 ..Default::default()
-            }],
-            ..Default::default()
-        })
+            },
+        )
         .await?;
     let artifact = captured.summary.context("missing summary")?.artifact_id;
     host.finish_task(host_request(
@@ -1251,43 +1256,44 @@ async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads(
         attempt_id: claim.attempt_id,
         lease_token: claim.lease_token,
     };
-    host.start_task(host_request(
-        StartTaskRequest {
-            task_id: attempt.task_id.clone(),
-            attempt_id: attempt.attempt_id.clone(),
-            lease_token: attempt.lease_token.clone(),
-        },
-        &credentials,
-        registered.generation,
-    )?)
-    .await?;
+    let attempt_credential = host
+        .start_task(host_request(
+            StartTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+            },
+            &credentials,
+            registered.generation,
+        )?)
+        .await?
+        .into_inner()
+        .attempt_credential;
     let mut acquisitions = attempt_artifacts_client::AttemptArtifactsClient::new(channel);
     let acquired = acquisitions
-        .acquire(host_request(
+        .acquire(authenticated_request(
             AcquireArtifactRequest {
-                attempt: Some(attempt.clone()),
                 operation_id: "read".into(),
                 artifact_id: artifact,
                 paths: vec!["report.txt".into()],
                 delivery: ArtifactDelivery::Read as i32,
                 destination: None,
             },
-            &credentials,
-            registered.generation,
+            &attempt_credential,
+            None,
         )?)
         .await?
         .into_inner();
     // The consumer reads the bytes from the producing Worker Host under a transfer grant for
     // exactly the acquired file; the Control Plane passes none.
     let grant = acquisitions
-        .issue_artifact_transfer(host_request(
+        .issue_artifact_transfer(authenticated_request(
             GetAcquiredArtifactFileRequest {
-                attempt: Some(attempt),
                 acquisition_id: acquired.acquisition_id.clone(),
                 path: "report.txt".into(),
             },
-            &credentials,
-            registered.generation,
+            &attempt_credential,
+            None,
         )?)
         .await?
         .into_inner();

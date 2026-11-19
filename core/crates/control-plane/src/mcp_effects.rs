@@ -1,3 +1,4 @@
+use crate::AttemptAccess;
 use std::collections::BTreeSet;
 
 use serde_json::Value;
@@ -8,7 +9,7 @@ use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
 use crate::{
-    ControlPlane, HostAuthority, Store, StoreError, approvals,
+    ControlPlane, Store, StoreError, approvals,
     store::{Result, invalid, lease_is_live, name, owned, task_row},
 };
 
@@ -20,19 +21,14 @@ fn identity(value: &impl serde::Serialize) -> Result<String> {
     Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(value)?)))
 }
 
-fn owned_attempt(attempt: &Option<InspectAttemptRequest>) -> Result<&InspectAttemptRequest> {
-    attempt
-        .as_ref()
-        .ok_or_else(|| invalid("Attempt identity is required"))
-}
-
 impl Store {
     pub async fn reserve_mcp_effect(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &ReserveMcpEffectRequest,
     ) -> Result<ReserveMcpEffectResponse> {
-        let attempt = owned_attempt(&input.attempt)?;
+        let host = authority.host();
+        let attempt = authority.lease();
         name("MCP operation ID", &input.operation_id)?;
         if !mcp::server_name(&input.server)
             || !mcp::tool_name(&input.tool)
@@ -223,10 +219,11 @@ impl Store {
 
     pub async fn settle_mcp_effect(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &SettleMcpEffectRequest,
     ) -> Result<()> {
-        let attempt = owned_attempt(&input.attempt)?;
+        let host = authority.host();
+        let attempt = authority.lease();
         name("MCP operation ID", &input.operation_id)?;
         name("MCP dispatch ID", &input.dispatch_id)?;
         if let Some(result) = &input.result_json {
@@ -312,10 +309,11 @@ impl Store {
     /// `.mcp.json` entries differ is refused, so the Worker Host starts none of them.
     pub async fn record_workspace_mcp(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &RecordWorkspaceMcpRequest,
     ) -> Result<()> {
-        let attempt = owned_attempt(&input.attempt)?;
+        let host = authority.host();
+        let attempt = authority.lease();
         let mut record = input
             .record
             .clone()
@@ -423,7 +421,7 @@ impl attempt_mcp_effects_server::AttemptMcpEffects for ControlPlane {
         &self,
         request: Request<ReserveMcpEffectRequest>,
     ) -> std::result::Result<Response<ReserveMcpEffectResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .reserve_mcp_effect(&host, request.get_ref())
@@ -435,7 +433,7 @@ impl attempt_mcp_effects_server::AttemptMcpEffects for ControlPlane {
         &self,
         request: Request<SettleMcpEffectRequest>,
     ) -> std::result::Result<Response<SettleMcpEffectResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         self.store
             .settle_mcp_effect(&host, request.get_ref())
             .await?;
@@ -446,7 +444,7 @@ impl attempt_mcp_effects_server::AttemptMcpEffects for ControlPlane {
         &self,
         request: Request<RecordWorkspaceMcpRequest>,
     ) -> std::result::Result<Response<RecordWorkspaceMcpResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         self.store
             .record_workspace_mcp(&host, request.get_ref())
             .await?;

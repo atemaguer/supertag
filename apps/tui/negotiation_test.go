@@ -15,7 +15,7 @@ func handleNegotiation(mux *http.ServeMux) {
 	mux.Handle(rpc.ProtocolNegotiationNegotiateProcedure, connect.NewUnaryHandler(rpc.ProtocolNegotiationNegotiateProcedure,
 		func(_ context.Context, _ *connect.Request[v2.NegotiateProtocolRequest]) (*connect.Response[v2.NegotiateProtocolResponse], error) {
 			return connect.NewResponse(&v2.NegotiateProtocolResponse{
-				Role: v2.ServiceRole_SERVICE_ROLE_GATEWAY, ProtocolVersion: 5, ProtocolVersions: []uint32{5},
+				Role: v2.ServiceRole_SERVICE_ROLE_GATEWAY, ProtocolVersion: 6, ProtocolVersions: []uint32{6},
 			}), nil
 		}))
 }

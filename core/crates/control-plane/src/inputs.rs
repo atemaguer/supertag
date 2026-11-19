@@ -1,8 +1,8 @@
+use crate::AttemptAccess;
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::v2::{
     InspectAttemptRequest, LiveInput, LiveInputDecision, LiveInputReceipt, LiveInputState,
-    QueueInputRequest, ResolveInputRequest, SettleInputRequest, TakeInputRequest,
-    TakeInputResponse, Task, TaskState,
+    QueueInputRequest, ResolveInputRequest, SettleInputRequest, TakeInputResponse, Task, TaskState,
 };
 use uuid::Uuid;
 
@@ -112,23 +112,16 @@ impl Store {
         Ok(input)
     }
 
-    pub async fn take_input(
-        &self,
-        host: &HostAuthority,
-        request: &TakeInputRequest,
-    ) -> Result<Option<LiveInput>> {
-        Ok(self.take_input_for_host(host, request).await?.input)
+    pub async fn take_input(&self, authority: &AttemptAccess) -> Result<Option<LiveInput>> {
+        Ok(self.take_input_for_attempt(authority).await?.input)
     }
 
-    pub async fn take_input_for_host(
+    pub async fn take_input_for_attempt(
         &self,
-        host: &HostAuthority,
-        request: &TakeInputRequest,
+        authority: &AttemptAccess,
     ) -> Result<TakeInputResponse> {
-        let attempt = request
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Attempt identity required"))?;
+        let host = authority.host();
+        let attempt = authority.lease();
         let (mut tx, _) = self.write().await?;
         let task = owned_attempt(&mut tx, host, attempt).await?;
         let now = self.execution_now_ms();
@@ -177,15 +170,13 @@ impl Store {
 
     pub async fn settle_input(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         request: &SettleInputRequest,
     ) -> Result<LiveInput> {
+        let host = authority.host();
         let _wake = self.wake_follows();
         name("live input ID", &request.input_id)?;
-        let attempt = request
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Attempt identity required"))?;
+        let attempt = authority.lease();
         let next = match request.receipt() {
             LiveInputReceipt::Accepted => LiveInputState::Accepted,
             LiveInputReceipt::Rejected => LiveInputState::Rejected,

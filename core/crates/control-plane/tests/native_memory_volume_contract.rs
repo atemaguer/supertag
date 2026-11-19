@@ -94,14 +94,12 @@ fn manifest(tag: char) -> BlobReference {
 }
 
 fn advance(
-    attempt: &InspectAttemptRequest,
     expected: u64,
     manifest: BlobReference,
     generation: u64,
     objects: &[char],
 ) -> AdvanceNativeMemoryRequest {
     AdvanceNativeMemoryRequest {
-        attempt: Some(attempt.clone()),
         expected_revision: expected,
         manifest: Some(manifest),
         files: objects.len() as u32,
@@ -172,14 +170,22 @@ async fn exercise(url: &str) {
     let grant = grant.expect("a Tag that keeps memory grants native memory");
     assert!(grant.volume_head.is_none());
     // A head that has files but names no objects would let them be deleted: refused.
-    let mut unnamed = advance(&first, 0, manifest('a'), 0, &['1']);
+    let mut unnamed = advance(0, manifest('a'), 0, &['1']);
     unnamed.objects.clear();
     assert!(matches!(
-        store.advance_native_memory(&laptop, &unnamed).await,
+        store
+            .advance_native_memory(
+                &supertag_control_plane::AttemptAccess::new(&laptop, &first),
+                &unnamed
+            )
+            .await,
         Err(StoreError::InvalidArgument(_))
     ));
     let moved = store
-        .advance_native_memory(&laptop, &advance(&first, 0, manifest('a'), 0, &['1', '2']))
+        .advance_native_memory(
+            &supertag_control_plane::AttemptAccess::new(&laptop, &first),
+            &advance(0, manifest('a'), 0, &['1', '2']),
+        )
         .await
         .unwrap();
     assert!(moved.advanced);
@@ -187,7 +193,10 @@ async fn exercise(url: &str) {
 
     // A turn that merged onto the empty store after another moved it is told the head, not moved.
     let stale = store
-        .advance_native_memory(&laptop, &advance(&first, 0, manifest('b'), 0, &['9']))
+        .advance_native_memory(
+            &supertag_control_plane::AttemptAccess::new(&laptop, &first),
+            &advance(0, manifest('b'), 0, &['9']),
+        )
         .await
         .unwrap();
     assert!(!stale.advanced);
@@ -203,7 +212,10 @@ async fn exercise(url: &str) {
     assert_eq!(head.revision, 1);
     assert_eq!(head.manifest.as_ref().unwrap().sha256, manifest('a').sha256);
     let moved = store
-        .advance_native_memory(&server, &advance(&second, 1, manifest('c'), 0, &['2', '3']))
+        .advance_native_memory(
+            &supertag_control_plane::AttemptAccess::new(&server, &second),
+            &advance(1, manifest('c'), 0, &['2', '3']),
+        )
         .await
         .unwrap();
     assert!(moved.advanced);
@@ -214,7 +226,10 @@ async fn exercise(url: &str) {
     assert_eq!(garbage(&store, &server).await, shas(&['a', '1']));
     // An object a later head names again leaves the queue.
     let again = store
-        .advance_native_memory(&server, &advance(&second, 2, manifest('d'), 0, &['1', '3']))
+        .advance_native_memory(
+            &supertag_control_plane::AttemptAccess::new(&server, &second),
+            &advance(2, manifest('d'), 0, &['1', '3']),
+        )
         .await
         .unwrap();
     assert!(again.advanced);
@@ -257,7 +272,10 @@ async fn exercise(url: &str) {
     );
     assert!(matches!(
         store
-            .advance_native_memory(&server, &advance(&second, 3, manifest('f'), 0, &['3']))
+            .advance_native_memory(
+                &supertag_control_plane::AttemptAccess::new(&server, &second),
+                &advance(3, manifest('f'), 0, &['3'])
+            )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
@@ -280,7 +298,10 @@ async fn exercise(url: &str) {
     assert!(grant.is_none());
     assert!(matches!(
         store
-            .advance_native_memory(&laptop, &advance(&off, 0, manifest('e'), 1, &[]))
+            .advance_native_memory(
+                &supertag_control_plane::AttemptAccess::new(&laptop, &off),
+                &advance(0, manifest('e'), 1, &[])
+            )
             .await,
         Err(StoreError::PermissionDenied)
     ));
@@ -350,7 +371,10 @@ async fn orphans(url: &str) {
             .unwrap();
     }
     let moved = store
-        .advance_native_memory(&host, &advance(&first, 0, manifest('9'), 0, &['8']))
+        .advance_native_memory(
+            &supertag_control_plane::AttemptAccess::new(&host, &first),
+            &advance(0, manifest('9'), 0, &['8']),
+        )
         .await
         .unwrap();
     assert!(moved.advanced);

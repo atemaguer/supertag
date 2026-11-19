@@ -86,7 +86,6 @@ async fn exercise(url: &str) {
         .unwrap();
     let capture = CommitArtifactCaptureRequest {
         source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
-        attempt: Some(attempt.clone()),
         operation_id: "capture".into(),
         description: Some(ArtifactDescription {
             title: "Reviewed interface".into(),
@@ -114,11 +113,17 @@ async fn exercise(url: &str) {
         ..Default::default()
     };
     store
-        .reserve_artifact_capture(&host, &capture)
+        .reserve_artifact_capture(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &capture,
+        )
         .await
         .unwrap();
     let artifact = store
-        .commit_artifact_capture(&host, &capture)
+        .commit_artifact_capture(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &capture,
+        )
         .await
         .unwrap()
         .summary

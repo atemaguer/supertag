@@ -36,7 +36,6 @@ impl HarnessWorkSessions for Bridge {
         }
         let input = request.into_inner();
         let upstream = ContinueWorkSessionRequest {
-            attempt: Some(self.attempt()),
             operation_id: input.operation_id,
             work_session_id: input.work_session_id,
             message: self.redact(&input.message),
@@ -63,7 +62,6 @@ impl HarnessWorkSessions for Bridge {
         }
         let input = request.into_inner();
         let upstream = AskWorkSessionQuestionRequest {
-            attempt: Some(self.attempt()),
             operation_id: input.operation_id,
             text: self.redact(&input.text),
         };
@@ -91,7 +89,6 @@ impl HarnessWorkSessions for Bridge {
         }
         let input = request.into_inner();
         let upstream = StartWorkSessionRequest {
-            attempt: Some(self.attempt()),
             operation_id: input.operation_id,
             title: self.redact(&input.title),
             instruction: self.redact(&input.instruction),
@@ -119,7 +116,6 @@ impl HarnessWorkSessions for Bridge {
             return Err(Status::failed_precondition("execution is complete"));
         }
         let upstream = CloseAttemptWorkSessionRequest {
-            attempt: Some(self.attempt()),
             work_session_id: request.into_inner().work_session_id,
         };
         let response = self

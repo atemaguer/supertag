@@ -125,7 +125,7 @@ impl HarnessArtifacts for Bridge {
             // written from here first.
             crate::worker::capture_volumes::write(
                 &self.coordination.acquisitions,
-                &self.host_token,
+                &self.attempt_token,
                 &manifest,
                 &selected,
                 &self.storage.volumes,
@@ -133,7 +133,7 @@ impl HarnessArtifacts for Bridge {
             )
             .await?;
             drop(selected);
-            let mut upstream = authenticated_request(manifest.clone(), &self.host_token, None)?;
+            let mut upstream = authenticated_request(manifest.clone(), &self.attempt_token, None)?;
             upstream.set_timeout(operation_deadline.saturating_duration_since(Instant::now()));
             let capture = self
                 .coordination

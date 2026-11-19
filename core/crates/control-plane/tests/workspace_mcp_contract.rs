@@ -64,9 +64,8 @@ async fn put_record(
 ) -> Result<(), StoreError> {
     store
         .record_workspace_mcp(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, attempt),
             &RecordWorkspaceMcpRequest {
-                attempt: Some(attempt.clone()),
                 record: Some(record),
             },
         )
@@ -81,9 +80,8 @@ async fn reserve(
 ) -> Result<ReserveMcpEffectResponse, StoreError> {
     store
         .reserve_mcp_effect(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, attempt),
             &ReserveMcpEffectRequest {
-                attempt: Some(attempt.clone()),
                 operation_id: format!("read-{binding}"),
                 server: "local".into(),
                 tool: "read_env".into(),

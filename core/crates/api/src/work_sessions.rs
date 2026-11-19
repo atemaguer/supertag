@@ -70,7 +70,7 @@ impl attempt_work_sessions_server::AttemptWorkSessions for Api {
         &self,
         request: Request<ContinueWorkSessionRequest>,
     ) -> Result<Response<WorkSession>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             attempt_work_sessions_client::AttemptWorkSessionsClient::new(channel)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)
@@ -84,7 +84,7 @@ impl attempt_work_sessions_server::AttemptWorkSessions for Api {
         &self,
         request: Request<CloseAttemptWorkSessionRequest>,
     ) -> Result<Response<WorkSession>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             attempt_work_sessions_client::AttemptWorkSessionsClient::new(channel)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)
@@ -98,7 +98,7 @@ impl attempt_work_sessions_server::AttemptWorkSessions for Api {
         &self,
         request: Request<AskWorkSessionQuestionRequest>,
     ) -> Result<Response<WorkSessionQuestion>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             attempt_work_sessions_client::AttemptWorkSessionsClient::new(channel)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)
@@ -112,7 +112,7 @@ impl attempt_work_sessions_server::AttemptWorkSessions for Api {
         &self,
         request: Request<StartWorkSessionRequest>,
     ) -> Result<Response<WorkSession>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             attempt_work_sessions_client::AttemptWorkSessionsClient::new(channel)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)

@@ -122,11 +122,8 @@ fn start(identity: &InspectAttemptRequest) -> StartTaskRequest {
     }
 }
 
-fn event(identity: &InspectAttemptRequest, text: &str) -> AppendEventRequest {
+fn event(text: &str) -> AppendEventRequest {
     AppendEventRequest {
-        task_id: identity.task_id.clone(),
-        attempt_id: identity.attempt_id.clone(),
-        lease_token: identity.lease_token.clone(),
         sequence: 1,
         text: text.into(),
         kind: TaskEventKind::Message as i32,
@@ -359,7 +356,10 @@ async fn authority_contract(url: &str) {
 
     store.start_task(&new_host, &start(&current)).await.unwrap();
     let first = store
-        .append_event(&new_host, &event(&current, "First attempt progress"))
+        .append_event(
+            &supertag_control_plane::AttemptAccess::new(&new_host, &current),
+            &event("First attempt progress"),
+        )
         .await
         .unwrap();
     assert_eq!(first.sequence, 1);
@@ -401,17 +401,25 @@ async fn authority_contract(url: &str) {
     );
     assert_eq!(
         store
-            .append_event(&new_host, &event(&current, &first.text))
+            .append_event(
+                &supertag_control_plane::AttemptAccess::new(&new_host, &current),
+                &event(&first.text)
+            )
             .await
             .unwrap(),
         first
     );
     let expired_event = AppendEventRequest {
         sequence: 2,
-        ..event(&current, "Expired event")
+        ..event("Expired event")
     };
     assert!(matches!(
-        store.append_event(&new_host, &expired_event).await,
+        store
+            .append_event(
+                &supertag_control_plane::AttemptAccess::new(&new_host, &current),
+                &expired_event
+            )
+            .await,
         Err(StoreError::FailedPrecondition(_))
     ));
 
@@ -495,11 +503,23 @@ async fn authority_contract(url: &str) {
         .start_task(&other_host, &start(&retried))
         .await
         .unwrap();
-    let repeated = event(&retried, "Replacement attempt progress");
-    let accepted = store.append_event(&other_host, &repeated).await.unwrap();
+    let repeated = event("Replacement attempt progress");
+    let accepted = store
+        .append_event(
+            &supertag_control_plane::AttemptAccess::new(&other_host, &retried),
+            &repeated,
+        )
+        .await
+        .unwrap();
     assert_eq!(accepted.sequence, 1);
     assert_eq!(
-        store.append_event(&other_host, &repeated).await.unwrap(),
+        store
+            .append_event(
+                &supertag_control_plane::AttemptAccess::new(&other_host, &retried),
+                &repeated
+            )
+            .await
+            .unwrap(),
         accepted
     );
     let events = store.list_events(&task.task_id, 0, 10).await.unwrap();

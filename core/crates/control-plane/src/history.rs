@@ -1,11 +1,9 @@
 use sqlx::Row;
-use supertag_protocol::v2::{
-    AttemptHistory, AttemptHistoryEntry, InspectAttemptRequest, TaskEventKind, TaskState,
-};
+use supertag_protocol::v2::{AttemptHistory, AttemptHistoryEntry, TaskEventKind, TaskState};
 
 use crate::{
     Store, StoreError,
-    store::{HostAuthority, Result, lease_is_live, owned},
+    store::{Result, lease_is_live, owned},
 };
 
 impl Store {
@@ -14,9 +12,9 @@ impl Store {
     /// immutable audience.
     pub async fn get_attempt_history(
         &self,
-        host: &HostAuthority,
-        attempt: &InspectAttemptRequest,
+        authority: &crate::AttemptAccess,
     ) -> Result<AttemptHistory> {
+        let (host, attempt) = (authority.host(), authority.lease());
         let mut tx = self.pool.begin().await?;
         let task = owned(
             &mut tx,

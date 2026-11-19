@@ -1,4 +1,5 @@
 //! A child can ask one question. Successful settlement publishes it to the parent.
+use crate::AttemptAccess;
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::v2::{
     AskWorkSessionQuestionRequest, FinishTaskRequest, ObjectiveSignal, Task, TaskState,
@@ -6,7 +7,7 @@ use supertag_protocol::v2::{
 };
 
 use crate::{
-    HostAuthority, Store, StoreError,
+    Store, StoreError,
     store::{Result, invalid, lease_is_live, name, owned},
     work_sessions::CHILD,
 };
@@ -28,13 +29,11 @@ fn question_row(row: &AnyRow) -> Result<WorkSessionQuestion> {
 impl Store {
     pub async fn ask_work_session_question(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &AskWorkSessionQuestionRequest,
     ) -> Result<WorkSessionQuestion> {
-        let attempt = input
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Attempt identity is required"))?;
+        let host = authority.host();
+        let attempt = authority.lease();
         name("operation ID", &input.operation_id)?;
         let text = input.text.trim();
         if text.is_empty() || text.contains('\0') || text.encode_utf16().count() > QUESTION_MAX {

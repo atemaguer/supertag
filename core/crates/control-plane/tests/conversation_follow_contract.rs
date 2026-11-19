@@ -133,9 +133,6 @@ async fn exercise(database: &str) {
         TaskState::Running
     );
     let append = |sequence: u64, kind: TaskEventKind, text: &str| AppendEventRequest {
-        task_id: sent_task.task_id.clone(),
-        attempt_id: assignment.attempt_id.clone(),
-        lease_token: assignment.lease_token.clone(),
         sequence,
         text: text.into(),
         kind: kind as i32,
@@ -146,7 +143,17 @@ async fn exercise(database: &str) {
     ] {
         let at = Instant::now();
         store
-            .append_event(&host, &append(sequence, kind, text))
+            .append_event(
+                &supertag_control_plane::AttemptAccess::new(
+                    &host,
+                    &supertag_protocol::v2::InspectAttemptRequest {
+                        task_id: sent_task.task_id.clone(),
+                        attempt_id: assignment.attempt_id.clone(),
+                        lease_token: assignment.lease_token.clone(),
+                    },
+                ),
+                &append(sequence, kind, text),
+            )
             .await
             .unwrap();
         let page = next_messages(&mut alice, PUSHED).await;
@@ -158,9 +165,6 @@ async fn exercise(database: &str) {
     // The text of the message being written is pushed as it changes, never stored, and goes
     // with its message once that is recorded.
     let text = |revision: u64, after_sequence: u64, text: &str| PublishTaskTextRequest {
-        task_id: sent_task.task_id.clone(),
-        attempt_id: assignment.attempt_id.clone(),
-        lease_token: assignment.lease_token.clone(),
         after_sequence,
         revision,
         text: text.into(),
@@ -171,7 +175,17 @@ async fn exercise(database: &str) {
         response.texts
     };
     store
-        .publish_text(&host, &text(1, 2, "The build "))
+        .publish_text(
+            &supertag_control_plane::AttemptAccess::new(
+                &host,
+                &supertag_protocol::v2::InspectAttemptRequest {
+                    task_id: sent_task.task_id.clone(),
+                    attempt_id: assignment.attempt_id.clone(),
+                    lease_token: assignment.lease_token.clone(),
+                },
+            ),
+            &text(1, 2, "The build "),
+        )
         .await
         .unwrap();
     let pushed = next_texts(&mut alice).await;
@@ -184,20 +198,60 @@ async fn exercise(database: &str) {
         }]
     );
     store
-        .publish_text(&host, &text(2, 2, "The build passes "))
+        .publish_text(
+            &supertag_control_plane::AttemptAccess::new(
+                &host,
+                &supertag_protocol::v2::InspectAttemptRequest {
+                    task_id: sent_task.task_id.clone(),
+                    attempt_id: assignment.attempt_id.clone(),
+                    lease_token: assignment.lease_token.clone(),
+                },
+            ),
+            &text(2, 2, "The build passes "),
+        )
         .await
         .unwrap();
     assert_eq!(next_texts(&mut alice).await[0].text, "The build passes ");
     // An older revision, or text after an earlier event, changes nothing.
-    store.publish_text(&host, &text(1, 2, "The")).await.unwrap();
     store
-        .publish_text(&host, &text(3, 1, "Stale"))
+        .publish_text(
+            &supertag_control_plane::AttemptAccess::new(
+                &host,
+                &supertag_protocol::v2::InspectAttemptRequest {
+                    task_id: sent_task.task_id.clone(),
+                    attempt_id: assignment.attempt_id.clone(),
+                    lease_token: assignment.lease_token.clone(),
+                },
+            ),
+            &text(1, 2, "The"),
+        )
+        .await
+        .unwrap();
+    store
+        .publish_text(
+            &supertag_control_plane::AttemptAccess::new(
+                &host,
+                &supertag_protocol::v2::InspectAttemptRequest {
+                    task_id: sent_task.task_id.clone(),
+                    attempt_id: assignment.attempt_id.clone(),
+                    lease_token: assignment.lease_token.clone(),
+                },
+            ),
+            &text(3, 1, "Stale"),
+        )
         .await
         .unwrap();
     assert_eq!(next(&mut alice, Duration::from_millis(300)).await, None);
     store
         .append_event(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(
+                &host,
+                &supertag_protocol::v2::InspectAttemptRequest {
+                    task_id: sent_task.task_id.clone(),
+                    attempt_id: assignment.attempt_id.clone(),
+                    lease_token: assignment.lease_token.clone(),
+                },
+            ),
             &append(3, TaskEventKind::Message, "The build passes."),
         )
         .await
@@ -221,7 +275,17 @@ async fn exercise(database: &str) {
     );
     // Text of a recorded message, sent late, is not shown again.
     store
-        .publish_text(&host, &text(3, 2, "The build passes."))
+        .publish_text(
+            &supertag_control_plane::AttemptAccess::new(
+                &host,
+                &supertag_protocol::v2::InspectAttemptRequest {
+                    task_id: sent_task.task_id.clone(),
+                    attempt_id: assignment.attempt_id.clone(),
+                    lease_token: assignment.lease_token.clone(),
+                },
+            ),
+            &text(3, 2, "The build passes."),
+        )
         .await
         .unwrap();
     assert_eq!(next(&mut alice, Duration::from_millis(300)).await, None);
@@ -229,7 +293,17 @@ async fn exercise(database: &str) {
     let other = support::register_host(&store, "other-host").await;
     assert!(
         store
-            .publish_text(&other, &text(4, 3, "Not mine"))
+            .publish_text(
+                &supertag_control_plane::AttemptAccess::new(
+                    &other,
+                    &supertag_protocol::v2::InspectAttemptRequest {
+                        task_id: sent_task.task_id.clone(),
+                        attempt_id: assignment.attempt_id.clone(),
+                        lease_token: assignment.lease_token.clone()
+                    }
+                ),
+                &text(4, 3, "Not mine")
+            )
             .await
             .is_err()
     );

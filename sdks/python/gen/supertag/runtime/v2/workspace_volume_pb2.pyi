@@ -25,17 +25,15 @@ class GetWorkspaceVolumeRequest(_message.Message):
     volume_id: str
     def __init__(self, volume_id: _Optional[str] = ...) -> None: ...
 
+class PreflightWorkspaceMountsRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
 class RecordWorkspaceMountWritesRequest(_message.Message):
-    __slots__ = ("task_id", "attempt_id", "lease_token", "writes")
-    TASK_ID_FIELD_NUMBER: _ClassVar[int]
-    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
-    LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("writes",)
     WRITES_FIELD_NUMBER: _ClassVar[int]
-    task_id: str
-    attempt_id: str
-    lease_token: str
     writes: _containers.RepeatedCompositeFieldContainer[_runtime_pb2.WorkspaceMountWrite]
-    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., writes: _Optional[_Iterable[_Union[_runtime_pb2.WorkspaceMountWrite, _Mapping]]] = ...) -> None: ...
+    def __init__(self, writes: _Optional[_Iterable[_Union[_runtime_pb2.WorkspaceMountWrite, _Mapping]]] = ...) -> None: ...
 
 class RecordWorkspaceMountWritesResponse(_message.Message):
     __slots__ = ()

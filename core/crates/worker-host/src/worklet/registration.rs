@@ -28,7 +28,10 @@ use tonic::{service::interceptor::InterceptedService, transport::Channel};
 
 use crate::{
     ArtifactPeers, AttemptClients, HostHeaders, request, retryable, wait_for_work,
-    worklet::{HostStorage, artifact_direct::SourceStorage, checkpoints},
+    worklet::{
+        HostStorage, HostToken, artifact_direct::SourceStorage, authority::AttemptClient,
+        checkpoints,
+    },
 };
 
 /// Negotiates the protocol with the Control Plane and registers this host's incarnation, waiting
@@ -84,8 +87,9 @@ pub(crate) async fn register(
     }
 }
 
-/// The Attempt-scoped clients a registered host's Workers and finalization call, and the host
-/// storage the Worklet lends them.
+/// The Attempt-scoped clients a registered host's Workers and finalization call, each call
+/// carrying its Attempt's credential, and the host storage the Worklet lends them, which holds
+/// the host credential.
 pub(crate) fn coordination(
     channel: &Channel,
     headers: &HostHeaders,
@@ -93,7 +97,7 @@ pub(crate) fn coordination(
     storage: &SourceStorage,
     artifact_peers: &ArtifactPeers,
     volumes: &BTreeMap<String, FileVolume>,
-    state_directory: &Path,
+    (state_directory, credential): (&Path, &HostToken),
 ) -> (AttemptClients, HostStorage) {
     let host_storage = HostStorage {
         review_git: supertag_git_delivery::GitDelivery::for_host(
@@ -101,19 +105,35 @@ pub(crate) fn coordination(
         )
         .ok(),
         artifact_source: Some(storage.clone()),
+        held_transfers: crate::worklet::artifact_direct::HeldTransfers::new(
+            supertag_protocol::v2::artifact_sources_client::ArtifactSourcesClient::with_interceptor(
+                channel.clone(),
+                headers.clone(),
+            )
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES),
+            credential.clone(),
+        ),
         artifact_peers: artifact_peers.clone(),
         volumes: std::sync::Arc::new(volumes.clone()),
-        volume_objects:
+        volume_objects: crate::worklet::volume_objects::VolumeObjects::new(
             supertag_protocol::v2::volume_objects_client::VolumeObjectsClient::with_interceptor(
                 channel.clone(),
                 headers.clone(),
             )
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES),
-        transfers: checkpoints::Transfers::new(channel.clone(), headers.clone())
+            credential.clone(),
+        ),
+        transfers: checkpoints::Transfers::new(channel.clone(), headers.clone(), credential.clone())
             .with_storage(storage.clone()),
     };
     let clients = AttemptClients {
+        attempt: AttemptClient::new(
+            WorkerHostClient::with_interceptor(channel.clone(), headers.clone())
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        ),
         acquisitions,
         workstreams: AttemptWorkstreamsClient::with_interceptor(channel.clone(), headers.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)

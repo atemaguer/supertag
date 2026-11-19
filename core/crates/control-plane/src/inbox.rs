@@ -1,5 +1,6 @@
 //! The operator Inbox is a bounded read model over durable questions, Objective
 //! limits, and uncertain execution. Decisions always revalidate their source.
+use crate::AttemptAccess;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction, any::AnyRow};
@@ -7,7 +8,7 @@ use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
 use tonic::{Request, Response, Status};
 
 use crate::{
-    ControlPlane, HostAuthority, Store, StoreError, objective_limits as limits,
+    ControlPlane, Store, StoreError, objective_limits as limits,
     objectives::{ensure_objective_access_in, objective_admission_in, objective_link_task_in},
     store::{Result, insert_task, invalid, lease_is_live, name, owned, task_in},
 };
@@ -37,9 +38,9 @@ fn nonempty_text(value: &str, maximum: usize) -> Result<&str> {
 impl Store {
     pub async fn attempt_capabilities(
         &self,
-        host: &HostAuthority,
-        attempt: &InspectAttemptRequest,
+        authority: &AttemptAccess,
     ) -> Result<AttemptCapabilities> {
+        let (host, attempt) = (authority.host(), authority.lease());
         let mut tx = self.pool.begin().await?;
         let row = owned(
             &mut tx,
@@ -156,13 +157,11 @@ impl Store {
 
     pub async fn ask_question(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &AskQuestionRequest,
     ) -> Result<ObjectiveQuestion> {
-        let attempt = input
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Attempt identity is required"))?;
+        let host = authority.host();
+        let attempt = authority.lease();
         name("operation ID", &input.operation_id)?;
         let text = nonempty_text(&input.text, QUESTION_MAX)?;
         let (mut tx, _) = self.write().await?;

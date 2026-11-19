@@ -3296,7 +3296,10 @@ class AttemptMailbox:
 
 
 class WorkerHostStub:
-    """Missing associated documentation comment in .proto file."""
+    """The Worker Host API. Lease operations are called with the host's enrolled credential; the data
+    calls a running Attempt makes (events, text, questions, usage, milestones, its network log, its
+    history, capabilities, and Context Item pins) with that Attempt's credential, which names it.
+    """
 
     def __init__(self, channel):
         """Constructor.
@@ -3322,7 +3325,7 @@ class WorkerHostStub:
         self.StartTask = channel.unary_unary(
                 '/supertag.runtime.v2.WorkerHost/StartTask',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.StartTaskRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.StartTaskResponse.FromString,
                 _registered_method=True)
         self.InspectAttempt = channel.unary_unary(
                 '/supertag.runtime.v2.WorkerHost/InspectAttempt',
@@ -3331,17 +3334,17 @@ class WorkerHostStub:
                 _registered_method=True)
         self.GetAttemptCapabilities = channel.unary_unary(
                 '/supertag.runtime.v2.WorkerHost/GetAttemptCapabilities',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetAttemptCapabilitiesRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptCapabilities.FromString,
                 _registered_method=True)
         self.GetAttemptHistory = channel.unary_unary(
                 '/supertag.runtime.v2.WorkerHost/GetAttemptHistory',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetAttemptHistoryRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptHistory.FromString,
                 _registered_method=True)
         self.GetContextPins = channel.unary_unary(
                 '/supertag.runtime.v2.WorkerHost/GetContextPins',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetContextPinsRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ContextResolutionManifest.FromString,
                 _registered_method=True)
         self.CommitContextResolution = channel.unary_unary(
@@ -3442,7 +3445,10 @@ class WorkerHostStub:
 
 
 class WorkerHostServicer:
-    """Missing associated documentation comment in .proto file."""
+    """The Worker Host API. Lease operations are called with the host's enrolled credential; the data
+    calls a running Attempt makes (events, text, questions, usage, milestones, its network log, its
+    history, capabilities, and Context Item pins) with that Attempt's credential, which names it.
+    """
 
     def RegisterHost(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -3649,7 +3655,7 @@ def add_WorkerHostServicer_to_server(servicer, server):
             'StartTask': grpc.unary_unary_rpc_method_handler(
                     servicer.StartTask,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.StartTaskRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.SerializeToString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.StartTaskResponse.SerializeToString,
             ),
             'InspectAttempt': grpc.unary_unary_rpc_method_handler(
                     servicer.InspectAttempt,
@@ -3658,17 +3664,17 @@ def add_WorkerHostServicer_to_server(servicer, server):
             ),
             'GetAttemptCapabilities': grpc.unary_unary_rpc_method_handler(
                     servicer.GetAttemptCapabilities,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetAttemptCapabilitiesRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptCapabilities.SerializeToString,
             ),
             'GetAttemptHistory': grpc.unary_unary_rpc_method_handler(
                     servicer.GetAttemptHistory,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetAttemptHistoryRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptHistory.SerializeToString,
             ),
             'GetContextPins': grpc.unary_unary_rpc_method_handler(
                     servicer.GetContextPins,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetContextPinsRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ContextResolutionManifest.SerializeToString,
             ),
             'CommitContextResolution': grpc.unary_unary_rpc_method_handler(
@@ -3775,7 +3781,10 @@ def add_WorkerHostServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class WorkerHost:
-    """Missing associated documentation comment in .proto file."""
+    """The Worker Host API. Lease operations are called with the host's enrolled credential; the data
+    calls a running Attempt makes (events, text, questions, usage, milestones, its network log, its
+    history, capabilities, and Context Item pins) with that Attempt's credential, which names it.
+    """
 
     @staticmethod
     def RegisterHost(request,
@@ -3874,7 +3883,7 @@ class WorkerHost:
             target,
             '/supertag.runtime.v2.WorkerHost/StartTask',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.StartTaskRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.StartTaskResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -3927,7 +3936,7 @@ class WorkerHost:
             request,
             target,
             '/supertag.runtime.v2.WorkerHost/GetAttemptCapabilities',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetAttemptCapabilitiesRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptCapabilities.FromString,
             options,
             channel_credentials,
@@ -3954,7 +3963,7 @@ class WorkerHost:
             request,
             target,
             '/supertag.runtime.v2.WorkerHost/GetAttemptHistory',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetAttemptHistoryRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptHistory.FromString,
             options,
             channel_credentials,
@@ -3981,7 +3990,7 @@ class WorkerHost:
             request,
             target,
             '/supertag.runtime.v2.WorkerHost/GetContextPins',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetContextPinsRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ContextResolutionManifest.FromString,
             options,
             channel_credentials,

@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package supertag.runtime.v2;
 
-import "supertag/runtime/v2/runtime.proto";
 
 // A Schedule wakes one Tag later: once (`at`, a follow-up) or on a recurrence (`every`). When it
 // is due, the Control Plane queues an ordinary turn for the Tag in the Schedule's Session; it never
@@ -155,7 +154,8 @@ message ListSchedulesResponse {
 // The `schedule` tool. It fires in the turn's own Session (for a conversation, the
 // conversation's latest Session). Fields as in CreateScheduleRequest.
 message CreateAttemptScheduleRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string operation_id = 2;
   string note = 3;
   string at = 4;
@@ -165,7 +165,8 @@ message CreateAttemptScheduleRequest {
 
 // The `cancel_schedule` tool, for a Schedule of the turn's own Tag.
 message CancelAttemptScheduleRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string schedule_id = 2;
 }
 

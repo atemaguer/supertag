@@ -1,19 +1,20 @@
 //! The Attempt's execution lease, which the Worklet holds and renews while a Worker or its own
 //! finalization works under it; the `Authority` handle through which a Worker takes every
 //! lease-bound action, and the `Lease` it lends the harness bridge; and the `AttemptClient` a
-//! Worker's Attempt-scoped data calls go through.
+//! Worker's Attempt-scoped data calls go through, each with the Attempt credential.
 
 use std::{path::Path, time::Duration};
 
 use anyhow::{Context, Result};
 use supertag_protocol::v2::{
     AppendEventRequest, AskQuestionRequest, AttemptAuthority, AttemptCapabilities, AttemptHistory,
-    CommitContextResolutionRequest, ContextResolutionManifest, HarnessCompleteRequest, HostRecord,
+    CommitContextResolutionRequest, ContextResolutionManifest, GetAttemptCapabilitiesRequest,
+    GetAttemptHistoryRequest, GetContextPinsRequest, HarnessCompleteRequest, HostRecord,
     InspectAttemptRequest, ObjectiveQuestion, PublishTaskTextRequest, PublishTaskTextResponse,
     ReportAppliedLimitsRequest, ReportAppliedLimitsResponse, ReportAttemptMilestoneRequest,
     ReportAttemptMilestoneResponse, ReportAttemptUsageRequest, ReportAttemptUsageResponse,
     ReportNetworkLogRequest, ReportNetworkLogResponse, ResolveWorkspaceRefRequest,
-    StartTaskRequest, Task, TaskEvent, TaskState,
+    StartTaskRequest, StartTaskResponse, Task, TaskEvent, TaskState,
 };
 use tokio::time::{self, Instant};
 use tokio_util::sync::CancellationToken;
@@ -22,7 +23,7 @@ use tonic::{Request, Response, Status};
 use crate::{
     RegisteredHost, ensure_attempt, request, retryable,
     worklet::{
-        cleanup_failure,
+        HostToken, cleanup_failure,
         finish::{record_finish, save_finish},
         journal::{Attempt, Journal},
         recovery::{cleanup_terminal, purge_discarded},
@@ -33,12 +34,11 @@ use crate::{
 /// The lease-bound actions a Worker takes for its Attempt: start it, renew its lease, keep the
 /// lease while an operation or a cleanup runs, lend the harness bridge a `Lease`, report what it
 /// waits for, hand its outcome to the Worklet for Finish, and give the Attempt back before
-/// launch. The Worklet's registration, Control Plane client, journal, and checkouts stay behind
-/// this handle. The host credential still signs the Worker's data calls until those move to an
-/// Attempt credential.
+/// launch. The Worklet's registration, Control Plane client, host credential, journal, and
+/// checkouts stay behind this handle: a Worker's own calls carry only its Attempt credential.
 pub(crate) struct Authority<'a> {
     host: &'a mut RegisteredHost,
-    token: &'a str,
+    token: &'a HostToken,
     registration: &'a HostRecord,
     shutdown: &'a CancellationToken,
     journal: &'a Journal,
@@ -49,7 +49,7 @@ pub(crate) struct Authority<'a> {
 
 impl<'a> Authority<'a> {
     pub(crate) fn new(
-        (host, token, registration): (&'a mut RegisteredHost, &'a str, &'a HostRecord),
+        (host, token, registration): (&'a mut RegisteredHost, &'a HostToken, &'a HostRecord),
         shutdown: &'a CancellationToken,
         (journal, workspaces): (&'a Journal, &'a Workspaces),
         (state_directory, once): (&'a Path, bool),
@@ -66,20 +66,9 @@ impl<'a> Authority<'a> {
         }
     }
 
-    /// The host credential the Attempt's calls carry.
-    pub(crate) fn token(&self) -> &'a str {
-        self.token
-    }
-
     /// This host's registration, which the Attempt's sandbox and shared-execution records name.
     pub(crate) fn registration(&self) -> &'a HostRecord {
         self.registration
-    }
-
-    /// A client for the Attempt-scoped data calls the Worker's harness bridge, Context Item
-    /// setup, milestone reports, and egress log make. It reaches none of the Worklet's calls.
-    pub(crate) fn client(&self) -> AttemptClient {
-        AttemptClient(self.host.clone())
     }
 
     /// The handle the Worker's harness bridge renews and checks the Attempt's lease through
@@ -87,20 +76,24 @@ impl<'a> Authority<'a> {
     pub(crate) fn lease(&self, attempt: &Attempt) -> Lease {
         Lease {
             host: self.host.clone(),
-            token: self.token.to_owned(),
+            token: self.token.clone(),
             attempt: attempt.inspect(),
         }
     }
 
-    /// Asks the Control Plane to start the claimed Attempt.
-    pub(crate) async fn start(&mut self, attempt: &Attempt) -> Result<Result<Task, Status>> {
+    /// Asks the Control Plane to start the claimed Attempt. The response carries the Attempt
+    /// credential the Worker's data calls use.
+    pub(crate) async fn start(
+        &mut self,
+        attempt: &Attempt,
+    ) -> Result<Result<StartTaskResponse, Status>> {
         let start = request(
             StartTaskRequest {
                 task_id: attempt.task_id.clone(),
                 attempt_id: attempt.attempt_id.clone(),
                 lease_token: attempt.lease_token.clone(),
             },
-            self.token,
+            self.token.secret(),
         )?;
         Ok(self
             .host
@@ -111,7 +104,7 @@ impl<'a> Authority<'a> {
 
     /// Reads the claimed Attempt's Task without starting it.
     pub(crate) async fn inspect(&mut self, attempt: &Attempt) -> Result<Result<Task, Status>> {
-        let inspect = request(attempt.inspect(), self.token)?;
+        let inspect = request(attempt.inspect(), self.token.secret())?;
         Ok(self
             .host
             .inspect_attempt(inspect)
@@ -124,7 +117,7 @@ impl<'a> Authority<'a> {
         &mut self,
         attempt: &Attempt,
     ) -> Result<Result<AttemptAuthority, Status>> {
-        let renew = request(attempt.inspect(), self.token)?;
+        let renew = request(attempt.inspect(), self.token.secret())?;
         Ok(self
             .host
             .renew_attempt(renew)
@@ -143,7 +136,7 @@ impl<'a> Authority<'a> {
                 attempt: Some(attempt.inspect()),
                 base_commit,
             },
-            self.token,
+            self.token.secret(),
         )?;
         Ok(self
             .host
@@ -162,7 +155,7 @@ impl<'a> Authority<'a> {
         with_authority(
             self.host,
             attempt,
-            self.token,
+            self.token.secret(),
             self.shutdown,
             cancel,
             operation,
@@ -176,12 +169,19 @@ impl<'a> Authority<'a> {
         attempt: &Attempt,
         cleanup: impl std::future::Future<Output = Result<()>>,
     ) -> Result<()> {
-        with_cleanup_authority(self.host, attempt, self.token, self.shutdown, cleanup).await
+        with_cleanup_authority(
+            self.host,
+            attempt,
+            self.token.secret(),
+            self.shutdown,
+            cleanup,
+        )
+        .await
     }
 
     /// Records whether the Attempt waits for the Worker Host holding its Session's last delivery.
     pub(crate) async fn report_waiting_for_holder(&mut self, attempt: &Attempt, waiting: bool) {
-        report_waiting_for_holder(self.host, attempt, self.token, waiting).await;
+        report_waiting_for_holder(self.host, attempt, self.token.secret(), waiting).await;
     }
 
     /// Hands the Worker's own verdict to the Worklet, which reports it with Finish.
@@ -227,15 +227,15 @@ impl<'a> Authority<'a> {
 
 /// The Attempt-scoped data calls a Worker makes to the Control Plane: events, text, questions,
 /// usage, milestones, its network log, its history and capabilities, and its Context Item pins.
-/// It exposes none of the Worklet's calls (register, claim, start, finish, reclaim, checkpoints)
-/// and none of the lease's.
+/// It holds no credential: each call carries the Attempt credential, which the Control Plane
+/// admits for these calls only. It exposes none of the Worklet's calls (register, claim, start,
+/// finish, reclaim, checkpoints) and none of the lease's.
 #[derive(Clone)]
 pub(crate) struct AttemptClient(RegisteredHost);
 
-#[cfg(test)]
-impl From<RegisteredHost> for AttemptClient {
-    fn from(host: RegisteredHost) -> Self {
-        Self(host)
+impl AttemptClient {
+    pub(crate) fn new(client: RegisteredHost) -> Self {
+        Self(client)
     }
 }
 
@@ -256,9 +256,9 @@ macro_rules! relay {
 }
 
 relay! {
-    get_attempt_capabilities(InspectAttemptRequest) -> AttemptCapabilities;
-    get_attempt_history(InspectAttemptRequest) -> AttemptHistory;
-    get_context_pins(InspectAttemptRequest) -> ContextResolutionManifest;
+    get_attempt_capabilities(GetAttemptCapabilitiesRequest) -> AttemptCapabilities;
+    get_attempt_history(GetAttemptHistoryRequest) -> AttemptHistory;
+    get_context_pins(GetContextPinsRequest) -> ContextResolutionManifest;
     commit_context_resolution(CommitContextResolutionRequest) -> ContextResolutionManifest;
     append_event(AppendEventRequest) -> TaskEvent;
     publish_text(PublishTaskTextRequest) -> PublishTaskTextResponse;
@@ -274,7 +274,7 @@ relay! {
 #[derive(Clone)]
 pub(crate) struct Lease {
     host: RegisteredHost,
-    token: String,
+    token: HostToken,
     attempt: InspectAttemptRequest,
 }
 
@@ -283,14 +283,17 @@ impl Lease {
     pub(crate) fn unconnected(host: RegisteredHost, attempt: InspectAttemptRequest) -> Self {
         Self {
             host,
-            token: "host-token".into(),
+            token: HostToken::new("host-token".into()),
             attempt,
         }
     }
 
     fn request(&self, timeout: Duration) -> Result<Request<InspectAttemptRequest>, Status> {
-        let mut request =
-            supertag_protocol::authenticated_request(self.attempt.clone(), &self.token, None)?;
+        let mut request = supertag_protocol::authenticated_request(
+            self.attempt.clone(),
+            self.token.secret(),
+            None,
+        )?;
         request.set_timeout(timeout);
         Ok(request)
     }
@@ -312,11 +315,16 @@ impl Lease {
             .into_inner())
     }
 
-    /// Reports the execution limits the adapter applied.
+    /// Reports the execution limits the adapter applied, as the host: whatever credential
+    /// `request` carries is replaced with the host's.
     pub(crate) async fn report_applied_limits(
         &self,
-        request: Request<ReportAppliedLimitsRequest>,
+        mut request: Request<ReportAppliedLimitsRequest>,
     ) -> Result<Response<ReportAppliedLimitsResponse>, Status> {
+        let bearer = format!("Bearer {}", self.token.secret())
+            .parse::<tonic::metadata::MetadataValue<_>>()
+            .map_err(|_| Status::internal("invalid host credential"))?;
+        request.metadata_mut().insert("authorization", bearer);
         self.host.clone().report_applied_limits(request).await
     }
 }

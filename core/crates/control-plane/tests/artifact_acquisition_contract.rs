@@ -60,10 +60,9 @@ async fn finish(store: &Store, host: &HostAuthority, attempt: &InspectAttemptReq
         .await
         .unwrap();
 }
-fn capture(attempt: &InspectAttemptRequest, operation: &str) -> CommitArtifactCaptureRequest {
+fn capture(operation: &str) -> CommitArtifactCaptureRequest {
     CommitArtifactCaptureRequest {
         source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
-        attempt: Some(attempt.clone()),
         operation_id: operation.into(),
         description: Some(ArtifactDescription {
             title: "Evidence".into(),
@@ -94,10 +93,15 @@ fn capture(attempt: &InspectAttemptRequest, operation: &str) -> CommitArtifactCa
 async fn commit(
     store: &Store,
     host: &HostAuthority,
+    attempt: &InspectAttemptRequest,
     input: &CommitArtifactCaptureRequest,
 ) -> CapturedArtifact {
-    store.reserve_artifact_capture(host, input).await.unwrap();
-    store.commit_artifact_capture(host, input).await.unwrap()
+    let access = supertag_control_plane::AttemptAccess::new(host, attempt);
+    store
+        .reserve_artifact_capture(&access, input)
+        .await
+        .unwrap();
+    store.commit_artifact_capture(&access, input).await.unwrap()
 }
 async fn session_contract(url: &str) {
     let store = Store::open(url).await.unwrap();
@@ -116,28 +120,29 @@ async fn session_contract(url: &str) {
     let source = message(&store, OP, "source").await;
     let producing = claim(&store, &host, "source").await;
     assert_eq!(source.task_id, producing.task_id);
-    let artifact = commit(&store, &host, &capture(&producing, "source")).await;
+    let artifact = commit(&store, &host, &producing, &capture("source")).await;
     let id = artifact.summary.as_ref().unwrap().artifact_id.clone();
     finish(&store, &host, &producing).await;
     let consuming = message(&store, OP, "consumer").await;
     let attempt = claim(&store, &host, "consumer").await;
     assert_eq!(attempt.task_id, consuming.task_id);
     let inspect = InspectAttemptArtifactRequest {
-        attempt: Some(attempt.clone()),
         artifact_id: id.clone(),
     };
     assert_eq!(
         store
-            .inspect_attempt_artifact(&host, &inspect)
+            .inspect_attempt_artifact(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &inspect
+            )
             .await
             .unwrap(),
         artifact
     );
     let found = store
         .find_attempt_artifacts(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
             &FindAttemptArtifactsRequest {
-                attempt: Some(attempt.clone()),
                 query: "evidence".into(),
                 limit: 1,
                 ..Default::default()
@@ -148,7 +153,6 @@ async fn session_contract(url: &str) {
     assert_eq!(found.artifacts.len(), 1);
     assert_eq!(found.artifacts[0].artifact_id, id);
     let input = AcquireArtifactRequest {
-        attempt: Some(attempt.clone()),
         operation_id: "read-first".into(),
         artifact_id: id.clone(),
         paths: vec!["readme.txt".into()],
@@ -156,14 +160,28 @@ async fn session_contract(url: &str) {
         destination: None,
     };
     assert!(matches!(
-        store.acquire_artifact(&intruder, &input).await,
+        store
+            .acquire_artifact(
+                &supertag_control_plane::AttemptAccess::new(&intruder, &attempt),
+                &input
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
     let stale = HostAuthority::new("host:artifact-consumer", 9999).unwrap();
-    assert!(store.acquire_artifact(&stale, &input).await.is_err());
+    assert!(
+        store
+            .acquire_artifact(
+                &supertag_control_plane::AttemptAccess::new(&stale, &attempt),
+                &input
+            )
+            .await
+            .is_err()
+    );
+    let access = supertag_control_plane::AttemptAccess::new(&host, &attempt);
     let (one, two) = tokio::join!(
-        store.acquire_artifact(&host, &input),
-        store.acquire_artifact(&host, &input)
+        store.acquire_artifact(&access, &input),
+        store.acquire_artifact(&access, &input)
     );
     let receipt = one.unwrap();
     assert_eq!(receipt, two.unwrap());
@@ -173,20 +191,35 @@ async fn session_contract(url: &str) {
     let mut changed = input.clone();
     changed.paths = vec!["private.txt".into()];
     assert!(matches!(
-        store.acquire_artifact(&host, &changed).await,
+        store
+            .acquire_artifact(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &changed
+            )
+            .await,
         Err(StoreError::Conflict(_))
     ));
     changed.operation_id = "missing".into();
     changed.paths = vec!["missing".into()];
-    assert!(store.acquire_artifact(&host, &changed).await.is_err());
+    assert!(
+        store
+            .acquire_artifact(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &changed
+            )
+            .await
+            .is_err()
+    );
     let download = GetAcquiredArtifactFileRequest {
-        attempt: Some(attempt.clone()),
         acquisition_id: receipt.acquisition_id.clone(),
         path: "readme.txt".into(),
     };
     assert_eq!(
         store
-            .get_acquired_artifact_file(&host, &download)
+            .get_acquired_artifact_file(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &download
+            )
             .await
             .unwrap(),
         receipt.files[0]
@@ -194,41 +227,62 @@ async fn session_contract(url: &str) {
     let mut forbidden = download.clone();
     forbidden.path = "private.txt".into();
     assert!(matches!(
-        store.get_acquired_artifact_file(&host, &forbidden).await,
+        store
+            .get_acquired_artifact_file(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &forbidden
+            )
+            .await,
         Err(StoreError::NotFound(_))
     ));
-    forbidden = download.clone();
-    forbidden.attempt.as_mut().unwrap().lease_token = "other".into();
+    let other_lease = InspectAttemptRequest {
+        lease_token: "other".into(),
+        ..attempt.clone()
+    };
     assert!(
         store
-            .get_acquired_artifact_file(&host, &forbidden)
+            .get_acquired_artifact_file(
+                &supertag_control_plane::AttemptAccess::new(&host, &other_lease),
+                &download
+            )
             .await
             .is_err()
     );
-    let unconfirmed = commit(&store, &host, &capture(&attempt, "unconfirmed-input")).await;
+    let unconfirmed = commit(&store, &host, &attempt, &capture("unconfirmed-input")).await;
     assert!(unconfirmed.inputs.is_empty());
     let mut settle = SettleArtifactAcquisitionRequest {
-        attempt: Some(attempt.clone()),
         acquisition_id: receipt.acquisition_id.clone(),
         state: ArtifactAcquisitionState::Uncertain as i32,
     };
     store
-        .settle_artifact_acquisition(&host, &settle)
+        .settle_artifact_acquisition(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &settle,
+        )
         .await
         .unwrap();
-    let uncertain = commit(&store, &host, &capture(&attempt, "uncertain-input")).await;
+    let uncertain = commit(&store, &host, &attempt, &capture("uncertain-input")).await;
     assert!(uncertain.inputs.is_empty());
     settle.state = ArtifactAcquisitionState::Delivered as i32;
     let delivered = store
-        .settle_artifact_acquisition(&host, &settle)
+        .settle_artifact_acquisition(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &settle,
+        )
         .await
         .unwrap();
     assert_eq!(
-        store.acquire_artifact(&host, &input).await.unwrap(),
+        store
+            .acquire_artifact(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &input
+            )
+            .await
+            .unwrap(),
         delivered
     );
-    let derived_input = capture(&attempt, "derived");
-    let derived = commit(&store, &host, &derived_input).await;
+    let derived_input = capture("derived");
+    let derived = commit(&store, &host, &attempt, &derived_input).await;
     assert_eq!(
         derived.inputs,
         vec![ArtifactSelection {
@@ -241,12 +295,17 @@ async fn session_contract(url: &str) {
         paths: vec!["private.txt".into()],
         ..input.clone()
     };
-    let later = store.acquire_artifact(&host, &later).await.unwrap();
+    let later = store
+        .acquire_artifact(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &later,
+        )
+        .await
+        .unwrap();
     store
         .settle_artifact_acquisition(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
             &SettleArtifactAcquisitionRequest {
-                attempt: Some(attempt.clone()),
                 acquisition_id: later.acquisition_id,
                 state: ArtifactAcquisitionState::Delivered as i32,
             },
@@ -254,18 +313,32 @@ async fn session_contract(url: &str) {
         .await
         .unwrap();
     // A capture retry keeps the lineage at reservation even after another input arrives.
-    assert_eq!(commit(&store, &host, &derived_input).await, derived);
-    let newer = commit(&store, &host, &capture(&attempt, "newer")).await;
+    assert_eq!(
+        commit(&store, &host, &attempt, &derived_input).await,
+        derived
+    );
+    let newer = commit(&store, &host, &attempt, &capture("newer")).await;
     assert_eq!(newer.inputs[0].paths, ["private.txt", "readme.txt"]);
     settle.state = ArtifactAcquisitionState::Failed as i32;
     assert!(matches!(
-        store.settle_artifact_acquisition(&host, &settle).await,
+        store
+            .settle_artifact_acquisition(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &settle
+            )
+            .await,
         Err(StoreError::Conflict(_))
     ));
     drop(store);
     let store = Store::open(url).await.unwrap();
     assert_eq!(
-        store.acquire_artifact(&host, &input).await.unwrap(),
+        store
+            .acquire_artifact(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &input
+            )
+            .await
+            .unwrap(),
         delivered
     );
     assert_eq!(
@@ -280,13 +353,19 @@ async fn session_contract(url: &str) {
     finish(&store, &host, &attempt).await;
     assert!(
         store
-            .get_acquired_artifact_file(&host, &download)
+            .get_acquired_artifact_file(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &download
+            )
             .await
             .is_err()
     );
     assert!(
         store
-            .inspect_attempt_artifact(&host, &inspect)
+            .inspect_attempt_artifact(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &inspect
+            )
             .await
             .is_err()
     );
@@ -297,9 +376,8 @@ async fn session_contract(url: &str) {
     assert!(matches!(
         store
             .inspect_attempt_artifact(
-                &host,
+                &supertag_control_plane::AttemptAccess::new(&host, &other),
                 &InspectAttemptArtifactRequest {
-                    attempt: Some(other.clone()),
                     artifact_id: id.clone()
                 }
             )
@@ -309,9 +387,8 @@ async fn session_contract(url: &str) {
     assert!(
         store
             .find_attempt_artifacts(
-                &host,
+                &supertag_control_plane::AttemptAccess::new(&host, &other),
                 &FindAttemptArtifactsRequest {
-                    attempt: Some(other.clone()),
                     ..Default::default()
                 }
             )
@@ -327,11 +404,8 @@ async fn session_contract(url: &str) {
     assert!(matches!(
         store
             .inspect_attempt_artifact(
-                &host,
-                &InspectAttemptArtifactRequest {
-                    attempt: Some(other.clone()),
-                    artifact_id: id
-                }
+                &supertag_control_plane::AttemptAccess::new(&host, &other),
+                &InspectAttemptArtifactRequest { artifact_id: id }
             )
             .await,
         Err(StoreError::NotFound(_))
@@ -378,12 +452,11 @@ async fn objective_contract(url: &str) {
         .unwrap();
     let owner = claim(&store, &host, "owner").await;
     assert_eq!(owner.task_id, objective.starting_task_id);
-    let artifact = commit(&store, &host, &capture(&owner, "objective-source")).await;
+    let artifact = commit(&store, &host, &owner, &capture("objective-source")).await;
     let child = store
         .start_work_session(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &owner),
             &StartWorkSessionRequest {
-                attempt: Some(owner.clone()),
                 operation_id: "delegate".into(),
                 title: "Review".into(),
                 instruction: "Read source evidence".into(),
@@ -397,9 +470,8 @@ async fn objective_contract(url: &str) {
     assert_eq!(reviewer.task_id, child.latest_task_id);
     let visible = store
         .inspect_attempt_artifact(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &reviewer),
             &InspectAttemptArtifactRequest {
-                attempt: Some(reviewer.clone()),
                 artifact_id: artifact.summary.as_ref().unwrap().artifact_id.clone(),
             },
         )

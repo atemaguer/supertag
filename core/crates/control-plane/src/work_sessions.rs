@@ -1,4 +1,5 @@
 //! Work started by an owned Attempt and kept in a separate Session.
+use crate::AttemptAccess;
 pub(crate) mod automatic;
 pub(crate) mod continuation;
 pub(crate) mod questions;
@@ -11,7 +12,7 @@ use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
 use crate::{
-    ControlPlane, HostAuthority, Store, StoreError,
+    ControlPlane, Store, StoreError,
     conversations::work_session_in,
     objectives::work_session_admission_in,
     store::{
@@ -484,13 +485,11 @@ impl Store {
     /// see.
     pub async fn close_attempt_work_session(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &CloseAttemptWorkSessionRequest,
     ) -> Result<WorkSession> {
-        let attempt = input
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Attempt identity is required"))?;
+        let host = authority.host();
+        let attempt = authority.lease();
         name("Work Session ID", &input.work_session_id)?;
         let (mut tx, _) = self.write().await?;
         let row = owned(
@@ -544,13 +543,11 @@ impl Store {
 
     pub async fn start_work_session(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &StartWorkSessionRequest,
     ) -> Result<WorkSession> {
-        let attempt = input
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Attempt identity is required"))?;
+        let host = authority.host();
+        let attempt = authority.lease();
         name("operation ID", &input.operation_id)?;
         let title = input.title.split_whitespace().collect::<Vec<_>>().join(" ");
         let instruction = input.instruction.trim();
@@ -705,7 +702,7 @@ impl attempt_work_sessions_server::AttemptWorkSessions for ControlPlane {
         &self,
         request: Request<StartWorkSessionRequest>,
     ) -> std::result::Result<Response<WorkSession>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .start_work_session(&host, &request.into_inner())
@@ -717,7 +714,7 @@ impl attempt_work_sessions_server::AttemptWorkSessions for ControlPlane {
         &self,
         request: Request<ContinueWorkSessionRequest>,
     ) -> std::result::Result<Response<WorkSession>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .continue_work_session(&host, &request.into_inner())
@@ -729,7 +726,7 @@ impl attempt_work_sessions_server::AttemptWorkSessions for ControlPlane {
         &self,
         request: Request<AskWorkSessionQuestionRequest>,
     ) -> std::result::Result<Response<WorkSessionQuestion>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .ask_work_session_question(&host, &request.into_inner())
@@ -741,7 +738,7 @@ impl attempt_work_sessions_server::AttemptWorkSessions for ControlPlane {
         &self,
         request: Request<CloseAttemptWorkSessionRequest>,
     ) -> std::result::Result<Response<WorkSession>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .close_attempt_work_session(&host, request.get_ref())

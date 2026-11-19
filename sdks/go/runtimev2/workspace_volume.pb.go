@@ -135,11 +135,45 @@ func (x *GetWorkspaceVolumeRequest) GetVolumeId() string {
 	return ""
 }
 
+// The Attempt the call's Attempt credential names.
+type PreflightWorkspaceMountsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PreflightWorkspaceMountsRequest) Reset() {
+	*x = PreflightWorkspaceMountsRequest{}
+	mi := &file_supertag_runtime_v2_workspace_volume_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PreflightWorkspaceMountsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PreflightWorkspaceMountsRequest) ProtoMessage() {}
+
+func (x *PreflightWorkspaceMountsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_workspace_volume_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PreflightWorkspaceMountsRequest.ProtoReflect.Descriptor instead.
+func (*PreflightWorkspaceMountsRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_workspace_volume_proto_rawDescGZIP(), []int{2}
+}
+
 type RecordWorkspaceMountWritesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	AttemptId     string                 `protobuf:"bytes,2,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
-	LeaseToken    string                 `protobuf:"bytes,3,opt,name=lease_token,json=leaseToken,proto3" json:"lease_token,omitempty"`
 	Writes        []*WorkspaceMountWrite `protobuf:"bytes,4,rep,name=writes,proto3" json:"writes,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -147,7 +181,7 @@ type RecordWorkspaceMountWritesRequest struct {
 
 func (x *RecordWorkspaceMountWritesRequest) Reset() {
 	*x = RecordWorkspaceMountWritesRequest{}
-	mi := &file_supertag_runtime_v2_workspace_volume_proto_msgTypes[2]
+	mi := &file_supertag_runtime_v2_workspace_volume_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -159,7 +193,7 @@ func (x *RecordWorkspaceMountWritesRequest) String() string {
 func (*RecordWorkspaceMountWritesRequest) ProtoMessage() {}
 
 func (x *RecordWorkspaceMountWritesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspace_volume_proto_msgTypes[2]
+	mi := &file_supertag_runtime_v2_workspace_volume_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -172,28 +206,7 @@ func (x *RecordWorkspaceMountWritesRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use RecordWorkspaceMountWritesRequest.ProtoReflect.Descriptor instead.
 func (*RecordWorkspaceMountWritesRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspace_volume_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *RecordWorkspaceMountWritesRequest) GetTaskId() string {
-	if x != nil {
-		return x.TaskId
-	}
-	return ""
-}
-
-func (x *RecordWorkspaceMountWritesRequest) GetAttemptId() string {
-	if x != nil {
-		return x.AttemptId
-	}
-	return ""
-}
-
-func (x *RecordWorkspaceMountWritesRequest) GetLeaseToken() string {
-	if x != nil {
-		return x.LeaseToken
-	}
-	return ""
+	return file_supertag_runtime_v2_workspace_volume_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *RecordWorkspaceMountWritesRequest) GetWrites() []*WorkspaceMountWrite {
@@ -211,7 +224,7 @@ type RecordWorkspaceMountWritesResponse struct {
 
 func (x *RecordWorkspaceMountWritesResponse) Reset() {
 	*x = RecordWorkspaceMountWritesResponse{}
-	mi := &file_supertag_runtime_v2_workspace_volume_proto_msgTypes[3]
+	mi := &file_supertag_runtime_v2_workspace_volume_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -223,7 +236,7 @@ func (x *RecordWorkspaceMountWritesResponse) String() string {
 func (*RecordWorkspaceMountWritesResponse) ProtoMessage() {}
 
 func (x *RecordWorkspaceMountWritesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspace_volume_proto_msgTypes[3]
+	mi := &file_supertag_runtime_v2_workspace_volume_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -236,7 +249,7 @@ func (x *RecordWorkspaceMountWritesResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use RecordWorkspaceMountWritesResponse.ProtoReflect.Descriptor instead.
 func (*RecordWorkspaceMountWritesResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspace_volume_proto_rawDescGZIP(), []int{3}
+	return file_supertag_runtime_v2_workspace_volume_proto_rawDescGZIP(), []int{4}
 }
 
 type WorkspaceMountPreflight struct {
@@ -248,7 +261,7 @@ type WorkspaceMountPreflight struct {
 
 func (x *WorkspaceMountPreflight) Reset() {
 	*x = WorkspaceMountPreflight{}
-	mi := &file_supertag_runtime_v2_workspace_volume_proto_msgTypes[4]
+	mi := &file_supertag_runtime_v2_workspace_volume_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -260,7 +273,7 @@ func (x *WorkspaceMountPreflight) String() string {
 func (*WorkspaceMountPreflight) ProtoMessage() {}
 
 func (x *WorkspaceMountPreflight) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspace_volume_proto_msgTypes[4]
+	mi := &file_supertag_runtime_v2_workspace_volume_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -273,7 +286,7 @@ func (x *WorkspaceMountPreflight) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceMountPreflight.ProtoReflect.Descriptor instead.
 func (*WorkspaceMountPreflight) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspace_volume_proto_rawDescGZIP(), []int{4}
+	return file_supertag_runtime_v2_workspace_volume_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *WorkspaceMountPreflight) GetProtectedFileSources() []string {
@@ -296,22 +309,19 @@ const file_supertag_runtime_v2_workspace_volume_proto_rawDesc = "" +
 	"credential\x18\xec' \x01(\tR\n" +
 	"credential\"8\n" +
 	"\x19GetWorkspaceVolumeRequest\x12\x1b\n" +
-	"\tvolume_id\x18\x01 \x01(\tR\bvolumeId\"\xbe\x01\n" +
-	"!RecordWorkspaceMountWritesRequest\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1d\n" +
-	"\n" +
-	"attempt_id\x18\x02 \x01(\tR\tattemptId\x12\x1f\n" +
-	"\vlease_token\x18\x03 \x01(\tR\n" +
-	"leaseToken\x12@\n" +
-	"\x06writes\x18\x04 \x03(\v2(.supertag.runtime.v2.WorkspaceMountWriteR\x06writes\"$\n" +
+	"\tvolume_id\x18\x01 \x01(\tR\bvolumeId\"!\n" +
+	"\x1fPreflightWorkspaceMountsRequest\"\x99\x01\n" +
+	"!RecordWorkspaceMountWritesRequest\x12@\n" +
+	"\x06writes\x18\x04 \x03(\v2(.supertag.runtime.v2.WorkspaceMountWriteR\x06writesJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03J\x04\b\x03\x10\x04R\atask_idR\n" +
+	"attempt_idR\vlease_token\"$\n" +
 	"\"RecordWorkspaceMountWritesResponse\"O\n" +
 	"\x17WorkspaceMountPreflight\x124\n" +
 	"\x16protected_file_sources\x18\x01 \x03(\tR\x14protectedFileSources2\xcc\x01\n" +
 	"\x10WorkspaceVolumes\x12[\n" +
 	"\x03Put\x12..supertag.runtime.v2.PutWorkspaceVolumeRequest\x1a$.supertag.runtime.v2.WorkspaceVolume\x12[\n" +
-	"\x03Get\x12..supertag.runtime.v2.GetWorkspaceVolumeRequest\x1a$.supertag.runtime.v2.WorkspaceVolume2\x80\x02\n" +
-	"\x16AttemptWorkspaceMounts\x12e\n" +
-	"\tPreflight\x12*.supertag.runtime.v2.InspectAttemptRequest\x1a,.supertag.runtime.v2.WorkspaceMountPreflight\x12\x7f\n" +
+	"\x03Get\x12..supertag.runtime.v2.GetWorkspaceVolumeRequest\x1a$.supertag.runtime.v2.WorkspaceVolume2\x8a\x02\n" +
+	"\x16AttemptWorkspaceMounts\x12o\n" +
+	"\tPreflight\x124.supertag.runtime.v2.PreflightWorkspaceMountsRequest\x1a,.supertag.runtime.v2.WorkspaceMountPreflight\x12\x7f\n" +
 	"\fRecordWrites\x126.supertag.runtime.v2.RecordWorkspaceMountWritesRequest\x1a7.supertag.runtime.v2.RecordWorkspaceMountWritesResponseb\x06proto3"
 
 var (
@@ -326,27 +336,27 @@ func file_supertag_runtime_v2_workspace_volume_proto_rawDescGZIP() []byte {
 	return file_supertag_runtime_v2_workspace_volume_proto_rawDescData
 }
 
-var file_supertag_runtime_v2_workspace_volume_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_supertag_runtime_v2_workspace_volume_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_supertag_runtime_v2_workspace_volume_proto_goTypes = []any{
 	(*PutWorkspaceVolumeRequest)(nil),          // 0: supertag.runtime.v2.PutWorkspaceVolumeRequest
 	(*GetWorkspaceVolumeRequest)(nil),          // 1: supertag.runtime.v2.GetWorkspaceVolumeRequest
-	(*RecordWorkspaceMountWritesRequest)(nil),  // 2: supertag.runtime.v2.RecordWorkspaceMountWritesRequest
-	(*RecordWorkspaceMountWritesResponse)(nil), // 3: supertag.runtime.v2.RecordWorkspaceMountWritesResponse
-	(*WorkspaceMountPreflight)(nil),            // 4: supertag.runtime.v2.WorkspaceMountPreflight
-	(*WorkspaceMountWrite)(nil),                // 5: supertag.runtime.v2.WorkspaceMountWrite
-	(*InspectAttemptRequest)(nil),              // 6: supertag.runtime.v2.InspectAttemptRequest
+	(*PreflightWorkspaceMountsRequest)(nil),    // 2: supertag.runtime.v2.PreflightWorkspaceMountsRequest
+	(*RecordWorkspaceMountWritesRequest)(nil),  // 3: supertag.runtime.v2.RecordWorkspaceMountWritesRequest
+	(*RecordWorkspaceMountWritesResponse)(nil), // 4: supertag.runtime.v2.RecordWorkspaceMountWritesResponse
+	(*WorkspaceMountPreflight)(nil),            // 5: supertag.runtime.v2.WorkspaceMountPreflight
+	(*WorkspaceMountWrite)(nil),                // 6: supertag.runtime.v2.WorkspaceMountWrite
 	(*WorkspaceVolume)(nil),                    // 7: supertag.runtime.v2.WorkspaceVolume
 }
 var file_supertag_runtime_v2_workspace_volume_proto_depIdxs = []int32{
-	5, // 0: supertag.runtime.v2.RecordWorkspaceMountWritesRequest.writes:type_name -> supertag.runtime.v2.WorkspaceMountWrite
+	6, // 0: supertag.runtime.v2.RecordWorkspaceMountWritesRequest.writes:type_name -> supertag.runtime.v2.WorkspaceMountWrite
 	0, // 1: supertag.runtime.v2.WorkspaceVolumes.Put:input_type -> supertag.runtime.v2.PutWorkspaceVolumeRequest
 	1, // 2: supertag.runtime.v2.WorkspaceVolumes.Get:input_type -> supertag.runtime.v2.GetWorkspaceVolumeRequest
-	6, // 3: supertag.runtime.v2.AttemptWorkspaceMounts.Preflight:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	2, // 4: supertag.runtime.v2.AttemptWorkspaceMounts.RecordWrites:input_type -> supertag.runtime.v2.RecordWorkspaceMountWritesRequest
+	2, // 3: supertag.runtime.v2.AttemptWorkspaceMounts.Preflight:input_type -> supertag.runtime.v2.PreflightWorkspaceMountsRequest
+	3, // 4: supertag.runtime.v2.AttemptWorkspaceMounts.RecordWrites:input_type -> supertag.runtime.v2.RecordWorkspaceMountWritesRequest
 	7, // 5: supertag.runtime.v2.WorkspaceVolumes.Put:output_type -> supertag.runtime.v2.WorkspaceVolume
 	7, // 6: supertag.runtime.v2.WorkspaceVolumes.Get:output_type -> supertag.runtime.v2.WorkspaceVolume
-	4, // 7: supertag.runtime.v2.AttemptWorkspaceMounts.Preflight:output_type -> supertag.runtime.v2.WorkspaceMountPreflight
-	3, // 8: supertag.runtime.v2.AttemptWorkspaceMounts.RecordWrites:output_type -> supertag.runtime.v2.RecordWorkspaceMountWritesResponse
+	5, // 7: supertag.runtime.v2.AttemptWorkspaceMounts.Preflight:output_type -> supertag.runtime.v2.WorkspaceMountPreflight
+	4, // 8: supertag.runtime.v2.AttemptWorkspaceMounts.RecordWrites:output_type -> supertag.runtime.v2.RecordWorkspaceMountWritesResponse
 	5, // [5:9] is the sub-list for method output_type
 	1, // [1:5] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
@@ -366,7 +376,7 @@ func file_supertag_runtime_v2_workspace_volume_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_workspace_volume_proto_rawDesc), len(file_supertag_runtime_v2_workspace_volume_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

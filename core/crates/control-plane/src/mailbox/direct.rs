@@ -1,4 +1,5 @@
 //! Direct messages are durable Mailbox effects, never Workstream posts.
+use crate::AttemptAccess;
 use sha2::{Digest, Sha256};
 use supertag_protocol::v2::commit_review_submission::Kind as ReviewKind;
 
@@ -215,13 +216,11 @@ impl Store {
 
     pub async fn send_attempt_tag_message(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &SendAttemptTagMessageRequest,
     ) -> Result<SendTagMessageResponse> {
-        let attempt = input
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Attempt identity is required"))?;
+        let host = authority.host();
+        let attempt = authority.lease();
         name("operation ID", &input.operation_id)?;
         name("recipient Tag ID", &input.recipient_tag_id)?;
         let text = input.text.trim();

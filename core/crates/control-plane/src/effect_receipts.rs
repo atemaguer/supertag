@@ -11,6 +11,7 @@
 //! provider, which the TypeScript journal left to each integration. A receipt begun by another
 //! Attempt that is still running is in flight rather than in doubt, and only that Attempt may
 //! settle it, so a parallel Work Session of the Tag cannot fail it and call the provider again.
+use crate::AttemptAccess;
 use sha2::{Digest, Sha256};
 use sqlx::{Row, any::AnyRow};
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
@@ -79,12 +80,6 @@ fn receipt(row: &AnyRow, state: EffectReceiptState, replayed: bool) -> Result<Ef
     })
 }
 
-fn attempt(value: &Option<InspectAttemptRequest>) -> Result<&InspectAttemptRequest> {
-    value
-        .as_ref()
-        .ok_or_else(|| invalid("Attempt identity is required"))
-}
-
 /// Whether an unsettled receipt was begun by another Attempt that is still its Task's running
 /// Attempt. A late lease renewal does not end it: only recovery or a finish replaces the Attempt.
 async fn in_flight_elsewhere(
@@ -114,10 +109,11 @@ impl Store {
     /// Reserves an effect before its provider call, or returns what an earlier call recorded.
     pub async fn begin_effect(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &BeginEffectRequest,
     ) -> Result<EffectReceipt> {
-        let attempt = attempt(&input.attempt)?;
+        let host = authority.host();
+        let attempt = authority.lease();
         let requested = input
             .effect
             .as_ref()
@@ -201,9 +197,10 @@ impl Store {
     /// the integration's reconciliation of it.
     pub async fn complete_effect(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &CompleteEffectRequest,
     ) -> Result<EffectReceipt> {
+        let host = authority.host();
         let requested = input
             .effect
             .as_ref()
@@ -220,7 +217,7 @@ impl Store {
         )?;
         self.settle_effect(
             host,
-            attempt(&input.attempt)?,
+            authority.lease(),
             &effect,
             (COMPLETED, &requested.result_json),
         )
@@ -230,9 +227,10 @@ impl Store {
     /// Records a provider call that failed without effect, so a later Begin may retry it.
     pub async fn fail_effect(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &FailEffectRequest,
     ) -> Result<EffectReceipt> {
+        let host = authority.host();
         let requested = input
             .effect
             .as_ref()
@@ -245,13 +243,8 @@ impl Store {
             &requested.operation,
             &requested.arguments_json,
         )?;
-        self.settle_effect(
-            host,
-            attempt(&input.attempt)?,
-            &effect,
-            (FAILED, &requested.error),
-        )
-        .await
+        self.settle_effect(host, authority.lease(), &effect, (FAILED, &requested.error))
+            .await
     }
 
     async fn settle_effect(
@@ -342,7 +335,7 @@ impl attempt_effects_server::AttemptEffects for ControlPlane {
         &self,
         request: Request<BeginEffectRequest>,
     ) -> std::result::Result<Response<EffectReceipt>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store.begin_effect(&host, request.get_ref()).await?,
         ))
@@ -352,7 +345,7 @@ impl attempt_effects_server::AttemptEffects for ControlPlane {
         &self,
         request: Request<CompleteEffectRequest>,
     ) -> std::result::Result<Response<EffectReceipt>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store.complete_effect(&host, request.get_ref()).await?,
         ))
@@ -362,7 +355,7 @@ impl attempt_effects_server::AttemptEffects for ControlPlane {
         &self,
         request: Request<FailEffectRequest>,
     ) -> std::result::Result<Response<EffectReceipt>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store.fail_effect(&host, request.get_ref()).await?,
         ))

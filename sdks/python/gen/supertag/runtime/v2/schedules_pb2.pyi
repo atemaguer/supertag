@@ -1,4 +1,3 @@
-from supertag.runtime.v2 import runtime_pb2 as _runtime_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
@@ -138,28 +137,24 @@ class ListSchedulesResponse(_message.Message):
     def __init__(self, schedules: _Optional[_Iterable[_Union[Schedule, _Mapping]]] = ...) -> None: ...
 
 class CreateAttemptScheduleRequest(_message.Message):
-    __slots__ = ("attempt", "operation_id", "note", "at", "every", "time_zone")
-    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("operation_id", "note", "at", "every", "time_zone")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     NOTE_FIELD_NUMBER: _ClassVar[int]
     AT_FIELD_NUMBER: _ClassVar[int]
     EVERY_FIELD_NUMBER: _ClassVar[int]
     TIME_ZONE_FIELD_NUMBER: _ClassVar[int]
-    attempt: _runtime_pb2.InspectAttemptRequest
     operation_id: str
     note: str
     at: str
     every: str
     time_zone: str
-    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., note: _Optional[str] = ..., at: _Optional[str] = ..., every: _Optional[str] = ..., time_zone: _Optional[str] = ...) -> None: ...
+    def __init__(self, operation_id: _Optional[str] = ..., note: _Optional[str] = ..., at: _Optional[str] = ..., every: _Optional[str] = ..., time_zone: _Optional[str] = ...) -> None: ...
 
 class CancelAttemptScheduleRequest(_message.Message):
-    __slots__ = ("attempt", "schedule_id")
-    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("schedule_id",)
     SCHEDULE_ID_FIELD_NUMBER: _ClassVar[int]
-    attempt: _runtime_pb2.InspectAttemptRequest
     schedule_id: str
-    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., schedule_id: _Optional[str] = ...) -> None: ...
+    def __init__(self, schedule_id: _Optional[str] = ...) -> None: ...
 
 class AttemptScheduleResponse(_message.Message):
     __slots__ = ("schedule", "pending", "time_zone")

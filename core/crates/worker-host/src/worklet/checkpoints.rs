@@ -223,13 +223,20 @@ pub(crate) struct Transfers {
     pub(crate) held: Option<Held>,
     /// The file Volumes this host maps, for checkpoints of Tags that name a Volume.
     pub(crate) volumes: crate::worklet::volume_objects::HostVolumes,
+    /// The host credential its checkpoint, delivery, and Volume object calls carry.
+    pub(in crate::worklet) credential: crate::worklet::HostToken,
 }
 
 impl Transfers {
-    pub fn new(channel: Channel, headers: HostHeaders) -> Self {
+    pub(crate) fn new(
+        channel: Channel,
+        headers: HostHeaders,
+        credential: crate::worklet::HostToken,
+    ) -> Self {
         Self {
             channel,
             headers,
+            credential,
             storage: None,
             held: None,
             volumes: Default::default(),
@@ -244,13 +251,14 @@ impl Transfers {
         self
     }
 
-    pub(crate) fn volume_objects(
-        &self,
-    ) -> VolumeObjectsClient<tonic::service::interceptor::InterceptedService<Channel, HostHeaders>>
-    {
-        VolumeObjectsClient::with_interceptor(self.channel.clone(), self.headers.clone())
-            .max_decoding_message_size(MAX_MESSAGE_BYTES)
-            .max_encoding_message_size(MAX_MESSAGE_BYTES)
+    /// Volume object grants, as this host.
+    pub(crate) fn volume_objects(&self) -> crate::worklet::volume_objects::VolumeObjects {
+        crate::worklet::volume_objects::VolumeObjects::new(
+            VolumeObjectsClient::with_interceptor(self.channel.clone(), self.headers.clone())
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+            self.credential.clone(),
+        )
     }
 
     /// The Control Plane's grant to write this Attempt's reserved Session checkpoint to its Tag's
@@ -258,7 +266,6 @@ impl Transfers {
     async fn volume_grant(
         &self,
         attempt: &Attempt,
-        token: &str,
         access: VolumeAccess,
     ) -> Result<VolumeObjectGrant, Status> {
         let request = VolumeObjectGrantRequest {
@@ -267,11 +274,39 @@ impl Transfers {
             purpose: VolumeObjectPurpose::SessionCheckpoint.into(),
             ..Default::default()
         };
-        Ok(self
-            .volume_objects()
-            .grant(authorized(request, token)?)
+        self.volume_objects().grant(request).await
+    }
+
+    /// A reviewed delivery the calling Attempt may read: its receipt and who holds it.
+    pub(crate) async fn review_delivery(
+        &self,
+        request: supertag_protocol::v2::GetReviewArtifactRequest,
+    ) -> Result<supertag_protocol::v2::HeldWorkspaceDelivery, Status> {
+        Ok(
+            supertag_protocol::v2::transfers_client::TransfersClient::with_interceptor(
+                self.channel.clone(),
+                self.headers.clone(),
+            )
+            .get_review_delivery(authorized(request, self.credential.secret())?)
             .await?
-            .into_inner())
+            .into_inner(),
+        )
+    }
+
+    /// A short-lived Git grant for a remote Workspace, for a live Attempt of this host.
+    pub(crate) async fn mint_git_access(
+        &self,
+        request: supertag_protocol::v2::MintWorkspaceGitAccessRequest,
+    ) -> Result<supertag_protocol::v2::WorkspaceGitGrant, Status> {
+        Ok(
+            supertag_protocol::v2::workspace_git_access_client::WorkspaceGitAccessClient::with_interceptor(
+                self.channel.clone(),
+                self.headers.clone(),
+            )
+            .mint(authorized(request, self.credential.secret())?)
+            .await?
+            .into_inner(),
+        )
     }
 
     pub(crate) fn with_storage(
@@ -307,7 +342,6 @@ impl Transfers {
     pub async fn upload(
         &self,
         attempt: &Attempt,
-        token: &str,
         checkpoint: SessionCheckpoint,
     ) -> Result<CheckpointReference, Status> {
         let held = self.held()?;
@@ -318,7 +352,7 @@ impl Transfers {
         let on_volume = attempt.volume.is_some();
         let task = self
             .host()
-            .inspect_attempt(authorized(attempt.inspect(), token)?)
+            .inspect_attempt(authorized(attempt.inspect(), self.credential.secret())?)
             .await?
             .into_inner();
         if !on_volume {
@@ -336,14 +370,12 @@ impl Transfers {
         };
         let reserved = self
             .host()
-            .reserve_checkpoint(authorized(record.clone(), token)?)
+            .reserve_checkpoint(authorized(record.clone(), self.credential.secret())?)
             .await?
             .into_inner();
         // The reservation comes first: the Volume grant names the reserved checkpoint.
         if on_volume {
-            let grant = self
-                .volume_grant(attempt, token, VolumeAccess::Write)
-                .await?;
+            let grant = self.volume_grant(attempt, VolumeAccess::Write).await?;
             let volume = grant
                 .volume
                 .as_ref()
@@ -367,7 +399,7 @@ impl Transfers {
         }
         let committed = self
             .host()
-            .commit_checkpoint(authorized(record, token)?)
+            .commit_checkpoint(authorized(record, self.credential.secret())?)
             .await?
             .into_inner();
         if reserved != reference || committed != reference {
@@ -386,11 +418,10 @@ impl Transfers {
     pub async fn download(
         &self,
         attempt: &Attempt,
-        token: &str,
         (tag, session): (&str, &str),
     ) -> Result<Option<SessionCheckpoint>, Status> {
         let held = self.held()?;
-        let mut upstream = authorized(attempt.inspect(), token)?;
+        let mut upstream = authorized(attempt.inspect(), self.credential.secret())?;
         upstream.set_timeout(Duration::from_secs(20));
         let response = self.host().get_checkpoint(upstream).await?.into_inner();
         let Some(reference) = response.reference else {
@@ -398,7 +429,7 @@ impl Transfers {
         };
         validate_checkpoint_reference(&reference)?;
         if !response.volume_id.is_empty() {
-            return self.read_volume(attempt, token, reference).await;
+            return self.read_volume(attempt, reference).await;
         }
         if response.holder_host_id != held.host_id {
             supertag_protocol::terminal_text::warn(&format!(
@@ -422,7 +453,6 @@ impl Transfers {
     async fn read_volume(
         &self,
         attempt: &Attempt,
-        token: &str,
         reference: CheckpointReference,
     ) -> Result<Option<SessionCheckpoint>, Status> {
         let fresh = |why: &str| {
@@ -432,7 +462,7 @@ impl Transfers {
             ));
             Ok(None)
         };
-        let grant = match self.volume_grant(attempt, token, VolumeAccess::Read).await {
+        let grant = match self.volume_grant(attempt, VolumeAccess::Read).await {
             Ok(grant) => grant,
             Err(error)
                 if matches!(
@@ -470,7 +500,7 @@ impl Transfers {
     }
 
     /// Deletes the checkpoint files this host holds that no Session will resume.
-    pub async fn reconcile(&self, token: &str) -> Result<usize, Status> {
+    pub async fn reconcile(&self) -> Result<usize, Status> {
         let held = self.held()?;
         let mut live = HashSet::new();
         let mut after = String::new();
@@ -482,7 +512,7 @@ impl Transfers {
                         after_sha256: after.clone(),
                         limit: 0,
                     },
-                    token,
+                    self.credential.secret(),
                 )?)
                 .await?
                 .into_inner();

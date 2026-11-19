@@ -53,13 +53,8 @@ async fn start(store: &Store, host: &HostAuthority, attempt: &InspectAttemptRequ
         .await
         .unwrap();
 }
-fn post(
-    attempt: &InspectAttemptRequest,
-    operation: &str,
-    body: &str,
-) -> PostAttemptWorkstreamRequest {
+fn post(operation: &str, body: &str) -> PostAttemptWorkstreamRequest {
     PostAttemptWorkstreamRequest {
-        attempt: Some(attempt.clone()),
         operation_id: operation.into(),
         body: body.into(),
         to_tag_ids: vec![],
@@ -146,18 +141,31 @@ async fn contract(url: &str) {
         .await
         .unwrap();
     let attempt = claim(&store, &host, &task.task_id).await;
-    let request = post(&attempt, "post", "An update");
+    let request = post("post", "An update");
     assert!(matches!(
-        store.post_attempt_workstream(&host, &request).await,
+        store
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &request
+            )
+            .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     start(&store, &host, &attempt).await;
     assert!(matches!(
-        store.post_attempt_workstream(&other, &request).await,
+        store
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&other, &attempt),
+                &request
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
     let pending = store
-        .post_attempt_workstream(&host, &request)
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &request,
+        )
         .await
         .unwrap();
     assert!(pending.post.is_none());
@@ -169,7 +177,10 @@ async fn contract(url: &str) {
         r#"{"body":"An update","to_tag_ids":[]}"#
     );
     let replay = store
-        .post_attempt_workstream(&host, &request)
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &request,
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -178,7 +189,10 @@ async fn contract(url: &str) {
     );
     assert!(matches!(
         store
-            .post_attempt_workstream(&host, &post(&attempt, "post", "Changed action"))
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &post("post", "Changed action")
+            )
             .await,
         Err(StoreError::Conflict(_))
     ));
@@ -206,13 +220,19 @@ async fn contract(url: &str) {
         granted
     );
     let posted = store
-        .post_attempt_workstream(&host, &request)
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &request,
+        )
         .await
         .unwrap();
     assert!(posted.post.is_some());
     assert_eq!(
         store
-            .post_attempt_workstream(&host, &request)
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &request
+            )
             .await
             .unwrap()
             .post,
@@ -227,7 +247,10 @@ async fn contract(url: &str) {
             .is_some()
     );
     let another = store
-        .post_attempt_workstream(&host, &post(&attempt, "another", "Different body"))
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &post("another", "Different body"),
+        )
         .await
         .unwrap();
     assert!(another.post.is_none());
@@ -252,7 +275,10 @@ async fn contract(url: &str) {
         .unwrap();
     assert_eq!(
         store
-            .post_attempt_workstream(&host, &post(&attempt, "another", "Different body"))
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &post("another", "Different body")
+            )
             .await
             .unwrap()
             .approval
@@ -262,7 +288,12 @@ async fn contract(url: &str) {
     );
     finish(&store, &host, &attempt, vec![]).await;
     assert!(matches!(
-        store.post_attempt_workstream(&host, &request).await,
+        store
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &request
+            )
+            .await,
         Err(StoreError::FailedPrecondition(_))
     ));
 
@@ -286,8 +317,8 @@ async fn contract(url: &str) {
     start(&store, &host, &private_attempt).await;
     let private_request = store
         .post_attempt_workstream(
-            &host,
-            &post(&private_attempt, "private-post", "Private arguments"),
+            &supertag_control_plane::AttemptAccess::new(&host, &private_attempt),
+            &post("private-post", "Private arguments"),
         )
         .await
         .unwrap()
@@ -393,8 +424,8 @@ async fn contract(url: &str) {
     assert!(
         store
             .post_attempt_workstream(
-                &host,
-                &post(&continued, "retry-private", "Private arguments")
+                &supertag_control_plane::AttemptAccess::new(&host, &continued),
+                &post("retry-private", "Private arguments")
             )
             .await
             .unwrap()
@@ -423,8 +454,8 @@ async fn contract(url: &str) {
     assert!(matches!(
         store
             .post_attempt_workstream(
-                &host,
-                &post(&excluded_attempt, "excluded", "Private action")
+                &supertag_control_plane::AttemptAccess::new(&host, &excluded_attempt),
+                &post("excluded", "Private action")
             )
             .await,
         Err(StoreError::PermissionDenied)
@@ -462,13 +493,19 @@ async fn contract(url: &str) {
     let attempt = claim(&store, &host, &objective.starting_task_id).await;
     start(&store, &host, &attempt).await;
     let first = store
-        .post_attempt_workstream(&host, &post(&attempt, "one", "First post"))
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &post("one", "First post"),
+        )
         .await
         .unwrap()
         .approval
         .unwrap();
     let second = store
-        .post_attempt_workstream(&host, &post(&attempt, "two", "Second post"))
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &post("two", "Second post"),
+        )
         .await
         .unwrap()
         .approval
@@ -588,7 +625,10 @@ async fn contract(url: &str) {
     // Explicit Objective scope can cover different arguments, still on the same resource.
     assert!(
         store
-            .post_attempt_workstream(&host, &post(&resumed, "scope-use", "Third post"))
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &resumed),
+                &post("scope-use", "Third post")
+            )
             .await
             .unwrap()
             .post
@@ -602,7 +642,10 @@ async fn contract(url: &str) {
     clock.store(NOW + 30_000, Ordering::SeqCst);
     assert!(matches!(
         store
-            .post_attempt_workstream(&host, &post(&resumed, "expired-attempt", "Too late"))
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &resumed),
+                &post("expired-attempt", "Too late")
+            )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
@@ -643,9 +686,12 @@ async fn contract(url: &str) {
         .unwrap();
     let expires_attempt = claim(&store, &host, &expires.task_id).await;
     start(&store, &host, &expires_attempt).await;
-    let expires_request = post(&expires_attempt, "expires", "Limited validity");
+    let expires_request = post("expires", "Limited validity");
     let approval = store
-        .post_attempt_workstream(&host, &expires_request)
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &expires_attempt),
+            &expires_request,
+        )
         .await
         .unwrap()
         .approval
@@ -660,7 +706,10 @@ async fn contract(url: &str) {
     store.decide_approval(ALICE, &grant).await.unwrap();
     clock.store(NOW + 35_000, Ordering::SeqCst);
     let expired = store
-        .post_attempt_workstream(&host, &expires_request)
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &expires_attempt),
+            &expires_request,
+        )
         .await
         .unwrap();
     assert!(expired.post.is_none());
@@ -688,7 +737,10 @@ async fn contract(url: &str) {
         let attempt = claim(&store, &host, &objective.starting_task_id).await;
         start(&store, &host, &attempt).await;
         let approval = store
-            .post_attempt_workstream(&host, &post(&attempt, "request", "A scoped update"))
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &post("request", "A scoped update"),
+            )
             .await
             .unwrap()
             .approval
@@ -725,7 +777,10 @@ async fn contract(url: &str) {
     let tail_attempt = claim(&store, &host, &tail.task_id).await;
     start(&store, &host, &tail_attempt).await;
     let tail_approval = store
-        .post_attempt_workstream(&host, &post(&tail_attempt, "tail", "Never sent"))
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &tail_attempt),
+            &post("tail", "Never sent"),
+        )
         .await
         .unwrap()
         .approval
@@ -853,25 +908,37 @@ async fn coverage_contract(url: &str) {
     let attempt = claim(&store, &host, &objective.starting_task_id).await;
     start(&store, &host, &attempt).await;
     let first = store
-        .post_attempt_workstream(&host, &post(&attempt, "first", "First update"))
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &post("first", "First update"),
+        )
         .await
         .unwrap()
         .approval
         .unwrap();
     let sibling = store
-        .post_attempt_workstream(&host, &post(&attempt, "sibling", "Second update"))
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &post("sibling", "Second update"),
+        )
         .await
         .unwrap()
         .approval
         .unwrap();
     let later = store
-        .post_attempt_workstream(&host, &post(&attempt, "later", "Later update"))
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &post("later", "Later update"),
+        )
         .await
         .unwrap()
         .approval
         .unwrap();
     let denied = store
-        .post_attempt_workstream(&host, &post(&attempt, "denied", "Do not publish"))
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &post("denied", "Do not publish"),
+        )
         .await
         .unwrap()
         .approval
@@ -919,7 +986,10 @@ async fn coverage_contract(url: &str) {
     // Reuse the original pending operation, not a newly requested effect.
     assert!(
         store
-            .post_attempt_workstream(&host, &post(&attempt, "sibling", "Second update"))
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &post("sibling", "Second update")
+            )
             .await
             .unwrap()
             .post
@@ -970,7 +1040,10 @@ async fn coverage_contract(url: &str) {
     ));
     // A new operation ID cannot evade an existing denial via a broader grant.
     let denied_retry = store
-        .post_attempt_workstream(&host, &post(&attempt, "denied-again", "Do not publish"))
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &post("denied-again", "Do not publish"),
+        )
         .await
         .unwrap();
     assert!(denied_retry.post.is_none());
@@ -1022,12 +1095,21 @@ async fn coverage_contract(url: &str) {
     );
     let next = claim(&store, &host, &continuation).await;
     start(&store, &host, &next).await;
-    let effect = post(&next, "retry-sibling", "Second update");
-    let sent = store.post_attempt_workstream(&host, &effect).await.unwrap();
+    let effect = post("retry-sibling", "Second update");
+    let sent = store
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &next),
+            &effect,
+        )
+        .await
+        .unwrap();
     assert!(sent.post.is_some());
     assert_eq!(
         store
-            .post_attempt_workstream(&host, &effect)
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &next),
+                &effect
+            )
             .await
             .unwrap()
             .post,
@@ -1044,7 +1126,10 @@ async fn coverage_contract(url: &str) {
     // Expired derived authority remains expired. A new operation can request a
     // new decision, without overwriting or silently reviving the covered row.
     let retry = store
-        .post_attempt_workstream(&host, &post(&next, "after-expiry", "Later update"))
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &next),
+            &post("after-expiry", "Later update"),
+        )
         .await
         .unwrap();
     assert!(retry.post.is_none());
@@ -1105,13 +1190,19 @@ async fn coverage_contract(url: &str) {
         let attempt = claim(&store, &host, &objective.starting_task_id).await;
         start(&store, &host, &attempt).await;
         let first = store
-            .post_attempt_workstream(&host, &post(&attempt, "one", "One"))
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &post("one", "One"),
+            )
             .await
             .unwrap()
             .approval
             .unwrap();
         let second = store
-            .post_attempt_workstream(&host, &post(&attempt, "two", "Two"))
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &post("two", "Two"),
+            )
             .await
             .unwrap()
             .approval
@@ -1170,7 +1261,10 @@ async fn coverage_contract(url: &str) {
         start(&store, &host, &next).await;
         assert!(
             store
-                .post_attempt_workstream(&host, &post(&next, "retry", "Two"))
+                .post_attempt_workstream(
+                    &supertag_control_plane::AttemptAccess::new(&host, &next),
+                    &post("retry", "Two")
+                )
                 .await
                 .unwrap()
                 .post
@@ -1218,7 +1312,10 @@ async fn coverage_contract(url: &str) {
     let attempt = claim(&store, &host, &objective.starting_task_id).await;
     start(&store, &host, &attempt).await;
     let pending = store
-        .post_attempt_workstream(&host, &post(&attempt, "once", "Approved once"))
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &post("once", "Approved once"),
+        )
         .await
         .unwrap()
         .approval
@@ -1249,7 +1346,10 @@ async fn coverage_contract(url: &str) {
     start(&store, &host, &next).await;
     assert!(
         store
-            .post_attempt_workstream(&host, &post(&next, "retry-once", "Approved once"))
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &next),
+                &post("retry-once", "Approved once")
+            )
             .await
             .unwrap()
             .post
@@ -1284,7 +1384,10 @@ async fn coverage_contract(url: &str) {
     let attempt = claim(&store, &host, &objective.starting_task_id).await;
     start(&store, &host, &attempt).await;
     let pending = store
-        .post_attempt_workstream(&host, &post(&attempt, "old-rule", "Policy-bound action"))
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &post("old-rule", "Policy-bound action"),
+        )
         .await
         .unwrap()
         .approval
@@ -1311,8 +1414,14 @@ async fn coverage_contract(url: &str) {
         .unwrap();
     let next = claim(&store, &host, &continuation).await;
     start(&store, &host, &next).await;
-    let effect = post(&next, "new-rule", "Policy-bound action");
-    let refused = store.post_attempt_workstream(&host, &effect).await.unwrap();
+    let effect = post("new-rule", "Policy-bound action");
+    let refused = store
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &next),
+            &effect,
+        )
+        .await
+        .unwrap();
     assert!(refused.post.is_none());
     let pending = refused.approval.unwrap();
     assert_eq!(pending.state(), ApprovalState::Pending);
@@ -1331,7 +1440,10 @@ async fn coverage_contract(url: &str) {
     store.decide_approval("operator:bob", &grant).await.unwrap();
     assert!(
         store
-            .post_attempt_workstream(&host, &effect)
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &next),
+                &effect
+            )
             .await
             .unwrap()
             .post

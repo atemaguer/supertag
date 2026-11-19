@@ -11,12 +11,13 @@
 //! manifest naming them. The Control Plane holds only each store's head, the current manifest,
 //! hands it out with the grant, and moves it by compare-and-set on the revision
 //! ([`Store::advance_native_memory`]), so concurrent turns on any hosts merge, never overwrite.
+use crate::AttemptAccess;
 use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::v2::*;
 
 use crate::{
-    HostAuthority, Store, StoreError,
+    Store, StoreError,
     store::{Result, invalid, lease_is_live, name, owned, task_row},
 };
 
@@ -456,13 +457,11 @@ impl Store {
     /// so the host merges onto it and tries again.
     pub async fn advance_native_memory(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &AdvanceNativeMemoryRequest,
     ) -> Result<AdvanceNativeMemoryResponse> {
-        let attempt = input
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Attempt identity is required"))?;
+        let host = authority.host();
+        let attempt = authority.lease();
         let manifest = input
             .manifest
             .clone()
@@ -585,13 +584,11 @@ impl Store {
     /// made under an older reset generation changes nothing.
     pub async fn report_native_memory(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &ReportNativeMemoryRequest,
     ) -> Result<()> {
-        let attempt = input
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Attempt identity is required"))?;
+        let host = authority.host();
+        let attempt = authority.lease();
         if input.files > MAX_FILES || input.bytes > MAX_BYTES {
             return Err(invalid("native memory is over its size limit"));
         }

@@ -96,9 +96,8 @@ async fn used(
 ) {
     store
         .report_attempt_usage(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, attempt),
             &ReportAttemptUsageRequest {
-                attempt: Some(attempt.clone()),
                 sequence,
                 native_usage: Some(NativeTokenUsage {
                     input_tokens: tokens,

@@ -159,7 +159,10 @@ async fn conversation_fires(store: &Store, host: &HostAuthority, clock: &Arc<Ato
     // A person's message is always answered, even when the harness asks to stay quiet.
     let hello = say(store, "Hello").await;
     let (_, turn) = next(store, host).await;
-    let caps = store.attempt_capabilities(host, &turn).await.unwrap();
+    let caps = store
+        .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(host, &turn))
+        .await
+        .unwrap();
     assert!(!caps.may_stay_quiet);
     let answered = finish(store, host, &turn, "Hi", true).await;
     assert!(!answered.quiet);
@@ -200,7 +203,7 @@ async fn conversation_fires(store: &Store, host: &HostAuthority, clock: &Arc<Ato
     assert!(!fired.prompt.contains("Of this Schedule's last"));
     assert!(
         store
-            .attempt_capabilities(host, &turn)
+            .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(host, &turn))
             .await
             .unwrap()
             .may_stay_quiet
@@ -348,9 +351,8 @@ async fn surface_fires(store: &Store, host: &HostAuthority, clock: &Arc<AtomicI6
     assert_eq!(task.task_id, accepted.task_id);
     store
         .create_attempt_schedule(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, &turn),
             &CreateAttemptScheduleRequest {
-                attempt: Some(turn.clone()),
                 operation_id: "watch-deploy".into(),
                 note: "Check the deploy".into(),
                 at: "2h".into(),
@@ -385,7 +387,7 @@ async fn surface_fires(store: &Store, host: &HostAuthority, clock: &Arc<AtomicI6
     assert_eq!(fired.session_id, "slack-thread");
     assert!(
         store
-            .attempt_capabilities(host, &turn)
+            .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(host, &turn))
             .await
             .unwrap()
             .may_stay_quiet

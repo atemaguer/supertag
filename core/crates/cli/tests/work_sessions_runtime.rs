@@ -493,7 +493,6 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports(
         attempts
             .ask(authenticated_request(
                 AskWorkSessionQuestionRequest {
-                    attempt: None,
                     operation_id: "operator-cannot-ask-as-child".into(),
                     text: "Unbound question".into(),
                 },
@@ -509,7 +508,6 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports(
         attempts
             .r#continue(authenticated_request(
                 ContinueWorkSessionRequest {
-                    attempt: None,
                     operation_id: "operator-cannot-continue-as-parent".into(),
                     work_session_id: "work/none".into(),
                     message: "Unbound continuation".into(),

@@ -653,7 +653,6 @@ impl supertag_protocol::v2::harness_memory_server::HarnessMemory for HarnessFixt
     ) -> Result<Response<supertag_protocol::v2::AttemptMemoryResponse>, Status> {
         self.authenticate(&request)?;
         let request = request.into_inner();
-        assert!(request.attempt.is_none());
         self.observed.lock().await.remembered.push(request);
         let note = supertag_protocol::v2::Memory {
             memory_id: "mem_fixture".into(),
@@ -691,7 +690,7 @@ impl HarnessTagSessions for HarnessFixture {
         request: Request<ListTagSessionsRequest>,
     ) -> Result<Response<ListTagSessionsResponse>, Status> {
         self.authenticate(&request)?;
-        assert!(request.get_ref().attempt.is_none() && request.get_ref().limit == 5);
+        assert_eq!(request.get_ref().limit, 5);
         self.observed
             .lock()
             .await
@@ -759,7 +758,6 @@ impl HarnessTagSessions for HarnessFixture {
         request: Request<ReadTagTurnRequest>,
     ) -> Result<Response<ReadTagTurnResponse>, Status> {
         self.authenticate(&request)?;
-        assert!(request.get_ref().attempt.is_none());
         assert_eq!(request.get_ref().task_id, "earlier-task");
         assert_eq!(request.get_ref().after, Some(2));
         self.observed

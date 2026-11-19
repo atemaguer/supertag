@@ -80,9 +80,8 @@ async fn report(
 ) -> Result<ReportChangedPathsResponse, StoreError> {
     store
         .report_changed_paths(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, attempt),
             &ReportChangedPathsRequest {
-                attempt: Some(attempt.clone()),
                 paths: paths.iter().map(|path| (*path).into()).collect(),
                 truncated,
             },
@@ -108,9 +107,8 @@ async fn overlap(url: &str) {
     for index in 1..=3 {
         store
             .start_work_session(
-                &parent.0,
+                &supertag_control_plane::AttemptAccess::new(&parent.0, &parent.1),
                 &StartWorkSessionRequest {
-                    attempt: Some(parent.1.clone()),
                     operation_id: format!("work-{index}"),
                     title: format!("Change {index}"),
                     instruction: "Edit the notes".into(),
@@ -269,9 +267,8 @@ async fn overlap(url: &str) {
     store.close().await;
 }
 
-fn begin(attempt: &InspectAttemptRequest, key: &str, arguments: &str) -> BeginEffectRequest {
+fn begin(key: &str, arguments: &str) -> BeginEffectRequest {
     BeginEffectRequest {
-        attempt: Some(attempt.clone()),
         effect: Some(HarnessBeginEffectRequest {
             idempotency_key: key.into(),
             operation: "add_issue_comment".into(),
@@ -280,9 +277,8 @@ fn begin(attempt: &InspectAttemptRequest, key: &str, arguments: &str) -> BeginEf
     }
 }
 
-fn complete(attempt: &InspectAttemptRequest, key: &str, result: &str) -> CompleteEffectRequest {
+fn complete(key: &str, result: &str) -> CompleteEffectRequest {
     CompleteEffectRequest {
-        attempt: Some(attempt.clone()),
         effect: Some(HarnessCompleteEffectRequest {
             idempotency_key: key.into(),
             operation: "add_issue_comment".into(),
@@ -292,9 +288,8 @@ fn complete(attempt: &InspectAttemptRequest, key: &str, result: &str) -> Complet
     }
 }
 
-fn fail(attempt: &InspectAttemptRequest, key: &str, error: &str) -> FailEffectRequest {
+fn fail(key: &str, error: &str) -> FailEffectRequest {
     FailEffectRequest {
-        attempt: Some(attempt.clone()),
         effect: Some(HarnessFailEffectRequest {
             idempotency_key: key.into(),
             operation: "add_issue_comment".into(),
@@ -356,23 +351,31 @@ async fn effects(url: &str) {
 
     // Begin, provider call, complete; then a replay instead of a second provider call.
     let acquired = store
-        .begin_effect(&host, &begin(&first, "task-1/comment/final", COMMENT))
+        .begin_effect(
+            &supertag_control_plane::AttemptAccess::new(&host, &first),
+            &begin("task-1/comment/final", COMMENT),
+        )
         .await
         .unwrap();
     assert_eq!(acquired.state(), EffectReceiptState::Acquired);
     assert!(!acquired.replayed);
     assert_eq!(acquired.task_id, first.task_id);
     // Completing requires the same effect identity.
-    let mut other = complete(&first, "task-1/comment/final", r#"{"commentId":"42"}"#);
+    let mut other = complete("task-1/comment/final", r#"{"commentId":"42"}"#);
     other.effect.as_mut().unwrap().arguments_json = r#"{"issue_number":4}"#.into();
     assert!(matches!(
-        store.complete_effect(&host, &other).await,
+        store
+            .complete_effect(
+                &supertag_control_plane::AttemptAccess::new(&host, &first),
+                &other
+            )
+            .await,
         Err(StoreError::Conflict(_))
     ));
     let completed = store
         .complete_effect(
-            &host,
-            &complete(&first, "task-1/comment/final", r#"{"commentId":"42"}"#),
+            &supertag_control_plane::AttemptAccess::new(&host, &first),
+            &complete("task-1/comment/final", r#"{"commentId":"42"}"#),
         )
         .await
         .unwrap();
@@ -381,8 +384,8 @@ async fn effects(url: &str) {
     assert_eq!(
         store
             .complete_effect(
-                &host,
-                &complete(&first, "task-1/comment/final", r#"{"commentId":"42"}"#),
+                &supertag_control_plane::AttemptAccess::new(&host, &first),
+                &complete("task-1/comment/final", r#"{"commentId":"42"}"#),
             )
             .await
             .unwrap(),
@@ -391,17 +394,16 @@ async fn effects(url: &str) {
     assert!(matches!(
         store
             .complete_effect(
-                &host,
-                &complete(&first, "task-1/comment/final", r#"{"commentId":"43"}"#),
+                &supertag_control_plane::AttemptAccess::new(&host, &first),
+                &complete("task-1/comment/final", r#"{"commentId":"43"}"#),
             )
             .await,
         Err(StoreError::Conflict(_))
     ));
     let replay = store
         .begin_effect(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &first),
             &begin(
-                &first,
                 "task-1/comment/final",
                 r#"{"body":"Done","issue_number":3}"#,
             ),
@@ -415,43 +417,58 @@ async fn effects(url: &str) {
     assert!(matches!(
         store
             .begin_effect(
-                &host,
-                &begin(&first, "task-1/comment/final", r#"{"issue_number":4}"#)
+                &supertag_control_plane::AttemptAccess::new(&host, &first),
+                &begin("task-1/comment/final", r#"{"issue_number":4}"#)
             )
             .await,
         Err(StoreError::Conflict(_))
     ));
     // A begun effect without a durable result is in doubt and never acquired again.
     store
-        .begin_effect(&host, &begin(&first, "task-1/comment/ambiguous", COMMENT))
+        .begin_effect(
+            &supertag_control_plane::AttemptAccess::new(&host, &first),
+            &begin("task-1/comment/ambiguous", COMMENT),
+        )
         .await
         .unwrap();
     let doubt = store
-        .begin_effect(&host, &begin(&first, "task-1/comment/ambiguous", COMMENT))
+        .begin_effect(
+            &supertag_control_plane::AttemptAccess::new(&host, &first),
+            &begin("task-1/comment/ambiguous", COMMENT),
+        )
         .await
         .unwrap();
     assert_eq!(doubt.state(), EffectReceiptState::InDoubt);
     // A failed provider call may be retried; settling twice differently is refused.
     store
-        .begin_effect(&host, &begin(&first, "task-1/comment/failed", COMMENT))
+        .begin_effect(
+            &supertag_control_plane::AttemptAccess::new(&host, &first),
+            &begin("task-1/comment/failed", COMMENT),
+        )
         .await
         .unwrap();
     let failed = store
         .fail_effect(
-            &host,
-            &fail(&first, "task-1/comment/failed", "rate limited"),
+            &supertag_control_plane::AttemptAccess::new(&host, &first),
+            &fail("task-1/comment/failed", "rate limited"),
         )
         .await
         .unwrap();
     assert_eq!(failed.state(), EffectReceiptState::Failed);
     assert!(matches!(
         store
-            .complete_effect(&host, &complete(&first, "task-1/comment/failed", "{}"))
+            .complete_effect(
+                &supertag_control_plane::AttemptAccess::new(&host, &first),
+                &complete("task-1/comment/failed", "{}")
+            )
             .await,
         Err(StoreError::Conflict(_))
     ));
     let retried = store
-        .begin_effect(&host, &begin(&first, "task-1/comment/failed", COMMENT))
+        .begin_effect(
+            &supertag_control_plane::AttemptAccess::new(&host, &first),
+            &begin("task-1/comment/failed", COMMENT),
+        )
         .await
         .unwrap();
     assert_eq!(retried.state(), EffectReceiptState::Acquired);
@@ -459,7 +476,10 @@ async fn effects(url: &str) {
     // Settling an effect that was never begun, malformed input, and stale authority fail.
     assert!(matches!(
         store
-            .complete_effect(&host, &complete(&first, "never-begun", "{}"))
+            .complete_effect(
+                &supertag_control_plane::AttemptAccess::new(&host, &first),
+                &complete("never-begun", "{}")
+            )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
@@ -471,7 +491,10 @@ async fn effects(url: &str) {
     ] {
         assert!(matches!(
             store
-                .begin_effect(&host, &begin(&first, key, arguments))
+                .begin_effect(
+                    &supertag_control_plane::AttemptAccess::new(&host, &first),
+                    &begin(key, arguments)
+                )
                 .await,
             Err(StoreError::InvalidArgument(_))
         ));
@@ -479,8 +502,8 @@ async fn effects(url: &str) {
     assert!(matches!(
         store
             .complete_effect(
-                &host,
-                &complete(&first, "task-1/comment/failed", "not json")
+                &supertag_control_plane::AttemptAccess::new(&host, &first),
+                &complete("task-1/comment/failed", "not json")
             )
             .await,
         Err(StoreError::InvalidArgument(_))
@@ -489,7 +512,10 @@ async fn effects(url: &str) {
     stale.lease_token = "stale".into();
     assert!(
         store
-            .begin_effect(&host, &begin(&stale, "task-1/comment/stale", COMMENT))
+            .begin_effect(
+                &supertag_control_plane::AttemptAccess::new(&host, &stale),
+                &begin("task-1/comment/stale", COMMENT)
+            )
             .await
             .is_err()
     );
@@ -504,8 +530,8 @@ async fn effects(url: &str) {
     let parallel = claim("parallel").await;
     let busy = store
         .begin_effect(
-            &host,
-            &begin(&parallel, "task-1/comment/ambiguous", COMMENT),
+            &supertag_control_plane::AttemptAccess::new(&host, &parallel),
+            &begin("task-1/comment/ambiguous", COMMENT),
         )
         .await
         .unwrap();
@@ -514,8 +540,8 @@ async fn effects(url: &str) {
     assert!(matches!(
         store
             .fail_effect(
-                &host,
-                &fail(&parallel, "task-1/comment/ambiguous", "not found")
+                &supertag_control_plane::AttemptAccess::new(&host, &parallel),
+                &fail("task-1/comment/ambiguous", "not found")
             )
             .await,
         Err(StoreError::FailedPrecondition(_))
@@ -523,8 +549,8 @@ async fn effects(url: &str) {
     assert!(matches!(
         store
             .complete_effect(
-                &host,
-                &complete(&parallel, "task-1/comment/ambiguous", "{}")
+                &supertag_control_plane::AttemptAccess::new(&host, &parallel),
+                &complete("task-1/comment/ambiguous", "{}")
             )
             .await,
         Err(StoreError::FailedPrecondition(_))
@@ -548,7 +574,10 @@ async fn effects(url: &str) {
         .unwrap();
     assert!(matches!(
         store
-            .begin_effect(&host, &begin(&first, "task-1/comment/late", COMMENT))
+            .begin_effect(
+                &supertag_control_plane::AttemptAccess::new(&host, &first),
+                &begin("task-1/comment/late", COMMENT)
+            )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
@@ -558,7 +587,10 @@ async fn effects(url: &str) {
         .unwrap();
     let second = claim("second").await;
     let still = store
-        .begin_effect(&host, &begin(&second, "task-1/comment/ambiguous", COMMENT))
+        .begin_effect(
+            &supertag_control_plane::AttemptAccess::new(&host, &second),
+            &begin("task-1/comment/ambiguous", COMMENT),
+        )
         .await
         .unwrap();
     assert_eq!(still.state(), EffectReceiptState::InDoubt);
@@ -566,8 +598,8 @@ async fn effects(url: &str) {
     assert_eq!(
         store
             .begin_effect(
-                &host,
-                &begin(&parallel, "task-1/comment/ambiguous", COMMENT)
+                &supertag_control_plane::AttemptAccess::new(&host, &parallel),
+                &begin("task-1/comment/ambiguous", COMMENT)
             )
             .await
             .unwrap()
@@ -576,15 +608,18 @@ async fn effects(url: &str) {
     );
     let reconciled = store
         .complete_effect(
-            &host,
-            &complete(&second, "task-1/comment/ambiguous", r#"{"commentId":"7"}"#),
+            &supertag_control_plane::AttemptAccess::new(&host, &second),
+            &complete("task-1/comment/ambiguous", r#"{"commentId":"7"}"#),
         )
         .await
         .unwrap();
     assert_eq!(reconciled.state(), EffectReceiptState::Completed);
     assert!(
         store
-            .begin_effect(&host, &begin(&second, "task-1/comment/final", COMMENT))
+            .begin_effect(
+                &supertag_control_plane::AttemptAccess::new(&host, &second),
+                &begin("task-1/comment/final", COMMENT)
+            )
             .await
             .unwrap()
             .replayed
@@ -597,7 +632,10 @@ async fn effects(url: &str) {
     let third = claim("third").await;
     assert_eq!(
         store
-            .begin_effect(&host, &begin(&third, "task-1/comment/final", COMMENT))
+            .begin_effect(
+                &supertag_control_plane::AttemptAccess::new(&host, &third),
+                &begin("task-1/comment/final", COMMENT)
+            )
             .await
             .unwrap()
             .state(),
@@ -619,9 +657,8 @@ async fn concurrent_overlap(url: &str) {
     for index in 1..=2 {
         store
             .start_work_session(
-                &parent.0,
+                &supertag_control_plane::AttemptAccess::new(&parent.0, &parent.1),
                 &StartWorkSessionRequest {
-                    attempt: Some(parent.1.clone()),
                     operation_id: format!("work-{index}"),
                     title: format!("Change {index}"),
                     instruction: "Edit the notes".into(),

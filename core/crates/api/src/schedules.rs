@@ -99,7 +99,7 @@ impl attempt_schedules_server::AttemptSchedules for Api {
         &self,
         request: Request<CreateAttemptScheduleRequest>,
     ) -> Result<Response<AttemptScheduleResponse>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             attempt_schedules_client::AttemptSchedulesClient::new(channel)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)
@@ -113,7 +113,7 @@ impl attempt_schedules_server::AttemptSchedules for Api {
         &self,
         request: Request<CancelAttemptScheduleRequest>,
     ) -> Result<Response<AttemptScheduleResponse>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             attempt_schedules_client::AttemptSchedulesClient::new(channel)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)

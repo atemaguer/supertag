@@ -15,7 +15,8 @@ use supertag_protocol::{
     negotiation::ProtocolChannel,
     v2::{
         BlobReference, CapturedArtifact, CommitArtifactCaptureRequest,
-        RegisterArtifactSourceRequest, attempt_artifacts_client::AttemptArtifactsClient,
+        RegisterArtifactSourceRequest, artifact_sources_client::ArtifactSourcesClient,
+        attempt_artifacts_client::AttemptArtifactsClient,
     },
 };
 use tonic::Request;
@@ -41,7 +42,7 @@ impl HeldArtifacts {
             storage_id: uuid::Uuid::new_v4().to_string(),
             held: Arc::default(),
         };
-        AttemptArtifactsClient::new(held.channel.clone())
+        ArtifactSourcesClient::new(held.channel.clone())
             .register_artifact_source(held.request(RegisterArtifactSourceRequest {
                 storage_id: held.storage_id.clone(),
             })?)
@@ -56,6 +57,11 @@ impl HeldArtifacts {
             .metadata_mut()
             .insert(HOST_GENERATION_HEADER, self.generation.to_string().parse()?);
         Ok(request)
+    }
+
+    /// A call with the Attempt credential `credential`, as the Attempt's Worker makes it.
+    fn attempt_request<T>(&self, value: T, credential: &str) -> Result<Request<T>> {
+        Ok(authenticated_request(value, credential, None)?)
     }
 
     /// Reconnects to another Control Plane address, as after its restart.
@@ -80,6 +86,7 @@ impl HeldArtifacts {
     /// lists (through a presigned upload, or `file_volumes` the host maps), then commits it.
     pub async fn commit_writing(
         &self,
+        (attempt, credential): (&str, &str),
         mut manifest: CommitArtifactCaptureRequest,
         file_volumes: &std::collections::BTreeMap<
             String,
@@ -88,13 +95,11 @@ impl HeldArtifacts {
     ) -> std::result::Result<CapturedArtifact, tonic::Status> {
         manifest.source_storage_id = Some(self.storage_id.clone());
         let internal = |error: anyhow::Error| tonic::Status::internal(error.to_string());
-        let attempt = manifest
-            .attempt
-            .as_ref()
-            .map(|attempt| attempt.attempt_id.clone())
-            .unwrap_or_default();
         let reserved = AttemptArtifactsClient::new(self.channel.clone())
-            .reserve_capture(self.request(manifest.clone()).map_err(internal)?)
+            .reserve_capture(
+                self.attempt_request(manifest.clone(), credential)
+                    .map_err(internal)?,
+            )
             .await?
             .into_inner();
         for copy in &reserved.volume_copies {
@@ -107,7 +112,7 @@ impl HeldArtifacts {
                 .held
                 .lock()
                 .unwrap()
-                .get(&(attempt.clone(), blob.sha256.clone()))
+                .get(&(attempt.to_owned(), blob.sha256.clone()))
                 .cloned()
                 .ok_or_else(|| tonic::Status::internal("bytes were not held"))?;
             match &copy.upload {
@@ -133,17 +138,19 @@ impl HeldArtifacts {
                 }
             }
         }
-        self.commit(manifest).await
+        self.commit(credential, manifest).await
     }
 
-    /// Commits a capture whose `files` bytes were given to [`Self::hold`] for its Attempt.
+    /// Commits a capture whose `files` bytes were given to [`Self::hold`] for its Attempt, with
+    /// that Attempt's credential.
     pub async fn commit(
         &self,
+        credential: &str,
         mut manifest: CommitArtifactCaptureRequest,
     ) -> std::result::Result<CapturedArtifact, tonic::Status> {
         manifest.source_storage_id = Some(self.storage_id.clone());
         let request = self
-            .request(manifest)
+            .attempt_request(manifest, credential)
             .map_err(|error| tonic::Status::internal(error.to_string()))?;
         AttemptArtifactsClient::new(self.channel.clone())
             .commit_capture(request)

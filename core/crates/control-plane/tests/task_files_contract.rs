@@ -103,24 +103,32 @@ async fn contract(url: &str) {
 
     // The host reports only an absolute path, for its own running Attempt.
     let report = |path: &str| ReportTaskFilesLocationRequest {
-        attempt: Some(attempt.clone()),
         local_path: path.into(),
     };
     assert!(matches!(
         store
-            .report_task_files_location(&host, &report("relative/checkout"))
+            .report_task_files_location(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &report("relative/checkout")
+            )
             .await,
         Err(StoreError::InvalidArgument(_))
     ));
     let stranger = support::register_host(&store, "stranger").await;
     assert!(
         store
-            .report_task_files_location(&stranger, &report("/srv/elsewhere"))
+            .report_task_files_location(
+                &supertag_control_plane::AttemptAccess::new(&stranger, &attempt),
+                &report("/srv/elsewhere")
+            )
             .await
             .is_err()
     );
     store
-        .report_task_files_location(&host, &report("/Users/alice/.supertag/checkouts/build"))
+        .report_task_files_location(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &report("/Users/alice/.supertag/checkouts/build"),
+        )
         .await
         .unwrap();
 

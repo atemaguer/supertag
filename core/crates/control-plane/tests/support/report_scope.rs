@@ -18,7 +18,10 @@ pub async fn assert_restricted_report_continuation(
     assert_eq!(task.workspace, report.workspace);
     assert_eq!(task.harness_kind, report.harness_kind);
 
-    let caps = store.attempt_capabilities(host, continued).await.unwrap();
+    let caps = store
+        .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(host, continued))
+        .await
+        .unwrap();
     assert!(caps.may_request_commit_review);
     assert!(caps.may_continue_work_session);
     assert!(!caps.may_start_work_session);
@@ -29,9 +32,8 @@ pub async fn assert_restricted_report_continuation(
     assert!(matches!(
         store
             .start_work_session(
-                host,
+                &supertag_control_plane::AttemptAccess::new(host, continued),
                 &StartWorkSessionRequest {
-                    attempt: Some(continued.clone()),
                     operation_id: "start-from-report-continuation".into(),
                     title: "Unrelated assignment".into(),
                     instruction: "Run unrelated work.".into(),
@@ -44,9 +46,8 @@ pub async fn assert_restricted_report_continuation(
     assert!(matches!(
         store
             .continue_work_session(
-                host,
+                &supertag_control_plane::AttemptAccess::new(host, continued),
                 &ContinueWorkSessionRequest {
-                    attempt: Some(continued.clone()),
                     operation_id: "continue-unrelated-child".into(),
                     work_session_id: unrelated_session.into(),
                     message: "Run unrelated work.".into(),
@@ -58,9 +59,8 @@ pub async fn assert_restricted_report_continuation(
     assert!(matches!(
         store
             .send_attempt_tag_message(
-                host,
+                &supertag_control_plane::AttemptAccess::new(host, continued),
                 &SendAttemptTagMessageRequest {
-                    attempt: Some(continued.clone()),
                     operation_id: "send-from-report-continuation".into(),
                     recipient_tag_id: recipient.into(),
                     text: "Send unrelated mail.".into(),
@@ -73,9 +73,8 @@ pub async fn assert_restricted_report_continuation(
     assert!(matches!(
         store
             .read_attempt_mailbox(
-                host,
+                &supertag_control_plane::AttemptAccess::new(host, continued),
                 &ReadMailboxRequest {
-                    attempt: Some(continued.clone()),
                     ..Default::default()
                 }
             )
@@ -85,9 +84,8 @@ pub async fn assert_restricted_report_continuation(
     assert!(matches!(
         store
             .read_attempt_workstream(
-                host,
+                &supertag_control_plane::AttemptAccess::new(host, continued),
                 &ReadAttemptWorkstreamRequest {
-                    attempt: Some(continued.clone()),
                     ..Default::default()
                 }
             )
@@ -97,9 +95,8 @@ pub async fn assert_restricted_report_continuation(
     assert!(matches!(
         store
             .post_attempt_workstream(
-                host,
+                &supertag_control_plane::AttemptAccess::new(host, continued),
                 &PostAttemptWorkstreamRequest {
-                    attempt: Some(continued.clone()),
                     operation_id: "post-from-report-continuation".into(),
                     body: "Send an unrelated post.".into(),
                     to_tag_ids: vec![],

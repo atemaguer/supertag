@@ -64,21 +64,32 @@ impl Worker<'_> {
             mut authority,
         } = self;
         let options = &options;
-        let (token, registration) = (authority.token(), authority.registration());
+        let registration = authority.registration();
+        let mut attempt = attempt;
         // Starting is durable before requesting authority and never records a launch.
         // A lost start response can therefore be retried using this exact Attempt.
         let can_launch = attempt.can_launch(options)?;
         let start = if can_launch {
             authority.start(&attempt).await?
         } else {
-            authority.inspect(&attempt).await?
+            authority.inspect(&attempt).await?.map(|task| {
+                supertag_protocol::v2::StartTaskResponse {
+                    task: Some(task),
+                    attempt_credential: String::new(),
+                }
+            })
         };
         let task = match start {
-            Ok(task) => {
+            Ok(started) => {
                 if can_launch {
                     supertag_protocol::crash_point("worker-host.start", "answered");
                 }
-                task
+                // The Attempt credential is the only one the Worker's data calls carry. A replayed
+                // start returns a new one and ends the last.
+                attempt.attempt_credential = started.attempt_credential;
+                started
+                    .task
+                    .context("Control Plane started the Attempt without its Task")?
             }
             Err(error) if retryable(&error) => {
                 wait_for_work(shutdown).await;
@@ -128,6 +139,16 @@ impl Worker<'_> {
             task.state() == TaskState::Running,
             "Control Plane did not authorize the Task Attempt to start"
         );
+        if attempt.attempt_credential.is_empty() {
+            // Started, but its start answer was lost to a refusal: nothing launched, and no data
+            // call can be made for it.
+            return authority.finish(
+                attempt,
+                adapter::failed("Execution authority ended before launch"),
+            );
+        }
+        let credential = attempt.attempt_credential.clone();
+        let token = credential.as_str();
 
         let sent = Instant::now();
         let renewed = authority.renew(&attempt).await?;
@@ -248,7 +269,10 @@ impl Worker<'_> {
             let check = match coordination
                 .workspace_mounts
                 .clone()
-                .preflight(request(attempt.inspect(), token)?)
+                .preflight(request(
+                    supertag_protocol::v2::PreflightWorkspaceMountsRequest {},
+                    token,
+                )?)
                 .await
             {
                 Err(error) if retryable(&error) => {
@@ -276,7 +300,7 @@ impl Worker<'_> {
         }
         let checkpoint = match time::timeout_at(
             valid_until,
-            transfers.download(&attempt, token, (&task.tag_id, &task.session_id)),
+            transfers.download(&attempt, (&task.tag_id, &task.session_id)),
         )
         .await
         {
@@ -308,7 +332,7 @@ impl Worker<'_> {
                 .any(|set| !set.items.is_empty())
         }) {
             let cancel = shutdown.child_token();
-            let context_host = authority.client();
+            let context_host = coordination.attempt.clone();
             match authority
                 .keep(
                     &attempt,
@@ -337,7 +361,7 @@ impl Worker<'_> {
         let prepared = authority
             .keep(&attempt, &operation_cancel, async {
                 workspaces
-                    .prepare(&task, &attempt, transfers, token, &operation_cancel)
+                    .prepare(&task, &attempt, transfers, &operation_cancel)
                     .await
                     .map_err(|error| {
                         error.downcast::<Status>().unwrap_or_else(|error| {
@@ -358,12 +382,7 @@ impl Worker<'_> {
                 }
                 // A remote Attempt's Workspace is ready once its sandbox is.
                 if options.remote_provider.is_none() {
-                    report_milestone(
-                        &authority.client(),
-                        &attempt.inspect(),
-                        token,
-                        WORKSPACE_READY,
-                    );
+                    report_milestone(&coordination.attempt.clone(), token, WORKSPACE_READY);
                 }
                 prepared
             }
@@ -453,12 +472,18 @@ impl Worker<'_> {
                 let current = coordination
                     .workspace_mounts
                     .clone()
-                    .preflight(request(attempt.inspect(), token).map_err(|error| {
-                        crate::failures::noted(
-                            Status::internal("Workspace Volume request failed"),
-                            &error,
+                    .preflight(
+                        request(
+                            supertag_protocol::v2::PreflightWorkspaceMountsRequest {},
+                            token,
                         )
-                    })?)
+                        .map_err(|error| {
+                            crate::failures::noted(
+                                Status::internal("Workspace Volume request failed"),
+                                &error,
+                            )
+                        })?,
+                    )
                     .await?
                     .into_inner();
                 let protected = mappings.preflight(&mount_pins, current).map_err(|error| {
@@ -527,7 +552,7 @@ impl Worker<'_> {
                             options.remote_provider.as_ref().map(ProviderConfig::label),
                         ),
                         &task,
-                        (&coordination.mcp_effects, &attempt, token),
+                        (&coordination.mcp_effects, token),
                         &cancel,
                     ),
                 )
@@ -714,12 +739,7 @@ impl Worker<'_> {
             .await;
             match prepared {
                 Ok(((provider, instructions, execution_ends, restart), expires)) => {
-                    report_milestone(
-                        &authority.client(),
-                        &attempt.inspect(),
-                        token,
-                        WORKSPACE_READY,
-                    );
+                    report_milestone(&coordination.attempt.clone(), token, WORKSPACE_READY);
                     if let Some(instructions) = instructions {
                         task.instructions.push_str(&instructions);
                     }
@@ -920,7 +940,6 @@ impl Worker<'_> {
         if let Some(prepared) = workspace.as_ref().filter(|_| adapter_workspace.is_some()) {
             let mut task_files = coordination.task_files.clone();
             let location = supertag_protocol::v2::ReportTaskFilesLocationRequest {
-                attempt: Some(attempt.inspect()),
                 local_path: prepared.checkout.path.to_string_lossy().into_owned(),
             };
             if let Ok(request) = request(location, token) {
@@ -937,7 +956,6 @@ impl Worker<'_> {
             .map(|prepared| {
                 tokio::spawn(changed_paths::report(
                     coordination.changed_paths.clone(),
-                    attempt.inspect(),
                     token.to_owned(),
                     prepared.checkout.clone(),
                     stop_reports.clone(),
@@ -1007,7 +1025,7 @@ impl Worker<'_> {
                         .unwrap_or_default(),
                 },
                 (
-                    authority.client(),
+                    coordination.attempt.clone(),
                     authority.lease(&attempt),
                     inputs.clone(),
                     coordination.clone(),
@@ -1046,12 +1064,7 @@ impl Worker<'_> {
             // Whether it failed while the Harness still ran, rather than being stopped after.
             let while_running = !sandbox_cancel.is_cancelled();
             if let Ok((_, _, _, restart)) = &result {
-                report_milestone(
-                    &authority.client(),
-                    &attempt.inspect(),
-                    token,
-                    WORKSPACE_READY,
-                );
+                report_milestone(&coordination.attempt.clone(), token, WORKSPACE_READY);
                 restart_ready.send_replace(Some(restart.clone()));
             }
             let _ = ready.send(Some(match &result {
@@ -1130,7 +1143,7 @@ impl Worker<'_> {
                     outcome.objective_signal,
                 )
             });
-        report_harness_finished(&authority.client(), &attempt.inspect(), token, reply);
+        report_harness_finished(&coordination.attempt.clone(), token, reply);
         let outcome = match sandbox {
             None => outcome,
             Some((Ok((prepared, _, _, _)), _)) => {
@@ -1174,7 +1187,7 @@ impl Worker<'_> {
         }
         if let Some(egress) = egress {
             egress
-                .finish(&mut authority.client(), &attempt, token)
+                .finish(&mut coordination.attempt.clone(), &attempt, token)
                 .await;
         }
         if let Some(mcp) = mcp {
@@ -1204,7 +1217,7 @@ impl Worker<'_> {
                                         .as_ref()
                                         .map(|mounted| (mounted, options.workspace_mounts)),
                                 ),
-                                (transfers, &attempt, token),
+                                (transfers, &attempt),
                                 &cancel,
                             ),
                         )

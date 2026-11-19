@@ -53,7 +53,6 @@ async fn exercise(url: &str) {
         .unwrap();
     let capture = CommitArtifactCaptureRequest {
         declared_task_output: false,
-        attempt: Some(attempt),
         operation_id: "capture".into(),
         description: Some(ArtifactDescription {
             title: "Release evidence".into(),
@@ -73,17 +72,32 @@ async fn exercise(url: &str) {
         source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
     };
     assert!(matches!(
-        store.commit_artifact_capture(&host, &capture).await,
+        store
+            .commit_artifact_capture(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &capture
+            )
+            .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     assert!(matches!(
-        store.reserve_artifact_capture(&intruder, &capture).await,
+        store
+            .reserve_artifact_capture(
+                &supertag_control_plane::AttemptAccess::new(&intruder, &attempt),
+                &capture
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
     let mut managed = capture.clone();
     managed.managed_task_output = true;
     assert!(matches!(
-        store.reserve_artifact_capture(&host, &managed).await,
+        store
+            .reserve_artifact_capture(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &managed
+            )
+            .await,
         Err(StoreError::InvalidArgument(_))
     ));
     managed.files[0].path = format!(
@@ -91,12 +105,18 @@ async fn exercise(url: &str) {
         supertag_protocol::artifacts::managed_output_directory(&assignment.attempt_id)
     );
     assert!(matches!(
-        store.reserve_artifact_capture(&host, &managed).await,
+        store
+            .reserve_artifact_capture(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &managed
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
+    let access = supertag_control_plane::AttemptAccess::new(&host, &attempt);
     let (one, two) = tokio::join!(
-        store.reserve_artifact_capture(&host, &capture),
-        store.reserve_artifact_capture(&host, &capture)
+        store.reserve_artifact_capture(&access, &capture),
+        store.reserve_artifact_capture(&access, &capture)
     );
     let reservation = one.unwrap();
     assert_eq!(two.unwrap(), reservation);
@@ -128,7 +148,10 @@ async fn exercise(url: &str) {
     );
     assert_eq!(
         store
-            .commit_artifact_capture(&host, &capture)
+            .commit_artifact_capture(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &capture
+            )
             .await
             .unwrap(),
         reservation
@@ -155,13 +178,21 @@ async fn exercise(url: &str) {
     let mut changed = capture.clone();
     changed.description.as_mut().unwrap().title = "Different evidence".into();
     assert!(matches!(
-        store.commit_artifact_capture(&host, &changed).await,
+        store
+            .commit_artifact_capture(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &changed
+            )
+            .await,
         Err(StoreError::Conflict(_))
     ));
     store.cancel_task(&task.task_id).await.unwrap();
     assert_eq!(
         store
-            .commit_artifact_capture(&host, &capture)
+            .commit_artifact_capture(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &capture
+            )
             .await
             .unwrap(),
         reservation
@@ -172,7 +203,12 @@ async fn exercise(url: &str) {
         ..capture
     };
     assert!(matches!(
-        store.reserve_artifact_capture(&host, &late).await,
+        store
+            .reserve_artifact_capture(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &late
+            )
+            .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     store.close().await;
@@ -241,7 +277,6 @@ async fn submission(store: &Store, host: &supertag_control_plane::HostAuthority,
         .unwrap();
     let capture = CommitArtifactCaptureRequest {
         source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
-        attempt: Some(attempt.clone()),
         operation_id: "deliverable".into(),
         description: Some(ArtifactDescription {
             title: "Release deliverable".into(),
@@ -259,14 +294,17 @@ async fn submission(store: &Store, host: &supertag_control_plane::HostAuthority,
         ..Default::default()
     };
     let reserved = store
-        .reserve_artifact_capture(host, &capture)
+        .reserve_artifact_capture(
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
+            &capture,
+        )
         .await
         .unwrap();
     let artifact_id = reserved.summary.unwrap().artifact_id;
     let mut finish = FinishTaskRequest {
-        task_id: attempt.task_id,
-        attempt_id: attempt.attempt_id,
-        lease_token: attempt.lease_token,
+        task_id: attempt.task_id.clone(),
+        attempt_id: attempt.attempt_id.clone(),
+        lease_token: attempt.lease_token.clone(),
         result: "Verified result".into(),
         succeeded: true,
         artifacts: vec![ArtifactSelection {
@@ -279,7 +317,13 @@ async fn submission(store: &Store, host: &supertag_control_plane::HostAuthority,
     finish.artifacts[0].artifact_id = artifact_id;
     finish.artifacts[0].paths = vec!["deliverable.txt".into()];
     assert!(store.finish_task(host, &finish).await.is_err());
-    store.commit_artifact_capture(host, &capture).await.unwrap();
+    store
+        .commit_artifact_capture(
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
+            &capture,
+        )
+        .await
+        .unwrap();
     finish.artifacts[0].paths = vec!["missing.txt".into()];
     assert!(store.finish_task(host, &finish).await.is_err());
     assert_eq!(

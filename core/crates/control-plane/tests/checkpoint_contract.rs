@@ -544,9 +544,8 @@ async fn hygiene_contract(url: &str) {
     store.close().await;
 }
 
-fn native(attempt: &InspectAttemptRequest, sequence: u64, input: u64) -> ReportAttemptUsageRequest {
+fn native(sequence: u64, input: u64) -> ReportAttemptUsageRequest {
     ReportAttemptUsageRequest {
-        attempt: Some(attempt.clone()),
         sequence,
         native_usage: Some(NativeTokenUsage {
             total_tokens: None,
@@ -577,39 +576,75 @@ async fn native_usage_contract(store: &Store, host: &HostAuthority, intruder: &H
         .await
         .unwrap();
     let attempt = claim(store, host, &objective.starting_task_id).await;
-    let first = native(&attempt, 1, 10);
-    store.report_attempt_usage(host, &first).await.unwrap();
-    store.report_attempt_usage(host, &first).await.unwrap();
+    let first = native(1, 10);
+    store
+        .report_attempt_usage(
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
+            &first,
+        )
+        .await
+        .unwrap();
+    store
+        .report_attempt_usage(
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
+            &first,
+        )
+        .await
+        .unwrap();
     assert!(matches!(
         store
-            .report_attempt_usage(host, &native(&attempt, 1, 11))
+            .report_attempt_usage(
+                &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                &native(1, 11)
+            )
             .await,
         Err(StoreError::Conflict(_))
     ));
     assert!(matches!(
-        store.report_attempt_usage(intruder, &first).await,
+        store
+            .report_attempt_usage(
+                &supertag_control_plane::AttemptAccess::new(intruder, &attempt),
+                &first
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
     assert!(matches!(
         store
-            .report_attempt_usage(host, &native(&attempt, 3, 20))
+            .report_attempt_usage(
+                &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                &native(3, 20)
+            )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     assert!(matches!(
         store
-            .report_attempt_usage(host, &native(&attempt, 2, 9))
+            .report_attempt_usage(
+                &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                &native(2, 9)
+            )
             .await,
         Err(StoreError::InvalidArgument(_))
     ));
-    let mut impossible = native(&attempt, 2, 1);
+    let mut impossible = native(2, 1);
     assert!(matches!(
-        store.report_attempt_usage(host, &impossible).await,
+        store
+            .report_attempt_usage(
+                &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                &impossible
+            )
+            .await,
         Err(StoreError::InvalidArgument(_))
     ));
     impossible.native_usage.as_mut().unwrap().input_tokens = u64::MAX;
     assert!(matches!(
-        store.report_attempt_usage(host, &impossible).await,
+        store
+            .report_attempt_usage(
+                &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                &impossible
+            )
+            .await,
         Err(StoreError::InvalidArgument(_))
     ));
     // Cost sequence one is separate from native sequence one. Measured tokens
@@ -620,19 +655,30 @@ async fn native_usage_contract(store: &Store, host: &HostAuthority, intruder: &H
         .unwrap();
     assert_eq!(objective.reported_spend_minor, Some(0));
     let cost = ReportAttemptUsageRequest {
-        attempt: Some(attempt.clone()),
         sequence: 1,
         amount_minor: Some(50),
         currency: Some("USD".into()),
         estimated: false,
         native_usage: None,
     };
-    store.report_attempt_usage(host, &cost).await.unwrap();
-    let mut second = native(&attempt, 2, 20);
+    store
+        .report_attempt_usage(
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
+            &cost,
+        )
+        .await
+        .unwrap();
+    let mut second = native(2, 20);
     second.amount_minor = Some(50);
     second.currency = Some("USD".into());
     second.native_usage.as_mut().unwrap().observed_model = Some("gpt-observed".into());
-    store.report_attempt_usage(host, &second).await.unwrap();
+    store
+        .report_attempt_usage(
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
+            &second,
+        )
+        .await
+        .unwrap();
     assert_eq!(
         store
             .get_objective("operator:local", "usage")
@@ -677,11 +723,26 @@ async fn native_usage_contract(store: &Store, host: &HostAuthority, intruder: &H
     let mut completion = finish(&attempt, None);
     completion.objective_signal = ObjectiveSignal::Completed.into();
     store.finish_task(host, &completion).await.unwrap();
-    store.report_attempt_usage(host, &first).await.unwrap();
-    store.report_attempt_usage(host, &second).await.unwrap();
+    store
+        .report_attempt_usage(
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
+            &first,
+        )
+        .await
+        .unwrap();
+    store
+        .report_attempt_usage(
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
+            &second,
+        )
+        .await
+        .unwrap();
     assert!(matches!(
         store
-            .report_attempt_usage(host, &native(&attempt, 3, 30))
+            .report_attempt_usage(
+                &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                &native(3, 30)
+            )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
@@ -689,7 +750,10 @@ async fn native_usage_contract(store: &Store, host: &HostAuthority, intruder: &H
     // Task without inventing an Objective or a cost report.
     let ordinary = turn(store, host, "owner", "ordinary-usage").await;
     store
-        .report_attempt_usage(host, &native(&ordinary, 1, 5))
+        .report_attempt_usage(
+            &supertag_control_plane::AttemptAccess::new(host, &ordinary),
+            &native(1, 5),
+        )
         .await
         .unwrap();
     store

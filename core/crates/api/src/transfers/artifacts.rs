@@ -12,6 +12,12 @@ impl ApiTransfers {
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 
+    pub fn artifact_sources_service(&self) -> artifact_sources_server::ArtifactSourcesServer<Self> {
+        artifact_sources_server::ArtifactSourcesServer::new(self.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES)
+    }
+
     pub fn artifact_catalog_service(&self) -> artifact_catalog_server::ArtifactCatalogServer<Self> {
         artifact_catalog_server::ArtifactCatalogServer::new(self.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -25,7 +31,7 @@ impl ApiTransfers {
         metadata: tonic::metadata::MetadataMap,
         begin: CommitArtifactCaptureRequest,
     ) -> Result<CapturedArtifact, Status> {
-        validate_capture_manifest(&begin)?;
+        validate_capture_manifest(&begin, None)?;
         if begin.source_storage_id.is_none() {
             return Err(Status::failed_precondition(
                 "artifact capture requires the Worker Host's registered artifact storage",
@@ -35,7 +41,7 @@ impl ApiTransfers {
         *reserve.metadata_mut() = metadata;
         Ok(self
             .api
-            .forward_host(reserve, true, |channel, request| async move {
+            .forward_attempt(reserve, |channel, request| async move {
                 artifact_client(channel).reserve_capture(request).await
             })
             .await?
@@ -60,7 +66,7 @@ impl ApiTransfers {
         *commit.metadata_mut() = metadata;
         let response = self
             .api
-            .forward_host(commit, true, |channel, request| async move {
+            .forward_attempt(commit, |channel, request| async move {
                 artifact_client(channel).commit_capture(request).await
             })
             .await?;
@@ -115,7 +121,7 @@ impl attempt_artifacts_server::AttemptArtifacts for ApiTransfers {
         &self,
         request: Request<CommitArtifactCaptureRequest>,
     ) -> Result<Response<CapturedArtifact>, Status> {
-        self.authorize_upload(&request).await?;
+        self.api.attempt_caller(&request).await?;
         let (metadata, _, begin) = request.into_parts();
         let mut reserved = timeout(
             ARTIFACT_TRANSFER_TIMEOUT,
@@ -133,12 +139,69 @@ impl attempt_artifacts_server::AttemptArtifacts for ApiTransfers {
         &self,
         request: Request<CommitArtifactCaptureRequest>,
     ) -> Result<Response<CapturedArtifact>, Status> {
-        self.authorize_upload(&request).await?;
+        self.api.attempt_caller(&request).await?;
         timeout(ARTIFACT_TRANSFER_TIMEOUT, self.commit_held_capture(request))
             .await
             .map_err(|_| Status::deadline_exceeded("artifact capture commit timed out"))?
     }
 
+    async fn issue_artifact_transfer(
+        &self,
+        request: Request<GetAcquiredArtifactFileRequest>,
+    ) -> std::result::Result<Response<ArtifactTransferGrant>, Status> {
+        self.api
+            .forward_attempt(request, |channel, request| async move {
+                artifact_client(channel)
+                    .issue_artifact_transfer(request)
+                    .await
+            })
+            .await
+    }
+
+    async fn find(
+        &self,
+        request: Request<FindAttemptArtifactsRequest>,
+    ) -> Result<Response<ListCapturedArtifactsResponse>, Status> {
+        self.api
+            .forward_attempt(request, |channel, request| async move {
+                artifact_client(channel).find_for_attempt(request).await
+            })
+            .await
+    }
+    async fn inspect(
+        &self,
+        request: Request<InspectAttemptArtifactRequest>,
+    ) -> Result<Response<CapturedArtifact>, Status> {
+        self.api
+            .forward_attempt(request, |channel, request| async move {
+                artifact_client(channel).get_for_attempt(request).await
+            })
+            .await
+    }
+    async fn acquire(
+        &self,
+        request: Request<AcquireArtifactRequest>,
+    ) -> Result<Response<ArtifactAcquisition>, Status> {
+        self.api
+            .forward_attempt(request, |channel, request| async move {
+                artifact_client(channel).acquire(request).await
+            })
+            .await
+    }
+    async fn settle(
+        &self,
+        request: Request<SettleArtifactAcquisitionRequest>,
+    ) -> Result<Response<ArtifactAcquisition>, Status> {
+        self.api
+            .forward_attempt(request, |channel, request| async move {
+                artifact_client(channel).settle(request).await
+            })
+            .await
+    }
+}
+
+#[tonic::async_trait]
+impl artifact_sources_server::ArtifactSources for ApiTransfers {
     async fn register_artifact_source(
         &self,
         request: Request<RegisterArtifactSourceRequest>,
@@ -147,19 +210,6 @@ impl attempt_artifacts_server::AttemptArtifacts for ApiTransfers {
             .forward_host(request, true, |channel, request| async move {
                 artifact_client(channel)
                     .register_artifact_source(request)
-                    .await
-            })
-            .await
-    }
-
-    async fn issue_artifact_transfer(
-        &self,
-        request: Request<GetAcquiredArtifactFileRequest>,
-    ) -> std::result::Result<Response<ArtifactTransferGrant>, Status> {
-        self.api
-            .forward_host(request, true, |channel, request| async move {
-                artifact_client(channel)
-                    .issue_artifact_transfer(request)
                     .await
             })
             .await
@@ -174,47 +224,6 @@ impl attempt_artifacts_server::AttemptArtifacts for ApiTransfers {
                 artifact_client(channel)
                     .authorize_artifact_transfer(request)
                     .await
-            })
-            .await
-    }
-
-    async fn find(
-        &self,
-        request: Request<FindAttemptArtifactsRequest>,
-    ) -> Result<Response<ListCapturedArtifactsResponse>, Status> {
-        self.api
-            .forward_host(request, true, |channel, request| async move {
-                artifact_client(channel).find_for_attempt(request).await
-            })
-            .await
-    }
-    async fn inspect(
-        &self,
-        request: Request<InspectAttemptArtifactRequest>,
-    ) -> Result<Response<CapturedArtifact>, Status> {
-        self.api
-            .forward_host(request, true, |channel, request| async move {
-                artifact_client(channel).get_for_attempt(request).await
-            })
-            .await
-    }
-    async fn acquire(
-        &self,
-        request: Request<AcquireArtifactRequest>,
-    ) -> Result<Response<ArtifactAcquisition>, Status> {
-        self.api
-            .forward_host(request, true, |channel, request| async move {
-                artifact_client(channel).acquire(request).await
-            })
-            .await
-    }
-    async fn settle(
-        &self,
-        request: Request<SettleArtifactAcquisitionRequest>,
-    ) -> Result<Response<ArtifactAcquisition>, Status> {
-        self.api
-            .forward_host(request, true, |channel, request| async move {
-                artifact_client(channel).settle(request).await
             })
             .await
     }

@@ -98,7 +98,6 @@ impl Bridge {
         let sent = Instant::now();
         let mut reserve = authenticated_request(
             ReserveMcpEffectRequest {
-                attempt: Some(self.attempt()),
                 operation_id: input.operation_id.clone(),
                 server: input.server.clone(),
                 tool: input.tool.clone(),
@@ -106,7 +105,7 @@ impl Bridge {
                 provider_binding: admitted.provider_binding,
                 tool_schema_sha256: admitted.tool_schema_sha256,
             },
-            &self.host_token,
+            &self.attempt_token,
             None,
         )?;
         reserve.set_timeout(
@@ -210,12 +209,11 @@ impl Bridge {
         };
         let mut settle = authenticated_request(
             SettleMcpEffectRequest {
-                attempt: Some(self.attempt()),
                 operation_id: input.operation_id,
                 dispatch_id,
                 result_json: result.clone(),
             },
-            &self.host_token,
+            &self.attempt_token,
             None,
         )?;
         settle.set_timeout(

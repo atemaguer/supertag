@@ -416,7 +416,6 @@ func (x *HarnessFailEffectRequest) GetError() string {
 
 type BeginEffectRequest struct {
 	state         protoimpl.MessageState     `protogen:"open.v1"`
-	Attempt       *InspectAttemptRequest     `protobuf:"bytes,1,opt,name=attempt,proto3" json:"attempt,omitempty"`
 	Effect        *HarnessBeginEffectRequest `protobuf:"bytes,2,opt,name=effect,proto3" json:"effect,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -452,13 +451,6 @@ func (*BeginEffectRequest) Descriptor() ([]byte, []int) {
 	return file_supertag_runtime_v2_effects_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *BeginEffectRequest) GetAttempt() *InspectAttemptRequest {
-	if x != nil {
-		return x.Attempt
-	}
-	return nil
-}
-
 func (x *BeginEffectRequest) GetEffect() *HarnessBeginEffectRequest {
 	if x != nil {
 		return x.Effect
@@ -468,7 +460,6 @@ func (x *BeginEffectRequest) GetEffect() *HarnessBeginEffectRequest {
 
 type CompleteEffectRequest struct {
 	state         protoimpl.MessageState        `protogen:"open.v1"`
-	Attempt       *InspectAttemptRequest        `protobuf:"bytes,1,opt,name=attempt,proto3" json:"attempt,omitempty"`
 	Effect        *HarnessCompleteEffectRequest `protobuf:"bytes,2,opt,name=effect,proto3" json:"effect,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -504,13 +495,6 @@ func (*CompleteEffectRequest) Descriptor() ([]byte, []int) {
 	return file_supertag_runtime_v2_effects_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *CompleteEffectRequest) GetAttempt() *InspectAttemptRequest {
-	if x != nil {
-		return x.Attempt
-	}
-	return nil
-}
-
 func (x *CompleteEffectRequest) GetEffect() *HarnessCompleteEffectRequest {
 	if x != nil {
 		return x.Effect
@@ -520,7 +504,6 @@ func (x *CompleteEffectRequest) GetEffect() *HarnessCompleteEffectRequest {
 
 type FailEffectRequest struct {
 	state         protoimpl.MessageState    `protogen:"open.v1"`
-	Attempt       *InspectAttemptRequest    `protobuf:"bytes,1,opt,name=attempt,proto3" json:"attempt,omitempty"`
 	Effect        *HarnessFailEffectRequest `protobuf:"bytes,2,opt,name=effect,proto3" json:"effect,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -556,13 +539,6 @@ func (*FailEffectRequest) Descriptor() ([]byte, []int) {
 	return file_supertag_runtime_v2_effects_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *FailEffectRequest) GetAttempt() *InspectAttemptRequest {
-	if x != nil {
-		return x.Attempt
-	}
-	return nil
-}
-
 func (x *FailEffectRequest) GetEffect() *HarnessFailEffectRequest {
 	if x != nil {
 		return x.Effect
@@ -574,7 +550,7 @@ var File_supertag_runtime_v2_effects_proto protoreflect.FileDescriptor
 
 const file_supertag_runtime_v2_effects_proto_rawDesc = "" +
 	"\n" +
-	"!supertag/runtime/v2/effects.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"\xa1\x03\n" +
+	"!supertag/runtime/v2/effects.proto\x12\x13supertag.runtime.v2\"\xa1\x03\n" +
 	"\rEffectReceipt\x12'\n" +
 	"\x0fidempotency_key\x18\x01 \x01(\tR\x0eidempotencyKey\x12 \n" +
 	"\vfingerprint\x18\x02 \x01(\tR\vfingerprint\x12=\n" +
@@ -605,16 +581,13 @@ const file_supertag_runtime_v2_effects_proto_rawDesc = "" +
 	"\x0fidempotency_key\x18\x01 \x01(\tR\x0eidempotencyKey\x12\x1c\n" +
 	"\toperation\x18\x02 \x01(\tR\toperation\x12%\n" +
 	"\x0earguments_json\x18\x03 \x01(\tR\rargumentsJson\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\"\xa2\x01\n" +
-	"\x12BeginEffectRequest\x12D\n" +
-	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12F\n" +
-	"\x06effect\x18\x02 \x01(\v2..supertag.runtime.v2.HarnessBeginEffectRequestR\x06effect\"\xa8\x01\n" +
-	"\x15CompleteEffectRequest\x12D\n" +
-	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12I\n" +
-	"\x06effect\x18\x02 \x01(\v21.supertag.runtime.v2.HarnessCompleteEffectRequestR\x06effect\"\xa0\x01\n" +
-	"\x11FailEffectRequest\x12D\n" +
-	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12E\n" +
-	"\x06effect\x18\x02 \x01(\v2-.supertag.runtime.v2.HarnessFailEffectRequestR\x06effect*\xe9\x01\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"k\n" +
+	"\x12BeginEffectRequest\x12F\n" +
+	"\x06effect\x18\x02 \x01(\v2..supertag.runtime.v2.HarnessBeginEffectRequestR\x06effectJ\x04\b\x01\x10\x02R\aattempt\"q\n" +
+	"\x15CompleteEffectRequest\x12I\n" +
+	"\x06effect\x18\x02 \x01(\v21.supertag.runtime.v2.HarnessCompleteEffectRequestR\x06effectJ\x04\b\x01\x10\x02R\aattempt\"i\n" +
+	"\x11FailEffectRequest\x12E\n" +
+	"\x06effect\x18\x02 \x01(\v2-.supertag.runtime.v2.HarnessFailEffectRequestR\x06effectJ\x04\b\x01\x10\x02R\aattempt*\xe9\x01\n" +
 	"\x12EffectReceiptState\x12$\n" +
 	" EFFECT_RECEIPT_STATE_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dEFFECT_RECEIPT_STATE_ACQUIRED\x10\x01\x12\"\n" +
@@ -654,33 +627,29 @@ var file_supertag_runtime_v2_effects_proto_goTypes = []any{
 	(*BeginEffectRequest)(nil),           // 5: supertag.runtime.v2.BeginEffectRequest
 	(*CompleteEffectRequest)(nil),        // 6: supertag.runtime.v2.CompleteEffectRequest
 	(*FailEffectRequest)(nil),            // 7: supertag.runtime.v2.FailEffectRequest
-	(*InspectAttemptRequest)(nil),        // 8: supertag.runtime.v2.InspectAttemptRequest
 }
 var file_supertag_runtime_v2_effects_proto_depIdxs = []int32{
 	0,  // 0: supertag.runtime.v2.EffectReceipt.state:type_name -> supertag.runtime.v2.EffectReceiptState
-	8,  // 1: supertag.runtime.v2.BeginEffectRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	2,  // 2: supertag.runtime.v2.BeginEffectRequest.effect:type_name -> supertag.runtime.v2.HarnessBeginEffectRequest
-	8,  // 3: supertag.runtime.v2.CompleteEffectRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	3,  // 4: supertag.runtime.v2.CompleteEffectRequest.effect:type_name -> supertag.runtime.v2.HarnessCompleteEffectRequest
-	8,  // 5: supertag.runtime.v2.FailEffectRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	4,  // 6: supertag.runtime.v2.FailEffectRequest.effect:type_name -> supertag.runtime.v2.HarnessFailEffectRequest
-	2,  // 7: supertag.runtime.v2.HarnessEffects.Begin:input_type -> supertag.runtime.v2.HarnessBeginEffectRequest
-	3,  // 8: supertag.runtime.v2.HarnessEffects.Complete:input_type -> supertag.runtime.v2.HarnessCompleteEffectRequest
-	4,  // 9: supertag.runtime.v2.HarnessEffects.Fail:input_type -> supertag.runtime.v2.HarnessFailEffectRequest
-	5,  // 10: supertag.runtime.v2.AttemptEffects.Begin:input_type -> supertag.runtime.v2.BeginEffectRequest
-	6,  // 11: supertag.runtime.v2.AttemptEffects.Complete:input_type -> supertag.runtime.v2.CompleteEffectRequest
-	7,  // 12: supertag.runtime.v2.AttemptEffects.Fail:input_type -> supertag.runtime.v2.FailEffectRequest
-	1,  // 13: supertag.runtime.v2.HarnessEffects.Begin:output_type -> supertag.runtime.v2.EffectReceipt
-	1,  // 14: supertag.runtime.v2.HarnessEffects.Complete:output_type -> supertag.runtime.v2.EffectReceipt
-	1,  // 15: supertag.runtime.v2.HarnessEffects.Fail:output_type -> supertag.runtime.v2.EffectReceipt
-	1,  // 16: supertag.runtime.v2.AttemptEffects.Begin:output_type -> supertag.runtime.v2.EffectReceipt
-	1,  // 17: supertag.runtime.v2.AttemptEffects.Complete:output_type -> supertag.runtime.v2.EffectReceipt
-	1,  // 18: supertag.runtime.v2.AttemptEffects.Fail:output_type -> supertag.runtime.v2.EffectReceipt
-	13, // [13:19] is the sub-list for method output_type
-	7,  // [7:13] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	2,  // 1: supertag.runtime.v2.BeginEffectRequest.effect:type_name -> supertag.runtime.v2.HarnessBeginEffectRequest
+	3,  // 2: supertag.runtime.v2.CompleteEffectRequest.effect:type_name -> supertag.runtime.v2.HarnessCompleteEffectRequest
+	4,  // 3: supertag.runtime.v2.FailEffectRequest.effect:type_name -> supertag.runtime.v2.HarnessFailEffectRequest
+	2,  // 4: supertag.runtime.v2.HarnessEffects.Begin:input_type -> supertag.runtime.v2.HarnessBeginEffectRequest
+	3,  // 5: supertag.runtime.v2.HarnessEffects.Complete:input_type -> supertag.runtime.v2.HarnessCompleteEffectRequest
+	4,  // 6: supertag.runtime.v2.HarnessEffects.Fail:input_type -> supertag.runtime.v2.HarnessFailEffectRequest
+	5,  // 7: supertag.runtime.v2.AttemptEffects.Begin:input_type -> supertag.runtime.v2.BeginEffectRequest
+	6,  // 8: supertag.runtime.v2.AttemptEffects.Complete:input_type -> supertag.runtime.v2.CompleteEffectRequest
+	7,  // 9: supertag.runtime.v2.AttemptEffects.Fail:input_type -> supertag.runtime.v2.FailEffectRequest
+	1,  // 10: supertag.runtime.v2.HarnessEffects.Begin:output_type -> supertag.runtime.v2.EffectReceipt
+	1,  // 11: supertag.runtime.v2.HarnessEffects.Complete:output_type -> supertag.runtime.v2.EffectReceipt
+	1,  // 12: supertag.runtime.v2.HarnessEffects.Fail:output_type -> supertag.runtime.v2.EffectReceipt
+	1,  // 13: supertag.runtime.v2.AttemptEffects.Begin:output_type -> supertag.runtime.v2.EffectReceipt
+	1,  // 14: supertag.runtime.v2.AttemptEffects.Complete:output_type -> supertag.runtime.v2.EffectReceipt
+	1,  // 15: supertag.runtime.v2.AttemptEffects.Fail:output_type -> supertag.runtime.v2.EffectReceipt
+	10, // [10:16] is the sub-list for method output_type
+	4,  // [4:10] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_effects_proto_init() }
@@ -688,7 +657,6 @@ func file_supertag_runtime_v2_effects_proto_init() {
 	if File_supertag_runtime_v2_effects_proto != nil {
 		return
 	}
-	file_supertag_runtime_v2_runtime_proto_init()
 	file_supertag_runtime_v2_effects_proto_msgTypes[0].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

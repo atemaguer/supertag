@@ -23,9 +23,8 @@ pub(crate) async fn workspace_mcp(
     workspaces: &workspaces::Workspaces,
     (prepared, sandbox): (Option<&workspaces::PreparedWorkspace>, Option<&str>),
     task: &Task,
-    (client, attempt, token): (
+    (client, token): (
         &AttemptMcpEffectsClient<InterceptedService<Channel, HostHeaders>>,
-        &Attempt,
         &str,
     ),
     cancel: &CancellationToken,
@@ -48,7 +47,6 @@ pub(crate) async fn workspace_mcp(
         .record_workspace_mcp(
             request(
                 RecordWorkspaceMcpRequest {
-                    attempt: Some(attempt.inspect()),
                     record: Some(resolved.record.clone()),
                 },
                 token,
@@ -74,7 +72,9 @@ pub(crate) async fn prepare_context(
 ) -> Result<Vec<ResolvedSkill>, Status> {
     let credential = |_| Status::internal("invalid Context Item authority request");
     let expected = host
-        .get_context_pins(request(attempt.inspect(), token).map_err(credential)?)
+        .get_context_pins(
+            request(supertag_protocol::v2::GetContextPinsRequest {}, token).map_err(credential)?,
+        )
         .await?
         .into_inner();
     let prepared = options
@@ -100,7 +100,6 @@ pub(crate) async fn prepare_context(
         .commit_context_resolution(
             request(
                 CommitContextResolutionRequest {
-                    attempt: Some(attempt.inspect()),
                     manifest: Some(manifest.clone()),
                 },
                 token,

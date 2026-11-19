@@ -12,6 +12,7 @@
 //! after enough work. The review reads the Tag's shared Sessions and rewrites its shared notes;
 //! it has no tool that reaches anyone, and it ends with `stay_quiet` (attention.rs), so it posts
 //! nothing. It runs read-only: of the Tag's actions it keeps only reading files.
+use crate::AttemptAccess;
 use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
@@ -435,15 +436,16 @@ impl Store {
     /// The `remember` tool: stages a note, which takes effect when the turn succeeds.
     pub async fn attempt_remember(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &AttemptRememberRequest,
     ) -> Result<AttemptMemoryResponse> {
+        let host = authority.host();
         name("operation ID", &input.operation_id)?;
         let text = note_text(&input.text)?;
         let now = self.execution_now_ms();
         let (mut tx, _) = self.write().await?;
         let (task, attempt, audience) =
-            memory_turn_in(&mut tx, host, input.attempt.as_ref(), now).await?;
+            memory_turn_in(&mut tx, host, Some(authority.lease()), now).await?;
         // Replays are per Task: a retried Attempt reuses its call identities.
         let principal = format!("task:{}", task.task_id);
         let request = digest(&("remember", &attempt, &text, &input.replaces))?;
@@ -478,14 +480,15 @@ impl Store {
     /// The `forget` tool: stages forgetting a note this turn sees.
     pub async fn attempt_forget(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &AttemptForgetRequest,
     ) -> Result<AttemptMemoryResponse> {
+        let host = authority.host();
         name("operation ID", &input.operation_id)?;
         let now = self.execution_now_ms();
         let (mut tx, _) = self.write().await?;
         let (task, attempt, audience) =
-            memory_turn_in(&mut tx, host, input.attempt.as_ref(), now).await?;
+            memory_turn_in(&mut tx, host, Some(authority.lease()), now).await?;
         let principal = format!("task:{}", task.task_id);
         let request = digest(&("forget", &attempt, &input.memory_id))?;
         if receipt_in(&mut tx, &principal, &input.operation_id, &request)
@@ -861,7 +864,7 @@ impl attempt_memory_server::AttemptMemory for ControlPlane {
         &self,
         request: Request<AttemptRememberRequest>,
     ) -> std::result::Result<Response<AttemptMemoryResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .attempt_remember(&host, request.get_ref())
@@ -873,7 +876,7 @@ impl attempt_memory_server::AttemptMemory for ControlPlane {
         &self,
         request: Request<AttemptForgetRequest>,
     ) -> std::result::Result<Response<AttemptMemoryResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store.attempt_forget(&host, request.get_ref()).await?,
         ))
@@ -882,7 +885,7 @@ impl attempt_memory_server::AttemptMemory for ControlPlane {
         &self,
         request: Request<ReportNativeMemoryRequest>,
     ) -> std::result::Result<Response<ReportNativeMemoryResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         self.store
             .report_native_memory(&host, request.get_ref())
             .await?;
@@ -893,7 +896,7 @@ impl attempt_memory_server::AttemptMemory for ControlPlane {
         &self,
         request: Request<AdvanceNativeMemoryRequest>,
     ) -> std::result::Result<Response<AdvanceNativeMemoryResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .advance_native_memory(&host, request.get_ref())

@@ -36,7 +36,7 @@ macro_rules! memories {
 macro_rules! attempt_memory {
     ($self:ident, $request:ident, $method:ident) => {
         $self
-            .forward_host($request, true, |channel, request| async {
+            .forward_attempt($request, |channel, request| async {
                 attempt_memory_client::AttemptMemoryClient::new(channel)
                     .max_decoding_message_size(MAX_MESSAGE_BYTES)
                     .max_encoding_message_size(MAX_MESSAGE_BYTES)

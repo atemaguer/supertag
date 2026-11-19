@@ -121,7 +121,7 @@ pub(crate) async fn download_inputs(
     let acquisition = AcquisitionClient {
         coordination,
         storage,
-        host_token: token,
+        token,
         attempt: attempt.inspect(),
     };
     RemoteInputs::download(&acquisition, task, cancel).await
@@ -185,7 +185,7 @@ pub(crate) async fn prepare(
     let acquisition = AcquisitionClient {
         coordination,
         storage,
-        host_token: token,
+        token,
         attempt: attempt.inspect(),
     };
     // Inputs downloaded before a Harness that started first are staged here, not fetched again.
@@ -436,7 +436,7 @@ pub(crate) async fn capture(
     (workspace, workspaces, has_inputs): (&PreparedWorkspace, &Workspaces, bool),
     outputs: Option<Box<PendingOutputs>>,
     (state, copies): (&std::path::Path, Option<(&Mounted, &WorkspaceMounts)>),
-    authority: (&crate::worklet::checkpoints::Transfers, &Attempt, &str),
+    authority: (&crate::worklet::checkpoints::Transfers, &Attempt),
     cancel: &CancellationToken,
 ) -> Result<(TransferArtifact, Option<Box<PendingOutputs>>), Status> {
     let directory = journal

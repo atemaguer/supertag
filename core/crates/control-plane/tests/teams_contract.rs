@@ -249,45 +249,73 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
             .is_none()
     );
     let denied = PostAttemptWorkstreamRequest {
-        attempt: Some(outside.clone()),
         operation_id: "outside".into(),
         body: "Not my team".into(),
         ..Default::default()
     };
     assert!(matches!(
-        store.post_attempt_workstream(&other_host, &denied).await,
+        store
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&other_host, &outside),
+                &denied
+            )
+            .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     finish(store, &other_host, &outside).await;
 
     let post = PostAttemptWorkstreamRequest {
-        attempt: Some(one.clone()),
         operation_id: "progress".into(),
         body: " Reviewed the rollout. ".into(),
         to_tag_ids: vec![],
     };
     assert!(matches!(
-        store.post_attempt_workstream(&other_host, &post).await,
+        store
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&other_host, &one),
+                &post
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
     let mut addressed = post.clone();
     addressed.operation_id = "addressed".into();
     addressed.to_tag_ids = vec!["outsider".into()];
     assert!(matches!(
-        store.post_attempt_workstream(&host, &addressed).await,
+        store
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &one),
+                &addressed
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
-    let first_post = store.post_attempt_workstream(&host, &post).await.unwrap();
+    let first_post = store
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &one),
+            &post,
+        )
+        .await
+        .unwrap();
     assert!(!first_post.duplicate);
     assert_eq!(first_post.post.as_ref().unwrap().sequence, 1);
-    let replay = store.post_attempt_workstream(&host, &post).await.unwrap();
+    let replay = store
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &one),
+            &post,
+        )
+        .await
+        .unwrap();
     assert!(replay.duplicate);
     assert_eq!(replay.post, first_post.post);
     let mut duplicate = post.clone();
     duplicate.operation_id = "duplicate-progress".into();
     assert!(
         store
-            .post_attempt_workstream(&host, &duplicate)
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &one),
+                &duplicate
+            )
             .await
             .unwrap()
             .duplicate
@@ -295,12 +323,20 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
     let mut conflict = post;
     conflict.body = "Changed operation".into();
     assert!(matches!(
-        store.post_attempt_workstream(&host, &conflict).await,
+        store
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &one),
+                &conflict
+            )
+            .await,
         Err(StoreError::Conflict(_))
     ));
     addressed.to_tag_ids = vec!["reviewer".into(), "reviewer".into()];
     let second_post = store
-        .post_attempt_workstream(&host, &addressed)
+        .post_attempt_workstream(
+            &supertag_control_plane::AttemptAccess::new(&host, &one),
+            &addressed,
+        )
         .await
         .unwrap()
         .post
@@ -328,9 +364,8 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
     finish(store, &other_host, &inbox_attempt).await;
     let read = store
         .read_attempt_workstream(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &one),
             &ReadAttemptWorkstreamRequest {
-                attempt: Some(one.clone()),
                 limit: 1,
                 ..Default::default()
             },
@@ -381,7 +416,6 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
     // tests/workstream-post-store.test.ts: text, addressees, and read options are validated.
     let invalid_post =
         |operation: &str, body: String, to: Vec<String>| PostAttemptWorkstreamRequest {
-            attempt: Some(one.clone()),
             operation_id: operation.into(),
             body,
             to_tag_ids: to,
@@ -400,7 +434,12 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
         let operation = request.operation_id.clone();
         assert!(
             matches!(
-                store.post_attempt_workstream(&host, &request).await,
+                store
+                    .post_attempt_workstream(
+                        &supertag_control_plane::AttemptAccess::new(&host, &one),
+                        &request
+                    )
+                    .await,
                 Err(StoreError::InvalidArgument(_))
             ),
             "{operation}"
@@ -408,7 +447,10 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
     }
     assert!(
         store
-            .post_attempt_workstream(&host, &invalid_post("longest", "é".repeat(16_384), vec![]))
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &one),
+                &invalid_post("longest", "é".repeat(16_384), vec![])
+            )
             .await
             .unwrap()
             .post
@@ -438,15 +480,19 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
     let mut posts = tokio::task::JoinSet::new();
     for index in 0..AUTHORS {
         for _ in 0..2 {
-            let (store, host) = (store.clone(), host.clone());
+            let store = store.clone();
+            let access = supertag_control_plane::AttemptAccess::new(&host, &one);
             let request = invalid_post(
                 &format!("concurrent-{index}"),
                 format!("Finding {index}"),
                 vec![],
             );
-            posts.spawn(
-                async move { (index, store.post_attempt_workstream(&host, &request).await) },
-            );
+            posts.spawn(async move {
+                (
+                    index,
+                    store.post_attempt_workstream(&access, &request).await,
+                )
+            });
         }
     }
     let mut answers = std::collections::BTreeMap::<usize, Vec<WorkstreamPost>>::new();
@@ -537,9 +583,8 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
     assert!(matches!(
         store
             .post_attempt_workstream(
-                assigned_host,
+                &supertag_control_plane::AttemptAccess::new(assigned_host, &two),
                 &PostAttemptWorkstreamRequest {
-                    attempt: Some(two.clone()),
                     operation_id: "expired".into(),
                     body: "Expired attempt".into(),
                     ..Default::default()

@@ -6,7 +6,6 @@ use crate::{request, worklet::authority::AttemptClient};
 /// `milestone`, for `supertag metrics`. The run never waits on it.
 pub(crate) fn report_milestone(
     host: &AttemptClient,
-    attempt: &supertag_protocol::v2::InspectAttemptRequest,
     token: &str,
     milestone: supertag_protocol::v2::AttemptMilestone,
 ) {
@@ -14,7 +13,6 @@ pub(crate) fn report_milestone(
         host,
         token,
         supertag_protocol::v2::ReportAttemptMilestoneRequest {
-            attempt: Some(attempt.clone()),
             milestone: milestone as i32,
             ..Default::default()
         },
@@ -25,7 +23,6 @@ pub(crate) fn report_milestone(
 /// succeeded and waits for no approval.
 pub(crate) fn report_harness_finished(
     host: &AttemptClient,
-    attempt: &supertag_protocol::v2::InspectAttemptRequest,
     token: &str,
     reply: Option<(String, bool, i32)>,
 ) {
@@ -37,7 +34,6 @@ pub(crate) fn report_harness_finished(
         host,
         token,
         supertag_protocol::v2::ReportAttemptMilestoneRequest {
-            attempt: Some(attempt.clone()),
             milestone: supertag_protocol::v2::AttemptMilestone::HarnessFinished as i32,
             reply,
             quiet,

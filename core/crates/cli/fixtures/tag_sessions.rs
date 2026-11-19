@@ -26,7 +26,6 @@ async fn read_objective(
         match client
             .read_objective(authenticated_request(
                 ReadTagObjectiveRequest {
-                    attempt: None,
                     objective_id: id.map(str::to_owned),
                 },
                 token,
@@ -69,7 +68,6 @@ pub async fn exercise(
         let matches = client
             .search_sessions(authenticated_request(
                 SearchTagSessionsRequest {
-                    attempt: None,
                     query: "release".into(),
                     limit: 5,
                 },
@@ -84,7 +82,6 @@ pub async fn exercise(
             let page = client
                 .read_session(authenticated_request(
                     ReadTagSessionRequest {
-                        attempt: None,
                         session_id: session.session_id.clone(),
                         limit: 5,
                         before: None,

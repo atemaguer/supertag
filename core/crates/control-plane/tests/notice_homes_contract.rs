@@ -139,9 +139,8 @@ async fn report(
 ) {
     store
         .report_attempt_usage(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, turn),
             &ReportAttemptUsageRequest {
-                attempt: Some(turn.clone()),
                 sequence,
                 native_usage: Some(NativeTokenUsage {
                     input_tokens: 10 * sequence,

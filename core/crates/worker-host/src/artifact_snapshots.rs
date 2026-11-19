@@ -26,6 +26,7 @@ const SNAPSHOTS: &str = "artifact-snapshots";
 
 #[derive(Clone)]
 pub(crate) struct Snapshots {
+    attempt_id: String,
     directory: PathBuf,
     artifact_source: Option<crate::worklet::artifact_direct::SourceStorage>,
 }
@@ -60,6 +61,7 @@ impl Snapshots {
         File::open(state)?.sync_all()?;
         File::open(root)?.sync_all()?;
         Ok(Self {
+            attempt_id: attempt_id.to_owned(),
             directory,
             artifact_source: None,
         })
@@ -135,7 +137,6 @@ impl Snapshots {
     pub(crate) fn staged_output_paths(
         &self,
         operation: &str,
-        attempt: InspectAttemptRequest,
         declared: bool,
         max_bytes: u64,
     ) -> Result<Option<Vec<String>>, Status> {
@@ -144,10 +145,9 @@ impl Snapshots {
         else {
             return Ok(None);
         };
-        let mut manifest: CommitArtifactCaptureRequest =
+        let manifest: CommitArtifactCaptureRequest =
             read_record(&mut file).map_err(journal_error)?;
         if manifest.operation_id != operation
-            || manifest.attempt.is_some()
             || manifest.declared_task_output != declared
             || manifest.managed_task_output == declared
         {
@@ -155,8 +155,7 @@ impl Snapshots {
                 "stored Task output has invalid authority",
             ));
         }
-        manifest.attempt = Some(attempt);
-        if validate_capture_manifest(&manifest)? > max_bytes {
+        if validate_capture_manifest(&manifest, None)? > max_bytes {
             return Err(Status::data_loss(
                 "stored artifact exceeds its accepted byte limit",
             ));
@@ -239,7 +238,6 @@ impl Snapshots {
             let mut manifest: CommitArtifactCaptureRequest =
                 read_record(&mut file).map_err(journal_error)?;
             if manifest.operation_id != request.operation_id
-                || manifest.attempt.is_some()
                 || manifest.managed_task_output != managed_task_output
                 || manifest.declared_task_output != declared_task_output
             {
@@ -253,8 +251,7 @@ impl Snapshots {
                 &manifest.native_session_id,
                 &manifest.files,
             )?;
-            manifest.attempt = Some(attempt);
-            if validate_capture_manifest(&manifest)? > max_bytes {
+            if validate_capture_manifest(&manifest, None)? > max_bytes {
                 return Err(Status::data_loss(
                     "stored artifact exceeds its accepted byte limit",
                 ));
@@ -287,7 +284,7 @@ impl Snapshots {
                             "artifact source storage changed while capture was pending",
                         )
                     })?;
-                storage.retain(&mut manifest, &bytes)?;
+                storage.retain(&self.attempt_id, &mut manifest, &bytes)?;
             }
             return Ok(Capture::Pending(manifest, bytes));
         }
@@ -296,7 +293,6 @@ impl Snapshots {
             return Err(Status::data_loss("frozen Task output snapshot is missing"));
         }
         let mut manifest = CommitArtifactCaptureRequest {
-            attempt: Some(attempt),
             operation_id: request.operation_id,
             description: request.description,
             files: Vec::with_capacity(request.paths.len()),
@@ -355,14 +351,12 @@ impl Snapshots {
             });
             bytes.push(content);
         }
-        validate_capture_manifest(&manifest)?;
+        validate_capture_manifest(&manifest, None)?;
         if let Some(storage) = &self.artifact_source {
-            storage.retain(&mut manifest, &bytes)?;
+            storage.retain(&self.attempt_id, &mut manifest, &bytes)?;
         }
-        let authority = manifest.attempt.take();
         self.persist(&path, &manifest, &bytes)
             .map_err(journal_error)?;
-        manifest.attempt = authority;
         Ok(Capture::Pending(manifest, bytes))
     }
 
@@ -373,17 +367,17 @@ impl Snapshots {
         source: Option<&crate::worklet::artifact_direct::SourceStorage>,
     ) -> Result<(), Status> {
         match (&manifest.source_storage_id, source) {
-            (Some(id), Some(source)) if source.has_id(id) => source.retain(manifest, selected),
+            (Some(id), Some(source)) if source.has_id(id) => {
+                source.retain(&self.attempt_id, manifest, selected)
+            }
             (Some(_), _) => Err(Status::failed_precondition(
                 "artifact source storage changed while output was pending",
             )),
             (None, Some(source)) => {
-                source.retain(manifest, selected)?;
-                let mut pending = manifest.clone();
-                pending.attempt = None;
+                source.retain(&self.attempt_id, manifest, selected)?;
                 self.persist(
                     &self.path(&manifest.operation_id, "pending"),
-                    &pending,
+                    &*manifest,
                     selected,
                 )
                 .map_err(journal_error)
@@ -626,6 +620,7 @@ mod tests {
         let journal = Journal::open(state.path())?;
         journal.save(&Entry::Terminal {
             attempt: Attempt {
+                attempt_credential: String::new(),
                 native_memory: None,
                 task_id: "task".into(),
                 attempt_id: "attempt".into(),

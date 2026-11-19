@@ -850,15 +850,14 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
             host.generation,
         )
     };
-    let send = |attempt: &InspectAttemptRequest, operation_id: &str, body: &str| {
+    let send = |credential: &str, operation_id: &str, body: &str| {
         host_request(
             PostAttemptWorkstreamRequest {
-                attempt: Some(attempt.clone()),
                 operation_id: operation_id.into(),
                 body: body.into(),
                 to_tag_ids: vec![],
             },
-            &host_token,
+            credential,
             host.generation,
         )
     };
@@ -903,9 +902,13 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
         attempt_id: assignment.attempt_id,
         lease_token: assignment.lease_token,
     };
-    worker.start_task(start_request(&next)?).await?;
+    let next_credential = worker
+        .start_task(start_request(&next)?)
+        .await?
+        .into_inner()
+        .attempt_credential;
     let posted = workstreams
-        .post_attempt_workstream(send(&next, "post-after-approval", message)?)
+        .post_attempt_workstream(send(&next_credential, "post-after-approval", message)?)
         .await?
         .into_inner();
     assert_eq!(
@@ -913,12 +916,12 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
         message
     );
     let duplicate = workstreams
-        .post_attempt_workstream(send(&next, "post-after-approval", message)?)
+        .post_attempt_workstream(send(&next_credential, "post-after-approval", message)?)
         .await?
         .into_inner();
     assert!(duplicate.duplicate);
     let different = workstreams
-        .post_attempt_workstream(send(&next, "changed", "Different message")?)
+        .post_attempt_workstream(send(&next_credential, "changed", "Different message")?)
         .await?
         .into_inner();
     assert!(different.post.is_none());
@@ -928,7 +931,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     );
     assert_eq!(
         workstreams
-            .post_attempt_workstream(send(&next, "changed", message)?)
+            .post_attempt_workstream(send(&next_credential, "changed", message)?)
             .await
             .unwrap_err()
             .code(),
@@ -1115,7 +1118,6 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
         lease_token: assignment.lease_token,
     };
     let post = PostAttemptWorkstreamRequest {
-        attempt: Some(attempt.clone()),
         operation_id: "verified-rollout".into(),
         body: "The rollout checks passed.".into(),
         ..Default::default()
@@ -1132,15 +1134,16 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
             .code(),
         Code::PermissionDenied,
     );
+    // The host credential reaches no Attempt's data calls; only the Attempt credential does.
     assert_eq!(
         attempts
             .post_attempt_workstream(host_request(post.clone(), &host_token, host.generation)?)
             .await
             .unwrap_err()
             .code(),
-        Code::FailedPrecondition,
+        Code::PermissionDenied,
     );
-    worker
+    let attempt_credential = worker
         .start_task(host_request(
             StartTaskRequest {
                 task_id: attempt.task_id.clone(),
@@ -1150,13 +1153,19 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
             &host_token,
             host.generation,
         )?)
-        .await?;
+        .await?
+        .into_inner()
+        .attempt_credential;
     let posted = attempts
-        .post_attempt_workstream(host_request(post.clone(), &host_token, host.generation)?)
+        .post_attempt_workstream(host_request(
+            post.clone(),
+            &attempt_credential,
+            host.generation,
+        )?)
         .await?
         .into_inner();
     let replay = attempts
-        .post_attempt_workstream(host_request(post, &host_token, host.generation)?)
+        .post_attempt_workstream(host_request(post, &attempt_credential, host.generation)?)
         .await?
         .into_inner();
     assert!(!posted.duplicate && replay.duplicate);
@@ -1179,7 +1188,6 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
     assert_eq!(page["posts"].as_array().context("missing posts")?.len(), 1);
 
     let addressed_request = PostAttemptWorkstreamRequest {
-        attempt: Some(attempt.clone()),
         operation_id: "address-reviewer".into(),
         body: "Please independently verify the rollback steps.".into(),
         to_tag_ids: vec!["reviewer".into()],
@@ -1187,7 +1195,7 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
     let addressed = attempts
         .post_attempt_workstream(host_request(
             addressed_request.clone(),
-            &host_token,
+            &attempt_credential,
             host.generation,
         )?)
         .await?
@@ -1196,7 +1204,7 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
     let duplicate = attempts
         .post_attempt_workstream(host_request(
             addressed_request,
-            &host_token,
+            &attempt_credential,
             host.generation,
         )?)
         .await?
@@ -1256,17 +1264,14 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
         attempt_id: inbox.attempt_id,
         lease_token: inbox.lease_token,
     };
-    let read = ReadMailboxRequest {
-        attempt: Some(inbox_attempt.clone()),
-        ..Default::default()
-    };
+    let read = ReadMailboxRequest::default();
     assert_eq!(
         attempt_mailbox
             .read_mailbox(host_request(read.clone(), &host_token, host.generation)?)
             .await
             .unwrap_err()
             .code(),
-        Code::FailedPrecondition
+        Code::PermissionDenied
     );
     let running = worker
         .start_task(host_request(
@@ -1280,6 +1285,8 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
         )?)
         .await?
         .into_inner();
+    let inbox_credential = running.attempt_credential;
+    let running = running.task.context("started Task")?;
     assert_eq!(running.instructions, "Verify changes");
     assert!(
         running
@@ -1289,7 +1296,7 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
     assert!(running.prompt.contains("via=\"workstream post\""));
     assert!(running.prompt.contains(&message.message_id));
     let read_result = attempt_mailbox
-        .read_mailbox(host_request(read, &host_token, host.generation)?)
+        .read_mailbox(host_request(read, &inbox_credential, host.generation)?)
         .await?
         .into_inner();
     assert_eq!(read_result.messages.len(), 1);
@@ -1462,7 +1469,7 @@ async fn objective_questions_survive_control_plane_restart_and_answer_once(
         attempt_id: assignment.attempt_id,
         lease_token: assignment.lease_token,
     };
-    worker
+    let attempt_credential = worker
         .start_task(host_request(
             StartTaskRequest {
                 task_id: attempt.task_id.clone(),
@@ -1472,9 +1479,10 @@ async fn objective_questions_survive_control_plane_restart_and_answer_once(
             &host_token,
             host.generation,
         )?)
-        .await?;
+        .await?
+        .into_inner()
+        .attempt_credential;
     let ask = AskQuestionRequest {
-        attempt: Some(attempt.clone()),
         operation_id: "ask-route".into(),
         text: "Which release route should I use?".into(),
     };
@@ -1487,7 +1495,11 @@ async fn objective_questions_survive_control_plane_restart_and_answer_once(
         Code::PermissionDenied
     );
     let staged = worker
-        .ask_question(host_request(ask.clone(), &host_token, host.generation)?)
+        .ask_question(host_request(
+            ask.clone(),
+            &attempt_credential,
+            host.generation,
+        )?)
         .await?
         .into_inner();
     assert!(staged.published_at_ms.is_none());
@@ -1536,13 +1548,14 @@ async fn objective_questions_survive_control_plane_restart_and_answer_once(
             host.generation,
         )?)
         .await?;
-    assert!(
+    // Finishing published the question and ended the Attempt's credential.
+    assert_eq!(
         worker
-            .ask_question(host_request(ask, &host_token, host.generation)?)
-            .await?
-            .into_inner()
-            .published_at_ms
-            .is_some()
+            .ask_question(host_request(ask, &attempt_credential, host.generation)?)
+            .await
+            .unwrap_err()
+            .code(),
+        Code::Unauthenticated
     );
     let listed = cli(
         &["get", "--gateway", &public, "inbox-items"],

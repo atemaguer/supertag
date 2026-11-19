@@ -3,13 +3,7 @@
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
-use supertag_protocol::{
-    authenticated_request,
-    v2::{
-        transfers_client::TransfersClient, workspace_git_access_client::WorkspaceGitAccessClient, *,
-    },
-    validate_workspace_delivery,
-};
+use supertag_protocol::{v2::*, validate_workspace_delivery};
 use tonic::{Request, Response, Status};
 
 use super::Bridge;
@@ -53,11 +47,7 @@ impl Bridge {
             attempt: Some(self.attempt()),
             review_id: review_id.into(),
         };
-        let held =
-            TransfersClient::with_interceptor(transfers.channel.clone(), transfers.headers.clone())
-                .get_review_delivery(authenticated_request(review, &self.host_token, None)?)
-                .await?
-                .into_inner();
+        let held = transfers.review_delivery(review).await?;
         let reference = held
             .delivery
             .ok_or_else(|| Status::data_loss("review has no delivery receipt"))?;
@@ -87,22 +77,14 @@ impl Bridge {
             self.storage.review_git.as_ref().ok_or_else(|| {
                 Status::unavailable("this Worker Host cannot read remote Workspaces")
             })?;
-        let grant = WorkspaceGitAccessClient::with_interceptor(
-            transfers.channel.clone(),
-            transfers.headers.clone(),
-        )
-        .mint(authenticated_request(
-            MintWorkspaceGitAccessRequest {
+        let grant = transfers
+            .mint_git_access(MintWorkspaceGitAccessRequest {
                 attempt: Some(self.attempt()),
                 permission: WorkspaceGitPermission::Read as i32,
                 review_id: review_id.into(),
                 ..Default::default()
-            },
-            &self.host_token,
-            None,
-        )?)
-        .await?
-        .into_inner();
+            })
+            .await?;
         if grant.commit != reference.head_commit || grant.branch.is_empty() {
             return Err(Status::data_loss("the review grant names another delivery"));
         }
@@ -178,6 +160,7 @@ fn page(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use supertag_protocol::authenticated_request;
     use supertag_protocol::v2::{BlobReference, WorkspaceDeliveryReference};
 
     fn bridge() -> Bridge {
@@ -185,7 +168,7 @@ mod tests {
         let headers = crate::HostHeaders::new(1, 2);
         Bridge {
             token: "execution-token".into(),
-            host_token: "host-token".into(),
+            attempt_token: "host-token".into(),
             harness: supertag_protocol::v2::HarnessKind::Unspecified,
             assignment: Assignment {
                 native_memory: None,
@@ -200,11 +183,12 @@ mod tests {
             },
             checkpoint: None,
             resolved_skills: vec![],
-            host: worker_host_client::WorkerHostClient::with_interceptor(
-                channel.clone(),
-                headers.clone(),
-            )
-            .into(),
+            host: crate::worklet::authority::AttemptClient::new(
+                worker_host_client::WorkerHostClient::with_interceptor(
+                    channel.clone(),
+                    headers.clone(),
+                ),
+            ),
             lease: crate::worklet::authority::Lease::unconnected(
                 worker_host_client::WorkerHostClient::with_interceptor(
                     channel.clone(),
@@ -212,18 +196,14 @@ mod tests {
                 ),
                 InspectAttemptRequest::default(),
             ),
-            storage: crate::worklet::HostStorage {
-                transfers: crate::worklet::checkpoints::Transfers::new(channel.clone(), headers.clone()),
-                artifact_source: None,
-                review_git: None,
-                artifact_peers: crate::ArtifactPeers::default(),
-                volumes: Default::default(),
-                volume_objects: supertag_protocol::v2::volume_objects_client::VolumeObjectsClient::with_interceptor(
-                    channel.clone(),
-                    headers.clone(),
-                ),
-            },
+            storage: crate::worklet::HostStorage::unconnected(channel.clone(), headers.clone()),
             coordination: crate::AttemptClients {
+                attempt: crate::worklet::authority::AttemptClient::new(
+                    worker_host_client::WorkerHostClient::with_interceptor(
+                        channel.clone(),
+                        headers.clone(),
+                    ),
+                ),
                 acquisitions: attempt_artifacts_client::AttemptArtifactsClient::with_interceptor(channel.clone(), headers.clone()),
                 mcp_effects: supertag_protocol::v2::attempt_mcp_effects_client::AttemptMcpEffectsClient::with_interceptor(
                     channel.clone(),

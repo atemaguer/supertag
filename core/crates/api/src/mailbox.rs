@@ -64,7 +64,7 @@ impl attempt_mailbox_server::AttemptMailbox for Api {
         &self,
         request: Request<SendAttemptTagMessageRequest>,
     ) -> Result<Response<SendTagMessageResponse>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             attempt_mailbox_client::AttemptMailboxClient::new(channel)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)
@@ -77,7 +77,7 @@ impl attempt_mailbox_server::AttemptMailbox for Api {
         &self,
         request: Request<ReadMailboxRequest>,
     ) -> Result<Response<ListMailboxMessagesResponse>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             attempt_mailbox_client::AttemptMailboxClient::new(channel)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)

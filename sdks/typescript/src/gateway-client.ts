@@ -60,7 +60,7 @@ function gatewayOrigin(value: string): URL {
 /** Names, on every call, the protocol version this client negotiated with the Gateway. */
 const PROTOCOL_HEADER = "x-supertag-protocol";
 /** The SuperTag protocol versions this client speaks. */
-const PROTOCOL_VERSIONS = [5];
+const PROTOCOL_VERSIONS = [6];
 
 function refusedByGateway(error: unknown): ConnectError {
   const status = ConnectError.from(error);

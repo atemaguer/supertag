@@ -46,16 +46,20 @@ fn written(destination: &str) -> WorkspaceMountWrite {
     }
 }
 
-fn record(
-    assignment: &Assignment,
-    writes: Vec<WorkspaceMountWrite>,
-) -> RecordWorkspaceMountWritesRequest {
-    RecordWorkspaceMountWritesRequest {
-        task_id: assignment.task.as_ref().unwrap().task_id.clone(),
-        attempt_id: assignment.attempt_id.clone(),
-        lease_token: assignment.lease_token.clone(),
-        writes,
-    }
+fn record(writes: Vec<WorkspaceMountWrite>) -> RecordWorkspaceMountWritesRequest {
+    RecordWorkspaceMountWritesRequest { writes }
+}
+
+/// What `assignment`'s Attempt credential grants, held by `host`.
+fn access(host: &HostAuthority, assignment: &Assignment) -> supertag_control_plane::AttemptAccess {
+    supertag_control_plane::AttemptAccess::new(
+        host,
+        &InspectAttemptRequest {
+            task_id: assignment.task.as_ref().unwrap().task_id.clone(),
+            attempt_id: assignment.attempt_id.clone(),
+            lease_token: assignment.lease_token.clone(),
+        },
+    )
 }
 
 fn tag(
@@ -590,13 +594,19 @@ async fn exercise(url: &str) {
 
     // Preflight discloses artifact paths only to the owning Host of a running Attempt.
     let preflight = store
-        .workspace_mount_preflight(&host, &inspect(&first))
+        .workspace_mount_preflight(&supertag_control_plane::AttemptAccess::new(
+            &host,
+            &inspect(&first),
+        ))
         .await
         .unwrap();
     assert_eq!(preflight.protected_file_sources, [ARTIFACTS]);
     assert!(
         store
-            .workspace_mount_preflight(&other, &inspect(&first))
+            .workspace_mount_preflight(&supertag_control_plane::AttemptAccess::new(
+                &other,
+                &inspect(&first)
+            ))
             .await
             .is_err()
     );
@@ -604,7 +614,7 @@ async fn exercise(url: &str) {
     stale.lease_token = Uuid::new_v4().to_string();
     assert!(
         store
-            .workspace_mount_preflight(&host, &stale)
+            .workspace_mount_preflight(&supertag_control_plane::AttemptAccess::new(&host, &stale))
             .await
             .is_err()
     );
@@ -612,7 +622,10 @@ async fn exercise(url: &str) {
     // A read-only copy records no writes.
     assert!(matches!(
         store
-            .record_workspace_mount_writes(&host, &record(&first, vec![written(&destination)]))
+            .record_workspace_mount_writes(
+                &access(&host, &first),
+                &record(vec![written(&destination)])
+            )
             .await,
         Err(StoreError::InvalidArgument(_))
     ));
@@ -658,7 +671,10 @@ async fn exercise(url: &str) {
     // Only the owning Host of a running Attempt records writes.
     assert!(
         store
-            .record_workspace_mount_writes(&editor_host, &record(&editing, vec![summary.clone()]))
+            .record_workspace_mount_writes(
+                &access(&editor_host, &editing),
+                &record(vec![summary.clone()])
+            )
             .await
             .is_err()
     );
@@ -668,7 +684,10 @@ async fn exercise(url: &str) {
         .unwrap();
     assert!(matches!(
         store
-            .record_workspace_mount_writes(&other, &record(&editing, vec![summary.clone()]))
+            .record_workspace_mount_writes(
+                &access(&other, &editing),
+                &record(vec![summary.clone()])
+            )
             .await,
         Err(StoreError::PermissionDenied)
     ));
@@ -687,25 +706,31 @@ async fn exercise(url: &str) {
     ] {
         assert!(matches!(
             store
-                .record_workspace_mount_writes(&editor_host, &record(&editing, invalid))
+                .record_workspace_mount_writes(&access(&editor_host, &editing), &record(invalid))
                 .await,
             Err(StoreError::InvalidArgument(_))
         ));
     }
     store
-        .record_workspace_mount_writes(&editor_host, &record(&editing, vec![summary.clone()]))
+        .record_workspace_mount_writes(
+            &access(&editor_host, &editing),
+            &record(vec![summary.clone()]),
+        )
         .await
         .unwrap();
     // A retry of the same summary succeeds; a different one is refused.
     store
-        .record_workspace_mount_writes(&editor_host, &record(&editing, vec![summary.clone()]))
+        .record_workspace_mount_writes(
+            &access(&editor_host, &editing),
+            &record(vec![summary.clone()]),
+        )
         .await
         .unwrap();
     let mut changed = summary.clone();
     changed.skipped = 4;
     assert!(matches!(
         store
-            .record_workspace_mount_writes(&editor_host, &record(&editing, vec![changed]))
+            .record_workspace_mount_writes(&access(&editor_host, &editing), &record(vec![changed]))
             .await,
         Err(StoreError::Conflict(_))
     ));
@@ -750,7 +775,10 @@ async fn exercise(url: &str) {
     store.start_task(&other, &start(&plain)).await.unwrap();
     assert!(matches!(
         store
-            .workspace_mount_preflight(&other, &inspect(&plain))
+            .workspace_mount_preflight(&supertag_control_plane::AttemptAccess::new(
+                &other,
+                &inspect(&plain)
+            ))
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
@@ -761,7 +789,10 @@ async fn exercise(url: &str) {
     assert_eq!(retargeted.revision, 2);
     assert!(matches!(
         store
-            .workspace_mount_preflight(&host, &inspect(&first))
+            .workspace_mount_preflight(&supertag_control_plane::AttemptAccess::new(
+                &host,
+                &inspect(&first)
+            ))
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
@@ -769,7 +800,10 @@ async fn exercise(url: &str) {
     assert_eq!(restored.revision, 3);
     assert!(
         store
-            .workspace_mount_preflight(&host, &inspect(&first))
+            .workspace_mount_preflight(&supertag_control_plane::AttemptAccess::new(
+                &host,
+                &inspect(&first)
+            ))
             .await
             .is_err()
     );

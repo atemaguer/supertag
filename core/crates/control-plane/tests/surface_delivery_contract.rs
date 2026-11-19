@@ -212,21 +212,18 @@ async fn contract(url: String) {
     let follow = send(&store, two, "1794470001.000002", "and the changelog").await;
     assert_eq!(follow.state(), TaskState::Queued);
     let input = store
-        .take_input(
+        .take_input(&supertag_control_plane::AttemptAccess::new(
             &host,
-            &TakeInputRequest {
-                attempt: Some(run.attempt()),
-            },
-        )
+            &run.attempt(),
+        ))
         .await
         .unwrap()
         .unwrap();
     assert_eq!(input.follower_task_id, follow.task_id);
     store
         .settle_input(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &run.attempt()),
             &SettleInputRequest {
-                attempt: Some(run.attempt()),
                 input_id: input.input_id,
                 receipt: LiveInputReceipt::Accepted.into(),
             },

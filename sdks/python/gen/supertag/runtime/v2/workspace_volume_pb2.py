@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from supertag.runtime.v2 import runtime_pb2 as supertag_dot_runtime_dot_v2_dot_runtime__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n*supertag/runtime/v2/workspace_volume.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"n\n\x19PutWorkspaceVolumeRequest\x12\x11\n\tvolume_id\x18\x01 \x01(\t\x12\x0e\n\x06source\x18\x02 \x01(\t\x12\x19\n\x11\x65xpected_revision\x18\x03 \x01(\x04\x12\x13\n\ncredential\x18\xec\' \x01(\t\".\n\x19GetWorkspaceVolumeRequest\x12\x11\n\tvolume_id\x18\x01 \x01(\t\"\x97\x01\n!RecordWorkspaceMountWritesRequest\x12\x0f\n\x07task_id\x18\x01 \x01(\t\x12\x12\n\nattempt_id\x18\x02 \x01(\t\x12\x13\n\x0blease_token\x18\x03 \x01(\t\x12\x38\n\x06writes\x18\x04 \x03(\x0b\x32(.supertag.runtime.v2.WorkspaceMountWrite\"$\n\"RecordWorkspaceMountWritesResponse\"9\n\x17WorkspaceMountPreflight\x12\x1e\n\x16protected_file_sources\x18\x01 \x03(\t2\xcc\x01\n\x10WorkspaceVolumes\x12[\n\x03Put\x12..supertag.runtime.v2.PutWorkspaceVolumeRequest\x1a$.supertag.runtime.v2.WorkspaceVolume\x12[\n\x03Get\x12..supertag.runtime.v2.GetWorkspaceVolumeRequest\x1a$.supertag.runtime.v2.WorkspaceVolume2\x80\x02\n\x16\x41ttemptWorkspaceMounts\x12\x65\n\tPreflight\x12*.supertag.runtime.v2.InspectAttemptRequest\x1a,.supertag.runtime.v2.WorkspaceMountPreflight\x12\x7f\n\x0cRecordWrites\x12\x36.supertag.runtime.v2.RecordWorkspaceMountWritesRequest\x1a\x37.supertag.runtime.v2.RecordWorkspaceMountWritesResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n*supertag/runtime/v2/workspace_volume.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"n\n\x19PutWorkspaceVolumeRequest\x12\x11\n\tvolume_id\x18\x01 \x01(\t\x12\x0e\n\x06source\x18\x02 \x01(\t\x12\x19\n\x11\x65xpected_revision\x18\x03 \x01(\x04\x12\x13\n\ncredential\x18\xec\' \x01(\t\".\n\x19GetWorkspaceVolumeRequest\x12\x11\n\tvolume_id\x18\x01 \x01(\t\"!\n\x1fPreflightWorkspaceMountsRequest\"\x91\x01\n!RecordWorkspaceMountWritesRequest\x12\x38\n\x06writes\x18\x04 \x03(\x0b\x32(.supertag.runtime.v2.WorkspaceMountWriteJ\x04\x08\x01\x10\x02J\x04\x08\x02\x10\x03J\x04\x08\x03\x10\x04R\x07task_idR\nattempt_idR\x0blease_token\"$\n\"RecordWorkspaceMountWritesResponse\"9\n\x17WorkspaceMountPreflight\x12\x1e\n\x16protected_file_sources\x18\x01 \x03(\t2\xcc\x01\n\x10WorkspaceVolumes\x12[\n\x03Put\x12..supertag.runtime.v2.PutWorkspaceVolumeRequest\x1a$.supertag.runtime.v2.WorkspaceVolume\x12[\n\x03Get\x12..supertag.runtime.v2.GetWorkspaceVolumeRequest\x1a$.supertag.runtime.v2.WorkspaceVolume2\x8a\x02\n\x16\x41ttemptWorkspaceMounts\x12o\n\tPreflight\x12\x34.supertag.runtime.v2.PreflightWorkspaceMountsRequest\x1a,.supertag.runtime.v2.WorkspaceMountPreflight\x12\x7f\n\x0cRecordWrites\x12\x36.supertag.runtime.v2.RecordWorkspaceMountWritesRequest\x1a\x37.supertag.runtime.v2.RecordWorkspaceMountWritesResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -36,14 +36,16 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_PUTWORKSPACEVOLUMEREQUEST']._serialized_end=212
   _globals['_GETWORKSPACEVOLUMEREQUEST']._serialized_start=214
   _globals['_GETWORKSPACEVOLUMEREQUEST']._serialized_end=260
-  _globals['_RECORDWORKSPACEMOUNTWRITESREQUEST']._serialized_start=263
-  _globals['_RECORDWORKSPACEMOUNTWRITESREQUEST']._serialized_end=414
-  _globals['_RECORDWORKSPACEMOUNTWRITESRESPONSE']._serialized_start=416
-  _globals['_RECORDWORKSPACEMOUNTWRITESRESPONSE']._serialized_end=452
-  _globals['_WORKSPACEMOUNTPREFLIGHT']._serialized_start=454
-  _globals['_WORKSPACEMOUNTPREFLIGHT']._serialized_end=511
-  _globals['_WORKSPACEVOLUMES']._serialized_start=514
-  _globals['_WORKSPACEVOLUMES']._serialized_end=718
-  _globals['_ATTEMPTWORKSPACEMOUNTS']._serialized_start=721
-  _globals['_ATTEMPTWORKSPACEMOUNTS']._serialized_end=977
+  _globals['_PREFLIGHTWORKSPACEMOUNTSREQUEST']._serialized_start=262
+  _globals['_PREFLIGHTWORKSPACEMOUNTSREQUEST']._serialized_end=295
+  _globals['_RECORDWORKSPACEMOUNTWRITESREQUEST']._serialized_start=298
+  _globals['_RECORDWORKSPACEMOUNTWRITESREQUEST']._serialized_end=443
+  _globals['_RECORDWORKSPACEMOUNTWRITESRESPONSE']._serialized_start=445
+  _globals['_RECORDWORKSPACEMOUNTWRITESRESPONSE']._serialized_end=481
+  _globals['_WORKSPACEMOUNTPREFLIGHT']._serialized_start=483
+  _globals['_WORKSPACEMOUNTPREFLIGHT']._serialized_end=540
+  _globals['_WORKSPACEVOLUMES']._serialized_start=543
+  _globals['_WORKSPACEVOLUMES']._serialized_end=747
+  _globals['_ATTEMPTWORKSPACEMOUNTS']._serialized_start=750
+  _globals['_ATTEMPTWORKSPACEMOUNTS']._serialized_end=1016
 # @@protoc_insertion_point(module_scope)

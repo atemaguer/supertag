@@ -38,10 +38,10 @@ impl PendingOutputs {
         (workspace, workspaces): (&PreparedWorkspace, &Workspaces),
         archive: TransferArtifact,
         state: &Path,
-        authority: (&Transfers, &Attempt, &str),
+        authority: (&Transfers, &Attempt),
         cancel: &CancellationToken,
     ) -> Result<Self> {
-        let (_, attempt, _) = authority;
+        let (_, attempt) = authority;
         let policy = self.policy()?;
         let git_mode = policy.as_ref().map(TaskOutputPolicy::git);
         let tracked = if policy

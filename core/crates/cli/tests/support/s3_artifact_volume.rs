@@ -474,19 +474,19 @@ async fn after_the_producer(
         .await?
         .into_inner()
         .generation;
-    let reader = turn(credentials, &channel, generation, "read", None).await?;
+    let (reader, reader_credential) = turn(credentials, &channel, generation, "read", None).await?;
     let acquisition = artifacts
-        .acquire(credentials.host(
+        .acquire(authenticated_request(
             AcquireArtifactRequest {
-                attempt: Some(reader.clone()),
                 operation_id: "acquire".into(),
                 artifact_id: artifact_id.into(),
                 paths: vec!["report.txt".into()],
                 delivery: ArtifactDelivery::Read as i32,
                 destination: None,
             },
-            generation,
-        ))
+            &reader_credential,
+            None,
+        )?)
         .await?
         .into_inner();
     let file = objects
@@ -559,7 +559,7 @@ async fn after_the_producer(
 
     // The next turn reads it back, then ends without one: the Session's checkpoint is dropped and
     // the Control Plane deletes its object.
-    let next = turn(credentials, &channel, generation, "next", None).await?;
+    let (next, _) = turn(credentials, &channel, generation, "next", None).await?;
     let resumed = objects
         .grant(credentials.host(
             VolumeObjectGrantRequest {

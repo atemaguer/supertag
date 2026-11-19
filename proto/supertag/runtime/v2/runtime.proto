@@ -458,7 +458,8 @@ message ObjectiveQuestion {
 }
 
 message AskQuestionRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string operation_id = 2;
   string text = 3;
 }
@@ -554,7 +555,8 @@ message CloseWorkSessionRequest {
 }
 
 message CloseAttemptWorkSessionRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string work_session_id = 2;
 }
 
@@ -590,7 +592,8 @@ message WorkSessionQuestion {
 }
 
 message StartWorkSessionRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string operation_id = 2;
   string title = 3;
   string instruction = 4;
@@ -610,14 +613,16 @@ message GetWorkSessionRequest {
 }
 
 message ContinueWorkSessionRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string operation_id = 2;
   string work_session_id = 3;
   string message = 4;
 }
 
 message AskWorkSessionQuestionRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string operation_id = 2;
   string text = 3;
 }
@@ -731,7 +736,8 @@ message CommitReview {
 }
 
 message SendAttemptTagMessageRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string operation_id = 2;
   string recipient_tag_id = 3;
   string text = 4;
@@ -785,20 +791,24 @@ message ListMailboxMessagesResponse {
 }
 
 message ReadMailboxRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   uint32 limit = 2;
   string cursor = 3;
 }
 
+// The Worker Host API. Lease operations are called with the host's enrolled credential; the data
+// calls a running Attempt makes (events, text, questions, usage, milestones, its network log, its
+// history, capabilities, and Context Item pins) with that Attempt's credential, which names it.
 service WorkerHost {
   rpc RegisterHost(RegisterHostRequest) returns (HostRecord);
   rpc ReportHost(ReportHostRequest) returns (WorkerHostStatus);
   rpc ClaimTask(ClaimTaskRequest) returns (ClaimTaskResponse);
-  rpc StartTask(StartTaskRequest) returns (Task);
+  rpc StartTask(StartTaskRequest) returns (StartTaskResponse);
   rpc InspectAttempt(InspectAttemptRequest) returns (Task);
-  rpc GetAttemptCapabilities(InspectAttemptRequest) returns (AttemptCapabilities);
-  rpc GetAttemptHistory(InspectAttemptRequest) returns (AttemptHistory);
-  rpc GetContextPins(InspectAttemptRequest) returns (ContextResolutionManifest);
+  rpc GetAttemptCapabilities(GetAttemptCapabilitiesRequest) returns (AttemptCapabilities);
+  rpc GetAttemptHistory(GetAttemptHistoryRequest) returns (AttemptHistory);
+  rpc GetContextPins(GetContextPinsRequest) returns (ContextResolutionManifest);
   rpc CommitContextResolution(CommitContextResolutionRequest) returns (ContextResolutionManifest);
   rpc RenewAttempt(InspectAttemptRequest) returns (AttemptAuthority);
   rpc GetAttemptResolution(InspectAttemptRequest) returns (GetAttemptResolutionResponse);
@@ -853,7 +863,8 @@ enum AttemptMilestone {
 }
 
 message ReportAttemptMilestoneRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   AttemptMilestone milestone = 2;
   // With ATTEMPT_MILESTONE_HARNESS_FINISHED, when the harness finished the turn successfully and
   // it waits for no approval: the turn's reply, as FinishTask will report it, with its `quiet`
@@ -1568,7 +1579,8 @@ message LiveInput {
 }
 
 message TakeInputRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
 }
 
 message TakeInputResponse {
@@ -1584,7 +1596,8 @@ message HarnessSettleLiveInputRequest {
 }
 
 message SettleInputRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string input_id = 2;
   LiveInputReceipt receipt = 3;
 }
@@ -2133,7 +2146,8 @@ message AttemptNetworkLog {
 
 // The Attempt's network log so far. Each report replaces the previous one.
 message ReportNetworkLogRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   NetworkLog log = 2;
 }
 
@@ -2182,7 +2196,8 @@ service AttemptTaskFiles {
 }
 
 message ReportTaskFilesLocationRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   // The checkout's absolute path on the host.
   string local_path = 2;
 }
@@ -2367,13 +2382,15 @@ message WorkspaceMcpRecord {
   repeated McpServerCapability servers = 2;
 }
 message RecordWorkspaceMcpRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   WorkspaceMcpRecord record = 2;
 }
 message RecordWorkspaceMcpResponse {}
 
 message ReserveMcpEffectRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string operation_id = 2;
   string server = 3;
   string tool = 4;
@@ -2391,7 +2408,8 @@ message ReserveMcpEffectResponse {
   bool ungated = 7;
 }
 message SettleMcpEffectRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string operation_id = 2;
   string dispatch_id = 3;
   // A missing result records an effect whose provider receipt is unconfirmed.
@@ -2532,6 +2550,22 @@ message StartTaskRequest {
   string lease_token = 3;
 }
 
+// The started Attempt and its Attempt credential: a bearer secret (`stat_` and 64 hex digits)
+// for that Attempt's data calls. It names one Task Attempt, its lease, and the Worker Host
+// generation that holds it, and works only while that lease is live: renewing the lease extends
+// it, and finishing, reclaiming, lease expiry, host revocation, or a new host generation ends
+// it. A repeated StartTask for the same Attempt returns a new credential and ends the previous
+// one.
+message StartTaskResponse {
+  Task task = 1;
+  string attempt_credential = 2;
+}
+
+// The data calls below name no Attempt: the Attempt credential they carry does.
+message GetAttemptCapabilitiesRequest {}
+message GetAttemptHistoryRequest {}
+message GetContextPinsRequest {}
+
 message InspectAttemptRequest {
   string task_id = 1;
   string attempt_id = 2;
@@ -2588,7 +2622,8 @@ message GetAttemptResolutionResponse {
 }
 
 message ReportAttemptUsageRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   uint64 sequence = 2;
   optional uint64 amount_minor = 3;
   optional string currency = 4;
@@ -2626,9 +2661,8 @@ message HarnessUsageRequest {
 }
 
 message AppendEventRequest {
-  string task_id = 1;
-  string attempt_id = 2;
-  string lease_token = 3;
+  reserved 1, 2, 3;
+  reserved "task_id", "attempt_id", "lease_token";
   uint64 sequence = 4;
   string text = 5;
   TaskEventKind kind = 6;
@@ -2762,7 +2796,8 @@ message ResolvedSkill {
 }
 
 message CommitContextResolutionRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   ContextResolutionManifest manifest = 2;
 }
 
@@ -3029,9 +3064,8 @@ message HarnessPublishTextResponse {}
 // The redacted text so far of the message an Attempt's Tag is writing after event
 // `after_sequence`. A later `revision` replaces an earlier one.
 message PublishTaskTextRequest {
-  string task_id = 1;
-  string attempt_id = 2;
-  string lease_token = 3;
+  reserved 1, 2, 3;
+  reserved "task_id", "attempt_id", "lease_token";
   uint64 after_sequence = 4;
   uint64 revision = 5;
   string text = 6;
@@ -3198,7 +3232,8 @@ message ListWorkstreamPostsResponse {
 }
 
 message ReadAttemptWorkstreamRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   optional uint64 after_sequence = 2;
   uint32 limit = 3;
   string cursor = 4;
@@ -3210,7 +3245,8 @@ message ReadAttemptWorkstreamResponse {
 }
 
 message PostAttemptWorkstreamRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string operation_id = 2;
   string body = 3;
   repeated string to_tag_ids = 4;

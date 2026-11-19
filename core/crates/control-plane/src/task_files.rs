@@ -2,11 +2,12 @@
 //! slice 1). A Worker Host reports where a running Attempt's local checkout is; a client on the
 //! same machine, proven by presenting the host's machine identifier, gets that directory and lists
 //! and reads it itself. The Control Plane returns locations only, never file content.
+use crate::AttemptAccess;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
 use tonic::{Request, Response, Status};
 
 use crate::{
-    ControlPlane, HostAuthority, Store, StoreError,
+    ControlPlane, Store, StoreError,
     store::{Result, invalid, lease_is_live, owned, task_row},
 };
 
@@ -24,13 +25,11 @@ impl Store {
     /// Records where a running Attempt's local checkout is on its Worker Host.
     pub async fn report_task_files_location(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &ReportTaskFilesLocationRequest,
     ) -> Result<ReportTaskFilesLocationResponse> {
-        let attempt = input
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Attempt identity is required"))?;
+        let host = authority.host();
+        let attempt = authority.lease();
         let path = &input.local_path;
         if !path.starts_with('/')
             || path.len() > MAX_LOCAL_PATH
@@ -162,7 +161,7 @@ impl attempt_task_files_server::AttemptTaskFiles for ControlPlane {
         &self,
         request: Request<ReportTaskFilesLocationRequest>,
     ) -> std::result::Result<Response<ReportTaskFilesLocationResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .report_task_files_location(&host, request.get_ref())

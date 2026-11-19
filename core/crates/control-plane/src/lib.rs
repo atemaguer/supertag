@@ -72,7 +72,7 @@ pub use policy::{
     normalize_tag_execution,
 };
 pub use remote_workspaces::validate_manifest_workspace;
-pub use store::{HostAuthority, Role, Store, StoreError};
+pub use store::{AttemptAccess, HostAuthority, Role, Store, StoreError};
 pub use surface_policy::{validate_manifest_account, validate_manifest_location};
 pub use watch::OperatorWatch;
 pub use workspace_landings::{GIT_DELIVERY_PRINCIPAL, LandingClaimer};
@@ -187,6 +187,19 @@ impl ControlPlane {
         Ok(HostAuthority::new(principal, host_generation(request)?)?)
     }
 
+    /// The Attempt an ATTEMPT call acts for. The API tier names the presented Attempt credential
+    /// by its SHA-256; it is resolved here on every call, so a finished, reclaimed, or expired
+    /// Attempt, or a revoked or re-registered host, ends it on the next call.
+    async fn attempt<T>(&self, request: &Request<T>) -> Result<AttemptAccess, Status> {
+        let principal = self.principal(request, supertag_protocol::ATTEMPT_PRINCIPAL_PREFIX)?;
+        let digest = hex_digest(&principal[supertag_protocol::ATTEMPT_PRINCIPAL_PREFIX.len()..])
+            .ok_or_else(|| Status::permission_denied("invalid caller identity"))?;
+        self.store
+            .resolve_attempt_credential(&digest)
+            .await?
+            .ok_or_else(|| Status::unauthenticated("valid bearer credential required"))
+    }
+
     /// Runs the periodic maintenance pass when this replica claims the current tick. Replicas
     /// sharing one database run one pass per `interval` between them.
     pub async fn maintain(&self, interval: std::time::Duration) -> anyhow::Result<bool> {
@@ -276,6 +289,22 @@ impl ControlPlane {
             .await?;
         Ok(format!("connector:{account}"))
     }
+}
+
+/// 32 bytes from 64 lowercase hex digits.
+fn hex_digest(text: &str) -> Option<Vec<u8>> {
+    if text.len() != 64 {
+        return None;
+    }
+    (0..32)
+        .map(|index| {
+            let pair = text.get(index * 2..index * 2 + 2)?;
+            pair.bytes()
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+                .then(|| u8::from_str_radix(pair, 16).ok())
+                .flatten()
+        })
+        .collect()
 }
 
 impl From<StoreError> for Status {
@@ -522,33 +551,25 @@ impl operator_server::Operator for ControlPlane {
 impl worker_host_server::WorkerHost for ControlPlane {
     async fn get_attempt_history(
         &self,
-        request: Request<InspectAttemptRequest>,
+        request: Request<GetAttemptHistoryRequest>,
     ) -> Result<Response<AttemptHistory>, Status> {
-        let host = self.host_authority(&request)?;
-        Ok(Response::new(
-            self.store
-                .get_attempt_history(&host, request.get_ref())
-                .await?,
-        ))
+        let host = self.attempt(&request).await?;
+        Ok(Response::new(self.store.get_attempt_history(&host).await?))
     }
 
     async fn get_context_pins(
         &self,
-        request: Request<InspectAttemptRequest>,
+        request: Request<GetContextPinsRequest>,
     ) -> Result<Response<ContextResolutionManifest>, Status> {
-        let host = self.host_authority(&request)?;
-        Ok(Response::new(
-            self.store
-                .get_context_pins(&host, request.get_ref())
-                .await?,
-        ))
+        let host = self.attempt(&request).await?;
+        Ok(Response::new(self.store.get_context_pins(&host).await?))
     }
 
     async fn commit_context_resolution(
         &self,
         request: Request<CommitContextResolutionRequest>,
     ) -> Result<Response<ContextResolutionManifest>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .commit_context_resolution(&host, request.get_ref())
@@ -571,7 +592,7 @@ impl worker_host_server::WorkerHost for ControlPlane {
         &self,
         request: Request<AskQuestionRequest>,
     ) -> Result<Response<ObjectiveQuestion>, Status> {
-        let authority = self.host_authority(&request)?;
+        let authority = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .ask_question(&authority, &request.into_inner())
@@ -581,13 +602,11 @@ impl worker_host_server::WorkerHost for ControlPlane {
 
     async fn get_attempt_capabilities(
         &self,
-        request: Request<InspectAttemptRequest>,
+        request: Request<GetAttemptCapabilitiesRequest>,
     ) -> Result<Response<AttemptCapabilities>, Status> {
-        let authority = self.host_authority(&request)?;
+        let authority = self.attempt(&request).await?;
         Ok(Response::new(
-            self.store
-                .attempt_capabilities(&authority, &request.into_inner())
-                .await?,
+            self.store.attempt_capabilities(&authority).await?,
         ))
     }
 
@@ -630,14 +649,14 @@ impl worker_host_server::WorkerHost for ControlPlane {
     async fn start_task(
         &self,
         request: Request<StartTaskRequest>,
-    ) -> Result<Response<Task>, Status> {
+    ) -> Result<Response<StartTaskResponse>, Status> {
         let principal = self.host_authority(&request)?;
-        let task = self
+        let started = self
             .store
             .start_task(&principal, &request.into_inner())
             .await?;
         supertag_protocol::crash_point("control-plane.start", "after-commit");
-        Ok(Response::new(task))
+        Ok(Response::new(started))
     }
 
     async fn inspect_attempt(
@@ -721,7 +740,7 @@ impl worker_host_server::WorkerHost for ControlPlane {
         &self,
         request: Request<ReportNetworkLogRequest>,
     ) -> Result<Response<ReportNetworkLogResponse>, Status> {
-        let principal = self.host_authority(&request)?;
+        let principal = self.attempt(&request).await?;
         self.store
             .report_network_log(&principal, &request.into_inner())
             .await?;
@@ -792,7 +811,7 @@ impl worker_host_server::WorkerHost for ControlPlane {
         &self,
         request: Request<ReportAttemptMilestoneRequest>,
     ) -> Result<Response<ReportAttemptMilestoneResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         self.store
             .report_attempt_milestone(&host, &request.into_inner())
             .await?;
@@ -815,7 +834,7 @@ impl worker_host_server::WorkerHost for ControlPlane {
         &self,
         request: Request<ReportAttemptUsageRequest>,
     ) -> Result<Response<ReportAttemptUsageResponse>, Status> {
-        let principal = self.host_authority(&request)?;
+        let principal = self.attempt(&request).await?;
         self.store
             .report_attempt_usage(&principal, &request.into_inner())
             .await?;
@@ -826,7 +845,7 @@ impl worker_host_server::WorkerHost for ControlPlane {
         &self,
         request: Request<AppendEventRequest>,
     ) -> Result<Response<TaskEvent>, Status> {
-        let principal = self.host_authority(&request)?;
+        let principal = self.attempt(&request).await?;
         let event = self
             .store
             .append_event(&principal, &request.into_inner())
@@ -839,7 +858,7 @@ impl worker_host_server::WorkerHost for ControlPlane {
         &self,
         request: Request<PublishTaskTextRequest>,
     ) -> Result<Response<PublishTaskTextResponse>, Status> {
-        let principal = self.host_authority(&request)?;
+        let principal = self.attempt(&request).await?;
         self.store
             .publish_text(&principal, &request.into_inner())
             .await?;
@@ -1096,11 +1115,9 @@ impl attempt_inputs_server::AttemptInputs for ControlPlane {
         &self,
         request: Request<TakeInputRequest>,
     ) -> Result<Response<TakeInputResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
-            self.store
-                .take_input_for_host(&host, &request.into_inner())
-                .await?,
+            self.store.take_input_for_attempt(&host).await?,
         ))
     }
 
@@ -1108,7 +1125,7 @@ impl attempt_inputs_server::AttemptInputs for ControlPlane {
         &self,
         request: Request<SettleInputRequest>,
     ) -> Result<Response<LiveInput>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .settle_input(&host, &request.into_inner())

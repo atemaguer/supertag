@@ -70,7 +70,6 @@ async fn capture(
 ) -> CapturedArtifact {
     let request = CommitArtifactCaptureRequest {
         source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
-        attempt: Some(attempt.clone()),
         operation_id: operation.into(),
         description: Some(ArtifactDescription {
             title: "Immutable report".into(),
@@ -91,10 +90,19 @@ async fn capture(
         ..Default::default()
     };
     store
-        .reserve_artifact_capture(host, &request)
+        .reserve_artifact_capture(
+            &supertag_control_plane::AttemptAccess::new(host, attempt),
+            &request,
+        )
         .await
         .unwrap();
-    store.commit_artifact_capture(host, &request).await.unwrap()
+    store
+        .commit_artifact_capture(
+            &supertag_control_plane::AttemptAccess::new(host, attempt),
+            &request,
+        )
+        .await
+        .unwrap()
 }
 
 async fn exercise(url: &str) {
@@ -239,7 +247,6 @@ async fn exercise(url: &str) {
     assert_eq!(consumer.task_id, accepted.task_id);
     let operation = supertag_protocol::task_artifact_inputs::operation_id(&pinned.artifact_id);
     let mut acquire = AcquireArtifactRequest {
-        attempt: Some(consumer.clone()),
         operation_id: operation.clone(),
         artifact_id: pinned.artifact_id.clone(),
         paths: vec!["other.txt".into()],
@@ -263,15 +270,40 @@ async fn exercise(url: &str) {
         ..acquire.clone()
     };
     assert!(matches!(
-        store.acquire_artifact(&host, &ordinary).await,
+        store
+            .acquire_artifact(
+                &supertag_control_plane::AttemptAccess::new(&host, &consumer),
+                &ordinary
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
-    assert!(store.acquire_artifact(&host, &acquire).await.is_err());
+    assert!(
+        store
+            .acquire_artifact(
+                &supertag_control_plane::AttemptAccess::new(&host, &consumer),
+                &acquire
+            )
+            .await
+            .is_err()
+    );
     acquire.paths = vec!["report.txt".into()];
-    let receipt = store.acquire_artifact(&host, &acquire).await.unwrap();
+    let receipt = store
+        .acquire_artifact(
+            &supertag_control_plane::AttemptAccess::new(&host, &consumer),
+            &acquire,
+        )
+        .await
+        .unwrap();
     assert_eq!(receipt.files, vec![submitted.files[1].clone()]);
     assert_eq!(
-        store.acquire_artifact(&host, &acquire).await.unwrap(),
+        store
+            .acquire_artifact(
+                &supertag_control_plane::AttemptAccess::new(&host, &consumer),
+                &acquire
+            )
+            .await
+            .unwrap(),
         receipt
     );
 
@@ -362,9 +394,8 @@ async fn withdrawal_blocks_delivery(
     let operation_id = supertag_protocol::task_artifact_inputs::operation_id(artifact_id);
     let acquisition = store
         .acquire_artifact(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
             &AcquireArtifactRequest {
-                attempt: Some(attempt.clone()),
                 destination: Some(
                     supertag_protocol::artifacts::materialized_artifact_directory(
                         &attempt.attempt_id,
@@ -380,27 +411,37 @@ async fn withdrawal_blocks_delivery(
         .await
         .unwrap();
     let file = GetAcquiredArtifactFileRequest {
-        attempt: Some(attempt.clone()),
         acquisition_id: acquisition.acquisition_id.clone(),
         path: "report.txt".into(),
     };
     assert_eq!(
-        store.get_acquired_artifact_file(host, &file).await.unwrap(),
+        store
+            .get_acquired_artifact_file(
+                &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                &file
+            )
+            .await
+            .unwrap(),
         acquisition.files[0]
     );
     let settlement = SettleArtifactAcquisitionRequest {
-        attempt: Some(attempt),
         acquisition_id: acquisition.acquisition_id,
         state: ArtifactAcquisitionState::Delivered.into(),
     };
     if response_lost {
         let acknowledged = store
-            .settle_artifact_acquisition(host, &settlement)
+            .settle_artifact_acquisition(
+                &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                &settlement,
+            )
             .await
             .unwrap();
         assert_eq!(
             store
-                .settle_artifact_acquisition(host, &settlement)
+                .settle_artifact_acquisition(
+                    &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                    &settlement
+                )
                 .await
                 .unwrap(),
             acknowledged
@@ -416,9 +457,22 @@ async fn withdrawal_blocks_delivery(
         )
         .await
         .unwrap();
-    assert!(store.get_acquired_artifact_file(host, &file).await.is_err());
+    assert!(
+        store
+            .get_acquired_artifact_file(
+                &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                &file
+            )
+            .await
+            .is_err()
+    );
     assert!(matches!(
-        store.settle_artifact_acquisition(host, &settlement).await,
+        store
+            .settle_artifact_acquisition(
+                &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                &settlement
+            )
+            .await,
         Err(StoreError::NotFound(_))
     ));
 }

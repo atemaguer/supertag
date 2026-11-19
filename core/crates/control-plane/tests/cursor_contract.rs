@@ -449,7 +449,7 @@ async fn contract(url: &str) {
         )
         .await
         .unwrap();
-    assert_eq!(task.harness_kind, HarnessKind::Cursor as i32);
+    assert_eq!(task.task.unwrap().harness_kind, HarnessKind::Cursor as i32);
     store
         .finish_task(
             &host,

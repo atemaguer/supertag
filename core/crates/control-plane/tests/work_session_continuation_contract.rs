@@ -74,22 +74,16 @@ async fn finish(
         .await
         .unwrap();
 }
-fn start(attempt: &InspectAttemptRequest, operation: &str) -> StartWorkSessionRequest {
+fn start(operation: &str) -> StartWorkSessionRequest {
     StartWorkSessionRequest {
-        attempt: Some(attempt.clone()),
         operation_id: operation.into(),
         title: "Review fixture".into(),
         instruction: "Read the fixture".into(),
         ..Default::default()
     }
 }
-fn next(
-    attempt: &InspectAttemptRequest,
-    session: &str,
-    operation: &str,
-) -> ContinueWorkSessionRequest {
+fn next(session: &str, operation: &str) -> ContinueWorkSessionRequest {
     ContinueWorkSessionRequest {
-        attempt: Some(attempt.clone()),
         operation_id: operation.into(),
         work_session_id: session.into(),
         message: "Use the accepted answer".into(),
@@ -119,14 +113,20 @@ async fn contract(url: String) {
         .unwrap();
     let parent = submit(&store, "parent").await;
     let first = run(&store, &host, &parent.task_id).await;
-    let started_request = start(&first, "start");
+    let started_request = start("start");
     let started = store
-        .start_work_session(&host, &started_request)
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &first),
+            &started_request,
+        )
         .await
         .unwrap();
     assert!(matches!(
         store
-            .continue_work_session(&host, &next(&first, &started.work_session_id, "premature"))
+            .continue_work_session(
+                &supertag_control_plane::AttemptAccess::new(&host, &first),
+                &next(&started.work_session_id, "premature")
+            )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
@@ -155,7 +155,10 @@ async fn contract(url: String) {
     let early = run(&store, &host, &early.task_id).await;
     assert!(matches!(
         store
-            .continue_work_session(&host, &next(&early, &started.work_session_id, "unreported"))
+            .continue_work_session(
+                &supertag_control_plane::AttemptAccess::new(&host, &early),
+                &next(&started.work_session_id, "unreported")
+            )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
@@ -165,8 +168,8 @@ async fn contract(url: String) {
     assert!(matches!(
         store
             .continue_work_session(
-                &host,
-                &next(&first_report, &started.work_session_id, "ordinary-report")
+                &supertag_control_plane::AttemptAccess::new(&host, &first_report),
+                &next(&started.work_session_id, "ordinary-report")
             )
             .await,
         Err(StoreError::PermissionDenied)
@@ -178,8 +181,8 @@ async fn contract(url: String) {
     assert!(matches!(
         store
             .continue_work_session(
-                &host,
-                &next(&outsider, &started.work_session_id, "wrong-parent")
+                &supertag_control_plane::AttemptAccess::new(&host, &outsider),
+                &next(&started.work_session_id, "wrong-parent")
             )
             .await,
         Err(StoreError::NotFound(_))
@@ -198,8 +201,8 @@ async fn contract(url: String) {
     assert!(matches!(
         store
             .continue_work_session(
-                &host,
-                &next(&changed, &started.work_session_id, "changed-authority")
+                &supertag_control_plane::AttemptAccess::new(&host, &changed),
+                &next(&started.work_session_id, "changed-authority")
             )
             .await,
         Err(StoreError::FailedPrecondition(_))
@@ -215,14 +218,20 @@ async fn contract(url: String) {
         .unwrap();
     let later = submit(&store, "parent").await;
     let later_attempt = run(&store, &host, &later.task_id).await;
-    let request = next(&later_attempt, &started.work_session_id, "continue");
+    let request = next(&started.work_session_id, "continue");
     assert!(matches!(
-        store.continue_work_session(&other, &request).await,
+        store
+            .continue_work_session(
+                &supertag_control_plane::AttemptAccess::new(&other, &later_attempt),
+                &request
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
+    let access = supertag_control_plane::AttemptAccess::new(&host, &later_attempt);
     let (one, two) = tokio::join!(
-        store.continue_work_session(&host, &request),
-        store.continue_work_session(&host, &request)
+        store.continue_work_session(&access, &request),
+        store.continue_work_session(&access, &request)
     );
     let continued = one.unwrap();
     assert_eq!(continued, two.unwrap());
@@ -236,26 +245,37 @@ async fn contract(url: String) {
     let mut conflict = request.clone();
     conflict.message = "Different answer".into();
     assert!(matches!(
-        store.continue_work_session(&host, &conflict).await,
+        store
+            .continue_work_session(
+                &supertag_control_plane::AttemptAccess::new(&host, &later_attempt),
+                &conflict
+            )
+            .await,
         Err(StoreError::Conflict(_))
     ));
     assert!(matches!(
         store
-            .start_work_session(&host, &start(&later_attempt, "continue"))
+            .start_work_session(
+                &supertag_control_plane::AttemptAccess::new(&host, &later_attempt),
+                &start("continue")
+            )
             .await,
         Err(StoreError::Conflict(_))
     ));
     assert!(matches!(
         store
             .continue_work_session(
-                &host,
-                &next(&later_attempt, &started.work_session_id, "second-operation")
+                &supertag_control_plane::AttemptAccess::new(&host, &later_attempt),
+                &next(&started.work_session_id, "second-operation")
             )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     let replay_start = store
-        .start_work_session(&host, &started_request)
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &first),
+            &started_request,
+        )
         .await
         .unwrap();
     assert_eq!(replay_start.latest_task_id, started.latest_task_id);
@@ -266,7 +286,13 @@ async fn contract(url: String) {
         .unwrap()
         .with_execution_clock(|| NOW);
     assert_eq!(
-        store.continue_work_session(&host, &request).await.unwrap(),
+        store
+            .continue_work_session(
+                &supertag_control_plane::AttemptAccess::new(&host, &later_attempt),
+                &request
+            )
+            .await
+            .unwrap(),
         continued
     );
     finish(&store, &host, &later_attempt, None).await;
@@ -283,35 +309,47 @@ async fn contract(url: String) {
     finish(&store, &host, &next_report, None).await;
     // A lost Continue response stays tied to its original child even after settlement.
     assert_eq!(
-        store.continue_work_session(&host, &request).await.unwrap(),
+        store
+            .continue_work_session(
+                &supertag_control_plane::AttemptAccess::new(&host, &later_attempt),
+                &request
+            )
+            .await
+            .unwrap(),
         continued
     );
     let last = submit(&store, "parent").await;
     let last = run(&store, &host, &last.task_id).await;
     store
         .continue_work_session(
-            &host,
-            &next(&last, &started.work_session_id, "budget-continue"),
+            &supertag_control_plane::AttemptAccess::new(&host, &last),
+            &next(&started.work_session_id, "budget-continue"),
         )
         .await
         .unwrap();
     for i in 0..3 {
         store
-            .start_work_session(&host, &start(&last, &format!("budget-start-{i}")))
+            .start_work_session(
+                &supertag_control_plane::AttemptAccess::new(&host, &last),
+                &start(&format!("budget-start-{i}")),
+            )
             .await
             .unwrap();
     }
     assert!(matches!(
         store
-            .start_work_session(&host, &start(&last, "fifth-effect"))
+            .start_work_session(
+                &supertag_control_plane::AttemptAccess::new(&host, &last),
+                &start("fifth-effect")
+            )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     assert!(matches!(
         store
             .continue_work_session(
-                &host,
-                &next(&last, &started.work_session_id, "budget-start-0")
+                &supertag_control_plane::AttemptAccess::new(&host, &last),
+                &next(&started.work_session_id, "budget-start-0")
             )
             .await,
         Err(StoreError::Conflict(_))
@@ -338,11 +376,17 @@ async fn objective_report_continuation(url: &str) {
         .unwrap();
     let owner = run(&store, &host, &objective.starting_task_id).await;
     let first = store
-        .start_work_session(&host, &start(&owner, "first"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &owner),
+            &start("first"),
+        )
         .await
         .unwrap();
     let second = store
-        .start_work_session(&host, &start(&owner, "second"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &owner),
+            &start("second"),
+        )
         .await
         .unwrap();
     finish(&store, &host, &owner, None).await;
@@ -354,14 +398,20 @@ async fn objective_report_continuation(url: &str) {
     assert!(
         store
             .continue_work_session(
-                &host,
-                &next(&first_report, &second.work_session_id, "another-report")
+                &supertag_control_plane::AttemptAccess::new(&host, &first_report),
+                &next(&second.work_session_id, "another-report")
             )
             .await
             .is_err()
     );
-    let request = next(&first_report, &first.work_session_id, "own-report");
-    let continued = store.continue_work_session(&host, &request).await.unwrap();
+    let request = next(&first.work_session_id, "own-report");
+    let continued = store
+        .continue_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &first_report),
+            &request,
+        )
+        .await
+        .unwrap();
     assert_eq!(continued.starter_task_id, first_report.task_id);
     assert_eq!(
         continued.objective_id.as_deref(),
@@ -371,7 +421,10 @@ async fn objective_report_continuation(url: &str) {
     // current pool and capacity. Derived approval-report turns stay scoped.
     assert!(
         store
-            .attempt_capabilities(&host, &first_report)
+            .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(
+                &host,
+                &first_report
+            ))
             .await
             .unwrap()
             .may_start_work_session
@@ -389,7 +442,13 @@ async fn objective_report_continuation(url: &str) {
     let last_report = run(&store, &host, &report(&store, &first.work_session_id).await).await;
     finish(&store, &host, &last_report, None).await;
     assert_eq!(
-        store.continue_work_session(&host, &request).await.unwrap(),
+        store
+            .continue_work_session(
+                &supertag_control_plane::AttemptAccess::new(&host, &first_report),
+                &request
+            )
+            .await
+            .unwrap(),
         continued
     );
     store.close().await;
@@ -434,11 +493,17 @@ async fn terminal_and_role_boundaries(url: &str) {
     let parent = submit(&store, "boundary-parent").await;
     let parent = run(&store, &host, &parent.task_id).await;
     let failed = store
-        .start_work_session(&host, &start(&parent, "failed-child"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &parent),
+            &start("failed-child"),
+        )
         .await
         .unwrap();
     let cancelled = store
-        .start_work_session(&host, &start(&parent, "cancelled-child"))
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &parent),
+            &start("cancelled-child"),
+        )
         .await
         .unwrap();
     finish(&store, &host, &parent, None).await;
@@ -469,16 +534,16 @@ async fn terminal_and_role_boundaries(url: &str) {
     assert!(matches!(
         store
             .continue_work_session(
-                &host,
-                &next(&parent, &cancelled.work_session_id, "cancelled")
+                &supertag_control_plane::AttemptAccess::new(&host, &parent),
+                &next(&cancelled.work_session_id, "cancelled")
             )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     let accepted = store
         .continue_work_session(
-            &host,
-            &next(&parent, &failed.work_session_id, "retry-failed"),
+            &supertag_control_plane::AttemptAccess::new(&host, &parent),
+            &next(&failed.work_session_id, "retry-failed"),
         )
         .await
         .unwrap();
@@ -507,10 +572,15 @@ async fn terminal_and_role_boundaries(url: &str) {
         .unwrap();
     let parent = submit(&store, "boundary-parent").await;
     let parent = run(&store, &host, &parent.task_id).await;
-    let request = next(&parent, &failed.work_session_id, "changed-role");
+    let request = next(&failed.work_session_id, "changed-role");
     assert!(
         matches!(
-            store.continue_work_session(&host, &request).await,
+            store
+                .continue_work_session(
+                    &supertag_control_plane::AttemptAccess::new(&host, &parent),
+                    &request
+                )
+                .await,
             Err(StoreError::FailedPrecondition(_))
         ),
         "a Role revision is part of accepted authority even if native action strings are unchanged"
@@ -522,7 +592,12 @@ async fn terminal_and_role_boundaries(url: &str) {
         .with_execution_clock(|| NOW + 40_000);
     assert!(
         matches!(
-            store.continue_work_session(&host, &request).await,
+            store
+                .continue_work_session(
+                    &supertag_control_plane::AttemptAccess::new(&host, &parent),
+                    &request
+                )
+                .await,
             Err(StoreError::FailedPrecondition(_))
         ),
         "a stale Attempt cannot create a continuation"

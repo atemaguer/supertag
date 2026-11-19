@@ -54,7 +54,8 @@ message TagSessionSummary {
 
 // At most 20 per page (default 20).
 message ListTagSessionsRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   uint32 limit = 2;
   uint32 offset = 3;
 }
@@ -67,7 +68,8 @@ message ListTagSessionsResponse {
 // `query` is 1 to 200 characters, matched case-insensitively against each
 // succeeded Task's request and result.
 message SearchTagSessionsRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string query = 2;
   uint32 limit = 3;
 }
@@ -91,7 +93,8 @@ message SearchTagSessionsResponse {
 // One page of a visible Session's finished Tasks of the caller's Tag, newest
 // page first; `before` is a previous page's `next_before`.
 message ReadTagSessionRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string session_id = 2;
   uint32 limit = 3;
   optional uint64 before = 4;
@@ -118,7 +121,8 @@ message ReadTagSessionResponse {
 // lines, and its progress. `after` is a previous page's `next_after`. The caller's own Session's
 // turns are visible too.
 message ReadTagTurnRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string task_id = 2;
   optional uint64 after = 3;
   // At most 100 per page (default 50).
@@ -146,7 +150,8 @@ message TagObjectiveSummary {
 }
 
 message ListTagObjectivesRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   uint32 limit = 2;
   uint32 offset = 3;
 }
@@ -161,7 +166,8 @@ message ListTagObjectivesResponse {
 // Omit `objective_id` for the Objective this turn works for. An Objective's
 // own turn reads only its own Objective.
 message ReadTagObjectiveRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   optional string objective_id = 2;
 }
 

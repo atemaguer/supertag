@@ -64,11 +64,15 @@ async fn say(store: &Store, text: &str) {
 async fn wrote(store: &Store, host: &HostAuthority, turn: &InspectAttemptRequest, text: &str) {
     store
         .append_event(
-            host,
+            &supertag_control_plane::AttemptAccess::new(
+                host,
+                &supertag_protocol::v2::InspectAttemptRequest {
+                    task_id: turn.task_id.clone(),
+                    attempt_id: turn.attempt_id.clone(),
+                    lease_token: turn.lease_token.clone(),
+                },
+            ),
             &AppendEventRequest {
-                task_id: turn.task_id.clone(),
-                attempt_id: turn.attempt_id.clone(),
-                lease_token: turn.lease_token.clone(),
                 sequence: 1,
                 text: text.into(),
                 kind: TaskEventKind::Message as i32,
@@ -78,13 +82,8 @@ async fn wrote(store: &Store, host: &HostAuthority, turn: &InspectAttemptRequest
         .unwrap();
 }
 
-fn harness_finished(
-    turn: &InspectAttemptRequest,
-    reply: Option<&str>,
-    quiet: bool,
-) -> ReportAttemptMilestoneRequest {
+fn harness_finished(reply: Option<&str>, quiet: bool) -> ReportAttemptMilestoneRequest {
     ReportAttemptMilestoneRequest {
-        attempt: Some(turn.clone()),
         milestone: AttemptMilestone::HarnessFinished as i32,
         reply: reply.map(str::to_owned),
         quiet,
@@ -159,7 +158,10 @@ async fn contract(url: String) {
     let turn = next(&store, &host).await;
     wrote(&store, &host, &turn, "Hi there").await;
     store
-        .report_attempt_milestone(&host, &harness_finished(&turn, Some("Hi there"), false))
+        .report_attempt_milestone(
+            &supertag_control_plane::AttemptAccess::new(&host, &turn),
+            &harness_finished(Some("Hi there"), false),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -190,7 +192,10 @@ async fn contract(url: String) {
     );
     // A repeated milestone changes nothing; a reply on another milestone is refused.
     store
-        .report_attempt_milestone(&host, &harness_finished(&turn, Some("Changed"), false))
+        .report_attempt_milestone(
+            &supertag_control_plane::AttemptAccess::new(&host, &turn),
+            &harness_finished(Some("Changed"), false),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -202,11 +207,14 @@ async fn contract(url: String) {
             .as_deref(),
         Some("Hi there")
     );
-    let mut misplaced = harness_finished(&turn, Some("Early"), false);
+    let mut misplaced = harness_finished(Some("Early"), false);
     misplaced.milestone = AttemptMilestone::AdapterAttached as i32;
     assert!(
         store
-            .report_attempt_milestone(&host, &misplaced)
+            .report_attempt_milestone(
+                &supertag_control_plane::AttemptAccess::new(&host, &turn),
+                &misplaced
+            )
             .await
             .is_err()
     );
@@ -226,8 +234,8 @@ async fn contract(url: String) {
     wrote(&store, &host, &turn, "Done, delivering").await;
     store
         .report_attempt_milestone(
-            &host,
-            &harness_finished(&turn, Some("Done, delivering"), false),
+            &supertag_control_plane::AttemptAccess::new(&host, &turn),
+            &harness_finished(Some("Done, delivering"), false),
         )
         .await
         .unwrap();
@@ -257,7 +265,10 @@ async fn contract(url: String) {
     say(&store, "Anything?").await;
     let turn = next(&store, &host).await;
     store
-        .report_attempt_milestone(&host, &harness_finished(&turn, Some("Nothing new"), true))
+        .report_attempt_milestone(
+            &supertag_control_plane::AttemptAccess::new(&host, &turn),
+            &harness_finished(Some("Nothing new"), true),
+        )
         .await
         .unwrap();
     let finished = store
@@ -287,7 +298,10 @@ async fn contract(url: String) {
     assert_eq!(store.sweep_schedules().await.unwrap(), 1);
     let turn = next(&store, &host).await;
     store
-        .report_attempt_milestone(&host, &harness_finished(&turn, Some("All green"), true))
+        .report_attempt_milestone(
+            &supertag_control_plane::AttemptAccess::new(&host, &turn),
+            &harness_finished(Some("All green"), true),
+        )
         .await
         .unwrap();
     let task = store.get_task(&turn.task_id).await.unwrap();
@@ -303,7 +317,10 @@ async fn contract(url: String) {
     say(&store, "Try again").await;
     let turn = next(&store, &host).await;
     store
-        .report_attempt_milestone(&host, &harness_finished(&turn, None, false))
+        .report_attempt_milestone(
+            &supertag_control_plane::AttemptAccess::new(&host, &turn),
+            &harness_finished(None, false),
+        )
         .await
         .unwrap();
     let task = store.get_task(&turn.task_id).await.unwrap();
@@ -394,7 +411,10 @@ async fn surface(url: String) {
         acknowledge(&store, &format!("{event}-ack"), ack).await;
         let turn = next(&store, &host).await;
         store
-            .report_attempt_milestone(&host, &harness_finished(&turn, Some("Fixed it."), false))
+            .report_attempt_milestone(
+                &supertag_control_plane::AttemptAccess::new(&host, &turn),
+                &harness_finished(Some("Fixed it."), false),
+            )
             .await
             .unwrap();
         clock.fetch_add(

@@ -37,10 +37,9 @@ impl HarnessEffects for Bridge {
         }
         let mut upstream = authenticated_request(
             BeginEffectRequest {
-                attempt: Some(self.attempt()),
                 effect: Some(request.into_inner()),
             },
-            &self.host_token,
+            &self.attempt_token,
             None,
         )?;
         upstream.set_timeout(Duration::from_secs(5));
@@ -55,10 +54,9 @@ impl HarnessEffects for Bridge {
         self.require_attached()?;
         let mut upstream = authenticated_request(
             CompleteEffectRequest {
-                attempt: Some(self.attempt()),
                 effect: Some(request.into_inner()),
             },
-            &self.host_token,
+            &self.attempt_token,
             None,
         )?;
         upstream.set_timeout(Duration::from_secs(5));
@@ -73,10 +71,9 @@ impl HarnessEffects for Bridge {
         self.require_attached()?;
         let mut upstream = authenticated_request(
             FailEffectRequest {
-                attempt: Some(self.attempt()),
                 effect: Some(request.into_inner()),
             },
-            &self.host_token,
+            &self.attempt_token,
             None,
         )?;
         upstream.set_timeout(Duration::from_secs(5));

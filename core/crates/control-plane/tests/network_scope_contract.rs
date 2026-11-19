@@ -284,11 +284,6 @@ async fn contract(url: &str) {
 
     // Only the owning host records the Attempt's network log; a later report replaces it.
     let request = |allowed: u64| ReportNetworkLogRequest {
-        attempt: Some(InspectAttemptRequest {
-            task_id: scoped.clone(),
-            attempt_id: assignment.attempt_id.clone(),
-            lease_token: assignment.lease_token.clone(),
-        }),
         log: Some(NetworkLog {
             requests: vec![NetworkRequestRecord {
                 at_ms: NOW,
@@ -304,14 +299,85 @@ async fn contract(url: &str) {
             ..Default::default()
         }),
     };
-    assert!(store.report_network_log(&bare, &request(1)).await.is_err());
+    assert!(
+        store
+            .report_network_log(
+                &supertag_control_plane::AttemptAccess::new(
+                    &bare,
+                    &InspectAttemptRequest {
+                        task_id: scoped.clone(),
+                        attempt_id: assignment.attempt_id.clone(),
+                        lease_token: assignment.lease_token.clone(),
+                    }
+                ),
+                &request(1)
+            )
+            .await
+            .is_err()
+    );
     let mut invalid = request(0);
-    assert!(store.report_network_log(&codex, &invalid).await.is_err());
+    assert!(
+        store
+            .report_network_log(
+                &supertag_control_plane::AttemptAccess::new(
+                    &codex,
+                    &InspectAttemptRequest {
+                        task_id: scoped.clone(),
+                        attempt_id: assignment.attempt_id.clone(),
+                        lease_token: assignment.lease_token.clone(),
+                    }
+                ),
+                &invalid
+            )
+            .await
+            .is_err()
+    );
     invalid.log.as_mut().unwrap().allowed = 1;
     invalid.log.as_mut().unwrap().requests[0].path = "/a\nb".into();
-    assert!(store.report_network_log(&codex, &invalid).await.is_err());
-    store.report_network_log(&codex, &request(1)).await.unwrap();
-    store.report_network_log(&codex, &request(7)).await.unwrap();
+    assert!(
+        store
+            .report_network_log(
+                &supertag_control_plane::AttemptAccess::new(
+                    &codex,
+                    &InspectAttemptRequest {
+                        task_id: scoped.clone(),
+                        attempt_id: assignment.attempt_id.clone(),
+                        lease_token: assignment.lease_token.clone(),
+                    }
+                ),
+                &invalid
+            )
+            .await
+            .is_err()
+    );
+    store
+        .report_network_log(
+            &supertag_control_plane::AttemptAccess::new(
+                &codex,
+                &InspectAttemptRequest {
+                    task_id: scoped.clone(),
+                    attempt_id: assignment.attempt_id.clone(),
+                    lease_token: assignment.lease_token.clone(),
+                },
+            ),
+            &request(1),
+        )
+        .await
+        .unwrap();
+    store
+        .report_network_log(
+            &supertag_control_plane::AttemptAccess::new(
+                &codex,
+                &InspectAttemptRequest {
+                    task_id: scoped.clone(),
+                    attempt_id: assignment.attempt_id.clone(),
+                    lease_token: assignment.lease_token.clone(),
+                },
+            ),
+            &request(7),
+        )
+        .await
+        .unwrap();
     let logs = store.get_task(&scoped).await.unwrap().network_logs;
     assert_eq!(logs.len(), 1);
     assert_eq!(logs[0].attempt_id, assignment.attempt_id);

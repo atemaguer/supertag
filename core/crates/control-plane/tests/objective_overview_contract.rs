@@ -526,9 +526,8 @@ async fn objective_overview(store: &Store, host: &HostAuthority, clock: &AtomicI
     assert_eq!(running.team.as_ref().unwrap().running_turns, 1);
     let work = store
         .start_work_session(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, &turn),
             &StartWorkSessionRequest {
-                attempt: Some(turn.clone()),
                 operation_id: "build".into(),
                 title: "Build the exporter".into(),
                 instruction: "Write the exporter".into(),
@@ -540,9 +539,8 @@ async fn objective_overview(store: &Store, host: &HostAuthority, clock: &AtomicI
         .unwrap();
     store
         .post_attempt_workstream(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, &turn),
             &PostAttemptWorkstreamRequest {
-                attempt: Some(turn.clone()),
                 operation_id: "post".into(),
                 body: "Exporter handed to helper.".into(),
                 to_tag_ids: vec!["helper".into()],
@@ -552,9 +550,8 @@ async fn objective_overview(store: &Store, host: &HostAuthority, clock: &AtomicI
         .unwrap();
     store
         .report_attempt_usage(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, &turn),
             &ReportAttemptUsageRequest {
-                attempt: Some(turn.clone()),
                 sequence: 1,
                 native_usage: Some(NativeTokenUsage {
                     input_tokens: 10,
@@ -570,9 +567,8 @@ async fn objective_overview(store: &Store, host: &HostAuthority, clock: &AtomicI
         .unwrap();
     store
         .ask_question(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, &turn),
             &AskQuestionRequest {
-                attempt: Some(turn.clone()),
                 operation_id: "ask".into(),
                 text: "Which region first?\u{1b}[2K".into(),
             },
@@ -757,7 +753,6 @@ async fn budget_notice(store: &Store, url: &str, host: &HostAuthority) {
         .unwrap();
     let turn = claim(store, host, &objective.starting_task_id).await;
     let usage = |sequence: u64, amount: u64| ReportAttemptUsageRequest {
-        attempt: Some(turn.clone()),
         sequence,
         native_usage: Some(NativeTokenUsage {
             input_tokens: 10 * sequence,
@@ -770,7 +765,10 @@ async fn budget_notice(store: &Store, url: &str, host: &HostAuthority) {
     };
     // The budget warning reaches the home thread before the budget runs out.
     store
-        .report_attempt_usage(host, &usage(1, 80))
+        .report_attempt_usage(
+            &supertag_control_plane::AttemptAccess::new(host, &turn),
+            &usage(1, 80),
+        )
         .await
         .unwrap();
     store.sweep_objectives().await.unwrap();
@@ -784,7 +782,10 @@ async fn budget_notice(store: &Store, url: &str, host: &HostAuthority) {
     );
     assert!(notices[0].contains(&format!("supertag describe objective {id}")));
     store
-        .report_attempt_usage(host, &usage(2, 150))
+        .report_attempt_usage(
+            &supertag_control_plane::AttemptAccess::new(host, &turn),
+            &usage(2, 150),
+        )
         .await
         .unwrap();
     finish(

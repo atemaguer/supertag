@@ -367,30 +367,59 @@ async fn budget_and_deadline(
         .unwrap();
     let identity = claim_start(&store, host, &budget.starting_task_id).await;
     let mut usage = ReportAttemptUsageRequest {
-        attempt: Some(identity.clone()),
         sequence: 1,
         amount_minor: Some(500),
         currency: Some("USD".into()),
         estimated: false,
         native_usage: None,
     };
-    store.report_attempt_usage(host, &usage).await.unwrap();
-    store.report_attempt_usage(host, &usage).await.unwrap();
+    store
+        .report_attempt_usage(
+            &supertag_control_plane::AttemptAccess::new(host, &identity),
+            &usage,
+        )
+        .await
+        .unwrap();
+    store
+        .report_attempt_usage(
+            &supertag_control_plane::AttemptAccess::new(host, &identity),
+            &usage,
+        )
+        .await
+        .unwrap();
     let mut conflict = usage.clone();
     conflict.amount_minor = Some(501);
     assert!(matches!(
-        store.report_attempt_usage(host, &conflict).await,
+        store
+            .report_attempt_usage(
+                &supertag_control_plane::AttemptAccess::new(host, &identity),
+                &conflict
+            )
+            .await,
         Err(StoreError::Conflict(_))
     ));
-    let mut forged = usage.clone();
-    forged.attempt.as_mut().unwrap().lease_token = "forged".into();
+    let forged = InspectAttemptRequest {
+        lease_token: "forged".into(),
+        ..identity.clone()
+    };
     assert!(matches!(
-        store.report_attempt_usage(host, &forged).await,
+        store
+            .report_attempt_usage(
+                &supertag_control_plane::AttemptAccess::new(host, &forged),
+                &usage
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
     usage.sequence = 2;
     usage.amount_minor = Some(700);
-    store.report_attempt_usage(host, &usage).await.unwrap();
+    store
+        .report_attempt_usage(
+            &supertag_control_plane::AttemptAccess::new(host, &identity),
+            &usage,
+        )
+        .await
+        .unwrap();
     assert_eq!(
         store
             .get_objective("operator:local", "budget")
@@ -401,7 +430,13 @@ async fn budget_and_deadline(
     );
     usage.sequence = 3;
     usage.amount_minor = Some(1_200);
-    store.report_attempt_usage(host, &usage).await.unwrap();
+    store
+        .report_attempt_usage(
+            &supertag_control_plane::AttemptAccess::new(host, &identity),
+            &usage,
+        )
+        .await
+        .unwrap();
     let exhausted = store
         .get_objective("operator:local", "budget")
         .await
@@ -453,7 +488,13 @@ async fn budget_and_deadline(
     store.close().await;
 
     let store = open(url, clock).await;
-    store.report_attempt_usage(host, &usage).await.unwrap(); // Exact durable evidence replay after settlement.
+    store
+        .report_attempt_usage(
+            &supertag_control_plane::AttemptAccess::new(host, &identity),
+            &usage,
+        )
+        .await
+        .unwrap(); // Exact durable evidence replay after settlement.
     let limited = store
         .pause_objective(OPERATOR, &action("budget", "pause-limited"))
         .await

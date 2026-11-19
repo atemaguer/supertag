@@ -11,15 +11,13 @@ use crate::worklet::{checkpoints, volume_objects};
 /// At start and every hour, deletes the checkpoint files no Session will resume.
 pub(crate) fn reconcile_checkpoints(
     transfers: &checkpoints::Transfers,
-    token: &str,
     shutdown: &CancellationToken,
 ) {
     let transfers = transfers.clone();
-    let token = token.to_owned();
     let shutdown = shutdown.clone();
     tokio::spawn(async move {
         loop {
-            if let Err(error) = transfers.reconcile(&token).await {
+            if let Err(error) = transfers.reconcile().await {
                 crate::failures::note("held checkpoints could not be reconciled", &error);
             }
             tokio::select! {
@@ -35,18 +33,14 @@ pub(crate) fn reconcile_checkpoints(
 pub(crate) fn collect_volume_garbage(
     volumes: &BTreeMap<String, FileVolume>,
     client: &volume_objects::VolumeObjects,
-    token: &str,
     shutdown: &CancellationToken,
 ) {
     let volumes = std::sync::Arc::new(volumes.clone());
     let client = client.clone();
-    let token = token.to_owned();
     let shutdown = shutdown.clone();
     tokio::spawn(async move {
         loop {
-            if let Err(error) =
-                volume_objects::collect_garbage(client.clone(), &token, &volumes).await
-            {
+            if let Err(error) = volume_objects::collect_garbage(&client, &volumes).await {
                 crate::failures::note("Volume garbage could not be deleted", &error);
             }
             tokio::select! {

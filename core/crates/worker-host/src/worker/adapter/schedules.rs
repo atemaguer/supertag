@@ -38,7 +38,6 @@ impl HarnessSchedules for Bridge {
         self.authenticate(&request)?;
         self.schedulable().await?;
         let mut input = request.into_inner();
-        input.attempt = Some(self.attempt());
         input.note = self.redact(&input.note);
         self.retry(input, |request| {
             let mut client = self.coordination.schedules.clone();
@@ -53,8 +52,7 @@ impl HarnessSchedules for Bridge {
     ) -> Result<Response<AttemptScheduleResponse>, Status> {
         self.authenticate(&request)?;
         self.schedulable().await?;
-        let mut input = request.into_inner();
-        input.attempt = Some(self.attempt());
+        let input = request.into_inner();
         self.retry(input, |request| {
             let mut client = self.coordination.schedules.clone();
             async move { client.cancel(request).await }

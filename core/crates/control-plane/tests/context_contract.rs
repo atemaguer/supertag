@@ -188,37 +188,60 @@ async fn contract(url: String) {
         }],
     };
     let request = CommitContextResolutionRequest {
-        attempt: Some(attempt.clone()),
         manifest: Some(manifest.clone()),
     };
     assert!(matches!(
-        store.commit_context_resolution(&host, &request).await,
+        store
+            .commit_context_resolution(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &request
+            )
+            .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     start(&store, &host, &attempt).await;
     assert_eq!(
-        store.get_context_pins(&host, &attempt).await.unwrap(),
+        store
+            .get_context_pins(&supertag_control_plane::AttemptAccess::new(&host, &attempt))
+            .await
+            .unwrap(),
         ContextResolutionManifest::default()
     );
     assert!(matches!(
-        store.commit_context_resolution(&other, &request).await,
+        store
+            .commit_context_resolution(
+                &supertag_control_plane::AttemptAccess::new(&other, &attempt),
+                &request
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
     let mut bad = request.clone();
     bad.manifest.as_mut().unwrap().pins[0].reference = "unadmitted".into();
     assert!(matches!(
-        store.commit_context_resolution(&host, &bad).await,
+        store
+            .commit_context_resolution(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &bad
+            )
+            .await,
         Err(StoreError::InvalidArgument(_))
     ));
     bad = request.clone();
     bad.manifest.as_mut().unwrap().pins.clear();
     assert!(matches!(
-        store.commit_context_resolution(&host, &bad).await,
+        store
+            .commit_context_resolution(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &bad
+            )
+            .await,
         Err(StoreError::InvalidArgument(_))
     ));
+    let access = supertag_control_plane::AttemptAccess::new(&host, &attempt);
     let (first, replay) = tokio::join!(
-        store.commit_context_resolution(&host, &request),
-        store.commit_context_resolution(&host, &request)
+        store.commit_context_resolution(&access, &request),
+        store.commit_context_resolution(&access, &request)
     );
     assert_eq!(first.unwrap(), manifest);
     assert_eq!(replay.unwrap(), manifest);
@@ -227,20 +250,30 @@ async fn contract(url: String) {
     bad.manifest.as_mut().unwrap().omissions[0].reason =
         "Harness does not support Skill inputs".into();
     assert!(matches!(
-        store.commit_context_resolution(&host, &bad).await,
+        store
+            .commit_context_resolution(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &bad
+            )
+            .await,
         Err(StoreError::Conflict(_))
     ));
     clock.store(NOW + 60_000, Ordering::SeqCst);
     store.sweep_expired_attempts().await.unwrap();
     assert_eq!(
         store
-            .commit_context_resolution(&host, &request)
+            .commit_context_resolution(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &request
+            )
             .await
             .unwrap(),
         manifest
     );
     assert!(matches!(
-        store.get_context_pins(&host, &attempt).await,
+        store
+            .get_context_pins(&supertag_control_plane::AttemptAccess::new(&host, &attempt))
+            .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     store
@@ -248,7 +281,7 @@ async fn contract(url: String) {
             "operator:alice",
             &ResolveAttemptRequest {
                 task_id: task.task_id.clone(),
-                attempt_id: attempt.attempt_id,
+                attempt_id: attempt.attempt_id.clone(),
                 operation_id: "audited-retry".into(),
                 decision: AttemptDecision::Retry as i32,
                 evidence: "Confirmed no native process survives".into(),
@@ -267,22 +300,32 @@ async fn contract(url: String) {
     assert_eq!(retry.task_id, task.task_id);
     start(&store, &other, &retry).await;
     assert_eq!(
-        store.get_context_pins(&other, &retry).await.unwrap(),
+        store
+            .get_context_pins(&supertag_control_plane::AttemptAccess::new(&other, &retry))
+            .await
+            .unwrap(),
         manifest
     );
     let retry_request = CommitContextResolutionRequest {
-        attempt: Some(retry.clone()),
         manifest: Some(manifest.clone()),
     };
     let mut changed = retry_request.clone();
     changed.manifest.as_mut().unwrap().pins[0].digest = format!("sha256:{}", "b".repeat(64));
     assert!(matches!(
-        store.commit_context_resolution(&other, &changed).await,
+        store
+            .commit_context_resolution(
+                &supertag_control_plane::AttemptAccess::new(&other, &retry),
+                &changed
+            )
+            .await,
         Err(StoreError::Conflict(_))
     ));
     assert_eq!(
         store
-            .commit_context_resolution(&other, &retry_request)
+            .commit_context_resolution(
+                &supertag_control_plane::AttemptAccess::new(&other, &retry),
+                &retry_request
+            )
             .await
             .unwrap(),
         manifest
@@ -290,7 +333,10 @@ async fn contract(url: String) {
     store.cancel_task(&retry.task_id).await.unwrap();
     assert_eq!(
         store
-            .commit_context_resolution(&other, &retry_request)
+            .commit_context_resolution(
+                &supertag_control_plane::AttemptAccess::new(&other, &retry),
+                &retry_request
+            )
             .await
             .unwrap(),
         manifest

@@ -28,7 +28,8 @@ service ArtifactDirectory {
   rpc AuthorizeArtifactTransfer(AuthorizeArtifactTransferRequest) returns (AuthorizedArtifactTransfer);
 }
 
-// Public Worker Host API. Identity and generation come from the authenticated Worker Host.
+// A running Attempt's captures and acquisitions, called with its Attempt credential, which names
+// the Attempt.
 service AttemptArtifacts {
   // Reserves a capture before its commit. When the producing Tag names an artifact Volume, the
   // response lists one copy per file for the host to write directly: an S3 copy carries a
@@ -43,8 +44,13 @@ service AttemptArtifacts {
   rpc Inspect(InspectAttemptArtifactRequest) returns (CapturedArtifact);
   rpc Acquire(AcquireArtifactRequest) returns (ArtifactAcquisition);
   rpc Settle(SettleArtifactAcquisitionRequest) returns (ArtifactAcquisition);
-  rpc RegisterArtifactSource(RegisterArtifactSourceRequest) returns (RegisterArtifactSourceResponse);
   rpc IssueArtifactTransfer(GetAcquiredArtifactFileRequest) returns (ArtifactTransferGrant);
+}
+
+// Public Worker Host API, as the host: the artifact storage it serves its peers from, and a peer's
+// transfer from that storage. Neither names one Attempt of the caller.
+service ArtifactSources {
+  rpc RegisterArtifactSource(RegisterArtifactSourceRequest) returns (RegisterArtifactSourceResponse);
   rpc AuthorizeArtifactTransfer(AuthorizeArtifactTransferRequest) returns (AuthorizedArtifactTransfer);
 }
 
@@ -136,7 +142,8 @@ message ArtifactAcquisition {
   int64 updated_at_ms = 11;
 }
 message FindAttemptArtifactsRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string query = 2;
   string kind = 3;
   string task_id = 4;
@@ -144,11 +151,13 @@ message FindAttemptArtifactsRequest {
   uint64 before_order = 6;
 }
 message InspectAttemptArtifactRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string artifact_id = 2;
 }
 message AcquireArtifactRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string operation_id = 2;
   string artifact_id = 3;
   repeated string paths = 4;
@@ -157,12 +166,14 @@ message AcquireArtifactRequest {
   optional string destination = 6;
 }
 message SettleArtifactAcquisitionRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string acquisition_id = 2;
   ArtifactAcquisitionState state = 3;
 }
 message GetAcquiredArtifactFileRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string acquisition_id = 2;
   string path = 3;
 }
@@ -206,7 +217,8 @@ message HarnessCaptureArtifactRequest {
 }
 
 message CommitArtifactCaptureRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string operation_id = 2;
   ArtifactDescription description = 3;
   repeated ArtifactFile files = 4;

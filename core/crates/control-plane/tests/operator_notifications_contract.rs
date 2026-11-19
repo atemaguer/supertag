@@ -206,9 +206,8 @@ impl Fixture {
         let attempt = self.running(&objective.starting_task_id).await;
         self.store
             .ask_question(
-                &self.host,
+                &supertag_control_plane::AttemptAccess::new(&self.host, &attempt),
                 &AskQuestionRequest {
-                    attempt: Some(attempt.clone()),
                     operation_id: "ask".into(),
                     text: "Which release? https://private.example/token".into(),
                 },
@@ -234,9 +233,8 @@ impl Fixture {
     async fn approval(&self, attempt: &InspectAttemptRequest, operation: &str) -> Approval {
         self.store
             .post_attempt_workstream(
-                &self.host,
+                &supertag_control_plane::AttemptAccess::new(&self.host, attempt),
                 &PostAttemptWorkstreamRequest {
-                    attempt: Some(attempt.clone()),
                     operation_id: operation.into(),
                     body: format!("Update {operation}"),
                     to_tag_ids: vec![],

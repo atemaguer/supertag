@@ -157,7 +157,7 @@ class AttemptWorkspaceMountsStub:
         """
         self.Preflight = channel.unary_unary(
                 '/supertag.runtime.v2.AttemptWorkspaceMounts/Preflight',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+                request_serializer=supertag_dot_runtime_dot_v2_dot_workspace__volume__pb2.PreflightWorkspaceMountsRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__volume__pb2.WorkspaceMountPreflight.FromString,
                 _registered_method=True)
         self.RecordWrites = channel.unary_unary(
@@ -190,7 +190,7 @@ def add_AttemptWorkspaceMountsServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'Preflight': grpc.unary_unary_rpc_method_handler(
                     servicer.Preflight,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__volume__pb2.PreflightWorkspaceMountsRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_workspace__volume__pb2.WorkspaceMountPreflight.SerializeToString,
             ),
             'RecordWrites': grpc.unary_unary_rpc_method_handler(
@@ -226,7 +226,7 @@ class AttemptWorkspaceMounts:
             request,
             target,
             '/supertag.runtime.v2.AttemptWorkspaceMounts/Preflight',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_workspace__volume__pb2.PreflightWorkspaceMountsRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_workspace__volume__pb2.WorkspaceMountPreflight.FromString,
             options,
             channel_credentials,

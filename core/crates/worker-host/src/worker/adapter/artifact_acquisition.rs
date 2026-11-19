@@ -33,14 +33,13 @@ impl Bridge {
         let deadline = self.inputs.active_deadline()?;
         let mut upstream = authenticated_request(
             FindAttemptArtifactsRequest {
-                attempt: Some(self.attempt()),
                 query: input.query,
                 kind: input.kind,
                 task_id: input.task_id,
                 limit: input.limit,
                 before_order: input.before_order,
             },
-            &self.host_token,
+            &self.attempt_token,
             None,
         )?;
         upstream.set_timeout(Duration::from_secs(5));
@@ -61,10 +60,9 @@ impl Bridge {
         let deadline = self.inputs.active_deadline()?;
         let mut upstream = authenticated_request(
             InspectAttemptArtifactRequest {
-                attempt: Some(self.attempt()),
                 artifact_id: request.into_inner().artifact_id,
             },
-            &self.host_token,
+            &self.attempt_token,
             None,
         )?;
         upstream.set_timeout(Duration::from_secs(5));
@@ -79,7 +77,7 @@ impl Bridge {
         AcquisitionClient {
             coordination: &self.coordination,
             storage: &self.storage,
-            host_token: &self.host_token,
+            token: &self.attempt_token,
             attempt: self.attempt(),
         }
     }
@@ -101,7 +99,6 @@ impl Bridge {
         let operation = async {
             let acquisition = client
                 .acquire(AcquireArtifactRequest {
-                    attempt: Some(self.attempt()),
                     operation_id: input.operation_id,
                     artifact_id: input.artifact_id,
                     paths: vec![input.path.clone()],
@@ -154,7 +151,6 @@ impl Bridge {
                 materialized_artifact_directory(&self.assignment.attempt_id, &input.operation_id);
             let acquisition = client
                 .acquire(AcquireArtifactRequest {
-                    attempt: Some(self.attempt()),
                     operation_id: input.operation_id,
                     artifact_id: input.artifact_id,
                     paths: input.paths,
@@ -185,7 +181,8 @@ pub(crate) struct AcquisitionClient<'a> {
     pub(crate) coordination: &'a AttemptClients,
     /// The host storage the Worklet lends: where held artifacts and Volumes are read.
     pub(crate) storage: &'a HostStorage,
-    pub(crate) host_token: &'a str,
+    /// The Attempt credential its acquisition calls carry.
+    pub(crate) token: &'a str,
     pub(crate) attempt: InspectAttemptRequest,
 }
 
@@ -199,7 +196,7 @@ impl AcquisitionClient<'_> {
             .coordination
             .acquisitions
             .clone()
-            .acquire(authenticated_request(input, self.host_token, None)?)
+            .acquire(authenticated_request(input, self.token, None)?)
             .await?
             .into_inner();
         let mut paths = expected.paths;
@@ -239,11 +236,10 @@ impl AcquisitionClient<'_> {
             .clone()
             .settle(authenticated_request(
                 SettleArtifactAcquisitionRequest {
-                    attempt: Some(self.attempt.clone()),
                     acquisition_id: acquisition.acquisition_id.clone(),
                     state: state as i32,
                 },
-                self.host_token,
+                self.token,
                 None,
             )?)
             .await
@@ -270,7 +266,6 @@ impl AcquisitionClient<'_> {
         file: &ArtifactFile,
     ) -> Result<Vec<u8>, Status> {
         let input = GetAcquiredArtifactFileRequest {
-            attempt: Some(self.attempt.clone()),
             acquisition_id: acquisition.acquisition_id.clone(),
             path: file.path.clone(),
         };
@@ -281,8 +276,7 @@ impl AcquisitionClient<'_> {
         match self.read_from_hosts(acquisition, input, file).await {
             Ok(bytes) => Ok(bytes),
             Err(status) => match crate::worklet::volume_objects::acquired(
-                self.storage.volume_objects.clone(),
-                self.host_token,
+                &self.storage.volume_objects,
                 &self.attempt,
                 (&acquisition.acquisition_id, &file.path),
                 &self.storage.volumes,
@@ -306,7 +300,7 @@ impl AcquisitionClient<'_> {
             .coordination
             .acquisitions
             .clone()
-            .issue_artifact_transfer(authenticated_request(input, self.host_token, None)?)
+            .issue_artifact_transfer(authenticated_request(input, self.token, None)?)
             .await?
             .into_inner();
         if grant.file.as_ref() != Some(file)
@@ -363,33 +357,26 @@ impl AcquisitionClient<'_> {
             .blob
             .clone()
             .ok_or_else(|| Status::data_loss("artifact blob is missing"))?;
-        let request = authenticated_request(
-            AuthorizeArtifactTransferRequest {
-                token: grant.token.clone(),
-                file: Some(WorkerArtifactDownloadRequest {
-                    artifact_id: acquisition.artifact_id.clone(),
-                    path: file.path.clone(),
-                    blob: Some(blob.clone()),
-                }),
-            },
-            self.host_token,
-            None,
-        )?;
-        let authorized = match tokio::time::timeout_at(
-            deadline,
-            self.coordination
-                .acquisitions
-                .clone()
-                .authorize_artifact_transfer(request),
-        )
-        .await
-        {
-            Ok(Ok(authorized)) => authorized.into_inner(),
-            // Another Worker Host holds the bytes.
-            Ok(Err(status)) if status.code() == tonic::Code::PermissionDenied => return Ok(None),
-            Ok(Err(status)) => return Err(status),
-            Err(_) => return Err(Status::deadline_exceeded("direct artifact grant expired")),
+        let request = AuthorizeArtifactTransferRequest {
+            token: grant.token.clone(),
+            file: Some(WorkerArtifactDownloadRequest {
+                artifact_id: acquisition.artifact_id.clone(),
+                path: file.path.clone(),
+                blob: Some(blob.clone()),
+            }),
         };
+        let authorized =
+            match tokio::time::timeout_at(deadline, self.storage.held_transfers.authorize(request))
+                .await
+            {
+                Ok(Ok(authorized)) => authorized,
+                // Another Worker Host holds the bytes.
+                Ok(Err(status)) if status.code() == tonic::Code::PermissionDenied => {
+                    return Ok(None);
+                }
+                Ok(Err(status)) => return Err(status),
+                Err(_) => return Err(Status::deadline_exceeded("direct artifact grant expired")),
+            };
         if authorized.file.as_ref() != Some(file) {
             return Err(Status::data_loss(
                 "artifact authorization differs from the selected file",

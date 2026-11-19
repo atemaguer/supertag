@@ -137,11 +137,15 @@ async fn exercise(database: &str) {
     for (index, (kind, text)) in events.iter().enumerate() {
         store
             .append_event(
-                &host,
+                &supertag_control_plane::AttemptAccess::new(
+                    &host,
+                    &supertag_protocol::v2::InspectAttemptRequest {
+                        task_id: attempt.task_id.clone(),
+                        attempt_id: attempt.attempt_id.clone(),
+                        lease_token: attempt.lease_token.clone(),
+                    },
+                ),
                 &AppendEventRequest {
-                    task_id: attempt.task_id.clone(),
-                    attempt_id: attempt.attempt_id.clone(),
-                    lease_token: attempt.lease_token.clone(),
                     sequence: index as u64 + 1,
                     text: (*text).into(),
                     kind: *kind as i32,
@@ -178,11 +182,15 @@ async fn exercise(database: &str) {
     for sequence in 7..=16 {
         store
             .append_event(
-                &host,
+                &supertag_control_plane::AttemptAccess::new(
+                    &host,
+                    &supertag_protocol::v2::InspectAttemptRequest {
+                        task_id: attempt.task_id.clone(),
+                        attempt_id: attempt.attempt_id.clone(),
+                        lease_token: attempt.lease_token.clone(),
+                    },
+                ),
                 &AppendEventRequest {
-                    task_id: attempt.task_id.clone(),
-                    attempt_id: attempt.attempt_id.clone(),
-                    lease_token: attempt.lease_token.clone(),
                     sequence,
                     text: long.clone(),
                     kind: TaskEventKind::Message as i32,
@@ -221,21 +229,15 @@ async fn exercise(database: &str) {
     assert_eq!(input.follower_task_id, follower.task_id);
     assert_eq!(input.state(), LiveInputState::Pending);
     let taken = store
-        .take_input(
-            &host,
-            &TakeInputRequest {
-                attempt: Some(attempt.clone()),
-            },
-        )
+        .take_input(&supertag_control_plane::AttemptAccess::new(&host, &attempt))
         .await
         .unwrap()
         .unwrap();
     assert_eq!(taken.input_id, input.input_id);
     let accepted = store
         .settle_input(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
             &SettleInputRequest {
-                attempt: Some(attempt),
                 input_id: input.input_id.clone(),
                 receipt: LiveInputReceipt::Accepted as i32,
             },

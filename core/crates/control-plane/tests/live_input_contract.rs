@@ -90,19 +90,8 @@ fn queue(task: &Task, operation: &str) -> QueueInputRequest {
     }
 }
 
-fn take(attempt: &InspectAttemptRequest) -> TakeInputRequest {
-    TakeInputRequest {
-        attempt: Some(attempt.clone()),
-    }
-}
-
-fn settle(
-    attempt: &InspectAttemptRequest,
-    input: &LiveInput,
-    receipt: LiveInputReceipt,
-) -> SettleInputRequest {
+fn settle(input: &LiveInput, receipt: LiveInputReceipt) -> SettleInputRequest {
     SettleInputRequest {
-        attempt: Some(attempt.clone()),
         input_id: input.input_id.clone(),
         receipt: receipt.into(),
     }
@@ -144,10 +133,10 @@ async fn ordered_receipts(store: &Store, host: &HostAuthority, other: &HostAutho
         .unwrap();
     assert!(one.order < two.order && two.order < three.order);
 
-    let take_request = take(&attempt);
+    let access = supertag_control_plane::AttemptAccess::new(host, &attempt);
     let (first, duplicate) = tokio::join!(
-        store.take_input_for_host(host, &take_request),
-        store.take_input_for_host(host, &take_request)
+        store.take_input_for_attempt(&access),
+        store.take_input_for_attempt(&access)
     );
     let first = first.unwrap();
     let duplicate = duplicate.unwrap();
@@ -160,42 +149,74 @@ async fn ordered_receipts(store: &Store, host: &HostAuthority, other: &HostAutho
     assert_eq!(returned.text, request.text);
     assert_eq!(returned.state(), LiveInputState::Dispatching);
     assert_eq!(store.get_input(&one.input_id).await.unwrap(), returned);
-    let accepted = settle(&attempt, &one, LiveInputReceipt::Accepted);
+    let accepted = settle(&one, LiveInputReceipt::Accepted);
     assert!(matches!(
-        store.settle_input(other, &accepted).await,
+        store
+            .settle_input(
+                &supertag_control_plane::AttemptAccess::new(other, &attempt),
+                &accepted
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
-    let first = store.settle_input(host, &accepted).await.unwrap();
+    let first = store
+        .settle_input(
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
+            &accepted,
+        )
+        .await
+        .unwrap();
     assert_eq!(first.state(), LiveInputState::Accepted);
-    assert_eq!(store.settle_input(host, &accepted).await.unwrap(), first);
+    assert_eq!(
+        store
+            .settle_input(
+                &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                &accepted
+            )
+            .await
+            .unwrap(),
+        first
+    );
     let follower = store.get_task(&one.follower_task_id).await.unwrap();
     assert_eq!(follower.state(), TaskState::Succeeded);
     assert!(follower.attempt_id.is_none());
 
     let returned = store
-        .take_input(host, &take_request)
+        .take_input(&supertag_control_plane::AttemptAccess::new(host, &attempt))
         .await
         .unwrap()
         .unwrap();
     assert_eq!(returned.input_id, two.input_id);
-    let unread = settle(&attempt, &two, LiveInputReceipt::Withdrawn);
-    let withdrawn = store.settle_input(host, &unread).await.unwrap();
+    let unread = settle(&two, LiveInputReceipt::Withdrawn);
+    let withdrawn = store
+        .settle_input(
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
+            &unread,
+        )
+        .await
+        .unwrap();
     assert_eq!(withdrawn.state(), LiveInputState::Withdrawn);
     assert_eq!(
         store
-            .settle_input(host, &settle(&attempt, &two, LiveInputReceipt::Accepted))
+            .settle_input(
+                &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                &settle(&two, LiveInputReceipt::Accepted)
+            )
             .await
             .unwrap(),
         withdrawn,
     );
     let withdrawn = store
-        .settle_input(host, &settle(&attempt, &one, LiveInputReceipt::Withdrawn))
+        .settle_input(
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
+            &settle(&one, LiveInputReceipt::Withdrawn),
+        )
         .await
         .unwrap();
     assert_eq!(withdrawn.state(), LiveInputState::Withdrawn);
     assert!(
         store
-            .take_input(host, &take_request)
+            .take_input(&supertag_control_plane::AttemptAccess::new(host, &attempt))
             .await
             .unwrap()
             .is_none()
@@ -233,7 +254,7 @@ async fn ordered_receipts(store: &Store, host: &HostAuthority, other: &HostAutho
         .unwrap();
     assert!(
         store
-            .take_input(host, &take(&attempt))
+            .take_input(&supertag_control_plane::AttemptAccess::new(host, &attempt))
             .await
             .unwrap()
             .is_none()
@@ -251,14 +272,29 @@ async fn ordered_receipts(store: &Store, host: &HostAuthority, other: &HostAutho
         .await
         .unwrap();
     store
-        .take_input(host, &take(&attempt))
+        .take_input(&supertag_control_plane::AttemptAccess::new(host, &attempt))
         .await
         .unwrap()
         .unwrap();
-    let receipt = settle(&attempt, &input, LiveInputReceipt::Rejected);
-    let rejected = store.settle_input(host, &receipt).await.unwrap();
+    let receipt = settle(&input, LiveInputReceipt::Rejected);
+    let rejected = store
+        .settle_input(
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
+            &receipt,
+        )
+        .await
+        .unwrap();
     assert_eq!(rejected.state(), LiveInputState::Rejected);
-    assert_eq!(store.settle_input(host, &receipt).await.unwrap(), rejected);
+    assert_eq!(
+        store
+            .settle_input(
+                &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                &receipt
+            )
+            .await
+            .unwrap(),
+        rejected
+    );
     finish(store, host, &attempt).await;
     let attempt = claim_start(store, host, &input.follower_task_id).await;
     finish(store, host, &attempt).await;
@@ -273,7 +309,7 @@ async fn uncertain_delivery(url: &str, store: Store, clock: &Arc<AtomicI64>, hos
         .unwrap();
     assert_eq!(
         store
-            .take_input(host, &take(&attempt))
+            .take_input(&supertag_control_plane::AttemptAccess::new(host, &attempt))
             .await
             .unwrap()
             .unwrap()
@@ -294,8 +330,8 @@ async fn uncertain_delivery(url: &str, store: Store, clock: &Arc<AtomicI64>, hos
     assert!(matches!(
         store
             .settle_input(
-                host,
-                &settle(&other_attempt, &input, LiveInputReceipt::Withdrawn)
+                &supertag_control_plane::AttemptAccess::new(host, &other_attempt),
+                &settle(&input, LiveInputReceipt::Withdrawn)
             )
             .await,
         Err(StoreError::PermissionDenied)
@@ -310,7 +346,7 @@ async fn uncertain_delivery(url: &str, store: Store, clock: &Arc<AtomicI64>, hos
     );
     assert!(
         store
-            .take_input(host, &take(&attempt))
+            .take_input(&supertag_control_plane::AttemptAccess::new(host, &attempt))
             .await
             .unwrap()
             .is_none()
@@ -330,7 +366,10 @@ async fn uncertain_delivery(url: &str, store: Store, clock: &Arc<AtomicI64>, hos
     );
     assert!(matches!(
         store
-            .settle_input(host, &settle(&attempt, &input, LiveInputReceipt::Accepted))
+            .settle_input(
+                &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                &settle(&input, LiveInputReceipt::Accepted)
+            )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
@@ -360,7 +399,10 @@ async fn uncertain_delivery(url: &str, store: Store, clock: &Arc<AtomicI64>, hos
     ));
     assert!(matches!(
         store
-            .settle_input(host, &settle(&attempt, &input, LiveInputReceipt::Withdrawn))
+            .settle_input(
+                &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                &settle(&input, LiveInputReceipt::Withdrawn)
+            )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
@@ -376,14 +418,17 @@ async fn uncertain_delivery(url: &str, store: Store, clock: &Arc<AtomicI64>, hos
         .await
         .unwrap();
     store
-        .take_input(host, &take(&attempt))
+        .take_input(&supertag_control_plane::AttemptAccess::new(host, &attempt))
         .await
         .unwrap()
         .unwrap();
     finish(&store, host, &attempt).await;
     assert_eq!(
         store
-            .settle_input(host, &settle(&attempt, &input, LiveInputReceipt::Accepted))
+            .settle_input(
+                &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                &settle(&input, LiveInputReceipt::Accepted)
+            )
             .await
             .unwrap()
             .state(),
@@ -397,13 +442,16 @@ async fn uncertain_delivery(url: &str, store: Store, clock: &Arc<AtomicI64>, hos
         .await
         .unwrap();
     store
-        .take_input(host, &take(&attempt))
+        .take_input(&supertag_control_plane::AttemptAccess::new(host, &attempt))
         .await
         .unwrap()
         .unwrap();
     assert_eq!(
         store
-            .settle_input(host, &settle(&attempt, &input, LiveInputReceipt::Unknown))
+            .settle_input(
+                &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                &settle(&input, LiveInputReceipt::Unknown)
+            )
             .await
             .unwrap()
             .state(),
@@ -411,7 +459,10 @@ async fn uncertain_delivery(url: &str, store: Store, clock: &Arc<AtomicI64>, hos
     );
     assert_eq!(
         store
-            .settle_input(host, &settle(&attempt, &input, LiveInputReceipt::Withdrawn))
+            .settle_input(
+                &supertag_control_plane::AttemptAccess::new(host, &attempt),
+                &settle(&input, LiveInputReceipt::Withdrawn)
+            )
             .await
             .unwrap()
             .state(),
@@ -428,7 +479,7 @@ async fn uncertain_delivery(url: &str, store: Store, clock: &Arc<AtomicI64>, hos
         .await
         .unwrap();
     store
-        .take_input(host, &take(&attempt))
+        .take_input(&supertag_control_plane::AttemptAccess::new(host, &attempt))
         .await
         .unwrap()
         .unwrap();
@@ -439,14 +490,19 @@ async fn uncertain_delivery(url: &str, store: Store, clock: &Arc<AtomicI64>, hos
     let current = HostAuthority::new("host:input-host", replacement.generation).unwrap();
     for invalid_host in [host, &current] {
         assert!(matches!(
-            store.take_input(invalid_host, &take(&attempt)).await,
+            store
+                .take_input(&supertag_control_plane::AttemptAccess::new(
+                    invalid_host,
+                    &attempt
+                ))
+                .await,
             Err(StoreError::PermissionDenied)
         ));
         assert!(matches!(
             store
                 .settle_input(
-                    invalid_host,
-                    &settle(&attempt, &input, LiveInputReceipt::Withdrawn)
+                    &supertag_control_plane::AttemptAccess::new(invalid_host, &attempt),
+                    &settle(&input, LiveInputReceipt::Withdrawn)
                 )
                 .await,
             Err(StoreError::PermissionDenied)
@@ -538,7 +594,7 @@ async fn policy_fence(url: &str, store: &Store, host: &HostAuthority) {
     store.put_tag_spec(narrower.clone()).await.unwrap();
     assert_eq!(
         store
-            .take_input(host, &take(&attempt))
+            .take_input(&supertag_control_plane::AttemptAccess::new(host, &attempt))
             .await
             .unwrap()
             .unwrap()
@@ -546,7 +602,10 @@ async fn policy_fence(url: &str, store: &Store, host: &HostAuthority) {
         input.input_id
     );
     let accepted = store
-        .settle_input(host, &settle(&attempt, &input, LiveInputReceipt::Accepted))
+        .settle_input(
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
+            &settle(&input, LiveInputReceipt::Accepted),
+        )
         .await
         .unwrap();
 
@@ -570,7 +629,7 @@ async fn policy_fence(url: &str, store: &Store, host: &HostAuthority) {
         );
         assert!(
             store
-                .take_input(host, &take(&attempt))
+                .take_input(&supertag_control_plane::AttemptAccess::new(host, &attempt))
                 .await
                 .unwrap()
                 .is_none()
@@ -588,7 +647,7 @@ async fn policy_fence(url: &str, store: &Store, host: &HostAuthority) {
     db.close().await.unwrap();
     assert!(
         store
-            .take_input(host, &take(&attempt))
+            .take_input(&supertag_control_plane::AttemptAccess::new(host, &attempt))
             .await
             .unwrap()
             .is_none()
@@ -631,7 +690,7 @@ async fn policy_fence(url: &str, store: &Store, host: &HostAuthority) {
     assert_eq!(queued.task.as_ref().unwrap().state(), TaskState::Queued);
     assert!(
         store
-            .take_input(host, &take(&attempt))
+            .take_input(&supertag_control_plane::AttemptAccess::new(host, &attempt))
             .await
             .unwrap()
             .is_none()

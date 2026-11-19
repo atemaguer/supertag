@@ -40,8 +40,7 @@ impl HarnessTagSessions for Bridge {
     ) -> Result<Response<ListTagSessionsResponse>, Status> {
         self.authenticate(&request)?;
         self.readable().await?;
-        let mut input = request.into_inner();
-        input.attempt = Some(self.attempt());
+        let input = request.into_inner();
         self.retry(input, |request| {
             let mut client = self.coordination.tag_sessions.clone();
             async move { client.list_sessions(request).await }
@@ -55,8 +54,7 @@ impl HarnessTagSessions for Bridge {
     ) -> Result<Response<SearchTagSessionsResponse>, Status> {
         self.authenticate(&request)?;
         self.readable().await?;
-        let mut input = request.into_inner();
-        input.attempt = Some(self.attempt());
+        let input = request.into_inner();
         self.retry(input, |request| {
             let mut client = self.coordination.tag_sessions.clone();
             async move { client.search_sessions(request).await }
@@ -70,8 +68,7 @@ impl HarnessTagSessions for Bridge {
     ) -> Result<Response<ReadTagSessionResponse>, Status> {
         self.authenticate(&request)?;
         self.readable().await?;
-        let mut input = request.into_inner();
-        input.attempt = Some(self.attempt());
+        let input = request.into_inner();
         self.retry(input, |request| {
             let mut client = self.coordination.tag_sessions.clone();
             async move { client.read_session(request).await }
@@ -85,8 +82,7 @@ impl HarnessTagSessions for Bridge {
     ) -> Result<Response<ReadTagTurnResponse>, Status> {
         self.authenticate(&request)?;
         self.readable().await?;
-        let mut input = request.into_inner();
-        input.attempt = Some(self.attempt());
+        let input = request.into_inner();
         self.retry(input, |request| {
             let mut client = self.coordination.tag_sessions.clone();
             async move { client.read_turn(request).await }
@@ -100,8 +96,7 @@ impl HarnessTagSessions for Bridge {
     ) -> Result<Response<ListTagObjectivesResponse>, Status> {
         self.authenticate(&request)?;
         self.readable().await?;
-        let mut input = request.into_inner();
-        input.attempt = Some(self.attempt());
+        let input = request.into_inner();
         self.retry(input, |request| {
             let mut client = self.coordination.tag_sessions.clone();
             async move { client.list_objectives(request).await }
@@ -115,8 +110,7 @@ impl HarnessTagSessions for Bridge {
     ) -> Result<Response<TagObjectiveView>, Status> {
         self.authenticate(&request)?;
         self.readable().await?;
-        let mut input = request.into_inner();
-        input.attempt = Some(self.attempt());
+        let input = request.into_inner();
         self.retry(input, |request| {
             let mut client = self.coordination.tag_sessions.clone();
             async move { client.read_objective(request).await }

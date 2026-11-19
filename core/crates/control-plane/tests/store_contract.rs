@@ -93,19 +93,36 @@ async fn contract(store: &Store) {
         Err(StoreError::PermissionDenied)
     ));
     assert_eq!(
-        store.start_task(owner, &start).await.unwrap().state,
+        store
+            .start_task(owner, &start)
+            .await
+            .unwrap()
+            .task
+            .unwrap()
+            .state,
         TaskState::Running as i32
     );
     assert_eq!(
-        store.start_task(owner, &start).await.unwrap().state,
+        store
+            .start_task(owner, &start)
+            .await
+            .unwrap()
+            .task
+            .unwrap()
+            .state,
         TaskState::Running as i32
     );
 
     // Event replay is content checked, ordered, and independently readable.
+    let access = supertag_control_plane::AttemptAccess::new(
+        owner,
+        &supertag_protocol::v2::InspectAttemptRequest {
+            task_id: first.task_id.clone(),
+            attempt_id: start.attempt_id.clone(),
+            lease_token: start.lease_token.clone(),
+        },
+    );
     let event = AppendEventRequest {
-        task_id: first.task_id.clone(),
-        attempt_id: start.attempt_id.clone(),
-        lease_token: start.lease_token.clone(),
         sequence: 1,
         text: "I'll inspect the patch.".into(),
         kind: TaskEventKind::Message as i32,
@@ -113,28 +130,28 @@ async fn contract(store: &Store) {
     let mut untyped = event.clone();
     untyped.kind = TaskEventKind::Unspecified as i32;
     assert!(matches!(
-        store.append_event(owner, &untyped).await,
+        store.append_event(&access, &untyped).await,
         Err(StoreError::InvalidArgument(_))
     ));
-    let accepted = store.append_event(owner, &event).await.unwrap();
+    let accepted = store.append_event(&access, &event).await.unwrap();
     assert_eq!(accepted.kind(), TaskEventKind::Message);
-    assert_eq!(store.append_event(owner, &event).await.unwrap(), accepted);
+    assert_eq!(store.append_event(&access, &event).await.unwrap(), accepted);
     let mut conflict = event.clone();
     conflict.text = "Conflicting replay".into();
     assert!(matches!(
-        store.append_event(owner, &conflict).await,
+        store.append_event(&access, &conflict).await,
         Err(StoreError::Conflict(_))
     ));
     // The same text replayed as another kind is a different event.
     let mut retyped = event.clone();
     retyped.kind = TaskEventKind::Activity as i32;
     assert!(matches!(
-        store.append_event(owner, &retyped).await,
+        store.append_event(&access, &retyped).await,
         Err(StoreError::Conflict(_))
     ));
     conflict.sequence = 3;
     assert!(matches!(
-        store.append_event(owner, &conflict).await,
+        store.append_event(&access, &conflict).await,
         Err(StoreError::FailedPrecondition(_))
     ));
     assert_eq!(

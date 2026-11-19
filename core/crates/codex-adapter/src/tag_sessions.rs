@@ -408,11 +408,10 @@ impl Client {
         let result: std::result::Result<Value, String> = match call {
             Call::ListSessions(page) => {
                 let input = ListTagSessionsRequest {
-                    attempt: None,
                     limit: page.limit.unwrap_or(MAX_RESULTS),
                     offset: page.offset,
                 };
-                confirm(async || self.client.list_sessions(request(input.clone(), token)?).await)
+                confirm(async || self.client.list_sessions(request(input, token)?).await)
                     .await?
                     .map(|listed| {
                         json!({"sessions": listed.sessions.iter().map(session).collect::<Vec<_>>()})
@@ -420,7 +419,6 @@ impl Client {
             }
             Call::SearchSessions(search) => {
                 let input = SearchTagSessionsRequest {
-                    attempt: None,
                     query: search.query.clone(),
                     limit: search.limit.unwrap_or(MAX_RESULTS),
                 };
@@ -439,7 +437,6 @@ impl Client {
             }
             Call::ReadSession(read) => {
                 let input = ReadTagSessionRequest {
-                    attempt: None,
                     session_id: read.session_id.clone(),
                     limit: read.limit.unwrap_or(MAX_RESULTS),
                     before: read.before,
@@ -468,7 +465,6 @@ impl Client {
             }
             Call::ReadTurn(turn) => {
                 let input = ReadTagTurnRequest {
-                    attempt: None,
                     task_id: turn.task_id.clone(),
                     after: turn.after,
                     limit: turn.limit.unwrap_or_default(),
@@ -493,11 +489,10 @@ impl Client {
             }
             Call::ListObjectives(page) => {
                 let input = ListTagObjectivesRequest {
-                    attempt: None,
                     limit: page.limit.unwrap_or(MAX_RESULTS),
                     offset: page.offset,
                 };
-                confirm(async || self.client.list_objectives(request(input.clone(), token)?).await)
+                confirm(async || self.client.list_objectives(request(input, token)?).await)
                     .await?
                     .map(|listed| {
                         json!({
@@ -508,7 +503,6 @@ impl Client {
             }
             Call::ReadObjective(read) => {
                 let input = ReadTagObjectiveRequest {
-                    attempt: None,
                     objective_id: read.objective_id.clone(),
                 };
                 confirm(async || self.client.read_objective(request(input.clone(), token)?).await)

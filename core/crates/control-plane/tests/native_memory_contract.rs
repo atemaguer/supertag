@@ -74,13 +74,8 @@ async fn finish(store: &Store, host: &HostAuthority, attempt: &InspectAttemptReq
         .unwrap();
 }
 
-fn report(
-    attempt: &InspectAttemptRequest,
-    revision: u64,
-    generation: u64,
-) -> ReportNativeMemoryRequest {
+fn report(revision: u64, generation: u64) -> ReportNativeMemoryRequest {
     ReportNativeMemoryRequest {
-        attempt: Some(attempt.clone()),
         revision,
         files: 2,
         bytes: 120,
@@ -108,14 +103,20 @@ async fn contract(url: &str) {
     assert!(!alice_grant.scope.contains("alice"));
     assert_eq!(alice_grant.reset_generation, 0);
     store
-        .report_native_memory(&host, &report(&alice, 1, 0))
+        .report_native_memory(
+            &supertag_control_plane::AttemptAccess::new(&host, &alice),
+            &report(1, 0),
+        )
         .await
         .unwrap();
     finish(&store, &host, &alice).await;
     let (bob, bob_grant) = say(&store, &host, BOB).await;
     assert_ne!(bob_grant.unwrap().scope, alice_grant.scope);
     store
-        .report_native_memory(&host, &report(&bob, 3, 0))
+        .report_native_memory(
+            &supertag_control_plane::AttemptAccess::new(&host, &bob),
+            &report(3, 0),
+        )
         .await
         .unwrap();
 
@@ -138,13 +139,24 @@ async fn contract(url: &str) {
     // A report from a finished turn, or past the caps, is refused.
     assert!(matches!(
         store
-            .report_native_memory(&host, &report(&alice, 2, 0))
+            .report_native_memory(
+                &supertag_control_plane::AttemptAccess::new(&host, &alice),
+                &report(2, 0)
+            )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
-    let mut huge = report(&bob, 4, 0);
+    let mut huge = report(4, 0);
     huge.bytes = 4 * 1024 * 1024 + 1;
-    assert!(store.report_native_memory(&host, &huge).await.is_err());
+    assert!(
+        store
+            .report_native_memory(
+                &supertag_control_plane::AttemptAccess::new(&host, &bob),
+                &huge
+            )
+            .await
+            .is_err()
+    );
 
     // Only operators reset; a reset drops every record and starts a new generation.
     assert!(
@@ -170,7 +182,10 @@ async fn contract(url: &str) {
     );
     // Bob's turn began before the reset: its report changes nothing.
     store
-        .report_native_memory(&host, &report(&bob, 4, 0))
+        .report_native_memory(
+            &supertag_control_plane::AttemptAccess::new(&host, &bob),
+            &report(4, 0),
+        )
         .await
         .unwrap();
     assert!(
@@ -199,7 +214,12 @@ async fn contract(url: &str) {
     let (off, grant) = say(&store, &host, ALICE).await;
     assert!(grant.is_none());
     assert!(matches!(
-        store.report_native_memory(&host, &report(&off, 1, 1)).await,
+        store
+            .report_native_memory(
+                &supertag_control_plane::AttemptAccess::new(&host, &off),
+                &report(1, 1)
+            )
+            .await,
         Err(StoreError::PermissionDenied)
     ));
     store.close().await;

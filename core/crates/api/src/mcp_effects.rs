@@ -19,7 +19,7 @@ impl attempt_mcp_effects_server::AttemptMcpEffects for Api {
         &self,
         request: Request<ReserveMcpEffectRequest>,
     ) -> Result<Response<ReserveMcpEffectResponse>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             attempt_mcp_effects_client::AttemptMcpEffectsClient::new(channel)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)
@@ -33,7 +33,7 @@ impl attempt_mcp_effects_server::AttemptMcpEffects for Api {
         &self,
         request: Request<SettleMcpEffectRequest>,
     ) -> Result<Response<SettleMcpEffectResponse>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             attempt_mcp_effects_client::AttemptMcpEffectsClient::new(channel)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)
@@ -47,7 +47,7 @@ impl attempt_mcp_effects_server::AttemptMcpEffects for Api {
         &self,
         request: Request<RecordWorkspaceMcpRequest>,
     ) -> Result<Response<RecordWorkspaceMcpResponse>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             attempt_mcp_effects_client::AttemptMcpEffectsClient::new(channel)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)

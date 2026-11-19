@@ -300,9 +300,8 @@ async fn host_enrollment_contract(url: &str) {
     assert!(matches!(
         store
             .report_attempt_usage(
-                &original,
+                &supertag_control_plane::AttemptAccess::new(&original, &old),
                 &ReportAttemptUsageRequest {
-                    attempt: Some(old.clone()),
                     sequence: 1,
                     ..Default::default()
                 }

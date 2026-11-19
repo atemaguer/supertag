@@ -306,9 +306,8 @@ async fn surface_pacing(store: &Store, host: &HostAuthority, clock: &Arc<AtomicI
     ] {
         store
             .create_attempt_schedule(
-                host,
+                &supertag_control_plane::AttemptAccess::new(host, &turn),
                 &CreateAttemptScheduleRequest {
-                    attempt: Some(turn.clone()),
                     operation_id: operation.into(),
                     note: "Check the deploy".into(),
                     at: at.into(),

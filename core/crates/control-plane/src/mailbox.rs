@@ -1,12 +1,13 @@
 //! Durable direct messages and addressed Workstream delivery. The receiving Tag's accepted policy
 //! owns the inbox turn; a sender's Objective is provenance, never authority.
+use crate::AttemptAccess;
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
 use crate::{
-    ControlPlane, HostAuthority, Store, StoreError,
+    ControlPlane, Store, StoreError,
     store::{MAX_TASK_PROMPT_BYTES, Result, insert_task, invalid, lease_is_live, name, owned},
 };
 
@@ -50,13 +51,11 @@ impl Store {
 
     pub async fn read_attempt_mailbox(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &ReadMailboxRequest,
     ) -> Result<ListMailboxMessagesResponse> {
-        let attempt = input
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Attempt identity is required"))?;
+        let host = authority.host();
+        let attempt = authority.lease();
         let (mut tx, _) = self.write().await?;
         let row = owned(
             &mut tx,
@@ -398,7 +397,7 @@ impl attempt_mailbox_server::AttemptMailbox for ControlPlane {
         &self,
         request: Request<SendAttemptTagMessageRequest>,
     ) -> std::result::Result<Response<SendTagMessageResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .send_attempt_tag_message(&host, request.get_ref())
@@ -410,7 +409,7 @@ impl attempt_mailbox_server::AttemptMailbox for ControlPlane {
         &self,
         request: Request<ReadMailboxRequest>,
     ) -> std::result::Result<Response<ListMailboxMessagesResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .read_attempt_mailbox(&host, request.get_ref())

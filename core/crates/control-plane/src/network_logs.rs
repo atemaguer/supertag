@@ -4,13 +4,14 @@
 //! first [`MAX_REQUESTS`] with totals. The host reports the log, cumulatively, while it still owns
 //! the Attempt; a later report replaces an earlier one. `GetTask` returns every Attempt's log.
 
+use crate::AttemptAccess;
 use prost::Message;
 use sqlx::{Any, Row};
 use supertag_protocol::v2::{AttemptNetworkLog, NetworkLog, ReportNetworkLogRequest};
 
 use crate::{
     Store,
-    store::{HostAuthority, Result, invalid},
+    store::{Result, invalid},
 };
 
 /// Requests a host keeps per Attempt.
@@ -67,13 +68,11 @@ impl Store {
     /// Record the owning host's network log for its running Attempt, replacing an earlier one.
     pub async fn report_network_log(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         request: &ReportNetworkLogRequest,
     ) -> Result<()> {
-        let attempt = request
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Task Attempt is required"))?;
+        let host = authority.host();
+        let attempt = authority.lease();
         let log = request
             .log
             .as_ref()

@@ -44,7 +44,7 @@ impl attempt_task_files_server::AttemptTaskFiles for Api {
         &self,
         request: Request<ReportTaskFilesLocationRequest>,
     ) -> Result<Response<ReportTaskFilesLocationResponse>, Status> {
-        self.forward(request, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             attempt_task_files_client::AttemptTaskFilesClient::new(channel)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)

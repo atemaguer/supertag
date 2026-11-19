@@ -37,13 +37,14 @@ use supertag_protocol::{
     MAX_CHECKPOINT_BYTES, MAX_MESSAGE_BYTES, authenticated_request, matches_bearer,
     v2::{
         AdapterBootstrap, AppendEventRequest, AppliedExecutionLimits, Assignment,
-        ConfirmExecutionLimitsResponse, ExecutionLimits, HarnessAttachRequest,
-        HarnessCompleteRequest, HarnessCompleteResponse, HarnessKind, HarnessPublishRequest,
-        HarnessPublishTextRequest, HarnessPublishTextResponse, HarnessRun,
-        HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest, HarnessUsageRequest,
-        InspectAttemptRequest, LiveInput, ObjectiveSignal, ReportAppliedLimitsRequest,
-        ReportAttemptUsageRequest, ReportAttemptUsageResponse, ReportedCostLimit, ResolvedSkill,
-        SessionCheckpoint, TakeInputResponse, TaskEvent, TaskEventKind, TaskState,
+        ConfirmExecutionLimitsResponse, ExecutionLimits, GetAttemptCapabilitiesRequest,
+        GetAttemptHistoryRequest, HarnessAttachRequest, HarnessCompleteRequest,
+        HarnessCompleteResponse, HarnessKind, HarnessPublishRequest, HarnessPublishTextRequest,
+        HarnessPublishTextResponse, HarnessRun, HarnessSettleLiveInputRequest,
+        HarnessTakeLiveInputRequest, HarnessUsageRequest, InspectAttemptRequest, LiveInput,
+        ObjectiveSignal, ReportAppliedLimitsRequest, ReportAttemptUsageRequest,
+        ReportAttemptUsageResponse, ReportedCostLimit, ResolvedSkill, SessionCheckpoint,
+        TakeInputResponse, TaskEvent, TaskEventKind, TaskState,
         harness_server::{Harness, HarnessServer},
     },
     validate_checkpoint_reference,
@@ -77,7 +78,7 @@ struct Bridge {
     assignment: Assignment,
     checkpoint: Option<SessionCheckpoint>,
     resolved_skills: Vec<ResolvedSkill>,
-    host_token: String,
+    attempt_token: String,
     host: AttemptClient,
     /// The Attempt's lease, which the Worklet lends: every renewal and lease check goes through
     /// it.
@@ -153,7 +154,7 @@ impl Bridge {
         F: FnMut(Request<M>) -> Fut,
         Fut: std::future::Future<Output = Result<Response<R>, Status>>,
     {
-        self.inputs.retry(message, &self.host_token, call).await
+        self.inputs.retry(message, &self.attempt_token, call).await
     }
 
     fn authenticate<T>(&self, request: &Request<T>) -> Result<(), Status> {
@@ -200,23 +201,24 @@ impl Harness for Bridge {
     ) -> Result<Response<HarnessRun>, Status> {
         self.authenticate(&request)?;
         let capabilities = self
-            .retry_upstream(self.attempt(), |mut host, request| async move {
-                host.get_attempt_capabilities(request).await
-            })
+            .retry_upstream(
+                GetAttemptCapabilitiesRequest {},
+                |mut host, request| async move { host.get_attempt_capabilities(request).await },
+            )
             .await?;
         // Every harness gets the recap: an adapter that cannot resume its checkpoint, or has
         // none, starts a fresh native session from it.
         let history = self
-            .retry_upstream(self.attempt(), |mut host, request| async move {
-                host.get_attempt_history(request).await
-            })
+            .retry_upstream(
+                GetAttemptHistoryRequest {},
+                |mut host, request| async move { host.get_attempt_history(request).await },
+            )
             .await?
             .entries;
         if !self.attached.swap(true, Ordering::AcqRel) {
             crate::worker::milestones::report_milestone(
                 &self.host,
-                &self.attempt(),
-                &self.host_token,
+                &self.attempt_token,
                 supertag_protocol::v2::AttemptMilestone::AdapterAttached,
             );
         }
@@ -301,9 +303,6 @@ impl Harness for Bridge {
         }
         let event = request.into_inner();
         let append = AppendEventRequest {
-            task_id: self.task_id().into(),
-            attempt_id: self.assignment.attempt_id.clone(),
-            lease_token: self.assignment.lease_token.clone(),
             sequence: event.sequence,
             text: self.redact_within(&event.text, MAX_EVENT_TEXT_BYTES),
             kind: event.kind,
@@ -368,7 +367,6 @@ impl Harness for Bridge {
         // The Control Plane accepts an exact repeat of a usage sequence, so a
         // report whose answer the transport lost is safely sent again.
         let report = ReportAttemptUsageRequest {
-            attempt: Some(self.attempt()),
             sequence: usage.sequence,
             amount_minor: usage.amount_minor,
             currency: usage.currency,
@@ -468,7 +466,7 @@ impl Harness for Bridge {
     ) -> Result<Response<TakeInputResponse>, Status> {
         self.authenticate(&request)?;
         self.require_attached()?;
-        self.inputs.take(self.attempt(), &self.host_token).await
+        self.inputs.take(self.attempt(), &self.attempt_token).await
     }
 
     async fn settle_live_input(
@@ -478,7 +476,7 @@ impl Harness for Bridge {
         self.authenticate(&request)?;
         self.require_attached()?;
         self.inputs
-            .settle(self.attempt(), request.into_inner(), &self.host_token)
+            .settle(self.attempt(), request.into_inner(), &self.attempt_token)
             .await
     }
 }
@@ -512,12 +510,12 @@ pub(crate) async fn execute(
         AttemptClients,
         HostStorage,
     ),
-    host_token: &str,
+    attempt_token: &str,
     valid_until: Instant,
     shutdown: &CancellationToken,
 ) -> Result<HarnessCompleteRequest> {
     let bootstrap_token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-    let secrets = Arc::new(host_secrets(&[host_token, &bootstrap_token]));
+    let secrets = Arc::new(host_secrets(&[attempt_token, &bootstrap_token]));
     let mcp_secrets = inputs
         .mcp
         .as_ref()
@@ -528,7 +526,7 @@ pub(crate) async fn execute(
         assignment,
         inputs,
         clients,
-        (host_token, bootstrap_token, secrets.clone()),
+        (attempt_token, bootstrap_token, secrets.clone()),
         valid_until,
         shutdown,
     )
@@ -565,7 +563,7 @@ async fn run(
         AttemptClients,
         HostStorage,
     ),
-    (host_token, bootstrap_token, secrets): (&str, String, Arc<Vec<SensitiveValue>>),
+    (attempt_token, bootstrap_token, secrets): (&str, String, Arc<Vec<SensitiveValue>>),
     valid_until: Instant,
     shutdown: &CancellationToken,
 ) -> Result<HarnessCompleteRequest> {
@@ -585,8 +583,13 @@ async fn run(
             exec.socket().into_os_string(),
         ));
     }
-    let native_memory =
-        prepare_native_memory(options, &assignment, (&coordination, &storage), host_token).await;
+    let native_memory = prepare_native_memory(
+        options,
+        &assignment,
+        (&coordination, &storage),
+        attempt_token,
+    )
+    .await;
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let bootstrap = AdapterBootstrap {
         endpoint: format!("http://{}", listener.local_addr()?),
@@ -624,7 +627,7 @@ async fn run(
         assignment,
         checkpoint,
         resolved_skills,
-        host_token: host_token.to_owned(),
+        attempt_token: attempt_token.to_owned(),
         host,
         lease,
         harness: options.harness,
@@ -745,7 +748,7 @@ async fn prepare_native_memory(
     options: &Settings<'_>,
     assignment: &Assignment,
     (coordination, host_storage): (&AttemptClients, &HostStorage),
-    host_token: &str,
+    attempt_token: &str,
 ) -> Option<NativeMemory> {
     // A remote Workspace keeps the Task's file and command tools in its sandbox, but the harness
     // and its memory folder stay on this host: nothing in the sandbox reaches the folder, and the
@@ -760,7 +763,7 @@ async fn prepare_native_memory(
         let access = crate::worker::native_memory_volume::Access {
             objects: host_storage.transfers.volume_objects(),
             memory: coordination.memory.clone(),
-            token: host_token.to_owned(),
+            token: attempt_token.to_owned(),
             attempt: InspectAttemptRequest {
                 task_id: task.task_id.clone(),
                 attempt_id: attempt.clone(),
@@ -840,7 +843,6 @@ async fn finish_native_memory(bridge: &Bridge, memory: NativeMemory) {
         }
     };
     let report = supertag_protocol::v2::ReportNativeMemoryRequest {
-        attempt: Some(bridge.attempt()),
         revision: summary.revision,
         files: summary.files,
         bytes: summary.bytes,
@@ -850,7 +852,7 @@ async fn finish_native_memory(bridge: &Bridge, memory: NativeMemory) {
     // The harness has stopped, so this goes straight out once, under the host's own credential;
     // a record lost here is replaced by the next turn's.
     let sent = async {
-        let mut request = authenticated_request(report, &bridge.host_token, None)
+        let mut request = authenticated_request(report, &bridge.attempt_token, None)
             .map_err(|error| Status::internal(error.to_string()))?;
         request.set_timeout(Duration::from_secs(10));
         bridge

@@ -84,9 +84,8 @@ async fn contract(url: &str) {
             matches!(
                 store
                     .start_work_session(
-                        &host,
+                        &crate::AttemptAccess::new(&host, &attempt.clone()),
                         &StartWorkSessionRequest {
-                            attempt: Some(attempt.clone()),
                             operation_id: format!("forbidden-child-{index}"),
                             title: "Must not start".into(),
                             instruction: "No delegation is allowed".into(),
@@ -100,9 +99,8 @@ async fn contract(url: &str) {
         );
         store
             .report_attempt_usage(
-                &host,
+                &crate::AttemptAccess::new(&host, &attempt.clone()),
                 &ReportAttemptUsageRequest {
-                    attempt: Some(attempt.clone()),
                     sequence: 1,
                     native_usage: Some(NativeTokenUsage {
                         input_tokens: tokens,
@@ -284,9 +282,8 @@ async fn objective_notice_case(store: &Store, host: &HostAuthority) {
         .unwrap();
     store
         .report_attempt_usage(
-            host,
+            &crate::AttemptAccess::new(host, &attempt.clone()),
             &ReportAttemptUsageRequest {
-                attempt: Some(attempt.clone()),
                 sequence: 1,
                 amount_minor: Some(980),
                 currency: Some("USD".into()),

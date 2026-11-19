@@ -34,7 +34,6 @@ impl HarnessQuestions for Bridge {
         let input = request.into_inner();
         // An exact repeat of this Attempt's question returns its durable receipt.
         let ask = AskQuestionRequest {
-            attempt: Some(self.attempt()),
             operation_id: input.operation_id,
             text: self.redact(&input.text),
         };

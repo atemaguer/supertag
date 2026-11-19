@@ -9,7 +9,8 @@
 //!
 //! Credentials have fixed prefixes, so a misplaced secret is refused before any lookup:
 //! `stop_` Operator Tokens, `stak_` Auth Keys (accepted only by `Enrollments.Enroll`), and
-//! `stcr_` enrolled host, Gateway and client credentials. The admin operator token comes from the
+//! `stcr_` enrolled host, Gateway and client credentials, and `stat_` Attempt credentials, which
+//! the state owner resolves on every call this tier forwards. The admin operator token comes from the
 //! Control Plane's configuration. Negotiation carries no credential, so the negotiated role is
 //! never trusted. Identity is in the bearer, so native gRPC and the WebSocket tunnel take the same
 //! path.
@@ -23,10 +24,12 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 pub use supertag_protocol::authorization::allowed_roles;
 use supertag_protocol::authorization::{
-    ADMIN, CLIENT, ENROLL, GATEWAY, HEALTH_PATH, HOST, NEGOTIATION_PATH, OPERATOR, path_access,
+    ADMIN, ATTEMPT, CLIENT, ENROLL, GATEWAY, HEALTH_PATH, HOST, NEGOTIATION_PATH, OPERATOR,
+    path_access,
 };
 use supertag_protocol::{
-    AUTH_KEY_SECRET_PREFIX, CREDENTIAL_SECRET_PREFIX, INTERNAL_PRINCIPAL_HEADER, MAX_MESSAGE_BYTES,
+    ATTEMPT_CREDENTIAL_SECRET_PREFIX, ATTEMPT_PRINCIPAL_PREFIX, AUTH_KEY_SECRET_PREFIX,
+    CREDENTIAL_SECRET_PREFIX, INTERNAL_PRINCIPAL_HEADER, MAX_MESSAGE_BYTES,
     is_operator_token_secret, is_secret,
     v2::{
         PrincipalRole, ResolveCredentialRequest,
@@ -52,6 +55,8 @@ pub enum Role {
     Host,
     Gateway,
     Client,
+    /// An Attempt credential: one Task Attempt's data calls.
+    Attempt,
 }
 
 impl Role {
@@ -61,11 +66,13 @@ impl Role {
             Self::Host => HOST,
             Self::Gateway => GATEWAY,
             Self::Client => CLIENT,
+            Self::Attempt => ATTEMPT,
         }
     }
 
     pub(crate) fn proto(self) -> PrincipalRole {
         match self {
+            Self::Attempt => PrincipalRole::Unspecified,
             Self::Operator => PrincipalRole::Operator,
             Self::Host => PrincipalRole::Host,
             Self::Gateway => PrincipalRole::Gateway,
@@ -78,7 +85,8 @@ impl Role {
 #[derive(Clone, Debug)]
 pub struct Caller {
     pub role: Role,
-    /// `operator:local`, `operator:token:NAME`, `host:NAME`, `gateway:NAME` or `client:NAME`.
+    /// `operator:local`, `operator:token:NAME`, `host:NAME`, `gateway:NAME` or `client:NAME`; for
+    /// an Attempt credential, `attempt:` and its SHA-256 in hex, which the state owner resolves.
     pub principal: String,
     /// The admin operator, the only one that manages Operator Tokens.
     pub admin: bool,
@@ -92,6 +100,8 @@ pub(crate) enum Credential {
     Admin,
     OperatorToken(Vec<u8>),
     Enrolled(Vec<u8>),
+    /// Resolved by the state owner on every call it forwards.
+    Attempt,
 }
 
 impl Caller {
@@ -100,6 +110,10 @@ impl Caller {
             .parse()
             .map_err(|_| Status::internal("invalid caller identity"))
     }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// The SHA-256 of the Auth Key presented to `Enrollments.Enroll`, in the request's extensions.
@@ -152,6 +166,16 @@ impl Api {
             self.resolve(Credential::OperatorToken(digest)).await
         } else if is_secret(CREDENTIAL_SECRET_PREFIX, secret) {
             self.resolve(Credential::Enrolled(digest)).await
+        } else if is_secret(ATTEMPT_CREDENTIAL_SECRET_PREFIX, secret) {
+            // The state owner resolves the credential on every call this tier forwards, and
+            // refuses one whose Attempt, lease, or host generation is no longer live.
+            Ok(Caller {
+                role: Role::Attempt,
+                principal: format!("{ATTEMPT_PRINCIPAL_PREFIX}{}", hex(&digest)),
+                admin: false,
+                generation: 0,
+                credential: Credential::Attempt,
+            })
         } else if is_secret(AUTH_KEY_SECRET_PREFIX, secret) {
             Err(Status::unauthenticated(
                 "an Auth Key is accepted only to enroll; present the enrolled credential",
@@ -165,7 +189,9 @@ impl Api {
         let (digest, kind) = match &credential {
             Credential::OperatorToken(digest) => (digest.clone(), PrincipalRole::Operator),
             Credential::Enrolled(digest) => (digest.clone(), PrincipalRole::Unspecified),
-            Credential::Admin => unreachable!("the admin token is never resolved"),
+            Credential::Admin | Credential::Attempt => {
+                unreachable!("the admin token and Attempt credentials are never resolved here")
+            }
         };
         let request = self.credentials.upstream(
             ResolveCredentialRequest {
@@ -220,6 +246,10 @@ impl Api {
         if matches!(caller.credential, Credential::Admin) {
             return Ok(());
         }
+        if matches!(caller.credential, Credential::Attempt) {
+            // No stream takes an Attempt credential.
+            return Err(unauthenticated());
+        }
         let current = self.resolve(caller.credential.clone()).await?;
         if current.principal != caller.principal {
             return Err(unauthenticated());
@@ -259,7 +289,7 @@ async fn admit(api: &Api, path: &str, metadata: &MetadataMap) -> Result<Admissio
             Sha256::digest(secret.as_bytes()).to_vec(),
         )));
     }
-    let roles = access & (ADMIN | OPERATOR | GATEWAY | HOST | CLIENT);
+    let roles = access & (ADMIN | OPERATOR | GATEWAY | HOST | CLIENT | ATTEMPT);
     if roles == 0 {
         return Err(denied());
     }

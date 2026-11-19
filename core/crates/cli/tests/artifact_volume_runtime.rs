@@ -187,15 +187,18 @@ async fn capture(
         attempt_id: assignment.attempt_id,
         lease_token: assignment.lease_token,
     };
-    host.start_task(credentials.host(
-        StartTaskRequest {
-            task_id: attempt.task_id.clone(),
-            attempt_id: attempt.attempt_id.clone(),
-            lease_token: attempt.lease_token.clone(),
-        },
-        registered.generation,
-    ))
-    .await?;
+    let credential = host
+        .start_task(credentials.host(
+            StartTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+            },
+            registered.generation,
+        ))
+        .await?
+        .into_inner()
+        .attempt_credential;
     let bytes = b"exact durable artifact evidence\n".to_vec();
     let held = held_artifacts::HeldArtifacts::register(
         channel.clone(),
@@ -205,7 +208,6 @@ async fn capture(
     .await?;
     let blob = held.hold(&attempt.attempt_id, &bytes);
     let capture = CommitArtifactCaptureRequest {
-        attempt: Some(attempt.clone()),
         operation_id: "capture".into(),
         description: Some(ArtifactDescription {
             title: "Evidence".into(),
@@ -226,7 +228,9 @@ async fn capture(
             supertag_workspaces::artifact_volumes::FileVolume::open(path)?,
         );
     }
-    let artifact = held.commit_writing(capture, &file_volumes).await?;
+    let artifact = held
+        .commit_writing((&attempt.attempt_id, &credential), capture, &file_volumes)
+        .await?;
     ensure!(
         artifact.volume_copies.len() == usize::from(tag_volume.is_some())
             && artifact
@@ -258,7 +262,7 @@ async fn turn(
     generation: u64,
     operation: &str,
     profile: Option<HarnessExecutionProfile>,
-) -> Result<InspectAttemptRequest> {
+) -> Result<(InspectAttemptRequest, String)> {
     let mut operator = operator_client::OperatorClient::new(channel.clone());
     let mut host = worker_host_client::WorkerHostClient::new(channel.clone());
     let task = operator
@@ -294,16 +298,19 @@ async fn turn(
         attempt_id: assignment.attempt_id,
         lease_token: assignment.lease_token,
     };
-    host.start_task(credentials.host(
-        StartTaskRequest {
-            task_id: attempt.task_id.clone(),
-            attempt_id: attempt.attempt_id.clone(),
-            lease_token: attempt.lease_token.clone(),
-        },
-        generation,
-    ))
-    .await?;
-    Ok(attempt)
+    let credential = host
+        .start_task(credentials.host(
+            StartTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+            },
+            generation,
+        ))
+        .await?
+        .into_inner()
+        .attempt_credential;
+    Ok((attempt, credential))
 }
 
 /// A private, owner-only directory a Worker Host may map as a file Volume.
@@ -457,19 +464,20 @@ async fn after_the_producer(
         .await?
         .into_inner()
         .generation;
-    let reader = turn(credentials, &channel, generation, "read", profile()).await?;
+    let (reader, reader_credential) =
+        turn(credentials, &channel, generation, "read", profile()).await?;
     let acquisition = artifacts
-        .acquire(credentials.host(
+        .acquire(authenticated_request(
             AcquireArtifactRequest {
-                attempt: Some(reader.clone()),
                 operation_id: "acquire".into(),
                 artifact_id: artifact_id.into(),
                 paths: vec!["report.txt".into()],
                 delivery: ArtifactDelivery::Read as i32,
                 destination: None,
             },
-            generation,
-        ))
+            &reader_credential,
+            None,
+        )?)
         .await?
         .into_inner();
     let file = objects
@@ -545,7 +553,7 @@ async fn after_the_producer(
     };
     host.finish_task(finish(&reader, Some(reference.sha256.clone())))
         .await?;
-    let next = turn(credentials, &channel, generation, "next", profile()).await?;
+    let (next, _) = turn(credentials, &channel, generation, "next", profile()).await?;
     let resumed = objects
         .grant(grant(&next, VolumeAccess::Read))
         .await?

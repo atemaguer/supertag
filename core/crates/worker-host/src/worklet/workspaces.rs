@@ -325,7 +325,6 @@ impl Workspaces {
         task: &Task,
         attempt: &Attempt,
         transfers: &Transfers,
-        token: &str,
         cancel: &CancellationToken,
     ) -> Result<Option<PreparedWorkspace>> {
         let Some(spec) = &task.workspace else {
@@ -341,7 +340,7 @@ impl Workspaces {
         match (&mapping.source, &spec.remote) {
             (WorkspaceSource::ControlPlane, Some(expected)) => {
                 let grant = tokio::select! {
-                    result = transfers.grant_source(attempt, token, false) => result?,
+                    result = transfers.grant_source(attempt, false) => result?,
                     _ = cancel.cancelled() => return Err(Status::cancelled("source read cancelled").into()),
                 };
                 ensure!(
@@ -371,7 +370,7 @@ impl Workspaces {
         // branch on the remote holds it once its holder pushed it. No delivery passes through the
         // Control Plane.
         let previous = tokio::select! {
-            previous = transfers.workspace_continuation(attempt, token) => previous?,
+            previous = transfers.workspace_continuation(attempt) => previous?,
             _ = cancel.cancelled() => return Err(Status::cancelled("workspace preparation cancelled").into()),
         };
         let expected_head = match previous {
@@ -406,7 +405,7 @@ impl Workspaces {
                         }
                         None if matches!(mapping.source, WorkspaceSource::ControlPlane) => {
                             let grant = tokio::select! {
-                                result = transfers.grant_source(attempt, token, false) => result?,
+                                result = transfers.grant_source(attempt, false) => result?,
                                 _ = cancel.cancelled() => return Err(Status::cancelled("workspace preparation cancelled").into()),
                             };
                             let fetched = self
@@ -452,7 +451,7 @@ impl Workspaces {
             match &mapping.source {
                 WorkspaceSource::ControlPlane => {
                     let grant = tokio::select! {
-                        result = transfers.grant_source(attempt, token, true) => result?,
+                        result = transfers.grant_source(attempt, true) => result?,
                         _ = cancel.cancelled() => return Err(Status::cancelled("merge source read cancelled").into()),
                     };
                     ensure!(
@@ -547,7 +546,7 @@ impl Workspaces {
         &self,
         workspace: &PreparedWorkspace,
         commit: &str,
-        authority: (&Transfers, &Attempt, &str),
+        authority: (&Transfers, &Attempt),
         cancel: &CancellationToken,
     ) -> Option<String> {
         let mapping = self.mapping(&workspace.workspace_id)?;
@@ -562,9 +561,9 @@ impl Workspaces {
             .ok()
             .flatten(),
             WorkspaceSource::ControlPlane => {
-                let (transfers, attempt, token) = authority;
+                let (transfers, attempt) = authority;
                 tokio::select! {
-                    remote = transfers.verify_output_remote(attempt, token, commit) => remote.ok().flatten(),
+                    remote = transfers.verify_output_remote(attempt, commit) => remote.ok().flatten(),
                     _ = cancel.cancelled() => None,
                 }
             }
@@ -817,7 +816,6 @@ impl Transfers {
     async fn verify_output_remote(
         &self,
         attempt: &Attempt,
-        token: &str,
         commit: &str,
     ) -> Result<Option<String>, Status> {
         let mut request = request(
@@ -825,7 +823,7 @@ impl Transfers {
                 attempt: Some(attempt.inspect()),
                 commit: commit.into(),
             },
-            token,
+            self.credential.secret(),
         )
         .map_err(|error| {
             crate::failures::noted(
@@ -853,7 +851,6 @@ impl Transfers {
     async fn grant_source(
         &self,
         attempt: &Attempt,
-        token: &str,
         merge: bool,
     ) -> Result<WorkspaceGitGrant, Status> {
         let mut request = request(
@@ -863,7 +860,7 @@ impl Transfers {
                 permission: WorkspaceGitPermission::Read as i32,
                 ..Default::default()
             },
-            token,
+            self.credential.secret(),
         )
         .map_err(|error| {
             crate::failures::noted(
@@ -885,7 +882,6 @@ impl Transfers {
     pub(crate) async fn upload_workspace(
         &self,
         attempt: &Attempt,
-        token: &str,
         pending: &PendingWorkspace,
         reference: WorkspaceDeliveryReference,
     ) -> Result<WorkspaceDeliveryReference, Status> {
@@ -935,7 +931,7 @@ impl Transfers {
                 attempt: Some(attempt.inspect()),
                 delivery: Some(reference.clone()),
             },
-            token,
+            self.credential.secret(),
         )
         .map_err(|error| {
             crate::failures::noted(
@@ -964,14 +960,14 @@ impl Transfers {
     async fn workspace_continuation(
         &self,
         attempt: &Attempt,
-        token: &str,
     ) -> Result<Option<(WorkspaceDeliveryReference, BlobHolder)>, Status> {
-        let mut upstream = request(attempt.inspect(), token).map_err(|error| {
-            crate::failures::noted(
-                Status::internal("cannot authenticate the continuation lookup"),
-                &error,
-            )
-        })?;
+        let mut upstream =
+            request(attempt.inspect(), self.credential.secret()).map_err(|error| {
+                crate::failures::noted(
+                    Status::internal("cannot authenticate the continuation lookup"),
+                    &error,
+                )
+            })?;
         upstream.set_timeout(Duration::from_secs(30));
         let continuation =
             TransfersClient::with_interceptor(self.channel.clone(), self.headers.clone())
@@ -1143,6 +1139,7 @@ mod tests {
         let journal = Journal::open(&state)?;
         journal.save(&Entry::Finalizing {
             attempt: Attempt {
+                attempt_credential: String::new(),
                 native_memory: None,
                 task_id: "task".into(),
                 attempt_id: "attempt".into(),

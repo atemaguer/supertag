@@ -96,18 +96,26 @@ async fn contract(url: String) {
     assert_eq!(original.latest_task_state(), TaskState::Succeeded);
     assert_eq!(original.report_task_state(), TaskState::Succeeded);
     let start = StartWorkSessionRequest {
-        attempt: Some(InspectAttemptRequest {
-            task_id: "old-parent".into(),
-            attempt_id: "old-attempt".into(),
-            lease_token: "old-lease".into(),
-        }),
         operation_id: "old-start".into(),
         title: "Migrated child".into(),
         instruction: "Read fixture".into(),
         ..Default::default()
     };
     assert_eq!(
-        store.start_work_session(&host, &start).await.unwrap(),
+        store
+            .start_work_session(
+                &supertag_control_plane::AttemptAccess::new(
+                    &host,
+                    &InspectAttemptRequest {
+                        task_id: "old-parent".into(),
+                        attempt_id: "old-attempt".into(),
+                        lease_token: "old-lease".into(),
+                    }
+                ),
+                &start
+            )
+            .await
+            .unwrap(),
         original
     );
     let parent = store
@@ -148,18 +156,36 @@ async fn contract(url: String) {
         .await
         .unwrap();
     let request = ContinueWorkSessionRequest {
-        attempt: Some(attempt),
         operation_id: "continue-migrated".into(),
         work_session_id: WORK.into(),
         message: "Use the next fixture case".into(),
     };
-    let continued = store.continue_work_session(&host, &request).await.unwrap();
+    let continued = store
+        .continue_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &request,
+        )
+        .await
+        .unwrap();
     assert_eq!(continued.starter_task_id, parent.task_id);
     assert_ne!(continued.latest_task_id, original.latest_task_id);
     assert_eq!(continued.work_session_id, original.work_session_id);
     assert!(continued.report_task_id.is_none());
     assert_eq!(
-        store.start_work_session(&host, &start).await.unwrap(),
+        store
+            .start_work_session(
+                &supertag_control_plane::AttemptAccess::new(
+                    &host,
+                    &InspectAttemptRequest {
+                        task_id: "old-parent".into(),
+                        attempt_id: "old-attempt".into(),
+                        lease_token: "old-lease".into(),
+                    }
+                ),
+                &start
+            )
+            .await
+            .unwrap(),
         original
     );
     let history = store
@@ -173,7 +199,13 @@ async fn contract(url: String) {
         .unwrap()
         .with_execution_clock(|| NOW);
     assert_eq!(
-        store.continue_work_session(&host, &request).await.unwrap(),
+        store
+            .continue_work_session(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &request
+            )
+            .await
+            .unwrap(),
         continued
     );
     assert_eq!(

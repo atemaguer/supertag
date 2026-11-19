@@ -123,10 +123,10 @@ impl PendingOutputs {
         workspace: &PreparedWorkspace,
         workspaces: &Workspaces,
         state: &Path,
-        authority: (&Transfers, &Attempt, &str),
+        authority: (&Transfers, &Attempt),
         cancel: &CancellationToken,
     ) -> Result<Self> {
-        let (_, attempt, _) = authority;
+        let (_, attempt) = authority;
         let checkout = workspace.checkout.path.clone();
         let state = state.to_owned();
         let recovery_state = state.clone();
@@ -140,12 +140,9 @@ impl PendingOutputs {
                 .and_then(|policy| policy.max_bytes)
                 .unwrap_or(MAX_ARTIFACT_BYTES);
             let snapshots = Snapshots::open(&recovery_state, &recovery_attempt.attempt_id)?;
-            if let Some(paths) = snapshots.staged_output_paths(
-                &output.operation_id,
-                recovery_attempt.inspect(),
-                policy.is_some(),
-                maximum,
-            )? {
+            if let Some(paths) =
+                snapshots.staged_output_paths(&output.operation_id, policy.is_some(), maximum)?
+            {
                 output.paths = paths;
                 output.frozen = true;
                 return Ok::<_, anyhow::Error>((output, policy, Vec::new()));
@@ -478,6 +475,7 @@ mod tests {
             ..Default::default()
         };
         let attempt = Attempt {
+            attempt_credential: String::new(),
             native_memory: None,
             task_id: "task".into(),
             attempt_id: "attempt".into(),
@@ -506,12 +504,7 @@ mod tests {
         let recovered: PendingOutputs = serde_json::from_slice(&saved)?;
         let snapshots = Snapshots::open(state.path(), &attempt.attempt_id)?;
         assert_eq!(
-            snapshots.staged_output_paths(
-                &recovered.operation_id,
-                attempt.inspect(),
-                false,
-                MAX_ARTIFACT_BYTES,
-            )?,
+            snapshots.staged_output_paths(&recovered.operation_id, false, MAX_ARTIFACT_BYTES,)?,
             Some(recovered.paths.clone()),
         );
         let Capture::Pending(manifest, bytes) = snapshots.replay_outputs(

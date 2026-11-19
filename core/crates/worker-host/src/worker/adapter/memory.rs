@@ -38,7 +38,6 @@ impl HarnessMemory for Bridge {
         self.authenticate(&request)?;
         self.rememberable().await?;
         let mut input = request.into_inner();
-        input.attempt = Some(self.attempt());
         input.text = self.redact(&input.text);
         self.retry(input, |request| {
             let mut client = self.coordination.memory.clone();
@@ -53,8 +52,7 @@ impl HarnessMemory for Bridge {
     ) -> Result<Response<AttemptMemoryResponse>, Status> {
         self.authenticate(&request)?;
         self.rememberable().await?;
-        let mut input = request.into_inner();
-        input.attempt = Some(self.attempt());
+        let input = request.into_inner();
         self.retry(input, |request| {
             let mut client = self.coordination.memory.clone();
             async move { client.forget(request).await }

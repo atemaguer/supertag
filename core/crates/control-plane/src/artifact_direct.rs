@@ -1,4 +1,5 @@
 //! Authority for exact, short-lived reads from a producing Worker Host.
+use crate::AttemptAccess;
 use crate::{
     ControlPlane, HostAuthority, Store, StoreError,
     store::{Result, invalid, owned},
@@ -139,13 +140,14 @@ impl Store {
 
     pub async fn issue_artifact_transfer(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &GetAcquiredArtifactFileRequest,
     ) -> Result<ArtifactTransferGrant> {
+        let host = authority.host();
         validate_artifact_path(&input.path).map_err(|error| invalid(error.message()))?;
-        let attempt = input.attempt.as_ref().ok_or_else(denied)?;
+        let attempt = authority.lease();
         let (mut tx, _) = self.write().await?;
-        let (capture, file) = self.acquired_source_in(&mut tx, host, input).await?;
+        let (capture, file) = self.acquired_source_in(&mut tx, authority, input).await?;
         let row = owned(
             &mut tx,
             host,
@@ -256,9 +258,8 @@ impl Store {
         let (capture, file) = self
             .acquired_source_in(
                 &mut tx,
-                &consumer,
+                &AttemptAccess::new(&consumer, &attempt),
                 &GetAcquiredArtifactFileRequest {
-                    attempt: Some(attempt),
                     acquisition_id: row.try_get("acquisition_id")?,
                     path: request.path.clone(),
                 },
@@ -305,10 +306,10 @@ impl ControlPlane {
         &self,
         request: Request<GetAcquiredArtifactFileRequest>,
     ) -> std::result::Result<Response<ArtifactTransferGrant>, Status> {
-        let host = self.host_authority(&request)?;
+        let attempt = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
-                .issue_artifact_transfer(&host, request.get_ref())
+                .issue_artifact_transfer(&attempt, request.get_ref())
                 .await?,
         ))
     }

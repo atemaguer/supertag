@@ -124,6 +124,14 @@ async fn seed(database: &std::path::Path, turns: u64, events: u64) {
             )
             .await
             .unwrap();
+        let access = supertag_control_plane::AttemptAccess::new(
+            &host,
+            &v2::InspectAttemptRequest {
+                task_id: task_id.clone(),
+                attempt_id: assignment.attempt_id.clone(),
+                lease_token: assignment.lease_token.clone(),
+            },
+        );
         for sequence in 1..=events {
             let (kind, text) = if sequence == 1 || sequence == events / 2 {
                 (
@@ -146,11 +154,8 @@ async fn seed(database: &std::path::Path, turns: u64, events: u64) {
             };
             store
                 .append_event(
-                    &host,
+                    &access,
                     &v2::AppendEventRequest {
-                        task_id: task_id.clone(),
-                        attempt_id: assignment.attempt_id.clone(),
-                        lease_token: assignment.lease_token.clone(),
                         sequence,
                         text,
                         kind: kind as i32,

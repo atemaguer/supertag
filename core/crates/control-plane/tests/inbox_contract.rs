@@ -52,9 +52,8 @@ async fn start(store: &Store, host: &HostAuthority, attempt: &InspectAttemptRequ
         .await
         .unwrap();
 }
-fn ask(attempt: &InspectAttemptRequest, text: &str) -> AskQuestionRequest {
+fn ask(text: &str) -> AskQuestionRequest {
     AskQuestionRequest {
-        attempt: Some(attempt.clone()),
         operation_id: "ask".into(),
         text: text.into(),
     }
@@ -110,7 +109,10 @@ async fn ready_question(
     let attempt = claim(store, host, &objective.starting_task_id).await;
     start(store, host, &attempt).await;
     store
-        .ask_question(host, &ask(&attempt, text))
+        .ask_question(
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
+            &ask(text),
+        )
         .await
         .unwrap();
     finish(store, host, &attempt).await;
@@ -132,35 +134,69 @@ async fn contract(url: &str) {
     let objective = create(&store, "question").await;
     let attempt = claim(&store, &host, &objective.starting_task_id).await;
     let text = format!("Which option? {}", "x".repeat(600));
-    let input = ask(&attempt, &format!("  {text}  "));
+    let input = ask(&format!("  {text}  "));
     assert!(matches!(
-        store.attempt_capabilities(&host, &attempt).await,
+        store
+            .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(&host, &attempt))
+            .await,
         Err(StoreError::FailedPrecondition(_))
     ));
-    assert!(matches!(
-        store.ask_question(&host, &input).await,
-        Err(StoreError::FailedPrecondition(_))
-    ));
-    start(&store, &host, &attempt).await;
-    let capabilities = store.attempt_capabilities(&host, &attempt).await.unwrap();
-    assert!(capabilities.may_ask_objective_question);
-    assert!(!capabilities.objective_ongoing);
-    assert!(matches!(
-        store.attempt_capabilities(&other, &attempt).await,
-        Err(StoreError::PermissionDenied)
-    ));
-    assert!(matches!(
-        store.ask_question(&other, &input).await,
-        Err(StoreError::PermissionDenied)
-    ));
-    let question = store.ask_question(&host, &input).await.unwrap();
-    assert_eq!(question.text, text);
-    assert_eq!(question.published_at_ms, None);
-    assert_eq!(store.ask_question(&host, &input).await.unwrap(), question);
     assert!(matches!(
         store
             .ask_question(
-                &host,
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &input
+            )
+            .await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+    start(&store, &host, &attempt).await;
+    let capabilities = store
+        .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(&host, &attempt))
+        .await
+        .unwrap();
+    assert!(capabilities.may_ask_objective_question);
+    assert!(!capabilities.objective_ongoing);
+    assert!(matches!(
+        store
+            .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(
+                &other, &attempt
+            ))
+            .await,
+        Err(StoreError::PermissionDenied)
+    ));
+    assert!(matches!(
+        store
+            .ask_question(
+                &supertag_control_plane::AttemptAccess::new(&other, &attempt),
+                &input
+            )
+            .await,
+        Err(StoreError::PermissionDenied)
+    ));
+    let question = store
+        .ask_question(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &input,
+        )
+        .await
+        .unwrap();
+    assert_eq!(question.text, text);
+    assert_eq!(question.published_at_ms, None);
+    assert_eq!(
+        store
+            .ask_question(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &input
+            )
+            .await
+            .unwrap(),
+        question
+    );
+    assert!(matches!(
+        store
+            .ask_question(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
                 &AskQuestionRequest {
                     text: "Changed".into(),
                     ..input.clone()
@@ -172,7 +208,7 @@ async fn contract(url: &str) {
     assert!(matches!(
         store
             .ask_question(
-                &host,
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
                 &AskQuestionRequest {
                     operation_id: "second-question".into(),
                     ..input.clone()
@@ -387,7 +423,10 @@ async fn contract(url: &str) {
     let abort_attempt = claim(&store, &host, &aborted.starting_task_id).await;
     start(&store, &host, &abort_attempt).await;
     store
-        .ask_question(&host, &ask(&abort_attempt, "Question before cancellation"))
+        .ask_question(
+            &supertag_control_plane::AttemptAccess::new(&host, &abort_attempt),
+            &ask("Question before cancellation"),
+        )
         .await
         .unwrap();
     cancel(&store, "aborted").await;
@@ -402,8 +441,8 @@ async fn contract(url: &str) {
     start(&store, &host, &failed_attempt).await;
     store
         .ask_question(
-            &host,
-            &ask(&failed_attempt, "Question before native failure"),
+            &supertag_control_plane::AttemptAccess::new(&host, &failed_attempt),
+            &ask("Question before native failure"),
         )
         .await
         .unwrap();
@@ -508,7 +547,12 @@ async fn contract(url: &str) {
     start(&store, &host, &attempt).await;
     clock.store(NOW + 30_000, Ordering::SeqCst);
     assert!(matches!(
-        store.ask_question(&host, &ask(&attempt, "Too late")).await,
+        store
+            .ask_question(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &ask("Too late")
+            )
+            .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     store.sweep_expired_attempts().await.unwrap();
@@ -539,9 +583,8 @@ async fn contract(url: &str) {
     start(&store, &host, &attempt).await;
     store
         .report_attempt_usage(
-            &host,
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
             &ReportAttemptUsageRequest {
-                attempt: Some(attempt.clone()),
                 sequence: 1,
                 amount_minor: Some(100),
                 currency: Some("USD".into()),
@@ -685,7 +728,10 @@ async fn ongoing_objective_owner_turn_carries_objective_ongoing() {
         .unwrap();
     let attempt = claim(&store, &host, &objective.starting_task_id).await;
     start(&store, &host, &attempt).await;
-    let capabilities = store.attempt_capabilities(&host, &attempt).await.unwrap();
+    let capabilities = store
+        .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(&host, &attempt))
+        .await
+        .unwrap();
     assert!(capabilities.may_ask_objective_question);
     assert!(capabilities.objective_ongoing);
 }

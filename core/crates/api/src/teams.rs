@@ -86,7 +86,7 @@ impl attempt_workstreams_server::AttemptWorkstreams for Api {
         &self,
         request: Request<ReadAttemptWorkstreamRequest>,
     ) -> Result<Response<ReadAttemptWorkstreamResponse>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             attempts(channel).read_attempt_workstream(request).await
         })
         .await
@@ -96,7 +96,7 @@ impl attempt_workstreams_server::AttemptWorkstreams for Api {
         &self,
         request: Request<PostAttemptWorkstreamRequest>,
     ) -> Result<Response<PostAttemptWorkstreamResponse>, Status> {
-        self.forward_host(request, true, |channel, request| async {
+        self.forward_attempt(request, |channel, request| async {
             attempts(channel).post_attempt_workstream(request).await
         })
         .await

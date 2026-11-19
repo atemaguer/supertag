@@ -178,7 +178,6 @@ async fn exercise(url: &str, remote: bool) {
     ));
     let mut capture = CommitArtifactCaptureRequest {
         source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
-        attempt: Some(attempt),
         operation_id: "output".into(),
         description: Some(ArtifactDescription {
             title: "Report".into(),
@@ -194,7 +193,12 @@ async fn exercise(url: &str, remote: bool) {
         ..Default::default()
     };
     assert!(matches!(
-        store.reserve_artifact_capture(&host, &capture).await,
+        store
+            .reserve_artifact_capture(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &capture
+            )
+            .await,
         Err(StoreError::InvalidArgument(_))
     ));
     let forged_snapshot = GitOutputSnapshot {
@@ -214,16 +218,22 @@ async fn exercise(url: &str, remote: bool) {
         git_output: Some(forged_snapshot),
     }];
     assert!(matches!(
-        store.reserve_artifact_capture(&host, &forged_capture).await,
+        store.reserve_artifact_capture(&supertag_control_plane::AttemptAccess::new(&host, &attempt), &forged_capture).await,
         Err(StoreError::FailedPrecondition(error)) if error.contains("accepted Workspace start")
     ));
     capture.files[0].path = "reports/report.md".into();
     store
-        .reserve_artifact_capture(&host, &capture)
+        .reserve_artifact_capture(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &capture,
+        )
         .await
         .unwrap();
     let committed = store
-        .commit_artifact_capture(&host, &capture)
+        .commit_artifact_capture(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &capture,
+        )
         .await
         .unwrap();
     finish.artifacts.push(ArtifactSelection {

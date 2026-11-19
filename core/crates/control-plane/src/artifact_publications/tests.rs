@@ -78,7 +78,6 @@ async fn exercise(url: &str) {
         .await
         .unwrap();
     let request = CommitArtifactCaptureRequest {
-        attempt: Some(attempt.clone()),
         operation_id: "capture".into(),
         description: Some(ArtifactDescription {
             title: "Evidence".into(),
@@ -107,11 +106,11 @@ async fn exercise(url: &str) {
         ..Default::default()
     };
     store
-        .reserve_artifact_capture(&host, &request)
+        .reserve_artifact_capture(&crate::AttemptAccess::new(&host, &attempt), &request)
         .await
         .unwrap();
     let artifact = store
-        .commit_artifact_capture(&host, &request)
+        .commit_artifact_capture(&crate::AttemptAccess::new(&host, &attempt), &request)
         .await
         .unwrap()
         .summary
@@ -267,9 +266,8 @@ async fn exercise(url: &str) {
         .unwrap();
     let acquired = store
         .acquire_artifact(
-            &host,
+            &crate::AttemptAccess::new(&host, &live.clone()),
             &AcquireArtifactRequest {
-                attempt: Some(live.clone()),
                 operation_id: "read-publication".into(),
                 artifact_id: artifact.clone(),
                 paths: selected.clone(),
@@ -280,19 +278,18 @@ async fn exercise(url: &str) {
         .await
         .unwrap();
     let download = GetAcquiredArtifactFileRequest {
-        attempt: Some(live.clone()),
         acquisition_id: acquired.acquisition_id.clone(),
         path: "selected.txt".into(),
     };
     assert_eq!(
         store
-            .get_acquired_artifact_file(&host, &download)
+            .get_acquired_artifact_file(&crate::AttemptAccess::new(&host, &live), &download)
             .await
             .unwrap(),
         publication.files[0]
     );
     let grant = store
-        .issue_artifact_transfer(&host, &download)
+        .issue_artifact_transfer(&crate::AttemptAccess::new(&host, &live), &download)
         .await
         .unwrap();
     let redeem = AuthorizeArtifactTransferRequest {
@@ -361,7 +358,7 @@ async fn exercise(url: &str) {
     );
     assert!(
         store
-            .issue_artifact_transfer(&host, &download)
+            .issue_artifact_transfer(&crate::AttemptAccess::new(&host, &live), &download)
             .await
             .is_err()
     );
@@ -375,16 +372,15 @@ async fn exercise(url: &str) {
     tx.commit().await.unwrap();
     assert!(
         store
-            .get_acquired_artifact_file(&host, &download)
+            .get_acquired_artifact_file(&crate::AttemptAccess::new(&host, &live), &download)
             .await
             .is_err()
     );
     assert!(
         store
             .inspect_attempt_artifact(
-                &host,
+                &crate::AttemptAccess::new(&host, &live),
                 &InspectAttemptArtifactRequest {
-                    attempt: Some(live),
                     artifact_id: artifact.clone()
                 }
             )

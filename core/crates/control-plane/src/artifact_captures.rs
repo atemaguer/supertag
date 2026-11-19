@@ -1,3 +1,4 @@
+use crate::AttemptAccess;
 use prost::Message;
 use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction, any::AnyRow};
@@ -10,7 +11,7 @@ use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
 use crate::{
-    ControlPlane, HostAuthority, Store, StoreError,
+    ControlPlane, Store, StoreError,
     conversations::task_access_in,
     policy::decode,
     store::{Result, invalid, lease_is_live, name, owned, task_row},
@@ -19,30 +20,31 @@ use crate::{
 impl Store {
     pub async fn reserve_artifact_capture(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &CommitArtifactCaptureRequest,
     ) -> Result<CapturedArtifact> {
-        self.record_artifact_capture(host, input, false).await
+        self.record_artifact_capture(authority, input, false).await
     }
 
     pub async fn commit_artifact_capture(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &CommitArtifactCaptureRequest,
     ) -> Result<CapturedArtifact> {
-        self.record_artifact_capture(host, input, true).await
+        self.record_artifact_capture(authority, input, true).await
     }
 
     async fn record_artifact_capture(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &CommitArtifactCaptureRequest,
         commit: bool,
     ) -> Result<CapturedArtifact> {
-        let byte_length =
-            validate_capture_manifest(input).map_err(|error| invalid(error.message()))?;
+        let host = authority.host();
+        let byte_length = validate_capture_manifest(input, Some(&authority.lease().attempt_id))
+            .map_err(|error| invalid(error.message()))?;
         let mut canonical = input.clone();
-        let attempt = canonical.attempt.take().expect("validated Attempt");
+        let attempt = authority.lease();
         // The capturing host holds the bytes; the Control Plane records only where they are.
         let storage = canonical.source_storage_id.clone().ok_or_else(|| {
             invalid("artifact capture requires the Worker Host's registered artifact storage")
@@ -468,7 +470,7 @@ impl artifact_directory_server::ArtifactDirectory for ControlPlane {
         &self,
         request: Request<FindAttemptArtifactsRequest>,
     ) -> std::result::Result<Response<ListCapturedArtifactsResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .find_attempt_artifacts(&host, request.get_ref())
@@ -480,7 +482,7 @@ impl artifact_directory_server::ArtifactDirectory for ControlPlane {
         &self,
         request: Request<InspectAttemptArtifactRequest>,
     ) -> std::result::Result<Response<CapturedArtifact>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .inspect_attempt_artifact(&host, request.get_ref())
@@ -492,7 +494,7 @@ impl artifact_directory_server::ArtifactDirectory for ControlPlane {
         &self,
         request: Request<AcquireArtifactRequest>,
     ) -> std::result::Result<Response<ArtifactAcquisition>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .acquire_artifact(&host, request.get_ref())
@@ -504,7 +506,7 @@ impl artifact_directory_server::ArtifactDirectory for ControlPlane {
         &self,
         request: Request<SettleArtifactAcquisitionRequest>,
     ) -> std::result::Result<Response<ArtifactAcquisition>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .settle_artifact_acquisition(&host, request.get_ref())
@@ -564,7 +566,7 @@ impl artifact_directory_server::ArtifactDirectory for ControlPlane {
         &self,
         request: Request<CommitArtifactCaptureRequest>,
     ) -> std::result::Result<Response<CapturedArtifact>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .reserve_artifact_capture(&host, request.get_ref())
@@ -576,7 +578,7 @@ impl artifact_directory_server::ArtifactDirectory for ControlPlane {
         &self,
         request: Request<CommitArtifactCaptureRequest>,
     ) -> std::result::Result<Response<CapturedArtifact>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .commit_artifact_capture(&host, request.get_ref())

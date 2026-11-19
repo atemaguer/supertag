@@ -16,11 +16,16 @@ use supertag_protocol::{
 use supertag_workspaces::{ExclusiveLock, TransferArtifact};
 use tempfile::NamedTempFile;
 
-#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Deserialize, Serialize)]
 pub(crate) struct Attempt {
     pub task_id: String,
     pub attempt_id: String,
     pub lease_token: String,
+    /// The Attempt credential StartTask returned, which the Attempt's data calls carry: the
+    /// Worker's, and the Worklet's own finalization records. Empty until the Attempt started; a
+    /// replayed start replaces it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub attempt_credential: String,
     #[serde(default)]
     pub execution_selection: Option<Vec<u8>>,
     #[serde(default)]
@@ -35,6 +40,34 @@ pub(crate) struct Attempt {
     #[serde(default)]
     pub volume: Option<AssignedVolume>,
 }
+
+/// One Attempt is the same Attempt whichever credential its latest start returned: a replayed
+/// start replaces the credential, never the Attempt.
+impl PartialEq for Attempt {
+    fn eq(&self, other: &Self) -> bool {
+        let Self {
+            task_id,
+            attempt_id,
+            lease_token,
+            attempt_credential: _,
+            execution_selection,
+            requires_unsandboxed_commands,
+            joined,
+            native_memory,
+            volume,
+        } = self;
+        *task_id == other.task_id
+            && *attempt_id == other.attempt_id
+            && *lease_token == other.lease_token
+            && *execution_selection == other.execution_selection
+            && *requires_unsandboxed_commands == other.requires_unsandboxed_commands
+            && *joined == other.joined
+            && *native_memory == other.native_memory
+            && *volume == other.volume
+    }
+}
+
+impl Eq for Attempt {}
 
 /// `supertag_protocol::v2::NativeMemoryGrant`, as the journal keeps it.
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -1066,6 +1099,7 @@ mod tests {
         let state = tempfile::tempdir()?;
         let journal = Journal::open(state.path())?;
         let attempt = |id: &str| Attempt {
+            attempt_credential: String::new(),
             native_memory: None,
             task_id: "task".into(),
             attempt_id: id.into(),
@@ -1122,6 +1156,7 @@ mod tests {
     fn lost_allocation_acknowledgement_requires_recovery_before_reuse() -> Result<()> {
         let state = tempfile::tempdir()?;
         let attempt = Attempt {
+            attempt_credential: String::new(),
             native_memory: None,
             task_id: "task".into(),
             attempt_id: "attempt".into(),
@@ -1287,6 +1322,7 @@ mod tests {
         );
         journal.save(&Entry::Executing {
             attempt: Attempt {
+                attempt_credential: String::new(),
                 native_memory: None,
                 task_id: "task".into(),
                 attempt_id: "attempt".into(),

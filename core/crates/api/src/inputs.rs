@@ -66,7 +66,7 @@ impl AttemptInputs for Api {
         &self,
         request: Request<TakeInputRequest>,
     ) -> Result<Response<TakeInputResponse>, Status> {
-        self.forward_host(request, true, |channel, request| async move {
+        self.forward_attempt(request, |channel, request| async move {
             attempt_client(channel).take_input(request).await
         })
         .await
@@ -76,7 +76,7 @@ impl AttemptInputs for Api {
         &self,
         request: Request<SettleInputRequest>,
     ) -> Result<Response<LiveInput>, Status> {
-        self.forward_host(request, true, |channel, request| async move {
+        self.forward_attempt(request, |channel, request| async move {
             attempt_client(channel).settle_input(request).await
         })
         .await

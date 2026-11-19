@@ -393,7 +393,10 @@ async fn contract(url: &str) {
         )
         .await
         .unwrap();
-    assert_eq!(task.harness_kind, HarnessKind::Opencode as i32);
+    assert_eq!(
+        task.task.unwrap().harness_kind,
+        HarnessKind::Opencode as i32
+    );
     store
         .finish_task(
             &host,
@@ -563,7 +566,10 @@ async fn history_contract(store: &Store, url: &str, host: &supertag_control_plan
         lease_token: claim.lease_token,
     };
     assert!(
-        store.get_attempt_history(host, &attempt).await.is_err(),
+        store
+            .get_attempt_history(&supertag_control_plane::AttemptAccess::new(host, &attempt))
+            .await
+            .is_err(),
         "claimed is not running"
     );
     store
@@ -578,7 +584,10 @@ async fn history_contract(store: &Store, url: &str, host: &supertag_control_plan
         .await
         .unwrap();
     let expected = eligible[2..].to_vec();
-    let history = store.get_attempt_history(host, &attempt).await.unwrap();
+    let history = store
+        .get_attempt_history(&supertag_control_plane::AttemptAccess::new(host, &attempt))
+        .await
+        .unwrap();
     assert_eq!(
         history
             .entries
@@ -610,19 +619,22 @@ async fn history_contract(store: &Store, url: &str, host: &supertag_control_plan
     let wrong_generation = supertag_control_plane::HostAuthority::new("host:opencode", 2).unwrap();
     assert!(
         store
-            .get_attempt_history(&wrong_generation, &attempt)
+            .get_attempt_history(&supertag_control_plane::AttemptAccess::new(
+                &wrong_generation,
+                &attempt
+            ))
             .await
             .is_err()
     );
     assert!(
         store
-            .get_attempt_history(
+            .get_attempt_history(&supertag_control_plane::AttemptAccess::new(
                 host,
                 &InspectAttemptRequest {
                     lease_token: "wrong".into(),
                     ..attempt.clone()
                 }
-            )
+            ))
             .await
             .is_err()
     );
@@ -630,13 +642,16 @@ async fn history_contract(store: &Store, url: &str, host: &supertag_control_plan
         store
             .clone()
             .with_execution_clock(|| NOW + 60_000)
-            .get_attempt_history(host, &attempt)
+            .get_attempt_history(&supertag_control_plane::AttemptAccess::new(host, &attempt))
             .await
             .is_err()
     );
     let reopened = Store::open(url).await.unwrap().with_execution_clock(|| NOW);
     assert_eq!(
-        reopened.get_attempt_history(host, &attempt).await.unwrap(),
+        reopened
+            .get_attempt_history(&supertag_control_plane::AttemptAccess::new(host, &attempt))
+            .await
+            .unwrap(),
         history
     );
     reopened.close().await;
@@ -662,7 +677,10 @@ async fn history_contract(store: &Store, url: &str, host: &supertag_control_plan
         .await
         .unwrap();
     assert_eq!(
-        store.get_attempt_history(host, &attempt).await.unwrap(),
+        store
+            .get_attempt_history(&supertag_control_plane::AttemptAccess::new(host, &attempt))
+            .await
+            .unwrap(),
         history
     );
     sqlx::query("UPDATE supertag_v2_tasks SET cleanup_pending=1 WHERE task_id=$1")
@@ -670,7 +688,10 @@ async fn history_contract(store: &Store, url: &str, host: &supertag_control_plan
         .execute(&mut connection)
         .await
         .unwrap();
-    let filtered = store.get_attempt_history(host, &attempt).await.unwrap();
+    let filtered = store
+        .get_attempt_history(&supertag_control_plane::AttemptAccess::new(host, &attempt))
+        .await
+        .unwrap();
     assert_eq!(
         filtered
             .entries
@@ -686,7 +707,10 @@ async fn history_contract(store: &Store, url: &str, host: &supertag_control_plan
         .await
         .unwrap();
     assert_eq!(
-        store.get_attempt_history(host, &attempt).await.unwrap(),
+        store
+            .get_attempt_history(&supertag_control_plane::AttemptAccess::new(host, &attempt))
+            .await
+            .unwrap(),
         filtered
     );
     sqlx::query("UPDATE supertag_v2_tasks SET state=$1 WHERE task_id=$2")
@@ -711,7 +735,10 @@ async fn history_contract(store: &Store, url: &str, host: &supertag_control_plan
         .await
         .unwrap();
     assert!(
-        store.get_attempt_history(host, &attempt).await.is_err(),
+        store
+            .get_attempt_history(&supertag_control_plane::AttemptAccess::new(host, &attempt))
+            .await
+            .is_err(),
         "settled Attempt has no history authority"
     );
 }

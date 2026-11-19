@@ -80,9 +80,8 @@ async fn ask(store: &Store, host: &HostAuthority, task_id: &str, text: &str) {
         .unwrap();
     store
         .ask_question(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
             &AskQuestionRequest {
-                attempt: Some(attempt.clone()),
                 operation_id: "ask".into(),
                 text: text.into(),
             },

@@ -50,16 +50,17 @@ pub fn validate_capture_request(input: &HarnessCaptureArtifactRequest) -> Result
     validate_paths(input.paths.iter().map(String::as_str))
 }
 
-pub fn validate_capture_manifest(input: &CommitArtifactCaptureRequest) -> Result<u64, Status> {
+/// Checks a capture manifest and returns its total size. `attempt_id` names the producing
+/// Attempt when the caller knows it, which places a managed output's files under its directory.
+pub fn validate_capture_manifest(
+    input: &CommitArtifactCaptureRequest,
+    attempt_id: Option<&str>,
+) -> Result<u64, Status> {
     validate_metadata(
         &input.operation_id,
         input.description.as_ref(),
         input.native_session_id.as_deref(),
     )?;
-    let attempt = input
-        .attempt
-        .as_ref()
-        .ok_or_else(|| Status::invalid_argument("Attempt authority is required"))?;
     if input.source_storage_id.as_ref().is_some_and(|id| {
         !uuid::Uuid::parse_str(id)
             .is_ok_and(|uuid| uuid.get_version_num() == 4 && uuid.to_string() == *id)
@@ -74,8 +75,8 @@ pub fn validate_capture_manifest(input: &CommitArtifactCaptureRequest) -> Result
             "artifact output modes are mutually exclusive",
         ));
     }
-    if input.managed_task_output {
-        let prefix = format!("{}/", managed_output_directory(&attempt.attempt_id));
+    if let Some(attempt_id) = attempt_id.filter(|_| input.managed_task_output) {
+        let prefix = format!("{}/", managed_output_directory(attempt_id));
         if input
             .files
             .iter()
@@ -204,7 +205,7 @@ fn validate_metadata(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::{ArtifactFile, BlobReference, InspectAttemptRequest};
+    use crate::v2::{ArtifactFile, BlobReference};
     use tonic::Code;
 
     #[test]
@@ -231,7 +232,6 @@ mod tests {
     fn manifest(paths: &[&str], bytes: u64) -> CommitArtifactCaptureRequest {
         CommitArtifactCaptureRequest {
             operation_id: "capture-report".into(),
-            attempt: Some(InspectAttemptRequest::default()),
             description: Some(ArtifactDescription {
                 title: "Release report".into(),
                 kind: "report".into(),
@@ -274,7 +274,7 @@ mod tests {
             vec!["dir", "dir-other/file", "dir/file"],
         ] {
             assert_eq!(
-                validate_capture_manifest(&manifest(&paths, 1))
+                validate_capture_manifest(&manifest(&paths, 1), Some(""))
                     .unwrap_err()
                     .code(),
                 Code::InvalidArgument,
@@ -287,12 +287,14 @@ mod tests {
     fn checks_digest_and_size_limits_for_each_file_and_the_total() {
         let mut input = manifest(&["a", "b"], MAX_ARTIFACT_FILE_BYTES);
         assert_eq!(
-            validate_capture_manifest(&input).unwrap(),
+            validate_capture_manifest(&input, Some("")).unwrap(),
             MAX_ARTIFACT_BYTES
         );
         input.files[0].blob.as_mut().unwrap().sha256 = "bad-digest".into();
         assert_eq!(
-            validate_capture_manifest(&input).unwrap_err().code(),
+            validate_capture_manifest(&input, Some(""))
+                .unwrap_err()
+                .code(),
             Code::InvalidArgument
         );
         for input in [
@@ -300,12 +302,14 @@ mod tests {
             manifest(&["a", "b", "c"], MAX_ARTIFACT_FILE_BYTES),
         ] {
             assert_eq!(
-                validate_capture_manifest(&input).unwrap_err().code(),
+                validate_capture_manifest(&input, Some(""))
+                    .unwrap_err()
+                    .code(),
                 Code::ResourceExhausted
             );
         }
         assert_eq!(
-            validate_capture_manifest(&manifest(&["empty.txt"], 0)).unwrap(),
+            validate_capture_manifest(&manifest(&["empty.txt"], 0), Some("")).unwrap(),
             0
         );
     }

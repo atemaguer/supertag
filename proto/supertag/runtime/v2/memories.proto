@@ -86,7 +86,8 @@ message GetMemoryRequest {
 // The `remember` tool. A note takes this turn's audience. `replaces` names a note this turn may
 // see, which the new note replaces when the turn succeeds.
 message AttemptRememberRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string operation_id = 2;
   // 1 to 500 characters.
   string text = 3;
@@ -95,7 +96,8 @@ message AttemptRememberRequest {
 
 // The `forget` tool, for a note this turn may see.
 message AttemptForgetRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   string operation_id = 2;
   string memory_id = 3;
 }
@@ -117,7 +119,8 @@ message ResetNativeMemoryResponse {
 }
 
 message ReportNativeMemoryRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   // Of the store as the host holds it after the turn.
   uint64 revision = 2;
   uint32 files = 3;
@@ -130,7 +133,8 @@ message ReportNativeMemoryRequest {
 message ReportNativeMemoryResponse {}
 
 message AdvanceNativeMemoryRequest {
-  InspectAttemptRequest attempt = 1;
+  reserved 1;
+  reserved "attempt";
   // The head the host merged onto; 0 when the store on the Volume was empty.
   uint64 expected_revision = 2;
   // The new manifest, already written to the Volume.

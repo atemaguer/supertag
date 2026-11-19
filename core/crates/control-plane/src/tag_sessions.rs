@@ -10,6 +10,7 @@
 //! private to the turn's requester. Rust records no requester for a shared surface thread, so a
 //! turn in a shared Session sees only shared Sessions; a private Session with no recorded
 //! requester is visible only to itself. Neither widens what TypeScript showed.
+use crate::AttemptAccess;
 use std::collections::HashMap;
 
 use sqlx::{Any, Row, Transaction};
@@ -629,14 +630,15 @@ impl Store {
     /// `list_sessions`: visible Sessions other than the caller's own, most recent first.
     pub async fn list_tag_sessions(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &ListTagSessionsRequest,
     ) -> Result<ListTagSessionsResponse> {
+        let host = authority.host();
         let limit = page_limit(input.limit)?;
         let offset = i64::from(input.offset);
         let mut tx = self.pool.begin().await?;
         let viewer = self
-            .tag_viewer_in(&mut tx, host, input.attempt.as_ref(), false)
+            .tag_viewer_in(&mut tx, host, Some(authority.lease()), false)
             .await?;
         let mut audiences = Audiences::new();
         let mut sessions = Vec::new();
@@ -679,9 +681,10 @@ impl Store {
     /// whose request or result contains `query` (case-insensitive), most recent first.
     pub async fn search_tag_sessions(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &SearchTagSessionsRequest,
     ) -> Result<SearchTagSessionsResponse> {
+        let host = authority.host();
         let query = input.query.trim();
         if query.is_empty()
             || input.query.chars().count() > SEARCH_MAX_QUERY
@@ -702,7 +705,7 @@ impl Store {
         );
         let mut tx = self.pool.begin().await?;
         let viewer = self
-            .tag_viewer_in(&mut tx, host, input.attempt.as_ref(), false)
+            .tag_viewer_in(&mut tx, host, Some(authority.lease()), false)
             .await?;
         let mut audiences = Audiences::new();
         let mut firsts: HashMap<String, (String, String)> = HashMap::new();
@@ -768,9 +771,10 @@ impl Store {
     /// `read_session`: one page of a visible Session's finished Tasks of the caller's Tag.
     pub async fn read_tag_session(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &ReadTagSessionRequest,
     ) -> Result<ReadTagSessionResponse> {
+        let host = authority.host();
         name("Session ID", &input.session_id)?;
         let limit = page_limit(input.limit)?;
         let before = match input.before {
@@ -782,7 +786,7 @@ impl Store {
         };
         let mut tx = self.pool.begin().await?;
         let viewer = self
-            .tag_viewer_in(&mut tx, host, input.attempt.as_ref(), true)
+            .tag_viewer_in(&mut tx, host, Some(authority.lease()), true)
             .await?;
         let not_found = || StoreError::NotFound("Session not found or not visible".into());
         let group = sqlx::query(&format!(
@@ -843,9 +847,10 @@ impl Store {
     /// `read_turn`: one page of a visible finished Task's kept events, its own Session's too.
     pub async fn read_tag_turn(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &ReadTagTurnRequest,
     ) -> Result<ReadTagTurnResponse> {
+        let host = authority.host();
         name("Task ID", &input.task_id)?;
         let limit = match input.limit {
             0 => TURN_PAGE,
@@ -865,7 +870,7 @@ impl Store {
         };
         let mut tx = self.pool.begin().await?;
         let viewer = self
-            .tag_viewer_in(&mut tx, host, input.attempt.as_ref(), true)
+            .tag_viewer_in(&mut tx, host, Some(authority.lease()), true)
             .await?;
         let not_found = || StoreError::NotFound("Turn not found or not visible".into());
         let turn = sqlx::query(
@@ -920,13 +925,14 @@ impl Store {
     /// `list_objectives`: open Objectives the caller's Tag owns that it may see.
     pub async fn list_tag_objectives(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &ListTagObjectivesRequest,
     ) -> Result<ListTagObjectivesResponse> {
+        let host = authority.host();
         let limit = page_limit(input.limit)?;
         let mut tx = self.pool.begin().await?;
         let viewer = self
-            .tag_viewer_in(&mut tx, host, input.attempt.as_ref(), false)
+            .tag_viewer_in(&mut tx, host, Some(authority.lease()), false)
             .await?;
         let (objectives, total) =
             open_objectives_in(&mut tx, &viewer, limit, i64::from(input.offset)).await?;
@@ -938,16 +944,17 @@ impl Store {
     /// conversation may see. An Objective's own turn reads only its own Objective.
     pub async fn read_tag_objective(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &ReadTagObjectiveRequest,
     ) -> Result<TagObjectiveView> {
+        let host = authority.host();
         if let Some(id) = &input.objective_id {
             name("Objective ID", id)?;
         }
         let now_ms = self.execution_now_ms();
         let mut tx = self.pool.begin().await?;
         let viewer = self
-            .tag_viewer_in(&mut tx, host, input.attempt.as_ref(), false)
+            .tag_viewer_in(&mut tx, host, Some(authority.lease()), false)
             .await?;
         let not_visible =
             || StoreError::NotFound("No matching Objective is visible to this conversation".into());
@@ -1043,7 +1050,7 @@ impl attempt_tag_sessions_server::AttemptTagSessions for ControlPlane {
         &self,
         request: Request<ListTagSessionsRequest>,
     ) -> std::result::Result<Response<ListTagSessionsResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .list_tag_sessions(&host, request.get_ref())
@@ -1055,7 +1062,7 @@ impl attempt_tag_sessions_server::AttemptTagSessions for ControlPlane {
         &self,
         request: Request<SearchTagSessionsRequest>,
     ) -> std::result::Result<Response<SearchTagSessionsResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .search_tag_sessions(&host, request.get_ref())
@@ -1067,7 +1074,7 @@ impl attempt_tag_sessions_server::AttemptTagSessions for ControlPlane {
         &self,
         request: Request<ReadTagSessionRequest>,
     ) -> std::result::Result<Response<ReadTagSessionResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .read_tag_session(&host, request.get_ref())
@@ -1079,7 +1086,7 @@ impl attempt_tag_sessions_server::AttemptTagSessions for ControlPlane {
         &self,
         request: Request<ReadTagTurnRequest>,
     ) -> std::result::Result<Response<ReadTagTurnResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store.read_tag_turn(&host, request.get_ref()).await?,
         ))
@@ -1089,7 +1096,7 @@ impl attempt_tag_sessions_server::AttemptTagSessions for ControlPlane {
         &self,
         request: Request<ListTagObjectivesRequest>,
     ) -> std::result::Result<Response<ListTagObjectivesResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .list_tag_objectives(&host, request.get_ref())
@@ -1101,7 +1108,7 @@ impl attempt_tag_sessions_server::AttemptTagSessions for ControlPlane {
         &self,
         request: Request<ReadTagObjectiveRequest>,
     ) -> std::result::Result<Response<TagObjectiveView>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
             self.store
                 .read_tag_objective(&host, request.get_ref())

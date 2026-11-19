@@ -49,7 +49,7 @@ pub(crate) async fn prepare(
     let client = AcquisitionClient {
         coordination: clients,
         storage,
-        host_token: token,
+        token,
         attempt: attempt.inspect(),
     };
     let mut locations = Vec::with_capacity(task.input_artifacts.len());
@@ -101,7 +101,6 @@ async fn acquire(
     let operation_id = operation_id(&input.artifact_id);
     let destination = materialized_artifact_directory(&client.attempt.attempt_id, &operation_id);
     let request = AcquireArtifactRequest {
-        attempt: Some(client.attempt.clone()),
         operation_id,
         artifact_id: input.artifact_id.clone(),
         paths: input.files.iter().map(|file| file.path.clone()).collect(),

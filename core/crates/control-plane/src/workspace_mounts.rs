@@ -1,6 +1,6 @@
 //! Workspace data Volume catalog and Task admission.
 use crate::{
-    ControlPlane, HostAuthority, Store, StoreError,
+    ControlPlane, Store, StoreError,
     store::{Result, invalid},
 };
 use prost::Message;
@@ -263,9 +263,9 @@ impl Store {
     /// running Attempt with current Workspace mount pins, for alias rejection.
     pub async fn workspace_mount_preflight(
         &self,
-        host: &HostAuthority,
-        request: &InspectAttemptRequest,
+        authority: &crate::AttemptAccess,
     ) -> Result<WorkspaceMountPreflight> {
+        let (host, request) = (authority.host(), authority.lease());
         let mut tx = self.pool.begin().await?;
         let row = crate::store::owned(
             &mut tx,
@@ -307,16 +307,17 @@ impl Store {
     /// refused.
     pub async fn record_workspace_mount_writes(
         &self,
-        host: &HostAuthority,
+        authority: &crate::AttemptAccess,
         request: &RecordWorkspaceMountWritesRequest,
     ) -> Result<()> {
+        let (host, attempt) = (authority.host(), authority.lease());
         let (mut tx, order) = self.write().await?;
         let row = crate::store::owned(
             &mut tx,
             host,
-            &request.task_id,
-            &request.attempt_id,
-            &request.lease_token,
+            &attempt.task_id,
+            &attempt.attempt_id,
+            &attempt.lease_token,
         )
         .await?;
         crate::artifact_captures::running(&row, self.execution_now_ms())?;
@@ -332,8 +333,8 @@ impl Store {
         }
         .encode_to_vec();
         sqlx::query("INSERT INTO supertag_v2_workspace_mount_writes (task_id,attempt_id,recorded_order,writes) VALUES ($1,$2,$3,$4) ON CONFLICT(task_id,attempt_id) DO NOTHING")
-            .bind(&request.task_id)
-            .bind(&request.attempt_id)
+            .bind(&attempt.task_id)
+            .bind(&attempt.attempt_id)
             .bind(order)
             .bind(&bytes)
             .execute(&mut *tx)
@@ -341,8 +342,8 @@ impl Store {
         let stored: Vec<u8> = sqlx::query_scalar(
             "SELECT writes FROM supertag_v2_workspace_mount_writes WHERE task_id=$1 AND attempt_id=$2",
         )
-        .bind(&request.task_id)
-        .bind(&request.attempt_id)
+        .bind(&attempt.task_id)
+        .bind(&attempt.attempt_id)
         .fetch_one(&mut *tx)
         .await?;
         if stored != bytes {
@@ -414,13 +415,11 @@ impl workspace_volumes_server::WorkspaceVolumes for ControlPlane {
 impl attempt_workspace_mounts_server::AttemptWorkspaceMounts for ControlPlane {
     async fn preflight(
         &self,
-        request: Request<InspectAttemptRequest>,
+        request: Request<PreflightWorkspaceMountsRequest>,
     ) -> std::result::Result<Response<WorkspaceMountPreflight>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         Ok(Response::new(
-            self.store
-                .workspace_mount_preflight(&host, request.get_ref())
-                .await?,
+            self.store.workspace_mount_preflight(&host).await?,
         ))
     }
 
@@ -428,7 +427,7 @@ impl attempt_workspace_mounts_server::AttemptWorkspaceMounts for ControlPlane {
         &self,
         request: Request<RecordWorkspaceMountWritesRequest>,
     ) -> std::result::Result<Response<RecordWorkspaceMountWritesResponse>, Status> {
-        let host = self.host_authority(&request)?;
+        let host = self.attempt(&request).await?;
         self.store
             .record_workspace_mount_writes(&host, request.get_ref())
             .await?;

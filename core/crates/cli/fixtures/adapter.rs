@@ -875,7 +875,6 @@ async fn main() -> Result<()> {
         let saved = memory
             .remember(authenticated_request(
                 supertag_protocol::v2::AttemptRememberRequest {
-                    attempt: None,
                     operation_id: "fixture-remember".into(),
                     text,
                     replaces: None,
@@ -902,7 +901,6 @@ async fn main() -> Result<()> {
         let created = schedules
             .create(authenticated_request(
                 CreateAttemptScheduleRequest {
-                    attempt: None,
                     operation_id: "fixture-schedule".into(),
                     note: "Check PR 412".into(),
                     at,

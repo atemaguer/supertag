@@ -4,6 +4,7 @@
 //! this first slice's mutations, including across multiple service instances. A
 //! socket, Tokio mutex, or response acknowledgement never owns durable work.
 
+mod attempt_credentials;
 mod authority;
 mod enrollments;
 mod execution;
@@ -22,6 +23,7 @@ mod replica_tests;
 #[path = "slack_threads.rs"]
 mod slack_threads;
 mod sqlite_files;
+pub use attempt_credentials::AttemptAccess;
 pub(crate) use authority::ClaimScope;
 pub(crate) use authority::lease_is_live;
 pub use enrollments::Role;
@@ -43,10 +45,10 @@ use supertag_protocol::{
     v2::{
         AcceptEventRequest, AppendEventRequest, ApprovalRule, Assignment, AttemptMilestone,
         ContextContract, ExecutionLimits, ExecutionSelection, FinishTaskRequest,
-        HarnessExecutionProfile, HarnessKind, ListTasksRequest, ListTasksResponse,
-        PolicyExecutionSettings, PutTagRequest, Reply, ReplyDestination, ReplyState,
-        ReportAttemptMilestoneRequest, StartTaskRequest, SubmitTaskRequest, Tag, Task, TaskEvent,
-        TaskState, WorkspaceSpec,
+        HarnessExecutionProfile, HarnessKind, InspectAttemptRequest, ListTasksRequest,
+        ListTasksResponse, PolicyExecutionSettings, PutTagRequest, Reply, ReplyDestination,
+        ReplyState, ReportAttemptMilestoneRequest, StartTaskRequest, StartTaskResponse,
+        SubmitTaskRequest, Tag, Task, TaskEvent, TaskState, WorkspaceSpec,
     },
     valid_git_commit, valid_workspace_id,
 };
@@ -104,7 +106,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 114;
+        const SCHEMA_VERSION: i64 = 115;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -337,6 +339,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0112_native_memory_pending_objects.sql"),
                 include_str!("../migrations/sqlite/0113_attempt_finalization.sql"),
                 include_str!("../migrations/sqlite/0114_warm_sessions.sql"),
+                include_str!("../migrations/sqlite/0115_attempt_credentials.sql"),
             ]
         } else {
             [
@@ -456,6 +459,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0112_native_memory_pending_objects.sql"),
                 include_str!("../migrations/postgresql/0113_attempt_finalization.sql"),
                 include_str!("../migrations/postgresql/0114_warm_sessions.sql"),
+                include_str!("../migrations/postgresql/0115_attempt_credentials.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -1263,7 +1267,13 @@ impl Store {
         Ok(task)
     }
 
-    pub async fn start_task(&self, host: &HostAuthority, input: &StartTaskRequest) -> Result<Task> {
+    /// Starts the claimed Attempt, or answers again for one already started, and mints the
+    /// Attempt credential its data calls carry. A repeated start replaces the credential.
+    pub async fn start_task(
+        &self,
+        host: &HostAuthority,
+        input: &StartTaskRequest,
+    ) -> Result<StartTaskResponse> {
         let _wake = self.wake_follows();
         let (mut transaction, _) = self.write().await?;
         let now = self.execution_now_ms();
@@ -1334,17 +1344,32 @@ impl Store {
             supertag_protocol::crash_point("control-plane.start", "before-commit");
         }
         crate::workspace_landings::with_author_in(&mut transaction, &mut task).await?;
+        let attempt_credential = attempt_credentials::mint_in(
+            &mut transaction,
+            host,
+            &InspectAttemptRequest {
+                task_id: input.task_id.clone(),
+                attempt_id: input.attempt_id.clone(),
+                lease_token: input.lease_token.clone(),
+            },
+            now,
+        )
+        .await?;
         transaction.commit().await?;
-        Ok(task)
+        Ok(StartTaskResponse {
+            task: Some(task),
+            attempt_credential,
+        })
     }
 
     /// Stamps when the running Attempt reached `milestone`, by this Control Plane's clock. The first
     /// stamp wins, so a retried report keeps the original time.
     pub async fn report_attempt_milestone(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &ReportAttemptMilestoneRequest,
     ) -> Result<()> {
+        let host = authority.host();
         // A reply shown now reaches the turn's followers at once.
         let _wake = self.wake_follows();
         let column = match AttemptMilestone::try_from(input.milestone) {
@@ -1355,10 +1380,7 @@ impl Store {
                 return Err(invalid("Attempt milestone is required"));
             }
         };
-        let attempt = input
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Attempt is required"))?;
+        let attempt = authority.lease();
         let (mut transaction, _) = self.write().await?;
         owned(
             &mut transaction,
@@ -1431,9 +1453,10 @@ impl Store {
 
     pub async fn append_event(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &AppendEventRequest,
     ) -> Result<TaskEvent> {
+        let (host, attempt) = (authority.host(), authority.lease());
         let _wake = self.wake_follows();
         let sequence =
             i64::try_from(input.sequence).map_err(|_| invalid("event sequence is too large"))?;
@@ -1451,9 +1474,9 @@ impl Store {
         let row = owned(
             &mut transaction,
             host,
-            &input.task_id,
-            &input.attempt_id,
-            &input.lease_token,
+            &attempt.task_id,
+            &attempt.attempt_id,
+            &attempt.lease_token,
         )
         .await?;
         let sequence = row
@@ -1463,7 +1486,7 @@ impl Store {
         let prior = sqlx::query(
             "SELECT text, kind FROM supertag_v2_task_events WHERE task_id = $1 AND sequence = $2",
         )
-        .bind(&input.task_id)
+        .bind(&attempt.task_id)
         .bind(sequence)
         .fetch_optional(&mut *transaction)
         .await?;
@@ -1492,7 +1515,7 @@ impl Store {
             sqlx::query(
                 "INSERT INTO supertag_v2_task_events (task_id, sequence, text, kind) VALUES ($1,$2,$3,$4)",
             )
-            .bind(&input.task_id)
+            .bind(&attempt.task_id)
             .bind(sequence)
             .bind(&input.text)
             .bind(kind as i64)
@@ -1501,7 +1524,7 @@ impl Store {
             sqlx::query(
                 "UPDATE supertag_v2_tasks SET next_sequence = next_sequence + 1 WHERE task_id = $1",
             )
-            .bind(&input.task_id)
+            .bind(&attempt.task_id)
             .execute(&mut *transaction)
             .await?;
             sqlx::query(
@@ -1509,13 +1532,13 @@ impl Store {
                  WHERE attempt_id = $2 AND first_event_at_ms IS NULL",
             )
             .bind(self.execution_now_ms())
-            .bind(&input.attempt_id)
+            .bind(&attempt.attempt_id)
             .execute(&mut *transaction)
             .await?;
             supertag_protocol::crash_point("control-plane.append-event", "before-commit");
             crate::reply_progress::record_in(
                 &mut transaction,
-                &input.task_id,
+                &attempt.task_id,
                 sequence,
                 kind,
                 &input.text,
@@ -1524,7 +1547,7 @@ impl Store {
         }
         transaction.commit().await?;
         if kind == supertag_protocol::v2::TaskEventKind::Message {
-            self.text_recorded(&input.task_id, input.sequence);
+            self.text_recorded(&attempt.task_id, input.sequence);
         }
         Ok(TaskEvent {
             sequence: input.sequence,

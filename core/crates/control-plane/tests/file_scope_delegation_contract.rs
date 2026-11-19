@@ -169,9 +169,8 @@ async fn delegated_scope(
     let attempt = run(store, host, &objective.starting_task_id).await;
     let work = store
         .start_work_session(
-            host,
+            &supertag_control_plane::AttemptAccess::new(host, &attempt),
             &StartWorkSessionRequest {
-                attempt: Some(attempt),
                 operation_id: format!("{owner}-{member}-delegate"),
                 title: "Change the code".into(),
                 instruction: "Edit src".into(),

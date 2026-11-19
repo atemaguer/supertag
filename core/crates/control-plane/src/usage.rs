@@ -1,5 +1,6 @@
 //! Cumulative per-Attempt evidence. Native and cost-only sequences are independent;
 //! combined native/cost observations commit atomically and never erase known spend.
+use crate::AttemptAccess;
 use std::collections::BTreeSet;
 
 use prost::Message;
@@ -9,19 +10,17 @@ use supertag_protocol::v2::*;
 
 use crate::{
     Store, StoreError,
-    store::{HostAuthority, Result, invalid, lease_is_live, name, owned},
+    store::{Result, invalid, lease_is_live, name, owned},
 };
 
 impl Store {
     pub async fn report_attempt_usage(
         &self,
-        host: &HostAuthority,
+        authority: &AttemptAccess,
         input: &ReportAttemptUsageRequest,
     ) -> Result<()> {
-        let attempt = input
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Attempt identity is required"))?;
+        let host = authority.host();
+        let attempt = authority.lease();
         let sequence =
             i64::try_from(input.sequence).map_err(|_| invalid("usage sequence is too large"))?;
         if sequence < 1 {
@@ -340,6 +339,7 @@ pub(crate) fn usage_row(row: &AnyRow) -> Result<NativeTokenUsage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::HostAuthority;
 
     #[tokio::test]
     async fn pool_counts_latest_observation_once_per_attempt_and_preserves_currency() {
@@ -483,9 +483,8 @@ mod tests {
         tx.commit().await.unwrap();
         store
             .report_attempt_usage(
-                &host,
+                &crate::AttemptAccess::new(&host, &attempt),
                 &ReportAttemptUsageRequest {
-                    attempt: Some(attempt),
                     sequence: 1,
                     amount_minor: Some(1),
                     currency: Some("USD".into()),

@@ -177,7 +177,6 @@ impl Client {
         let result = match call {
             Call::Remember(remember) => {
                 let input = AttemptRememberRequest {
-                    attempt: None,
                     operation_id,
                     text: crate::auth::redact(remember.text.trim().to_owned(), secrets),
                     replaces: remember.replaces.clone(),
@@ -188,7 +187,6 @@ impl Client {
             }
             Call::Forget(forget) => {
                 let input = AttemptForgetRequest {
-                    attempt: None,
                     operation_id,
                     memory_id: forget.memory_id.clone(),
                 };
