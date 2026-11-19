@@ -125,7 +125,7 @@ missing from the table is refused.
 | `host:NAME` | Enrolled credential (`stcr_…`) | `supertag host enroll NAME` with a host Auth Key |
 | `gateway:NAME` | Enrolled credential (`stcr_…`) | `supertag gateway enroll NAME` with a gateway Auth Key |
 | `client:NAME` | Enrolled credential (`stcr_…`) | `supertag connect URL` with a client Auth Key, or the terminal UI or desktop app |
-| One running Task Attempt | Task Attempt credential (`stat_…`) | Returned by `StartTask` to the Worker Host that holds the Task Attempt's lease |
+| One running Task Attempt | Task Attempt credential (`stat_…`) | Returned by `StartTask` to the Worklet that holds the Task Attempt's lease |
 
 An Auth Key (`stak_…`) admits one role, chosen when an operator creates it with
 `supertag auth-key create NAME --role host|gateway|client`. It is accepted only to enroll. The

@@ -163,7 +163,7 @@ More Tag fields declare where its Tasks run, where the Tag works, and who may me
 | `spec.lead` | `true` or `false` | Whether this is the Control Plane's **lead Tag**. Omitted keeps the current value. |
 | `spec.maxWorkSessions` | 1 to 64 | How many work Sessions the Tag may have open at once, 8 by default. Omitted keeps the current value. See [Open work Sessions](coordination.md#open-work-sessions). |
 | `spec.memory` | `true` or `false` | Whether the Tag keeps [Memory](coordination.md#memory): notes it writes and a daily review. Omitted keeps the current value; a new Tag keeps memory. |
-| `spec.volume` | A Volume ID, or `""` | Keeps the Tag's work beyond any one Worker Host: the capturing host writes a copy of every capture there, and a capture fails when its copy cannot be written. Its Sessions' checkpoints live there too, so any host that reaches the Volume resumes them; see [Session checkpoints](control-plane.md#session-checkpoints). A file Volume places the Tag only on hosts that map it. Omitted keeps the current value. See [Keep every capture on a Volume](artifacts.md#keep-every-capture-on-a-volume). |
+| `spec.volume` | A Volume ID, or `""` | Keeps the Tag's work beyond any one Worker Host: the capturing host's Worklet writes a copy of every capture there, and a capture fails when its copy cannot be written. Its Sessions' checkpoints live there too, so any host that reaches the Volume resumes them; see [Session checkpoints](control-plane.md#session-checkpoints). A file Volume places the Tag only on hosts that map it. Omitted keeps the current value. See [Keep every capture on a Volume](artifacts.md#keep-every-capture-on-a-volume). |
 | `spec.startRate` | `starts` (1 to 10,000) and `per` (`1m` to `7d`) | At most how many of the Tag's Task Attempts start per period; `starts: 0` removes it. Omitted keeps the current value; a new Tag has none. See [Start rates](scheduling-and-recovery.md#start-rates). |
 
 Where a Tag answers is a separate `SurfaceLocation` resource, a Tag **location**. It names the
@@ -231,7 +231,7 @@ revoked and unbound from its Tags, and `supertag get host ID` shows when it was 
 `removed_at_ms`. A host that joined but never connected is removed after ten minutes.
 
 Persistent hosts keep the stricter recovery rule: a Task Attempt whose outcome is unknown keeps its
-capacity until the host reports evidence. An ephemeral host cannot come back after removal, so its
+capacity until the host's Worklet reports evidence. An ephemeral host cannot come back after removal, so its
 interrupted Task Attempts count as stopped, and their Tasks run again on another host. The usual
 retry limits apply. See [Leases and unknown outcomes](scheduling-and-recovery.md#leases-and-unknown-outcomes).
 

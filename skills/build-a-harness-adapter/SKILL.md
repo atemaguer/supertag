@@ -1,6 +1,6 @@
 ---
 name: build-a-harness-adapter
-description: Bring another agent system to SuperTag by writing a harness adapter that a Worker Host starts for each Task Attempt. Read only when the built-in harnesses do not fit.
+description: Bring another agent system to SuperTag by writing a harness adapter that the Worker of each Task Attempt starts. Read only when the built-in harnesses do not fit.
 ---
 
 # Build a harness adapter

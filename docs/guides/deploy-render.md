@@ -170,7 +170,7 @@ With the Gateway connected to Lark, mention the Tag in the Lark chat and confirm
 ## Cold starts and restarts
 
 - Each deploy replaces the instance. A service with a disk gets no zero-downtime deploy, so open
-  tunnels drop. Worker Hosts and the Gateway reconnect and retry; opening a tunnel waits up to 30
+  tunnels drop. Worklets and the Gateway reconnect and retry; opening a tunnel waits up to 30
   seconds for the new instance.
 - Do not use a free instance type: it sleeps when idle, which stops the Control Plane's
   controllers, and it cannot attach a disk.
