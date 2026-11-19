@@ -173,8 +173,11 @@ async fn transient_renewals_do_not_pause_or_abandon_held_provider_io() -> Result
     let _provider = AbortOnDrop(tokio::spawn(async move {
         axum::serve(listener, router).await.unwrap();
     }));
+    // Loopback only: a proxy from the environment (such as a sandbox's egress proxy) would
+    // relay or buffer the streamed body and break the progress handshake below.
+    let provider = reqwest::Client::builder().no_proxy().build()?;
     let work = async {
-        let mut response = reqwest::Client::new()
+        let mut response = provider
             .post(format!("http://{address}/reply"))
             .send()
             .await?;
