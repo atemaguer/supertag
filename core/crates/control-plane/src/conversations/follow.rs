@@ -42,9 +42,9 @@ pub(crate) struct Live {
 }
 
 impl Live {
-    pub(crate) fn new(postgres: bool) -> Self {
+    pub(crate) fn new(bus: crate::bus::Bus) -> Self {
         Self {
-            bus: crate::bus::Bus::new(postgres),
+            bus,
             text_changes: tokio::sync::watch::Sender::new(0),
             texts: Default::default(),
             claims: Default::default(),

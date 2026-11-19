@@ -9,6 +9,8 @@
 //! streams subscribed to it: a conversation follow by its Tag, an operator Watch by its scope. A
 //! hint wakes the tail; without one it reads every [`Bus::poll`] anyway. Streams read the store
 //! only when the tail tells them something they follow changed, so an idle stream costs nothing.
+//! On PostgreSQL the tail also listens for the hints other replicas' commits send (see
+//! [`listener`]); SQLite runs in one process, where the in-process hints are enough.
 //!
 //! A stream subscribes first, then reads its history, then applies what the tail delivered since,
 //! dropping anything at or below what its read returned. A subscription registered while the
@@ -25,6 +27,8 @@ use std::{
 
 use supertag_protocol::v2::WatchKind;
 use tokio::sync::{Notify, mpsc};
+
+pub(crate) mod listener;
 
 use crate::{
     Store,
@@ -50,6 +54,11 @@ pub(crate) struct Bus {
     /// Moves with every hint, for the Worker Host claims held while they wait for a Task.
     pub(crate) changes: tokio::sync::watch::Sender<u64>,
     poll_ms: AtomicU64,
+    /// Where the tail listens for other replicas' commits, on PostgreSQL.
+    listen: Option<sqlx::postgres::PgConnectOptions>,
+    /// Keeps the listener from reconnecting, for tests of the poll.
+    #[cfg(test)]
+    pub(crate) listener_paused: AtomicBool,
     /// Reads the tail made, for tests that check streams leave reading to it.
     pub(crate) tail_reads: AtomicU64,
     /// Reads streams made after their first, for the same tests.
@@ -123,14 +132,22 @@ impl Signal {
 }
 
 impl Bus {
-    pub(crate) fn new(postgres: bool) -> Self {
+    pub(crate) fn new(listen: Option<sqlx::postgres::PgConnectOptions>) -> Self {
         Self {
             state: Mutex::default(),
             hinted: Notify::new(),
             changes: tokio::sync::watch::Sender::new(0),
             poll_ms: AtomicU64::new(
-                if postgres { POSTGRES_POLL } else { SQLITE_POLL }.as_millis() as u64,
+                if listen.is_some() {
+                    POSTGRES_POLL
+                } else {
+                    SQLITE_POLL
+                }
+                .as_millis() as u64,
             ),
+            listen,
+            #[cfg(test)]
+            listener_paused: AtomicBool::new(false),
             tail_reads: AtomicU64::new(0),
             stream_reads: AtomicU64::new(0),
         }
@@ -363,6 +380,13 @@ async fn tail(store: Store) {
     let bus = &live.bus;
     let stop = live.closing.child_token();
     let _stopped = stop.clone().drop_guard();
+    if let Some(options) = &bus.listen {
+        tokio::spawn(listener::listen(
+            options.clone(),
+            live.clone(),
+            stop.clone(),
+        ));
+    }
     loop {
         // Everything after the last notice delivered.
         loop {

@@ -106,7 +106,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 115;
+        const SCHEMA_VERSION: i64 = 116;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -119,6 +119,12 @@ impl Store {
             sqlite_files::make_private(url)?;
         }
         let options = AnyConnectOptions::from_str(url)?;
+        // The tail's PostgreSQL listener connects on its own, outside the pool.
+        let listen = if sqlite {
+            None
+        } else {
+            Some(crate::bus::listener::options(url)?)
+        };
         let mut pool = AnyPoolOptions::new()
             .max_connections(if sqlite { 1 } else { 8 })
             .acquire_timeout(Duration::from_secs(10));
@@ -340,6 +346,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0113_attempt_finalization.sql"),
                 include_str!("../migrations/sqlite/0114_warm_sessions.sql"),
                 include_str!("../migrations/sqlite/0115_attempt_credentials.sql"),
+                include_str!("../migrations/sqlite/0116_watch_hints.sql"),
             ]
         } else {
             [
@@ -460,6 +467,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0113_attempt_finalization.sql"),
                 include_str!("../migrations/postgresql/0114_warm_sessions.sql"),
                 include_str!("../migrations/postgresql/0115_attempt_credentials.sql"),
+                include_str!("../migrations/postgresql/0116_watch_hints.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -495,7 +503,9 @@ impl Store {
             audit_sink: None,
             migrated: (version > 0 && version < SCHEMA_VERSION)
                 .then_some((version, SCHEMA_VERSION)),
-            live: Arc::new(crate::conversations::Live::new(!sqlite)),
+            live: Arc::new(crate::conversations::Live::new(crate::bus::Bus::new(
+                (!sqlite).then_some(listen).flatten(),
+            ))),
             time_zone: crate::schedules::default_zone(),
         })
     }
