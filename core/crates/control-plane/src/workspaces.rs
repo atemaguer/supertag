@@ -96,7 +96,7 @@ impl Store {
         host: &HostAuthority,
         input: &ReportWaitingForHolderRequest,
     ) -> Result<Task> {
-        let _wake = self.wake_follows();
+        let _wake = self.hint_after_commit();
         let attempt = input
             .attempt
             .as_ref()

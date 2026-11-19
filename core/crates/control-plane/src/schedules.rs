@@ -993,7 +993,7 @@ impl Store {
         }
         if fired > 0 {
             // A fired turn is a new conversation message: wake the open follows.
-            drop(self.wake_follows());
+            drop(self.hint_after_commit());
         }
         Ok(fired)
     }

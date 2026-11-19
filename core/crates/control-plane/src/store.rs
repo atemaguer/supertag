@@ -903,7 +903,7 @@ impl Store {
     }
 
     pub async fn cancel_task(&self, task_id: &str) -> Result<Task> {
-        let _wake = self.wake_follows();
+        let _wake = self.hint_after_commit();
         name("Task ID", task_id)?;
         let (mut transaction, _) = self.write().await?;
         let task = task_in(&mut transaction, task_id).await?;
@@ -1070,7 +1070,7 @@ impl Store {
         {
             return Ok(());
         }
-        let _wake = self.wake_follows();
+        let _wake = self.hint_after_commit();
         let (mut transaction, _) = self.write().await?;
         let now = self.execution_now_ms();
         crate::objectives::objective_sweep_in(&mut transaction, now).await?;
@@ -1092,7 +1092,7 @@ impl Store {
         ),
         claimed_scope: &mut Option<ClaimScope>,
     ) -> Result<Option<Assignment>> {
-        let _wake = self.wake_follows();
+        let _wake = self.hint_after_commit();
         name("operation ID", operation_id)?;
         let profile = execution::normalize_profile(execution_profile)?;
         let profile_bytes = profile.encode_to_vec();
@@ -1274,7 +1274,7 @@ impl Store {
         host: &HostAuthority,
         input: &StartTaskRequest,
     ) -> Result<StartTaskResponse> {
-        let _wake = self.wake_follows();
+        let _wake = self.hint_after_commit();
         let (mut transaction, _) = self.write().await?;
         let now = self.execution_now_ms();
         crate::objectives::objective_sweep_in(&mut transaction, now).await?;
@@ -1371,7 +1371,7 @@ impl Store {
     ) -> Result<()> {
         let host = authority.host();
         // A reply shown now reaches the turn's followers at once.
-        let _wake = self.wake_follows();
+        let _wake = self.hint_after_commit();
         let column = match AttemptMilestone::try_from(input.milestone) {
             Ok(AttemptMilestone::WorkspaceReady) => "workspace_ready_at_ms",
             Ok(AttemptMilestone::AdapterAttached) => "attached_at_ms",
@@ -1457,7 +1457,7 @@ impl Store {
         input: &AppendEventRequest,
     ) -> Result<TaskEvent> {
         let (host, attempt) = (authority.host(), authority.lease());
-        let _wake = self.wake_follows();
+        let _wake = self.hint_after_commit();
         let sequence =
             i64::try_from(input.sequence).map_err(|_| invalid("event sequence is too large"))?;
         if sequence == 0 {
@@ -1561,7 +1561,7 @@ impl Store {
         host: &HostAuthority,
         input: &FinishTaskRequest,
     ) -> Result<Task> {
-        let _wake = self.wake_follows();
+        let _wake = self.hint_after_commit();
         text("result", &input.result, 262_144)?;
         if input.succeeded && !input.failure_detail.is_empty() {
             return Err(invalid("only a failed Attempt has failure detail"));

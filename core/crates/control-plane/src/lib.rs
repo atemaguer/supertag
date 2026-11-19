@@ -11,6 +11,7 @@ mod attention;
 mod audit;
 mod audit_sink;
 mod budget_pool;
+mod bus;
 mod changed_paths;
 mod checkpoints;
 mod claims;

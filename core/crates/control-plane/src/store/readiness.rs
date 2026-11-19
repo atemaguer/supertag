@@ -16,7 +16,7 @@ impl Store {
         input: &ReportHostRequest,
     ) -> Result<WorkerHostStatus> {
         // A host's first Ready report lets the claims it holds take work at once.
-        let _wake = self.wake_follows();
+        let _wake = self.hint_after_commit();
         let sequence = i64::try_from(input.sequence)
             .ok()
             .filter(|n| *n > 0)

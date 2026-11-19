@@ -152,7 +152,7 @@ impl Store {
         principal: &str,
         input: &SendMessageRequest,
     ) -> Result<ConversationMessage> {
-        let _wake = self.wake_follows();
+        let _wake = self.hint_after_commit();
         let execution_limits = crate::budget_pool::normalize(input.execution_limits.as_ref())?;
         let output_policy =
             supertag_protocol::output_policy::normalize(input.output_policy.as_ref())

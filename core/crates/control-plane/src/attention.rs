@@ -489,7 +489,7 @@ impl crate::Store {
         if due.is_none() {
             return Ok(0);
         }
-        let _wake = self.wake_follows();
+        let _wake = self.hint_after_commit();
         let (mut tx, _) = self.write().await?;
         let released = release_due_in(&mut tx, now).await?;
         tx.commit().await?;

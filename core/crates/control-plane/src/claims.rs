@@ -143,7 +143,7 @@ impl Store {
             )
             .await
         };
-        let mut changes = self.live.changes.subscribe();
+        let mut changes = self.live.bus.changes.subscribe();
         let mut head = self.feed_head().await?;
         let assignment = claim(&mut None).await?;
         let wait = wait.min(MAX_HOLD);

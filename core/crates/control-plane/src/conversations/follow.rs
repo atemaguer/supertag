@@ -34,7 +34,7 @@ const TRACKED: usize = 128;
 
 /// In-process signals for open follows, and the text of the messages running turns write.
 pub(crate) struct Live {
-    pub(crate) changes: tokio::sync::watch::Sender<u64>,
+    pub(crate) bus: crate::bus::Bus,
     text_changes: tokio::sync::watch::Sender<u64>,
     pub(crate) texts: super::texts::Texts,
     /// Worker Host claims held while they wait for a Task.
@@ -47,7 +47,7 @@ pub(crate) struct Live {
 impl Default for Live {
     fn default() -> Self {
         Self {
-            changes: tokio::sync::watch::Sender::new(0),
+            bus: Default::default(),
             text_changes: tokio::sync::watch::Sender::new(0),
             texts: Default::default(),
             claims: Default::default(),
@@ -64,16 +64,6 @@ impl Live {
     }
 }
 
-pub(crate) struct WakeFollows(std::sync::Arc<Live>);
-
-impl Drop for WakeFollows {
-    fn drop(&mut self) {
-        self.0
-            .changes
-            .send_modify(|version| *version = version.wrapping_add(1));
-    }
-}
-
 pub type Updates =
     Pin<Box<dyn Stream<Item = std::result::Result<FollowConversationResponse, Status>> + Send>>;
 
@@ -82,11 +72,9 @@ fn draining() -> Status {
 }
 
 impl Store {
-    /// Wakes the open follows when dropped. A write that can change a conversation holds one
-    /// for its whole call, so the follows wake after it commits; one that fails wakes them for
-    /// nothing, which costs one read of the feed's head.
-    pub(crate) fn wake_follows(&self) -> WakeFollows {
-        WakeFollows(self.live.clone())
+    /// Publishes a hint once the caller's write committed; see [`crate::bus::HintAfterCommit`].
+    pub(crate) fn hint_after_commit(&self) -> crate::bus::HintAfterCommit {
+        crate::bus::HintAfterCommit(self.live.clone())
     }
 
     /// Ends every open follow, as the Control Plane drains.
@@ -132,7 +120,7 @@ impl Store {
         let store = self.clone();
         let operator = principal.starts_with("operator:");
         let principal = principal.to_owned();
-        let mut changes = self.live.changes.subscribe();
+        let mut changes = self.live.bus.changes.subscribe();
         let mut text_changes = self.live.text_changes.subscribe();
         let closing = self.live.closing.clone();
         let output = async_stream::try_stream! {
