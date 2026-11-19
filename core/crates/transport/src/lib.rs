@@ -115,6 +115,7 @@ impl Target {
                 host,
                 port,
                 proxy: None,
+                named: None,
                 tunnel: Some(Tunnel {
                     url: Arc::new(parsed),
                     outer,
@@ -131,33 +132,52 @@ impl Target {
         let Some(proxy) = proxy else {
             return Ok(self);
         };
-        let (host, port) = match &self.dialer {
-            Some(dialer) => (dialer.host.clone(), dialer.port),
-            None => {
-                let uri = self.endpoint.uri();
-                let host = url::Host::parse(uri.host().ok_or("the endpoint needs a host")?)?;
-                let port = uri
-                    .port_u16()
-                    .unwrap_or(if uri.scheme_str() == Some("https") {
-                        443
-                    } else {
-                        80
-                    });
-                (host, port)
-            }
-        };
+        let (host, _) = self.address()?;
         if !proxy.applies_to(&host) {
             return Ok(self);
         }
         let server = proxy.server()?;
-        let dialer = self.dialer.get_or_insert(Dialer {
+        let dialer = self.dialer()?;
+        dialer.proxy = Some(Arc::new(server));
+        Ok(self)
+    }
+
+    /// The same target, with every connection it cannot open reported as `what` at its URL,
+    /// such as `the data endpoint https://gateway.example:3434 is unreachable: Connection
+    /// refused`. The call still fails `Unavailable`, so callers retry it as before.
+    pub fn named(mut self, what: &str) -> Result<Self, Error> {
+        let named = format!("{what} {}", self.url().trim_end_matches('/'));
+        self.dialer()?.named = Some(named.into());
+        Ok(self)
+    }
+
+    /// The host and port connections go to: the tunnel's or the native endpoint's.
+    fn address(&self) -> Result<(url::Host<String>, u16), Error> {
+        if let Some(dialer) = &self.dialer {
+            return Ok((dialer.host.clone(), dialer.port));
+        }
+        let uri = self.endpoint.uri();
+        let host = url::Host::parse(uri.host().ok_or("the endpoint needs a host")?)?;
+        let port = uri
+            .port_u16()
+            .unwrap_or(if uri.scheme_str() == Some("https") {
+                443
+            } else {
+                80
+            });
+        Ok((host, port))
+    }
+
+    /// This target's own dialer, made for a native target that tonic would dial itself.
+    fn dialer(&mut self) -> Result<&mut Dialer, Error> {
+        let (host, port) = self.address()?;
+        Ok(self.dialer.get_or_insert(Dialer {
             host,
             port,
             proxy: None,
+            named: None,
             tunnel: None,
-        });
-        dialer.proxy = Some(Arc::new(server));
-        Ok(self)
+        }))
     }
 
     /// The same target with other HTTP/2 keepalive timing than [`KEEPALIVE_INTERVAL`]
@@ -286,6 +306,8 @@ struct Dialer {
     host: url::Host<String>,
     port: u16,
     proxy: Option<Arc<proxy::Server>>,
+    /// What a failed dial reports itself as; see [`Target::named`].
+    named: Option<Arc<str>>,
     tunnel: Option<Tunnel>,
 }
 
@@ -298,6 +320,14 @@ struct Tunnel {
 
 impl Dialer {
     async fn dial(self) -> io::Result<TokioIo<Dialed>> {
+        let named = self.named.clone();
+        self.open().await.map_err(|error| match named {
+            Some(named) => io::Error::new(error.kind(), format!("{named} is unreachable: {error}")),
+            None => error,
+        })
+    }
+
+    async fn open(self) -> io::Result<TokioIo<Dialed>> {
         let stream = match &self.proxy {
             Some(proxy) => proxy.connect(&self.host, self.port).await?,
             None => proxy::open(&self.host, self.port).await?,
@@ -518,5 +548,40 @@ impl Stream for Incoming {
             return Poll::Ready(Some(Ok(connection)));
         }
         Poll::Pending
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A loopback address nothing listens on.
+    fn refusing() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        format!("http://{address}")
+    }
+
+    #[tokio::test]
+    async fn a_named_target_says_which_endpoint_it_could_not_reach() {
+        let url = refusing();
+        let target = Target::native(Endpoint::from_shared(url.clone()).unwrap())
+            .named("the data endpoint")
+            .unwrap();
+        assert_eq!(target.url(), format!("{url}/"));
+        let mut client =
+            supertag_protocol::v2::worker_host_client::WorkerHostClient::new(target.connect_lazy());
+        let status = client
+            .append_event(supertag_protocol::v2::AppendEventRequest::default())
+            .await
+            .unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Unavailable, "{status:?}");
+        assert!(
+            status
+                .message()
+                .starts_with(&format!("the data endpoint {url} is unreachable: ")),
+            "{status:?}"
+        );
     }
 }
