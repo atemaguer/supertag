@@ -17,8 +17,8 @@ host" means the Worklet acting for its Worker Host. For the ideas, read
 | Starting and supervising Workers, the adapter processes | Which hosts may run which Tags |
 
 A Worklet never receives the database credential, a Gateway's surface credentials, or another
-host's credential. A harness adapter receives only its own harness's provider credentials and a
-bootstrap token scoped to one Task Attempt.
+host's credential. A Worker never receives the host's credential. A harness adapter receives only
+its own harness's provider credentials and a bootstrap token scoped to one Task Attempt.
 
 ## Enrollment and credentials
 
@@ -27,6 +27,27 @@ keeps its credential in its state directory. A reusable key that finds the name 
 host as `NAME-2`, `NAME-3`, and so on. A key created with `--ephemeral` removes its hosts once they
 go offline, and their running Task Attempts return to the queue. `host rotate-credential` replaces
 the credential; `host revoke` refuses it at once.
+
+The Worklet alone holds the host credential, `host:NAME`. With it, the Worklet registers the host,
+claims Tasks, starts, renews, reclaims, and finishes Task Attempts, and moves checkpoints,
+deliveries, Volume objects, and artifacts between hosts.
+
+When the Control Plane starts a Task Attempt, it returns a Task Attempt credential bound to that
+Task Attempt, its lease, and the host's current registration. The Worker's calls carry only this
+credential:
+
+| A Task Attempt credential may | It may not |
+| --- | --- |
+| Record the Task Attempt's events, streamed text, usage, milestones, and network log | Claim, start, renew, reclaim, or finish any Task Attempt |
+| Ask a question and take live input | Read or write another Task Attempt's data |
+| Read the Task Attempt's history, capabilities, and Context Item pins | Register the host or move checkpoints and deliveries |
+| Use the Task Attempt's Mailbox, Workstreams, work Sessions, Schedules, notes, MCP effects, Workspace Volumes, and artifacts | Work after the lease ends |
+
+Renewing the lease extends the credential. Finishing or reclaiming the Task Attempt, a lapsed
+lease, revoking the host, or a new registration of the host ends it. A Worklet that starts the
+same Task Attempt again after a restart receives a new credential, and the old one stops working.
+The Worklet's own finalization for a Task Attempt, such as writing back a Workspace Volume or
+committing captured artifacts, also uses that Task Attempt's credential.
 
 ## Placement
 

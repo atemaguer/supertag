@@ -31,9 +31,9 @@ send the selected version in the `x-supertag-protocol` metadata header on every 
 call without it, or with a version the Control Plane does not speak, fails with
 `FAILED_PRECONDITION`. Only negotiation and the standard gRPC health service are exempt.
 
-SuperTag 0.3.0 speaks protocol 2, and 0.3.1 speaks protocol 6. Before 1.0, each release
-speaks only its own protocol version, so a client and a Control Plane from releases with different
-versions cannot connect. When you offer no version the Control Plane speaks, `Negotiate` fails
+SuperTag 0.3.0 speaks protocol 2, 0.3.1 speaks protocol 5, and the next release speaks protocol 6.
+Before 1.0, each release speaks only its own protocol version, so a client and a Control Plane from
+releases with different versions cannot connect. When you offer no version the Control Plane speaks, `Negotiate` fails
 with `FAILED_PRECONDITION` and a message of this form:
 
 ```text
@@ -44,7 +44,7 @@ both services
 
 The part `(SuperTag BUILD) speaks protocol versions [V, ...]` names the Control Plane's release and
 versions, and every release keeps that form. The CLI, terminal UI, desktop app, and Worklets
-read it to show which release to upgrade, for example: `This app speaks SuperTag protocol 6, but
+read it to show which release to upgrade, for example: `This app speaks SuperTag protocol 5, but
 the Control Plane at http://127.0.0.1:3434 runs SuperTag 0.3.0 (protocol 2). Upgrade the Control
 Plane.`
 
@@ -58,9 +58,13 @@ table of roles:
 | The admin operator | The admin Operator Token | Every operator service, including `OperatorAccess` |
 | A named operator, `token:NAME` | An Operator Token | Every operator service except Operator Token management in `OperatorAccess` |
 | A client device, `client:NAME` | The credential `supertag connect` saved from a client Auth Key | Operator services, limited to the Tags its key named |
-| A Worker Host's Worklet, `host:NAME` | Its host credential | `WorkerHost` registration, claims, leases, and finishing, checkpoints, and transfers |
-| A running Task Attempt's Worker | The Task Attempt credential `WorkerHost.StartTask` returned (`stat_…`) | That Task Attempt's data calls: its events, text, questions, usage, and network log, and the `Attempt…` services |
+| A Worker Host's Worklet, `host:NAME` | Its host credential | `WorkerHost` registration, claims, leases, finishing, and checkpoints, and `HostLandings`, `VolumeObjects`, `Transfers`, `WorkspaceGitAccess`, and `ArtifactSources` |
+| A running Task Attempt's Worker | The Task Attempt credential `WorkerHost.StartTask` returned (`stat_…`) | That Task Attempt's data calls on `WorkerHost`, such as its events, text, questions, usage, network log, history, and Context Item pins, and the `Attempt…` services |
 | A Gateway, `gateway:NAME` | Its Gateway credential | `Connector`, `ReplyProgress`, and `OperatorNotifications` |
+
+A Task Attempt credential names its Task Attempt, so data requests carry no Task Attempt or lease
+fields. It works only while the Worklet holds the Task Attempt's lease, and it never claims,
+starts, renews, or finishes a Task Attempt.
 
 An application usually runs with an Operator Token of its own, so its changes appear under its
 name in `supertag audit`.

@@ -29,7 +29,9 @@ Worklet ── claims Task ── starts adapter ── writes bootstrap to its 
 2. It writes one `AdapterBootstrap` message to the adapter's standard input and closes it: a
    loopback `endpoint` and a `token`, at most 4096 bytes.
 3. The adapter connects to that endpoint with gRPC and sends the token as a bearer credential
-   on every call to the `supertag.runtime.v2.Harness` service.
+   on every call to the `supertag.runtime.v2.Harness` service. The token works only there. Your
+   adapter never holds a Control Plane credential: the endpoint forwards its calls with the Task
+   Attempt's own credential, so they name the Task Attempt without your adapter naming it.
 4. `Attach` returns a `HarnessRun`: the Task and its prompt, the Session checkpoint to resume
    from, a recap of the Session's last finished turns (`history`: each request, result, and the
    messages the agent wrote), the Skills its Context Sets resolved, and what the Task may do.

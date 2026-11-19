@@ -206,8 +206,10 @@ vault credential, so give the replicas one credential vault. A SQLite database s
 5. Upgrade the CLI on operator machines and Worker Hosts, then `supertag host resume NAME`.
 6. Run `supertag verify deployment URL --env-file operator.env --require-ready`.
 
-Clients negotiate a protocol version on every connection and refuse a Control Plane that speaks
-none of theirs, so upgrade clients and the Control Plane together.
+Clients and Worklets negotiate a protocol version on every connection and refuse a Control Plane
+that speaks none of theirs, so upgrade them and the Control Plane together. A Worklet from 0.3.1
+speaks protocol 5 and cannot connect to a Control Plane that speaks protocol 6, so drain those
+Worker Hosts before the upgrade.
 
 ## Network and secret boundaries
 

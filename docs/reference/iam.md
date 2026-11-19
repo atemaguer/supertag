@@ -686,6 +686,10 @@ boundary.
 
 - Gateway credentials receive events and deliver replies.
 - Worker Host credentials authenticate harness tools and request-selected resources.
+- A Worker Host's enrolled credential stays with its Worklet, which claims, starts, renews, and
+  finishes Task Attempts with it. Each running Task Attempt's data calls carry a Task Attempt
+  credential instead, which reaches only that Task Attempt's data and ends with its lease. See
+  [Callers and roles](control-plane.md#callers-and-roles).
 - Authorization snapshots contain identifiers and policy, never credentials.
 - collaboration surface MCP traffic stays outside the collaboration Gateway. Hosted HTTP calls pass through a Task-scoped policy proxy in the Worklet before reaching the official provider server.
 

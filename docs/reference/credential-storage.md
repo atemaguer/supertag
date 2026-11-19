@@ -117,13 +117,7 @@ compares them in constant time. Operator Tokens (`stop_`) are stored the same wa
 
 A Worker Host enrolls from its own side and keeps its credential in its owner-only state
 directory, outside any checkout a harness can read. Its Worklet uses that credential, and no Worker receives
-it. When a Task Attempt starts, the Control Plane returns a Task Attempt credential (`stat_` and 64
-hex digits) for that Task Attempt alone, again storing only its digest. The Worker running the Task
-Attempt makes its data calls with it. It works only while the Worklet holds the lease: finishing
-or reclaiming the Task Attempt, a lapsed lease, revoking the host, or the host registering again
-ends it.
-
-
+it:
 
 ```bash
 supertag host enroll build-east-1 --control-plane https://supertag.example.com \
@@ -136,8 +130,18 @@ with `supertag host rotate-credential build-east-1 --out FILE`, and a stopped ho
 credential is rotated with `--host-state-directory`. Rotation replaces the credential at once;
 revocation refuses it at once. `supertag get host` never shows the token or its digest.
 
-A host credential is never a CLI flag. The built-in supervisor removes the exact credential value
-from harness events and errors. Local-process execution under the same operating-system account is
+### Task Attempt credential
+
+When a Task Attempt starts, the Control Plane returns a Task Attempt credential (`stat_` and 64
+hex digits) for that Task Attempt alone, again storing only its digest. The Worker running the Task
+Attempt makes its data calls with it, and the Worklet keeps it in the Task Attempt's journal entry
+in the owner-only state directory. It works only while the Worklet holds the lease. Renewing the
+lease extends it. Finishing or reclaiming the Task Attempt, a lapsed lease, revoking the host, the
+host registering again, or a repeated start ends it. A harness adapter never receives it: the
+adapter's bootstrap token works only on its Worker's loopback endpoint.
+
+A host credential is never a CLI flag. The Worker never holds it, and the built-in supervisor
+removes the exact Task Attempt credential and bootstrap token values from harness events and errors. Local-process execution under the same operating-system account is
 not a filesystem security boundary; production deployments must keep the supervisor credential
 outside the Task Attempt sandbox or run the harness under a separately confined identity.
 

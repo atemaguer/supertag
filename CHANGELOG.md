@@ -9,6 +9,25 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Changed
+
+- SuperTag now speaks protocol 6; 0.3.1 spoke protocol 5. Upgrade the Control Plane, Gateways,
+  Worker Hosts, and clients together: a 0.3.1 Worker Host, CLI, terminal UI, or desktop app is
+  refused when it connects to a newer Control Plane, and the error says which side to upgrade.
+  Drain 0.3.1 Worker Hosts before upgrading the Control Plane. The Task Attempt data requests no
+  longer carry Task Attempt or lease token fields, and the host-wide artifact source calls moved
+  to a new `ArtifactSources` service. Harness adapters need no change.
+
+### Security
+
+- Each running Task Attempt gets its own credential. `WorkerHost.StartTask` returns a Task
+  Attempt credential (`stat_…`) for that Task Attempt alone, and the Control Plane stores only its
+  digest. Its events, text, questions, usage, network log, and the `Attempt…` services accept only
+  that credential, and only while the Worklet holds the lease: finishing, reclaiming, a lapsed
+  lease, revoking the host, or a new host registration ends it. The host credential no longer
+  reaches those calls, and the Worker never holds it, so the code running a Task Attempt cannot
+  claim, start, or finish work, or touch another Task Attempt.
+
 ## [0.3.1] - 2026-11-18
 
 ### Added

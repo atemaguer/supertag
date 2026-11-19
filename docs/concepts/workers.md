@@ -21,8 +21,8 @@ Two more terms come up below:
 | Execution environment | Where the Task's files and commands live: a local checkout, an E2B or Modal sandbox, or a shared execution environment |
 
 The Worklet handles control: what to run, and whether it is still allowed to. The Worker handles
-the work. A Worker never holds the Worker Host's credential and reaches the Control Plane only
-through its Worklet.
+the work. A Worker never holds the Worker Host's credential. It reports with a credential of its
+own that names its one Task Attempt and stops working when the Worklet's lease on it ends.
 
 ## Follow one Task
 
@@ -45,8 +45,8 @@ Worklet ── prepares a pinned checkout ── starts a Worker (harness adapte
    claims the Task. Its claim is a lease the Worklet renews while the work runs.
 3. The Worklet prepares a checkout of the Tag's Workspace pinned to an exact commit, resolves the
    Task's Skills, and starts a Worker in it: the harness adapter and its harness.
-4. The Worker runs the agent, reports progress through the Worklet, and completes the Task
-   Attempt with its result and a Session checkpoint.
+4. The Worker runs the agent, reports its progress with the Task Attempt's own credential, and
+   hands the Worklet its result and a Session checkpoint. The Worklet completes the Task Attempt.
 5. The Worklet verifies the commits the Task made and delivers them as the branch
    `supertag/session/...`: it writes the branch into the repository it maps, or pushes it to a
    remote Workspace's git server.
@@ -69,7 +69,10 @@ only its own harness's. See [Run Worker Hosts](../guides/workers.md).
 
 A Worker exists for one Task Attempt. The Worklet starts it in its own process group, with a
 scratch directory and a token that work only for that Task Attempt, and stops every process it
-left when the Task Attempt ends. A Workspace checkout, a Session checkpoint, and captured
+left when the Task Attempt ends. The Control Plane gives each Task Attempt a credential when it
+starts. The Worker's events, questions, messages, and other reports carry it, and it cannot claim,
+start, or finish work. It ends with the Task Attempt's lease, so a Worker whose Worklet lost the
+lease can no longer report anything. A Workspace checkout, a Session checkpoint, and captured
 artifacts outlast the Worker; the Worklet keeps them.
 
 The harness is the agent system that does the work. The harness adapter connects one Task Attempt

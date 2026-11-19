@@ -28,7 +28,9 @@ Control Plane stores the organization and schedules its work, and a Worker Host 
 container, VM, or sandbox that provides the capacity to run it. On each Worker Host a **Worklet**,
 the `supertag worker-host` program, connects the host to the Control Plane, claims Tasks, and
 starts a **Worker** for each Task Attempt: a harness adapter and the harness it drives. The
-Worklet and the Worker are roles of running programs, not resources you create or apply. A
+Worklet and the Worker are roles of running programs, not resources you create or apply. The
+Worklet holds the host's credential; a Worker's calls carry a Task Attempt credential that
+names its one Task Attempt and ends with its lease. A
 separate **Gateway** is the service clients connect to: it forwards their calls to the Control
 Plane, and carries **collaboration surface** traffic as a client of the Control Plane. A collaboration surface is how SuperTag meets people in an external work tool, such as
 Slack, GitHub, Lark/Feishu, Linear, or Microsoft Teams: it receives events at a [Tag](#configuration-resources)'s locations and
