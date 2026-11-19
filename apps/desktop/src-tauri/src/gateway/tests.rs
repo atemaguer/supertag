@@ -857,7 +857,7 @@ async fn the_local_gateway_connects_with_its_current_token_and_is_never_saved() 
         listed["local"]["problem"]
             .as_str()
             .unwrap()
-            .contains("supertag up")
+            .contains("supertag init")
     );
 
     std::fs::DirBuilder::new()
