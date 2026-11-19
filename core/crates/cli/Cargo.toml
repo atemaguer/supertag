@@ -191,6 +191,11 @@ path = "tests/operator_runtime.rs"
 required-features = ["test-fixtures"]
 
 [[test]]
+name = "attempt_credential_runtime"
+path = "tests/attempt_credential_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
 name = "host_readiness_runtime"
 path = "tests/host_readiness_runtime.rs"
 required-features = ["test-fixtures"]
