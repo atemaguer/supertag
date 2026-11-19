@@ -390,7 +390,7 @@ async function verifyTunnels(
   const tunnelUrl = `ws://${tunnelAddress}/supertag/tunnel`;
   const tunnel = createGatewayClient({ url: tunnelUrl, token });
   try {
-    assert.deepEqual(await tunnel.negotiate(), 6);
+    assert.deepEqual(await tunnel.negotiate(), 7);
     const watch = tunnel.events.watch({}, { timeoutMs: 10_000 })[Symbol.asyncIterator]();
     assert.equal((await watch.next()).value.update.case, "heartbeat");
     await watch.return?.();
@@ -541,7 +541,7 @@ async function verifyTunnels(
       }
       const secure = createGatewayClient({ url, token, ca: certificates.ca });
       try {
-        assert.equal(await secure.negotiate(), 6);
+        assert.equal(await secure.negotiate(), 7);
         await verifyServices(secure, taskId);
       } finally {
         secure.close();
