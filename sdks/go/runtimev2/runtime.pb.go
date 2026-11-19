@@ -12077,10 +12077,15 @@ func (x *RegisterHostRequest) GetIncarnationId() string {
 }
 
 type HostRecord struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	HostId        string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
-	Generation    uint64                 `protobuf:"varint,2,opt,name=generation,proto3" json:"generation,omitempty"`
-	Revoked       bool                   `protobuf:"varint,3,opt,name=revoked,proto3" json:"revoked,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	HostId     string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
+	Generation uint64                 `protobuf:"varint,2,opt,name=generation,proto3" json:"generation,omitempty"`
+	Revoked    bool                   `protobuf:"varint,3,opt,name=revoked,proto3" json:"revoked,omitempty"`
+	// Where this host's Task Attempts send their data calls, when the deployment names one: a
+	// Gateway URL (`https://`, `wss://` for the WebSocket tunnel, or loopback `http://` or `ws://`)
+	// that forwards them to this Control Plane. Empty means the Control Plane the host registered
+	// with. It grants nothing: the Control Plane checks each data call's Attempt credential.
+	DataEndpoint  string `protobuf:"bytes,4,opt,name=data_endpoint,json=dataEndpoint,proto3" json:"data_endpoint,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -12134,6 +12139,13 @@ func (x *HostRecord) GetRevoked() bool {
 		return x.Revoked
 	}
 	return false
+}
+
+func (x *HostRecord) GetDataEndpoint() string {
+	if x != nil {
+		return x.DataEndpoint
+	}
+	return ""
 }
 
 type PutTagRequest struct {
@@ -27221,14 +27233,15 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x10\xfc\n" +
 	"\"<\n" +
 	"\x13RegisterHostRequest\x12%\n" +
-	"\x0eincarnation_id\x18\x01 \x01(\tR\rincarnationId\"_\n" +
+	"\x0eincarnation_id\x18\x01 \x01(\tR\rincarnationId\"\x84\x01\n" +
 	"\n" +
 	"HostRecord\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x02 \x01(\x04R\n" +
 	"generation\x12\x18\n" +
-	"\arevoked\x18\x03 \x01(\bR\arevoked\"\x8b\x06\n" +
+	"\arevoked\x18\x03 \x01(\bR\arevoked\x12#\n" +
+	"\rdata_endpoint\x18\x04 \x01(\tR\fdataEndpoint\"\x8b\x06\n" +
 	"\rPutTagRequest\x12\x15\n" +
 	"\x06tag_id\x18\x01 \x01(\tR\x05tagId\x12\"\n" +
 	"\finstructions\x18\x02 \x01(\tR\finstructions\x12'\n" +

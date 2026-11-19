@@ -2136,14 +2136,16 @@ class RegisterHostRequest(_message.Message):
     def __init__(self, incarnation_id: _Optional[str] = ...) -> None: ...
 
 class HostRecord(_message.Message):
-    __slots__ = ("host_id", "generation", "revoked")
+    __slots__ = ("host_id", "generation", "revoked", "data_endpoint")
     HOST_ID_FIELD_NUMBER: _ClassVar[int]
     GENERATION_FIELD_NUMBER: _ClassVar[int]
     REVOKED_FIELD_NUMBER: _ClassVar[int]
+    DATA_ENDPOINT_FIELD_NUMBER: _ClassVar[int]
     host_id: str
     generation: int
     revoked: bool
-    def __init__(self, host_id: _Optional[str] = ..., generation: _Optional[int] = ..., revoked: _Optional[bool] = ...) -> None: ...
+    data_endpoint: str
+    def __init__(self, host_id: _Optional[str] = ..., generation: _Optional[int] = ..., revoked: _Optional[bool] = ..., data_endpoint: _Optional[str] = ...) -> None: ...
 
 class PutTagRequest(_message.Message):
     __slots__ = ("tag_id", "instructions", "allowed_actions", "workspace", "harness_kind", "approval_rules", "execution", "name", "expected_revision", "lead", "max_work_sessions", "memory", "start_rate", "volume")

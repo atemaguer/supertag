@@ -100,7 +100,7 @@ whole system rather than another first-class resource.
 - <a id="surface-account"></a>**Surface Account** — one connected external workspace or account and the Gateway that serves
   it. Its credentials stay with that Gateway, in a credential vault.
 - <a id="gateway"></a>**Gateway** — the service clients connect to: the CLI, the terminal UI, the desktop app, and SDK
-  applications. It forwards their calls to the Control Plane, and carries collaboration surface
+  applications. It forwards their calls, and Task Attempts' data calls, to the Control Plane, and carries collaboration surface
   traffic and operator notifications as a client with its own credential, `gateway:NAME`.
 - <a id="worker-host"></a>**Worker Host** — a machine, container, VM, or sandbox that provides execution capacity,
   enrolled under a name, `host:NAME`. Its Worklet connects it outbound to the Control Plane. See

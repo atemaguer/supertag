@@ -78,6 +78,8 @@ const TIMEOUT: &str = "grpc-timeout";
 pub struct Api {
     control_plane: ProtocolChannel,
     credentials: Arc<Credentials>,
+    /// The Gateway URL `RegisterHost` names for Task Attempts' data calls, if the deployment set one.
+    data_endpoint: Option<Arc<str>>,
 }
 
 struct Credentials {
@@ -124,7 +126,17 @@ impl Api {
                 admin: bearer(&admin_token).context("invalid operator token")?,
                 admin_principal,
             }),
+            data_endpoint: None,
         })
+    }
+
+    /// Names `endpoint`, a Gateway that forwards Task Attempts' data calls to this Control Plane,
+    /// in every `RegisterHost` response, so a Worklet can tell its Workers to send their data calls
+    /// there. The endpoint is advice to the host: it grants nothing, and the Attempt credential
+    /// is checked on every data call wherever it arrives.
+    pub fn with_data_endpoint(mut self, endpoint: String) -> Self {
+        self.data_endpoint = Some(endpoint.into());
+        self
     }
 
     pub fn operator_service(&self) -> OperatorServer<Self> {
@@ -862,10 +874,15 @@ impl WorkerHost for Api {
         &self,
         request: Request<RegisterHostRequest>,
     ) -> Result<Response<HostRecord>, Status> {
-        self.forward_host(request, false, |channel, request| async {
-            worker_host_client(channel).register_host(request).await
-        })
-        .await
+        let mut record = self
+            .forward_host(request, false, |channel, request| async {
+                worker_host_client(channel).register_host(request).await
+            })
+            .await?;
+        if let Some(endpoint) = &self.data_endpoint {
+            record.get_mut().data_endpoint = endpoint.to_string();
+        }
+        Ok(record)
     }
 
     async fn claim_task(

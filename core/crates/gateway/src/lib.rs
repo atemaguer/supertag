@@ -8,8 +8,9 @@
 //!
 //! A Gateway is also the endpoint clients connect to: the desktop app, the terminal UI, the CLI
 //! and the SDKs. It forwards their calls to the Control Plane, which authorizes each one as its
-//! caller ([`client_api`]). Its own gRPC service is the operator's test notification. It serves no
-//! Worker Host API: Worker Hosts connect to the Control Plane.
+//! caller ([`client_api`]). It forwards a running Task Attempt's data calls the same way, under
+//! the Attempt credential they carry. Its own gRPC service is the operator's test notification. It
+//! serves no Worker Host registration, claim, or lease call: Worklets connect to the Control Plane.
 
 pub mod client_api;
 mod delivery_journal;

@@ -233,15 +233,16 @@ pub fn path_access(path: &str) -> Option<u16> {
     access(service, method)
 }
 
-/// Whether a Gateway forwards a call on `path` from its client listener to the Control Plane:
-/// protocol negotiation and health, and every RPC that an operator, a client, or an Auth Key
-/// (enrollment) may call. Worker Host, Gateway, internal, and peer-local RPCs are not served there.
-/// Forwarding grants nothing: the Control Plane authorizes each call as its caller's own principal.
+/// Whether a Gateway forwards a call on `path` from its listener to the Control Plane: protocol
+/// negotiation and health, every RPC that an operator, a client, or an Auth Key (enrollment) may
+/// call, and a running Task Attempt's data calls under its Attempt credential. Worker Host lease
+/// and host operations, Gateway, internal, and peer-local RPCs are not served there. Forwarding
+/// grants nothing: the Control Plane authorizes each call as its caller's own principal.
 pub fn gateway_forwards(path: &str) -> bool {
     path.starts_with(NEGOTIATION_PATH)
         || path.starts_with(HEALTH_PATH)
         || path_access(path)
-            .is_some_and(|access| access & (ADMIN | OPERATOR | CLIENT | ENROLL) != 0)
+            .is_some_and(|access| access & (ADMIN | OPERATOR | CLIENT | ENROLL | ATTEMPT) != 0)
 }
 
 #[cfg(test)]
@@ -385,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn a_gateway_forwards_only_operator_client_and_enrollment_calls() {
+    fn a_gateway_forwards_operator_client_enrollment_and_attempt_calls() {
         let forwards = |path: &str| gateway_forwards(&format!("{PACKAGE}{path}"));
         for path in [
             "ProtocolNegotiation/Negotiate",
@@ -395,15 +396,23 @@ mod tests {
             "NetworkLogs/List",
             "OperatorAccess/CreateOperatorToken",
             "Conversations/FollowConversation",
+            "WorkerHost/AppendEvent",
+            "WorkerHost/PublishText",
+            "AttemptMailbox/SendMessage",
+            "AttemptInputs/TakeInput",
         ] {
             assert!(forwards(path), "{path}");
         }
         assert!(gateway_forwards("/grpc.health.v1.Health/Check"));
         for path in [
+            "WorkerHost/RegisterHost",
             "WorkerHost/ClaimTask",
+            "WorkerHost/StartTask",
+            "WorkerHost/RenewAttempt",
+            "WorkerHost/FinishTask",
             "WorkerHost/GetCheckpoint",
-            "WorkerHost/AppendEvent",
-            "AttemptMailbox/SendMessage",
+            "HostLandings/Claim",
+            "Transfers/CommitWorkspace",
             "Connector/ClaimConnector",
             "ReplyProgress/Claim",
             "OperatorNotifications/Claim",
@@ -413,5 +422,27 @@ mod tests {
         ] {
             assert!(!forwards(path), "{path}");
         }
+    }
+
+    /// The forward set is exactly negotiation and the methods an operator, a client, an Auth Key or
+    /// an Attempt credential may call: no method only a host credential may call is forwarded.
+    #[test]
+    fn a_gateway_forwards_no_host_only_method() {
+        let set = prost_types::FileDescriptorSet::decode(crate::FILE_DESCRIPTOR_SET)
+            .expect("compiled descriptors");
+        let mut host_only = 0;
+        for service in set.file.iter().flat_map(|file| &file.service) {
+            for method in &service.method {
+                let path = format!("{PACKAGE}{}/{}", service.name(), method.name());
+                let access = access(service.name(), method.name()).unwrap_or(0);
+                let forwarded = access & (OPEN | ADMIN | OPERATOR | CLIENT | ENROLL | ATTEMPT) != 0;
+                assert_eq!(gateway_forwards(&path), forwarded, "{path}");
+                if access & HOST != 0 && access & (OPERATOR | CLIENT) == 0 {
+                    host_only += 1;
+                    assert!(!gateway_forwards(&path), "{path} is a host call");
+                }
+            }
+        }
+        assert!(host_only > 20, "too few host methods checked: {host_only}");
     }
 }

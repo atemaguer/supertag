@@ -1,5 +1,6 @@
-//! Clients reach the Control Plane through a Gateway, and the Gateway never widens what a caller
-//! may do: the Control Plane authorizes every forwarded call as the caller's own principal.
+//! Clients, and a running Task Attempt's data calls, reach the Control Plane through a Gateway,
+//! and the Gateway never widens what a caller may do: the Control Plane authorizes every forwarded
+//! call as the caller's own principal.
 #[path = "support/children.rs"]
 mod children;
 use children::reaped;
@@ -112,14 +113,21 @@ struct Stack {
     gateway_url: String,
     admin: String,
     gateway_credential: String,
+    host_token: String,
 }
+
+/// The Gateway URL the Control Plane names to registering hosts for Task Attempts' data calls.
+const DATA_ENDPOINT: &str = "https://gateway.example.test:8443";
 
 async fn stack(database: String) -> Result<Stack> {
     let gateway_credential = new_secret(CREDENTIAL_SECRET_PREFIX);
+    let host_token = new_secret(CREDENTIAL_SECRET_PREFIX);
     let admin = Uuid::new_v4().to_string();
     let mut control = binary(&["control-plane"]);
     control
         .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_credential)
+        .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
+        .env("SUPERTAG_DATA_ENDPOINT", DATA_ENDPOINT)
         .env("SUPERTAG_DATABASE_URL", database)
         .env("SUPERTAG_OPERATOR_TOKEN", &admin);
     let control_plane = service(control, "Control Plane").await?;
@@ -133,6 +141,7 @@ async fn stack(database: String) -> Result<Stack> {
         gateway_url,
         admin,
         gateway_credential,
+        host_token,
     })
 }
 
@@ -226,6 +235,8 @@ async fn enroll_client(channel: &ProtocolChannel, admin: &str, name: &str) -> Re
 database_tests! {
     #[tokio::test]
     a_gateway_forwards_calls_as_their_caller_and_never_widens_them;
+    #[tokio::test]
+    a_gateway_forwards_an_attempts_data_calls_and_no_host_call;
     #[tokio::test]
     #[ignore = "load test: holds 1,000 conversation follows open through one Gateway"]
     a_gateway_holds_a_thousand_follows_open;
@@ -567,4 +578,378 @@ async fn a_gateway_forwards_calls_as_their_caller_and_never_widens_them(
         );
     }
     Ok(())
+}
+
+/// A Worker sends its Task Attempt's data calls through a Gateway with the Attempt credential. The
+/// Gateway forwards them as that Attempt and nothing more: no host call crosses it, with either
+/// credential, and the Control Plane still refuses a lease call the Gateway is made to forward.
+async fn a_gateway_forwards_an_attempts_data_calls_and_no_host_call(
+    database: String,
+) -> Result<()> {
+    use supertag_protocol::{
+        ATTEMPT_CREDENTIAL_SECRET_PREFIX, HOST_GENERATION_HEADER,
+        authorization::{ENROLL, HOST, OPERATOR, gateway_forwards},
+        v2::{
+            AppendEventRequest, ClaimTaskRequest, FinishTaskRequest, GetAttemptHistoryRequest,
+            InspectAttemptRequest, ListEventsRequest, PublishTaskTextRequest, ReadMailboxRequest,
+            RegisterHostRequest, ServiceRole, StartTaskRequest, SubmitTaskRequest, TaskEventKind,
+            attempt_mailbox_client::AttemptMailboxClient, worker_host_client::WorkerHostClient,
+        },
+    };
+
+    let stack = stack(database).await?;
+    let admin = stack.admin.as_str();
+    let host_token = stack.host_token.as_str();
+    let operator = protocol::dial(&stack.gateway_url).await?;
+    OperatorClient::new(operator.clone())
+        .put_tag(call(
+            PutTagRequest {
+                tag_id: "worker".into(),
+                instructions: "Do the work".into(),
+                ..Default::default()
+            },
+            admin,
+        ))
+        .await?;
+    let mut tasks = vec![];
+    for operation in ["first", "second"] {
+        tasks.push(
+            OperatorClient::new(operator.clone())
+                .submit_task(call(
+                    SubmitTaskRequest {
+                        tag_id: "worker".into(),
+                        session_id: operation.into(),
+                        operation_id: operation.into(),
+                        prompt: "Change the checkout".into(),
+                        ..Default::default()
+                    },
+                    admin,
+                ))
+                .await?
+                .into_inner(),
+        );
+    }
+
+    // The Worklet registers, claims, and starts on the Control Plane itself.
+    let plane = protocol::dial(&stack.control_plane_url).await?;
+    let mut host = WorkerHostClient::new(plane.clone());
+    let registration = host
+        .register_host(call(
+            RegisterHostRequest {
+                incarnation_id: "fixture".into(),
+            },
+            host_token,
+        ))
+        .await?
+        .into_inner();
+    // Registration names the Gateway the deployment set for Task Attempts' data calls.
+    assert_eq!(registration.data_endpoint, DATA_ENDPOINT);
+    let generation = registration.generation;
+    // A call naming the host's generation, as a Worklet's does.
+    let as_host = HostCalls(generation);
+    let mut leases = vec![];
+    let mut credentials = vec![];
+    for operation in ["claim-first", "claim-second"] {
+        let assignment = host
+            .claim_task(as_host.call(
+                ClaimTaskRequest {
+                    operation_id: operation.into(),
+                    ..Default::default()
+                },
+                host_token,
+            ))
+            .await?
+            .into_inner()
+            .assignment
+            .context("Attempt missing")?;
+        let lease = InspectAttemptRequest {
+            task_id: assignment.task.context("Task missing")?.task_id,
+            attempt_id: assignment.attempt_id,
+            lease_token: assignment.lease_token,
+        };
+        let started = host
+            .start_task(as_host.call(
+                StartTaskRequest {
+                    task_id: lease.task_id.clone(),
+                    attempt_id: lease.attempt_id.clone(),
+                    lease_token: lease.lease_token.clone(),
+                },
+                host_token,
+            ))
+            .await?
+            .into_inner();
+        ensure!(supertag_protocol::is_secret(
+            ATTEMPT_CREDENTIAL_SECRET_PREFIX,
+            &started.attempt_credential
+        ));
+        leases.push(lease);
+        credentials.push(started.attempt_credential);
+    }
+    let (first, credential) = (&leases[0], credentials[0].as_str());
+
+    // A Worker reaches the Gateway, negotiating as its Worker Host does.
+    let worker = supertag_protocol::negotiation::connect(
+        tonic::transport::Endpoint::from_shared(stack.gateway_url.clone())?
+            .connect()
+            .await?,
+        ServiceRole::WorkerHost,
+        ServiceRole::Gateway,
+    )
+    .await
+    .map_err(|error| anyhow::anyhow!("{error}"))?;
+    let mut data = WorkerHostClient::new(worker.clone());
+    let event = |sequence: u64, text: &str| AppendEventRequest {
+        sequence,
+        text: text.into(),
+        kind: TaskEventKind::Message as i32,
+    };
+
+    // 1. The Attempt's data calls go through, as that Attempt alone.
+    data.append_event(call(event(1, "Working on it"), credential))
+        .await?;
+    data.publish_text(call(
+        PublishTaskTextRequest {
+            after_sequence: 1,
+            revision: 1,
+            text: "Working on it, still".into(),
+        },
+        credential,
+    ))
+    .await?;
+    data.get_attempt_history(call(GetAttemptHistoryRequest {}, credential))
+        .await?;
+    AttemptMailboxClient::new(worker.clone())
+        .read_mailbox(call(
+            ReadMailboxRequest {
+                limit: 1,
+                ..Default::default()
+            },
+            credential,
+        ))
+        .await?;
+    let events = |task_id: &str| {
+        call(
+            ListEventsRequest {
+                task_id: task_id.into(),
+                ..Default::default()
+            },
+            admin,
+        )
+    };
+    let listed = OperatorClient::new(operator.clone())
+        .list_events(events(&tasks[0].task_id))
+        .await?
+        .into_inner();
+    assert_eq!(listed.events.len(), 1);
+    assert_eq!(first.task_id, tasks[0].task_id);
+    let listed = OperatorClient::new(operator.clone())
+        .list_events(events(&tasks[1].task_id))
+        .await?
+        .into_inner();
+    assert!(
+        listed.events.is_empty(),
+        "the first Attempt's credential wrote to the second Task through the Gateway"
+    );
+
+    // A forged principal or host generation header changes nothing: the call is still the
+    // Attempt's, and a forged credential of the right shape is refused.
+    let mut forged = call(event(2, "Still the Attempt"), credential);
+    forged
+        .metadata_mut()
+        .insert("x-supertag-internal-principal", "host:local".parse()?);
+    forged
+        .metadata_mut()
+        .insert(HOST_GENERATION_HEADER, generation.into());
+    data.append_event(forged).await?;
+    let unknown = new_secret(ATTEMPT_CREDENTIAL_SECRET_PREFIX);
+    assert_eq!(
+        code(data.append_event(call(event(3, "Forged"), &unknown)).await),
+        Code::Unauthenticated
+    );
+
+    // 2. The host credential on a data call is forwarded, and refused as the host it is.
+    assert_eq!(
+        code(
+            data.append_event(as_host.call(event(3, "As the host"), host_token))
+                .await
+        ),
+        Code::PermissionDenied
+    );
+
+    // 3. No method a Worker Host's host credential may call is served by the Gateway, with the
+    // host credential or the Attempt credential.
+    let set = prost_types::FileDescriptorSet::decode(supertag_protocol::FILE_DESCRIPTOR_SET)?;
+    let mut checked = 0;
+    for file in &set.file {
+        for service in &file.service {
+            for method in &service.method {
+                let access = access(service.name(), method.name()).unwrap_or(0);
+                // `Enrollments.WhoAmI` and `RotateCredential` also serve clients, as their callers.
+                if access & HOST == 0 || access & (OPERATOR | CLIENT | ENROLL) != 0 {
+                    continue;
+                }
+                let path = format!("/{}.{}/{}", file.package(), service.name(), method.name());
+                assert!(!gateway_forwards(&path), "{path} is forwarded");
+                for secret in [host_token, credential] {
+                    let bearer = format!("Bearer {secret}");
+                    let generation = generation.to_string();
+                    let code = raw_code(
+                        &worker,
+                        &path,
+                        &[
+                            ("authorization", &bearer),
+                            (HOST_GENERATION_HEADER, &generation),
+                        ],
+                    )
+                    .await?;
+                    assert_eq!(
+                        code,
+                        Code::Unimplemented,
+                        "{path} answered through the Gateway"
+                    );
+                }
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 20, "too few host methods checked: {checked}");
+    let refused_claim = WorkerHostClient::new(worker.clone())
+        .claim_task(as_host.call(
+            ClaimTaskRequest {
+                operation_id: "through-the-gateway".into(),
+                ..Default::default()
+            },
+            host_token,
+        ))
+        .await;
+    assert_eq!(code(refused_claim), Code::Unimplemented);
+
+    // 4. With the Gateway's allowlist disabled, the Control Plane still refuses the Attempt
+    // credential every lease and host call: forwarding lends it nothing.
+    let open_gateway =
+        start_gateway(&stack.control_plane_url, &stack.gateway_credential, true).await?;
+    let open = supertag_protocol::negotiation::connect(
+        tonic::transport::Endpoint::from_shared(open_gateway.url.clone())?
+            .connect()
+            .await?,
+        ServiceRole::WorkerHost,
+        ServiceRole::Gateway,
+    )
+    .await
+    .map_err(|error| anyhow::anyhow!("{error}"))?;
+    let mut open_host = WorkerHostClient::new(open.clone());
+    let lease_calls = [
+        code(
+            open_host
+                .claim_task(as_host.call(
+                    ClaimTaskRequest {
+                        operation_id: "attempt-claim".into(),
+                        ..Default::default()
+                    },
+                    credential,
+                ))
+                .await,
+        ),
+        code(
+            open_host
+                .renew_attempt(as_host.call(first.clone(), credential))
+                .await,
+        ),
+        code(
+            open_host
+                .start_task(as_host.call(
+                    StartTaskRequest {
+                        task_id: first.task_id.clone(),
+                        attempt_id: first.attempt_id.clone(),
+                        lease_token: first.lease_token.clone(),
+                    },
+                    credential,
+                ))
+                .await,
+        ),
+        code(
+            open_host
+                .finish_task(as_host.call(
+                    FinishTaskRequest {
+                        task_id: first.task_id.clone(),
+                        attempt_id: first.attempt_id.clone(),
+                        lease_token: first.lease_token.clone(),
+                        succeeded: true,
+                        result: "Done".into(),
+                        ..Default::default()
+                    },
+                    credential,
+                ))
+                .await,
+        ),
+        code(
+            open_host
+                .register_host(as_host.call(
+                    RegisterHostRequest {
+                        incarnation_id: "attempt".into(),
+                    },
+                    credential,
+                ))
+                .await,
+        ),
+    ];
+    assert_eq!(lease_calls, [Code::PermissionDenied; 5]);
+    // The same credential's data call through that Gateway is admitted, so the refusals above
+    // were the Attempt's role, not a dead credential.
+    open_host
+        .append_event(call(event(3, "Through the open Gateway"), credential))
+        .await?;
+
+    // 5. Finishing the Attempt on the Control Plane ends its credential at the Gateway too; the
+    // other Attempt's still works.
+    host.finish_task(as_host.call(
+        FinishTaskRequest {
+            task_id: first.task_id.clone(),
+            attempt_id: first.attempt_id.clone(),
+            lease_token: first.lease_token.clone(),
+            succeeded: true,
+            result: "Done".into(),
+            ..Default::default()
+        },
+        host_token,
+    ))
+    .await?;
+    assert_eq!(
+        code(
+            data.append_event(call(event(4, "After finishing"), credential))
+                .await
+        ),
+        Code::Unauthenticated
+    );
+    data.append_event(call(event(1, "Second"), &credentials[1]))
+        .await?;
+
+    // Nothing either Gateway logged carries an Attempt or host credential.
+    for mut process in [stack.gateway, open_gateway] {
+        process.child.start_kill()?;
+        process.child.wait().await?;
+        let log = process.stderr.lock().unwrap().clone();
+        for secret in [credential, credentials[1].as_str(), host_token] {
+            assert!(!log.contains(secret), "the Gateway logged a credential");
+        }
+        assert!(
+            !log.contains(ATTEMPT_CREDENTIAL_SECRET_PREFIX),
+            "the Gateway logged an Attempt credential"
+        );
+    }
+    Ok(())
+}
+
+/// Builds calls that name one host generation, which only a host call uses.
+#[derive(Clone, Copy)]
+struct HostCalls(u64);
+
+impl HostCalls {
+    fn call<T>(self, message: T, secret: &str) -> Request<T> {
+        let mut request = call(message, secret);
+        request
+            .metadata_mut()
+            .insert(supertag_protocol::HOST_GENERATION_HEADER, self.0.into());
+        request
+    }
 }

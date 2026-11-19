@@ -68,6 +68,11 @@ starts, renews, or finishes a Task Attempt. After a cancellation, `ReportAttempt
 `ReportAttemptMilestone`, and `ReportNetworkLog` still accept it until the Worklet's
 `FinishTask` confirms execution stopped.
 
+A Gateway forwards Task Attempt data calls to the Control Plane as their caller, exactly as it
+forwards client calls. It adds no authority, and it serves none of the host credential's methods.
+When the Control Plane sets `SUPERTAG_DATA_ENDPOINT` to a Gateway URL, `RegisterHost` returns it
+in `HostRecord.data_endpoint`. Empty means the Control Plane itself.
+
 An application usually runs with an Operator Token of its own, so its changes appear under its
 name in `supertag audit`.
 

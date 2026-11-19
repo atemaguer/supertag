@@ -20,6 +20,12 @@ The Control Plane reads Schedule times that name no time zone in its own time zo
 machine's, or `SUPERTAG_TIME_ZONE` for a hosted Control Plane. Each is an IANA name such as
 `Europe/Berlin`. Without either, it uses the machine's time zone, or UTC when that is unknown.
 
+A Gateway can carry the data calls of running [Task Attempts](../reference/glossary.md#task-attempt), such as their events and streamed
+text. Set `SUPERTAG_DATA_ENDPOINT` to that Gateway's URL (`https://`, `wss://`, or a loopback
+`http://` or `ws://`). The Control Plane refuses to start with any other form. It names the URL to
+each Worker Host when the host registers. In this release, Worklets still send these calls to
+the Control Plane directly.
+
 The Control Plane creates and migrates its schema when it starts. It stores no files: Session
 checkpoints stay on the Worker Host that wrote them, artifacts on the Worker Host that produced
 them or a Volume, and Workspace deliveries in the Workspace's git remote or the host's

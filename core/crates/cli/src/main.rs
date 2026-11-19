@@ -1689,12 +1689,20 @@ async fn control_plane(
         ServiceRole::ControlPlane,
     )
     .await?;
-    let api = Api::new(
+    let mut api = Api::new(
         channel.clone(),
         service_token.clone(),
         required_env("SUPERTAG_OPERATOR_TOKEN")?,
         operator_principal,
     )?;
+    // A Gateway that forwards Task Attempts' data calls here, named to each Worker Host when it
+    // registers. It takes the URL forms a Worklet dials.
+    if let Some(endpoint) = nonempty_env("SUPERTAG_DATA_ENDPOINT") {
+        network::endpoint(endpoint.clone())
+            .await
+            .with_context(|| format!("SUPERTAG_DATA_ENDPOINT {endpoint:?} is not a Gateway URL"))?;
+        api = api.with_data_endpoint(endpoint);
+    }
     // The Control Plane signs S3 Volume object URLs with credentials from its vault; it maps no
     // Volume and carries no Volume bytes.
     // Without a state directory there is no vault, and an S3 Volume's capture fails, naming why.
@@ -2111,7 +2119,7 @@ async fn gateway(
         client_api
     };
     // Refuse every call from a peer that skipped protocol negotiation, then forward client calls
-    // to the Control Plane, which authorizes each as its caller.
+    // and Task Attempts' data calls to the Control Plane, which authorizes each as its caller.
     let mut builder = network::server(listen, websocket)
         .await?
         .layer(fence(ServiceRole::Gateway))
@@ -2216,7 +2224,14 @@ async fn gateway(
     let shutdown = CancellationToken::new();
     let router = builder
         .add_service(health_service)
-        .add_service(Negotiator::new(ServiceRole::Gateway, &[ServiceRole::Client]).service())
+        // Clients, and Worker Hosts' Workers sending a Task Attempt's data calls.
+        .add_service(
+            Negotiator::new(
+                ServiceRole::Gateway,
+                &[ServiceRole::Client, ServiceRole::WorkerHost],
+            )
+            .service(),
+        )
         .add_service(notifier.test_service(auth));
     let grpc = async {
         let result = router

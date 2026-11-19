@@ -1669,6 +1669,11 @@ message HostRecord {
   string host_id = 1;
   uint64 generation = 2;
   bool revoked = 3;
+  // Where this host's Task Attempts send their data calls, when the deployment names one: a
+  // Gateway URL (`https://`, `wss://` for the WebSocket tunnel, or loopback `http://` or `ws://`)
+  // that forwards them to this Control Plane. Empty means the Control Plane the host registered
+  // with. It grants nothing: the Control Plane checks each data call's Attempt credential.
+  string data_endpoint = 4;
 }
 
 enum TaskState {

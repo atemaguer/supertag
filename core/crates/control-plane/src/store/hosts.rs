@@ -213,6 +213,8 @@ fn host_row(row: &AnyRow) -> Result<HostRecord> {
         host_id: row.try_get("host_id")?,
         generation: row.try_get::<i64, _>("generation")? as u64,
         revoked: row.try_get::<Option<i64>, _>("revoked_at_ms")?.is_some(),
+        // The API tier names the deployment's data endpoint; the store keeps none.
+        data_endpoint: String::new(),
     })
 }
 

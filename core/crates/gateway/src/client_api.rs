@@ -1,16 +1,19 @@
-//! The client API a Gateway serves: every operator and client call, and client enrollment,
-//! forwarded to the Control Plane.
+//! The client API a Gateway serves: every operator and client call, client enrollment, and a
+//! running Task Attempt's data calls, forwarded to the Control Plane.
 //!
-//! Clients (the desktop app, the terminal UI, the CLI and the SDKs) connect to a Gateway. The
+//! Clients (the desktop app, the terminal UI, the CLI and the SDKs) connect to a Gateway, and a
+//! Worker may send its Task Attempt's data calls through one with its Attempt credential. The
 //! Gateway authorizes nothing itself and adds no authority: it passes the caller's own bearer
 //! credential through unchanged, and the Control Plane resolves it and checks the method against
 //! its one authorization table on every call, exactly as for a direct call. No header naming a
 //! principal crosses the hop, and the forwarder never holds this Gateway's own credential, so a
 //! client call can neither claim another principal nor borrow the Gateway's `gateway` role.
 //!
-//! Only methods that an operator, a client or an Auth Key may call are forwarded
-//! ([`supertag_protocol::authorization::gateway_forwards`]); Worker Host, Gateway, internal and
-//! peer-local methods fall through to this Gateway's own router, which does not serve them.
+//! Only methods that an operator, a client, an Auth Key or an Attempt credential may call are
+//! forwarded ([`supertag_protocol::authorization::gateway_forwards`]); Worker Host registration,
+//! claim, lease and transfer methods, and Gateway, internal and peer-local methods, fall through
+//! to this Gateway's own router, which does not serve them. A Worker Host's host credential
+//! therefore never crosses a Gateway, and no host generation header does either.
 //! Request metadata is rebuilt from an allowlist, and streams and downloads are relayed as they
 //! arrive, with no deadline added and nothing written to disk.
 
@@ -348,16 +351,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn negotiation_health_and_non_client_methods_stay_with_the_gateway() {
+    async fn negotiation_health_and_host_and_gateway_methods_stay_with_the_gateway() {
         let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy();
         let api = ClientApi::new(vec![supertag_protocol::negotiation::bind_current(channel)]);
         let path = |rpc: &str| format!("/supertag.runtime.v2.{rpc}");
         assert!(api.forwards(&path("Conversations/ListConversations")));
         assert!(api.forwards(&path("Operator/PutTag")));
         assert!(api.forwards(ENROLL_PATH));
+        assert!(api.forwards(&path("WorkerHost/AppendEvent")));
+        assert!(api.forwards(&path("AttemptMailbox/ReadMailbox")));
         assert!(!api.forwards(&path("ProtocolNegotiation/Negotiate")));
         assert!(!api.forwards("/grpc.health.v1.Health/Check"));
         assert!(!api.forwards(&path("WorkerHost/ClaimTask")));
+        assert!(!api.forwards(&path("WorkerHost/StartTask")));
+        assert!(!api.forwards(&path("WorkerHost/FinishTask")));
         assert!(!api.forwards(&path("Connector/ClaimConnector")));
         assert!(!api.forwards(&path("OperatorNotificationTest/SendTestNotification")));
         let every = api.forwarding_every_call();
