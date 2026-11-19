@@ -1,5 +1,12 @@
-import type { Conversation, Gateway, Message, Note, Tag, TaskEvent } from "./gateway";
-import type { TagAdmin } from "./tag-admin";
+import type {
+  Conversation,
+  Gateway,
+  Message,
+  Note,
+  Tag,
+  TagAdmin,
+  TaskEvent,
+} from "@supertag/client/model";
 
 const tags: Tag[] = [
   {
@@ -102,7 +109,7 @@ let notes: Note[] = [
   },
 ];
 
-const previewFiles: Record<string, import("./gateway").TaskFileEntry[]> = {
+const previewFiles: Record<string, import("@supertag/client/model").TaskFileEntry[]> = {
   "": [
     { name: "src", path: "src", kind: "directory", size: 96, modifiedMs: Date.now(), text: false },
     {

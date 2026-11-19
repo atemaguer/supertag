@@ -1,3 +1,44 @@
+import type {
+  Gateway,
+  Tag,
+  Message as TagMessage,
+  TagSummary,
+  TaskEvent,
+  WatchUpdate,
+} from "@supertag/client/model";
+import {
+  conversationSummary,
+  deliveryStatus,
+  describe,
+  earlierHistory,
+  emptyHistory,
+  eventLine,
+  type History,
+  joinedReplies,
+  lastOperatorMessage,
+  latestHistory,
+  receivedMessage,
+  refreshRequest,
+  shownMessages,
+  timeDividers,
+} from "@supertag/client/model";
+import {
+  cachedHistory,
+  cacheHistory,
+  discard,
+  markShown,
+  type Outgoing,
+  openConversation,
+  send as queue,
+  resumeOutbox,
+  retry,
+  storedHistory,
+  useConversationFollow,
+  useOutbox,
+  usePolling,
+  useWatchRefresh,
+  type WatchFeed,
+} from "@supertag/client/react";
 import { ArrowDown, ArrowUp, CircleAlert, X } from "lucide-react";
 import {
   type FormEvent,
@@ -9,50 +50,13 @@ import {
   useState,
 } from "react";
 import { type StickToBottomContext, useStickToBottomContext } from "use-stick-to-bottom";
-import type { Gateway, Tag, Message as TagMessage, TaskEvent, WatchUpdate } from "../gateway";
-import {
-  cachedHistory,
-  cacheHistory,
-  markShown,
-  openConversation,
-  storedHistory,
-} from "../lib/conversation-cache";
-import { useConversationFollow } from "../lib/follow";
-import {
-  earlierHistory,
-  emptyHistory,
-  type History,
-  latestHistory,
-  receivedMessage,
-  refreshRequest,
-  shownMessages,
-} from "../lib/history";
-import {
-  discard,
-  type Outgoing,
-  send as queue,
-  resumeOutbox,
-  retry,
-  useOutbox,
-} from "../lib/outbox";
-import { describe, usePolling } from "../lib/polling";
-import { eventLine } from "../lib/turn";
-import { useWatchRefresh, type WatchFeed } from "../lib/watch";
 import { Conversation, ConversationContent } from "./ai-elements/conversation";
 import { Message } from "./ai-elements/message";
 import { Bubble, LiveConversationEntry } from "./conversation-entry";
 import { clamp, ResizeHandle, useStoredWidth } from "./resize";
-import type { TagSummary } from "./sidebar";
 import { TagAvatar } from "./tag-avatar";
 import { TagDetails } from "./tag-details";
 import { TaskFiles } from "./task-files";
-import {
-  conversationSummary,
-  deliveryStatus,
-  joinedReplies,
-  lastOperatorMessage,
-  timeDividers,
-} from "./transcript";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
 

@@ -2,8 +2,9 @@
  * The channels backed by the app's own CLI: starting and restarting the local services, the
  * first-launch setup, and adding a folder as a Workspace of the local Gateway.
  */
+
+import { type LocalDiscovery, readLocalGateway } from "@supertag/client/node";
 import type { SetupCheck } from "../../src/gateway";
-import { type LocalDiscovery, readLocalGateway } from "../gateway/local";
 import type { Handlers } from "../ipc";
 import { type AppIdentity, environment, installCommand, usableCli } from "./cli";
 import { checkWith, setUpWith } from "./onboarding";

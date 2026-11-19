@@ -4,6 +4,7 @@
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { GatewayState, readLocalGateway } from "@supertag/client/node";
 import {
   app,
   BrowserWindow,
@@ -18,8 +19,6 @@ import {
   type WebContents,
 } from "electron";
 import { NOTIFICATION_CLICK } from "./channels";
-import { readLocalGateway } from "./gateway/local";
-import { GatewayState } from "./gateway/state";
 import { handlers } from "./handlers";
 import { originOf, registerChannels, Streams } from "./ipc";
 import { type AppIdentity, appCli } from "./local/cli";

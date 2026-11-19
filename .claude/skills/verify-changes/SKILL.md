@@ -31,8 +31,8 @@ After `supertag-ai` changes, run `pnpm --filter supertag-ai typecheck` and, with
 `SUPERTAG_RUST_TEST_CLI` naming a built `supertag`, `pnpm --filter supertag-ai test:package`.
 After Python SDK changes, install it with `python -m pip install "./sdks/python[dev]"` in a virtual
 environment, then run `ruff check sdks/python` and `pytest sdks/python/tests`.
-After desktop changes, run `pnpm --filter @supertag/desktop build` and
-`pnpm vitest run apps/desktop`. CI runs them, and the integration suites against a built CLI, in `.github/workflows/desktop.yml`.
+After desktop or `apps/client` changes, run `pnpm --filter @supertag/desktop build` and
+`pnpm vitest run apps/client apps/desktop`. CI runs them, and the integration suites against a built CLI, in `.github/workflows/desktop.yml`.
 
 After changes under `proto/`, decide whether the protocol version changes and update
 `proto/protocol.lock` (see "Changing `proto/`" in `AGENTS.md`); `cargo test -p supertag-protocol

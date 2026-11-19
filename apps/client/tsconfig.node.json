@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.model.json",
+  "compilerOptions": {
+    "rootDir": "../..",
+    "outDir": "dist/node",
+    "tsBuildInfoFile": "dist/node/.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": [
+    "src/model/*.ts",
+    "src/node/*.ts",
+    "../../sdks/typescript/src/gateway-client.ts",
+    "../../sdks/typescript/src/tunnel.ts",
+    "../../harnesses/sdk/src/rust-harness/gen/**/*.ts"
+  ],
+  "exclude": ["src/model/*.test.ts"]
+}

@@ -1,7 +1,7 @@
+import type { Tag } from "@supertag/client/model";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
-import type { Tag } from "../gateway";
 import { WorkspaceShell } from "./workspace";
 
 const tags: Tag[] = [

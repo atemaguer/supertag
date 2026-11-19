@@ -1,7 +1,7 @@
+import { GatewayState } from "@supertag/client/node";
 import type { IpcMainInvokeEvent, WebContents } from "electron";
 import { expect, it, vi } from "vitest";
 import { CHANNELS, type Channel, STREAM_END, STREAM_UPDATE } from "./channels";
-import { GatewayState } from "./gateway/state";
 import { handlers } from "./handlers";
 import {
   dispatch,

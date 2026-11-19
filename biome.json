@@ -35,6 +35,26 @@
   },
   "overrides": [
     {
+      "includes": ["apps/client/src/react/**", "!apps/client/src/react/**/*.test.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "window": "The terminal UI has no window: pass it in through `Platform`.",
+                  "document": "The terminal UI has no document: pass it in through `Platform`.",
+                  "localStorage": "The terminal UI has no localStorage: pass it in through `Platform`.",
+                  "sessionStorage": "The terminal UI has no sessionStorage: pass it in through `Platform`."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["apps/desktop/src/shadcn.css"],
       "css": {
         "parser": { "tailwindDirectives": true }

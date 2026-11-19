@@ -1,7 +1,7 @@
+import type { Tag, TagSummary } from "@supertag/client/model";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { useMemo, useState } from "react";
-import type { Tag } from "../gateway";
-import { onMac, type TagSummary, tagShortcut } from "./sidebar";
+import { onMac, tagShortcut } from "./sidebar";
 import { TagAvatar } from "./tag-avatar";
 import {
   CommandDialog,

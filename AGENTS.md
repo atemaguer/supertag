@@ -34,7 +34,8 @@ operators use Operator Tokens.
 The services and CLI are Rust (`core/`), built from the protobuf contract in `proto/`. The
 TypeScript that remains is the Node harness bridges and Workspace providers that Workers
 start, with the Worker SDK they share (`harnesses/`), the `supertag-ai` SDK (`sdks/typescript`),
-and the desktop app's frontend (`apps/desktop`). `sdks/` holds one directory per language, each
+the desktop app (`apps/desktop`), and `@supertag/client` (`apps/client`), the private client code
+SuperTag's TypeScript front ends share. `sdks/` holds one directory per language, each
 with its hand-written SDK and generated bindings. The repo-orientation skill
 (`.claude/skills/repo-orientation/SKILL.md`) maps each directory.
 

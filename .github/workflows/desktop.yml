@@ -1,9 +1,9 @@
 name: Desktop
 
-# The desktop app. `electron` builds the Electron app and runs its tests: the unit suites, then
-# the Gateway and local-services integration suites against a CLI built from this commit, under
-# the repository's Node.js and again under Electron's own, which is newer and has caught bugs the
-# other didn't. `package` builds the Debian package the release ships, installs it, launches it
+# The desktop app and `@supertag/client` (apps/client), the client it runs on. `electron` builds
+# the Electron app and runs its tests: the unit suites, then the Gateway and local-services
+# integration suites against a CLI built from this commit, under the repository's Node.js and
+# again under Electron's own, which is newer and has caught bugs the other didn't. `package` builds the Debian package the release ships, installs it, launches it
 # with Chromium's sandbox under Ubuntu's restriction on unprivileged user namespaces, and removes
 # it. The integration suites run a CLI built from core crates, so core changes run this too.
 # It is its own workflow so that a desktop break shows as its own check rather than as one more
@@ -11,6 +11,7 @@ name: Desktop
 on:
   pull_request:
     paths:
+      - 'apps/client/**'
       - 'apps/desktop/**'
       - 'core/**'
       - 'proto/**'
@@ -24,6 +25,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'apps/client/**'
       - 'apps/desktop/**'
       - 'core/**'
       - 'proto/**'
@@ -69,7 +71,7 @@ jobs:
       - name: Build the renderer, main process, and preload
         run: pnpm --filter @supertag/desktop build
       - name: Run the unit suites
-        run: pnpm vitest run apps/desktop
+        run: pnpm vitest run apps/client apps/desktop
       - name: Build the CLI
         run: cargo build --locked --manifest-path core/Cargo.toml -p supertag-cli --bin supertag
       - name: Run the integration suites under the repository's Node.js
@@ -77,7 +79,7 @@ jobs:
           SUPERTAG_RUST_TEST_CLI: ${{ github.workspace }}/core/target/debug/supertag
         run: |
           node --version
-          pnpm vitest run apps/desktop/electron
+          pnpm vitest run apps/client/src/node apps/desktop/electron
       - name: Run the integration suites under Electron's Node.js
         env:
           SUPERTAG_RUST_TEST_CLI: ${{ github.workspace }}/core/target/debug/supertag
@@ -87,7 +89,7 @@ jobs:
           node apps/desktop/node_modules/electron/install.js
           electron=apps/desktop/node_modules/electron/dist/electron
           "$electron" --version
-          "$electron" node_modules/vitest/vitest.mjs run apps/desktop/electron
+          "$electron" node_modules/vitest/vitest.mjs run apps/client/src/node apps/desktop/electron
 
   package:
     runs-on: ubuntu-24.04

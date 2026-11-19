@@ -5,8 +5,8 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { parseLocalGateway } from "@supertag/client/node";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { parseLocalGateway } from "../gateway/local";
 import {
   bundledCli,
   cliVersion,

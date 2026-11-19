@@ -1,0 +1,22 @@
+{
+  "name": "@supertag/client",
+  "version": "0.3.2",
+  "description": "What SuperTag's front ends share: view types, transcript rules, React hooks, and Gateway connections.",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./model": "./src/model/index.ts",
+    "./react": "./src/react/index.ts",
+    "./node": "./src/node/index.ts"
+  },
+  "devDependencies": {
+    "@bufbuild/protobuf": "2.15.0",
+    "@connectrpc/connect": "2.2.0",
+    "@connectrpc/connect-node": "2.2.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  }
+}

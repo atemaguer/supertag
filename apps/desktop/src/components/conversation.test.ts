@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
+
+import type { Gateway, Message, Schedule, Tag } from "@supertag/client/model";
+import { clearConversationCache, clearOutbox } from "@supertag/client/react";
 import { act, createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Gateway, Message, Schedule, Tag } from "../gateway";
-import { clearConversationCache } from "../lib/conversation-cache";
-import { clearOutbox } from "../lib/outbox";
 import { ConversationPane, type Draft } from "./conversation";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

@@ -1,7 +1,12 @@
+import {
+  type GatewayProfile,
+  LOCAL_GATEWAY,
+  type LocalGateway,
+  type NotificationLevel,
+} from "@supertag/client/model";
 import { Bell, Check, ChevronRight, Pencil, Plus, Server, Unplug } from "lucide-react";
 import type { RefObject } from "react";
-import { type GatewayProfile, LOCAL_GATEWAY, type LocalGateway } from "../gateway";
-import { type NotificationLevel, useNotificationLevel } from "../lib/notifications";
+import { useNotificationLevel } from "../lib/notifications";
 import type { PaletteAction } from "./command-palette";
 import { Button } from "./ui/button";
 import {

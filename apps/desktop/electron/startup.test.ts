@@ -7,12 +7,11 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { GatewayActivation } from "@supertag/client/model";
+import { GatewayState, readLocalGateway } from "@supertag/client/node";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import type { GatewayActivation } from "../src/gateway";
 import { startup } from "../src/startup";
 import { gatewayHandlers } from "./gateway/handlers";
-import { readLocalGateway } from "./gateway/local";
-import { GatewayState } from "./gateway/state";
 import type { Handlers } from "./ipc";
 import { type AppIdentity, appCli, installCommand } from "./local/cli";
 import { localHandlers } from "./local/handlers";

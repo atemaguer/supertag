@@ -8,6 +8,7 @@
     { "path": "harnesses/environments/e2b" },
     { "path": "harnesses/environments/modal" },
     { "path": "harnesses/environments/local-vm" },
+    { "path": "apps/client" },
     { "path": "apps/desktop/electron" }
   ]
 }

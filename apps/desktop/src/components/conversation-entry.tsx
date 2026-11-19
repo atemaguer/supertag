@@ -1,11 +1,11 @@
+import type { Gateway, Message as TagMessage, TaskEvent } from "@supertag/client/model";
+import { dividerLabel, fromOperator, RUNNING, turnView } from "@supertag/client/model";
+import { useTurnEvents } from "@supertag/client/react";
 import { Check, Copy, ListTree } from "lucide-react";
 import { useEffect, useState } from "react";
 import { defaultRehypePlugins } from "streamdown";
-import type { Gateway, Message as TagMessage, TaskEvent } from "../gateway";
-import { turnView, useTurnEvents } from "../lib/turn";
 import { Message, MessageContent, MessageResponse } from "./ai-elements/message";
 import { ExternalLink } from "./external-link";
-import { dividerLabel, fromOperator, RUNNING } from "./transcript";
 
 /**
  * Streamdown's plugins, except that a link it would block, such as a relative path to a file in

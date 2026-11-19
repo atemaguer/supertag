@@ -1,7 +1,7 @@
+import type { Gateway, TaskFileEntry, TaskFilesPlace } from "@supertag/client/model";
+import { describe } from "@supertag/client/model";
 import { ArrowLeft, File, FileText, Folder, FolderOpen, Link2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import type { Gateway, TaskFileEntry, TaskFilesPlace } from "../gateway";
-import { describe } from "../lib/polling";
 import { sessionBranch } from "../lib/session-branch";
 import { CopyText } from "./conversation-entry";
 import { Button } from "./ui/button";

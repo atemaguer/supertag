@@ -1,5 +1,5 @@
+import type { LocalUpgrade, RestartStep } from "@supertag/client/model";
 import { useState } from "react";
-import type { LocalUpgrade, RestartStep } from "../gateway";
 import { Button } from "./ui/button";
 import {
   Dialog,

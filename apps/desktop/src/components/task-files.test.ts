@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
+
+import type { Gateway, TaskFileEntry } from "@supertag/client/model";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Gateway, TaskFileEntry } from "../gateway";
 import { sizeWords, TaskFiles } from "./task-files";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

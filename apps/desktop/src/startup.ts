@@ -1,4 +1,5 @@
-import type { GatewayActivation, GatewayList, SetupCheck } from "./gateway";
+import type { GatewayActivation, GatewayList } from "@supertag/client/model";
+import type { SetupCheck } from "./gateway";
 
 /** What the window asks while it decides its first screen. */
 export interface StartupApi {

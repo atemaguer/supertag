@@ -3,9 +3,10 @@
  * connection (`gateway/`, on `supertag-ai`), and the local services and onboarding (`local/`,
  * on the app's CLI).
  */
+
+import type { GatewayState } from "@supertag/client/node";
 import type { NotificationRequest } from "./channels";
 import { gatewayHandlers } from "./gateway/handlers";
-import type { GatewayState } from "./gateway/state";
 import type { Handlers } from "./ipc";
 import { type LocalDependencies, localHandlers } from "./local/handlers";
 import { badgeCount, notificationRequest, webUrl } from "./shell";

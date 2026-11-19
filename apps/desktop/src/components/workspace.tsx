@@ -1,3 +1,22 @@
+import type { Conversation, Gateway, Tag, WatchUpdate } from "@supertag/client/model";
+import {
+  describe,
+  harnessLabel,
+  previewLine,
+  type TagAdmin,
+  type TagSummary,
+} from "@supertag/client/model";
+import {
+  cachedMessageTexts,
+  cachedRoster,
+  cacheRoster,
+  storedRoster,
+  useConversationList,
+  useConversationPrefetch,
+  useGatewayWatch,
+  useWatchRefresh,
+  type WatchFeed,
+} from "@supertag/client/react";
 import { Keyboard, NotebookText, Plus } from "lucide-react";
 import {
   type CSSProperties,
@@ -10,20 +29,8 @@ import {
   useState,
 } from "react";
 import mascot from "../../../../assets/images/supertag-mascot-round.png";
-import type { Conversation, Gateway, Tag, WatchUpdate } from "../gateway";
-import {
-  cachedMessageTexts,
-  cachedRoster,
-  cacheRoster,
-  storedRoster,
-  useConversationList,
-  useConversationPrefetch,
-} from "../lib/conversation-cache";
+import { nativeGateway } from "../gateway";
 import { nativeNotifier, silentNotifier, useDesktopNotifications } from "../lib/notifications";
-import { describe } from "../lib/polling";
-import { previewLine } from "../lib/preview-line";
-import { useGatewayWatch, useWatchRefresh, type WatchFeed } from "../lib/watch";
-import { harnessLabel, type TagAdmin } from "../tag-admin";
 import {
   CommandPalette,
   commandKeyLabel,
@@ -36,7 +43,6 @@ import {
   orderTags,
   Sidebar,
   type SidebarMode,
-  type TagSummary,
   useSidebarShortcut,
   useSidebarWidth,
 } from "./sidebar";
@@ -341,7 +347,7 @@ export function Workspace({
     [],
   );
   const [error, setError] = useState("");
-  const watch = useGatewayWatch(connectionId);
+  const watch = useGatewayWatch(nativeGateway.watch, connectionId);
   // Every conversation's row, from the cached list at once and then the Gateway, kept
   // current through the watch.
   const { conversations, fresh } = useConversationList(gateway, watch);

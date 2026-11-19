@@ -7,7 +7,7 @@
  * then `supertag up`, which migrates the database.
  */
 import path from "node:path";
-import type { LocalDiscovery } from "../gateway/local";
+import type { LocalDiscovery } from "@supertag/client/node";
 import { result, run } from "./run";
 
 /** How long `supertag up` may take to report its services ready. */

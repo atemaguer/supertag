@@ -1,7 +1,7 @@
+import type { Tag, TagSummary } from "@supertag/client/model";
 import { Plus, Search, Star } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import mascot from "../../../../assets/images/supertag-mascot-round.png";
-import type { Tag } from "../gateway";
 import { clamp, KEY_STEP, ResizeHandle, useStoredWidth } from "./resize";
 import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
@@ -99,21 +99,6 @@ export function tagShortcut(
   if (event.key.toLowerCase() === "n") return { kind: "new" };
   if (event.key.toLowerCase() === "k") return { kind: "palette" };
   return undefined;
-}
-
-/**
- * What the Tag list shows about a Tag beyond its name. The cached Tag list fills these in; until
- * then a row shows just the name.
- */
-export interface TagSummary {
-  /** The first line of the last message in the Tag's conversation. */
-  preview?: string;
-  /** When the conversation last changed, in milliseconds since the epoch. */
-  lastActivityMs?: number;
-  /** Whether the conversation has messages this person has not seen. */
-  unread?: boolean;
-  /** Whether the Tag is working on a Task in this conversation. */
-  working?: boolean;
 }
 
 /** The lead Tag first, then the others by last activity, newest first, keeping the given order. */

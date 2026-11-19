@@ -2,12 +2,10 @@
  * The Gateway channels of the table, on the main process's {@link GatewayState}. Each checks
  * its arguments' types before anything runs.
  */
-import type { ReadMessages, ScheduleAction } from "../../src/gateway";
-import type { NewTag } from "../../src/tag-admin";
+import type { NewTag, ReadMessages, ScheduleAction } from "@supertag/client/model";
+import type { GatewayState } from "@supertag/client/node";
+import { forget, taskFiles } from "@supertag/client/node";
 import type { Handlers } from "../ipc";
-import { forget } from "./cache";
-import type { GatewayState } from "./state";
-import { absolute, list, read } from "./task-files";
 
 export const INVALID_REQUEST = "The app sent an invalid request.";
 
@@ -180,10 +178,16 @@ export function gatewayHandlers(
         text(args.action) as ScheduleAction,
       ),
     locateTaskFiles: (args) => state.locateTaskFiles(text(args.connectionId), text(args.taskId)),
-    listTaskFiles: (args) => list(text(args.connectionId), text(args.taskId), text(args.path)),
-    readTaskFile: (args) => read(text(args.connectionId), text(args.taskId), text(args.path)),
+    listTaskFiles: (args) =>
+      taskFiles.list(text(args.connectionId), text(args.taskId), text(args.path)),
+    readTaskFile: (args) =>
+      taskFiles.read(text(args.connectionId), text(args.taskId), text(args.path)),
     async revealTaskFile(args) {
-      const file = await absolute(text(args.connectionId), text(args.taskId), text(args.path));
+      const file = await taskFiles.absolute(
+        text(args.connectionId),
+        text(args.taskId),
+        text(args.path),
+      );
       try {
         shell.reveal(file);
       } catch {

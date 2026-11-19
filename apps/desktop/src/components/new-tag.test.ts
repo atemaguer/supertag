@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
+
+import type { Tag } from "@supertag/client/model";
+import { type TagAdmin, tagAdminRefusal, tagIdFor } from "@supertag/client/model";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Tag } from "../gateway";
-import { type TagAdmin, tagAdminRefusal, tagIdFor } from "../tag-admin";
 import { NewTagDialog } from "./new-tag";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

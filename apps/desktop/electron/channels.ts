@@ -9,6 +9,7 @@
  * user-facing string, never an upstream message.
  */
 import type {
+  AddedWorkspace,
   Conversation,
   FollowUpdate,
   GatewayActivation,
@@ -17,20 +18,21 @@ import type {
   Message,
   MessagePage,
   NetworkLog,
+  NewTag,
   Note,
   ReadMessages,
   RestartStep,
   Schedule,
   ScheduleAction,
-  SetupCheck,
   Tag,
   TagActivity,
+  TagOptions,
   TaskEvent,
   TaskFileEntry,
   TaskFilesPlace,
   WatchUpdate,
-} from "../src/gateway";
-import type { AddedWorkspace, NewTag, TagOptions } from "../src/tag-admin";
+} from "@supertag/client/model";
+import type { SetupCheck } from "../src/gateway";
 
 /** A call that takes no arguments; the window passes `{}`. */
 export type NoArgs = Record<string, never>;

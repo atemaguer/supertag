@@ -1,6 +1,6 @@
+import type { GatewayProfile } from "@supertag/client/model";
 import type { FormEvent, RefObject } from "react";
 import { useRef } from "react";
-import type { GatewayProfile } from "../gateway";
 import { Button } from "./ui/button";
 import {
   Dialog,

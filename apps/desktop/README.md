@@ -28,25 +28,29 @@ pnpm --filter @supertag/desktop electron          # the built app
 
 `dev` serves the renderer from `http://127.0.0.1:1420` and points Electron at it; closing the
 window stops the server. Check a change with `pnpm --filter @supertag/desktop build` and
-`pnpm vitest run apps/desktop`. CI runs them in `.github/workflows/desktop.yml`.
+`pnpm vitest run apps/client apps/desktop`. CI runs them in `.github/workflows/desktop.yml`.
 
 `electron/main.ts` opens the window, serves the built renderer from `app://supertag/` with its
 Content Security Policy, and keeps the window on it; `preload.ts` exposes `window.supertag`, one
 method per entry of the channel table in `channels.ts`; `ipc.ts` refuses any call that isn't from
-the main window's own page. The main process connects to Gateways in `electron/gateway/` with
-`supertag-ai`'s Gateway client, so tokens and Auth Keys stay in it, and runs the local services
-and setup with the app's CLI in `electron/local/`.
+the main window's own page. The main process connects to Gateways with `GatewayState` from
+`@supertag/client/node` (`apps/client`), on `supertag-ai`'s Gateway client, so tokens and Auth
+Keys stay in it; `electron/gateway/handlers.ts` puts it behind the channel table. It runs the
+local services and setup with the app's CLI in `electron/local/`. The renderer takes its view
+types, transcript rules and hooks from `@supertag/client/model` and `@supertag/client/react`,
+and gives the hooks the window's visibility through `PlatformProvider` (`src/lib/platform.ts`).
 
-The Gateway backend's integration tests run against Control Planes and Gateways started by a
-built CLI, each with throwaway directories and ports:
+The Gateway client's integration tests, in `apps/client/src/node`, and the local services' run
+against Control Planes and Gateways started by a built CLI, each with throwaway directories and
+ports:
 
 ```sh
 cargo build --manifest-path core/Cargo.toml --locked -p supertag-cli --bin supertag
-SUPERTAG_RUST_TEST_CLI=$PWD/core/target/debug/supertag pnpm vitest run apps/desktop/electron
+SUPERTAG_RUST_TEST_CLI=$PWD/core/target/debug/supertag pnpm vitest run apps/client/src/node apps/desktop/electron
 ```
 
 Run them under Electron's own Node.js as well, which differs from the repository's:
-`ELECTRON_RUN_AS_NODE=1 apps/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron node_modules/vitest/vitest.mjs run apps/desktop/electron`
+`ELECTRON_RUN_AS_NODE=1 apps/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron node_modules/vitest/vitest.mjs run apps/client/src/node apps/desktop/electron`
 (on Linux, `apps/desktop/node_modules/electron/dist/electron`).
 
 ## Package the app

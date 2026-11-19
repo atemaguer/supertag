@@ -1,7 +1,7 @@
+import type { Gateway, Schedule, ScheduleAction, WatchUpdate } from "@supertag/client/model";
+import { useWatchRefresh, type WatchFeed } from "@supertag/client/react";
 import { Pause, Play, Trash2 } from "lucide-react";
 import { useCallback, useState } from "react";
-import type { Gateway, Schedule, ScheduleAction, WatchUpdate } from "../gateway";
-import { useWatchRefresh, type WatchFeed } from "../lib/watch";
 import { Button } from "./ui/button";
 
 /** How often the list is read while the Watch is down. */

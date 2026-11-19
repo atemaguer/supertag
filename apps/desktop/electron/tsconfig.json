@@ -17,6 +17,8 @@
     "*.ts",
     "gateway/*.ts",
     "local/*.ts",
+    "../../client/src/model/*.ts",
+    "../../client/src/node/*.ts",
     "../../../sdks/typescript/src/gateway-client.ts",
     "../../../sdks/typescript/src/tunnel.ts",
     "../../../harnesses/sdk/src/rust-harness/gen/**/*.ts",
@@ -26,5 +28,6 @@
     "../src/desktop.ts",
     "../scripts/*.ts",
     "../electron-builder.config.ts"
-  ]
+  ],
+  "exclude": ["../../client/src/**/*.test.ts"]
 }

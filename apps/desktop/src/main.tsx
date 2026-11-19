@@ -1,4 +1,19 @@
 import "@fontsource-variable/geist";
+import {
+  cacheScope,
+  describe,
+  type Gateway,
+  type GatewayActivation,
+  type GatewayList,
+  type GatewayProfile,
+  LOCAL_GATEWAY,
+  type LocalUpgrade,
+  type RestartStep,
+  type Tag,
+  type TagAdmin,
+  tagAdminRefusal,
+} from "@supertag/client/model";
+import { PlatformProvider } from "@supertag/client/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ConnectionDialog } from "./components/connection";
@@ -7,25 +22,11 @@ import { LocalUpgradeOffer } from "./components/local-upgrade";
 import { Onboarding } from "./components/onboarding";
 import type { SidebarMode } from "./components/sidebar";
 import { EmptyWorkspace, Workspace, WorkspaceShell } from "./components/workspace";
-import {
-  cacheScope,
-  type Gateway,
-  type GatewayActivation,
-  type GatewayList,
-  type GatewayProfile,
-  gatewaySession,
-  LOCAL_GATEWAY,
-  type LocalUpgrade,
-  nativeGateway,
-  nativeSetup,
-  type RestartStep,
-  type SetupCheck,
-  type Tag,
-} from "./gateway";
+import { gatewaySession, nativeGateway, nativeSetup, type SetupCheck } from "./gateway";
 import { useNotificationLevel } from "./lib/notifications";
-import { describe } from "./lib/polling";
+import { windowPlatform } from "./lib/platform";
 import { startup } from "./startup";
-import { type TagAdmin, tagAdminRefusal, tagAdminSession } from "./tag-admin";
+import { tagAdminSession } from "./tag-admin";
 import "./shadcn.css";
 import "./style.css";
 
@@ -375,7 +376,11 @@ async function start() {
       tagAdmin: previewTagAdmin,
     };
   }
-  createRoot(target).render(<App initialConnection={initialConnection} />);
+  createRoot(target).render(
+    <PlatformProvider value={windowPlatform}>
+      <App initialConnection={initialConnection} />
+    </PlatformProvider>,
+  );
 }
 
 void start();

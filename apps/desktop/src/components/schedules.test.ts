@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
+
+import type { Gateway, Schedule, ScheduleAction, WatchUpdate } from "@supertag/client/model";
+import { watchFeed } from "@supertag/client/react";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Gateway, Schedule, ScheduleAction, WatchUpdate } from "../gateway";
-import { watchFeed } from "../lib/watch";
 import { ScheduleList, scheduleLine } from "./schedules";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

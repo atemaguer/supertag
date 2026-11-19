@@ -1,5 +1,3 @@
-import { Lock, Trash2, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   Gateway,
   NetworkLog,
@@ -8,9 +6,11 @@ import type {
   Tag,
   TagActivity,
   WatchUpdate,
-} from "../gateway";
-import { describe } from "../lib/polling";
-import { useWatchRefresh, type WatchFeed } from "../lib/watch";
+} from "@supertag/client/model";
+import { describe } from "@supertag/client/model";
+import { useWatchRefresh, type WatchFeed } from "@supertag/client/react";
+import { Lock, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ScheduleList } from "./schedules";
 import { relativeTime } from "./sidebar";
 import { Button } from "./ui/button";

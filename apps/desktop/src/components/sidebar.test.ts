@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
+
+import type { Tag } from "@supertag/client/model";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Tag } from "../gateway";
 import {
   isSidebarShortcut,
   orderTags,

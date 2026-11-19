@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.model.json",
+  "compilerOptions": {
+    "outDir": "dist/react",
+    "tsBuildInfoFile": "dist/react/.tsbuildinfo",
+    "lib": ["ES2024", "DOM"]
+  },
+  "include": ["src/model/*.ts", "src/react/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

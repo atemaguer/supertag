@@ -1,7 +1,7 @@
+import { describe } from "@supertag/client/model";
 import { Check, CircleAlert, FolderOpen, LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { SetupCheck, SetupHarness } from "../gateway";
-import { describe } from "../lib/polling";
 import { CopyText } from "./conversation-entry";
 import { openExternal } from "./external-link";
 import { Button } from "./ui/button";

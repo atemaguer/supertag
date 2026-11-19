@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
+
+import type { Gateway, NetworkLog, Note, Tag, TagActivity } from "@supertag/client/model";
+import { watchFeed } from "@supertag/client/react";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Gateway, NetworkLog, Note, Tag, TagActivity } from "../gateway";
-import { watchFeed } from "../lib/watch";
 import {
   attentionLine,
   networkRequestLine,

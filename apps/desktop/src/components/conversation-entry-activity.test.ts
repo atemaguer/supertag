@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
+
+import type { Message } from "@supertag/client/model";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
-import type { Message } from "../gateway";
 import { ConversationEntry } from "./conversation-entry";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

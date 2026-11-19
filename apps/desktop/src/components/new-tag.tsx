@@ -1,14 +1,14 @@
-import { useEffect, useState } from "react";
-import type { Tag } from "../gateway";
-import { describe } from "../lib/polling";
+import type { Tag } from "@supertag/client/model";
 import {
   type AddedWorkspace,
+  describe,
   HARNESSES,
   harnessLabel,
   type TagAdmin,
   type TagOptions,
   tagIdFor,
-} from "../tag-admin";
+} from "@supertag/client/model";
+import { useEffect, useState } from "react";
 import { Button } from "./ui/button";
 import {
   Dialog,
