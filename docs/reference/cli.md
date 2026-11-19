@@ -16,6 +16,7 @@ Commands:
   init                  Set up SuperTag on this machine for the git repository in the current directory
   up                    Start local services or configured Worker Hosts in the background and return when ready
   tui                   Open the terminal UI; plain supertag opens it for this machine's services
+  message               Send a message to your conversation with a Tag and print its reply
   status                Show Worker Hosts, Tags, unfinished Objectives, and the operator inbox
   ps                    List this machine's SuperTag services
   logs                  Print this machine's service logs
@@ -231,6 +232,36 @@ Options:
           Workspace ID the terminal UI starts in
   -h, --help
           Print help
+```
+
+## `supertag message`
+
+```text
+Send a message to your conversation with a Tag and print its reply.
+
+The conversation is the one the terminal UI and the desktop app show, so a message sent here appears there, and a message sent there continues here. The command waits for the reply, printing the Tag's messages as they arrive, and fails when the turn fails.
+
+Usage: supertag message [OPTIONS] <TAG> [TEXT]
+
+Arguments:
+  <TAG>
+          Tag to message, by ID
+
+  [TEXT]
+          What to say. Without it, the message is read from standard input
+
+Options:
+      --no-wait
+          Return once the message is accepted, without waiting for the reply
+
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## `supertag status`

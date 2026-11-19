@@ -214,11 +214,23 @@ where the logs are.
 
 ## Send messages from the CLI
 
-`task submit` sends one turn of work to a Tag. A new Session name starts a new Session;
-reusing it continues one. These Sessions are separate from your conversation with the Tag in the
-terminal UI and the desktop app, and don't appear there. `task submit` refuses that
-conversation's own Session, so talk in your conversation from the terminal UI or the desktop
-app:
+`message` sends a message to your conversation with a Tag, the same conversation the terminal UI
+and the desktop app show. It waits for the reply and prints the Tag's messages as they arrive:
+
+```sh
+supertag message lead "What changed in the payment module this week?"
+git diff | supertag message lead
+supertag message lead "Start on the release notes." --no-wait
+```
+
+Without the text, `message` reads the message from standard input. `--no-wait` returns once the
+message is accepted; the reply shows in the conversation. The command fails when the Tag's turn
+fails, and prints why.
+
+`task submit` sends one turn of work to a Tag in a Session you name. A new Session name starts a
+new Session; reusing it continues one. These Sessions are separate from your conversation with
+the Tag, and don't appear in the terminal UI or the desktop app. `task submit` refuses that
+conversation's own Session and suggests `message` instead. Start a separate Session like this:
 
 ```sh
 supertag task submit --tag lead --session first-look \

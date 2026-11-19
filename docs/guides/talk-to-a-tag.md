@@ -234,10 +234,18 @@ another member. See [Define and complete an Objective](objectives.md).
 
 ## Send messages from scripts
 
-Scripts send a turn with `supertag task submit`. A Session name is the thread: a new name
-starts one, and reusing it continues it. These Sessions are separate from your conversation with
-the Tag: they don't appear in the terminal UI or the desktop app, and `task submit` refuses the
-conversation's own Session. To talk in your conversation, use the terminal UI or the desktop app.
+`supertag message` sends to your conversation with a Tag from a terminal or a script. It is the
+conversation the terminal UI and the desktop app show, so the message and the reply appear there
+too. The command waits for the reply and prints it; without the text, it reads standard input:
+
+```sh
+supertag message lead "Draft the release notes for 2.4."
+cat failing-test.log | supertag message lead
+```
+
+Scripts that keep separate threads send a turn with `supertag task submit`. A Session name is the
+thread: a new name starts one, and reusing it continues it. These Sessions don't appear in the
+terminal UI or the desktop app, and `task submit` refuses your conversation's own Session.
 
 ```sh
 supertag task submit --tag lead --session release-notes "Draft the release notes for 2.4."

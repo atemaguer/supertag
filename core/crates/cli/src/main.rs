@@ -3,6 +3,7 @@ mod terminal;
 mod artifact_publications;
 mod artifacts;
 mod auth_keys;
+mod conversation_message;
 mod delivery_branches;
 mod deployment;
 mod enrollments;
@@ -196,6 +197,12 @@ enum Command {
         #[arg(long)]
         workspace: Option<String>,
     },
+    /// Send a message to your conversation with a Tag and print its reply.
+    ///
+    /// The conversation is the one the terminal UI and the desktop app show, so a message sent
+    /// here appears there, and a message sent there continues here. The command waits for the
+    /// reply, printing the Tag's messages as they arrive, and fails when the turn fails.
+    Message(conversation_message::MessageArgs),
     /// Show Worker Hosts, Tags, unfinished Objectives, and the operator inbox.
     Status(status::StatusArgs),
     /// List this machine's SuperTag services.
@@ -1003,6 +1010,7 @@ async fn run(command: Command) -> Result<()> {
         Command::Down(args) => lifecycle::down(args).await?,
         Command::Logs(args) => lifecycle::logs(args).await?,
         Command::Ps(args) => lifecycle::ps(args).await?,
+        Command::Message(args) => conversation_message::run(args).await?,
         Command::Status(args) => status::status(args).await?,
         Command::Version(args) => status::version(args)?,
         Command::Config {
@@ -3355,7 +3363,8 @@ mod tests {
 
     /// Top-level commands that act on this machine, a deployment, or a report rather than on one
     /// resource kind. `connect` is the one verb: it saves a Control Plane on this machine.
-    const OPERATIONS: [&str; 17] = [
+    const OPERATIONS: [&str; 18] = [
+        "message",
         "health",
         "init",
         "sign-in",
@@ -3374,6 +3383,10 @@ mod tests {
         "metrics",
         "audit",
     ];
+
+    /// Operations that share a kind's name: `message` sends to the caller's conversation with a
+    /// Tag, while `get messages` lists Mailbox messages between Tags.
+    const OPERATIONS_NAMED_AFTER_KINDS: [&str; 1] = ["message"];
 
     /// RESOURCE VERB actions named after another kind, because they create it: `task input`
     /// sends the Input that `get input` reads.
@@ -3672,7 +3685,8 @@ mod tests {
         for name in OTHER_GROUPS.iter().chain(&OPERATIONS) {
             subcommand(cli, name);
             assert!(
-                KINDS.iter().all(|spec| spec.name != *name),
+                KINDS.iter().all(|spec| spec.name != *name)
+                    || OPERATIONS_NAMED_AFTER_KINDS.contains(name),
                 "{name} is a kind, so its group is not listed separately"
             );
         }
