@@ -122,6 +122,7 @@ pub(crate) async fn list_messages(connection: Connection, args: MessageListArgs)
                 "recipient_tag_id": message.recipient_tag_id,
                 "source_task_id": message.source_task_id,
                 "origin": message.origin().as_str_name(),
+                "kind": message.kind().as_str_name(),
                 "workstream_post_id": message.workstream_post_id,
                 "objective_id": message.objective_id,
                 "text": message.text,

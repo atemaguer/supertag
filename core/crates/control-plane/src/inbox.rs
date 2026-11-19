@@ -482,6 +482,13 @@ pub(crate) async fn inbox_page_in(
         }
         items.extend(logins);
     }
+    if wants(&cursor, InboxItemKind::WakeLimit) {
+        let (trips, more) = wake_limits_in(tx, &cursor, creator).await?;
+        if more {
+            truncated.push(InboxItemKind::WakeLimit as i32);
+        }
+        items.extend(trips);
+    }
     items.sort_by(|a, b| (a.actionable_since_ms, &a.key).cmp(&(b.actionable_since_ms, &b.key)));
     items.retain(|item| {
         (item.actionable_since_ms, item.key.as_str()) > (cursor.at, cursor.key.as_str())
@@ -617,6 +624,88 @@ async fn mcp_logins_in(
                 notification: None,
             });
         }
+    }
+    Ok((items, rows.len() > SCAN))
+}
+
+/// Wake limits Tags tripped in the last day: one item per limit and window. The messages they
+/// held are delivered late, never dropped; the item says how many waited.
+async fn wake_limits_in(
+    tx: &mut Transaction<'_, Any>,
+    cursor: &Cursor,
+    creator: &str,
+) -> Result<(Vec<InboxItem>, bool)> {
+    use crate::messages::wakes::{LIMIT_OBJECTIVE, LIMIT_PAIR, LIMIT_TAG};
+    const DAY_MS: i64 = 86_400_000;
+    let rows = sqlx::query(
+        "SELECT trip.* FROM supertag_v2_wake_limit_trips trip
+         LEFT JOIN supertag_v2_objectives o ON o.objective_id=trip.objective_id
+         WHERE trip.tripped_at_ms>$1 AND trip.tripped_at_ms<=$2
+           AND ($3='' OR trip.objective_id=$3) AND ($4='' OR o.created_by=$4)
+         ORDER BY trip.tripped_at_ms,trip.scope,trip.scope_id LIMIT $5",
+    )
+    .bind(cursor.as_of_ms - DAY_MS)
+    .bind(cursor.as_of_ms)
+    .bind(&cursor.objective_id)
+    .bind(creator)
+    .bind((SCAN + 1) as i64)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut items = Vec::new();
+    for row in rows.iter().take(SCAN) {
+        let scope: i64 = row.try_get("scope")?;
+        let scope_id: String = row.try_get("scope_id")?;
+        let window: i64 = row.try_get("window_start_ms")?;
+        let limit: i64 = row.try_get("wake_limit")?;
+        let held: i64 = row.try_get("held")?;
+        let since: i64 = row.try_get("tripped_at_ms")?;
+        let waited = if held == 1 {
+            "1 message waited".to_owned()
+        } else {
+            format!("{held} messages waited")
+        };
+        let reason = match scope {
+            LIMIT_PAIR => {
+                let mut parts = scope_id.split('\n');
+                let (origin, a, b) = (
+                    parts.next().unwrap_or_default(),
+                    parts.next().unwrap_or_default(),
+                    parts.next().unwrap_or_default(),
+                );
+                format!(
+                    "{a} and {b} hit the mutual wake limit ({limit}) for Task {origin}; {waited}."
+                )
+            }
+            LIMIT_TAG => format!(
+                "Tag {scope_id} hit the hourly wake limit ({limit}) for wakes by other Tags; {waited}."
+            ),
+            LIMIT_OBJECTIVE => format!(
+                "Objective {scope_id} hit the hourly wake limit ({limit}) for its Tags; {waited}."
+            ),
+            _ => continue,
+        };
+        let key = format!(
+            "wake_limit:{scope}:{}:{window}",
+            scope_id.replace('\n', ":")
+        );
+        items.push(InboxItem {
+            key: key.clone(),
+            occurrence: format!("{key}:{since}"),
+            kind: InboxItemKind::WakeLimit as i32,
+            objective_id: row
+                .try_get::<Option<String>, _>("objective_id")?
+                .unwrap_or_default(),
+            task_id: String::new(),
+            attempt_id: None,
+            operator_eligible: true,
+            actionable_since_ms: since,
+            reason: format!(
+                "{reason} They are delivered late, never dropped. Raise the Team's spec.wakeLimits if this is expected."
+            ),
+            question: None,
+            approval: None,
+            notification: None,
+        });
     }
     Ok((items, rows.len() > SCAN))
 }

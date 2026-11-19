@@ -357,6 +357,46 @@ DROP TABLE supertag_v2_m117_delivery;
 DROP TABLE supertag_v2_m117_direct;
 DROP TABLE supertag_v2_m117_orphans;
 
+-- A commit review request is a direct message. SQLite cannot change a foreign key, so the table
+-- is rebuilt with 0030's definition pointing at the new messages; request IDs are unchanged.
+PRAGMA legacy_alter_table = ON;
+CREATE TABLE supertag_v2_commit_reviews_next (
+    request_id TEXT PRIMARY KEY REFERENCES supertag_v2_messages(message_id),
+    objective_id TEXT NOT NULL REFERENCES supertag_v2_objectives(objective_id),
+    requester_tag_id TEXT NOT NULL REFERENCES supertag_v2_tags(tag_id),
+    reviewer_tag_id TEXT NOT NULL REFERENCES supertag_v2_tags(tag_id),
+    source_task_id TEXT NOT NULL REFERENCES supertag_v2_tasks(task_id),
+    workspace_id TEXT NOT NULL,
+    commit_sha TEXT NOT NULL,
+    delivery BLOB NOT NULL,
+    requested_at_ms BIGINT NOT NULL,
+    created_order BIGINT NOT NULL UNIQUE,
+    decision BIGINT CHECK (decision IN (1, 2)),
+    summary TEXT,
+    verdict_task_id TEXT REFERENCES supertag_v2_tasks(task_id),
+    recorded_at_ms BIGINT,
+    notice_task_id TEXT UNIQUE REFERENCES supertag_v2_tasks(task_id),
+    notice_retry_at_ms BIGINT NOT NULL DEFAULT 0,
+    CHECK (requester_tag_id <> reviewer_tag_id),
+    CHECK ((decision IS NULL AND summary IS NULL AND verdict_task_id IS NULL AND recorded_at_ms IS NULL AND notice_task_id IS NULL)
+        OR (decision IS NOT NULL AND summary IS NOT NULL AND verdict_task_id IS NOT NULL AND recorded_at_ms IS NOT NULL))
+);
+INSERT INTO supertag_v2_commit_reviews_next SELECT * FROM supertag_v2_commit_reviews;
+DROP TABLE supertag_v2_commit_reviews;
+ALTER TABLE supertag_v2_commit_reviews_next RENAME TO supertag_v2_commit_reviews;
+PRAGMA legacy_alter_table = OFF;
+CREATE INDEX supertag_v2_commit_reviews_objective ON supertag_v2_commit_reviews(objective_id,created_order);
+CREATE INDEX supertag_v2_commit_reviews_pending ON supertag_v2_commit_reviews(notice_task_id,created_order);
+
+-- Direct messages, their delivery state, and their operations now live in the tables above.
+DROP TABLE supertag_v2_mailbox_send_operations;
+DROP TABLE supertag_v2_mailbox_messages;
+
+-- A Tag's delivered messages: the bound wake whose range holds a seq (message state, review
+-- lineage).
+CREATE INDEX supertag_v2_wakes_bound
+    ON supertag_v2_wakes(tag_id, conversation_id, first_seq) WHERE task_id IS NOT NULL;
+
 -- The watch feed announces a Tag's direct message (WatchKind 9, Mailbox message), one notice per
 -- recipient, and a channel message as a Workstream post (WatchKind 6). SQLite cannot change a
 -- CHECK, so the table is rebuilt as in 0093. These triggers come after the copy, so migrated

@@ -100,7 +100,8 @@ spec:
     Ask me to approve each production cutover and retirement of the shared keys.
 ```
 
-A Team's members and `maxConcurrency` change when you apply its manifest again. Which Team an
+A Team's members, `maxConcurrency`, and `wakeLimits` change when you apply its manifest again.
+Which Team an
 Objective names is fixed once it exists. See
 [Declare Objectives](../operations/resources.md#declare-objectives).
 
@@ -135,6 +136,33 @@ supertag team update service-identity --clear-concurrency
 Use `supertag describe objective service-identity-migration` to see the Team's limit or confirm
 that only Worker Host capacity limits the number of turns.
 
+## Change how often Tags wake each other
+
+Wake limits stop the Team's Tags from waking each other in a loop. The defaults are 3 wakes
+between two Tags for one originating Task, 20 wakes of one Tag by other Tags per hour, and 60
+wakes by one Objective's Tags per hour. Over a limit nothing is dropped: messages wait for the
+recipient's next turn or are delivered late, and you get one Inbox item. See
+[Wake limits](tag-messaging.md#wake-limits).
+
+Change them in the Team's manifest. Declared limits replace all three; one left out keeps its
+default, and each is 0 to 1,000, where 0 allows no wake:
+
+```yaml
+apiVersion: supertag/v1
+kind: Team
+metadata:
+  name: service-identity
+spec:
+  members: [lead, identity, migration, verification, rollout]
+  wakeLimits:
+    mutualPerTask: 6
+    perTagPerHour: 40
+```
+
+`supertag get team service-identity` shows the overrides under `wake_limits`. Declare
+`wakeLimits: {}` to return to the defaults; a manifest without `wakeLimits` keeps the current
+limits.
+
 ## Messaging inside and outside the Team
 
 Two Tags in the same Team may send each other messages with no further configuration: a message
@@ -165,6 +193,9 @@ addressed to Tags reaches their inboxes. See [Share a Team's Workstream](workstr
   `supertag describe objective ID`, and remove the limit if nobody meant to throttle the Team.
 - **A Tag cannot message another Tag.** They share no Team and there is no grant; see
   [Send messages between Tags](tag-messaging.md).
+- **The Inbox says Tags hit a wake limit.** They woke each other more often than the Team allows.
+  If they are looping, give the work to one Tag; if the traffic is expected, raise
+  `spec.wakeLimits`.
 
 ## Next
 

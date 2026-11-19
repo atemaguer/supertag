@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 const OPERATOR: &str = "operator:alice";
 const NOW: i64 = 1_900_000_000_000;
+const DEBOUNCE_MS: i64 = 3_000;
 
 fn send(operation: &str, recipient: &str, text: &str) -> SendAttemptTagMessageRequest {
     SendAttemptTagMessageRequest {
@@ -64,6 +65,17 @@ async fn claim(store: &Store, host: &HostAuthority, tag: &str) -> InspectAttempt
         attempt_id: assignment.attempt_id,
         lease_token: assignment.lease_token,
     }
+}
+/// Claims the Tag's inbox turn once its messages' wake is due: notes wait out the debounce.
+async fn claim_inbox(
+    store: &Store,
+    clock: &AtomicI64,
+    host: &HostAuthority,
+    tag: &str,
+) -> InspectAttemptRequest {
+    clock.fetch_add(DEBOUNCE_MS, Ordering::SeqCst);
+    store.sweep_mailbox().await.unwrap();
+    claim(store, host, tag).await
 }
 async fn start(store: &Store, host: &HostAuthority, attempt: &InspectAttemptRequest) -> Task {
     store
@@ -168,20 +180,20 @@ async fn direct_contract(url: &str) {
     let clock = Arc::new(AtomicI64::new(NOW));
     let store = open_at(url, &clock).await;
     let (sender, receiver, other) = initialize_mailbox(&store).await;
-    let delivery = submit_direct_messages(&store, &sender, &receiver, &other).await;
+    let delivery = submit_direct_messages(&store, &sender, &receiver, &other, &clock).await;
 
     // Exact replay across restart while both sending and receiving Attempts are live.
     store.close().await;
     let store = open_at(url, &clock).await;
-    verify_restarted_delivery(&store, &sender, &receiver, &other, delivery).await;
+    verify_restarted_delivery(&store, &sender, &receiver, &other, delivery, &clock).await;
     verify_directional_grants(&store).await;
 
     store.close().await;
     let store = open_at(url, &clock).await;
-    verify_scoped_delivery(&store, &sender, &receiver).await;
+    verify_scoped_delivery(&store, &sender, &receiver, &clock).await;
     verify_cross_attempt_replay(&store, &sender, &receiver, &clock).await;
     let continuation = verify_approved_message(&store, &sender).await;
-    verify_denial_and_quota(&store, &sender, &receiver, &continuation).await;
+    verify_denial_and_quota(&store, &sender, &receiver, &continuation, &clock).await;
     verify_hop_limit(&store, &sender, &clock).await;
     store.close().await;
 }
@@ -233,6 +245,7 @@ async fn submit_direct_messages(
     sender: &HostAuthority,
     receiver: &HostAuthority,
     other: &HostAuthority,
+    clock: &AtomicI64,
 ) -> PendingDelivery {
     ordinary(store, "alpha").await;
     let source = claim(store, sender, "alpha").await;
@@ -331,11 +344,13 @@ async fn submit_direct_messages(
         )
         .await
         .unwrap();
+    // The inbox turn is accepted once the debounced wake is due; a later Tag change does not
+    // reach it.
+    let inbox = claim_inbox(store, clock, receiver, "beta").await;
     store
         .put_tag("beta", "Changed after inbox acceptance", vec![])
         .await
         .unwrap();
-    let inbox = claim(store, receiver, "beta").await;
     let bound = start(store, receiver, &inbox).await;
     assert_eq!(bound.instructions, "Identity beta");
     assert_eq!(bound.prompt.matches("<tag-message ").count(), 2);
@@ -395,6 +410,7 @@ async fn verify_restarted_delivery(
     receiver: &HostAuthority,
     other: &HostAuthority,
     delivery: PendingDelivery,
+    clock: &AtomicI64,
 ) {
     let PendingDelivery {
         first,
@@ -434,7 +450,7 @@ async fn verify_restarted_delivery(
         Some(post_id.as_str())
     );
     finish(store, receiver, &inbox, vec![]).await;
-    let successor = claim(store, receiver, "beta").await;
+    let successor = claim_inbox(store, clock, receiver, "beta").await;
     let next = start(store, receiver, &successor).await;
     assert_eq!(next.prompt.matches("<tag-message ").count(), 2);
     assert!(next.prompt.contains("via=\"direct message\""));
@@ -593,7 +609,12 @@ async fn verify_directional_grants(store: &Store) {
     );
 }
 
-async fn verify_scoped_delivery(store: &Store, sender: &HostAuthority, receiver: &HostAuthority) {
+async fn verify_scoped_delivery(
+    store: &Store,
+    sender: &HostAuthority,
+    receiver: &HostAuthority,
+    clock: &AtomicI64,
+) {
     assert_eq!(history(store, "beta").await.len(), 4);
     ordinary(store, "alpha").await;
     let source = claim(store, sender, "alpha").await;
@@ -617,7 +638,7 @@ async fn verify_scoped_delivery(store: &Store, sender: &HostAuthority, receiver:
         Err(StoreError::FailedPrecondition(reason)) if reason.contains("acceptsMessagesFrom")
     ));
     finish(store, sender, &source, vec![]).await;
-    let inbox = claim(store, receiver, "outsider").await;
+    let inbox = claim_inbox(store, clock, receiver, "outsider").await;
     start(store, receiver, &inbox).await;
     assert!(matches!(
         store
@@ -650,7 +671,7 @@ async fn verify_cross_attempt_replay(
         .unwrap()
         .message
         .unwrap();
-    clock.store(NOW + 30_001, Ordering::SeqCst);
+    clock.fetch_add(30_001, Ordering::SeqCst);
     store.sweep_expired_attempts().await.unwrap();
     assert_eq!(
         store.get_task(&before_retry.task_id).await.unwrap().state(),
@@ -693,7 +714,7 @@ async fn verify_cross_attempt_replay(
             .is_err()
     );
     finish(store, sender, &after_retry, vec![]).await;
-    let inbox = claim(store, receiver, "beta").await;
+    let inbox = claim_inbox(store, clock, receiver, "beta").await;
     start(store, receiver, &inbox).await;
     finish(store, receiver, &inbox, vec![]).await;
 }
@@ -790,6 +811,7 @@ async fn verify_denial_and_quota(
     sender: &HostAuthority,
     receiver: &HostAuthority,
     continuation: &InspectAttemptRequest,
+    clock: &AtomicI64,
 ) {
     // A denial delivers nothing. A later quota refusal must not consume a
     // separately approved Once grant: consumption belongs to the actual insert.
@@ -888,13 +910,32 @@ async fn verify_denial_and_quota(
             .is_none()
     );
     finish(store, sender, continuation, vec![]).await;
-    let inbox = claim(store, receiver, "beta").await;
+    let inbox = claim_inbox(store, clock, receiver, "beta").await;
     start(store, receiver, &inbox).await;
     finish(store, receiver, &inbox, vec![]).await;
 }
 
 async fn verify_hop_limit(store: &Store, sender: &HostAuthority, clock: &AtomicI64) {
-    // Each new inbox message inherits the bound chain, including approval turns.
+    // Each new inbox message inherits the bound chain, including approval turns. The chain wakes
+    // alpha and beta five times for one originating Task, past the default mutual wake limit, so
+    // the Team raises it.
+    let team = store.get_team(OPERATOR, "team").await.unwrap();
+    store
+        .update_team(
+            OPERATOR,
+            &UpdateTeamRequest {
+                operation_id: "hop-wake-limits".into(),
+                team: "team".into(),
+                expected_revision: team.revision,
+                wake_limits: Some(TeamWakeLimits {
+                    mutual_per_task: Some(10),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
     store.put_tag("alpha", "Sender", vec![]).await.unwrap();
     ordinary(store, "alpha").await;
     let mut current = claim(store, sender, "alpha").await;
@@ -955,7 +996,7 @@ async fn verify_hop_limit(store: &Store, sender: &HostAuthority, clock: &AtomicI
             .unwrap();
         assert_eq!(sent.hops, hop);
         finish(store, sender, &current, vec![]).await;
-        current = claim(store, sender, to).await;
+        current = claim_inbox(store, clock, sender, to).await;
         start(store, sender, &current).await;
     }
     let rejected = send("too-far", "alpha", "No sixth inbox");
@@ -968,7 +1009,7 @@ async fn verify_hop_limit(store: &Store, sender: &HostAuthority, clock: &AtomicI
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
-    clock.store(NOW + 60_002, Ordering::SeqCst);
+    clock.fetch_add(30_001, Ordering::SeqCst);
     assert!(
         store
             .send_attempt_tag_message(

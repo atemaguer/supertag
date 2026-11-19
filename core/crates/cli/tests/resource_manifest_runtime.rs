@@ -132,7 +132,8 @@ spec:
         input.join("a-team.json"),
         r#"[
       {"apiVersion":"supertag/v1","kind":"Team","metadata":{"name":"engineering"},
-       "spec":{"members":["builder","reviewer"],"maxConcurrency":2}}
+       "spec":{"members":["builder","reviewer"],"maxConcurrency":2,
+               "wakeLimits":{"mutualPerTask":5}}}
     ]"#,
     )?;
     std::fs::write(
@@ -187,6 +188,10 @@ spec: {source: "file:///var/lib/supertag/archive"}
     }
     command(&gateway, &["get", "tag", "builder"], false).await?;
     command(&gateway, &["apply", "-f", path], true).await?;
+    let team: Value =
+        serde_json::from_str(&command(&gateway, &["get", "team", "engineering"], true).await?)?;
+    assert_eq!(team["wake_limits"]["mutual_per_task"], 5, "{team}");
+    assert!(team["wake_limits"]["per_tag_per_hour"].is_null(), "{team}");
     let objective: Value =
         serde_json::from_str(&command(&gateway, &["get", "objective", "release"], true).await?)?;
     assert_eq!(objective["owner_tag_id"], "builder");

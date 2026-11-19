@@ -154,7 +154,7 @@ a network scope is in [Network scopes](../reference/iam.md#network-scopes).
 | `ContextSet` | Knowledge items a Task may receive, each with an `itemKey`, `type`, `version`, and `config`, and optionally `required` |
 | `Role` | `purpose`, `instructions`, `permissionSets`, `contextSets`, and `execution` |
 | `Tag` | `roles`, `instructions`, `allowedActions`, `execution`, `workspace`, `runsOn`, `acceptsMessagesFrom`, `lead`, `maxWorkSessions`, `memory`, `startRate`, and `volume` |
-| `Team` | `members` and `maxConcurrency` |
+| `Team` | `members`, `maxConcurrency`, and `wakeLimits` (`mutualPerTask`, `perTagPerHour`, `perObjectivePerHour`, each 0–1,000); see [Wake limits](../guides/tag-messaging.md#wake-limits) |
 | `Objective` | An outcome; see [Declare Objectives](#declare-objectives) |
 | `Schedule` | A recurring wake-up of a Tag: `tag`, `every`, `note`, and optionally `timeZone`; see [Declared Schedules](../reference/resource-model.md#declared-schedules) |
 | `Workspace` | A GitHub repository source: `github` with `accountId`, `repositoryId`, `repository`, and a `revision` or `commitSha`, and optionally `pullRequestBase`. A repository on a Worker Host is not a manifest; map it in the host's `workspaces` in `supertag.yaml` |

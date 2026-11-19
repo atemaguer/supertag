@@ -175,6 +175,17 @@ struct TeamSpec {
     name: Option<String>,
     members: Option<Vec<String>>,
     max_concurrency: Option<u32>,
+    /// Declared limits replace all three; an omitted one keeps its default.
+    wake_limits: Option<WakeLimitsSpec>,
+}
+
+/// How often Tags may wake each other: each 0–1,000.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct WakeLimitsSpec {
+    mutual_per_task: Option<u32>,
+    per_tag_per_hour: Option<u32>,
+    per_objective_per_hour: Option<u32>,
 }
 
 /// A recurring Schedule that wakes a Tag in the applying operator's conversation with it.

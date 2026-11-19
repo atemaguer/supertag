@@ -381,20 +381,10 @@ async fn contract(url: &str) {
         )
         .await
         .unwrap();
+    // Creating the Team created its channel, with its members.
     let (mut tx, _) = store.write().await.unwrap();
-    let channel = create_team_channel_in(
-        &mut tx,
-        "release",
-        &["alice".to_owned(), "bob".to_owned()],
-        1_000,
-    )
-    .await
-    .unwrap();
+    let channel = team_channel_in(&mut tx, "release").await.unwrap().unwrap();
     assert!(channel.starts_with("channel/"));
-    assert_eq!(
-        team_channel_in(&mut tx, "release").await.unwrap(),
-        Some(channel.clone())
-    );
     let to = vec!["bob".to_owned(), "alice".to_owned(), "bob".to_owned()];
     let mut post = note(&channel, Member::Tag("alice"), "Ready for review", &to);
     post.kind = MessageKind::Decision;
@@ -417,14 +407,7 @@ async fn contract(url: &str) {
     tx.rollback().await.unwrap();
 
     let (mut tx, _) = store.write().await.unwrap();
-    let channel = create_team_channel_in(
-        &mut tx,
-        "release",
-        &["alice".to_owned(), "bob".to_owned()],
-        1_000,
-    )
-    .await
-    .unwrap();
+    let channel = team_channel_in(&mut tx, "release").await.unwrap().unwrap();
     let post = NewMessage {
         conversation_id: &channel,
         ..post

@@ -21,8 +21,8 @@ impl Store {
              (SELECT COUNT(*) FROM supertag_v2_permission_sets) AS permission_sets, \
              (SELECT COUNT(*) FROM supertag_v2_context_sets) AS context_sets, \
              (SELECT COUNT(*) FROM (SELECT DISTINCT tag_id, session_id FROM supertag_v2_tasks) sessions) AS sessions, \
-             (SELECT COUNT(*) FROM supertag_v2_mailbox_messages WHERE task_id IS NULL) AS mailbox_pending, \
-             (SELECT MIN(created_at_ms) FROM supertag_v2_mailbox_messages WHERE task_id IS NULL) AS mailbox_oldest, \
+             (SELECT COUNT(*) FROM supertag_v2_wakes WHERE task_id IS NULL) AS mailbox_pending, \
+             (SELECT MIN(created_at_ms) FROM supertag_v2_wakes WHERE task_id IS NULL) AS mailbox_oldest, \
              (SELECT COUNT(*) FROM supertag_v2_replies WHERE state IN ($1,$2,$3)) AS reply_backlog, \
              (SELECT COUNT(*) FROM supertag_v2_replies WHERE state=$4) AS reply_failed",
         )

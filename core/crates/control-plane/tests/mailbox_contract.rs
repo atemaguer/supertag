@@ -1,13 +1,36 @@
 mod support;
 
+use std::sync::{
+    Arc,
+    atomic::{AtomicI64, Ordering},
+};
+
 use sqlx::{Connection, Executor};
 use supertag_control_plane::{HostAuthority, Store, StoreError};
 use supertag_protocol::v2::*;
 use uuid::Uuid;
 
 const OPERATOR: &str = "operator:mailbox-test";
+const NOW: i64 = 1_900_000_000_000;
+/// Notes wait this long before they wake their Tag, so a burst lands in one turn.
+const DEBOUNCE_MS: i64 = 3_000;
 
-async fn claim(store: &Store, host: &HostAuthority) -> InspectAttemptRequest {
+async fn open_at(url: &str, clock: &Arc<AtomicI64>) -> Store {
+    let now = clock.clone();
+    Store::open(url)
+        .await
+        .unwrap()
+        .with_execution_clock(move || now.load(Ordering::SeqCst))
+}
+
+/// Lets every waiting wake come due and turns it into an inbox Task.
+async fn settle(store: &Store, clock: &AtomicI64) {
+    clock.fetch_add(DEBOUNCE_MS, Ordering::SeqCst);
+    store.sweep_mailbox().await.unwrap();
+}
+
+async fn claim(store: &Store, clock: &AtomicI64, host: &HostAuthority) -> InspectAttemptRequest {
+    settle(store, clock).await;
     let assignment = store
         .claim_task_for_host(host, &Uuid::new_v4().to_string(), &[], HarnessKind::Codex)
         .await
@@ -130,7 +153,8 @@ async fn ordinary(store: &Store, tag: &str) -> Task {
 }
 
 async fn durable_delivery(url: &str) {
-    let store = Store::open(url).await.unwrap();
+    let clock = Arc::new(AtomicI64::new(NOW));
+    let store = open_at(url, &clock).await;
     seed(&store).await;
     store
         .put_role(
@@ -182,7 +206,7 @@ async fn durable_delivery(url: &str) {
         )
         .await
         .unwrap();
-    let source = claim(&store, &sender).await;
+    let source = claim(&store, &clock, &sender).await;
     start(&store, &sender, &source).await;
     post(&store, &sender, &source, "plain", "Public progress", &[]).await;
     assert!(history(&store, "recipient").await.is_empty());
@@ -258,11 +282,14 @@ async fn durable_delivery(url: &str) {
         &["recipient"],
     )
     .await;
+    // The inbox turn is accepted once the debounced wake is due; a later Tag change does not
+    // reach it.
+    settle(&store, &clock).await;
     store
         .put_tag("recipient", "Changed after acceptance", vec![])
         .await
         .unwrap();
-    let first = claim(&store, &recipient).await;
+    let first = claim(&store, &clock, &recipient).await;
     post(
         &store,
         &sender,
@@ -404,7 +431,7 @@ async fn durable_delivery(url: &str) {
     ));
     finish(&store, &recipient, &first, true).await;
     store.close().await;
-    let store = Store::open(url).await.unwrap();
+    let store = open_at(url, &clock).await;
     let after_restart = history(&store, "recipient").await;
     assert_eq!(
         after_restart
@@ -413,7 +440,7 @@ async fn durable_delivery(url: &str) {
             .count(),
         3
     );
-    let next = claim(&store, &recipient).await;
+    let next = claim(&store, &clock, &recipient).await;
     let task = start(&store, &recipient, &next).await;
     assert!(task.instructions.starts_with("Changed after acceptance"));
     assert_eq!(task.harness_kind(), HarnessKind::Codex);
@@ -472,7 +499,8 @@ async fn durable_delivery(url: &str) {
 }
 
 async fn bounded_batches_and_hops(url: &str) {
-    let store = Store::open(url).await.unwrap();
+    let clock = Arc::new(AtomicI64::new(NOW + 3_600_000));
+    let store = open_at(url, &clock).await;
     for id in ["batch-sender", "batch-recipient"] {
         store.put_tag(id, "Process mail", vec![]).await.unwrap();
     }
@@ -484,6 +512,11 @@ async fn bounded_batches_and_hops(url: &str) {
                 team_id: "batch-team".into(),
                 name: "Batch team".into(),
                 member_tag_ids: vec!["batch-sender".into(), "batch-recipient".into()],
+                // The relay below wakes the pair five times for one originating Task.
+                wake_limits: Some(TeamWakeLimits {
+                    mutual_per_task: Some(10),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
         )
@@ -492,7 +525,7 @@ async fn bounded_batches_and_hops(url: &str) {
     let host = support::register_host(&store, "batch-host").await;
     let receiver = support::register_host(&store, "batch-receiver").await;
     ordinary(&store, "batch-sender").await;
-    let source = claim(&store, &host).await;
+    let source = claim(&store, &clock, &host).await;
     start(&store, &host, &source).await;
     let excerpt = format!("{}😀 remainder", "x".repeat(7_999));
     post(
@@ -504,9 +537,10 @@ async fn bounded_batches_and_hops(url: &str) {
         &["batch-recipient"],
     )
     .await;
+    // The Mailbox lists the whole post.
     let message = history(&store, "batch-recipient").await.remove(0);
-    assert_eq!(message.text.encode_utf16().count(), 7_999);
-    let reservation = claim(&store, &receiver).await;
+    assert_eq!(message.text, excerpt);
+    let reservation = claim(&store, &clock, &receiver).await;
     store.cancel_task(&reservation.task_id).await.unwrap();
     // Cancellation before first Start preserves the unbound mail; a repair
     // sweep creates exactly one new wake, with no native authorization.
@@ -536,7 +570,7 @@ async fn bounded_batches_and_hops(url: &str) {
     }
     store.sweep_mailbox().await.unwrap();
     store.sweep_mailbox().await.unwrap();
-    let first = claim(&store, &receiver).await;
+    let first = claim(&store, &clock, &receiver).await;
     let task = start(&store, &receiver, &first).await;
     assert_eq!(task.prompt.matches("<tag-message from=").count(), 16);
     assert!(!task.prompt.contains("Item 15"));
@@ -551,7 +585,7 @@ async fn bounded_batches_and_hops(url: &str) {
             .is_none()
     );
     finish(&store, &receiver, &first, true).await;
-    let second = claim(&store, &receiver).await;
+    let second = claim(&store, &clock, &receiver).await;
     let task = start(&store, &receiver, &second).await;
     assert_eq!(task.prompt.matches("<tag-message from=").count(), 1);
     assert!(task.prompt.contains("Item 15"));
@@ -568,13 +602,13 @@ async fn bounded_batches_and_hops(url: &str) {
         )
         .await;
     }
-    let first = claim(&store, &receiver).await;
+    let first = claim(&store, &clock, &receiver).await;
     let task = start(&store, &receiver, &first).await;
     assert!(task.prompt.len() <= 262_144);
     assert_eq!(task.prompt.matches("<tag-message from=").count(), 6);
     assert!(!task.prompt.contains("Expanded 6"));
     finish(&store, &receiver, &first, true).await;
-    let second = claim(&store, &receiver).await;
+    let second = claim(&store, &clock, &receiver).await;
     let task = start(&store, &receiver, &second).await;
     assert!(task.prompt.contains("Expanded 6") && task.prompt.contains("Expanded 7"));
     assert_eq!(task.prompt.matches("<tag-message from=").count(), 2);
@@ -584,7 +618,7 @@ async fn bounded_batches_and_hops(url: &str) {
     // The bound message lineage, not arbitrary Session spelling, owns the
     // relay limit. Each receiving Task may produce the next addressed post.
     ordinary(&store, "batch-sender").await;
-    let mut source = claim(&store, &host).await;
+    let mut source = claim(&store, &clock, &host).await;
     start(&store, &host, &source).await;
     let mut to = "batch-recipient";
     for hop in 0..=4 {
@@ -620,7 +654,7 @@ async fn bounded_batches_and_hops(url: &str) {
             .unwrap();
         assert_eq!(message.hops, hop);
         finish(&store, &host, &source, true).await;
-        source = claim(&store, &host).await;
+        source = claim(&store, &clock, &host).await;
         start(&store, &host, &source).await;
         to = if to == "batch-recipient" {
             "batch-sender"
@@ -662,7 +696,7 @@ async fn bounded_batches_and_hops(url: &str) {
         )
         .await
         .unwrap();
-    let source = claim(&store, &host).await;
+    let source = claim(&store, &clock, &host).await;
     assert_eq!(
         decision.continuation_task_id.as_deref(),
         Some(source.task_id.as_str())

@@ -193,6 +193,9 @@ async fn contract(url: String) {
         .finish_task(&host, &outcome(&sender_attempt))
         .await
         .unwrap();
+    // A note wakes its recipient after the Mailbox debounce.
+    clock.fetch_add(3_000, Ordering::SeqCst);
+    store.sweep_mailbox().await.unwrap();
     let (mail, mail_attempt) = claim(&store, &host).await;
     assert!(mail.session_id.starts_with("inbox:"));
     start(&store, &host, &mail_attempt).await;

@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use supertag_protocol::v2::commit_review_submission::Kind as ReviewKind;
 
 use super::*;
-use crate::commit_reviews;
+use crate::{commit_reviews, messages::OperationScope, messages::wakes::WakeRequest};
 
 const SENDS_PER_TASK: i64 = 3;
 
@@ -89,12 +89,6 @@ async fn may_send_in(tx: &mut Transaction<'_, Any>, sender: &str, recipient: &st
         .bind(sender).bind(recipient).fetch_one(&mut **tx).await?;
     Ok(granted > 0)
 }
-async fn message_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<TagMessage> {
-    let row = sqlx::query("SELECT m.*,t.state AS task_state FROM supertag_v2_mailbox_messages m LEFT JOIN supertag_v2_tasks t ON t.task_id=m.task_id WHERE m.message_id=$1")
-        .bind(id).fetch_one(&mut **tx).await?;
-    message_row(tx, &row).await
-}
-
 async fn record_operation_in(
     tx: &mut Transaction<'_, Any>,
     task_id: &str,
@@ -102,9 +96,52 @@ async fn record_operation_in(
     digest: &str,
     message_id: &str,
 ) -> Result<()> {
-    sqlx::query("INSERT INTO supertag_v2_mailbox_send_operations (source_task_id,operation_id,request_digest,message_id) VALUES ($1,$2,$3,$4)")
-        .bind(task_id).bind(operation_id).bind(digest).bind(message_id).execute(&mut **tx).await?;
-    Ok(())
+    messages::record_operation_in(
+        tx,
+        OperationScope::Mailbox,
+        task_id,
+        operation_id,
+        digest,
+        message_id,
+    )
+    .await
+}
+
+/// The type a Tag gives its message. A review request is the Control Plane's to mark: a Tag asks
+/// for one with `review.commit`.
+fn message_kind(value: i32) -> Result<MessageKind> {
+    match MessageKind::try_from(value) {
+        Ok(MessageKind::Unspecified | MessageKind::Note) => Ok(MessageKind::Note),
+        Ok(MessageKind::Review) => Err(invalid(
+            "a Tag cannot send the review type; request a commit review with review.commit",
+        )),
+        Ok(kind) => Ok(kind),
+        Err(_) => Err(invalid("unknown message type")),
+    }
+}
+
+fn type_name(kind: MessageKind) -> &'static str {
+    match kind {
+        MessageKind::Question => "question",
+        MessageKind::Blocker => "blocker",
+        MessageKind::Evidence => "evidence",
+        MessageKind::Decision => "decision",
+        MessageKind::Review => "review",
+        MessageKind::Unspecified | MessageKind::Note => "note",
+    }
+}
+
+/// The Team whose wake limits a Task's direct messages use: its Workstream's, if it has one.
+async fn limits_team_in(
+    tx: &mut Transaction<'_, Any>,
+    task_id: &str,
+    sender: &str,
+) -> Result<Option<String>> {
+    match crate::teams::workstreams::workstream_for_task_in(tx, task_id, sender).await {
+        Ok(team) => Ok(Some(team.team_id)),
+        Err(StoreError::FailedPrecondition(_) | StoreError::PermissionDenied) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 impl Store {
@@ -231,13 +268,25 @@ impl Store {
             ));
         }
         let review = review_kind(input.review.as_ref())?;
+        let chosen = message_kind(input.kind)?;
         let mut arguments =
             serde_json::json!({"recipient_tag_id": input.recipient_tag_id, "text": text});
+        if chosen != MessageKind::Note {
+            arguments["type"] = type_name(chosen).into();
+        }
         let digest = if let Some(review) = &review {
             arguments["review"] = review_arguments(review);
             fingerprint(&arguments)?
-        } else {
+        } else if chosen == MessageKind::Note {
             fingerprint(&(&input.recipient_tag_id, text))?
+        } else {
+            fingerprint(&(&input.recipient_tag_id, text, type_name(chosen)))?
+        };
+        // A review request is marked by the Control Plane; it wakes its reviewer at once.
+        let message_kind = if matches!(review, Some(ReviewKind::Commit(_))) {
+            MessageKind::Review
+        } else {
+            chosen
         };
         let approval_request = RequestApprovalRequest {
             attempt: Some(attempt.clone()),
@@ -292,10 +341,15 @@ impl Store {
                 "Tag {recipient} does not accept messages from Tag {sender}: they share no Team, and {recipient}'s acceptsMessagesFrom does not name {sender}. An operator can allow it with supertag mailbox-grant allow {sender} {recipient}"
             )));
         }
-        let prior = sqlx::query("SELECT request_digest,message_id FROM supertag_v2_mailbox_send_operations WHERE source_task_id=$1 AND operation_id=$2")
-            .bind(&attempt.task_id).bind(&input.operation_id).fetch_optional(&mut *tx).await?;
-        if let Some(prior) = prior {
-            if prior.try_get::<String, _>("request_digest")? != digest {
+        let prior = messages::operation_in(
+            &mut tx,
+            OperationScope::Mailbox,
+            &attempt.task_id,
+            &input.operation_id,
+        )
+        .await?;
+        if let Some((prior_digest, message_id)) = prior {
+            if prior_digest != digest {
                 return Err(StoreError::Conflict(
                     "message operation used different content".into(),
                 ));
@@ -306,14 +360,16 @@ impl Store {
                 &approval_request,
             )
             .await?;
-            let message_id: String = prior.try_get("message_id")?;
             let (message, recorded_review) = if matches!(review, Some(ReviewKind::Response(_))) {
                 let stored = commit_reviews::for_message_in(&mut tx, &message_id)
                     .await?
                     .ok_or_else(|| StoreError::NotFound("commit review was not found".into()))?;
                 (None, Some(stored))
             } else {
-                (Some(message_in(&mut tx, &message_id).await?), None)
+                (
+                    Some(tag_message_by_id_in(&mut tx, &message_id).await?),
+                    None,
+                )
             };
             tx.rollback().await?;
             return Ok(SendTagMessageResponse {
@@ -379,17 +435,23 @@ impl Store {
             }
             _ => None,
         };
-        let (is_verdict, hops) = if matches!(review, Some(ReviewKind::Response(_))) {
-            (true, 0)
+        let (is_verdict, (hops, origin)) = if matches!(review, Some(ReviewKind::Response(_))) {
+            (true, (0, attempt.task_id.clone()))
         } else {
-            let sent: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_mailbox_messages WHERE source_task_id=$1 AND origin=1")
-            .bind(&attempt.task_id).fetch_one(&mut *tx).await?;
+            let sent: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM supertag_v2_messages m
+                 JOIN supertag_v2_conversations c ON c.conversation_id=m.conversation_id AND c.kind=1
+                 WHERE m.source_task_id=$1 AND m.sender_kind=1",
+            )
+            .bind(&attempt.task_id)
+            .fetch_one(&mut *tx)
+            .await?;
             if sent >= SENDS_PER_TASK {
                 return Err(StoreError::FailedPrecondition(
                     "this Task already sent three direct messages".into(),
                 ));
             }
-            (false, outgoing_hops_in(&mut tx, &attempt.task_id).await?)
+            (false, wakes::origin_in(&mut tx, &attempt.task_id).await?)
         };
         let authorization =
             crate::approvals::gate_in(&mut tx, host, &approval_request, now, order).await?;
@@ -438,18 +500,60 @@ impl Store {
         .bind(&attempt.task_id)
         .fetch_optional(&mut *tx)
         .await?;
-        let id = Uuid::new_v4().to_string();
-        sqlx::query("INSERT INTO supertag_v2_mailbox_messages (message_id,sender_tag_id,recipient_tag_id,source_task_id,origin,objective_id,text,hops,created_at_ms,delivery_order) VALUES ($1,$2,$3,$4,1,$5,$6,$7,$8,$9)")
-            .bind(&id).bind(sender).bind(&input.recipient_tag_id).bind(&attempt.task_id).bind(objective).bind(text).bind(hops).bind(now).bind(order).execute(&mut *tx).await?;
+        let conversation = messages::direct_conversation_in(
+            &mut tx,
+            Member::Tag(&sender),
+            Member::Tag(&input.recipient_tag_id),
+            now,
+        )
+        .await?;
+        let stored = messages::insert_message_in(
+            &mut tx,
+            &messages::NewMessage {
+                conversation_id: &conversation,
+                sender: Member::Tag(&sender),
+                kind: message_kind,
+                text,
+                hops,
+                source_task_id: Some(&attempt.task_id),
+                origin_task_id: Some(&origin),
+                objective_id: objective.as_deref(),
+                task_id: None,
+                effect_digest: None,
+                addressees: std::slice::from_ref(&input.recipient_tag_id),
+                now,
+            },
+        )
+        .await?;
+        let id = stored.message_id;
         if let Some(request) = validated_request {
             commit_reviews::insert_request_in(&mut tx, &id, &request, now, order).await?;
         }
         record_operation_in(&mut tx, &attempt.task_id, &input.operation_id, &digest, &id).await?;
-        sweep_in(&mut tx).await?;
-        let message = message_in(&mut tx, &id).await?;
+        let team = limits_team_in(&mut tx, &attempt.task_id, &sender).await?;
+        let outcome = wakes::wake_in(
+            &mut tx,
+            &WakeRequest {
+                tag_id: &input.recipient_tag_id,
+                conversation_id: &conversation,
+                kind: ConversationKind::Direct,
+                message_kind,
+                addressed: false,
+                sender_tag_id: &sender,
+                seq: stored.seq,
+                hops,
+                origin_task_id: Some(&origin),
+                objective_id: objective.as_deref(),
+                team_id: team.as_deref(),
+                now,
+            },
+        )
+        .await?;
+        sweep_in(&mut tx, now).await?;
+        let message = tag_message_by_id_in(&mut tx, &id).await?;
         tx.commit().await?;
         Ok(SendTagMessageResponse {
-            wake_deferred: String::new(),
+            wake_deferred: outcome.deferred.unwrap_or_default(),
             message: Some(message),
             duplicate: false,
             approval: None,

@@ -1089,7 +1089,7 @@ impl Store {
         let (mut transaction, _) = self.write().await?;
         let now = self.execution_now_ms();
         crate::objectives::objective_sweep_in(&mut transaction, now).await?;
-        crate::mailbox::sweep_in(&mut transaction).await?;
+        crate::mailbox::sweep_in(&mut transaction, now).await?;
         crate::work_sessions::reports::sweep_in(&mut transaction, now).await?;
         transaction.commit().await?;
         Ok(())
@@ -1350,7 +1350,7 @@ impl Store {
             sqlx::query("UPDATE supertag_v2_tasks SET state = $1, cleanup_pending = 1, cleanup_observed = 0, lease_expires_at_ms = $2 WHERE task_id = $3")
                 .bind(TaskState::Running as i64).bind(deadline).bind(&input.task_id)
                 .execute(&mut *transaction).await?;
-            crate::mailbox::started_in(&mut transaction, &input.task_id).await?;
+            crate::mailbox::started_in(&mut transaction, &input.task_id, now).await?;
             sqlx::query("UPDATE supertag_v2_claims SET started_at_ms=$1 WHERE attempt_id=$2 AND started_at_ms IS NULL")
                 .bind(now).bind(&input.attempt_id)
                 .execute(&mut *transaction).await?;

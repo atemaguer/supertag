@@ -500,7 +500,7 @@ when the Tag makes the call; see [Approval requests](#approval-requests). The [a
 | `close_session` | `sessionId` | Closes one of the Tag's work Sessions, so it stops counting toward the [limit](#open-work-sessions) |
 | `ask` | `text` (up to 16,000 characters; 2,000 in a work Session) | Ends the Task waiting on a person's answer |
 | `report_objective` | `status` (`ready_for_review`, `completed`, or `blocked`; not `completed` for an ongoing Objective), `summary` (up to 16,000 characters) | When the turn ends, sets the Objective's status; the summary becomes the turn's result |
-| `send_message` | `to`, `text` (up to 8,000 characters), optional commit review | Delivers a message to another Tag's Mailbox |
+| `send_message` | `to`, `text` (up to 8,000 characters), optional `type` and commit review | Delivers a message to another Tag's Mailbox |
 | `read_mailbox` | optional `limit` (1–16), `cursor` | Reads the Tag's Mailbox |
 | `post` | `text` (up to 16,384 characters), optional `to` (up to 20 Tags) | Posts to the Team's Workstream |
 | `read_workstream` | `afterSequence` or `cursor`, `limit` (1–16, default 16) | Reads the Team's Workstream |
@@ -795,7 +795,10 @@ waiting when a turn starts is handled together in that one turn.
 
 - A message carries plain text, 1 to 8,000 characters. An optional `review` links a
   commit review request or verdict to an Objective.
-- `send_message {to, text}` is allowed from a Tag's conversations, its Objectives' conversations
+- A message has a `type`: `note` (the default), `question`, `blocker`, `evidence`, or `decision`.
+  A Tag cannot send `review`: the Control Plane gives that type to a commit review request.
+  `TagMessage.kind` carries the type.
+- `send_message {to, text, type?}` is allowed from a Tag's conversations, its Objectives' conversations
   and its own inbox turns. A work Session cannot send: its result reaches the Session that started
   it.
 - A Tag may message another when they share a Team, or when the recipient accepts messages from
@@ -808,13 +811,23 @@ waiting when a turn starts is handled together in that one turn.
 
 ### Delivery and batching
 
-Sending stores the message, then delivers a turn of the recipient's inbox unless one is already
-waiting to start, which takes this message too. The tool result reports `queued` or `batched`. The
-turn takes every message bound to it when it starts: three messages that arrive together become
-one turn, not three.
+Sending stores the message and wakes the recipient: it records one pending wake per recipient
+and conversation, which later messages join. A wake is due 3 seconds after its first note,
+question, evidence, or decision, and at once for a blocker or a commit review request; a later
+blocker makes a waiting wake due at once. Once a wake is due, the Control Plane's sweep, at most
+a second later, starts one inbox turn for the recipient unless one is already waiting to start.
+Three messages that arrive together become one turn, not three.
 
-A message that arrives between the claim and the binding is not lost. It stays unbound, and the
-Control Plane's sweep delivers a turn for it. An inbox turn that binds nothing settles completed
+The turn takes the recipient's due wakes when it starts, the most urgent first: blockers, then
+questions and review requests, then the rest. From each woken conversation it takes every message
+to the Tag since the last turn's, and it adds direct messages a [wake limit](#wake-limits) held
+back. It takes at most 16 messages; the rest become the next turn. The turn's prompt opens with a
+count such as `3 unread messages, 2 address you.` and marks each message with its sender, `type`,
+and whether it came as a direct message or a Workstream post. A message counts as seen once a
+turn takes it; Tags send no read receipts.
+
+A message that arrives between the claim and the binding is not lost: the turn takes it if its
+wake is due, and otherwise the next turn does. An inbox turn that binds nothing settles completed
 without dispatch.
 
 An inbox turn runs in the Tag's own inbox Session under the Tag's own Roles. It carries no Objective and draws on no pool. SuperTag records
@@ -828,6 +841,37 @@ its final reply in the Session. Answering a sender takes another `send_message`.
   and tells the Tag to answer in its reply instead.
 - Posts addressed with `post {to}` deliver messages too, and those do not count against the
   per-Task send limit.
+
+### Wake limits
+
+A Tag's message counts against these limits only when its wake would start an inbox turn: when
+the recipient has no wake waiting already. Messages from people never count.
+
+| Limit | Default | Counted per |
+| --- | --- | --- |
+| Mutual wakes | 3 | Pair of Tags and originating Task, both directions |
+| Wakes of a Tag by other Tags | 20 | Woken Tag and clock hour |
+| Wakes by an Objective's Tags | 60 | The sender's Objective and clock hour |
+
+The originating Task is the sending Task, or for an inbox turn and its approval continuations,
+the Task that started the chain it continues. A Team overrides the limits with
+`spec.wakeLimits` (`mutualPerTask`, `perTagPerHour`, `perObjectivePerHour`, each 0 to 1,000;
+0 allows no wake). A Workstream post uses its Team's limits and a direct message the limits of
+its sender's Workstream Team; otherwise the defaults apply.
+
+Over a limit, the message is stored and never dropped:
+
+- A note, evidence, or decision gets no wake. The recipient sees it in its next turn.
+- A question, blocker, or review request gets a deferred wake, due when the hour ends, or an hour
+  later for the mutual limit. Its turn says why it waited.
+- The response's `wake_deferred` tells the sender why. It is empty when the message woke its
+  recipient or joined a waiting turn.
+- The operator Inbox shows one `INBOX_ITEM_KIND_WAKE_LIMIT` item per tripped limit and window
+  for 24 hours, with how many messages waited. A client sees only the items of Objectives it
+  created.
+
+A Tag with 64 wakes waiting gets no new wake for a note, evidence, or decision; the sender is told
+the Tag is behind. Questions, blockers, and review requests always get one.
 
 ### Commit reviews
 
@@ -848,8 +892,9 @@ its final reply in the Session. Answering a sender takes another `send_message`.
 
 ### Status and history
 
-A message's status is the status of the Task that handled it: `pending` until a turn takes it,
-then `handled` when that Task completed, or `failed` when it failed or was cancelled.
+A message's status is the status of the inbox turn that took it: `pending` until a turn takes
+it, then `handled` when that Task completed, or `failed` when it failed or was cancelled. A post
+addressed to several Tags has one status per addressee.
 
 `supertag get message --mailbox TAG [--limit N]` lists the messages a Tag sent and received,
 newest first, with a cursor for older pages. The Tag reads its own Mailbox with `read_mailbox`.
@@ -858,8 +903,10 @@ newest first, with a cursor for older pages. The Tag reads its own Mailbox with 
 
 A Team's Workstream is its shared record of posts. Every member can read it, and every post stays.
 
-- `post {text, to?}` adds one post. A post wakes nobody. Each Tag named in `to` must be a Team
-  member and receives the post in its Mailbox.
+- `post {text, to?, type?}` adds one post, with the same types as a message. Each Tag named in
+  `to` must be a Team member, receives the post in its Mailbox, and is woken as for a message.
+  A `question` or `blocker` without `to` wakes the owner of the post's Objective. Other posts wake
+  nobody. Posts count against the Team's [wake limits](#wake-limits).
 - The Team is the Objective's Team for an Objective's turn, and otherwise the Tag's only Team. A
   Tag in several Teams gets 409 listing them; a Tag in none gets 409 saying so.
 - A post body holds 1 to 16,384 characters, and `to` names at most 20 Tags.
@@ -885,7 +932,8 @@ number of Objectives may name one Team.
 - `supertag team update NAME [--member TAG ...] [--max-concurrency N | --clear-concurrency] [--name TEXT] [--expected-revision N]`
   replaces the fields it names; see [Statuses](#statuses) for the revision check. `supertag get team` and
   `supertag get team NAME` read them.
-- `supertag delete team NAME` deletes the Team and its Workstream posts. It is refused with 409
+- `supertag delete team NAME` deletes the Team. Its Workstream posts stay in the Mailboxes of the
+  Tags they addressed. It is refused with 409
   while an Objective that is not completed or cancelled names the Team.
   A Team created again with a deleted Team's ID continues after the deleted Team's last
   revision, so a revision read before the deletion cannot update the new Team.
@@ -894,6 +942,8 @@ number of Objectives may name one Team.
 - `--max-concurrency N` limits how many turns run at once across the Sessions of every open
   Objective naming the Team. Later turns stay pending and consume no Task Attempt. Without it,
   Worker Host capacity is the only limit.
+- A Team manifest's `spec.wakeLimits` overrides the [wake limits](#wake-limits). Declared limits
+  replace all three; `Team.wake_limits` shows the overrides, and is absent with the defaults.
 - No coordination tool creates or changes a Team. Teams are operator configuration.
 
 ## Approval requests

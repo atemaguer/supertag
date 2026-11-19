@@ -1,6 +1,14 @@
 //! Wake rows: which Tag must take an inbox turn for which messages. A pending wake (no Task yet)
 //! is coalesced per Tag and conversation, so a burst of messages makes one turn; the inbox Task
 //! that delivers it binds the wake and records the seqs it delivered.
+//!
+//! Only Tags' messages come through here, so only they count toward the wake limits: mutual wakes
+//! per pair of Tags per originating Task, and Tag-originated wakes per woken Tag and per Objective
+//! per hour. A wake counts only when it would start an activation, meaning the Tag has no pending
+//! wake already; coalesced wakes are free. Over a limit, a note, evidence, or decision gets no wake
+//! and waits for the Tag's next turn; a question, blocker, or review request gets a deferred wake.
+//! Nothing is dropped, the sender is told why, and the operator gets one Inbox item per limit and
+//! window.
 use sqlx::{Any, Transaction};
 use supertag_protocol::v2::MessageKind;
 use uuid::Uuid;
@@ -17,6 +25,24 @@ pub(crate) const REASON_ADDRESSED: i64 = 2;
 pub(crate) const REASON_QUESTION: i64 = 4;
 pub(crate) const REASON_BLOCKER: i64 = 8;
 pub(crate) const REASON_REVIEW: i64 = 16;
+
+/// A burst of notes and questions within this window lands in one turn. Blockers and review
+/// requests are due at once.
+pub(crate) const DEBOUNCE_MS: i64 = 3_000;
+/// A Tag with this many pending wakes gets no new wake for a note, evidence, or decision.
+pub(crate) const BACKLOG: i64 = 64;
+/// Wake-limit windows are fixed hours.
+pub(crate) const HOUR_MS: i64 = 3_600_000;
+
+/// The defaults a Team's `spec.wakeLimits` overrides.
+pub(crate) const DEFAULT_MUTUAL_PER_TASK: i64 = 3;
+pub(crate) const DEFAULT_PER_TAG_PER_HOUR: i64 = 20;
+pub(crate) const DEFAULT_PER_OBJECTIVE_PER_HOUR: i64 = 60;
+
+/// `supertag_v2_wake_limit_trips.scope` (and `supertag_v2_wake_counts.scope` for 1 and 2).
+pub(crate) const LIMIT_TAG: i64 = 1;
+pub(crate) const LIMIT_OBJECTIVE: i64 = 2;
+pub(crate) const LIMIT_PAIR: i64 = 3;
 
 pub(crate) struct WakeRequest<'a> {
     /// The Tag to wake.
@@ -38,7 +64,7 @@ pub(crate) struct WakeRequest<'a> {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct WakeOutcome {
-    /// A wake row was written or coalesced.
+    /// A wake row was written or coalesced, due now or deferred.
     pub woke: bool,
     /// Why the recipient was not woken now; the sender is told.
     pub deferred: Option<String>,
@@ -67,19 +93,312 @@ pub(crate) fn reasons_and_priority(request: &WakeRequest<'_>) -> (i64, i64) {
     (reasons, priority)
 }
 
-/// Writes or coalesces the Tag's pending wake for the conversation, due now. The coalesced wake
-/// keeps its first seq and origin, and takes the highest priority and hops, the latest seq, and
-/// the earliest due time.
+/// The word a sender's notice uses for the message.
+fn kind_word(kind: MessageKind) -> &'static str {
+    match kind {
+        MessageKind::Question => "question",
+        MessageKind::Blocker => "blocker",
+        MessageKind::Review => "review request",
+        MessageKind::Evidence => "evidence",
+        MessageKind::Decision => "decision",
+        MessageKind::Unspecified | MessageKind::Note => "note",
+    }
+}
+
+/// The wake limits that apply to a Team's messages.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Limits {
+    pub mutual_per_task: i64,
+    pub per_tag_per_hour: i64,
+    pub per_objective_per_hour: i64,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            mutual_per_task: DEFAULT_MUTUAL_PER_TASK,
+            per_tag_per_hour: DEFAULT_PER_TAG_PER_HOUR,
+            per_objective_per_hour: DEFAULT_PER_OBJECTIVE_PER_HOUR,
+        }
+    }
+}
+
+/// The Team's overrides over the defaults; a deleted or missing Team keeps the defaults.
+pub(crate) async fn limits_in(
+    tx: &mut Transaction<'_, Any>,
+    team_id: Option<&str>,
+) -> Result<Limits> {
+    let mut limits = Limits::default();
+    let Some(team_id) = team_id else {
+        return Ok(limits);
+    };
+    let row: Option<(Option<i64>, Option<i64>, Option<i64>)> = sqlx::query_as(
+        "SELECT wake_mutual_limit,wake_tag_hourly_limit,wake_objective_hourly_limit
+         FROM supertag_v2_teams WHERE team_id=$1",
+    )
+    .bind(team_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if let Some((mutual, tag, objective)) = row {
+        limits.mutual_per_task = mutual.unwrap_or(limits.mutual_per_task);
+        limits.per_tag_per_hour = tag.unwrap_or(limits.per_tag_per_hour);
+        limits.per_objective_per_hour = objective.unwrap_or(limits.per_objective_per_hour);
+    }
+    Ok(limits)
+}
+
+/// A limit the wake would pass.
+struct Trip {
+    scope: i64,
+    scope_id: String,
+    window_start_ms: i64,
+    limit: i64,
+    /// When a deferred wake comes due.
+    until_ms: i64,
+    /// Why the wake waits, without what happens next.
+    reason: String,
+}
+
+fn times(count: i64) -> String {
+    if count == 1 {
+        "once".to_owned()
+    } else {
+        format!("{count} times")
+    }
+}
+
+fn window_start(now: i64) -> i64 {
+    now - now.rem_euclid(HOUR_MS)
+}
+
+fn pair<'a>(a: &'a str, b: &'a str) -> (&'a str, &'a str) {
+    if a <= b { (a, b) } else { (b, a) }
+}
+
+async fn counted_in(
+    tx: &mut Transaction<'_, Any>,
+    scope: i64,
+    scope_id: &str,
+    window: i64,
+) -> Result<i64> {
+    let wakes: Option<i64> = sqlx::query_scalar(
+        "SELECT wakes FROM supertag_v2_wake_counts
+         WHERE scope=$1 AND scope_id=$2 AND window_start_ms=$3",
+    )
+    .bind(scope)
+    .bind(scope_id)
+    .bind(window)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(wakes.unwrap_or(0))
+}
+
+/// The first limit this wake would pass: the pair's, then the woken Tag's, then the Objective's.
+async fn trip_in(
+    tx: &mut Transaction<'_, Any>,
+    request: &WakeRequest<'_>,
+    limits: Limits,
+) -> Result<Option<Trip>> {
+    let now = request.now;
+    if let Some(origin) = request.origin_task_id
+        && request.sender_tag_id != request.tag_id
+    {
+        let (a, b) = pair(request.sender_tag_id, request.tag_id);
+        let wakes: Option<i64> = sqlx::query_scalar(
+            "SELECT wakes FROM supertag_v2_wake_pairs
+             WHERE origin_task_id=$1 AND tag_a=$2 AND tag_b=$3",
+        )
+        .bind(origin)
+        .bind(a)
+        .bind(b)
+        .fetch_optional(&mut **tx)
+        .await?;
+        if wakes.unwrap_or(0) >= limits.mutual_per_task {
+            return Ok(Some(Trip {
+                scope: LIMIT_PAIR,
+                scope_id: format!("{origin}\n{a}\n{b}"),
+                window_start_ms: 0,
+                limit: limits.mutual_per_task,
+                until_ms: now + HOUR_MS,
+                reason: format!(
+                    "{a} and {b} already woke each other {} for Task {origin}",
+                    times(limits.mutual_per_task)
+                ),
+            }));
+        }
+    }
+    let window = window_start(now);
+    if counted_in(tx, LIMIT_TAG, request.tag_id, window).await? >= limits.per_tag_per_hour {
+        return Ok(Some(Trip {
+            scope: LIMIT_TAG,
+            scope_id: request.tag_id.to_owned(),
+            window_start_ms: window,
+            limit: limits.per_tag_per_hour,
+            until_ms: window + HOUR_MS,
+            reason: format!(
+                "Tag {} was already woken {} this hour by other Tags",
+                request.tag_id,
+                times(limits.per_tag_per_hour)
+            ),
+        }));
+    }
+    if let Some(objective) = request.objective_id
+        && counted_in(tx, LIMIT_OBJECTIVE, objective, window).await?
+            >= limits.per_objective_per_hour
+    {
+        return Ok(Some(Trip {
+            scope: LIMIT_OBJECTIVE,
+            scope_id: objective.to_owned(),
+            window_start_ms: window,
+            limit: limits.per_objective_per_hour,
+            until_ms: window + HOUR_MS,
+            reason: format!(
+                "Objective {objective} already woke its Tags {} this hour",
+                times(limits.per_objective_per_hour)
+            ),
+        }));
+    }
+    Ok(None)
+}
+
+/// Counts a wake that starts an activation against every limit it is under.
+async fn count_in(tx: &mut Transaction<'_, Any>, request: &WakeRequest<'_>) -> Result<()> {
+    if let Some(origin) = request.origin_task_id
+        && request.sender_tag_id != request.tag_id
+    {
+        let (a, b) = pair(request.sender_tag_id, request.tag_id);
+        sqlx::query(
+            "INSERT INTO supertag_v2_wake_pairs (origin_task_id,tag_a,tag_b,wakes)
+             VALUES ($1,$2,$3,1) ON CONFLICT(origin_task_id,tag_a,tag_b)
+             DO UPDATE SET wakes=supertag_v2_wake_pairs.wakes+1",
+        )
+        .bind(origin)
+        .bind(a)
+        .bind(b)
+        .execute(&mut **tx)
+        .await?;
+    }
+    let window = window_start(request.now);
+    let mut scopes = vec![(LIMIT_TAG, request.tag_id)];
+    if let Some(objective) = request.objective_id {
+        scopes.push((LIMIT_OBJECTIVE, objective));
+    }
+    for (scope, id) in scopes {
+        sqlx::query(
+            "INSERT INTO supertag_v2_wake_counts (scope,scope_id,window_start_ms,wakes)
+             VALUES ($1,$2,$3,1) ON CONFLICT(scope,scope_id,window_start_ms)
+             DO UPDATE SET wakes=supertag_v2_wake_counts.wakes+1",
+        )
+        .bind(scope)
+        .bind(id)
+        .bind(window)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
+/// One operator Inbox item per tripped limit and window; each message it holds is counted.
+async fn record_trip_in(
+    tx: &mut Transaction<'_, Any>,
+    request: &WakeRequest<'_>,
+    trip: &Trip,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO supertag_v2_wake_limit_trips
+            (scope,scope_id,window_start_ms,team_id,objective_id,sender_tag_id,recipient_tag_id,
+             wake_limit,held,tripped_at_ms)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9)
+         ON CONFLICT(scope,scope_id,window_start_ms)
+         DO UPDATE SET held=supertag_v2_wake_limit_trips.held+1",
+    )
+    .bind(trip.scope)
+    .bind(&trip.scope_id)
+    .bind(trip.window_start_ms)
+    .bind(request.team_id)
+    .bind(request.objective_id)
+    .bind(request.sender_tag_id)
+    .bind(request.tag_id)
+    .bind(trip.limit)
+    .bind(request.now)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// Wakes the Tag for a Tag's message, within the wake limits, and says why when it waits.
+///
+/// The Tag's pending wake for the conversation is written or coalesced: it keeps its first seq
+/// and origin, and takes the highest priority and hops, the latest seq, and the earliest due time.
+/// A note or question is due after [`DEBOUNCE_MS`], so a burst lands in one turn; a blocker or
+/// review request is due now and pulls an existing wake forward.
 pub(crate) async fn wake_in(
     tx: &mut Transaction<'_, Any>,
     request: &WakeRequest<'_>,
 ) -> Result<WakeOutcome> {
     let (reasons, priority) = reasons_and_priority(request);
+    let urgent = matches!(
+        request.message_kind,
+        MessageKind::Blocker | MessageKind::Review
+    );
+    let (pending, active, same): (i64, i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*),
+                COUNT(CASE WHEN deferred_reason IS NULL THEN 1 END),
+                COUNT(CASE WHEN conversation_id=$2 THEN 1 END)
+         FROM supertag_v2_wakes WHERE tag_id=$1 AND task_id IS NULL",
+    )
+    .bind(request.tag_id)
+    .bind(request.conversation_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if priority == 1 && same == 0 && pending >= BACKLOG {
+        return Ok(WakeOutcome {
+            woke: false,
+            deferred: Some(format!(
+                "Tag {} is behind; it sees this in its next turn.",
+                request.tag_id
+            )),
+        });
+    }
+    let mut not_before = if urgent {
+        request.now
+    } else {
+        request.now + DEBOUNCE_MS
+    };
+    let mut deferred_reason = None;
+    let mut notice = None;
+    // A Tag with a pending wake takes a turn anyway: this wake starts nothing and is free.
+    if active == 0 {
+        let limits = limits_in(tx, request.team_id).await?;
+        match trip_in(tx, request, limits).await? {
+            Some(trip) => {
+                record_trip_in(tx, request, &trip).await?;
+                let tag = request.tag_id;
+                if priority == 1 {
+                    return Ok(WakeOutcome {
+                        woke: false,
+                        deferred: Some(format!(
+                            "{}; Tag {tag} will see this message in its next turn.",
+                            trip.reason
+                        )),
+                    });
+                }
+                notice = Some(format!(
+                    "{}; Tag {tag} gets this {} when the limit resets, within the hour.",
+                    trip.reason,
+                    kind_word(request.message_kind)
+                ));
+                not_before = trip.until_ms;
+                deferred_reason = Some(trip.reason);
+            }
+            None => count_in(tx, request).await?,
+        }
+    }
     sqlx::query(
         "INSERT INTO supertag_v2_wakes
             (wake_id,tag_id,conversation_id,reasons,priority,first_seq,last_seq,hops,
-             origin_task_id,objective_id,not_before_ms,created_at_ms)
-         VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10,$10)
+             origin_task_id,objective_id,not_before_ms,deferred_reason,created_at_ms)
+         VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10,$11,$12)
          ON CONFLICT(tag_id,conversation_id) WHERE task_id IS NULL DO UPDATE SET
             reasons=supertag_v2_wakes.reasons | excluded.reasons,
             priority=CASE WHEN excluded.priority>supertag_v2_wakes.priority
@@ -88,6 +407,8 @@ pub(crate) async fn wake_in(
                 THEN excluded.last_seq ELSE supertag_v2_wakes.last_seq END,
             hops=CASE WHEN excluded.hops>supertag_v2_wakes.hops
                 THEN excluded.hops ELSE supertag_v2_wakes.hops END,
+            deferred_reason=CASE WHEN excluded.not_before_ms<supertag_v2_wakes.not_before_ms
+                THEN excluded.deferred_reason ELSE supertag_v2_wakes.deferred_reason END,
             not_before_ms=CASE WHEN excluded.not_before_ms<supertag_v2_wakes.not_before_ms
                 THEN excluded.not_before_ms ELSE supertag_v2_wakes.not_before_ms END",
     )
@@ -100,12 +421,14 @@ pub(crate) async fn wake_in(
     .bind(request.hops)
     .bind(request.origin_task_id)
     .bind(request.objective_id)
+    .bind(not_before)
+    .bind(deferred_reason)
     .bind(request.now)
     .execute(&mut **tx)
     .await?;
     Ok(WakeOutcome {
         woke: true,
-        deferred: None,
+        deferred: notice,
     })
 }
 
@@ -143,7 +466,10 @@ pub(crate) async fn origin_in(
     Ok((hops, origin.unwrap_or_else(|| task_id.to_owned())))
 }
 
-/// Tags with a wake due now, most urgent first. A retired Tag takes no turns.
+/// Tags with a wake due now that may take a new inbox turn, most urgent first. A retired Tag
+/// takes no turns; a Tag whose inbox turn waits or is claimed gets no second one; a Tag whose
+/// Workspace changed since its last inbox turn keeps its mail pending. Only Workspace changes are
+/// filtered here; `insert_task` checks the rest of the accepted policy.
 pub(crate) async fn due_recipients_in(
     tx: &mut Transaction<'_, Any>,
     now: i64,
@@ -153,12 +479,24 @@ pub(crate) async fn due_recipients_in(
         "SELECT w.tag_id FROM supertag_v2_wakes w
          JOIN supertag_v2_tags tag ON tag.tag_id=w.tag_id
          WHERE w.task_id IS NULL AND w.not_before_ms<=$1 AND tag.retired_at_ms IS NULL
+           AND NOT EXISTS (SELECT 1 FROM supertag_v2_mailbox_tasks link
+             JOIN supertag_v2_tasks t ON t.task_id=link.task_id
+             WHERE link.recipient_tag_id=w.tag_id AND t.state IN ($3,$4))
+           AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks previous
+             WHERE previous.tag_id=w.tag_id
+             AND previous.session_id=('inbox:' || w.tag_id)
+             AND (COALESCE(previous.workspace_id,'')<>COALESCE(tag.workspace_id,'')
+               OR COALESCE(previous.workspace_base_ref,'')<>COALESCE(tag.workspace_base_ref,'')
+               OR (tag.workspace_base_ref IS NULL
+                 AND COALESCE(previous.workspace_base_commit,'')<>COALESCE(tag.workspace_base_commit,''))))
          GROUP BY w.tag_id
          ORDER BY MAX(w.priority) DESC,MIN(w.not_before_ms),MIN(w.created_at_ms),w.tag_id
          LIMIT $2",
     )
     .bind(now)
     .bind(limit)
+    .bind(supertag_protocol::v2::TaskState::Queued as i64)
+    .bind(supertag_protocol::v2::TaskState::Claimed as i64)
     .fetch_all(&mut **tx)
     .await?)
 }

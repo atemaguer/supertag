@@ -373,6 +373,32 @@ DROP TABLE supertag_v2_m117_delivery;
 DROP TABLE supertag_v2_m117_direct;
 DROP TABLE supertag_v2_m117_orphans;
 
+-- A commit review request is a direct message; request IDs are unchanged. The constraint name is
+-- looked up rather than assumed.
+DO $$
+DECLARE
+    constraint_name TEXT;
+BEGIN
+    SELECT con.conname INTO constraint_name
+    FROM pg_constraint con
+    WHERE con.conrelid = 'supertag_v2_commit_reviews'::regclass
+      AND con.confrelid = 'supertag_v2_mailbox_messages'::regclass
+      AND con.contype = 'f';
+    EXECUTE format('ALTER TABLE supertag_v2_commit_reviews DROP CONSTRAINT %I', constraint_name);
+END;
+$$;
+ALTER TABLE supertag_v2_commit_reviews ADD CONSTRAINT supertag_v2_commit_reviews_request_id_fkey
+    FOREIGN KEY (request_id) REFERENCES supertag_v2_messages(message_id);
+
+-- Direct messages, their delivery state, and their operations now live in the tables above.
+DROP TABLE supertag_v2_mailbox_send_operations;
+DROP TABLE supertag_v2_mailbox_messages;
+
+-- A Tag's delivered messages: the bound wake whose range holds a seq (message state, review
+-- lineage).
+CREATE INDEX supertag_v2_wakes_bound
+    ON supertag_v2_wakes(tag_id, conversation_id, first_seq) WHERE task_id IS NOT NULL;
+
 -- The watch feed announces a Tag's direct message (WatchKind 9, Mailbox message), one notice per
 -- recipient, and a channel message as a Workstream post (WatchKind 6). These triggers come after
 -- the copy, so migrated messages announce nothing.

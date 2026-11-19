@@ -1016,7 +1016,8 @@ async fn bounded_review_history(store: &Store, pool: &sqlx::AnyPool, first: &Tag
     let mut tx = pool.begin().await.unwrap();
     for i in 0..60 {
         let id = format!("page-{i}");
-        sqlx::query("INSERT INTO supertag_v2_mailbox_messages (message_id,sender_tag_id,recipient_tag_id,source_task_id,origin,objective_id,text,hops,created_at_ms,delivery_order) SELECT $1,sender_tag_id,recipient_tag_id,source_task_id,origin,objective_id,text,hops,created_at_ms,$2 FROM supertag_v2_mailbox_messages WHERE message_id=$3")
+        // Audit-only copies of the request message, at seqs past the conversation's own.
+        sqlx::query("INSERT INTO supertag_v2_messages (conversation_id,seq,message_id,sender_kind,sender_id,kind,text,hops,source_task_id,origin_task_id,objective_id,created_at_ms) SELECT conversation_id,$2,$1,sender_kind,sender_id,kind,text,hops,source_task_id,origin_task_id,objective_id,created_at_ms FROM supertag_v2_messages WHERE message_id=$3")
             .bind(&id).bind(10_000_i64+i).bind(&first.message_id).execute(&mut *tx).await.unwrap();
         sqlx::query("INSERT INTO supertag_v2_commit_reviews (request_id,objective_id,requester_tag_id,reviewer_tag_id,source_task_id,workspace_id,commit_sha,delivery,requested_at_ms,created_order,decision,summary,verdict_task_id,recorded_at_ms) SELECT $1,objective_id,requester_tag_id,reviewer_tag_id,source_task_id,workspace_id,commit_sha,delivery,requested_at_ms,$2,decision,$3,verdict_task_id,recorded_at_ms FROM supertag_v2_commit_reviews WHERE request_id=$4")
             .bind(id).bind(10_000_i64+i).bind(&summary).bind(&first.message_id).execute(&mut *tx).await.unwrap();

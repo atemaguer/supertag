@@ -1205,11 +1205,36 @@ impl<'a> Catalog<'a> {
             prior.as_ref().is_none_or(|prior| prior.team_id == name),
             "Team name belongs to a different ID"
         );
+        let wakes_declared = spec.wake_limits.is_some();
         let declared = [
             spec.name.is_some(),
             spec.members.is_some(),
             spec.max_concurrency.is_some(),
+            wakes_declared,
+            wakes_declared,
+            wakes_declared,
         ];
+        // Declared limits replace all three; none at all is the defaults.
+        let wakes = spec
+            .wake_limits
+            .map(|limits| TeamWakeLimits {
+                mutual_per_task: limits.mutual_per_task,
+                per_tag_per_hour: limits.per_tag_per_hour,
+                per_objective_per_hour: limits.per_objective_per_hour,
+            })
+            .unwrap_or_default();
+        ensure!(
+            [
+                wakes.mutual_per_task,
+                wakes.per_tag_per_hour,
+                wakes.per_objective_per_hour
+            ]
+            .into_iter()
+            .flatten()
+            .all(|value| value <= 1000),
+            "invalid Team wake limit"
+        );
+        let desired_wakes = (wakes != TeamWakeLimits::default()).then_some(wakes);
         let display = spec.name.unwrap_or_else(|| {
             prior
                 .as_ref()
@@ -1277,6 +1302,21 @@ impl<'a> Catalog<'a> {
                 old.map(|v| concurrency(v.max_concurrency)),
                 concurrency(limit),
             ),
+            field(
+                "spec.wakeLimits.mutualPerTask",
+                old.map(|v| concurrency(v.wake_limits.and_then(|w| w.mutual_per_task))),
+                concurrency(wakes.mutual_per_task),
+            ),
+            field(
+                "spec.wakeLimits.perTagPerHour",
+                old.map(|v| concurrency(v.wake_limits.and_then(|w| w.per_tag_per_hour))),
+                concurrency(wakes.per_tag_per_hour),
+            ),
+            field(
+                "spec.wakeLimits.perObjectivePerHour",
+                old.map(|v| concurrency(v.wake_limits.and_then(|w| w.per_objective_per_hour))),
+                concurrency(wakes.per_objective_per_hour),
+            ),
         ]
         .into_iter()
         .zip(declared)
@@ -1288,12 +1328,13 @@ impl<'a> Catalog<'a> {
                     || prior.member_tag_ids != members
                     || spec
                         .max_concurrency
-                        .is_some_and(|_| prior.max_concurrency != limit) =>
+                        .is_some_and(|_| prior.max_concurrency != limit)
+                    || (wakes_declared && prior.wake_limits != desired_wakes) =>
             {
                 Some((
                     true,
                     Write::UpdateTeam(UpdateTeamRequest {
-                        wake_limits: None,
+                        wake_limits: wakes_declared.then_some(wakes),
                         operation_id: id(),
                         team: name.into(),
                         expected_revision: prior.revision,
@@ -1307,7 +1348,7 @@ impl<'a> Catalog<'a> {
             None => Some((
                 false,
                 Write::Team(CreateTeamRequest {
-                    wake_limits: None,
+                    wake_limits: desired_wakes,
                     operation_id: id(),
                     team_id: name.into(),
                     name: display,

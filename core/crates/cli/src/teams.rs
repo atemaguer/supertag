@@ -270,6 +270,13 @@ pub(crate) fn team_json(team: Team) -> Value {
         "name": team.name,
         "member_tag_ids": team.member_tag_ids,
         "max_concurrency": team.max_concurrency,
+        // Each absent limit is the default: 3 mutual wakes per Task, 20 per Tag and 60 per
+        // Objective per hour.
+        "wake_limits": team.wake_limits.map(|limits| json!({
+            "mutual_per_task": limits.mutual_per_task,
+            "per_tag_per_hour": limits.per_tag_per_hour,
+            "per_objective_per_hour": limits.per_objective_per_hour,
+        })),
         "revision": team.revision,
         "created_at_ms": team.created_at_ms,
         "updated_at_ms": team.updated_at_ms,

@@ -142,7 +142,13 @@ pub(crate) async fn insert_request_in(
 ) -> Result<CommitReview> {
     // The caller has already inserted the exact Mailbox message in this transaction.
     // Verify its relationship here too, so no transport can attach a different route.
-    let matches: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_mailbox_messages WHERE message_id=$1 AND sender_tag_id=$2 AND recipient_tag_id=$3 AND objective_id=$4 AND origin=1")
+    let matches: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM supertag_v2_messages m
+         JOIN supertag_v2_message_addressees a ON a.conversation_id=m.conversation_id AND a.seq=m.seq
+         JOIN supertag_v2_conversations c ON c.conversation_id=m.conversation_id AND c.kind=1
+         WHERE m.message_id=$1 AND m.sender_kind=1 AND m.sender_id=$2 AND a.tag_id=$3
+           AND m.objective_id=$4",
+    )
         .bind(message_id).bind(&request.requester_tag_id).bind(&request.reviewer_tag_id).bind(&request.objective_id)
         .fetch_one(&mut **tx).await?;
     if matches != 1 {
@@ -178,9 +184,28 @@ async fn authorized_review_in(
     name("review request ID", request_id)?;
     // Approval continuations may settle the original message. Session identity
     // alone is insufficient: unrelated later Inbox batches cannot read or respond.
-    sqlx::query("WITH RECURSIVE lineage(task_id) AS (SELECT CAST($1 AS TEXT) UNION SELECT w.task_id FROM supertag_v2_approval_waits w JOIN lineage l ON l.task_id=w.continuation_task_id) SELECT r.* FROM supertag_v2_commit_reviews r JOIN supertag_v2_mailbox_messages m ON m.message_id=r.request_id WHERE r.request_id=$2 AND r.reviewer_tag_id=$3 AND m.recipient_tag_id=$3 AND m.task_id IN (SELECT task_id FROM lineage)")
-        .bind(&source.task_id).bind(request_id).bind(&source.tag_id).fetch_optional(&mut **tx).await?
-        .ok_or(StoreError::PermissionDenied)
+    // The request must have been delivered to this Task's lineage: a bound wake of the reviewer
+    // holds its seq.
+    sqlx::query(
+        "WITH RECURSIVE lineage(task_id) AS (
+            SELECT CAST($1 AS TEXT)
+            UNION
+            SELECT w.task_id FROM supertag_v2_approval_waits w
+            JOIN lineage l ON l.task_id=w.continuation_task_id
+        ) SELECT r.* FROM supertag_v2_commit_reviews r
+          JOIN supertag_v2_messages m ON m.message_id=r.request_id
+          WHERE r.request_id=$2 AND r.reviewer_tag_id=$3
+            AND EXISTS (SELECT 1 FROM supertag_v2_wakes w
+              WHERE w.tag_id=$3 AND w.conversation_id=m.conversation_id
+                AND w.task_id IN (SELECT task_id FROM lineage)
+                AND m.seq BETWEEN w.first_seq AND w.through_seq)",
+    )
+    .bind(&source.task_id)
+    .bind(request_id)
+    .bind(&source.tag_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(StoreError::PermissionDenied)
 }
 
 pub(crate) async fn validate_response_in(

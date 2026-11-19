@@ -92,7 +92,7 @@ async fn remove(
             if team.team_id != id {
                 return Err(StoreError::Conflict("Team identity changed".into()));
             }
-            crate::teams::delete_team_in(tx, &team, Some(expected)).await
+            crate::teams::delete_team_in(tx, &team, Some(expected), now_ms).await
         }
         "Tag" => crate::tags::retire_in(tx, id, expected, now_ms, apply_set).await,
         "Role" => crate::policy::retire_role_in(tx, id, expected).await,

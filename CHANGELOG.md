@@ -17,6 +17,13 @@ within the pre-1.0 compatibility policy described in
   question or blocker goes to the Tag that owns the post's Objective. An inbox turn now opens with
   a digest of the Team's Workstream posts its Tag has not seen, addressed posts first, then
   blockers and decisions; it holds about 8 KiB and points to `read_workstream` for the rest.
+- Wake limits keep Tags from waking each other in loops: by default 3 wakes between two Tags for
+  one originating Task, 20 wakes of a Tag by other Tags per hour, and 60 per Objective per hour,
+  overridable with a Team manifest's `spec.wakeLimits`. Over a limit nothing is dropped: notes
+  wait for the recipient's next turn, questions and blockers arrive late, the sender's result says
+  why in `wake_deferred`, and the operator Inbox gets one wake-limit item. Notes and questions now
+  wake their recipient after about 3 seconds so a burst lands in one turn; blockers and commit
+  review requests wake it at once, and inbox turns take the most urgent messages first.
 - `sandbox-commands: [claude-code]` on a host service (`supertag worker-host --sandbox-commands`)
   runs Claude Code's commands in Claude Code's own operating-system sandbox: they write only the
   Workspace, never its `.git` or read-only and hidden paths, cannot read hidden paths or the home's
