@@ -54,6 +54,12 @@ same Task Attempt again after a restart receives a new credential, and the old o
 The Worklet's own finalization for a Task Attempt, such as writing back a Workspace Volume or
 committing captured artifacts, also uses that Task Attempt's credential.
 
+A Gateway can carry a Task Attempt's data calls to the Control Plane. It forwards only calls a
+Task Attempt credential may make, and passes the credential through unchanged. It never forwards
+the host credential's calls. When the deployment names such a Gateway, `RegisterHost` returns
+its URL; see [Control Plane API](control-plane-api.md#authenticate). In this release, Workers
+still send their data calls to the Control Plane directly.
+
 ## Placement
 
 A host reports its harnesses, its models per harness, its labels, its concurrency, and its

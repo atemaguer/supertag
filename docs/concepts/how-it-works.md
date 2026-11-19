@@ -80,7 +80,9 @@ the desktop app, and SDK applications connect to it, and it forwards their calls
 Plane under the caller's own credential. It also receives and authenticates surface traffic,
 turns it into Tasks through the Control Plane's connector API, delivers replies, and sends
 operator notifications. For that work it is an ordinary client of the Control Plane with its own
-credential. Worker Hosts do not go through it: their Worklets connect to the Control Plane.
+credential. Worker Hosts do not register or claim work through it: their Worklets connect to
+the Control Plane. A Gateway can carry a running Task Attempt's events and other reports, under
+that Task Attempt's own credential, but never the host's.
 
 For example, when someone mentions `@SuperTag` in Slack, the Gateway passes the message, its
 origin, and its requester to the Control Plane. The Control Plane finds the Tag configured for

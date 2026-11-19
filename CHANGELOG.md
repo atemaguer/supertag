@@ -25,6 +25,10 @@ within the pre-1.0 compatibility policy described in
   Drain 0.3.1 Worker Hosts before upgrading the Control Plane. The Task Attempt data requests no
   longer carry Task Attempt or lease token fields, and the host-wide artifact source calls moved
   to a new `ArtifactSources` service. Harness adapters need no change.
+- A Gateway forwards a running Task Attempt's data calls, such as its events, streamed text, and
+  questions, to the Control Plane under the Task Attempt credential, and never a Worker Host's
+  registration, claim, lease, or transfer calls. Set `SUPERTAG_DATA_ENDPOINT` on the Control Plane
+  to a Gateway URL to name it to each Worker Host in `RegisterHost`. Workers do not use it yet.
 
 ### Fixed
 

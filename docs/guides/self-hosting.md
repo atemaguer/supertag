@@ -14,7 +14,8 @@ A deployment has up to three roles:
 | Worker Hosts | Outbound only | Each host's own state directory |
 
 Deploy the Gateway only when you connect Slack, GitHub, Linear, Lark, or Microsoft Teams, or send
-operator notifications. The Control Plane stores no artifact or Workspace delivery
+operator notifications. A Gateway can also carry running Task Attempts' data calls; see
+[Control Plane operations](../operations/control-plane.md). The Control Plane stores no artifact or Workspace delivery
 files: each Worker Host keeps what its Tasks produce, so give Worker Hosts persistent state
 directories.
 

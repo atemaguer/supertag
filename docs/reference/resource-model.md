@@ -32,7 +32,7 @@ Worklet and the Worker are roles of running programs, not resources you create o
 Worklet holds the host's credential; a Worker's calls carry a Task Attempt credential that
 names its one Task Attempt and ends with its lease. A
 separate **Gateway** is the service clients connect to: it forwards their calls to the Control
-Plane, and carries **collaboration surface** traffic as a client of the Control Plane. A collaboration surface is how SuperTag meets people in an external work tool, such as
+Plane, can forward a running Task Attempt's data calls under its Task Attempt credential, and carries **collaboration surface** traffic as a client of the Control Plane. A collaboration surface is how SuperTag meets people in an external work tool, such as
 Slack, GitHub, Lark/Feishu, Linear, or Microsoft Teams: it receives events at a [Tag](#configuration-resources)'s locations and
 replies there. A location is a place on a collaboration surface, such as a channel or repository. The Control
 Plane serves one API to Worklets and Gateways, and through Gateways to clients. Worker Hosts

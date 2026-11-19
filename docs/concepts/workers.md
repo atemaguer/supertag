@@ -73,7 +73,9 @@ scratch directory and a token that work only for that Task Attempt, and stops ev
 left when the Task Attempt ends. The Control Plane gives each Task Attempt a credential when it
 starts. The Worker's events, questions, messages, and other reports carry it, and it cannot claim,
 start, or finish work. It ends with the Task Attempt's lease, so a Worker whose Worklet lost the
-lease can no longer report anything. A Workspace checkout, a Session checkpoint, and captured
+lease can no longer report anything. A Gateway can carry these reports to the Control Plane,
+since the credential alone decides what they may do; for now, Workers send them to the Control
+Plane directly. A Workspace checkout, a Session checkpoint, and captured
 artifacts outlast the Worker; the Worklet keeps them.
 
 The harness is the agent system that does the work. The harness adapter connects one Task Attempt

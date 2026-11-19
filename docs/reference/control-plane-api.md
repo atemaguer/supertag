@@ -4,7 +4,7 @@ The Control Plane, the service that stores a SuperTag organization and schedules
 serves one gRPC API. Clients, such as the CLI, the terminal UI, the desktop app, and your own
 applications, call it through a **Gateway**, the service that forwards their calls and connects
 collaboration surfaces. The **Worklets** of **Worker Hosts**, the machines that run work, call it
-directly. This page is the contract for calling it. See the
+directly. A Gateway can also carry a running **Task Attempt**'s data calls. This page is the contract for calling it. See the
 [glossary](glossary.md) for terms.
 
 The API is the protobuf package `supertag.runtime.v2`, defined in
@@ -68,10 +68,23 @@ starts, renews, or finishes a Task Attempt. After a cancellation, `ReportAttempt
 `ReportAttemptMilestone`, and `ReportNetworkLog` still accept it until the Worklet's
 `FinishTask` confirms execution stopped.
 
-A Gateway forwards Task Attempt data calls to the Control Plane as their caller, exactly as it
-forwards client calls. It adds no authority, and it serves none of the host credential's methods.
+A Gateway forwards these calls to the Control Plane as their caller:
+
+| Forwarded | Not forwarded |
+| --- | --- |
+| Negotiation, health, and every method an operator, a client device, or an Auth Key may call | `WorkerHost` registration, claims, leases, finishing, and checkpoints |
+| A Task Attempt's data calls on `WorkerHost` and the `Attempt…` services, under its Task Attempt credential | `HostLandings`, `VolumeObjects`, `Transfers`, `WorkspaceGitAccess`, and `ArtifactSources` |
+| | `Connector`, `ReplyProgress`, `OperatorNotifications`, and other Gateway methods |
+
+The Gateway passes the caller's own credential through unchanged and adds no authority. A host
+credential therefore reaches no method through a Gateway, and the Gateway drops the host
+generation header. A caller that sends Task Attempt data calls through a Gateway negotiates as
+`SERVICE_ROLE_WORKER_HOST`.
+
 When the Control Plane sets `SUPERTAG_DATA_ENDPOINT` to a Gateway URL, `RegisterHost` returns it
-in `HostRecord.data_endpoint`. Empty means the Control Plane itself.
+in `HostRecord.data_endpoint`. Empty means the Control Plane itself. The field is advice to the
+host and grants nothing. In this release, Worklets still send their Task Attempts' data calls to
+the Control Plane directly.
 
 An application usually runs with an Operator Token of its own, so its changes appear under its
 name in `supertag audit`.
