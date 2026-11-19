@@ -614,7 +614,7 @@ async fn retire_removed_hosts(state: &Path, config: Option<&local_config::Config
     }
 }
 
-/// A running supervisor's request to run a different number of lanes for some hosts, written
+/// A running supervisor's request to change some hosts' concurrency, written
 /// by `supertag up` when nothing else in supertag.yaml changed.
 #[derive(Serialize, Deserialize)]
 pub struct ConcurrencyRequest {
@@ -644,8 +644,9 @@ pub fn clear_concurrency_request(directory: &Path) -> io::Result<()> {
     remove_if_present(&directory.join(CONCURRENCY_REQUEST))
 }
 
-/// Change the running hosts' concurrency in place: raised lanes start under the host's current
-/// registration, and lowered lanes finish their Attempt and stop, so running work is neither
+/// Change the running hosts' concurrency in place: the Worklet
+/// grows its pool under its current registration, and slots beyond the new size finish their
+/// Attempt and stop, so running work is neither
 /// drained nor restarted.
 async fn change_concurrency(
     state: &Path,

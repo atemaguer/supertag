@@ -51,7 +51,7 @@ on later. `--yes` accepts every default and needs no terminal. It writes `~/.sup
   following the branch checked out when `init` ran;
 - a Gateway; and
 - a `host` service named after the machine, which maps this repository as the Workspace,
-  named after the repository by default, and runs up to three Task Attempts at once
+  named after the repository by default, and runs up to three Task Attempts at once for each harness
   (`concurrency: 3`).
 
 Nothing is written to the repository; state lives in `~/.supertag/`. Running `init` again in

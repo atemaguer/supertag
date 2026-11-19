@@ -21,9 +21,9 @@ pub(crate) struct Attempt {
     pub task_id: String,
     pub attempt_id: String,
     pub lease_token: String,
-    /// The Attempt credential StartTask returned, which the Attempt's data calls carry: the
-    /// Worker's, and the Worklet's own finalization records. Empty until the Attempt started; a
-    /// replayed start replaces it.
+    /// The Attempt credential StartTask returned, which the Worklet hands to the Attempt's
+    /// Worker and then clears from its own copy. Empty until the Attempt started; a replayed
+    /// start replaces it.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub attempt_credential: String,
     #[serde(default)]

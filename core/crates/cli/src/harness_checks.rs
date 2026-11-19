@@ -101,7 +101,7 @@ impl Supervisor {
     }
 }
 
-/// The variables a Worker Host lane would give `harness`: the supervisor's identity and locale,
+/// The variables a Worklet would give `harness`: the supervisor's identity and locale,
 /// and the harness's credentials from the supervisor's environment or the configured env_file.
 pub fn worker_variables(
     harness: Harness,

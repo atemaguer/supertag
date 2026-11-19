@@ -20,7 +20,7 @@ use super::{
 const LEASE_MS: i64 = 30_000;
 /// The result a reclaimed Attempt's Task records when it has none, as TypeScript's
 /// `InterruptedExecutionOutcomeUnknown` failure says.
-const RECLAIMED_RESULT: &str = "Execution was interrupted when its Worker Host stopped. The host confirmed that every process it started for this Attempt is gone. The outcome is unknown, and the Task does not run again automatically.";
+const RECLAIMED_RESULT: &str = "Execution was interrupted before the harness finished. The host confirmed that every process it started for this Attempt is gone. The outcome is unknown, and the Task does not run again automatically.";
 
 impl Store {
     /// Supply the Control Plane's clock for deterministic state transition tests.

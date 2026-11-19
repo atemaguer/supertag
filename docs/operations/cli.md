@@ -51,7 +51,7 @@ Tag's name; for OpenCode it also asks for a `provider/model`. Claude Code runs t
   and the `lead` Tag, bound to the repository's Workspace and following the branch checked out
   when `init` ran; and
 - a `host` service named after this machine, which maps the repository as a Workspace and runs
-  up to three Task Attempts at once (`concurrency: 3`), so one stuck Task does not hold every Tag.
+  up to three Task Attempts at once for each harness (`concurrency: 3`), so one stuck Task does not hold every Tag.
 
 Codex sandboxes its own commands. Claude Code, Cursor, and OpenCode don't, so for them `init`
 asks how the lead may run commands, defaulting to not at all:
