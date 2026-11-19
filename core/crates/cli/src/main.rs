@@ -460,8 +460,10 @@ enum Command {
         )]
         notify: Vec<String>,
     },
-    /// Connect a Worker Host and run accepted Tasks through an adapter: its Worklet registers
-    /// the host, claims Tasks, and runs each Task Attempt in a Worker process of its own.
+    /// Connect a Worker Host and run accepted Tasks through an adapter.
+    ///
+    /// This is the host's Worklet: it registers the host, claims Tasks, and runs each Task
+    /// Attempt in a Worker process of its own.
     WorkerHost(Box<worker_host::WorkerHostArgs>),
     /// One Task Attempt, run by the Worklet that starts it.
     #[command(name = "__worker", hide = true)]

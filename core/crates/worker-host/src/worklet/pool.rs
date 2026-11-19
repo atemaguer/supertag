@@ -27,7 +27,9 @@ use crate::{
     worklet::WorkerLaunch,
 };
 
-/// How long a Worker may take to stop after `Drain` or `Cancel` before the Worklet kills it.
+/// How long a Worker may take to stop after `Drain` before the Worklet sends `Cancel`, and after
+/// that before it kills the Worker.
+const DRAIN_GRACE: Duration = Duration::from_secs(5);
 const STOP_GRACE: Duration = Duration::from_secs(10);
 
 /// The variable a supervisor's lifeline sets; a Worker's lifeline is its channel instead.
@@ -73,6 +75,7 @@ impl WorkerProcess {
         }
         // A Worker writes nothing to the Worklet's standard output, which a supervisor reads for
         // readiness; its log lines join the Worklet's on standard error.
+        // terminal-safe: the Worker's standard output is this standard error, not written here.
         let stdout = std::io::stderr()
             .as_fd_owned()
             .context("share the Worklet's log with its Worker")?;
@@ -192,6 +195,8 @@ pub(crate) async fn serve(
     handler: &impl Serve,
     stop: &CancellationToken,
 ) -> WorkerEnd {
+    // The one Attempt this Worker may ask host calls for.
+    let own = assign.attempt.inspect();
     let mut outcome = None;
     if WorkerProcess::send(&process.writer, &ToWorker::Assign(Box::new(assign)))
         .await
@@ -202,10 +207,17 @@ pub(crate) async fn serve(
         return WorkerEnd { outcome, status };
     }
     let mut calls = tokio::task::JoinSet::new();
+    let mut cancel_at: Option<tokio::time::Instant> = None;
     let mut kill_at: Option<tokio::time::Instant> = None;
     loop {
         let killing = async {
             match kill_at {
+                Some(at) => tokio::time::sleep_until(at).await,
+                None => std::future::pending().await,
+            }
+        };
+        let cancelling = async {
+            match cancel_at {
                 Some(at) => tokio::time::sleep_until(at).await,
                 None => std::future::pending().await,
             }
@@ -242,6 +254,12 @@ pub(crate) async fn serve(
                         }
                     }
                     FromWorker::Request { id, call } => {
+                        if let Err(refused) = call.check(&own) {
+                            if reply(&process.writer, id, Err(refused)).await.is_err() {
+                                break;
+                            }
+                            continue;
+                        }
                         let answer = handler.call(call);
                         let writer = process.writer.clone();
                         calls.spawn(async move {
@@ -257,7 +275,13 @@ pub(crate) async fn serve(
             Some(_) = calls.join_next(), if !calls.is_empty() => {}
             () = stop.cancelled(), if kill_at.is_none() => {
                 let _ = WorkerProcess::send(&process.writer, &ToWorker::Drain).await;
+                cancel_at = Some(tokio::time::Instant::now() + DRAIN_GRACE);
                 kill_at = Some(tokio::time::Instant::now() + STOP_GRACE);
+            }
+            () = cancelling => {
+                // Still running after its drain: stop now.
+                let _ = WorkerProcess::send(&process.writer, &ToWorker::Cancel).await;
+                cancel_at = None;
             }
             () = killing => {
                 process.kill();
@@ -286,7 +310,10 @@ async fn reply(
         writer,
         &ToWorker::Reply {
             id,
-            result: result.map_err(|status| WireStatus::from(&status)),
+            // A connection the Control Plane dropped is retryable for the Worker too; its local
+            // cause does not cross the channel.
+            result: result
+                .map_err(|status| WireStatus::from(&supertag_protocol::upstream_status(status))),
         },
     )
     .await
@@ -295,6 +322,120 @@ async fn reply(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::local::Proto;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use supertag_protocol::v2::InspectAttemptRequest;
+
+    /// Counts the host calls it is asked to make.
+    #[derive(Default)]
+    struct Counting {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl Serve for Counting {
+        fn milestone(&self, _: Milestone, _: i32) -> Result<(), Status> {
+            Ok(())
+        }
+        fn outcome(&self, _: &Outcome) -> Result<(), Status> {
+            Ok(())
+        }
+        fn state(&self, _: WorkerState) {}
+        fn call(&self, _: HostCall) -> HostAnswer {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { (Ok(Bytes::default()), None) })
+        }
+    }
+
+    fn attempt() -> crate::worklet::journal::Attempt {
+        crate::worklet::journal::Attempt {
+            task_id: "task".into(),
+            attempt_id: "attempt".into(),
+            lease_token: "lease".into(),
+            attempt_credential: "stat_worker".into(),
+            execution_selection: None,
+            requires_unsandboxed_commands: false,
+            joined: vec![],
+            native_memory: None,
+            volume: None,
+        }
+    }
+
+    /// A stand-in Worker that sends one host call naming `attempt_id`, then reads its reply.
+    async fn worker_asking_for(attempt_id: &str) -> usize {
+        let request = FromWorker::Request {
+            id: 1,
+            call: HostCall::Renew(Proto(InspectAttemptRequest {
+                task_id: "task".into(),
+                attempt_id: attempt_id.into(),
+                lease_token: "lease".into(),
+            })),
+        };
+        let body = serde_json::to_vec(&request).unwrap();
+        let mut frame = (body.len() as u32).to_be_bytes().to_vec();
+        frame.extend(body);
+        let escaped: String = frame.iter().map(|byte| format!("\\{byte:03o}")).collect();
+        let launch = WorkerLaunch {
+            program: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                format!("printf '{escaped}' >&3; sleep 1").into(),
+            ],
+        };
+        let process = WorkerProcess::spawn(&launch, "stcr_host-credential").unwrap();
+        let handler = Counting::default();
+        let calls = handler.calls.clone();
+        let assign = Assign {
+            slot: "adapter-0".into(),
+            state_directory: "/nonexistent".into(),
+            attempt: attempt(),
+            task: Proto(Default::default()),
+            workspace: None,
+            checkpoint: None,
+            valid_for_ms: 1_000,
+            registration: Proto(Default::default()),
+            protocol: 1,
+            data_endpoint: "http://127.0.0.1:1".into(),
+            secrets: Default::default(),
+        };
+        let end = serve(process, assign, &handler, &CancellationToken::new()).await;
+        assert!(end.died(), "the stand-in hands over no outcome");
+        calls.load(Ordering::SeqCst)
+    }
+
+    #[tokio::test]
+    async fn the_worklet_makes_host_calls_only_for_the_workers_own_attempt() {
+        assert_eq!(worker_asking_for("attempt").await, 1);
+        assert_eq!(
+            worker_asking_for("another-attempt").await,
+            0,
+            "a host call naming another Attempt never reaches the host"
+        );
+    }
+
+    #[test]
+    fn an_assignment_carries_no_host_credential() {
+        let assign = Assign {
+            slot: "adapter-0".into(),
+            state_directory: "/state/slots/adapter-0".into(),
+            attempt: attempt(),
+            task: Proto(Default::default()),
+            workspace: None,
+            checkpoint: None,
+            valid_for_ms: 1_000,
+            registration: Proto(Default::default()),
+            protocol: 1,
+            data_endpoint: "http://127.0.0.1:1".into(),
+            secrets: crate::local::AttemptSecrets {
+                provider: [("OPENAI_API_KEY".to_owned(), "sk-harness".to_owned())].into(),
+                network: vec![],
+            },
+        };
+        // The Assign has no field for it: what the Worker receives is its Attempt's credential
+        // and its harness's own secrets.
+        let text = serde_json::to_string(&ToWorker::Assign(Box::new(assign))).unwrap();
+        assert!(text.contains("stat_worker") && text.contains("sk-harness"));
+        assert!(!text.contains("stcr_"));
+    }
 
     #[test]
     fn a_worker_inherits_no_host_credential_variable() {

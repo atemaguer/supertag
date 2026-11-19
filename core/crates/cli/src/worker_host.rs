@@ -156,8 +156,8 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
     #[arg(long, default_value_t = local_config::DEFAULT_ATTEMPT_TIMEOUT_SECONDS, value_parser = clap::value_parser!(u64).range(1..=local_config::MAX_ATTEMPT_TIMEOUT_SECONDS))]
     pub(crate) attempt_timeout_seconds: u64,
     /// Task Attempts of each harness this host runs at once: the slots of its Worker pool per
-    /// harness, from 1 through 64.
-    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..=64))]
+    /// harness, from 1 through 16.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..=16))]
     pub(crate) concurrency: u32,
     /// A private JSON file naming each harness this host runs, as `supertag worker-host`
     /// arguments of its own: `{"harnesses": [[ARG, ...], ...]}`. `supertag up` writes it for a

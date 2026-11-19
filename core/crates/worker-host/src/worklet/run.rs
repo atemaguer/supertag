@@ -572,7 +572,13 @@ async fn pool(worklet: Arc<Worklet>) -> Result<(), SlotFailure> {
     for slot in initial {
         start(&mut tasks, &mut running, slot)?;
     }
-    let single = options.once || (options.harnesses.len() == 1 && size == 1);
+    // A slot beyond the pool size resumes the Attempt it holds, then retires.
+    let sized = wanted(size);
+    for (name, (retire, _)) in &running {
+        if parse_slot(options, name).is_some_and(|slot| !sized.contains(&slot)) {
+            retire.cancel();
+        }
+    }
     loop {
         tokio::select! {
             changed = concurrency.changed(), if resizable => {
@@ -631,7 +637,11 @@ async fn pool(worklet: Arc<Worklet>) -> Result<(), SlotFailure> {
                     }
                     // One slot's failure is the host's when it is the only slot, as a host with
                     // one harness and one slot always was.
-                    Err(failure) if single || worklet.shutdown.is_cancelled() => {
+                    Err(failure)
+                        if options.once
+                            || (options.harnesses.len() == 1 && size == 1 && running.is_empty())
+                            || worklet.shutdown.is_cancelled() =>
+                    {
                         worklet.shutdown.cancel();
                         while tasks.join_next().await.is_some() {}
                         return Err(failure);
@@ -1437,7 +1447,6 @@ async fn run_worker(
     let serving = Serving {
         worklet,
         slot,
-        own: attempt.inspect(),
         attempt,
     };
     Ok(serve(process, assign, &serving, &worklet.shutdown).await)
@@ -1448,7 +1457,6 @@ struct Serving<'a> {
     worklet: &'a Worklet,
     slot: &'a Slot,
     attempt: Attempt,
-    own: supertag_protocol::v2::InspectAttemptRequest,
 }
 
 impl Serving<'_> {
@@ -1600,9 +1608,6 @@ impl Serve for Serving<'_> {
     }
 
     fn call(&self, call: HostCall) -> crate::worklet::pool::HostAnswer {
-        if let Err(refused) = call.check(&self.own) {
-            return Box::pin(async move { (Err(refused), None) });
-        }
         let mut host = self.worklet.host.clone();
         let token = self.worklet.token.clone();
         let storage = self.worklet.storage.clone();

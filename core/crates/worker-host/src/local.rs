@@ -162,10 +162,11 @@ pub(crate) enum LeaseChange {
 #[derive(Deserialize, Serialize)]
 pub(crate) enum ToWorker {
     Assign(Box<Assign>),
-    /// Stop now: the Worklet ends the Attempt's run and kills the Worker after a short grace.
+    /// Stop now: the Worker exits after a short grace, whatever its run still does. The Worklet
+    /// sends it when a drained Worker did not stop, and kills it after another.
     Cancel,
     /// The Worklet is stopping: stop before launching the harness if it has not launched, else
-    /// stop it. The journal resumes the Attempt.
+    /// stop the harness, and exit. The journal resumes the Attempt.
     Drain,
     Lease(LeaseChange),
     Reply {
@@ -416,7 +417,16 @@ impl WorkletLink {
                     Ok(Some(ToWorker::Lease(change))) => {
                         lease_sender.send_replace(Some(change));
                     }
-                    Ok(Some(ToWorker::Cancel | ToWorker::Drain)) => stop.cancel(),
+                    Ok(Some(ToWorker::Drain)) => stop.cancel(),
+                    Ok(Some(ToWorker::Cancel)) => {
+                        stop.cancel();
+                        // Stop now: whatever the run still does after a short grace, the Worker
+                        // exits, and its guardian reaps the harness.
+                        tokio::spawn(async move {
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                            lost();
+                        });
+                    }
                     Ok(Some(ToWorker::Assign(_))) => {
                         // One Worker runs one Attempt.
                         stop.cancel();
