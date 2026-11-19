@@ -244,6 +244,16 @@ button:disabled {
     transition: none;
   }
 }
+/*
+ * A drag region moves the window, and double-clicking it zooms. Only the region itself drags:
+ * what it holds, such as a button, stays clickable.
+ */
+.drag-region {
+  -webkit-app-region: drag;
+}
+.drag-region > * {
+  -webkit-app-region: no-drag;
+}
 /* The top row holds the toggle, or the macOS window controls and the toggle, and the actions. */
 .sidebar-top {
   display: flex;

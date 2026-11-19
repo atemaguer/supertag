@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { desktop } from "./desktop";
 import type { Tag } from "./gateway";
 
 /** What a new Tag can run on: the harnesses and Workspaces the connected Worker Hosts offer. */
@@ -44,12 +44,11 @@ export interface TagAdmin {
 
 /** Tag creation over a connection; `local` when it is the local Gateway, which can add folders. */
 export function tagAdminSession(connectionId: string, local = false): TagAdmin {
+  const api = desktop();
   return {
-    options: () => invoke("list_tag_options", { connectionId }),
-    create: (tag) => invoke("create_tag", { connectionId, tag }),
-    ...(local && {
-      addFolder: () => invoke<AddedWorkspace | null>("add_local_workspace", { connectionId }),
-    }),
+    options: () => api.listTagOptions({ connectionId }),
+    create: (tag) => api.createTag({ connectionId, tag }),
+    ...(local && { addFolder: () => api.addLocalWorkspace({ connectionId }) }),
   };
 }
 

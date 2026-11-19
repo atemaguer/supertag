@@ -1,11 +1,15 @@
 {
   "name": "@supertag/desktop",
+  "productName": "SuperTag",
   "version": "0.3.2",
   "private": true,
   "type": "module",
+  "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && tsc --build electron && vite build && tsup",
+    "electron": "tsup && electron .",
+    "electron:dev": "tsup && SUPERTAG_DESKTOP_DEV_URL=${SUPERTAG_DESKTOP_DEV_URL:-http://127.0.0.1:1420} electron .",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -26,12 +30,15 @@
     "use-stick-to-bottom": "1.1.6"
   },
   "devDependencies": {
+    "@electron/fuses": "2.1.3",
     "@tailwindcss/vite": "4.3.5",
     "@tauri-apps/cli": "2.12.4",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.3.0",
+    "electron": "44.11.4",
     "tailwindcss": "4.3.5",
+    "tsup": "8.5.0",
     "typescript": "7.0.2",
     "vite": "8.2.0"
   }

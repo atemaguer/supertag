@@ -24,13 +24,13 @@ func fakeSupertag(t *testing.T, script string) string {
 
 func TestLocalDiscoveryReadsWhatTheCLIReports(t *testing.T) {
 	token := strings.Repeat("a", 64)
-	running := fakeSupertag(t, `printf '%s\n' '{"protocol":"local-gateway.v1","running":true,"state_directory":"/tmp/state","url":"http://127.0.0.1:7001","token":"`+token+`"}'`)
+	running := fakeSupertag(t, `printf '%s\n' '{"protocol":"local-gateway.v2","running":true,"state_directory":"/tmp/state","set_up":true,"machine_id":null,"url":"http://127.0.0.1:7001","token":"`+token+`"}'`)
 	target, problem := runLocalDiscovery(t.Context(), running)
 	if problem != "" || target != (client.Target{Name: localName, URL: "http://127.0.0.1:7001", Token: token}) {
 		t.Fatalf("running local Gateway: %+v %q", target, problem)
 	}
 
-	stopped := fakeSupertag(t, `printf '%s\n' '{"protocol":"local-gateway.v1","running":false,"state_directory":"/tmp/state","message":"No local Gateway is running from /tmp/state. Start it with supertag up."}'`)
+	stopped := fakeSupertag(t, `printf '%s\n' '{"protocol":"local-gateway.v2","running":false,"state_directory":"/tmp/state","set_up":true,"message":"No local Gateway is running from /tmp/state. Start it with supertag up."}'`)
 	target, problem = runLocalDiscovery(t.Context(), stopped)
 	if target.URL != "" || !strings.Contains(problem, "Start it with supertag up") {
 		t.Fatalf("stopped local Gateway: %+v %q", target, problem)
@@ -42,9 +42,9 @@ func TestLocalDiscoveryReadsWhatTheCLIReports(t *testing.T) {
 	}
 
 	for _, report := range []string{
-		`{"protocol":"local-gateway.v2","running":true,"url":"http://127.0.0.1:7001","token":"t"}`,
-		`{"protocol":"local-gateway.v1","running":true,"url":"http://192.0.2.1:7001","token":"t"}`,
-		`{"protocol":"local-gateway.v1","running":true,"url":"http://127.0.0.1:7001","token":""}`,
+		`{"protocol":"local-gateway.v1","running":true,"url":"http://127.0.0.1:7001","token":"t"}`,
+		`{"protocol":"local-gateway.v2","running":true,"url":"http://192.0.2.1:7001","token":"t"}`,
+		`{"protocol":"local-gateway.v2","running":true,"url":"http://127.0.0.1:7001","token":""}`,
 	} {
 		if target, problem = runLocalDiscovery(t.Context(), fakeSupertag(t, `printf '%s\n' '`+report+`'`)); target.URL != "" || problem == "" {
 			t.Fatalf("accepted %s", report)

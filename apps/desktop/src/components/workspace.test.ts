@@ -38,8 +38,8 @@ it("lists each Tag in the sidebar and puts just the selected Tag in the pill", (
   expect(html).not.toContain("Release checks");
   expect(html).toContain("Claude Code");
   // The sidebar's top and the conversation's top strip drag the window.
-  expect(html).toMatch(/class="sidebar-top" data-tauri-drag-region/);
-  expect(html).toMatch(/class="topstrip" data-tauri-drag-region/);
+  expect(html).toMatch(/class="sidebar-top drag-region"/);
+  expect(html).toMatch(/class="topstrip drag-region"/);
   expect(html).not.toContain('<header class="topbar"');
 });
 

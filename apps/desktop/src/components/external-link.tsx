@@ -1,6 +1,5 @@
-import { isTauri } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import type { ComponentProps } from "react";
+import { desktop, inDesktopApp } from "../desktop";
 
 /** The host of a web link, or nothing for any other kind of link. */
 export function webHost(href: string | undefined): string | undefined {
@@ -14,7 +13,10 @@ export function webHost(href: string | undefined): string | undefined {
 
 /** Opens a web link in the system browser, never in the app's own window. */
 export function openExternal(href: string) {
-  if (isTauri()) void openUrl(href);
+  if (inDesktopApp())
+    void desktop()
+      .openExternal({ url: href })
+      .catch(() => {});
   else window.open(href, "_blank", "noopener,noreferrer");
 }
 

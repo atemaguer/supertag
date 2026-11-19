@@ -42,8 +42,19 @@ fn prints_the_running_local_gateway_with_its_current_token() {
 
     let (ok, value, _) = discover(&state);
     assert!(ok);
-    assert_eq!(value["protocol"], "local-gateway.v1");
+    assert_eq!(value["protocol"], "local-gateway.v2");
     assert_eq!(value["running"], false);
+    assert_eq!(value["set_up"], false);
+    // This machine's identifier, created on first use under HOME, independent of the state
+    // directory.
+    let machine = value["machine_id"].as_str().unwrap().to_owned();
+    assert_eq!(machine.len(), 32);
+    assert_eq!(
+        fs::read_to_string(state.parent().unwrap().join(".supertag/machine-id"))
+            .unwrap()
+            .trim(),
+        machine
+    );
     // Nothing is set up there yet, so the message names supertag init.
     assert!(value["message"].as_str().unwrap().contains("supertag init"));
     assert!(value.get("token").is_none());
@@ -68,6 +79,8 @@ fn prints_the_running_local_gateway_with_its_current_token() {
     let (ok, value, _) = discover(&state);
     assert!(ok);
     assert_eq!(value["running"], true);
+    assert_eq!(value["set_up"], true);
+    assert_eq!(value["machine_id"], machine.as_str());
     assert_eq!(value["url"], "http://127.0.0.1:7001");
     assert_eq!(value["token"], operator);
     assert_eq!(
@@ -76,7 +89,10 @@ fn prints_the_running_local_gateway_with_its_current_token() {
     );
 
     drop(lock);
-    assert_eq!(discover(&state).1["running"], false);
+    let (_, stopped, _) = discover(&state);
+    assert_eq!(stopped["running"], false);
+    // Set up but stopped: the desktop app starts it.
+    assert_eq!(stopped["set_up"], true);
 
     // State another user could read is refused rather than trusted.
     fs::set_permissions(&state, fs::Permissions::from_mode(0o755)).unwrap();

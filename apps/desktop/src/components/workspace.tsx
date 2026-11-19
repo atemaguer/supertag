@@ -165,7 +165,7 @@ export function WorkspaceShell({
       />
       {separator}
       <main className="main" aria-label="Conversation" aria-busy={switching}>
-        <header className="topstrip" data-tauri-drag-region>
+        <header className="topstrip drag-region">
           {tag &&
             (onTagDetails ? (
               <button

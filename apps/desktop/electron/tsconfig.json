@@ -1,0 +1,17 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "emitDeclarationOnly": true,
+    "declarationMap": false,
+    "sourceMap": false,
+    "rootDir": "..",
+    "outDir": "../dist-electron/types",
+    "tsBuildInfoFile": "../dist-electron/types/.tsbuildinfo",
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2024", "DOM"],
+    "types": ["node"]
+  },
+  "include": ["*.ts", "../src/gateway.ts", "../src/tag-admin.ts", "../src/desktop.ts"]
+}

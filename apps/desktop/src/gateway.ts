@@ -1,4 +1,4 @@
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { desktop } from "./desktop";
 
 export interface Tag {
   tagId: string;
@@ -335,38 +335,32 @@ export function cacheScope(origin: string, principal: string) {
 }
 
 export function gatewaySession(connectionId: string, scope: string): Gateway {
+  const api = desktop();
   return {
     scope,
-    tags: () => invoke("list_tags", { connectionId }),
-    conversations: () => invoke("list_conversations", { connectionId }),
-    messages: (read) => invoke("list_messages", { connectionId, read }),
-    send: (tagId, text, operationId) =>
-      invoke("send_message", { connectionId, tagId, text, operationId }),
-    markRead: (tagId, order) => invoke("mark_conversation_read", { connectionId, tagId, order }),
-    events: (taskId, afterSequence) =>
-      invoke("list_task_events", { connectionId, taskId, afterSequence }),
+    tags: () => api.listTags({ connectionId }),
+    conversations: () => api.listConversations({ connectionId }),
+    messages: (read) => api.listMessages({ connectionId, read }),
+    send: (tagId, text, operationId) => api.sendMessage({ connectionId, tagId, text, operationId }),
+    markRead: (tagId, order) => api.markConversationRead({ connectionId, tagId, order }),
+    events: (taskId, afterSequence) => api.listTaskEvents({ connectionId, taskId, afterSequence }),
     async follow(read, receive) {
-      const onUpdate = new Channel<FollowUpdate>(receive);
-      const followId = await invoke<string>("start_conversation_follow", {
-        connectionId,
-        read,
-        onUpdate,
-      });
-      return () => invoke<void>("stop_conversation_follow", { followId });
+      const followId = await api.startConversationFollow({ connectionId, read }, receive);
+      return () => api.stopConversationFollow({ followId });
     },
-    notes: (tagId) => invoke("list_notes", { connectionId, tagId }),
-    deleteNote: (memoryId) => invoke("delete_note", { connectionId, memoryId }),
-    networkLogs: (tagId) => invoke("list_network_logs", { connectionId, tagId }),
-    locateTaskFiles: (taskId) => invoke("locate_task_files", { connectionId, taskId }),
-    listTaskFiles: (taskId, path) => invoke("list_task_files", { connectionId, taskId, path }),
-    readTaskFile: (taskId, path) => invoke("read_task_file", { connectionId, taskId, path }),
-    revealTaskFile: (taskId, path) => invoke("reveal_task_file", { connectionId, taskId, path }),
-    tagActivity: (tagId) => invoke("tag_activity", { connectionId, tagId }),
-    schedules: (tagId) => invoke("list_schedules", { connectionId, tagId }),
+    notes: (tagId) => api.listNotes({ connectionId, tagId }),
+    deleteNote: (memoryId) => api.deleteNote({ connectionId, memoryId }),
+    networkLogs: (tagId) => api.listNetworkLogs({ connectionId, tagId }),
+    locateTaskFiles: (taskId) => api.locateTaskFiles({ connectionId, taskId }),
+    listTaskFiles: (taskId, path) => api.listTaskFiles({ connectionId, taskId, path }),
+    readTaskFile: (taskId, path) => api.readTaskFile({ connectionId, taskId, path }),
+    revealTaskFile: (taskId, path) => api.revealTaskFile({ connectionId, taskId, path }),
+    tagActivity: (tagId) => api.tagActivity({ connectionId, tagId }),
+    schedules: (tagId) => api.listSchedules({ connectionId, tagId }),
     changeSchedule: (scheduleId, action) =>
-      invoke("change_schedule", { connectionId, scheduleId, action }),
-    readCache: (key) => invoke("read_cache", { connectionId, key }),
-    writeCache: (key, value) => invoke("write_cache", { connectionId, key, value }),
+      api.changeSchedule({ connectionId, scheduleId, action }),
+    readCache: (key) => api.readCache({ connectionId, key }),
+    writeCache: (key, value) => api.writeCache({ connectionId, key, value }),
   };
 }
 
@@ -410,40 +404,37 @@ export interface SetupCheck {
 /** Setting SuperTag up on this machine, through the supertag CLI. */
 export const nativeSetup = {
   check: (directory?: string, harness?: string) =>
-    invoke<SetupCheck>("check_setup", { directory, harness }),
-  chooseFolder: () => invoke<string | null>("choose_project_folder"),
-  setUp: (directory: string, harness: string) =>
-    invoke<unknown>("set_up_supertag", { directory, harness }),
+    desktop().checkSetup({
+      ...(directory === undefined ? {} : { directory }),
+      ...(harness === undefined ? {} : { harness }),
+    }),
+  chooseFolder: () => desktop().chooseProjectFolder({}),
+  setUp: (directory: string, harness: string) => desktop().setUpSupertag({ directory, harness }),
 };
 
 export const nativeGateway = {
-  list: () => invoke<GatewayList>("list_gateways"),
+  list: () => desktop().listGateways({}),
   save: (gateway: string, name: string, token: string) =>
-    invoke<GatewayActivation>("save_gateway", { gateway, name, token }),
-  select: (origin: string) => invoke<GatewayActivation>("select_gateway", { origin }),
-  connectLocal: () => invoke<GatewayActivation>("connect_local_gateway"),
+    desktop().saveGateway({ gateway, name, token }),
+  select: (origin: string) => desktop().selectGateway({ origin }),
+  connectLocal: () => desktop().connectLocalGateway({}),
   /** Whether SuperTag is set up on this machine but its local services are stopped. */
-  localStartNeeded: () => invoke<boolean>("local_start_needed"),
+  localStartNeeded: () => desktop().localStartNeeded({}),
   /** Starts the stopped local services with `supertag up`; false when nothing needed starting. */
-  startLocal: () => invoke<boolean>("start_local_services"),
+  startLocal: () => desktop().startLocalServices({}),
   /** Why the app can't run the `supertag` CLI (missing, or another version), with the command
    * that installs the right one; null when it can. */
-  localCliProblem: () => invoke<string | null>("local_cli_problem"),
+  localCliProblem: () => desktop().localCliProblem({}),
   /** The older release the local Gateway runs, which the app can restart with its own version;
    * null when it runs this app's protocol, a newer release, or not at all. */
-  localUpgrade: () => invoke<LocalUpgrade | null>("local_gateway_upgrade"),
+  localUpgrade: () => desktop().localGatewayUpgrade({}),
   /** Restarts the local services with the app's own CLI: `supertag down`, then `supertag up`
    * against the same state directory, which migrates the database. */
   restartLocal: (progress: (step: RestartStep) => void) =>
-    invoke<void>("restart_local_services", { onProgress: new Channel<RestartStep>(progress) }),
-  clear: (forget?: string) => invoke<GatewayList>("clear_gateway", { forget }),
+    desktop().restartLocalServices({}, progress),
+  clear: (forget?: string) => desktop().clearGateway(forget === undefined ? {} : { forget }),
   async watch(connectionId: string, watchEpoch: number, receive: (update: WatchUpdate) => void) {
-    const onUpdate = new Channel<WatchUpdate>(receive);
-    const watchId = await invoke<string>("start_gateway_watch", {
-      connectionId,
-      watchEpoch,
-      onUpdate,
-    });
-    return () => invoke<void>("stop_gateway_watch", { watchId });
+    const watchId = await desktop().startGatewayWatch({ connectionId, watchEpoch }, receive);
+    return () => desktop().stopGatewayWatch({ watchId });
   },
 };

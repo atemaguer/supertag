@@ -1,11 +1,5 @@
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import {
-  isPermissionGranted,
-  onAction,
-  requestPermission,
-  sendNotification,
-} from "@tauri-apps/plugin-notification";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { desktop } from "../desktop";
 import type { Conversation } from "../gateway";
 import { previewLine } from "./preview-line";
 
@@ -147,7 +141,7 @@ function useFocused() {
 }
 
 export interface Notifier {
-  /** Shows a notification; the default asks the system once and then uses the plugin. */
+  /** Shows a notification; a newer one with the same key replaces the earlier. */
   show(alert: Alert): void;
   badge(count: number): void;
   /** Calls `open` with the Tag of a clicked notification, until the returned stop. */
@@ -161,45 +155,24 @@ export const silentNotifier: Notifier = {
   clicks: () => () => {},
 };
 
-let permission: Promise<boolean> | undefined;
-
-/** The system notifier: the Tauri notification plugin and the window's Dock badge. */
+/**
+ * The system notifier, through the desktop app's main process: it shows the notification,
+ * focuses the window when one is clicked, and sets the Dock badge.
+ */
 export const nativeNotifier: Notifier = {
   show(alert) {
-    permission ??= isPermissionGranted()
-      .then((granted) => granted || requestPermission().then((state) => state === "granted"))
-      .catch(() => false);
-    void permission.then((granted) => {
-      if (granted)
-        sendNotification({
-          id: alertId(alert.key),
-          title: alert.title,
-          body: alert.body,
-          extra: { tagId: alert.tagId },
-        });
-    });
+    const { key, tagId, title, body } = alert;
+    void desktop()
+      .notify({ key, tagId, title, body })
+      .catch(() => {});
   },
   badge(count) {
-    void getCurrentWindow()
-      .setBadgeCount(count > 0 ? count : undefined)
+    void desktop()
+      .setBadge({ count: Math.max(0, count) })
       .catch(() => {});
   },
   clicks(open) {
-    let stopped = false;
-    const listening = onAction((event) => {
-      const tagId = event.notification?.extra?.tagId;
-      if (event.actionId !== "tap" || typeof tagId !== "string") return;
-      void getCurrentWindow()
-        .setFocus()
-        .catch(() => {});
-      open(tagId);
-    });
-    listening.catch(() => {});
-    return () => {
-      if (stopped) return;
-      stopped = true;
-      void listening.then((listener) => listener.unregister()).catch(() => {});
-    };
+    return desktop().onNotificationClick(open);
   },
 };
 

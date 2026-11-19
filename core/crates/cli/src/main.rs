@@ -517,7 +517,8 @@ enum Command {
         #[arg(long)]
         socket: PathBuf,
     },
-    /// The local Gateway and its current operator token, as JSON for the terminal UI.
+    /// The local Gateway and its current operator token, as JSON for the terminal UI and the
+    /// desktop app.
     #[command(name = "__local-gateway", hide = true)]
     LocalGateway,
     #[command(name = "__adapter-guardian", hide = true)]

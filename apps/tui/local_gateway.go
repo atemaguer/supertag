@@ -26,7 +26,7 @@ import (
 const localName = "Local"
 
 // localProtocol is the format `supertag __local-gateway` prints.
-const localProtocol = "local-gateway.v1"
+const localProtocol = "local-gateway.v2"
 
 const localDiscoveryTimeout = 5 * time.Second
 

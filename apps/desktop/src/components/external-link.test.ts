@@ -3,9 +3,8 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 
-const openUrl = vi.fn(async () => {});
-vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl }));
-vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true }));
+const openExternal = vi.fn(async (_: { url: string }) => {});
+Object.defineProperty(window, "supertag", { value: { openExternal }, configurable: true });
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -29,7 +28,7 @@ it("opens web links from a Tag's message in the system browser and shows their h
   const click = new MouseEvent("click", { bubbles: true, cancelable: true });
   act(() => link.dispatchEvent(click));
   expect(click.defaultPrevented).toBe(true);
-  expect(openUrl).toHaveBeenCalledWith("https://ci.example.com/runs/7");
+  expect(openExternal).toHaveBeenCalledWith({ url: "https://ci.example.com/runs/7" });
   // Only web links open; another kind shows as text.
   expect(host.querySelectorAll("a")).toHaveLength(1);
   expect(host.textContent).toContain("write");

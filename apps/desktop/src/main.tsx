@@ -369,8 +369,14 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
 }
 
 async function start() {
-  // On macOS the title bar overlays the window (tauri.conf.json), so the rail leaves room for the
-  // window controls. Other platforms keep their native title bar.
+  // Until the Tauri shell is removed, its window gets the same `window.supertag` the Electron
+  // preload exposes.
+  if (!window.supertag && "__TAURI_INTERNALS__" in window) {
+    const { installTauriBridge } = await import("../src-tauri/bridge");
+    installTauriBridge();
+  }
+  // On macOS the title bar overlays the window (electron/main.ts), so the rail leaves room for
+  // the window controls. Other platforms keep their native title bar.
   if (navigator.userAgent.includes("Macintosh"))
     document.documentElement.dataset.titlebar = "overlay";
   const target = document.getElementById("app");

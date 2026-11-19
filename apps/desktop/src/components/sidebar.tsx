@@ -218,7 +218,7 @@ export function Sidebar({
 
   return (
     <nav id="sidebar" className="sidebar" data-mode={mode} aria-label="Tags">
-      <div className="sidebar-top" data-tauri-drag-region>
+      <div className="sidebar-top drag-region">
         {expanded && (
           <div className="sidebar-top-actions">
             {search}
@@ -245,7 +245,7 @@ export function Sidebar({
             {expanded && <span className="lead-name">{tagName(lead)}</span>}
           </Button>
         ) : (
-          <img className="sidebar-mascot" src={mascot} alt="SuperTag" data-tauri-drag-region />
+          <img className="sidebar-mascot drag-region" src={mascot} alt="SuperTag" />
         )}
       </div>
       <div className="sidebar-divider" aria-hidden />

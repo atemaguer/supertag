@@ -82,9 +82,10 @@ command installed beside it (else the one on `PATH`) with the internal
 `supertag __local-gateway`, so the CLI's own code checks the state directory: it must be
 private to this user, the supervisor must hold its lock, and the endpoint must be a loopback
 address. The command prints one JSON object to a pipe and refuses a terminal:
-`{"protocol": "local-gateway.v1", "running": true, "state_directory": ..., "url": ...,
-"token": ...}`, or `"running": false` with a `message` naming the command that starts it.
-`core/crates/cli/tests/local_gateway.rs` pins that format.
+`{"protocol": "local-gateway.v2", "running": true, "state_directory": ..., "set_up": ...,
+"machine_id": ..., "url": ..., "token": ...}`, or `"running": false` with a `message` naming the
+command that starts it. The terminal UI ignores `set_up` and `machine_id`, which the desktop app
+reads. `core/crates/cli/tests/local_gateway.rs` pins that format.
 
 The local operator token is read again each time you choose Local and is never saved, because
 `supertag up` may replace it; Local cannot be edited, saved, or forgotten. Choosing Local leaves
