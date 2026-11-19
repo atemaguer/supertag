@@ -18,12 +18,14 @@ import {
   type WebContents,
 } from "electron";
 import { NOTIFICATION_CLICK } from "./channels";
-import { handlers } from "./handlers";
+import { handlers, notPorted } from "./handlers";
 import { originOf, registerChannels, Streams } from "./ipc";
+import type { AppIdentity } from "./local/cli";
+import { PROTOCOL_VERSIONS, probe } from "./local/negotiate";
 import { menuTemplate } from "./menu";
 import { configDirectory } from "./paths";
 import { APP_ORIGIN, APP_SCHEME, APP_URL, appResponse, contentSecurityPolicy } from "./protocol";
-import { chooseFolder, Notifications, webUrl } from "./shell";
+import { chooseFolder, FOLDER_TITLES, Notifications, webUrl } from "./shell";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const mac = process.platform === "darwin";
@@ -55,6 +57,17 @@ protocol.registerSchemesAsPrivileged([
 ]);
 // Chromium's own state sits beside the saved Gateways, in the directory the CLI reads them from.
 app.setPath("userData", configDirectory());
+
+/**
+ * This release and where it runs from, for the CLI it runs: the packaged app's bundled CLI is in
+ * its resources; in development there is none, and the CLI on PATH must be this version.
+ */
+const appIdentity: AppIdentity = {
+  version: app.getVersion(),
+  execPath: process.execPath,
+  resourcesPath: development ? undefined : process.resourcesPath,
+  env: process.env,
+};
 
 let mainWindow: BrowserWindow | undefined;
 const streams = new Streams();
@@ -165,14 +178,26 @@ function start() {
 
   registerChannels(
     ipcMain,
-    handlers({
-      notify: (request) => notifications.show(request),
-      setBadge: (count) => {
-        app.setBadgeCount(count);
+    handlers(
+      {
+        notify: (request) => notifications.show(request),
+        setBadge: (count) => {
+          app.setBadgeCount(count);
+        },
+        openExternal: (url) => shell.openExternal(url),
+        chooseFolder: () => chooseFolder(dialog, mainWindow),
       },
-      openExternal: (url) => shell.openExternal(url),
-      chooseFolder: () => chooseFolder(dialog, mainWindow),
-    }),
+      {
+        app: appIdentity,
+        protocolVersions: PROTOCOL_VERSIONS,
+        probe: (url, token) => probe(url, token, app.getVersion()),
+        chooseWorkspaceFolder: () => chooseFolder(dialog, mainWindow, FOLDER_TITLES.workspace),
+        // The Gateway backend answers which connection is the local Gateway's.
+        localStateOf: async () => {
+          throw notPorted("addLocalWorkspace");
+        },
+      },
+    ),
     { mainWindow: mainContents, trusted, streams },
   );
 

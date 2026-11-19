@@ -70,13 +70,20 @@ export class Notifications {
   }
 }
 
-/** Asks for the project folder with the system's folder picker; null when cancelled. */
+/** The folder pickers' titles. */
+export const FOLDER_TITLES = {
+  project: "Choose your project folder",
+  workspace: "Choose a git repository to add as a Workspace",
+} as const;
+
+/** Asks for a folder with the system's folder picker; null when cancelled. */
 export async function chooseFolder(
   dialog: Pick<Dialog, "showOpenDialog">,
   window: BrowserWindow | undefined,
+  title: string = FOLDER_TITLES.project,
 ): Promise<string | null> {
   const options = {
-    title: "Choose your project folder",
+    title,
     properties: ["openDirectory", "createDirectory"] as ("openDirectory" | "createDirectory")[],
   };
   const result = window

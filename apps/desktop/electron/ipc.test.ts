@@ -11,6 +11,7 @@ import {
   Streams,
   trustedSender,
 } from "./ipc";
+import type { LocalDependencies } from "./local/handlers";
 
 type Event = Pick<IpcMainInvokeEvent, "sender" | "senderFrame">;
 
@@ -81,7 +82,7 @@ it("defines an origin for the custom app scheme", () => {
 
 it("registers exactly the table's channels", () => {
   const registered: string[] = [];
-  registerChannels({ handle: (channel) => registered.push(channel) }, handlers(shell()), {
+  registerChannels({ handle: (channel) => registered.push(channel) }, handlers(shell(), local()), {
     mainWindow: () => undefined,
     trusted,
     streams: new Streams(),
@@ -104,6 +105,19 @@ function shell() {
   };
 }
 
+/** The local services' dependencies, finding no CLI. */
+function local(): LocalDependencies {
+  return {
+    app: { version: "0.0.0", execPath: process.execPath, env: { PATH: "" } },
+    protocolVersions: [6],
+    probe: async () => undefined,
+    chooseWorkspaceFolder: async () => null,
+    localStateOf: async () => {
+      throw "not the local Gateway";
+    },
+  };
+}
+
 function setup(table: Handlers) {
   const main = contents("app://supertag/index.html");
   const streams = new Streams();
@@ -115,7 +129,7 @@ function setup(table: Handlers) {
 
 it("refuses an untrusted caller before any handler runs, and malformed arguments", async () => {
   const fake = shell();
-  const { call } = setup(handlers(fake));
+  const { call } = setup(handlers(fake, local()));
   const remote = contents("https://untrusted.example/");
   expect(await call("openExternal", { url: "https://example.com" }, undefined, remote)).toEqual({
     ok: false,
@@ -129,7 +143,7 @@ it("refuses an untrusted caller before any handler runs, and malformed arguments
 
 it("answers with the handler's value, or its own message, never an internal error", async () => {
   const fake = shell();
-  const { call } = setup(handlers(fake));
+  const { call } = setup(handlers(fake, local()));
   expect(await call("chooseProjectFolder", {})).toEqual({ ok: true, value: "/tmp/project" });
   expect(await call("listGateways", {})).toEqual({ ok: false, error: notPorted("listGateways") });
   expect(await call("openExternal", { url: "javascript:alert(1)" })).toEqual({
@@ -144,7 +158,7 @@ it("answers with the handler's value, or its own message, never an internal erro
 
   const log = vi.spyOn(console, "error").mockImplementation(() => {});
   const broken = {
-    ...handlers(fake),
+    ...handlers(fake, local()),
     listTags: async () => {
       throw new Error("upstream detail: token abc");
     },
@@ -159,7 +173,7 @@ it("pushes stream updates under the preload's key until the stream ends", async 
   let pushed: ((update: unknown) => void) | undefined;
   const stopped = vi.fn();
   const table: Handlers = {
-    ...handlers(shell()),
+    ...handlers(shell(), local()),
     async startGatewayWatch(_args, stream) {
       pushed = (update) => stream.send(update as never);
       stream.onEnd(stopped);

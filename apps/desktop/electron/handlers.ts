@@ -1,10 +1,11 @@
 /**
- * The main process's handler for every channel. The shell's own channels work here; the Gateway
- * connection, the local services and onboarding are still the Tauri app's Rust backend and are
- * ported onto `supertag-ai` next, so until then they refuse with one clear message.
+ * The main process's handler for every channel. The shell's own channels and the local services
+ * and onboarding (`local/`) work here; the Gateway connection is still the Tauri app's Rust
+ * backend and is ported onto `supertag-ai` next, so until then it refuses with one clear message.
  */
 import type { Channel, NotificationRequest } from "./channels";
 import type { Handlers } from "./ipc";
+import { type LocalDependencies, localHandlers } from "./local/handlers";
 import { badgeCount, notificationRequest, webUrl } from "./shell";
 
 export interface Shell {
@@ -19,7 +20,7 @@ export function notPorted(name: Channel): string {
   return `The Electron desktop app can't do this yet: ${name} is not yet ported.`;
 }
 
-export function handlers(shell: Shell): Handlers {
+export function handlers(shell: Shell, local: LocalDependencies): Handlers {
   const missing = (name: Channel) => async (): Promise<never> => {
     throw notPorted(name);
   };
@@ -43,7 +44,6 @@ export function handlers(shell: Shell): Handlers {
     tagActivity: missing("tagActivity"),
     listTagOptions: missing("listTagOptions"),
     createTag: missing("createTag"),
-    addLocalWorkspace: missing("addLocalWorkspace"),
     listNotes: missing("listNotes"),
     deleteNote: missing("deleteNote"),
     listNetworkLogs: missing("listNetworkLogs"),
@@ -55,14 +55,8 @@ export function handlers(shell: Shell): Handlers {
     revealTaskFile: missing("revealTaskFile"),
     readCache: missing("readCache"),
     writeCache: missing("writeCache"),
-    localStartNeeded: missing("localStartNeeded"),
-    startLocalServices: missing("startLocalServices"),
-    localCliProblem: missing("localCliProblem"),
-    localGatewayUpgrade: missing("localGatewayUpgrade"),
-    restartLocalServices: missing("restartLocalServices"),
-    checkSetup: missing("checkSetup"),
     chooseProjectFolder: () => shell.chooseFolder(),
-    setUpSupertag: missing("setUpSupertag"),
+    ...localHandlers(local),
     async notify(args) {
       const request = notificationRequest(args);
       if (request) shell.notify(request);

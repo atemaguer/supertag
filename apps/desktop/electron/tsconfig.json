@@ -5,7 +5,7 @@
     "emitDeclarationOnly": true,
     "declarationMap": false,
     "sourceMap": false,
-    "rootDir": "..",
+    "rootDir": "../../..",
     "outDir": "../dist-electron/types",
     "tsBuildInfoFile": "../dist-electron/types/.tsbuildinfo",
     "module": "Preserve",
@@ -13,5 +13,14 @@
     "lib": ["ES2024", "DOM"],
     "types": ["node"]
   },
-  "include": ["*.ts", "../src/gateway.ts", "../src/tag-admin.ts", "../src/desktop.ts"]
+  "include": [
+    "*.ts",
+    "local/*.ts",
+    "../../../sdks/typescript/src/gateway-client.ts",
+    "../../../sdks/typescript/src/tunnel.ts",
+    "../../../harnesses/sdk/src/rust-harness/gen/**/*.ts",
+    "../src/gateway.ts",
+    "../src/tag-admin.ts",
+    "../src/desktop.ts"
+  ]
 }
