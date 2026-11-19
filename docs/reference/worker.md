@@ -81,7 +81,9 @@ connection to the Control Plane and no fallback to it.
 When the data endpoint is unreachable, each data call fails with `the data endpoint URL is
 unreachable: REASON` and is retried, as calls to an unreachable Control Plane are. The Worker
 logs `a data call will be retried` with that reason once per call, and keeps retrying while the
-Task Attempt's lease lasts. A data endpoint the Worker cannot dial at all, such as a cleartext
+Task Attempt's lease lasts. A Worker whose calls before launch keep failing hands its Task
+Attempt back to the Worklet, which starts the next Worker after a wait that doubles from one second
+up to 30 seconds. A data endpoint the Worker cannot dial at all, such as a cleartext
 `http://` URL outside loopback, stops the Worker with `the data endpoint URL is not usable:
 REASON`. After three Workers stop that way before launching the harness, the Task Attempt fails.
 

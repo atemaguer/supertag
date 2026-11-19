@@ -53,6 +53,19 @@ use crate::{
 /// turn's captures, before the Worklet fails the Attempt instead of starting another.
 const PRELAUNCH_DEATHS: u32 = 3;
 
+/// The longest a slot waits before it starts another Worker for an Attempt whose Workers keep
+/// handing back Retry before launch, for example while its data endpoint is unreachable.
+const RETRY_BACKOFF_MAX: Duration = Duration::from_secs(30);
+
+/// How long to wait before the next Worker after `retries` consecutive Retry outcomes: none after
+/// the first, then 1 s doubling to [`RETRY_BACKOFF_MAX`].
+fn retry_backoff(retries: u32) -> Duration {
+    if retries <= 1 {
+        return Duration::ZERO;
+    }
+    Duration::from_secs(1u64 << (retries - 2).min(5)).min(RETRY_BACKOFF_MAX)
+}
+
 /// What every slot of the Worklet shares.
 struct Worklet {
     options: WorkletOptions,
@@ -743,6 +756,8 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
     let retire = &slot.retire;
     // How often a Worker of the Attempt now Starting died before it launched the harness.
     let mut deaths: (String, u32) = (String::new(), 0);
+    // How many Workers of the Attempt now Starting handed back Retry in a row.
+    let mut retries: (String, u32) = (String::new(), 0);
     while !shutdown.is_cancelled() {
         let entry = match journal.load()? {
             Some(entry) => entry,
@@ -904,7 +919,20 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                         }
                     }
                 } else if end.outcome == Some(OutcomeKind::Retry) {
-                    // The Worker waited already; resume the entry now.
+                    // A Retry is not a death, so it never fails the Attempt; back off instead, so
+                    // an outage that outlasts the Worker's own wait does not start a Worker every
+                    // few hundred milliseconds for as long as the lease holds.
+                    if retries.0 != attempt_id {
+                        retries = (attempt_id.clone(), 0);
+                    }
+                    retries.1 += 1;
+                    let wait = retry_backoff(retries.1);
+                    if !wait.is_zero() {
+                        tokio::select! {
+                            _ = tokio::time::sleep(wait) => {}
+                            _ = shutdown.cancelled() => {}
+                        }
+                    }
                 }
             }
             Entry::Executing { attempt, prepared } => {
@@ -1941,5 +1969,20 @@ trait EncodeMessage {
 impl<T: Message> EncodeMessage for T {
     fn encode(&self) -> Vec<u8> {
         self.encode_to_vec()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeated_retries_back_off_to_a_ceiling() {
+        assert_eq!(retry_backoff(1), Duration::ZERO);
+        assert_eq!(retry_backoff(2), Duration::from_secs(1));
+        assert_eq!(retry_backoff(3), Duration::from_secs(2));
+        assert_eq!(retry_backoff(6), Duration::from_secs(16));
+        assert_eq!(retry_backoff(7), RETRY_BACKOFF_MAX);
+        assert_eq!(retry_backoff(40), RETRY_BACKOFF_MAX);
     }
 }
