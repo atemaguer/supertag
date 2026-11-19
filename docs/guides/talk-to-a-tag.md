@@ -234,8 +234,10 @@ another member. See [Define and complete an Objective](objectives.md).
 
 ## Send messages from scripts
 
-Scripts send a turn with `supertag task submit`. A Session name is the conversation: a new name
-starts one, and reusing it continues it.
+Scripts send a turn with `supertag task submit`. A Session name is the thread: a new name
+starts one, and reusing it continues it. These Sessions are separate from your conversation with
+the Tag: they don't appear in the terminal UI or the desktop app, and `task submit` refuses the
+conversation's own Session. To talk in your conversation, use the terminal UI or the desktop app.
 
 ```sh
 supertag task submit --tag lead --session release-notes "Draft the release notes for 2.4."
@@ -255,7 +257,7 @@ For a coding agent that operates SuperTag from a separate conversation, see
 Your conversation shows under its Tag with its latest message, and the terminal UI and the
 desktop app mark replies you have not read. The desktop app's Dock badge and the terminal UI's
 status line count them; see [Notifications in the apps](#notifications-in-the-apps). An Objective's conversation is titled by the Objective. A work Session the Tag started appears
-beneath the conversation that started it; `supertag get session --parent-session SESSION_ID`
+beneath the conversation that started it; `supertag get session --parent-tag lead --parent-session SESSION_ID`
 lists them, and `supertag describe session ID` shows one with its latest Task and report.
 
 ## Rules

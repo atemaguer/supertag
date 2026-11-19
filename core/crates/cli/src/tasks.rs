@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use clap::{Subcommand, ValueEnum};
 use serde_json::{Value, json};
 use supertag_protocol::negotiation::ProtocolChannel;
@@ -132,6 +132,10 @@ pub async fn run(connection: Connection, command: TaskCommand) -> Result<()> {
             artifact_publication,
             prompt,
         } => {
+            ensure!(
+                !conversation_session(&session),
+                "{session} is your conversation with {tag}, which the terminal UI and desktop app show; send to it there. task submit runs a separate Session: name another --session."
+            );
             let (mut operator, token) = crate::operator(connection).await?;
             let max_reported_cost = max_reported_cost_minor.zip(reported_cost_currency).map(
                 |(amount_minor, currency)| ReportedCostLimit {
@@ -274,6 +278,11 @@ pub async fn run(connection: Connection, command: TaskCommand) -> Result<()> {
     Ok(())
 }
 
+/// A Session of a Tag's conversation, which only the Conversations service sends to.
+fn conversation_session(session: &str) -> bool {
+    session.starts_with("conversation/")
+}
+
 /// A queued Task also names what keeps every bound Worker Host from taking it, as
 /// `supertag placement explain` does, when the caller may read placement.
 /// `supertag get tasks`: recent Tasks, newest first.
@@ -347,4 +356,13 @@ pub(crate) async fn fetch(channel: ProtocolChannel, token: &str, task_id: String
         }
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn conversation_sessions_are_refused_before_any_call() {
+        assert!(super::conversation_session("conversation/8fa5d323"));
+        assert!(!super::conversation_session("first-look"));
+    }
 }

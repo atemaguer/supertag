@@ -547,7 +547,8 @@ pub async fn up(options: Background) -> Result<()> {
     for line in migrations(&state, since) {
         outln!("{line}");
     }
-    summary(&state, &status);
+    // The directory as given, as the other paths print it, not its resolved form.
+    summary(&options.state, &status);
     outln!(
         "Follow the logs with supertag logs -f, list services with supertag ps, and stop with supertag down."
     );
@@ -829,12 +830,29 @@ fn log_tail(state: &Path, service: &str, start: u64) -> String {
     let text = String::from_utf8_lossy(text.get(start as usize..).unwrap_or_default());
     let lines: Vec<_> = text.lines().collect();
     let mut tail = lines[lines.len().saturating_sub(20)..].join("\n");
-    if text.contains("Address already in use") {
-        tail.push_str(
-            "\nAnother program is using a port SuperTag listens on. Stop it and run supertag up again. (Before the first supertag up, you can instead choose another port under services.control-plane.ports in supertag.yaml.)",
-        );
-    }
+    tail.push_str(&port_taken_hint(&text));
     tail
+}
+
+/// For a service that could not listen because another program holds its port, which address
+/// that is and what to do; empty otherwise.
+fn port_taken_hint(log: &str) -> String {
+    if !log.contains("Address already in use") {
+        return String::new();
+    }
+    let taken = log
+        .split("could not listen on ")
+        .nth(1)
+        .and_then(|rest| rest.split(|c: char| c.is_whitespace() || c == ',').next())
+        .map(|address| address.trim_end_matches(':'))
+        .filter(|address| !address.is_empty());
+    let which = match taken {
+        Some(address) => format!("Another program is using {address}, which SuperTag listens on."),
+        None => "Another program is using a port SuperTag listens on.".to_owned(),
+    };
+    format!(
+        "\n{which} Stop it and run supertag up again. (Before the first supertag up, you can instead choose another port under services.control-plane.ports in supertag.yaml.)"
+    )
 }
 
 /// Why `stop` stopped a supervisor without draining its hosts through its Control Plane.
@@ -1246,6 +1264,7 @@ struct SupervisorRow {
 /// `supertag ps`: the supervisor and each service it runs, or the configured services as stopped.
 pub async fn ps(args: PsArgs) -> Result<()> {
     let state = local_config::state_directory(args.state_directory)?;
+    let named_file = args.file.is_some();
     let supervisor = inspect(&state)?;
     let mut services = Vec::new();
     let mut supervisor_row = None;
@@ -1345,6 +1364,14 @@ pub async fn ps(args: PsArgs) -> Result<()> {
     };
     match args.output {
         Output::Json => crate::terminal::print_json_pretty(&report)?,
+        // Nothing runs and nothing is set up: say how to set SuperTag up, not that it stopped.
+        Output::Text
+            if matches!(supervisor, Supervisor::Stopped)
+                && !named_file
+                && !supertag_local_state::set_up(&state) =>
+        {
+            outln!("{}", supertag_local_state::not_set_up(&state))
+        }
         Output::Text => out!("{}", format_ps(&report, &supervisor)),
     }
     Ok(())
@@ -1696,6 +1723,28 @@ const MAX_PARTIAL_LOG_LINE: usize = 64 * 1024;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_taken_port_is_named() {
+        let hint = port_taken_hint(
+            "Error: could not listen on 127.0.0.1:3434: Address already in use (os error 48)",
+        );
+        assert!(
+            hint.starts_with(
+                "\nAnother program is using 127.0.0.1:3434, which SuperTag listens on."
+            ),
+            "{hint}"
+        );
+        let hint = port_taken_hint(
+            "Error: could not listen on [::1]:3435\n\nCaused by:\n    Address already in use (os error 48)",
+        );
+        assert!(hint.contains("using [::1]:3435, which"), "{hint}");
+        assert!(
+            port_taken_hint("Error: bind: Address already in use")
+                .contains("a port SuperTag listens on")
+        );
+        assert_eq!(port_taken_hint("Error: something else"), "");
+    }
 
     #[test]
     fn a_status_removed_while_it_is_read_counts_as_absent() {

@@ -19,8 +19,9 @@ supertag ps
 supertag status
 ```
 
-`ps` should show `control-plane`, each host, and, once a surface or notification is configured,
-`gateway` as `running`. If a service stopped, run `supertag up` and read its log with
+`ps` should show `control-plane`, `gateway`, and each host as `running`. The CLI, the terminal
+UI, and the desktop app all connect through the Gateway. If `ps` says SuperTag isn't set up on
+this machine yet, run `supertag init` in your git repository. If a service stopped, run `supertag up` and read its log with
 `supertag logs control-plane`, `supertag logs gateway`, or `supertag logs HOST`. For a shared
 deployment, run `supertag verify deployment URL --env-file operator.env`.
 
@@ -32,9 +33,14 @@ reconnects on its own, and messages you sent in the meantime are sent once Super
 To have SuperTag started again after a failure without you, set `restart: unless-stopped`; see
 [Run as a service](../operations/cli.md#run-as-a-service).
 
-If a command says `no local Control Plane is running`, start the local services with
+If a command says `no local Gateway is running`, start the local services with
 `supertag up`, or pass `--gateway URL` or the `--gateway NAME` of a saved
-Gateway.
+Gateway. If it says SuperTag isn't set up on this machine yet, there is no `supertag.yaml` in the
+state directory: run `supertag init` in your git repository first.
+
+If `supertag up` says another program is using an address, such as `127.0.0.1:3434`, stop that
+program, or choose another port under `services.control-plane.ports` in `supertag.yaml` before
+the first `supertag up`.
 
 ## 2. Check the Surface Account
 

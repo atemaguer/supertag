@@ -90,7 +90,9 @@ The local operator token is read again each time you choose Local and is never s
 `supertag up` may replace it; Local cannot be edited, saved, or forgotten. Choosing Local leaves
 no saved Gateway selected, so the next launch opens Local again. Ctrl-P checks again, so a
 Local Gateway started after launch appears; when none runs, the list says so and how to
-start one (`supertag up`), and the saved Gateways stay available.
+start one (`supertag up`, or `supertag init` when this machine isn't set up yet), and the saved
+Gateways stay available. With no Tags on the Local Gateway, the conversation pane names
+`supertag init`; on other Gateways it names Ctrl-N and `supertag tag put`.
 
 Open Objectives show their status, owner, deadline, and available spend information. Send
 `/goal <outcome>` in a Tag's conversation to create an Objective or press `m` in an Objective to

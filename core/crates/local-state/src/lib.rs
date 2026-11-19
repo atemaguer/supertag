@@ -26,6 +26,10 @@ pub const CREDENTIALS: &str = "credentials.json";
 pub const STATE_LOCK: &str = ".lock";
 /// What to run when no local Control Plane is running.
 pub const START_COMMAND: &str = "supertag up";
+/// The local services' configuration, which `supertag init` writes.
+pub const CONFIG: &str = "supertag.yaml";
+/// What to run when this machine has no local setup.
+pub const SET_UP_COMMAND: &str = "supertag init";
 
 /// The local state directory: `explicit`, else `SUPERTAG_STATE_DIR`, else `~/.supertag`. A
 /// relative directory is resolved from the current directory, so the services `supertag up`
@@ -86,8 +90,29 @@ pub fn gateway(state_directory: &Path) -> Result<Option<LocalConnection>> {
     discover(state_directory, GATEWAY_ENDPOINT)
 }
 
-/// Why no local Gateway is available from `state_directory`, as one sentence.
+/// Whether SuperTag is set up in `state_directory`: it holds the supertag.yaml `supertag init`
+/// writes, or the credentials of services `supertag up` started there before, as from flags
+/// alone.
+pub fn set_up(state_directory: &Path) -> bool {
+    [CONFIG, CREDENTIALS]
+        .iter()
+        .any(|file| fs::symlink_metadata(state_directory.join(file)).is_ok())
+}
+
+/// That `state_directory` has no local setup yet, and how to make one, as one sentence.
+pub fn not_set_up(state_directory: &Path) -> String {
+    format!(
+        "SuperTag isn't set up on this machine yet (no {CONFIG} in {}). Run {SET_UP_COMMAND} in a git repository.",
+        state_directory.display()
+    )
+}
+
+/// Why no local Gateway is available from `state_directory`, as one sentence: with no local
+/// setup, how to make one, else how to start it.
 pub fn not_running(state_directory: &Path) -> String {
+    if !set_up(state_directory) {
+        return not_set_up(state_directory);
+    }
     format!(
         "No local Gateway is running from {}. Start it with {START_COMMAND}.",
         state_directory.display()
@@ -397,7 +422,10 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        assert!(not_running(&root.path().join("absent")).contains(START_COMMAND));
+        assert!(not_running(&root.path().join("absent")).contains(SET_UP_COMMAND));
+        // A setup that is stopped is started, not set up again.
+        fs::write(root.path().join(CONFIG), "").unwrap();
+        assert!(not_running(root.path()).contains(START_COMMAND));
 
         let (root, _lock) = running_state();
         let state = root.path().join("state");

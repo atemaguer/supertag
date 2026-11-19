@@ -70,7 +70,8 @@ sandbox. To run a Codex host's Tasks in containers anyway, add `environment: loc
 service in supertag.yaml and run `supertag up`. Each image then gets the host's Codex version;
 see [local-vm containers](../reference/supertag-yaml.md#local-vm-containers).
 
-The `local-tools` Permission Set grants `files:read` and `files:write`, plus `commands:execute` when the host may run
+The `local-tools` Permission Set grants `files:read`, `files:write`, and `schedule:create`, which lets
+the lead set [Schedules](../reference/coordination.md#schedules), wake-ups for itself, plus `commands:execute` when the host may run
 the lead's commands, which it always may on Codex. For a Codex `lead`, it also grants `web:fetch`,
 and `init` says so: current Codex models run commands only in Codex
 code mode, which SuperTag starts only for Tasks that may also fetch from the web. Code-mode
@@ -92,12 +93,13 @@ A script or app can run `init` without a terminal:
 - `supertag init --check --json --directory PATH` prints what `init` would find, and changes
   nothing: whether `PATH` is a Git repository with commits, and its branch; for each harness
   (Codex, Claude Code, Cursor, OpenCode), whether it is installed, signed in with the credentials
-  a Worker Host would use, and, for a harness that runs through Node.js, whether that Node.js can
-  run it; and whether `~/.supertag/supertag.yaml` exists and already maps the repository. Each
+  a Worker Host would use, and, for a harness that runs through Node.js, whether that Node.js and
+  the Node bridge installed beside `supertag` can run it; and whether `~/.supertag/supertag.yaml` exists and already maps the repository. Each
   problem carries one plain `fix` line and, when the fix is a command, that command as
   `fix_command`; each harness also has an `install_url`. A sign-in check that takes longer than 30
   seconds is reported as unknown. `ready` is true when the folder and at least one checked harness
-  are usable. Add `--harness codex` to check only that harness.
+  are usable. Add `--harness codex` to check only that harness. Without `--json`,
+  `supertag init --check` prints the same findings as readable text.
 - `supertag init --yes --harness codex --directory PATH` (or `--harness claude-code`) sets up that
   folder with that harness and starts SuperTag, as `init` does. It stops before writing anything
   when the harness is not installed or not signed in. On a machine that is already set up, it adds
@@ -201,6 +203,8 @@ The terminal UI and the desktop app find the local Control Plane on their own. W
 and connects with the local operator token, with nothing to enter. With no saved Control Plane
 last used, each opens Local at launch. The token is read at each connect and never saved. When no
 local Control Plane runs, they say so, name `supertag up`, and offer the saved Control Planes.
+When SuperTag isn't set up in that state directory yet, they name `supertag init` instead, as
+`supertag ps` and every operator command do.
 The desktop app goes one step further at launch: when SuperTag is set up in that state directory
 but its services are stopped, and no saved Control Plane was last used, it shows "Starting
 SuperTag…", runs `supertag up` itself with your login shell's `PATH` (the copy bundled with the
@@ -210,8 +214,11 @@ where the logs are.
 
 ## Send messages from the CLI
 
-`task submit` sends one turn of work to a Tag. A new Session name starts a new conversation;
-reusing it continues one:
+`task submit` sends one turn of work to a Tag. A new Session name starts a new Session;
+reusing it continues one. These Sessions are separate from your conversation with the Tag in the
+terminal UI and the desktop app, and don't appear there. `task submit` refuses that
+conversation's own Session, so talk in your conversation from the terminal UI or the desktop
+app:
 
 ```sh
 supertag task submit --tag lead --session first-look \

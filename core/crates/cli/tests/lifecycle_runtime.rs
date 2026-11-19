@@ -188,10 +188,11 @@ fn write_yaml(path: &Path, value: &Value) -> Result<()> {
 fn background_up_runs_until_down_and_reports_through_ps_logs_status_and_version() -> Result<()> {
     let machine = Machine::new()?;
     let state = machine.state.to_str().unwrap().to_owned();
+    // Nothing is set up yet, so ps names supertag init.
+    let ps = machine.ok(&["ps"])?;
     assert!(
-        machine
-            .ok(&["ps"])?
-            .contains("SuperTag is not running on this machine.")
+        ps.contains("SuperTag isn't set up on this machine yet") && ps.contains("supertag init"),
+        "{ps}"
     );
     assert!(
         machine
@@ -761,7 +762,7 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
         "{failed}"
     );
     assert_eq!(
-        failed["fix_command"], "npm install -g @anthropic-ai/claude-code",
+        failed["fix_command"], "curl -fsSL https://claude.ai/install.sh | bash",
         "{failed}"
     );
     let output = init(&["--yes", "--json", "--harness", "codex"])?;

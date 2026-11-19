@@ -142,6 +142,11 @@ func (m model) renderConversation() string {
 		case m.tagsErr != nil:
 			return wrap.Render("Could not check for Tags on this Gateway.\n\n" + terminalText(m.tagsErr.Error()))
 		default:
+			if m.tagAdminRefusal() == "" && m.client.Target().Name == localName {
+				// This machine's own setup: init makes the lead Tag for a repository.
+				return wrap.Render("No Tags are set up on this machine yet.\n\n" +
+					"Run supertag init in a git repository, or press ctrl+n to create a Tag.")
+			}
 			if m.tagAdminRefusal() == "" {
 				return wrap.Render("No Tags are set up on this Gateway.\n\n" +
 					"Press ctrl+n to create one, or run supertag tag put --help for setup.")

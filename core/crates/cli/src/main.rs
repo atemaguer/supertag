@@ -786,10 +786,34 @@ fn main() -> std::process::ExitCode {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => {
             // Errors carry text from services, surfaces and files; filter it for the terminal.
-            errln!("Error: {error:?}");
+            errln!("Error: {}", error_text(&error));
             std::process::ExitCode::FAILURE
         }
     }
+}
+
+/// An error as `{:?}` prints it, except that a gRPC status from a service shows only its
+/// message: "code: 'The system is not in a state…', message: …" tells a person nothing more.
+fn error_text(error: &anyhow::Error) -> String {
+    let causes: Vec<String> = error
+        .chain()
+        .map(|cause| match cause.downcast_ref::<tonic::Status>() {
+            Some(status) if !status.message().is_empty() => status.message().to_owned(),
+            _ => cause.to_string(),
+        })
+        .collect();
+    let mut text = causes[0].clone();
+    match &causes[1..] {
+        [] => {}
+        [cause] => text.push_str(&format!("\n\nCaused by:\n    {cause}")),
+        causes => {
+            text.push_str("\n\nCaused by:");
+            for (index, cause) in causes.iter().enumerate() {
+                text.push_str(&format!("\n    {index}: {cause}"));
+            }
+        }
+    }
+    text
 }
 
 /// Help and version text is the CLI's own. A usage error can repeat what was typed, so it is
@@ -1012,7 +1036,8 @@ async fn run(command: Command) -> Result<()> {
             if config.is_none() {
                 ensure!(
                     adapter.is_selected(),
-                    "select a harness, an adapter, or a local services file; supertag init writes one"
+                    "{} Or name a local services file with --file, or a harness with --harness.",
+                    supertag_local_state::not_set_up(&state_directory)
                 );
             }
             if !foreground {
@@ -1682,7 +1707,7 @@ async fn control_plane(
         transfers =
             transfers.with_workspace_git(std::sync::Arc::new(WorkspaceGit(delivery.clone())));
     }
-    let listener = TcpListener::bind(listen).await?;
+    let listener = listen_on(listen).await?;
     outln!("{}", listener.local_addr()?);
     let tunnel = bind_websocket(websocket).await?;
     let maintenance = plane.clone();
@@ -2019,11 +2044,19 @@ async fn state_owner(
 }
 
 /// Binds the optional WebSocket tunnel listener and reports its address.
+/// A listener on `address`; the error names it, so `supertag up` can say which port is taken.
+async fn listen_on(address: SocketAddr) -> Result<TcpListener> {
+    // One message, not a context: the supervisor reports only a service's first line.
+    TcpListener::bind(address)
+        .await
+        .map_err(|error| anyhow::anyhow!("could not listen on {address}: {error}"))
+}
+
 async fn bind_websocket(address: Option<SocketAddr>) -> Result<Option<TcpListener>> {
     let Some(address) = address else {
         return Ok(None);
     };
-    let listener = TcpListener::bind(address).await?;
+    let listener = listen_on(address).await?;
     outln!("{}", listener.local_addr()?);
     Ok(Some(listener))
 }
@@ -2100,7 +2133,7 @@ async fn gateway(
             )
             .await?;
             let listener = match ingress {
-                SlackIngress::Http(address) => Some(TcpListener::bind(address).await?),
+                SlackIngress::Http(address) => Some(listen_on(address).await?),
                 SlackIngress::Socket => None,
             };
             Some((connector, listener))
@@ -2115,7 +2148,7 @@ async fn gateway(
             );
             let connector =
                 github_connector(channel.clone(), gateway_token.clone(), state_directory).await?;
-            Some((connector, TcpListener::bind(address).await?))
+            Some((connector, listen_on(address).await?))
         }
         None => None,
     };
@@ -2127,7 +2160,7 @@ async fn gateway(
             );
             let connector =
                 linear_connector(channel.clone(), gateway_token.clone(), state_directory).await?;
-            Some((connector, TcpListener::bind(address).await?))
+            Some((connector, listen_on(address).await?))
         }
         None => None,
     };
@@ -2140,7 +2173,7 @@ async fn gateway(
             let connector =
                 microsoft_teams_connector(channel.clone(), gateway_token.clone(), state_directory)
                     .await?;
-            Some((connector, TcpListener::bind(address).await?))
+            Some((connector, listen_on(address).await?))
         }
         None => None,
     };
@@ -2165,7 +2198,7 @@ async fn gateway(
     health
         .set_serving::<supertag_protocol::v2::operator_notification_test_server::OperatorNotificationTestServer<supertag_gateway::notifications::TestNotifications>>()
         .await;
-    let listener = TcpListener::bind(listen).await?;
+    let listener = listen_on(listen).await?;
     outln!("{}", listener.local_addr()?);
     let tunnel = bind_websocket(websocket).await?;
     if let Some((_, Some(listener))) = &slack {
@@ -2828,10 +2861,17 @@ pub(crate) fn environment_gateway() -> Option<String> {
 /// The local Gateway that `supertag up` runs from `directory`.
 fn local_target(directory: &Path) -> Result<OperatorTarget> {
     let (url, token) = local::gateway_connection(directory).with_context(|| {
-        format!(
-            "no local Gateway is running from {}; start one with supertag up, or pass --gateway",
-            directory.display()
-        )
+        if supertag_local_state::set_up(directory) {
+            format!(
+                "no local Gateway is running from {}; start one with supertag up, or pass --gateway",
+                directory.display()
+            )
+        } else {
+            format!(
+                "{} Or pass --gateway to use a shared Gateway.",
+                supertag_local_state::not_set_up(directory)
+            )
+        }
     })?;
     Ok(OperatorTarget {
         url,
@@ -3173,8 +3213,27 @@ fn limits_json(limits: &supertag_protocol::v2::ExecutionLimits) -> serde_json::V
 mod tests {
     use clap::{CommandFactory, Parser};
 
-    use super::{Cli, notice_default_change, usage_error_text};
+    use super::{Cli, error_text, notice_default_change, usage_error_text};
     use crate::{observe::WATCH_EVENT_STREAMS, resources::KINDS};
+
+    #[test]
+    fn a_service_status_shows_only_its_message() {
+        let error = anyhow::Error::new(tonic::Status::failed_precondition("Tag lead is paused"));
+        assert_eq!(error_text(&error), "Tag lead is paused");
+        let error =
+            anyhow::Error::new(tonic::Status::not_found("no Task t-1")).context("read the Task");
+        assert_eq!(
+            error_text(&error),
+            "read the Task\n\nCaused by:\n    no Task t-1"
+        );
+        let error = anyhow::anyhow!("innermost")
+            .context("middle")
+            .context("outer");
+        assert_eq!(
+            error_text(&error),
+            "outer\n\nCaused by:\n    0: middle\n    1: innermost"
+        );
+    }
 
     #[test]
     fn a_replica_says_when_it_replaced_the_shared_notice_default() {

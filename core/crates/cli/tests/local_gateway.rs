@@ -44,7 +44,8 @@ fn prints_the_running_local_gateway_with_its_current_token() {
     assert!(ok);
     assert_eq!(value["protocol"], "local-gateway.v1");
     assert_eq!(value["running"], false);
-    assert!(value["message"].as_str().unwrap().contains("supertag up"));
+    // Nothing is set up there yet, so the message names supertag init.
+    assert!(value["message"].as_str().unwrap().contains("supertag init"));
     assert!(value.get("token").is_none());
 
     fs::DirBuilder::new().mode(0o700).create(&state).unwrap();

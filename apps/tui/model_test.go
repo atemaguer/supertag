@@ -134,6 +134,24 @@ func TestShowsSetupUntilATagExists(t *testing.T) {
 	}
 }
 
+// The local Gateway with no Tags is a machine not set up yet: init makes the lead Tag.
+func TestLocalSetupNamesInit(t *testing.T) {
+	tagRefresh = time.Millisecond
+	fake := &fakeGateway{tags: tags()}
+	server := fake.start(t)
+	c, err := client.New(client.Target{URL: server.URL, Token: "secret", Name: localName}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &client.Follower{Client: c, Interval: time.Millisecond, IdleTimeout: time.Second, ReconnectTimeout: time.Second, WorkTimeout: time.Second}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	m := start(t, update(t, newModel(ctx, c, f, nil), tea.WindowSizeMsg{Width: 100, Height: 30}))
+	if got := screen(m); !strings.Contains(got, "supertag init") || strings.Contains(got, "tag put --help") {
+		t.Fatalf("screen without any Tags on the local Gateway:\n%s", got)
+	}
+}
+
 func TestKeysMoveFocusAndSelection(t *testing.T) {
 	m := start(t, testModel(t, &fakeGateway{tags: tags("lead", "builder")}))
 	m = update(t, m, key(tea.KeyTab))

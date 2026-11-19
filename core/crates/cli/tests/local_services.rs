@@ -419,11 +419,12 @@ async fn operator_commands_default_to_the_local_control_plane(database: String) 
     let output = get_tags(&[("HOME", elsewhere_text)], &[])?;
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
+    // Nothing is set up there, so the error names supertag init.
     assert!(
         stderr.contains(&format!(
-            "no local Gateway is running from {}",
+            "SuperTag isn't set up on this machine yet (no supertag.yaml in {})",
             elsewhere.join(".supertag").display()
-        )) && stderr.contains("supertag up"),
+        )) && stderr.contains("supertag init"),
         "{stderr}"
     );
     let output = get_tags(
@@ -431,10 +432,10 @@ async fn operator_commands_default_to_the_local_control_plane(database: String) 
         &["--state-directory".as_ref(), elsewhere.as_os_str()],
     )?;
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains(&format!(
-        "no local Gateway is running from {}",
-        elsewhere.display()
-    )));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains(&format!("no supertag.yaml in {}", elsewhere.display()))
+    );
     // A selected Control Plane is never replaced by the local one.
     let output = get_tags(
         &[
