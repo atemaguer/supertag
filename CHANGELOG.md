@@ -33,6 +33,8 @@ within the pre-1.0 compatibility policy described in
   Code, Cursor, or OpenCode Tag gets `commands:execute` only when a host lets that harness run
   commands, as `init` does for its lead. Offline hosts no longer add stale harnesses and
   Workspaces to the form.
+- On PostgreSQL, each Control Plane replica's stream push `LISTEN` connection now gets the same
+  TCP keepalives and idle limits as its pool's connections, so PostgreSQL probes it too.
 
 ### Changed
 

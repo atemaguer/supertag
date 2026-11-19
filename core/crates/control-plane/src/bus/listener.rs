@@ -68,10 +68,18 @@ pub(crate) async fn listen(options: PgConnectOptions, live: Arc<Live>, stop: Can
     }
 }
 
-async fn connect(options: &PgConnectOptions) -> sqlx::Result<PgListener> {
+pub(crate) async fn connect(options: &PgConnectOptions) -> sqlx::Result<PgListener> {
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .acquire_timeout(Duration::from_secs(10))
+        // The pool's TCP keepalive and idle limits, so PostgreSQL probes this connection too.
+        .after_connect(|connection, _| {
+            Box::pin(async move {
+                sqlx::Executor::execute(&mut *connection, crate::store::POSTGRES_SESSION_LIMITS)
+                    .await?;
+                Ok(())
+            })
+        })
         .connect_lazy_with(options.clone());
     let mut listener = PgListener::connect_with(&pool).await?;
     listener.listen(CHANNEL).await?;

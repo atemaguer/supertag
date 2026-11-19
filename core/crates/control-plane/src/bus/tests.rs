@@ -414,3 +414,24 @@ async fn replicas(url: &str) -> anyhow::Result<()> {
     b.close().await;
     Ok(())
 }
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_the_listener_connection_gets_the_pools_tcp_keepalives() -> anyhow::Result<()> {
+    let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
+        .ok_or_else(|| anyhow::anyhow!("set SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"))?;
+    let url = std::fs::read_to_string(path)?;
+    let mut listener = listener::connect(&listener::options(url.trim())?).await?;
+    for (setting, value) in [
+        ("idle_in_transaction_session_timeout", "15s"),
+        ("tcp_keepalives_idle", "15"),
+        ("tcp_keepalives_interval", "5"),
+        ("tcp_keepalives_count", "3"),
+    ] {
+        let shown: String = sqlx::query_scalar(&format!("SHOW {setting}"))
+            .fetch_one(&mut listener)
+            .await?;
+        assert_eq!(shown, value, "{setting}");
+    }
+    Ok(())
+}

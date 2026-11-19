@@ -77,7 +77,8 @@ pub(crate) type Result<T> = std::result::Result<T, StoreError>;
 /// froze or lost its network inside a transaction would stall every replica. PostgreSQL ends a
 /// session left idle inside a transaction after 15 seconds and probes a silent client, which
 /// releases the lock. No Control Plane transaction waits on anything but its own statements.
-const POSTGRES_SESSION_LIMITS: &str = "SELECT \
+/// The bus listener's connection, outside the pool, runs them too.
+pub(crate) const POSTGRES_SESSION_LIMITS: &str = "SELECT \
      set_config('idle_in_transaction_session_timeout', '15s', false), \
      set_config('tcp_keepalives_idle', '15', false), \
      set_config('tcp_keepalives_interval', '5', false), \

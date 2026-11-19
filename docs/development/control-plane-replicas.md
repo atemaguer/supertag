@@ -14,11 +14,12 @@ sweep, and reconciler below runs inside such a transaction and decides from dura
 from process memory. IDs are random UUIDs; orders and Watch positions come from database rows.
 
 Because one row lock orders every write, a replica that freezes or loses its network inside a
-transaction would stall every other replica. Each PostgreSQL connection therefore sets
-`idle_in_transaction_session_timeout` to 15 seconds and TCP keepalives of 15 seconds idle, 5
-seconds between probes, and 3 probes (`POSTGRES_SESSION_LIMITS` in `store.rs`). PostgreSQL ends
-such a session and releases its lock; no Control Plane transaction waits on anything but its own
-statements. Other replicas stall for about that long.
+transaction would stall every other replica. Each PostgreSQL connection, the pool's and the
+stream push's `LISTEN` connection alike, therefore sets `idle_in_transaction_session_timeout` to 15
+seconds and TCP keepalives of 15 seconds idle, 5 seconds between probes, and 3 probes
+(`POSTGRES_SESSION_LIMITS` in `store.rs`). PostgreSQL ends such a session and releases its lock;
+no Control Plane transaction waits on anything but its own statements. Other replicas stall for
+about that long.
 
 ## Audit
 
