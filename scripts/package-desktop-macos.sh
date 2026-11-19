@@ -66,6 +66,9 @@ cleanup() {
 trap cleanup EXIT
 printf '%s' "$APPLE_DEVELOPER_ID_P12" | base64 -D > "$work/signing.p12"
 security create-keychain -p "$password" "$keychain"
+# A new keychain locks after five idle minutes, and notarizing the app takes longer than that;
+# codesign then waits for a password prompt nobody can answer. Turn the lock off.
+security set-keychain-settings "$keychain"
 security unlock-keychain -p "$password" "$keychain"
 security import "$work/signing.p12" -k "$keychain" -f pkcs12 -P "$APPLE_DEVELOPER_ID_P12_PASSWORD" \
   -T /usr/bin/codesign
@@ -114,6 +117,7 @@ spctl --assess --type execute --verbose=2 "$app"
 
 rm -f "$image"
 hdiutil create -quiet -volname SuperTag -srcfolder "$app" -ov -format ULMO "$image"
+security unlock-keychain -p "$password" "$keychain"
 codesign --force --timestamp --keychain "$keychain" --sign "$IDENTITY" "$image"
 codesign --verify --strict --verbose=2 "$image"
 xcrun notarytool submit "$image" --key "$NOTARY_KEY_PATH" \
