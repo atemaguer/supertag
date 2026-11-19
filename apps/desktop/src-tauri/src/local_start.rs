@@ -13,9 +13,13 @@ const UP_LIMIT: Duration = Duration::from_secs(180);
 /// How long `supertag down` may take: it waits up to five minutes for running Task Attempts.
 const DOWN_LIMIT: Duration = Duration::from_secs(360);
 
-/// The command that installs or updates the `supertag` CLI.
-pub const INSTALL_COMMAND: &str =
-    "curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh";
+/// The command that installs or updates the `supertag` CLI: this app's own release, since the
+/// app runs only a CLI of its version, and the latest release may be another one.
+pub const INSTALL_COMMAND: &str = concat!(
+    "curl -fsSL https://github.com/atemaguer/supertag/releases/download/v",
+    env!("CARGO_PKG_VERSION"),
+    "/install.sh | sh"
+);
 
 /// The version of SuperTag this app belongs to; the CLI it runs must match it.
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -321,6 +325,16 @@ async fn run(cli: &Path, verb: Verb, state: &Path, path: Option<&str>) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_install_command_installs_this_apps_release() {
+        assert_eq!(
+            INSTALL_COMMAND,
+            format!(
+                "curl -fsSL https://github.com/atemaguer/supertag/releases/download/v{APP_VERSION}/install.sh | sh"
+            )
+        );
+    }
 
     #[cfg(unix)]
     fn tool(directory: &Path, name: &str, mode: u32) -> PathBuf {

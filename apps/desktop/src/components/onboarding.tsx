@@ -147,10 +147,10 @@ export function Onboarding({
         </h2>
         <p>
           {check.problem
-            ? `${check.problem.split("\n")[0]?.split(" Install it with:")[0]?.split(" Update with:")[0]} Run this in Terminal, then check again:`
+            ? `${check.problem.split("\n")[0]?.split(" Install it with:")[0]?.split(" Update with:")[0]} Run this in a terminal, then check again:`
             : check.outdated
-              ? `The supertag command-line tool at ${check.outdated} is older than this app. Run this in Terminal to update it, then check again:`
-              : "SuperTag runs on this Mac through its command-line tool. Run this in Terminal, then check again:"}
+              ? `The supertag command-line tool at ${check.outdated} is older than this app. Run this in a terminal to update it, then check again:`
+              : "SuperTag runs on this computer through its command-line tool. Run this in a terminal, then check again:"}
         </p>
         {check.install && (
           <div className="branch-command">

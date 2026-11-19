@@ -87,7 +87,9 @@ signed in, and says how when it isn't. Claude Code also needs [Node.js](requirem
 
 On Linux:
 
-1. Install the `supertag` command with the install script above. The Linux app uses it.
+1. Install the `supertag` command with the install script above. The Linux app uses it, and only
+   a `supertag` of its own version: when it finds none or another version, its setup screen
+   shows the install command for its release.
 2. Install `SuperTag-VERSION-linux-ARCH.deb` with `sudo apt install ./SuperTag-VERSION-linux-ARCH.deb`,
    or make `SuperTag-VERSION-linux-ARCH.AppImage` executable (`chmod +x`) and run it.
 3. Open SuperTag from your applications menu, or run the AppImage.
@@ -120,7 +122,8 @@ cargo build --release --locked --manifest-path core/Cargo.toml -p supertag-cli -
 
 Put `core/target/release/supertag` on your `PATH`. Without the release archive's Node bridges, a
 Worklet runs Claude Code, Cursor, or OpenCode only when you name a built adapter entrypoint
-with `--harness-entrypoint`. Container images for hosted platforms are described in
+with `--harness-entrypoint`, and `supertag init` doesn't offer Claude Code; it names the
+directory the bridges belong in. Container images for hosted platforms are described in
 [Self-host SuperTag](../guides/self-hosting.md).
 
 ## Client libraries

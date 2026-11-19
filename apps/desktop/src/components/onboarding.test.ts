@@ -131,6 +131,8 @@ it("says how to install the CLI when there is none", async () => {
     );
   });
   expect(document.body.textContent).toContain("Install SuperTag");
+  // Linux apps don't bundle the CLI, so this screen names no one platform.
+  expect(document.body.textContent).toContain("SuperTag runs on this computer");
   expect(document.body.textContent).toContain("install.sh | sh");
   await act(async () => button("Check again")?.click());
   expect(api.check).toHaveBeenCalledWith(undefined, undefined);
@@ -181,6 +183,6 @@ it("names a CLI of another version than the app and how to update it", async () 
   });
   expect(document.body.textContent).toContain("Update SuperTag");
   expect(document.body.textContent).toContain(
-    "This SuperTag CLI is 0.2.0, the app expects 0.3.1. Run this in Terminal",
+    "This SuperTag CLI is 0.2.0, the app expects 0.3.1. Run this in a terminal",
   );
 });
