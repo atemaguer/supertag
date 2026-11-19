@@ -17,6 +17,7 @@ pub async fn exercise(
             harness_mailbox_client::HarnessMailboxClient::connect(bootstrap.endpoint.clone())
                 .await?;
         let plain = HarnessSendTagMessageRequest {
+            kind: 0,
             operation_id: "report-plain-message".into(),
             recipient_tag_id: "reviewer".into(),
             text: "This report should only be able to request review".into(),
@@ -28,6 +29,7 @@ pub async fn exercise(
             .expect_err("a report cannot send ordinary messages");
         ensure!(denied.code() == Code::PermissionDenied);
         let input = HarnessSendTagMessageRequest {
+            kind: 0,
             operation_id: "request-work-review".into(),
             recipient_tag_id: "reviewer".into(),
             text: "Review the delivered fixture changes.".into(),
@@ -107,6 +109,7 @@ pub async fn exercise(
         let patch = std::str::from_utf8(&page.data)?;
         ensure!(patch.contains("workspace.txt") && patch.contains("Inspect child evidence"));
         let input = HarnessSendTagMessageRequest {
+            kind: 0,
             operation_id: "record-work-verdict".into(),
             recipient_tag_id: review.requester_tag_id.clone(),
             text: "The patch contains the expected fixture evidence.".into(),

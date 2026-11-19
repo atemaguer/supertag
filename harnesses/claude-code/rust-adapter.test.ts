@@ -41,6 +41,7 @@ import {
   type HarnessWorkspaceRequest,
   HarnessWorkstreams,
   LiveInputReceipt,
+  MessageKind,
   NetworkRules,
   ObjectiveSignal,
   type ResolvedSkill,
@@ -301,6 +302,7 @@ async function invoke({
                     teamId: request.cursor === "s7" ? "other-team" : "engineering",
                     authorTagId: "lead",
                     sequence: 6n,
+                    kind: MessageKind.BLOCKER,
                     body: `Untrusted Workstream text ${providerSecret}`,
                   },
                 ],
@@ -325,6 +327,7 @@ async function invoke({
                   sourceTaskId: "task",
                   body: request.body,
                   toTagIds: request.toTagIds,
+                  kind: request.kind,
                 },
               };
             }
@@ -437,6 +440,7 @@ async function invoke({
                 senderTagId: "actor",
                 recipientTagId: request.recipientTagId,
                 text: request.text,
+                kind: request.kind,
                 origin: TagMessageOrigin.DIRECT,
                 ...(kind?.case === "commit" ? { objectiveId: review.objectiveId, review } : {}),
               },
@@ -1363,6 +1367,8 @@ it("runs scoped Workstream and Mailbox tools in the real SDK and stages only the
     expect(request.body).toBe("Pending post [REDACTED]");
     expect(request.toTagIds).toEqual(["builder", "lead"]);
   }
+  for (const request of run.posts.slice(0, 3)) expect(request.kind).toBe(MessageKind.NOTE);
+  expect(run.posts.at(-1)).toMatchObject({ body: "Confirmed post", kind: MessageKind.DECISION });
   expect(run.completions).toHaveLength(2);
   expect(run.completions[0]).toEqual(run.completions[1]);
   expect(run.completions[0]?.waitingApprovalIds).toEqual(["approval-1"]);
@@ -1397,6 +1403,7 @@ it("sends direct Mailbox messages through the real Claude SDK with a stable retr
     operationId: expect.any(String),
     recipientTagId: "lead",
     text: "Private note [REDACTED]",
+    kind: MessageKind.QUESTION,
   });
   expect(run.posts).toEqual([]);
 }, 30000);

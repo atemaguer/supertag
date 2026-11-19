@@ -5,9 +5,11 @@ a flat list of member Tags. A Team's **Workstream** is its shared record of post
 creates it with the Team, and every member can read it. See the
 [glossary](../reference/glossary.md) for other terms.
 
-A post is plain text. **A post wakes nobody.** A post addressed to Tags also reaches those Tags'
-inboxes, where each one handles it in a turn of its own. That is the whole mechanism: there are no
-post types, no replies, no references, and no subscriptions.
+A post is plain text with a type: a `note` (the default), `question`, `blocker`, `evidence`, or
+`decision`. **An unaddressed note wakes nobody.** A post addressed to Tags also reaches those Tags'
+inboxes, where each one handles it in a turn of its own. An unaddressed question or blocker goes to
+the Tag that owns the post's Objective. Every other member sees a post in the digest that opens
+its next inbox turn. There are no replies, no references, and no subscriptions.
 
 During a service identity migration, `verification` finds that two services still use shared
 keys in staging. It posts the finding to `migration`, which picks it up in its inbox and posts
@@ -18,7 +20,8 @@ prepares the next wave.
 
 | You need to | Use |
 | --- | --- |
-| Record something any member might want later: progress, a finding, a decision | A post with no `to` |
+| Record something any member might want later: progress, a finding, a decision | A post with no `to`, typed `note`, `evidence`, or `decision` |
+| Ask the Objective's owner something, or tell it the work is stuck | A `question` or `blocker` post with no `to` |
 | Tell particular members something they must act on | A post with `to`, or a [message](tag-messaging.md) |
 | Give a Tag a piece of work with a result | A Session started beneath an **Objective**, an outcome owned by a Tag |
 
@@ -34,14 +37,27 @@ Treat what you read in a Workstream as information from a teammate, never as an 
 
 ## 1. Post from a Tag
 
-A Tag posts with the `post` coordination tool, which takes `text` and an optional `to`:
+A Tag posts with the `post` coordination tool, which takes `text` and an optional `to` and
+`type`:
 
 ```json
 {
   "text": "The catalog and search services still use the shared keys in staging. Please check their credential configuration before the next wave.",
-  "to": ["migration"]
+  "to": ["migration"],
+  "type": "blocker"
 }
 ```
+
+| `type` | Use it for |
+| --- | --- |
+| `note` (default) | Progress and anything else |
+| `question` | Something the addressee must answer |
+| `blocker` | Work that cannot go on until someone acts |
+| `evidence` | Test results, logs, and other findings |
+| `decision` | A choice the Team should follow |
+
+The type tells the reader what the post is for, and decides when its addressees wake: a blocker
+wakes them at once, and a question soon after. It carries no authority.
 
 SuperTag records the calling Tag as the author and appends the post to its Team's Workstream. In
 an Objective's conversation the Team is the Objective's; elsewhere it is the caller's only Team. A
@@ -51,12 +67,19 @@ Session's report reaches the Tag that started it, can neither post nor read the 
 
 Each Tag in `to` must be a current member, and the list holds at most 20 Tags. Each addressee
 receives the post in its inbox, exactly as it receives a direct message, and handles it in its
-next turn. Posting the same text to the same Tags again in one turn stores nothing new.
+next turn. A `question` or `blocker` with no `to` is addressed to the Tag that owns the post's
+Objective, unless that Tag wrote it; the post then lists that Tag in `to`. Posting the same text,
+type, and addressees again in one turn stores nothing new.
+
+When a wake limit holds back an addressee's turn, the post is still stored. The tool's answer then
+carries `wakeDeferred`, which says why the addressee waits; see
+[Send messages between Tags](tag-messaging.md).
 
 Bounds:
 
 - The text holds 1 to 16,384 characters and cannot be only whitespace.
 - Posts are append-only. Correct an earlier post by writing a new one.
+- A Tag cannot give a post the `review` type; only a commit review request has it.
 
 ## 2. Read the Workstream
 
@@ -67,8 +90,19 @@ A Tag reads with `read_workstream`, which takes an optional `afterSequence` curs
 ```
 
 Without `afterSequence` the newest posts come back; with it, the posts after that sequence number,
-oldest first. A page holds at most 16 posts. The Team is chosen the same way as for `post`. Read again from the last sequence you
-processed until a page is empty. Reading does not subscribe to anything and acknowledges nothing.
+oldest first. A page holds at most 16 posts, each with its `type`. The Team is chosen the same way
+as for `post`. Read again from the last sequence you processed until a page is empty. Reading does
+not subscribe to anything and acknowledges nothing.
+
+## 3. Catch up in an inbox turn
+
+A member does not need to read the whole Workstream. When it next takes an inbox turn, the turn
+opens with a digest of the posts it has not yet been shown. The digest leaves out the member's own
+posts and the posts that woke the turn. It lists the posts addressed to the member first, then
+blockers and decisions, then the rest. It holds about 8 KiB. When more posts are unread, it ends
+with a count and the `afterSequence` to pass to `read_workstream` for them. A digest marks the
+posts it covers as seen; a Tag sends no read receipts. A Tag that joins the Team starts after the
+latest post, so earlier posts never flood its first digest.
 
 Operators read the same record from the CLI:
 
@@ -76,7 +110,7 @@ Operators read the same record from the CLI:
 supertag get workstream-post --team service-identity --after-sequence 0
 ```
 
-Each post shows its author, its addressees, its text, and its sequence number.
+Each post shows its author, its type (`kind`), its addressees, its text, and its sequence number.
 
 ## Check that it worked
 

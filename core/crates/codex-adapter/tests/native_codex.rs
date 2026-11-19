@@ -24,8 +24,9 @@ use supertag_protocol::v2::{
     HarnessCaptureArtifactRequest, HarnessPostWorkstreamRequest, HarnessReadMailboxRequest,
     HarnessReadReviewPatchRequest, HarnessReadWorkstreamRequest, HarnessReviewPatch,
     HarnessSendTagMessageRequest, ListMailboxMessagesResponse, ListWorkstreamPostsResponse,
-    PostAttemptWorkstreamResponse, ReadAttemptWorkstreamResponse, SendTagMessageResponse,
-    TagMessage, TagMessageOrigin, Team, WorkspaceDeliveryReference, WorkstreamPost,
+    MessageKind, PostAttemptWorkstreamResponse, ReadAttemptWorkstreamResponse,
+    SendTagMessageResponse, TagMessage, TagMessageOrigin, Team, WorkspaceDeliveryReference,
+    WorkstreamPost,
     commit_review_submission::Kind as ReviewKind,
     harness_artifacts_server::{HarnessArtifacts, HarnessArtifactsServer},
     harness_mailbox_server::{HarnessMailbox, HarnessMailboxServer},
@@ -442,6 +443,7 @@ impl HarnessWorkstreams for HarnessFixture {
                     post_id: "existing".into(),
                     body: "Prior Workstream data.".into(),
                     team_id: "release".into(),
+                    kind: MessageKind::Blocker.into(),
                     ..Default::default()
                 }],
                 next_cursor: "workstream-next".into(),
@@ -482,6 +484,7 @@ impl HarnessWorkstreams for HarnessFixture {
                     source_task_id: "native-task".into(),
                     body: input.body,
                     to_tag_ids: input.to_tag_ids,
+                    kind: input.kind,
                     sequence: 7,
                     ..Default::default()
                 }),
@@ -562,6 +565,7 @@ impl HarnessMailbox for HarnessFixture {
                 sender_tag_id: "native-tag".into(),
                 recipient_tag_id: request.recipient_tag_id,
                 text: request.text,
+                kind: request.kind,
                 origin: TagMessageOrigin::Direct as i32,
                 objective_id: requested.as_ref().map(|review| review.objective_id.clone()),
                 review: requested,
@@ -589,6 +593,7 @@ impl HarnessMailbox for HarnessFixture {
                 sender_tag_id: "reviewer".into(),
                 recipient_tag_id: "native-tag".into(),
                 text: "Prior Mailbox data.".into(),
+                kind: MessageKind::Evidence.into(),
                 ..Default::default()
             }],
             next_cursor: "mailbox-next".into(),
@@ -1246,16 +1251,24 @@ async fn native_coordination_pins_tools_and_stages_only_verified_workstream_appr
             usize::from(workstream_allowed)
         );
         assert_eq!(observed.posts.len(), [2, 1, 0][index]);
+        if let Some(post) = observed.posts.first() {
+            assert_eq!(post.kind(), MessageKind::Decision);
+        }
         assert_eq!(observed.mailbox_sends.len(), [2, 2, 0][index]);
         if let Some(send) = observed.mailbox_sends.first() {
             assert_eq!(send.recipient_tag_id, "reviewer");
             assert_eq!(send.text, "Private rollout note.");
+            assert_eq!(send.kind(), MessageKind::Question);
         }
         let logs = native.read("requests.jsonl")?;
         assert!(logs.contains("Untrusted coordination history"));
         if index == 0 {
             assert_eq!(outcome.waiting_approval_ids, ["approve-post"]);
             assert!(logs.contains("read_workstream") && logs.contains("read_mailbox"));
+            assert!(
+                logs.contains(r#"\"type\":\"blocker\""#)
+                    && logs.contains(r#"\"type\":\"evidence\""#)
+            );
             assert!(logs.contains("send_message") && logs.contains("direct-receipt"));
         } else {
             assert!(outcome.waiting_approval_ids.is_empty());

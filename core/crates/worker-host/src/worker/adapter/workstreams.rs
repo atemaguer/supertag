@@ -90,7 +90,7 @@ impl HarnessWorkstreams for Bridge {
         }
         let input = request.into_inner();
         let upstream = PostAttemptWorkstreamRequest {
-            kind: 0,
+            kind: input.kind,
             operation_id: input.operation_id,
             body: self.redact(&input.body),
             to_tag_ids: input.to_tag_ids,
@@ -128,7 +128,7 @@ impl HarnessMailbox for Bridge {
         let input = request.into_inner();
         // The Control Plane replays a send by its operation ID.
         let upstream = SendAttemptTagMessageRequest {
-            kind: 0,
+            kind: input.kind,
             operation_id: input.operation_id,
             recipient_tag_id: input.recipient_tag_id,
             text: self.redact(&input.text),

@@ -853,6 +853,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     let send = |credential: &str, operation_id: &str, body: &str| {
         host_request(
             PostAttemptWorkstreamRequest {
+                kind: 0,
                 operation_id: operation_id.into(),
                 body: body.into(),
                 to_tag_ids: vec![],
@@ -1185,6 +1186,7 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
     assert_eq!(page["posts"][0]["body"], "The rollout checks passed.");
     assert_eq!(page["posts"][0]["author_tag_id"], "engineer");
     assert_eq!(page["posts"][0]["sequence"], 1);
+    assert_eq!(page["posts"][0]["kind"], "note");
     assert_eq!(page["posts"].as_array().context("missing posts")?.len(), 1);
 
     let addressed_request = PostAttemptWorkstreamRequest {
@@ -1248,6 +1250,8 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
         .claim_task(host_request(
             ClaimTaskRequest {
                 operation_id: "claim-inbox".into(),
+                // An addressed note wakes its addressee after a short debounce.
+                wait_ms: 8_000,
                 ..Default::default()
             },
             &host_token,

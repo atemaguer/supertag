@@ -21,6 +21,7 @@ import {
   type HarnessCompleteRequest,
   HarnessKind,
   type HarnessRun,
+  MessageKind,
   ObjectiveSignal,
   ObjectiveStatus,
   TagMessageOrigin,
@@ -70,6 +71,46 @@ function nonblankText(limit: number) {
 
 const limit = z.number().int().min(1).max(16).optional();
 const cursor = z.string().min(1).max(256).optional();
+// What a post or direct message is for; questions and blockers wake their recipient sooner.
+const messageTypes = ["note", "question", "blocker", "evidence", "decision"] as const;
+const messageType = z.enum(messageTypes);
+const messageKinds: Record<(typeof messageTypes)[number], MessageKind> = {
+  note: MessageKind.NOTE,
+  question: MessageKind.QUESTION,
+  blocker: MessageKind.BLOCKER,
+  evidence: MessageKind.EVIDENCE,
+  decision: MessageKind.DECISION,
+};
+
+function messageKind(type: (typeof messageTypes)[number] | undefined): MessageKind {
+  return messageKinds[type ?? "note"];
+}
+
+// A receipt's kind matches the requested one; an unspecified kind is a note.
+function sameKind(received: MessageKind, requested: MessageKind): boolean {
+  return (
+    received === requested ||
+    (received === MessageKind.UNSPECIFIED && requested === MessageKind.NOTE)
+  );
+}
+
+function kindName(kind: MessageKind): string {
+  switch (kind) {
+    case MessageKind.QUESTION:
+      return "question";
+    case MessageKind.BLOCKER:
+      return "blocker";
+    case MessageKind.EVIDENCE:
+      return "evidence";
+    case MessageKind.DECISION:
+      return "decision";
+    case MessageKind.REVIEW:
+      return "review";
+    default:
+      return "note";
+  }
+}
+
 const tagId = z
   .string()
   .min(1)
@@ -138,6 +179,7 @@ const schemas = {
   post: z.strictObject({
     text: nonblankText(16_384),
     to: z.array(tagId).min(1).max(20).optional(),
+    type: messageType.optional(),
   }),
   read_workstream: z
     .strictObject({ afterSequence, limit, cursor })
@@ -148,6 +190,7 @@ const schemas = {
     to: tagId,
     text: nonblankText(8000),
     review: commitReviewInput.optional(),
+    type: messageType.optional(),
   }),
   list_sessions: z.strictObject({ limit: sessionLimit, offset }),
   search_sessions: z.strictObject({ query: nonblankText(200), limit: sessionLimit }),
@@ -954,20 +997,21 @@ export function registerCoordinationTools(
       "post",
       {
         description:
-          "Post to the Team Workstream. Optionally address member Tag IDs so they receive the post in their Mailboxes.",
+          "Post to the Team Workstream. Optionally address member Tag IDs so they receive the post in their Mailboxes. Optionally give a type: note (the default), question, blocker, evidence, or decision. An unaddressed question or blocker goes to the Objective's owner Tag.",
         inputSchema: schemas.post,
         _meta: meta,
       },
-      ({ text, to }, tool) =>
+      ({ text, to, type }, tool) =>
         write(async () => {
           if (asked)
             return response("Finish this turn and wait for the Objective answer first.", true);
           const body = trim(safeText(text));
-          if (!schemas.post.safeParse({ text: body, to }).success)
+          if (!schemas.post.safeParse({ text: body, to, type }).success)
             return response("Provide valid Workstream post text.", true);
           const toTagIds = [...new Set(to ?? [])].sort();
+          const kind = messageKind(type);
           const operationId = `claude-workstream:${createHash("sha256")
-            .update(JSON.stringify([body, toTagIds]))
+            .update(JSON.stringify([body, toTagIds, type ?? "note"]))
             .digest("hex")}`;
           if (!pending.has(operationId) && pending.size >= MAX_PENDING_APPROVALS)
             return response(
@@ -975,15 +1019,20 @@ export function registerCoordinationTools(
               true,
             );
           try {
-            const { post, approval, duplicate } = await call(tool.signal, (config) =>
-              workstreams.post({ operationId, body, toTagIds }, config),
+            const { post, approval, duplicate, wakeDeferred } = await call(tool.signal, (config) =>
+              workstreams.post({ operationId, body, toTagIds, kind }, config),
             );
             if (
               post?.postId &&
               post.sourceTaskId === scope.taskId &&
               post.authorTagId === scope.tagId &&
               post.body === body &&
-              [...post.toTagIds].sort().join("\0") === toTagIds.join("\0")
+              sameKind(post.kind, kind) &&
+              // An unaddressed question or blocker may go to the Objective's owner Tag.
+              ([...post.toTagIds].sort().join("\0") === toTagIds.join("\0") ||
+                (toTagIds.length === 0 &&
+                  (kind === MessageKind.QUESTION || kind === MessageKind.BLOCKER) &&
+                  post.toTagIds.length === 1))
             ) {
               pending.delete(operationId);
               return response(
@@ -992,6 +1041,7 @@ export function registerCoordinationTools(
                   postId: post.postId,
                   sequence: post.sequence.toString(),
                   duplicate,
+                  ...(wakeDeferred ? { wakeDeferred: safeText(wakeDeferred) } : {}),
                 }),
               );
             }
@@ -1054,6 +1104,7 @@ export function registerCoordinationTools(
                 id: post.postId,
                 from: post.authorTagId,
                 to: post.toTagIds,
+                type: kindName(post.kind),
                 sequence: post.sequence.toString(),
                 text: safeText(post.body),
               })),
@@ -1099,6 +1150,7 @@ export function registerCoordinationTools(
                 from: message.senderTagId,
                 to: message.recipientTagId,
                 origin: message.origin === TagMessageOrigin.DIRECT ? "direct" : "workstream",
+                type: kindName(message.kind),
                 text: safeText(message.text),
                 ...(message.review ? { review: projectReview(message.review, safeText) } : {}),
               })),
@@ -1160,16 +1212,16 @@ export function registerCoordinationTools(
       "send_message",
       {
         description:
-          "Send a private message that another Tag handles in a later turn of its own. At most 3 new messages per Task. To request review, provide the full delivered commit hash. To record a verdict, provide the review request ID and verdict. If approval is pending, finish this turn and wait for the decision.",
+          "Send a private message that another Tag handles in a later turn of its own. At most 3 new messages per Task. Optionally give a type: note (the default), question, blocker, evidence, or decision. To request review, provide the full delivered commit hash. To record a verdict, provide the review request ID and verdict. If approval is pending, finish this turn and wait for the decision.",
         inputSchema: schemas.send_message,
         _meta: meta,
       },
-      ({ to, text, review }, tool) =>
+      ({ to, text, review, type }, tool) =>
         write(async () => {
           if (asked)
             return response("Finish this turn and wait for the Objective answer first.", true);
           const safe = trim(safeText(text));
-          if (!schemas.send_message.safeParse({ to, text: safe, review }).success)
+          if (!schemas.send_message.safeParse({ to, text: safe, review, type }).success)
             return response("Provide valid direct message text.", true);
           const kind = reviewSubmission(review);
           if (!run.coordination?.maySendTagMessage && kind?.case !== "commit")
@@ -1182,7 +1234,8 @@ export function registerCoordinationTools(
                 : safeText(kind.value.requestId) !== kind.value.requestId))
           )
             return response("Provide a valid review identifier.", true);
-          const key = JSON.stringify(["mailbox", to, safe, kind]);
+          const sendKind = messageKind(type);
+          const key = JSON.stringify(["mailbox", to, safe, kind, type ?? "note"]);
           if (!pending.has(key) && pending.size >= MAX_PENDING_APPROVALS)
             return response("Finish this turn and wait for the pending approvals.", true);
           const operationId = `claude-mailbox:${randomUUID()}`;
@@ -1192,6 +1245,7 @@ export function registerCoordinationTools(
               approval,
               duplicate,
               review: recorded,
+              wakeDeferred,
             } = await call(tool.signal, (config) =>
               mailbox.sendMessage(
                 {
@@ -1199,6 +1253,7 @@ export function registerCoordinationTools(
                   recipientTagId: to,
                   text: safe,
                   review: kind ? { kind } : undefined,
+                  kind: sendKind,
                 },
                 config,
               ),
@@ -1211,6 +1266,8 @@ export function registerCoordinationTools(
               message.text === safe &&
               message.origin === TagMessageOrigin.DIRECT &&
               message.workstreamPostId === undefined &&
+              // The Control Plane marks a commit review request itself.
+              (kind !== undefined || sameKind(message.kind, sendKind)) &&
               !approval &&
               !recorded &&
               (!kind
@@ -1226,7 +1283,12 @@ export function registerCoordinationTools(
             ) {
               pending.delete(key);
               return response(
-                JSON.stringify({ status: "sent", messageId: message.messageId, duplicate }),
+                JSON.stringify({
+                  status: "sent",
+                  messageId: message.messageId,
+                  duplicate,
+                  ...(wakeDeferred ? { wakeDeferred: safeText(wakeDeferred) } : {}),
+                }),
               );
             }
             if (

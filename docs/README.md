@@ -73,7 +73,7 @@ Read these in order when you want the complete mental model:
    it.
 4. A [Team](guides/teams.md) is a flat list of member Tags with an optional concurrency limit.
 5. A Team's [Workstream](guides/workstreams.md) is its shared record of posts; every member can
-   read it, and a post wakes nobody. A Tag's [Mailbox](guides/tag-messaging.md) is its inbox for
+   read it, and only a post addressed to Tags wakes them. A Tag's [Mailbox](guides/tag-messaging.md) is its inbox for
    messages from other Tags; Tags in one Team message each other without a grant.
 
 Two more resources separate knowledge from authority. A

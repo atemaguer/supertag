@@ -829,7 +829,9 @@ identity and no Mailbox; they coordinate through the harness's local primitives.
 [Coordination tools](coordination.md#coordination-tools).
 
 Each Team has one [Workstream](../guides/workstreams.md), its shared record of posts. Every
-member reads it, a post wakes nobody, and each Tag a post addresses receives it in its Mailbox.
+member reads it, an unaddressed note wakes nobody, and each Tag a post addresses receives it in its
+Mailbox. A post has a type: note, question, blocker, evidence, or decision. An unaddressed question
+or blocker is addressed to the Objective's owner Tag.
 Posts carry information only. See [Workstream](coordination.md#workstream).
 
 For saved Task output, producer provenance, and artifact acquisition, see [artifacts](artifacts.md).

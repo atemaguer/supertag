@@ -405,4 +405,11 @@ $$;
 CREATE TRIGGER supertag_v2_watch_mailbox_message AFTER INSERT ON supertag_v2_message_addressees
 FOR EACH ROW EXECUTE FUNCTION supertag_v2_watch_mailbox_message();
 
+-- A Workstream is its Team's channel now: its posts, their operations, and the Team's post
+-- counter (which seeded the channel's next seq) are gone.
+DROP TABLE supertag_v2_workstream_operations;
+DROP TABLE supertag_v2_workstream_posts;
+DROP FUNCTION supertag_v2_watch_workstream_post_created();
+ALTER TABLE supertag_v2_teams DROP COLUMN next_post_sequence;
+
 UPDATE supertag_v2_schema SET version=117 WHERE version=116;

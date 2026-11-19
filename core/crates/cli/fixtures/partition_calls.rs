@@ -120,6 +120,7 @@ pub async fn exercise(
     let sent = mailbox
         .send_message(authenticated_request(
             HarnessSendTagMessageRequest {
+                kind: 0,
                 operation_id: "partition-message".into(),
                 recipient_tag_id: peer.into(),
                 text: "Sent through a partition".into(),
@@ -154,6 +155,7 @@ pub async fn exercise(
     let posted = workstreams
         .post(authenticated_request(
             HarnessPostWorkstreamRequest {
+                kind: 0,
                 operation_id: "partition-post".into(),
                 body: "Posted through a partition".into(),
                 to_tag_ids: vec![],

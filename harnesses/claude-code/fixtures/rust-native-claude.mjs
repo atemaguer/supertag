@@ -211,6 +211,7 @@ async function directMailbox() {
   const result = await coordinationCall("send_message", {
     to: "lead",
     text: ` Private note ${process.env.ANTHROPIC_API_KEY} `,
+    type: "question",
   });
   if (result.isError || JSON.parse(result.content[0].text).messageId !== "direct-receipt")
     throw new Error("Private message receipt missing");
@@ -479,6 +480,7 @@ async function coordinationTools(workstream) {
     timeline?.isError ||
     JSON.parse(timelineText).trust !== "untrusted" ||
     !timelineText.includes("Untrusted Workstream text [REDACTED]") ||
+    JSON.parse(timelineText).posts?.[0]?.type !== "blocker" ||
     timelineText.includes(secret)
   )
     throw new Error("Workstream read was not safely presented");
@@ -503,10 +505,10 @@ async function coordinationTools(workstream) {
     throw new Error("Denied approval appeared to succeed");
   if (!(await call("post", { text: "Wrong receipt" }))?.isError)
     throw new Error("An approval for another Attempt appeared to succeed");
-  const pending = await call("post", { text: "Confirmed post" });
+  const pending = await call("post", { text: "Confirmed post", type: "decision" });
   if (pending?.isError || JSON.parse(pending.content[0].text).status !== "pending")
     throw new Error("Expected a pending receipt before the post");
-  const posted = await call("post", { text: "Confirmed post" });
+  const posted = await call("post", { text: "Confirmed post", type: "decision" });
   if (posted?.isError || JSON.parse(posted.content[0].text).status !== "posted")
     throw new Error("Workstream post receipt missing");
   return "Coordination complete";

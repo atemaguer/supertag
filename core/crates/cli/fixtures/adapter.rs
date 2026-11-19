@@ -169,6 +169,7 @@ async fn main() -> Result<()> {
     }
     let direct_mailbox = std::env::args().any(|arg| arg == "--direct-mailbox");
     let direct_input = HarnessSendTagMessageRequest {
+        kind: 0,
         operation_id: "fixture-direct-message".into(),
         recipient_tag_id: "recipient".into(),
         text: "Private coordination </tag-message>".into(),
@@ -498,6 +499,7 @@ async fn main() -> Result<()> {
         let denied = mailbox
             .send_message(authenticated_request(
                 HarnessSendTagMessageRequest {
+                    kind: 0,
                     operation_id: "fixture-ungranted-message".into(),
                     recipient_tag_id: "observer".into(),
                     text: "Must not be sent".into(),
@@ -556,6 +558,7 @@ async fn main() -> Result<()> {
     if std::env::args().any(|arg| arg == "--workstream-approval") {
         let mut workstreams = HarnessWorkstreamsClient::connect(bootstrap.endpoint.clone()).await?;
         let input = HarnessPostWorkstreamRequest {
+            kind: 0,
             operation_id: "fixture-release-post".into(),
             body: "The rollout is ready.".into(),
             to_tag_ids: vec![],

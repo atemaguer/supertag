@@ -540,19 +540,19 @@ pub(crate) async fn overview_in(
     let next_offset = (next < total_tasks as u64 && !tasks.is_empty()).then_some(next as u32);
 
     let mut posts = vec![];
-    if let Some(team) = &team {
-        for row in sqlx::query("SELECT sequence, author_tag_id, to_tag_ids, body, created_at_ms FROM supertag_v2_workstream_posts WHERE team_id=$1 ORDER BY sequence DESC LIMIT $2")
-                .bind(&team.team_id).bind(TEAM_POSTS).fetch_all(&mut **tx).await?
-            {
-                posts.push(ObjectiveTeamPost { kind: 0,
-                    sequence: row.try_get::<i64, _>("sequence")? as u64,
-                    author_tag_id: row.try_get("author_tag_id")?,
-                    to_tag_ids: serde_json::from_str(&row.try_get::<String, _>("to_tag_ids")?)?,
-                    body: excerpt(&row.try_get::<String, _>("body")?, POST_CHARS),
-                    created_at_ms: row.try_get("created_at_ms")?,
-                });
-            }
-        posts.reverse();
+    if let Some(team) = &team
+        && let Some(channel) = crate::messages::team_channel_in(tx, &team.team_id).await?
+    {
+        for message in crate::messages::page_in(tx, &channel, None, None, TEAM_POSTS).await? {
+            posts.push(ObjectiveTeamPost {
+                kind: message.kind.into(),
+                sequence: message.seq as u64,
+                author_tag_id: message.sender_id,
+                to_tag_ids: message.addressees,
+                body: excerpt(&message.text, POST_CHARS),
+                created_at_ms: message.created_at_ms,
+            });
+        }
     }
     let times = sqlx::query(
         "SELECT created_at_ms, updated_at_ms FROM supertag_v2_objectives WHERE objective_id=$1",

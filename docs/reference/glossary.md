@@ -46,8 +46,10 @@ whole system rather than another first-class resource.
   start work Sessions of its members. See [Teams](coordination.md#teams).
 - <a id="workstream"></a>**Workstream** — a Team's shared record of posts. Every member reads it. See
   [Workstream](coordination.md#workstream).
-- <a id="post"></a>**post** — one append-only entry in a Team's Workstream. It is plain text and carries
-  no authority. A post wakes nobody; each Tag it addresses receives it in that Tag's Mailbox. See
+- <a id="post"></a>**post** — one append-only entry in a Team's Workstream. It is plain text with a
+  type (note, question, blocker, evidence, or decision) and carries no authority. Each Tag it
+  addresses receives it in that Tag's Mailbox; an unaddressed question or blocker goes to the
+  Objective's owner Tag, and other members see it in their next inbox turn's digest. See
   [Share progress in a Workstream](../guides/workstreams.md).
 - <a id="mailbox"></a>**Mailbox** — a Tag's inbox for plain-text messages from other Tags. Everything
   waiting when a turn starts is handled together in that turn. See

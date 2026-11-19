@@ -11,7 +11,7 @@ use supertag_protocol::{
         HarnessCloseWorkSessionRequest, HarnessContinueWorkSessionRequest,
         HarnessPostWorkstreamRequest, HarnessReadMailboxRequest, HarnessReadReviewPatchRequest,
         HarnessReadWorkstreamRequest, HarnessSendTagMessageRequest, HarnessStartWorkSessionRequest,
-        TagMessageOrigin, TaskState, WorkspaceDeliveryReference,
+        MessageKind, TagMessageOrigin, TaskState, WorkspaceDeliveryReference,
         commit_review_submission::Kind as ReviewKind, harness_mailbox_client::HarnessMailboxClient,
         harness_work_sessions_client::HarnessWorkSessionsClient,
         harness_workstreams_client::HarnessWorkstreamsClient,
@@ -22,6 +22,7 @@ use tonic::{Code, Response, Status, transport::Channel};
 
 const PAGE_LIMIT: u32 = 16;
 const DEFAULT_LIMIT: u32 = 8;
+const MESSAGE_TYPES: [&str; 5] = ["note", "question", "blocker", "evidence", "decision"];
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Arguments {
@@ -130,6 +131,50 @@ pub(crate) struct DirectMessage {
     to: String,
     text: String,
     review: Option<DirectReview>,
+    #[serde(default, rename = "type")]
+    kind: MessageType,
+}
+
+/// What a post or direct message is for: the `type` field of `post` and `send_message`. Questions
+/// and blockers wake their recipient sooner than notes.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum MessageType {
+    #[default]
+    Note,
+    Question,
+    Blocker,
+    Evidence,
+    Decision,
+}
+
+impl MessageType {
+    fn wire(self) -> MessageKind {
+        match self {
+            Self::Note => MessageKind::Note,
+            Self::Question => MessageKind::Question,
+            Self::Blocker => MessageKind::Blocker,
+            Self::Evidence => MessageKind::Evidence,
+            Self::Decision => MessageKind::Decision,
+        }
+    }
+}
+
+/// A receipt's kind matches the requested type; an unspecified kind is a note.
+fn same_kind(kind: MessageKind, requested: MessageType) -> bool {
+    kind == requested.wire() || (kind == MessageKind::Unspecified && requested == MessageType::Note)
+}
+
+/// The `type` a read shows for a stored message kind.
+fn type_name(kind: MessageKind) -> &'static str {
+    match kind {
+        MessageKind::Question => "question",
+        MessageKind::Blocker => "blocker",
+        MessageKind::Evidence => "evidence",
+        MessageKind::Decision => "decision",
+        MessageKind::Review => "review",
+        MessageKind::Unspecified | MessageKind::Note => "note",
+    }
 }
 
 impl DirectMessage {
@@ -235,6 +280,8 @@ pub(crate) struct Post {
     text: String,
     #[serde(default)]
     to: Vec<String>,
+    #[serde(default, rename = "type")]
+    kind: MessageType,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -434,10 +481,11 @@ pub(crate) fn close_arguments(params: &Value) -> Result<Option<String>> {
 pub(crate) fn tool_specs(inventory: Inventory) -> Vec<Value> {
     let mut tools = vec![json!({
         "type":"function", "name":"post",
-        "description":"Post progress to the Team Workstream. Optional Tag IDs in to wake their Mailboxes. A pending approval requires ending the turn and waiting for a decision.",
+        "description":"Post progress to the Team Workstream. Optional Tag IDs in to wake their Mailboxes. Optional type: note (default), question, blocker, evidence, or decision; an unaddressed question or blocker goes to the Objective's owner Tag. A pending approval requires ending the turn and waiting for a decision.",
         "inputSchema":{"type":"object","properties":{
             "text":{"type":"string","minLength":1,"maxLength":16384},
-            "to":{"type":"array","items":{"type":"string"},"maxItems":20}
+            "to":{"type":"array","items":{"type":"string"},"maxItems":20},
+            "type":{"type":"string","enum":MESSAGE_TYPES}
         },"required":["text"],"additionalProperties":false}
     })];
     for (name, description) in [
@@ -468,7 +516,8 @@ pub(crate) fn tool_specs(inventory: Inventory) -> Vec<Value> {
             "description":"Send a private message to another Tag. A pending approval requires ending the turn and waiting for a decision.",
             "inputSchema":{"type":"object","properties":{
                 "to":{"type":"string","minLength":1,"maxLength":256},
-                "text":{"type":"string","minLength":1,"maxLength":8000}
+                "text":{"type":"string","minLength":1,"maxLength":8000},
+                "type":{"type":"string","enum":MESSAGE_TYPES}
             },"required":["to","text"],"additionalProperties":false}
         });
         if inventory.supports_reviews() {
@@ -535,6 +584,7 @@ pub(crate) enum PendingEffect {
         to: String,
         text: String,
         review: Option<DirectReview>,
+        kind: MessageType,
     },
 }
 
@@ -768,10 +818,11 @@ impl Client {
         let post = Post {
             text: crate::auth::redact(post.text.clone(), secrets),
             to: post.to.clone(),
+            kind: post.kind,
         };
         let effect = PendingEffect::Post(post.clone());
         let input = HarnessPostWorkstreamRequest {
-            kind: 0,
+            kind: post.kind.wire().into(),
             operation_id,
             body: post.text.clone(),
             to_tag_ids: post.to.clone(),
@@ -790,15 +841,26 @@ impl Client {
         };
         match (result.post, result.approval) {
             (Some(posted), None) => {
+                // An unaddressed question or blocker may go to the Objective's owner Tag.
+                let addressed = posted.to_tag_ids == post.to
+                    || (post.to.is_empty()
+                        && matches!(post.kind, MessageType::Question | MessageType::Blocker)
+                        && posted.to_tag_ids.len() == 1);
                 ensure!(
                     posted.source_task_id == task_id
                         && posted.body == post.text
-                        && posted.to_tag_ids == post.to
+                        && addressed
+                        && same_kind(posted.kind(), post.kind)
                         && !posted.post_id.is_empty(),
                     "Workstream receipt has mismatched identity or content"
                 );
                 self.pending.remove(&effect);
-                Ok(response(json!({"postId":posted.post_id,"sequence":posted.sequence.to_string(),"duplicate":result.duplicate}).to_string(), true))
+                let mut output = json!({"postId":posted.post_id,"sequence":posted.sequence.to_string(),"duplicate":result.duplicate});
+                if !result.wake_deferred.is_empty() {
+                    output["wakeDeferred"] =
+                        json!(crate::auth::redact(result.wake_deferred, secrets));
+                }
+                Ok(response(output.to_string(), true))
             }
             (None, Some(approval)) if approval.state() == ApprovalState::Pending => {
                 ensure!(
@@ -840,9 +902,10 @@ impl Client {
             to: message.to.clone(),
             text: text.clone(),
             review: message.review.clone(),
+            kind: message.kind,
         };
         let input = HarnessSendTagMessageRequest {
-            kind: 0,
+            kind: message.kind.wire().into(),
             operation_id,
             recipient_tag_id: message.to.clone(),
             text: text.clone(),
@@ -877,6 +940,8 @@ impl Client {
                         && sent.text == text
                         && sent.origin() == TagMessageOrigin::Direct
                         && sent.workstream_post_id.is_none()
+                        // The Control Plane marks a commit review request itself.
+                        && (message.review.is_some() || same_kind(sent.kind(), message.kind))
                         && !sent.message_id.is_empty()
                         && match (&message.review, &sent.review) {
                             (None, None) => true,
@@ -893,10 +958,12 @@ impl Client {
                     "direct message receipt has mismatched identity or content"
                 );
                 self.pending.remove(&effect);
-                Ok(response(
-                    json!({"messageId":sent.message_id,"duplicate":result.duplicate}).to_string(),
-                    true,
-                ))
+                let mut output = json!({"messageId":sent.message_id,"duplicate":result.duplicate});
+                if !result.wake_deferred.is_empty() {
+                    output["wakeDeferred"] =
+                        json!(crate::auth::redact(result.wake_deferred, secrets));
+                }
+                Ok(response(output.to_string(), true))
             }
             (None, None, Some(review)) => {
                 let Some(DirectReview::Verdict {
@@ -1057,7 +1124,7 @@ impl Client {
             "Workstream history belongs to a different Team"
         );
         let posts = page.posts.into_iter().map(|post| json!({
-            "id":post.post_id,"sequence":post.sequence.to_string(),
+            "id":post.post_id,"sequence":post.sequence.to_string(),"type":type_name(post.kind()),
             "author":post.author_tag_id,"to":post.to_tag_ids,"body":crate::auth::redact(post.body,secrets)
         })).collect::<Vec<_>>();
         Ok(history(
@@ -1098,9 +1165,11 @@ impl Client {
         let messages = result.messages.into_iter().map(|message| -> Result<Value> {
             let state = message.state().as_str_name();
             let origin = message.origin().as_str_name();
+            let kind = type_name(message.kind());
             let mut output = json!({
                 "id":message.message_id,"from":message.sender_tag_id,"to":message.recipient_tag_id,
-                "text":crate::auth::redact(message.text,secrets),"state":state,"origin":origin
+                "text":crate::auth::redact(message.text,secrets),"state":state,"origin":origin,
+                "type":kind
             });
             if let Some(review) = message.review {
                 ensure!(valid_review(&review)

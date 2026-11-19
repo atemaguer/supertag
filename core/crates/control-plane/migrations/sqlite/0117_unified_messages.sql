@@ -396,4 +396,10 @@ BEGIN
         WHERE m.conversation_id = NEW.conversation_id AND m.seq = NEW.seq;
 END;
 
+-- A Workstream is its Team's channel now: its posts, their operations, and the Team's post
+-- counter (which seeded the channel's next seq) are gone.
+DROP TABLE supertag_v2_workstream_operations;
+DROP TABLE supertag_v2_workstream_posts;
+ALTER TABLE supertag_v2_teams DROP COLUMN next_post_sequence;
+
 UPDATE supertag_v2_schema SET version=117 WHERE version=116;

@@ -276,11 +276,24 @@ pub(crate) fn team_json(team: Team) -> Value {
     })
 }
 
+/// A post's type, as Tags name it.
+fn post_kind(kind: MessageKind) -> &'static str {
+    match kind {
+        MessageKind::Question => "question",
+        MessageKind::Blocker => "blocker",
+        MessageKind::Evidence => "evidence",
+        MessageKind::Decision => "decision",
+        MessageKind::Review => "review",
+        MessageKind::Unspecified | MessageKind::Note => "note",
+    }
+}
+
 fn post_json(post: WorkstreamPost) -> Value {
     json!({
         "post_id": post.post_id,
         "team_id": post.team_id,
         "author_tag_id": post.author_tag_id,
+        "kind": post_kind(post.kind()),
         "to_tag_ids": post.to_tag_ids,
         "body": post.body,
         "source_task_id": post.source_task_id,

@@ -11,6 +11,12 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- Workstream posts and Mailbox messages have a type: `post` and `send_message` take an optional
+  `type` of `note` (the default), `question`, `blocker`, `evidence`, or `decision`, and
+  `read_workstream`, `read_mailbox`, and `supertag get workstream-posts` show it. An unaddressed
+  question or blocker goes to the Tag that owns the post's Objective. An inbox turn now opens with
+  a digest of the Team's Workstream posts its Tag has not seen, addressed posts first, then
+  blockers and decisions; it holds about 8 KiB and points to `read_workstream` for the rest.
 - `sandbox-commands: [claude-code]` on a host service (`supertag worker-host --sandbox-commands`)
   runs Claude Code's commands in Claude Code's own operating-system sandbox: they write only the
   Workspace, never its `.git` or read-only and hidden paths, cannot read hidden paths or the home's

@@ -1,12 +1,15 @@
 use crate::AttemptAccess;
 use sha2::{Digest, Sha256};
-use sqlx::{Any, Row, Transaction, any::AnyRow};
+use sqlx::{Any, Row, Transaction};
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
 use tonic::{Request, Response, Status};
-use uuid::Uuid;
 
 use crate::{
     ControlPlane, HostAuthority, Store, StoreError,
+    messages::{
+        self, ConversationKind, Member, MessageRow, NewMessage, OperationScope,
+        wakes::{self, WakeRequest},
+    },
     store::{Result, WORKSTREAM_POST_ACTION, invalid, lease_is_live, name, owned},
 };
 
@@ -79,24 +82,37 @@ impl Store {
                 "post body must contain 1–16,384 characters without a NUL",
             ));
         }
+        let kind = post_kind(input.kind)?;
         let recipients = recipients(&input.to_tag_ids)?;
         let (mut tx, order) = self.write().await?;
         let now = self.execution_now_ms();
         let (team, author) = attempt_team(&mut tx, host, attempt, now).await?;
+        let channel = messages::team_channel_in(&mut tx, &team.team_id)
+            .await?
+            .ok_or_else(|| StoreError::NotFound("Team Workstream was not found".into()))?;
         let digest = format!(
             "{:x}",
-            Sha256::digest(serde_json::to_vec(&(&team.team_id, &recipients, body))?)
+            Sha256::digest(serde_json::to_vec(&(
+                &team.team_id,
+                &recipients,
+                body,
+                messages::stored_kind(kind),
+            ))?)
         );
-        let prior = sqlx::query("SELECT request_digest,post_id FROM supertag_v2_workstream_operations WHERE source_task_id=$1 AND operation_id=$2")
-            .bind(&attempt.task_id).bind(&input.operation_id).fetch_optional(&mut *tx).await?;
-        if let Some(prior) = prior {
-            if prior.try_get::<String, _>("request_digest")? != digest {
+        let prior = messages::operation_in(
+            &mut tx,
+            OperationScope::Workstream,
+            &attempt.task_id,
+            &input.operation_id,
+        )
+        .await?;
+        if let Some((prior_digest, id)) = prior {
+            if prior_digest != digest {
                 return Err(StoreError::Conflict(
                     "operation ID was used with a different Workstream post".into(),
                 ));
             }
-            let id: String = prior.try_get("post_id")?;
-            let post = post_by_id(&mut tx, &id).await?;
+            let post = post_by_id(&mut tx, &team.team_id, &id).await?;
             tx.rollback().await?;
             return Ok(PostAttemptWorkstreamResponse {
                 wake_deferred: String::new(),
@@ -111,18 +127,26 @@ impl Store {
         {
             return Err(StoreError::PermissionDenied);
         }
-        let prior = sqlx::query("SELECT * FROM supertag_v2_workstream_posts WHERE team_id=$1 AND source_task_id=$2 AND effect_digest=$3")
-            .bind(&team.team_id).bind(&attempt.task_id).bind(&digest).fetch_optional(&mut *tx).await?;
+        let prior: Option<String> = sqlx::query_scalar(
+            "SELECT message_id FROM supertag_v2_messages
+             WHERE conversation_id=$1 AND source_task_id=$2 AND effect_digest=$3",
+        )
+        .bind(&channel)
+        .bind(&attempt.task_id)
+        .bind(&digest)
+        .fetch_optional(&mut *tx)
+        .await?;
         let approval_request = RequestApprovalRequest {
             attempt: Some(attempt.clone()),
             operation_id: input.operation_id.clone(),
             action: WORKSTREAM_POST_ACTION.into(),
             resource: team.team_id.clone(),
             arguments_json: serde_json::to_string(&serde_json::json!({
-                "body": body, "to_tag_ids": recipients,
+                "body": body, "to_tag_ids": recipients, "type": messages::digest::kind_name(kind),
             }))?,
             summary: format!(
-                "Post to the Team Workstream with {} addressed Tags.",
+                "Post a {} to the Team Workstream with {} addressed Tags.",
+                messages::digest::kind_name(kind),
                 recipients.len()
             ),
         };
@@ -149,41 +173,150 @@ impl Store {
             }
         }
         let duplicate = prior.is_some();
-        let post = if let Some(row) = prior {
-            post_row(&row)?
+        let mut deferred = Vec::new();
+        let id = if let Some(id) = prior {
+            id
         } else {
-            let id = Uuid::new_v4().to_string();
-            let sequence: i64 = sqlx::query_scalar("UPDATE supertag_v2_teams SET next_post_sequence=next_post_sequence+1 WHERE team_id=$1 RETURNING next_post_sequence-1")
-                .bind(&team.team_id).fetch_one(&mut *tx).await?;
-            sqlx::query("INSERT INTO supertag_v2_workstream_posts (post_id,team_id,author_tag_id,source_task_id,to_tag_ids,body,effect_digest,sequence,created_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)")
-                .bind(&id).bind(&team.team_id).bind(&author).bind(&attempt.task_id).bind(serde_json::to_string(&recipients)?)
-                .bind(body).bind(&digest).bind(sequence).bind(now).execute(&mut *tx).await?;
-            WorkstreamPost {
-                kind: 0,
-                post_id: id,
-                team_id: team.team_id,
-                author_tag_id: author,
-                to_tag_ids: recipients,
-                body: body.into(),
-                source_task_id: attempt.task_id.clone(),
-                sequence: sequence as u64,
-                created_at_ms: now,
+            let objective = post_objective_in(&mut tx, &attempt.task_id).await?;
+            let mut addressees: Vec<String> = recipients
+                .iter()
+                .filter(|id| **id != author)
+                .cloned()
+                .collect();
+            if recipients.is_empty()
+                && matches!(kind, MessageKind::Question | MessageKind::Blocker)
+                && let Some(owner) = objective_owner_in(&mut tx, objective.as_deref()).await?
+                && owner != author
+            {
+                addressees.push(owner);
             }
+            // Only a post that wakes someone continues a chain; the hop limit applies to it.
+            let (hops, origin) = if addressees.is_empty() {
+                (0, attempt.task_id.clone())
+            } else {
+                wakes::origin_in(&mut tx, &attempt.task_id).await?
+            };
+            let stored = messages::insert_message_in(
+                &mut tx,
+                &NewMessage {
+                    conversation_id: &channel,
+                    sender: Member::Tag(&author),
+                    kind,
+                    text: body,
+                    hops,
+                    source_task_id: Some(&attempt.task_id),
+                    origin_task_id: Some(&origin),
+                    objective_id: objective.as_deref(),
+                    task_id: None,
+                    effect_digest: Some(&digest),
+                    addressees: &addressees,
+                    now,
+                },
+            )
+            .await?;
+            for addressee in &addressees {
+                let outcome = wakes::wake_in(
+                    &mut tx,
+                    &WakeRequest {
+                        tag_id: addressee,
+                        conversation_id: &channel,
+                        kind: ConversationKind::Channel,
+                        message_kind: kind,
+                        addressed: true,
+                        sender_tag_id: &author,
+                        seq: stored.seq,
+                        hops,
+                        origin_task_id: Some(&origin),
+                        objective_id: objective.as_deref(),
+                        team_id: Some(&team.team_id),
+                        now,
+                    },
+                )
+                .await?;
+                deferred.extend(outcome.deferred);
+            }
+            if !addressees.is_empty() {
+                // A wake that is already due, such as a blocker's, gets its inbox turn now.
+                crate::mailbox::sweep_in(&mut tx, now).await?;
+            }
+            stored.message_id
         };
-        if !duplicate {
-            crate::mailbox::deliver_workstream_in(&mut tx, &post, now).await?;
-        }
-        sqlx::query("INSERT INTO supertag_v2_workstream_operations (source_task_id,operation_id,request_digest,post_id) VALUES ($1,$2,$3,$4)")
-            .bind(&attempt.task_id).bind(&input.operation_id).bind(&digest).bind(&post.post_id)
-            .execute(&mut *tx).await?;
+        let post = post_by_id(&mut tx, &team.team_id, &id).await?;
+        messages::record_operation_in(
+            &mut tx,
+            OperationScope::Workstream,
+            &attempt.task_id,
+            &input.operation_id,
+            &digest,
+            &id,
+        )
+        .await?;
         tx.commit().await?;
         Ok(PostAttemptWorkstreamResponse {
-            wake_deferred: String::new(),
+            wake_deferred: deferred.join(" "),
             post: Some(post),
             duplicate,
             approval: None,
         })
     }
+}
+
+/// The kind of a post a Tag writes: a note unless it says otherwise. Only the Control Plane marks
+/// a commit review request.
+fn post_kind(value: i32) -> Result<MessageKind> {
+    match MessageKind::try_from(value) {
+        Ok(MessageKind::Unspecified | MessageKind::Note) => Ok(MessageKind::Note),
+        Ok(MessageKind::Review) => Err(invalid(
+            "a Workstream post cannot be a commit review request",
+        )),
+        Ok(kind) => Ok(kind),
+        Err(_) => Err(invalid("unknown Workstream post type")),
+    }
+}
+
+/// The Objective a post belongs to: its Task's own, or else the Objective of the message chain an
+/// inbox turn (or an approval continuation of one) continues.
+async fn post_objective_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> Result<Option<String>> {
+    let own: Option<String> =
+        sqlx::query_scalar("SELECT objective_id FROM supertag_v2_objective_tasks WHERE task_id=$1")
+            .bind(task_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    if own.is_some() {
+        return Ok(own);
+    }
+    Ok(sqlx::query_scalar(
+        "WITH RECURSIVE source_tasks(task_id) AS (
+            SELECT CAST($1 AS TEXT)
+            UNION
+            SELECT w.task_id FROM supertag_v2_approval_waits w
+            JOIN source_tasks s ON w.continuation_task_id=s.task_id
+        ) SELECT w.objective_id FROM supertag_v2_wakes w
+          JOIN source_tasks s ON w.task_id=s.task_id
+          WHERE w.objective_id IS NOT NULL
+          ORDER BY w.hops DESC,w.created_at_ms,w.wake_id LIMIT 1",
+    )
+    .bind(task_id)
+    .fetch_optional(&mut **tx)
+    .await?)
+}
+
+/// Who an unaddressed question or blocker goes to: the owner Tag of the post's Objective.
+async fn objective_owner_in(
+    tx: &mut Transaction<'_, Any>,
+    objective: Option<&str>,
+) -> Result<Option<String>> {
+    let Some(objective) = objective else {
+        return Ok(None);
+    };
+    Ok(sqlx::query_scalar(
+        "SELECT o.owner_tag_id FROM supertag_v2_objectives o
+         JOIN supertag_v2_tags tag ON tag.tag_id=o.owner_tag_id
+         WHERE o.objective_id=$1 AND tag.retired_at_ms IS NULL",
+    )
+    .bind(objective)
+    .fetch_optional(&mut **tx)
+    .await?)
 }
 
 async fn attempt_team(
@@ -295,18 +428,19 @@ async fn posts_in(
                 .ok_or_else(|| invalid("invalid Workstream cursor"))?,
         )
     };
-    let mut rows = if let Some(after) = after {
-        sqlx::query("SELECT * FROM supertag_v2_workstream_posts WHERE team_id=$1 AND sequence>$2 ORDER BY sequence LIMIT $3")
-            .bind(team).bind(after).bind(limit as i64 + 1).fetch_all(&mut **tx).await?
-    } else {
-        let mut latest = sqlx::query("SELECT * FROM supertag_v2_workstream_posts WHERE team_id=$1 ORDER BY sequence DESC LIMIT $2")
-            .bind(team).bind(limit as i64).fetch_all(&mut **tx).await?;
-        latest.reverse();
-        latest
+    let Some(channel) = messages::team_channel_in(tx, team).await? else {
+        return Err(StoreError::NotFound("Team Workstream was not found".into()));
     };
+    // With a position, one more than a page tells whether more follow; the latest page has none
+    // after it.
+    let fetch = if after.is_some() { limit + 1 } else { limit };
+    let mut rows = messages::page_in(tx, &channel, after, None, fetch as i64).await?;
     let more = rows.len() > limit;
     rows.truncate(limit);
-    let posts: Vec<WorkstreamPost> = rows.iter().map(post_row).collect::<Result<_>>()?;
+    let posts: Vec<WorkstreamPost> = rows
+        .into_iter()
+        .map(|message| post_row(team, message))
+        .collect();
     let next_cursor = posts
         .last()
         .filter(|_| more)
@@ -314,26 +448,25 @@ async fn posts_in(
     Ok(ListWorkstreamPostsResponse { posts, next_cursor })
 }
 
-async fn post_by_id(tx: &mut Transaction<'_, Any>, id: &str) -> Result<WorkstreamPost> {
-    let row = sqlx::query("SELECT * FROM supertag_v2_workstream_posts WHERE post_id=$1")
-        .bind(id)
-        .fetch_one(&mut **tx)
-        .await?;
-    post_row(&row)
+async fn post_by_id(tx: &mut Transaction<'_, Any>, team: &str, id: &str) -> Result<WorkstreamPost> {
+    let message = messages::message_by_id_in(tx, id)
+        .await?
+        .ok_or_else(|| StoreError::NotFound("Workstream post was not found".into()))?;
+    Ok(post_row(team, message))
 }
 
-fn post_row(row: &AnyRow) -> Result<WorkstreamPost> {
-    Ok(WorkstreamPost {
-        kind: 0,
-        post_id: row.try_get("post_id")?,
-        team_id: row.try_get("team_id")?,
-        author_tag_id: row.try_get("author_tag_id")?,
-        to_tag_ids: serde_json::from_str(&row.try_get::<String, _>("to_tag_ids")?)?,
-        body: row.try_get("body")?,
-        source_task_id: row.try_get("source_task_id")?,
-        sequence: row.try_get::<i64, _>("sequence")? as u64,
-        created_at_ms: row.try_get("created_at_ms")?,
-    })
+fn post_row(team: &str, message: MessageRow) -> WorkstreamPost {
+    WorkstreamPost {
+        kind: message.kind.into(),
+        post_id: message.message_id,
+        team_id: team.to_owned(),
+        author_tag_id: message.sender_id,
+        to_tag_ids: message.addressees,
+        body: message.text,
+        source_task_id: message.source_task_id.unwrap_or_default(),
+        sequence: message.seq as u64,
+        created_at_ms: message.created_at_ms,
+    }
 }
 
 impl ControlPlane {

@@ -302,6 +302,7 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
         .unwrap();
     assert!(!first_post.duplicate);
     assert_eq!(first_post.post.as_ref().unwrap().sequence, 1);
+    assert_eq!(first_post.post.as_ref().unwrap().kind(), MessageKind::Note);
     let replay = store
         .post_attempt_workstream(
             &supertag_control_plane::AttemptAccess::new(&host, &one),
@@ -346,8 +347,10 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
         .unwrap();
     assert_eq!(second_post.sequence, 2);
     assert_eq!(second_post.to_tag_ids, ["reviewer"]);
-    // Addressed posts now enqueue a durable inbox turn. This turn is outside
-    // the sender's Objective and does not consume its Team's Objective slots.
+    // Addressed posts now enqueue a durable inbox turn once a note's short debounce passes. This
+    // turn is outside the sender's Objective and does not consume its Team's Objective slots.
+    clock.fetch_add(5_000, Ordering::SeqCst);
+    store.sweep_mailbox().await.unwrap();
     let inbox = store
         .claim_task(&other_host, "addressed-post-inbox")
         .await

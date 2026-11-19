@@ -41,8 +41,9 @@ grants no authority. Start a Session when work needs a result. See
 [Send messages between Tags](../guides/tag-messaging.md).
 
 A Team's Workstream is its shared record of posts. `post` adds a note every member can read, and
-it wakes nobody. Give the post a `to` list and each addressed member receives it in its inbox as
-a message. See [Coordinate in a Team Workstream](../guides/workstreams.md).
+it wakes nobody; members see it in the digest that opens their next inbox turn. Give the post a
+`to` list and each addressed member receives it in its inbox as a message. A post typed
+`question` or `blocker` with no `to` goes to the Tag that owns the Objective. See [Coordinate in a Team Workstream](../guides/workstreams.md).
 
 ## Teammates can spot overlapping edits
 
