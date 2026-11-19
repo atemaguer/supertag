@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 import type { Tag } from "../gateway";
 import { describe } from "../lib/polling";
-import { HARNESSES, harnessLabel, type TagAdmin, type TagOptions, tagIdFor } from "../tag-admin";
+import {
+  type AddedWorkspace,
+  HARNESSES,
+  harnessLabel,
+  type TagAdmin,
+  type TagOptions,
+  tagIdFor,
+} from "../tag-admin";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -13,9 +20,13 @@ import {
 } from "./ui/dialog";
 import { Input } from "./ui/input";
 
+/** The Workspace picker's entry that adds a folder of this machine; no Workspace ID has a space. */
+const CHOOSE_FOLDER = " choose-folder";
+
 /**
  * Creates a Tag from a name and a harness, and optionally a Workspace. The rest matches the lead
- * Tag `supertag init` creates: it may edit files and run commands.
+ * Tag `supertag init` creates: it may edit files and, where its host can, run commands. On the
+ * local Gateway, a folder of this machine can be added as a new Workspace.
  */
 export function NewTagDialog({
   admin,
@@ -56,6 +67,9 @@ function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag)
   const [name, setName] = useState("");
   const [harness, setHarness] = useState("");
   const [workspace, setWorkspace] = useState("");
+  /** Folders added while the form is open, by Workspace, with where their Sessions start. */
+  const [added, setAdded] = useState<Record<string, AddedWorkspace>>({});
+  const [adding, setAdding] = useState(false);
   const [maxWorkSessions, setMaxWorkSessions] = useState(8);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -91,17 +105,43 @@ function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag)
   const harnesses = options?.harnesses.length
     ? [...options.harnesses].sort((a, b) => rank(a) - rank(b))
     : known;
+  const workspaces = options
+    ? [...new Set([...options.workspaces, ...Object.keys(added)])].sort()
+    : [];
+  const noCommands = options?.noCommands?.includes(harness) ?? false;
+
+  /** Asks for a folder, adds it as a Workspace of this machine, and selects it. */
+  async function addFolder() {
+    if (!admin.addFolder || adding) return;
+    setAdding(true);
+    setError("");
+    try {
+      const folder = await admin.addFolder();
+      if (folder) {
+        setAdded((prior) => ({ ...prior, [folder.workspace]: folder }));
+        setWorkspace(folder.workspace);
+      }
+    } catch (error) {
+      setError(describe(error));
+    } finally {
+      setAdding(false);
+    }
+  }
+
   async function create() {
-    if (!tagId || !harness || busy) return;
+    if (!tagId || !harness || busy || adding) return;
     setBusy(true);
     setError("");
     try {
+      const start = workspace ? added[workspace] : undefined;
       onCreated(
         await admin.create({
           tagId,
           name: name.trim(),
           harness,
           workspaceId: workspace || undefined,
+          workspaceRef: start?.workspaceRef,
+          workspaceCommit: start?.workspaceCommit,
           maxWorkSessions,
         }),
       );
@@ -152,22 +192,39 @@ function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag)
           No Worker Host is connected. Choose the harness its host will run.
         </small>
       )}
-      {options && options.workspaces.length > 0 && (
+      {noCommands && (
+        <small className="field-hint">
+          {harnessLabel(harness) ?? harness} has no sandbox of its own, and no host here lets it run
+          commands, so this Tag reads and edits files only.
+        </small>
+      )}
+      {options && (workspaces.length > 0 || admin.addFolder) && (
         <>
           <label htmlFor="tag-workspace">Workspace</label>
           <select
             id="tag-workspace"
             className="field-select"
             value={workspace}
-            onChange={(event) => setWorkspace(event.target.value)}
+            disabled={adding}
+            aria-describedby={adding ? "tag-workspace-adding" : undefined}
+            onChange={(event) => {
+              if (event.target.value === CHOOSE_FOLDER) void addFolder();
+              else setWorkspace(event.target.value);
+            }}
           >
             <option value="">None</option>
-            {options.workspaces.map((id) => (
+            {workspaces.map((id) => (
               <option key={id} value={id}>
                 {id}
               </option>
             ))}
+            {admin.addFolder && <option value={CHOOSE_FOLDER}>Choose a folder…</option>}
           </select>
+          {adding && (
+            <small id="tag-workspace-adding" className="field-hint">
+              Adding the folder and restarting SuperTag…
+            </small>
+          )}
         </>
       )}
       <label htmlFor="tag-work-sessions">Work Sessions open at once</label>
@@ -191,7 +248,7 @@ function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag)
         </p>
       )}
       <DialogFooter className="dialog-actions">
-        <Button className="primary" type="submit" disabled={!tagId || !options || busy}>
+        <Button className="primary" type="submit" disabled={!tagId || !options || busy || adding}>
           {busy ? "Creating…" : "Create Tag"}
         </Button>
       </DialogFooter>

@@ -27,7 +27,7 @@ Commands:
   verify                Check a running deployment through its public Control Plane endpoint
   diff                  Preview an organization manifest through the Control Plane
   apply                 Apply an organization manifest through the Control Plane
-  workspace             Declare remote Workspaces on any git server, their Workspace Credentials, and check them
+  workspace             Add local git repositories as Workspaces, declare remote Workspaces on any git server and their Workspace Credentials, and check them
   reply                 Resolve uncertain connector replies from provider evidence
   role                  Define reusable Roles: purpose, instructions, Permission Sets, and Context Sets
   role-assignment       Assign Roles to Tags and deactivate assignments
@@ -723,11 +723,12 @@ Options:
 ## `supertag workspace`
 
 ```text
-Declare remote Workspaces on any git server, their Workspace Credentials, and check them
+Add local git repositories as Workspaces, declare remote Workspaces on any git server and their Workspace Credentials, and check them
 
 Usage: supertag workspace [OPTIONS] <COMMAND>
 
 Commands:
+  add         Add a git repository on this machine as a Workspace of its local Worker Host, in supertag.yaml, and apply it to the running services as supertag up does
   put         Create or replace a remote Workspace: a git remote, the branch Sessions start from, the Workspace Credentials that read and push it, and where Session changes land
   check       Read the remote and check pushing with the Workspace's credentials, without changing it
   credential  Store, list, and remove the Workspace Credentials git delivery uses
@@ -738,6 +739,31 @@ Options:
           Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+  -h, --help
+          Print help
+```
+
+## `supertag workspace add`
+
+```text
+Add a git repository on this machine as a Workspace of its local Worker Host, in supertag.yaml, and apply it to the running services as supertag up does
+
+Usage: supertag workspace add [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]  The git repository to add, or a folder inside it. Default: the current directory
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --name <NAME>
+          The Workspace's name. Default: the repository folder's name, in lowercase letters, digits, and hyphens
+      --host <HOST>
+          The local host service in supertag.yaml to add it to, when there is more than one
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+      --json
+          Print the result as one JSON object, and progress on standard error
   -h, --help
           Print help
 ```

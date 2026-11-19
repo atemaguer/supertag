@@ -17,13 +17,13 @@ const SETUP_TIMEOUT: Duration = Duration::from_secs(600);
 const MAX_REASON_CHARS: usize = 600;
 
 /// What a finished CLI run printed.
-struct Ran {
-    success: bool,
-    stdout: String,
-    stderr: String,
+pub(crate) struct Ran {
+    pub(crate) success: bool,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
 }
 
-async fn run(
+pub(crate) async fn run(
     cli: &Path,
     path: Option<&str>,
     args: &[&str],
@@ -63,7 +63,7 @@ async fn run(
 }
 
 /// The last lines of a failed command's output, as one bounded reason.
-fn reason(ran: &Ran) -> String {
+pub(crate) fn reason(ran: &Ran) -> String {
     let text = if ran.stderr.trim().is_empty() {
         &ran.stdout
     } else {
@@ -87,7 +87,7 @@ fn reason(ran: &Ran) -> String {
 }
 
 /// The one JSON object a `--json` run prints on its last non-empty line.
-fn json_of(stdout: &str) -> Option<Value> {
+pub(crate) fn json_of(stdout: &str) -> Option<Value> {
     stdout
         .lines()
         .rev()
@@ -170,6 +170,11 @@ pub async fn set_up(directory: String, harness: String) -> Result<Value, String>
         SETUP_TIMEOUT,
     )
     .await?;
+    result(&ran)
+}
+
+/// What a `--json` run printed: its object, or its error and fix in one line.
+pub(crate) fn result(ran: &Ran) -> Result<Value, String> {
     let value = json_of(&ran.stdout);
     if ran.success {
         return Ok(value.unwrap_or(Value::Null));
@@ -183,7 +188,7 @@ pub async fn set_up(directory: String, harness: String) -> Result<Value, String>
                 _ => error.to_owned(),
             })
         })
-        .unwrap_or_else(|| reason(&ran));
+        .unwrap_or_else(|| reason(ran));
     Err(error)
 }
 

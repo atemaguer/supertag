@@ -143,6 +143,35 @@ async fn choose_project_folder<R: tauri::Runtime>(
         .map(|path| path.display().to_string()))
 }
 
+/// Asks for a folder with the system's folder picker and adds its git repository as a
+/// Workspace of the local services, with `supertag workspace add`. Only for the local Gateway;
+/// `None` when the picker was cancelled.
+#[tauri::command]
+async fn add_local_workspace<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, GatewayState>,
+    connection_id: String,
+) -> Result<Option<local_start::AddedWorkspace>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let directory = state.local_state_of(&connection_id).await?;
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("Choose a git repository to add as a Workspace")
+        .pick_folder(move |folder| {
+            let _ = sender.send(folder);
+        });
+    let folder = receiver
+        .await
+        .map_err(|_| "The folder picker closed.".to_owned())?;
+    let Some(folder) = folder.and_then(|folder| folder.into_path().ok()) else {
+        return Ok(None);
+    };
+    local_start::add_workspace(&directory, &folder)
+        .await
+        .map(Some)
+}
+
 /// Sets SuperTag up for the chosen project and harness, and starts it.
 #[tauri::command]
 async fn set_up_supertag(directory: String, harness: String) -> Result<serde_json::Value, String> {
@@ -453,7 +482,8 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         .plugin(tauri_plugin_notification::init())
         // Links in messages open in the system browser; the capability allows only http and https.
         .plugin(tauri_plugin_opener::init())
-        // The project folder picker on first launch; only the app's own command opens it.
+        // The folder pickers: the project on first launch, and a folder to add as a Workspace;
+        // only the app's own commands open them.
         .plugin(tauri_plugin_dialog::init())
         .on_page_load(|webview, payload| {
             if webview.label() == "main" && payload.event() == PageLoadEvent::Started {
@@ -521,6 +551,7 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             mark_conversation_read,
             check_setup,
             choose_project_folder,
+            add_local_workspace,
             set_up_supertag
         ])
 }

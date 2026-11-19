@@ -90,7 +90,9 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
         id: connectionId,
         origin,
         principal,
-        tagAdmin: tagAdminRefusal(principal) ? undefined : tagAdminSession(connectionId),
+        tagAdmin: tagAdminRefusal(principal)
+          ? undefined
+          : tagAdminSession(connectionId, origin === LOCAL_GATEWAY),
       });
     },
     [],

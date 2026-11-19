@@ -280,6 +280,9 @@ export const previewTagAdmin: TagAdmin = {
   async options() {
     return { harnesses: ["claude_code", "codex"], workspaces: ["supertag"] };
   },
+  async addFolder() {
+    return { workspace: "site", workspaceRef: "main" };
+  },
   async create({ tagId, name, harness }) {
     if (tags.some((tag) => tag.tagId === tagId))
       throw new Error("A Tag with that ID or name already exists.");

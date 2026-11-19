@@ -116,6 +116,98 @@ it("offers every harness when no Worker Host is connected, and shows a refusal",
   expect(onCreated).not.toHaveBeenCalled();
 });
 
+it("offers no folder outside the local Gateway, and says when a harness runs no commands", async () => {
+  const admin: TagAdmin = {
+    options: async () => ({
+      harnesses: ["claude_code", "codex"],
+      workspaces: ["supertag", "site"],
+      noCommands: ["claude_code"],
+    }),
+    create: vi.fn(async () => created),
+  };
+  await open(admin);
+  const workspace = field<HTMLSelectElement>("#tag-workspace");
+  expect([...workspace.options].map((option) => option.textContent)).toEqual([
+    "None",
+    "site",
+    "supertag",
+  ]);
+  expect(document.body.textContent).not.toContain("reads and edits files only");
+  act(() => choose(field<HTMLSelectElement>("#tag-harness"), "claude_code"));
+  expect(document.body.textContent).toContain(
+    "Claude Code has no sandbox of its own, and no host here lets it run commands",
+  );
+});
+
+it("adds a chosen folder as a Workspace and starts the Tag on its branch", async () => {
+  let finish: (added: { workspace: string; workspaceRef: string } | null) => void = () => {};
+  const admin: TagAdmin = {
+    options: async () => ({ harnesses: ["codex"], workspaces: ["supertag"] }),
+    create: vi.fn(async () => created),
+    addFolder: vi.fn(
+      () =>
+        new Promise<{ workspace: string; workspaceRef: string } | null>((resolve) => {
+          finish = resolve;
+        }),
+    ),
+  };
+  await open(admin);
+  const workspace = field<HTMLSelectElement>("#tag-workspace");
+  expect([...workspace.options].map((option) => option.textContent)).toEqual([
+    "None",
+    "supertag",
+    "Choose a folder…",
+  ]);
+  act(() => choose(workspace, " choose-folder"));
+  expect(admin.addFolder).toHaveBeenCalledTimes(1);
+  expect(document.body.textContent).toContain("Adding the folder");
+  expect(field<HTMLButtonElement>('button[type="submit"]').disabled).toBe(true);
+  await act(async () => finish({ workspace: "site", workspaceRef: "trunk" }));
+  expect(workspace.value).toBe("site");
+  expect([...workspace.options].map((option) => option.textContent)).toEqual([
+    "None",
+    "site",
+    "supertag",
+    "Choose a folder…",
+  ]);
+
+  act(() => type(field<HTMLInputElement>("#tag-name"), "Site"));
+  await act(async () => {
+    field<HTMLFormElement>(".workspace-dialog form").requestSubmit();
+  });
+  expect(admin.create).toHaveBeenCalledWith({
+    tagId: "site",
+    name: "Site",
+    harness: "codex",
+    workspaceId: "site",
+    workspaceRef: "trunk",
+    workspaceCommit: undefined,
+    maxWorkSessions: 8,
+  });
+});
+
+it("keeps the Workspace when choosing a folder is cancelled, and shows why adding failed", async () => {
+  const addFolder = vi
+    .fn<() => Promise<null>>()
+    .mockResolvedValueOnce(null)
+    .mockRejectedValueOnce("/tmp/x is not in a git repository. Choose one.");
+  const admin: TagAdmin = {
+    options: async () => ({ harnesses: ["codex"], workspaces: ["supertag"] }),
+    create: vi.fn(async () => created),
+    addFolder,
+  };
+  await open(admin);
+  const workspace = field<HTMLSelectElement>("#tag-workspace");
+  expect(workspace.value).toBe("supertag");
+  await act(async () => choose(workspace, " choose-folder"));
+  expect(workspace.value).toBe("supertag");
+  await act(async () => choose(workspace, " choose-folder"));
+  expect(workspace.value).toBe("supertag");
+  expect(field('[role="alert"]').textContent).toBe(
+    "/tmp/x is not in a git repository. Choose one.",
+  );
+});
+
 it("derives Tag IDs as supertag init names Tags, and refuses non-operators", () => {
   expect(tagIdFor("Release Bot")).toBe("release-bot");
   expect(tagIdFor("  --Ops.Team__2 ")).toBe("ops-team-2");

@@ -19,6 +19,7 @@ mod lifecycle;
 mod local;
 mod local_config;
 mod local_landing;
+mod local_workspaces;
 mod mailbox;
 mod manifests;
 mod mcp;
@@ -236,7 +237,8 @@ enum Command {
     Diff(manifests::ManifestArgs),
     /// Apply an organization manifest through the Control Plane.
     Apply(manifests::ManifestArgs),
-    /// Declare remote Workspaces on any git server, their Workspace Credentials, and check them.
+    /// Add local git repositories as Workspaces, declare remote Workspaces on any git server and
+    /// their Workspace Credentials, and check them.
     Workspace {
         #[command(flatten)]
         connection: Connection,

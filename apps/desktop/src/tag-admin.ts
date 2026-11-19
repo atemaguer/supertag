@@ -5,6 +5,17 @@ import type { Tag } from "./gateway";
 export interface TagOptions {
   harnesses: string[];
   workspaces: string[];
+  /** Offered harnesses no host runs commands for: a Tag on one reads and edits files only. */
+  noCommands?: string[];
+}
+
+/** A folder of this machine just added as a Workspace, and where its Sessions start. */
+export interface AddedWorkspace {
+  workspace: string;
+  /** The branch checked out in the folder. */
+  workspaceRef?: string;
+  /** The commit checked out, when the folder's HEAD is detached. */
+  workspaceCommit?: string;
 }
 
 /** A new Tag: its permanent ID, a display name, its harness, and optionally its Workspace. */
@@ -13,6 +24,9 @@ export interface NewTag {
   name?: string;
   harness: string;
   workspaceId?: string;
+  /** Where a Workspace just added starts; otherwise the branch its other Tags follow. */
+  workspaceRef?: string;
+  workspaceCommit?: string;
   /** How many Work Sessions it may have open at once, 1 to 64. */
   maxWorkSessions?: number;
 }
@@ -21,16 +35,24 @@ export interface NewTag {
 export interface TagAdmin {
   options(): Promise<TagOptions>;
   create(tag: NewTag): Promise<Tag>;
+  /**
+   * Asks for a folder and adds its git repository as a Workspace of this machine; `null` when
+   * the person cancelled. Only the local Gateway has it.
+   */
+  addFolder?(): Promise<AddedWorkspace | null>;
 }
 
-export function tagAdminSession(connectionId: string): TagAdmin {
+/** Tag creation over a connection; `local` when it is the local Gateway, which can add folders. */
+export function tagAdminSession(connectionId: string, local = false): TagAdmin {
   return {
     options: () => invoke("list_tag_options", { connectionId }),
     create: (tag) => invoke("create_tag", { connectionId, tag }),
+    ...(local && {
+      addFolder: () => invoke<AddedWorkspace | null>("add_local_workspace", { connectionId }),
+    }),
   };
 }
 
-/** The harnesses a Tag can name, in the order they are offered. */
 /** The harnesses a Tag can run on, in the order the app offers them: Codex and Claude Code first. */
 export const HARNESSES: Record<string, string> = {
   codex: "Codex",

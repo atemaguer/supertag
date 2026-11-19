@@ -7,9 +7,13 @@ use tonic::Code;
 
 use super::{GatewayState, MAX_PAGES, Result, Session, Tag, harness_name, rpc_error};
 
-/// The runtime actions `supertag init` gives its lead Tag through its Permission Set: edit files
-/// and run commands in its Workspace, and schedule its own follow-ups.
-const NEW_TAG_ACTIONS: [&str; 3] = ["commands:execute", "files:write", "schedule:create"];
+/// The runtime actions `supertag init` gives its lead Tag through its Permission Set: read and
+/// edit files in its Workspace, and schedule its own follow-ups. files:write does not imply
+/// files:read: Claude Code's Read, Glob and Grep need it.
+const NEW_TAG_ACTIONS: [&str; 3] = ["files:read", "files:write", "schedule:create"];
+
+/// Running commands, which `supertag init` also gives a lead whose host can run them.
+const COMMANDS: &str = "commands:execute";
 
 /// What `supertag init` adds for a Codex lead: current Codex models run commands only in Codex
 /// code mode, which SuperTag starts only for a Task that may also fetch from the web. Without it,
@@ -22,6 +26,69 @@ const CODEX_ACTIONS: [&str; 1] = ["web:fetch"];
 pub struct TagOptions {
     pub harnesses: Vec<String>,
     pub workspaces: Vec<String>,
+    /// Offered harnesses no host runs commands for: a Tag on one reads and edits files but runs
+    /// no commands, as `supertag init` sets up such a lead.
+    pub no_commands: Vec<String>,
+}
+
+/// Whether a host whose harness reports `profile` runs that harness's commands. Codex sandboxes
+/// its own; Claude Code, Cursor, and OpenCode need the host's opt-in to run them unsandboxed, a
+/// local-vm container, or a remote sandbox. As the Control Plane places Tasks.
+fn runs_commands(kind: v2::HarnessKind, profile: Option<&v2::HarnessExecutionProfile>) -> bool {
+    match kind {
+        v2::HarnessKind::ClaudeCode | v2::HarnessKind::Cursor | v2::HarnessKind::Opencode => {
+            profile.is_some_and(|profile| {
+                profile.allow_unsandboxed_commands
+                    || profile.shared_execution.is_some()
+                    || profile.remote_file_workspace
+            })
+        }
+        _ => true,
+    }
+}
+
+/// The options the current hosts offer: their harnesses, which of those none runs commands for,
+/// and their Workspaces. A revoked, removed, or offline host offers nothing.
+fn options_of(hosts: &[v2::WorkerHostStatus]) -> TagOptions {
+    let mut options = TagOptions::default();
+    let mut commands = Vec::new();
+    for host in hosts {
+        if host.revoked_at_ms.is_some()
+            || host.removed_at_ms.is_some()
+            || matches!(
+                host.phase(),
+                v2::HostPhase::Offline | v2::HostPhase::Revoked
+            )
+        {
+            continue;
+        }
+        let kinds = host
+            .harnesses
+            .iter()
+            .map(|harness| (harness.harness_kind(), harness.execution_profile.as_ref()))
+            .chain([(host.harness_kind(), host.execution_profile.as_ref())])
+            .filter(|(kind, _)| *kind != v2::HarnessKind::Unspecified);
+        for (kind, profile) in kinds {
+            options.harnesses.push(harness_name(kind));
+            if runs_commands(kind, profile) {
+                commands.push(harness_name(kind));
+            }
+        }
+        options
+            .workspaces
+            .extend(host.workspace_ids.iter().cloned());
+    }
+    options.harnesses.sort();
+    options.harnesses.dedup();
+    options.no_commands = options
+        .harnesses
+        .iter()
+        .filter(|harness| !commands.contains(harness))
+        .cloned()
+        .collect();
+    options.workspaces.sort();
+    options.workspaces.dedup();
+    options
 }
 
 /// A new Tag: its permanent ID, an optional display name, its harness, and optionally the
@@ -33,13 +100,22 @@ pub struct NewTag {
     pub name: Option<String>,
     pub harness: String,
     pub workspace_id: Option<String>,
+    /// The branch a local Workspace's Sessions start from, such as the one `supertag workspace
+    /// add` read from a folder just added. Otherwise the branch its other Tags follow.
+    #[serde(default)]
+    pub workspace_ref: Option<String>,
+    /// The commit they start from instead, for a folder whose HEAD is detached.
+    #[serde(default)]
+    pub workspace_commit: Option<String>,
     /// How many Work Sessions it may have open at once; the Gateway's default when unset.
     #[serde(default)]
     pub max_work_sessions: Option<u32>,
 }
 
 impl NewTag {
-    fn request(self) -> Result<v2::PutTagRequest> {
+    /// The request that creates it. `commands` says whether it may run commands: false when its
+    /// harness's hosts run none, so its Tasks do not wait for a host that would.
+    fn request(self, commands: bool) -> Result<v2::PutTagRequest> {
         let harness = v2::HarnessKind::from_str_name(&format!(
             "HARNESS_KIND_{}",
             self.harness.to_ascii_uppercase()
@@ -54,8 +130,10 @@ impl NewTag {
             tag_id: self.tag_id,
             name,
             harness_kind: harness as i32,
-            allowed_actions: NEW_TAG_ACTIONS
+            allowed_actions: commands
+                .then_some(COMMANDS)
                 .iter()
+                .chain(NEW_TAG_ACTIONS.iter())
                 .chain(if harness == v2::HarnessKind::Codex {
                     CODEX_ACTIONS.as_slice()
                 } else {
@@ -68,6 +146,8 @@ impl NewTag {
                 .filter(|workspace| !workspace.is_empty())
                 .map(|workspace_id| v2::WorkspaceSpec {
                     workspace_id,
+                    base_ref: self.workspace_ref.unwrap_or_default(),
+                    base_commit: self.workspace_commit.unwrap_or_default(),
                     ..Default::default()
                 }),
             max_work_sessions: self.max_work_sessions,
@@ -119,7 +199,7 @@ impl Session {
     }
 
     async fn tag_options(&self) -> Result<TagOptions> {
-        let mut options = TagOptions::default();
+        let mut hosts = Vec::new();
         let mut cursor = String::new();
         for _ in 0..MAX_PAGES {
             let page = self
@@ -131,32 +211,13 @@ impl Session {
                 .await
                 .map_err(rpc_error)?
                 .into_inner();
-            for host in page.hosts {
-                if host.revoked_at_ms.is_some() || host.removed_at_ms.is_some() {
-                    continue;
-                }
-                let kinds = host
-                    .harnesses
-                    .iter()
-                    .map(|harness| harness.harness_kind())
-                    .chain([host.harness_kind()]);
-                options.harnesses.extend(
-                    kinds
-                        .filter(|kind| *kind != v2::HarnessKind::Unspecified)
-                        .map(harness_name),
-                );
-                options.workspaces.extend(host.workspace_ids);
-            }
+            hosts.extend(page.hosts);
             if page.next_cursor.is_empty() || page.next_cursor == cursor {
                 break;
             }
             cursor = page.next_cursor;
         }
-        options.harnesses.sort();
-        options.harnesses.dedup();
-        options.workspaces.sort();
-        options.workspaces.dedup();
-        Ok(options)
+        Ok(options_of(&hosts))
     }
 }
 
@@ -169,10 +230,29 @@ impl GatewayState {
         self.current(&session, options).await
     }
 
+    /// The state directory of the local services this connection reaches, where `supertag
+    /// workspace add` adds a folder. Only the local Gateway has one: a folder of this Mac means
+    /// nothing to another Gateway's hosts.
+    pub async fn local_state_of(&self, connection_id: &str) -> Result<std::path::PathBuf> {
+        self.session(connection_id).await?;
+        let local = self.0.read().await.origin.as_deref() == Some(super::local::LOCAL);
+        match (&self.2, local) {
+            (Some(state), true) => Ok(state.clone()),
+            _ => Err("Only the local Gateway can add a folder of this Mac as a Workspace.".into()),
+        }
+    }
+
     /// Creates a Tag, refusing an ID or name another Tag holds.
     pub async fn create_tag(&self, connection_id: &str, tag: NewTag) -> Result<Tag> {
-        let mut request = tag.request()?;
         let session = self.session(connection_id).await?;
+        // A harness its current hosts run no commands for gets none, as init's lead does. With
+        // no host serving it yet, the host that will is not known, so it may run them.
+        // When the hosts can't be listed, creating the Tag says why: only an operator may.
+        let commands = session
+            .tag_options()
+            .await
+            .map_or(true, |options| !options.no_commands.contains(&tag.harness));
+        let mut request = tag.request(commands)?;
         if let Some(workspace) = request.workspace.as_mut()
             && workspace.base_ref.is_empty()
             && workspace.base_commit.is_empty()
@@ -226,16 +306,27 @@ mod tests {
         assert_eq!(branch_to_follow(&tags, "unknown"), None);
     }
 
+    fn new_tag(harness: &str, workspace_id: Option<&str>) -> NewTag {
+        NewTag {
+            tag_id: "lead".into(),
+            name: None,
+            harness: harness.into(),
+            workspace_id: workspace_id.map(str::to_owned),
+            workspace_ref: None,
+            workspace_commit: None,
+            max_work_sessions: None,
+        }
+    }
+
     #[test]
     fn a_new_tag_gets_the_lead_tag_defaults_and_never_replaces_another() {
         let request = NewTag {
             tag_id: "reviewer".into(),
             name: Some(" Reviewer ".into()),
-            harness: "claude_code".into(),
-            workspace_id: Some("supertag".into()),
             max_work_sessions: Some(3),
+            ..new_tag("claude_code", Some("supertag"))
         }
-        .request()
+        .request(true)
         .unwrap();
         assert_eq!(request.max_work_sessions, Some(3));
         assert_eq!(request.tag_id, "reviewer");
@@ -243,25 +334,31 @@ mod tests {
         assert_eq!(request.harness_kind, v2::HarnessKind::ClaudeCode as i32);
         assert_eq!(
             request.allowed_actions,
-            ["commands:execute", "files:write", "schedule:create"]
+            [
+                "commands:execute",
+                "files:read",
+                "files:write",
+                "schedule:create"
+            ]
         );
-        assert_eq!(request.workspace.unwrap().workspace_id, "supertag");
+        let workspace = request.workspace.unwrap();
+        assert_eq!(workspace.workspace_id, "supertag");
+        // Without a branch, create_tag looks up the one the Workspace's other Tags follow.
+        assert_eq!(workspace.base_ref, "");
         assert_eq!(request.expected_revision, Some(0));
 
         let plain = NewTag {
-            tag_id: "lead".into(),
             name: Some("lead".into()),
-            harness: "codex".into(),
-            workspace_id: Some(String::new()),
-            max_work_sessions: None,
+            ..new_tag("codex", Some(""))
         }
-        .request()
+        .request(true)
         .unwrap();
         assert!(plain.name.is_none());
         assert_eq!(
             plain.allowed_actions,
             [
                 "commands:execute",
+                "files:read",
                 "files:write",
                 "schedule:create",
                 "web:fetch"
@@ -270,17 +367,101 @@ mod tests {
         assert!(plain.workspace.is_none());
 
         for harness in ["", "unspecified", "unknown"] {
-            assert!(
-                NewTag {
-                    tag_id: "lead".into(),
-                    name: None,
-                    harness: harness.into(),
-                    workspace_id: None,
-                    max_work_sessions: None,
-                }
-                .request()
-                .is_err()
-            );
+            assert!(new_tag(harness, None).request(true).is_err());
         }
+    }
+
+    #[test]
+    fn a_tag_whose_hosts_run_no_commands_gets_none() {
+        let request = new_tag("claude_code", None).request(false).unwrap();
+        assert_eq!(
+            request.allowed_actions,
+            ["files:read", "files:write", "schedule:create"]
+        );
+    }
+
+    #[test]
+    fn a_folder_just_added_names_where_sessions_start() {
+        let branch = NewTag {
+            workspace_ref: Some("trunk".into()),
+            ..new_tag("codex", Some("site"))
+        }
+        .request(true)
+        .unwrap()
+        .workspace
+        .unwrap();
+        assert_eq!(
+            (branch.workspace_id.as_str(), branch.base_ref.as_str()),
+            ("site", "trunk")
+        );
+        let commit = NewTag {
+            workspace_commit: Some("4f2c0d1e9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d".into()),
+            ..new_tag("codex", Some("site"))
+        }
+        .request(true)
+        .unwrap()
+        .workspace
+        .unwrap();
+        assert_eq!(
+            commit.base_commit,
+            "4f2c0d1e9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d"
+        );
+    }
+
+    #[test]
+    fn every_ready_host_offers_its_harnesses_and_workspaces() {
+        let slot = |kind: v2::HarnessKind, unsandboxed: bool| v2::HostHarnessCapacity {
+            harness_kind: kind as i32,
+            execution_profile: Some(v2::HarnessExecutionProfile {
+                allow_unsandboxed_commands: unsandboxed,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let host = |phase: v2::HostPhase, harnesses, workspaces: &[&str]| v2::WorkerHostStatus {
+            phase: phase as i32,
+            harnesses,
+            workspace_ids: workspaces.iter().map(|id| (*id).to_owned()).collect(),
+            ..Default::default()
+        };
+        // The laptop init set up: a Codex lead, with Claude Code beside it, unsandboxed off.
+        let laptop = host(
+            v2::HostPhase::Ready,
+            vec![
+                slot(v2::HarnessKind::Codex, false),
+                slot(v2::HarnessKind::ClaudeCode, false),
+            ],
+            &["supertag", "site"],
+        );
+        let options = options_of(std::slice::from_ref(&laptop));
+        assert_eq!(options.harnesses, ["claude_code", "codex"]);
+        assert_eq!(options.workspaces, ["site", "supertag"]);
+        assert_eq!(options.no_commands, ["claude_code"]);
+
+        // Another host that runs Claude Code's commands makes it run them; an offline one, or a
+        // revoked one, offers nothing.
+        let mut revoked = host(
+            v2::HostPhase::Ready,
+            vec![slot(v2::HarnessKind::Cursor, true)],
+            &["revoked"],
+        );
+        revoked.revoked_at_ms = Some(1);
+        let options = options_of(&[
+            laptop,
+            host(
+                v2::HostPhase::Busy,
+                vec![slot(v2::HarnessKind::ClaudeCode, true)],
+                &[],
+            ),
+            host(
+                v2::HostPhase::Offline,
+                vec![slot(v2::HarnessKind::Opencode, false)],
+                &["stale"],
+            ),
+            revoked,
+        ]);
+        assert_eq!(options.harnesses, ["claude_code", "codex"]);
+        assert_eq!(options.workspaces, ["site", "supertag"]);
+        assert!(options.no_commands.is_empty());
     }
 }

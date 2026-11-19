@@ -1,5 +1,6 @@
 //! `supertag workspace`: remote Workspaces on any git server, the Workspace Credentials git
-//! delivery uses for them, and `workspace check`. Secrets go to this machine's credential vault,
+//! delivery uses for them, and `workspace check`; `workspace add`, for a repository on this
+//! machine, is `local_workspaces`. Secrets go to this machine's credential vault,
 //! never to the Control Plane database, a flag, or the terminal.
 use std::{
     io::{BufRead as _, IsTerminal as _, Read as _},
@@ -41,6 +42,9 @@ pub enum Forge {
 
 #[derive(Subcommand)]
 pub enum WorkspaceCommand {
+    /// Add a git repository on this machine as a Workspace of its local Worker Host, in
+    /// supertag.yaml, and apply it to the running services as supertag up does.
+    Add(crate::local_workspaces::AddArgs),
     /// Create or replace a remote Workspace: a git remote, the branch Sessions start from, the
     /// Workspace Credentials that read and push it, and where Session changes land.
     Put {
@@ -225,6 +229,14 @@ pub(crate) async fn delete(
 
 pub async fn run(connection: Connection, command: WorkspaceCommand) -> Result<()> {
     let output = match command {
+        WorkspaceCommand::Add(args) => {
+            // It changes this machine's supertag.yaml, not a Control Plane resource.
+            ensure!(
+                connection.gateway.is_none() && crate::ROOT_GATEWAY.get().is_none(),
+                "supertag workspace add changes this machine's supertag.yaml, so it takes --state-directory, not --gateway"
+            );
+            return crate::local_workspaces::add(connection.state_directory, args).await;
+        }
         WorkspaceCommand::Put {
             workspace_id,
             remote,

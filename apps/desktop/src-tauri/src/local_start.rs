@@ -211,6 +211,70 @@ fn marked_path(output: &str) -> Option<String> {
     (!path.trim().is_empty()).then(|| path.to_owned())
 }
 
+/// How long `supertag workspace add` may take: it restarts the changed services, waiting for
+/// running Task Attempts as `supertag up` does.
+const ADD_WORKSPACE_LIMIT: Duration = Duration::from_secs(420);
+
+/// A folder `supertag workspace add` made a Workspace of the local host, as its `--json` says.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddedWorkspace {
+    pub workspace: String,
+    /// The branch its Sessions start from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_ref: Option<String>,
+    /// The commit they start from instead, when the folder's HEAD is detached.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_commit: Option<String>,
+}
+
+impl AddedWorkspace {
+    fn of(value: &serde_json::Value) -> Option<Self> {
+        Some(Self {
+            workspace: value["workspace"].as_str()?.to_owned(),
+            workspace_ref: value["ref"].as_str().map(str::to_owned),
+            workspace_commit: value["baseCommit"].as_str().map(str::to_owned),
+        })
+    }
+}
+
+/// Adds the git repository at `folder` as a Workspace of the local services in `state`, with
+/// the app's CLI: `supertag workspace add --json`, which writes supertag.yaml and applies it as
+/// `supertag up` does.
+pub async fn add_workspace(state: &Path, folder: &Path) -> Result<AddedWorkspace, String> {
+    let (cli, path) = usable_cli().await?;
+    add_workspace_with(&cli, path.as_deref(), state, folder).await
+}
+
+async fn add_workspace_with(
+    cli: &Path,
+    path: Option<&str>,
+    state: &Path,
+    folder: &Path,
+) -> Result<AddedWorkspace, String> {
+    let (state, folder) = (state.to_string_lossy(), folder.to_string_lossy());
+    let ran = crate::onboarding::run(
+        cli,
+        path,
+        &[
+            "workspace",
+            "add",
+            "--json",
+            "--state-directory",
+            &state,
+            &folder,
+        ],
+        None,
+        ADD_WORKSPACE_LIMIT,
+    )
+    .await?;
+    let value = crate::onboarding::result(&ran)?;
+    AddedWorkspace::of(&value).ok_or_else(|| {
+        "This version of the supertag CLI can't add a folder for the app. Update it, then try again."
+            .to_owned()
+    })
+}
+
 /// What the app reports while it restarts the local services with its own CLI.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -385,6 +449,53 @@ mod tests {
         assert_eq!(
             cli(None, Some(&path), std::slice::from_ref(&installed)),
             Some(second.join("supertag"))
+        );
+    }
+
+    /// The app adds a folder with `supertag workspace add --json` against its state directory,
+    /// and reads where the Workspace's Sessions start, or the CLI's error and fix.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_folder_is_added_with_the_cli_and_its_json_is_read() {
+        let directory = tempfile::tempdir().unwrap();
+        let runs = directory.path().join("runs");
+        let script = |body: &str| {
+            format!(
+                "#!/bin/sh\necho \"$*\" >> '{}'\necho 'Added Workspace site.' >&2\n{body}\n",
+                runs.display()
+            )
+        };
+        let cli = tool(directory.path(), "supertag", 0o755);
+        std::fs::write(
+            &cli,
+            script(r#"echo '{"version":1,"workspace":"site","ref":"trunk","added":true}'"#),
+        )
+        .unwrap();
+        let (state, folder) = (Path::new("/tmp/state"), Path::new("/work/My Site"));
+        assert_eq!(
+            add_workspace_with(&cli, None, state, folder).await.unwrap(),
+            AddedWorkspace {
+                workspace: "site".into(),
+                workspace_ref: Some("trunk".into()),
+                workspace_commit: None,
+            }
+        );
+        assert_eq!(
+            std::fs::read_to_string(&runs).unwrap(),
+            "workspace add --json --state-directory /tmp/state /work/My Site\n"
+        );
+        std::fs::write(
+            &cli,
+            script(
+                r#"echo '{"version":1,"error":"/work/x is not in a git repository.","fix":"Choose one."}'; exit 1"#,
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            add_workspace_with(&cli, None, state, folder)
+                .await
+                .unwrap_err(),
+            "/work/x is not in a git repository. Choose one."
         );
     }
 

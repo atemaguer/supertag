@@ -310,6 +310,9 @@ github=GITHUB_TOKEN` and reads the value from `SUPERTAG_NETWORK_CREDENTIAL_GITHU
       handbook: { remote: true }
 ```
 
+`supertag workspace add PATH` adds a local repository here for you, on the file's only local host
+(or `--host NAME`), and applies the change as `supertag up` does.
+
 `{ remote: true }` serves a remote Workspace: a `Workspace` resource on a git server, which the
 host reads and pushes itself with a credential the Control Plane grants for each operation. It
 takes no `path`, `land`, or `setup`: the resource's own `land` applies. `supertag up` warns when its

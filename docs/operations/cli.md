@@ -50,8 +50,10 @@ Tag's name; for OpenCode it also asks for a `provider/model`. Claude Code runs t
 - a `control-plane` service, which also creates a `local-tools` Permission Set, a `Lead` Role,
   and the `lead` Tag, bound to the repository's Workspace and following the branch checked out
   when `init` ran; and
-- a `host` service named after this machine, which maps the repository as a Workspace and runs
-  up to three Task Attempts at once for each harness (`concurrency: 3`), so one stuck Task does not hold every Tag.
+- a `host` service named after this machine, which maps the repository as a Workspace, runs
+  every harness `init` found signed in, the lead's first, so Tags you create later can use any
+  of them, and runs up to three Task Attempts at once for each harness (`concurrency: 3`), so
+  one stuck Task does not hold every Tag.
 
 Codex sandboxes its own commands. Claude Code, Cursor, and OpenCode don't, so for them `init`
 asks how the lead may run commands, defaulting to not at all:
@@ -101,8 +103,9 @@ A script or app can run `init` without a terminal:
   are usable. Add `--harness codex` to check only that harness. Without `--json`,
   `supertag init --check` prints the same findings as readable text.
 - `supertag init --yes --harness codex --directory PATH` (or `--harness claude-code`) sets up that
-  folder with that harness and starts SuperTag, as `init` does. It stops before writing anything
-  when the harness is not installed or not signed in. On a machine that is already set up, it adds
+  folder with that harness for the lead and starts SuperTag, as `init` does; the host also runs
+  the other installed harnesses that are signed in. It stops before writing anything when the
+  named harness is not installed or not signed in. On a machine that is already set up, it adds
   the folder as described in [Add another repository](#add-another-repository), and the Tag uses
   the lead's harness. With `--json`, it prints one object: the Tag, Workspace, harness, and
   Control Plane address on success, or `error`, `fix`, and `fix_command` with a non-zero exit
@@ -143,16 +146,34 @@ services. Talk to that Tag to work in that repository. If you have edited `super
 (comments, variables, or several local hosts), `init` leaves the file alone and prints the steps
 instead.
 
+To add a repository as a Workspace without creating a Tag for it, run `supertag workspace add`
+with its folder:
+
+```sh
+supertag workspace add ~/code/site
+```
+
+It checks that the folder is in a Git repository with a commit, adds the repository under the
+local host's `workspaces` in `~/.supertag/supertag.yaml`, named after its folder (`--name` picks
+another name), and restarts the changed services as `supertag up` does. It then prints the
+`supertag tag put` command that creates a Tag working in it, following the branch checked out
+there. A repository the host already maps is left as it is. The desktop app's New Tag form runs
+the same command when you choose **Choose a folder…** as the Workspace.
+
 ### Try another harness
 
 A Tag keeps the harness it was created with, so `lead` can't switch from Claude Code to Codex.
-To try another harness, add it to the host and create a second Tag on it. Add the harness to the
-host's `harnesses` in `~/.supertag/supertag.yaml`, for example `harnesses: [claude-code, codex]`,
-then run:
+To try another harness, create a second Tag on it, for example with **+** in the desktop app,
+whose New Tag form offers every harness this machine's Worker Hosts run. `init` gives the host
+every harness it found signed in. Run `supertag init` again to add one you signed in to later:
+on a machine that is already set up, it offers, defaulting to yes, to add each signed-in harness
+the host does not run yet. To do it by hand, add the harness to the host's `harnesses` in
+`~/.supertag/supertag.yaml`, for example `harnesses: [claude-code, codex]`, then run:
 
 ```sh
 supertag up
-supertag tag put codex-lead --harness codex --workspace-id WORKSPACE --workspace-ref BRANCH \
+supertag tag put codex-lead --instructions "Work in this repository." \
+  --harness codex --workspace-id WORKSPACE --workspace-ref BRANCH \
   --allow files:read --allow files:write --allow commands:execute --allow web:fetch
 ```
 

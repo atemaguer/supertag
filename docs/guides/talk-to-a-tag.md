@@ -29,6 +29,12 @@ If there is no local setup or the Control Plane has no Tags, SuperTag shows how 
 with `supertag init`. For a shared Control Plane, ask its operator to set up a Tag. An operator can
 also create one with Ctrl-N in the terminal UI, or with **+** in the desktop app's sidebar, or ⌘N:
 give it a name, from which its permanent ID is derived, a harness, and optionally a Workspace.
+The form offers every harness and Workspace the connected Worker Hosts serve. Connected to the
+local services, the desktop app's form can also add a folder of this machine as a new Workspace:
+choose **Choose a folder…**, pick a Git repository, and SuperTag adds it, restarts, and starts the
+Tag on the branch checked out there. A Claude Code, Cursor, or OpenCode Tag gets
+`commands:execute` only when a host lets that harness run commands, as `supertag init` sets up
+its lead; the form says when it reads and edits files only.
 
 To give `lead` an **Objective**, an outcome it owns, type `/goal` followed by the outcome and how
 to verify it, and press Enter. The message goes to the conversation like any other, and the Control

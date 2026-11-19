@@ -51,11 +51,12 @@ on later. `--yes` accepts every default and needs no terminal. It writes `~/.sup
   following the branch checked out when `init` ran;
 - a Gateway; and
 - a `host` service named after the machine, which maps this repository as the Workspace,
-  named after the repository by default, and runs up to three Task Attempts at once for each harness
-  (`concurrency: 3`).
+  named after the repository by default, runs every harness `init` found signed in (the lead's
+  first), and runs up to three Task Attempts at once for each harness (`concurrency: 3`).
 
 Nothing is written to the repository; state lives in `~/.supertag/`. Running `init` again in
-another repository offers to add it, with a Tag named after it that works there. Each new Session of `lead`
+another repository offers to add it, with a Tag named after it that works there.
+`supertag workspace add PATH` adds a repository as a Workspace without a Tag. Each new Session of `lead`
 starts from the current commit of the branch `init` found (`workspace.ref`). When HEAD is
 detached, `init` pins the checked-out commit (`workspace.baseCommit`) instead and says so in its
 output. To follow another branch or pin a commit, apply a Tag manifest; see [Workspaces](../../docs/guides/workspaces.md#2-bind-a-tag-to-the-workspace).

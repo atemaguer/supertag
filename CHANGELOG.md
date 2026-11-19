@@ -9,6 +9,23 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Added
+
+- `supertag workspace add [PATH]` adds a Git repository on this machine as a Workspace of the
+  local Worker Host in `supertag.yaml` and restarts the changed services as `supertag up` does.
+  The desktop app's New Tag form, connected to the local services, offers **Choose a folder…**
+  as its Workspace, which runs it and starts the new Tag on the folder's branch.
+
+### Fixed
+
+- The desktop app's New Tag form offered only the lead's harness, because `supertag init` set up
+  the local host with that harness alone. `init` now gives the host every installed harness that
+  is signed in, and on a machine already set up offers to add the ones it lacks. A Tag created in
+  the desktop app now gets `files:read`, which Claude Code needs to read files, and a Claude
+  Code, Cursor, or OpenCode Tag gets `commands:execute` only when a host lets that harness run
+  commands, as `init` does for its lead. Offline hosts no longer add stale harnesses and
+  Workspaces to the form.
+
 ### Changed
 
 - A Worker Host runs one Worklet, which registers the host once and starts a Worker process of

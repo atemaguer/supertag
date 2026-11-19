@@ -39,7 +39,19 @@ your repository  <──  branch supertag/session/HASH  <── delivery
 
 ## 1. Map the repository on a Worker Host
 
-In `~/.supertag/supertag.yaml`, a host service maps Workspace names to repositories:
+On a machine set up with `supertag init`, add a repository as a Workspace of the local host with
+its folder:
+
+```sh
+supertag workspace add ~/code/app
+```
+
+It checks that the folder is in a Git repository with a commit, names the Workspace after the
+folder (`--name` picks another name), and restarts the changed services. In the desktop app,
+choose **Choose a folder…** as the Workspace of a new Tag to do the same.
+
+The command writes `~/.supertag/supertag.yaml`, where a host service maps Workspace names to
+repositories. You can also edit it, then run `supertag up`:
 
 ```yaml
 services:

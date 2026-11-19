@@ -40,7 +40,9 @@ One Tag may be the Control Plane's lead Tag, the default Tag `supertag init` cre
 terminal UI and desktop app show first. `tag put TAG --lead` or a manifest's `spec.lead: true`
 makes a Tag the lead; the Control Plane refuses a second lead and names the current one, so clear
 it first with `--lead false`. `tag put` without `--lead` keeps the Tag's current value. An
-operator can also create a Tag from the desktop app's New Tag dialog.
+operator can also create a Tag from the desktop app's New Tag dialog, which offers every harness
+and Workspace the connected Worker Hosts serve and, on the local services, can add a folder as a
+new Workspace (`supertag workspace add PATH` does the same from the CLI).
 
 A Tag may have 8 [work Sessions](../../docs/reference/coordination.md#open-work-sessions) open at
 once by default. Raise or lower it, from 1 to 64, with `tag put TAG --max-work-sessions N` or a

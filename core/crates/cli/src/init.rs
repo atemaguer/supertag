@@ -241,17 +241,17 @@ fn no_sign_in(harnesses: &[Found]) -> anyhow::Error {
     anyhow::anyhow!(message)
 }
 
-struct Repository {
-    root: PathBuf,
-    name: String,
+pub(crate) struct Repository {
+    pub(crate) root: PathBuf,
+    pub(crate) name: String,
     /// Where the lead Tag's Sessions start.
-    start: Start,
+    pub(crate) start: Start,
 }
 
 /// Where the lead Tag's Sessions start: the current branch, followed as it moves, or, when HEAD is
 /// detached, the checked-out commit.
 #[derive(Debug, PartialEq, Eq)]
-enum Start {
+pub(crate) enum Start {
     Branch(String),
     Commit(String),
 }
@@ -288,10 +288,10 @@ fn start(branch: Option<&str>, head: &str) -> Start {
 
 /// An error with one line that says what to do, for `--json`.
 #[derive(Debug)]
-struct Fixable {
-    error: String,
-    fix: String,
-    command: Option<&'static str>,
+pub(crate) struct Fixable {
+    pub(crate) error: String,
+    pub(crate) fix: String,
+    pub(crate) command: Option<&'static str>,
 }
 
 impl std::fmt::Display for Fixable {
@@ -303,7 +303,7 @@ impl std::fmt::Display for Fixable {
 impl std::error::Error for Fixable {}
 
 /// The `--json` object for an init that failed.
-fn failure(error: &anyhow::Error) -> Value {
+pub(crate) fn failure(error: &anyhow::Error) -> Value {
     let (fix, command) = if let Some(fixable) = error.downcast_ref::<Fixable>() {
         (Some(fixable.fix.clone()), fixable.command)
     } else if let Some(problem) = error.downcast_ref::<RepositoryProblem>() {
@@ -324,7 +324,7 @@ fn failure(error: &anyhow::Error) -> Value {
 
 /// Why a folder can't be set up, in words a person can act on.
 #[derive(Debug)]
-enum RepositoryProblem {
+pub(crate) enum RepositoryProblem {
     NoGit,
     NotRepository,
     NoCommits(PathBuf),
@@ -363,7 +363,7 @@ impl RepositoryProblem {
 }
 
 /// The git repository at `directory`, or the current directory.
-fn repository(directory: Option<&Path>) -> Result<Repository> {
+pub(crate) fn repository(directory: Option<&Path>) -> Result<Repository> {
     let mut command = Command::new("git");
     if let Some(directory) = directory {
         command.arg("-C").arg(directory);
@@ -409,7 +409,7 @@ fn repository(directory: Option<&Path>) -> Result<Repository> {
 }
 
 /// A lowercase identifier of letters, digits and hyphens, at most 63 characters.
-fn sanitize(value: &str) -> Option<String> {
+pub(crate) fn sanitize(value: &str) -> Option<String> {
     let mut name = String::new();
     for c in value.to_ascii_lowercase().chars() {
         if c.is_ascii_alphanumeric() {
@@ -549,6 +549,8 @@ fn interactive() -> bool {
 struct Answers {
     port: u16,
     harness: Found,
+    /// The other signed-in harnesses the host also runs, for Tags created later.
+    also: Vec<Found>,
     model: Option<String>,
     commands: Commands,
     workspace: String,
@@ -675,6 +677,10 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
             results: Vec::new(),
             timed_out: Vec::new(),
         };
+        add_harnesses(&path, &installed, &mut sign_ins, prompter.as_mut()).await?;
+        // Adding harnesses may have changed the file too.
+        let config =
+            local_config::load(Some(path.clone()), &state)?.context("supertag.yaml disappeared")?;
         let mut checked = Vec::new();
         let mut runnable = false;
         for host in config
@@ -726,11 +732,9 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
     let mut signed_in = Vec::new();
     // Why Claude Code can't run here, as the fix to name if it is the only harness.
     let mut claude_cannot_run: Option<&str> = None;
-    // A named harness is the only one checked.
-    for harness in installed
-        .iter()
-        .filter(|harness| named.is_none_or(|named| named == **harness))
-    {
+    // Every installed harness is checked, a named one too: the host runs each signed-in one, so
+    // Tags created later may use any of them. Only the lead's harness must be signed in.
+    for harness in &installed {
         if *harness == Found::Opencode {
             // `--yes` never selects OpenCode, which needs a model answer first.
             if prompter.is_some() {
@@ -750,7 +754,7 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
             claude_cannot_run = Some(
                 "Claude Code is the only harness on this machine, and it needs Node.js 22.13 or later on PATH. Install that, or install Codex (npm install -g @openai/codex), then run supertag init again.",
             );
-            if named.is_some() {
+            if named == Some(*harness) {
                 bail!(Fixable {
                     error: format!("Claude Code can't run: {problem}."),
                     fix: "Install Node.js 22.13 or later from https://nodejs.org/en/download, then run supertag init again.".into(),
@@ -768,7 +772,7 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
             claude_cannot_run = Some(
                 "Claude Code is the only harness on this machine, and it is too old for SuperTag. Update it with claude update, or install Codex (npm install -g @openai/codex), then run supertag init again.",
             );
-            if named.is_some() {
+            if named == Some(*harness) {
                 bail!(Fixable {
                     error: format!("{problem}."),
                     fix: "Update Claude Code with claude update, then run supertag init again."
@@ -792,7 +796,7 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
             claude_cannot_run = Some(
                 "Claude Code is the only harness on this machine, and this supertag has no Node bridge to run it. Install the bridges as shown above, or install Codex (npm install -g @openai/codex), then run supertag init again.",
             );
-            if named.is_some() {
+            if named == Some(*harness) {
                 bail!(Fixable {
                     error: format!("Claude Code can't run: {}.", problem.cause),
                     fix: format!("{}, then run supertag init again.", problem.fix),
@@ -855,6 +859,12 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
     if !result {
         return Err(no_sign_in(&[answers.harness]));
     }
+    let mut answers = answers;
+    answers.also = signed_in
+        .iter()
+        .copied()
+        .filter(|harness| *harness != answers.harness)
+        .collect();
     let document = document(&answers, &repository);
     std::fs::DirBuilder::new()
         .recursive(true)
@@ -897,6 +907,13 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
         repository.root.display(),
         repository.start.describe()
     );
+    if !answers.also.is_empty() {
+        let names: Vec<&str> = answers.also.iter().map(|found| found.harness()).collect();
+        outln!(
+            "This machine also runs {} for Tags you create later.",
+            names.join(" and ")
+        );
+    }
     outln!(
         "Run supertag in your terminal to talk to it. To keep SuperTag running after restarts, add restart: unless-stopped to both services in {} and run supertag up.",
         path.display()
@@ -952,7 +969,7 @@ fn add_repository(
         by_hand("the file has no single local host and lead Tag that init set up");
         return Ok(());
     };
-    if text.lines().any(|line| line.trim_start().starts_with('#')) || text.contains("${") {
+    if !rewritable(&text) {
         by_hand("the file has comments or variables that rewriting it would lose");
         return Ok(());
     }
@@ -991,6 +1008,102 @@ fn add_repository(
             "metadata": { "name": name },
             "spec": spec,
         }));
+    rewrite(path, &document).context("adding this repository would make supertag.yaml invalid")?;
+    outln!(
+        "Added Workspace {name} ({}) to host {host}, and Tag {name}, which works in it on the lead's harness, {}.",
+        root.display(),
+        repository.start.describe()
+    );
+    Ok(())
+}
+
+/// On an existing setup: offers (default yes) to let the one local host also run the installed,
+/// signed-in harnesses it does not run yet, such as Codex beside a Claude Code lead, so Tags
+/// created later can use them. A host with an adapter, more than one local host, or a file with
+/// comments is left alone, with the step to do it by hand.
+async fn add_harnesses(
+    path: &Path,
+    installed: &[Found],
+    sign_ins: &mut SignIns,
+    prompter: Option<&mut Prompter>,
+) -> Result<()> {
+    let text = std::fs::read_to_string(path)?;
+    let mut document = yaml_document(&text)?;
+    let hosts = local_hosts(&document);
+    let [host] = hosts.as_slice() else {
+        return Ok(());
+    };
+    let service = &document["services"][host];
+    let Some(listed) = service["harnesses"].as_array() else {
+        return Ok(());
+    };
+    if !service["adapter"].is_null() || listed.is_empty() {
+        return Ok(());
+    }
+    let mut missing = Vec::new();
+    for harness in installed {
+        // OpenCode needs a model answer first.
+        if *harness == Found::Opencode
+            || listed
+                .iter()
+                .any(|listed| listed.as_str() == Some(harness.harness()))
+            || (*harness == Found::ClaudeCode && claude_code_cannot_run())
+        {
+            continue;
+        }
+        if sign_ins.check(*harness, None).await? {
+            missing.push(*harness);
+        }
+    }
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let names: Vec<&str> = missing.iter().map(|found| found.harness()).collect();
+    let names = names.join(" and ");
+    if !rewritable(&text) {
+        outln!(
+            "\n{names} is signed in but host {host} does not run it. To create Tags on it, add it to the host's harnesses in {}, then run supertag up.",
+            path.display()
+        );
+        return Ok(());
+    }
+    let add = match prompter {
+        Some(prompter) => prompter.confirm(
+            &format!("Also run {names} on this machine, so new Tags can use it?"),
+            true,
+        )?,
+        None => true,
+    };
+    if !add {
+        return Ok(());
+    }
+    let harnesses = document["services"][host]["harnesses"]
+        .as_array_mut()
+        .context("the host's harnesses is not a list")?;
+    harnesses.extend(missing.iter().map(|found| json!(found.harness())));
+    rewrite(path, &document).context("adding harnesses would make supertag.yaml invalid")?;
+    outln!("Host {host} also runs {names} now, for Tags you create later.");
+    Ok(())
+}
+
+/// Whether SuperTag could not run the Claude Code on PATH: no Node.js it can use, a Claude Code
+/// too old, or no Node bridge beside this supertag.
+fn claude_code_cannot_run() -> bool {
+    use crate::node_bridges::{NodeBridge, bridge_problem, node_problem};
+    node_problem(NodeBridge::ClaudeCode).is_some()
+        || claude_version_problem().is_some()
+        || bridge_problem(NodeBridge::ClaudeCode).is_some()
+}
+
+/// Whether supertag.yaml's text can be rewritten without losing anything: it has no comments
+/// and no `${...}` variables.
+pub(crate) fn rewritable(text: &str) -> bool {
+    !(text.lines().any(|line| line.trim_start().starts_with('#')) || text.contains("${"))
+}
+
+/// Replaces supertag.yaml at `path` with `document`, refusing one that would not load: the new
+/// file is written beside it, read as `supertag up` reads it, then renamed over it.
+pub(crate) fn rewrite(path: &Path, document: &Value) -> Result<()> {
     let temporary = path.with_file_name(format!(
         ".supertag.yaml.{}.tmp",
         uuid::Uuid::new_v4().simple()
@@ -1002,31 +1115,26 @@ fn add_repository(
             .create_new(true)
             .mode(0o600)
             .open(&temporary)?;
-        file.write_all(local_config::to_yaml(&document).as_bytes())?;
+        file.write_all(local_config::to_yaml(document).as_bytes())?;
         file.sync_all()?;
     }
     let state = path.parent().context("supertag.yaml has no directory")?;
     if let Err(error) = local_config::load(Some(temporary.clone()), state) {
         let _ = std::fs::remove_file(&temporary);
-        return Err(error.context("adding this repository would make supertag.yaml invalid"));
+        return Err(error);
     }
     std::fs::rename(&temporary, path)?;
-    outln!(
-        "Added Workspace {name} ({}) to host {host}, and Tag {name}, which works in it on the lead's harness, {}.",
-        root.display(),
-        repository.start.describe()
-    );
     Ok(())
 }
 
 /// supertag.yaml as written, without resolving variables.
-fn yaml_document(text: &str) -> Result<Value> {
+pub(crate) fn yaml_document(text: &str) -> Result<Value> {
     let options = serde_saphyr::options! {budget:serde_saphyr::budget!{max_documents:1,max_depth:24,max_nodes:10000}};
     serde_saphyr::from_str_with_options(text, options).context("supertag.yaml is not valid YAML")
 }
 
 /// The host services of this machine's own Control Plane.
-fn local_hosts(document: &Value) -> Vec<String> {
+pub(crate) fn local_hosts(document: &Value) -> Vec<String> {
     document["services"]
         .as_object()
         .map(|services| {
@@ -1047,7 +1155,7 @@ fn maps(document: &Value, hosts: &[String], root: &Path) -> bool {
 }
 
 /// The name of the Workspace a local host maps to `root`, if any.
-fn mapped_workspace(document: &Value, hosts: &[String], root: &Path) -> Option<String> {
+pub(crate) fn mapped_workspace(document: &Value, hosts: &[String], root: &Path) -> Option<String> {
     hosts.iter().find_map(|host| {
         document["services"][host]["workspaces"]
             .as_object()?
@@ -1449,7 +1557,7 @@ fn check_text(report: &Value) -> String {
     out
 }
 
-async fn up(state: &Path, config: local_config::Config) -> Result<()> {
+pub(crate) async fn up(state: &Path, config: local_config::Config) -> Result<()> {
     lifecycle::up(lifecycle::Background {
         state: state.to_owned(),
         args: vec![
@@ -1581,6 +1689,8 @@ fn answers(
     Ok(Answers {
         port,
         harness,
+        // Set once the lead's harness is known to be signed in.
+        also: Vec::new(),
         model,
         commands,
         workspace,
@@ -1640,9 +1750,16 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
     if let Some(model) = &answers.model {
         execution["models"] = json!([model]);
     }
+    // The lead's harness first, then the others signed in, so a Tag created later, in the
+    // desktop app or with supertag tag put, may run on any of them.
+    let harnesses: Vec<&str> = [answers.harness]
+        .iter()
+        .chain(&answers.also)
+        .map(|found| found.harness())
+        .collect();
     let mut host = json!({
         "type": "host",
-        "harnesses": [harness],
+        "harnesses": harnesses,
         "concurrency": CONCURRENCY,
         "workspaces": { answers.workspace.clone(): repository.root },
     });
@@ -1948,6 +2065,7 @@ mod tests {
         let answers = Answers {
             port: DEFAULT_PORT,
             harness: Found::Codex,
+            also: vec![Found::ClaudeCode],
             model: None,
             commands: Commands::Unset,
             workspace: "app".into(),
@@ -1994,6 +2112,11 @@ mod tests {
                     "web:fetch"
                 ]
             );
+            // The host also runs the other signed-in harness, the lead's first.
+            assert_eq!(
+                document["services"][machine_name()]["harnesses"],
+                json!(["codex", "claude-code"])
+            );
             // The local host runs three Task Attempts per harness at once.
             assert_eq!(document["services"][machine_name()]["concurrency"], 3);
             let sources = provision
@@ -2014,6 +2137,7 @@ mod tests {
         let answers = Answers {
             port: DEFAULT_PORT,
             harness: Found::ClaudeCode,
+            also: Vec::new(),
             model: None,
             commands: Commands::Unsandboxed,
             workspace: "app".into(),
@@ -2040,6 +2164,7 @@ mod tests {
             let answers = Answers {
                 port: DEFAULT_PORT,
                 harness,
+                also: Vec::new(),
                 model: None,
                 commands,
                 workspace: "app".into(),
@@ -2075,6 +2200,7 @@ mod tests {
         let answers = Answers {
             port: DEFAULT_PORT,
             harness: Found::ClaudeCode,
+            also: Vec::new(),
             model: None,
             commands: Commands::LocalVm,
             workspace: "app".into(),
