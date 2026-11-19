@@ -1,13 +1,13 @@
 name: Release SuperTag
 
 # Pushing a release tag builds the native archives for macOS on Apple silicon and Linux (arm64,
-# amd64) and the desktop app's macOS disk image, and attaches them, their SHA256SUMS, and an
-# install.sh pinned to the release to a draft GitHub Release. The archives hold the supertag CLI,
-# the supertag-tui terminal UI, the shared execution provider, and the Node.js bridges; the app
-# carries the macOS archive's contents, so it needs no separate install. A maintainer publishes the
-# draft once every asset is attached; publishing
-# runs the installer check and the SDK publish workflows, so the README's latest installer URL
-# never points at a release without its archives.
+# amd64), the desktop app's macOS disk image and Linux Debian packages, and attaches them, their
+# SHA256SUMS, and an install.sh pinned to the release to a draft GitHub Release. The archives hold
+# the supertag CLI, the supertag-tui terminal UI, the shared execution provider, and the Node.js
+# bridges; the Mac app carries the macOS archive's contents, so it needs no separate install. A
+# maintainer publishes the draft once every asset is attached; publishing runs the installer
+# check and the SDK publish workflows, so the README's latest installer URL never points at a
+# release without its archives.
 on:
   push:
     tags:
@@ -71,15 +71,17 @@ jobs:
       APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
       APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
 
-  # The desktop app for Apple silicon, as SuperTag-VERSION-darwin-arm64.dmg. Intel Macs get no
-  # build: releases ship no Intel Mac CLI. The app carries the package job's signed macOS archive
-  # under Contents/Resources/supertag/, so it needs no separate install.
-  # scripts/package-desktop-macos.sh signs the bridges' executables, then the app, with the
-  # Developer ID certificate and the hardened runtime, builds and signs the disk image, and
-  # notarizes and staples only the disk image, which covers the app inside it; Gatekeeper then
-  # accepts the app inside the mounted image. Without any Apple secret the image is unsigned, with a warning, as for the
-  # archives; an incomplete set fails this job. For now a failure here leaves the image out of the
-  # release with a warning instead of stopping it.
+  # The Electron desktop app for Apple silicon (macOS 13 or later), as
+  # SuperTag-VERSION-darwin-arm64.dmg. Intel Macs get no build: releases ship no Intel Mac CLI.
+  # electron-builder packages an unsigned SuperTag.app with its fuses flipped; the app carries the
+  # package job's signed macOS archive under Contents/Resources/supertag/, so it needs no separate
+  # install. scripts/package-desktop-macos.sh signs the bridges' executables and the CLI, then the
+  # Electron frameworks, helpers and the app, with the Developer ID certificate and the hardened
+  # runtime, builds and signs the disk image, and notarizes and staples only the disk image, which
+  # covers the app inside it; Gatekeeper then accepts the app inside the mounted image. Without
+  # any Apple secret the image is unsigned, with a warning, as for the archives; an incomplete set
+  # fails this job. For now a failure here leaves the image out of the release with a warning
+  # instead of stopping it.
   desktop:
     needs: [source, package]
     runs-on: macos-15
@@ -99,14 +101,6 @@ jobs:
         with:
           node-version: '22.13.0'
           cache: pnpm
-      - name: Use the pinned Rust toolchain
-        run: rustup toolchain install "$(sed -n 's/^channel = "\(.*\)"$/\1/p' core/rust-toolchain.toml)" --profile minimal --no-self-update
-      # Restores the registry and third-party dependency builds for the app's Tauri backend;
-      # workspace crates are never cached. A tag run reads caches saved on main or on the same tag.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: desktop-macos-release
-          workspaces: apps/desktop/src-tauri -> target
       - run: pnpm install --frozen-lockfile
       - name: Prepare signing and notarization
         id: signing
@@ -133,7 +127,7 @@ jobs:
           fi
           umask 077
           printf '%s' "$APPLE_DEVELOPER_ID_P12" | base64 -D > "$RUNNER_TEMP/signing.p12"
-          # Tauri needs the identity's name; read it from the certificate in the PKCS#12 file.
+          # codesign and @electron/osx-sign take the identity's name; read it from the certificate.
           subject=$(openssl pkcs12 -in "$RUNNER_TEMP/signing.p12" -nokeys -clcerts \
               -passin env:APPLE_DEVELOPER_ID_P12_PASSWORD -legacy 2>/dev/null ||
             openssl pkcs12 -in "$RUNNER_TEMP/signing.p12" -nokeys -clcerts \
@@ -165,9 +159,8 @@ jobs:
           test "$("${roots[0]}supertag" --version)" = "supertag $VERSION"
           echo "CLI_DIRECTORY=${roots[0]%/}" >> "$GITHUB_ENV"
       - name: Build the app
-        working-directory: apps/desktop
-        # The app is signed after the CLI goes into it, by the next step.
-        run: pnpm tauri build --bundles app
+        # Unsigned, with its fuses flipped; the next step signs it once the CLI is inside it.
+        run: pnpm --filter @supertag/desktop package:mac
       - name: Put the CLI in the app, sign it, then build, sign, notarize, and check the disk image
         env:
           SIGNED: ${{ steps.signing.outputs.signed }}
@@ -177,8 +170,10 @@ jobs:
           APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
           APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
         run: |
-          app=apps/desktop/src-tauri/target/release/bundle/macos/SuperTag.app
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$VERSION"
+          app=apps/desktop/release/mac-arm64/SuperTag.app
+          plist="$app/Contents/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" = "$VERSION"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$plist")" = 13.0
           image="SuperTag-$VERSION-darwin-arm64.dmg"
           mkdir -p "$RUNNER_TEMP/desktop"
           NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey.p8" scripts/package-desktop-macos.sh \
@@ -190,6 +185,20 @@ jobs:
       - name: Remove the notary key
         if: always()
         run: rm -f "$RUNNER_TEMP/AuthKey.p8"
+      - name: Check and launch the app inside the disk image
+        run: |
+          mount="$RUNNER_TEMP/desktop-mount"
+          mkdir -p "$mount"
+          hdiutil attach -quiet -readonly -nobrowse -noautoopen -mountpoint "$mount" \
+            "$RUNNER_TEMP/desktop/SuperTag-$VERSION-darwin-arm64.dmg"
+          trap 'hdiutil detach -quiet "$mount"' EXIT
+          app="$mount/SuperTag.app"
+          test "$("$app/Contents/Resources/supertag/supertag" --version)" = "supertag $VERSION"
+          # ditto must have kept every relative symlink of the bridges' pnpm layout.
+          broken=$(find "$app/Contents/Resources/supertag" -type l ! -exec test -e {} \; -print | wc -l)
+          [ "$broken" -eq 0 ] || { echo "::error::$broken symlinks in the bundled CLI are broken"; exit 1; }
+          pnpm --filter @supertag/desktop smoke "$app/Contents/MacOS/SuperTag"
+          du -sh "$app" "$RUNNER_TEMP/desktop/SuperTag-$VERSION-darwin-arm64.dmg"
       - uses: actions/upload-artifact@v4
         with:
           name: supertag-desktop-darwin-arm64
@@ -200,10 +209,13 @@ jobs:
           retention-days: 7
 
   # A failed desktop job leaves the disk image out with a warning; the CLI archives still attach.
-  # The desktop app for Linux, as an AppImage and a Debian package for each release platform. It
-  # uses the supertag CLI from install.sh on PATH or in ~/.local/bin, and bundles none. Linux
-  # needs no signing. For now a failure here leaves these files out of the release with a warning
-  # instead of stopping it.
+  # The Electron desktop app for Linux, as a Debian package for each release platform, and no
+  # AppImage: Chromium's sandbox can't start from one under Ubuntu's restriction on unprivileged
+  # user namespaces. The package installs an AppArmor profile that lets the app's own executable
+  # create them; scripts/check-desktop-deb.sh installs it, launches it sandboxed with the
+  # restriction on, and removes it. The app uses the supertag CLI from install.sh on PATH or in
+  # ~/.local/bin, and bundles none. Linux needs no signing. For now a failure here leaves these
+  # files out of the release with a warning instead of stopping it.
   desktop-linux:
     needs: source
     strategy:
@@ -232,33 +244,27 @@ jobs:
         with:
           node-version: '22.13.0'
           cache: pnpm
-      - name: Use the pinned Rust toolchain
-        run: rustup toolchain install "$(sed -n 's/^channel = "\(.*\)"$/\1/p' core/rust-toolchain.toml)" --profile minimal --no-self-update
-      - name: Install Tauri system libraries
+      - run: pnpm install --frozen-lockfile
+      - name: Build the Debian package
+        run: pnpm --filter @supertag/desktop package:linux
+      - name: Name and check the Debian package
+        run: |
+          debs=(apps/desktop/release/*.deb)
+          [ "${#debs[@]}" = 1 ] && [ -f "${debs[0]}" ] || { echo "::error::expected one Debian package"; exit 1; }
+          # Debian spells a pre-release 0.3.0-alpha.1 as 0.3.0~alpha.1, which sorts before 0.3.0.
+          test "$(dpkg-deb --field "${debs[0]}" Version)" = "${VERSION//-/\~}"
+          test "$(dpkg-deb --field "${debs[0]}" Architecture)" = "${PLATFORM#linux-}"
+          test "$(dpkg-deb --field "${debs[0]}" Package)" = supertag-desktop
+          mkdir -p "$RUNNER_TEMP/desktop"
+          cp "${debs[0]}" "$RUNNER_TEMP/desktop/SuperTag-$VERSION-$PLATFORM.deb"
+          cd "$RUNNER_TEMP/desktop"
+          for file in SuperTag-*; do sha256sum "$file" > "$file.sha256"; cat "$file.sha256"; done
+          du -h SuperTag-*.deb
+      - name: Install, launch sandboxed, and remove the package
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
-            librsvg2-dev libsoup-3.0-dev patchelf file
-      - run: pnpm install --frozen-lockfile
-      - name: Build the AppImage and Debian package
-        working-directory: apps/desktop
-        env:
-          APPIMAGE_EXTRACT_AND_RUN: '1'
-        run: pnpm tauri build --bundles appimage,deb
-      - name: Name and check the Linux bundles
-        run: |
-          bundle=apps/desktop/src-tauri/target/release/bundle
-          appimages=("$bundle"/appimage/*.AppImage)
-          debs=("$bundle"/deb/*.deb)
-          [ "${#appimages[@]}" = 1 ] && [ -f "${appimages[0]}" ] || { echo "::error::expected one AppImage"; exit 1; }
-          [ "${#debs[@]}" = 1 ] && [ -f "${debs[0]}" ] || { echo "::error::expected one Debian package"; exit 1; }
-          test "$(dpkg-deb --field "${debs[0]}" Version)" = "$VERSION"
-          mkdir -p "$RUNNER_TEMP/desktop"
-          cd "$RUNNER_TEMP/desktop"
-          cp "$GITHUB_WORKSPACE/${appimages[0]}" "SuperTag-$VERSION-$PLATFORM.AppImage"
-          cp "$GITHUB_WORKSPACE/${debs[0]}" "SuperTag-$VERSION-$PLATFORM.deb"
-          chmod 755 "SuperTag-$VERSION-$PLATFORM.AppImage"
-          for file in SuperTag-*; do sha256sum "$file" > "$file.sha256"; cat "$file.sha256"; done
+          sudo apt-get install -y xvfb
+          scripts/check-desktop-deb.sh "$RUNNER_TEMP/desktop/SuperTag-$VERSION-$PLATFORM.deb"
       - uses: actions/upload-artifact@v4
         with:
           name: supertag-desktop-${{ matrix.platform }}
@@ -304,14 +310,12 @@ jobs:
           pattern: supertag-desktop-linux-*
           path: release
           merge-multiple: true
-      - name: Warn when a Linux desktop bundle is missing
+      - name: Warn when a Linux desktop package is missing
         working-directory: release
         run: |
           for platform in linux-amd64 linux-arm64; do
-            for kind in AppImage deb; do
-              [ -f "SuperTag-$VERSION-$platform.$kind" ] ||
-                echo "::warning::This release attaches no SuperTag-$VERSION-$platform.$kind."
-            done
+            [ -f "SuperTag-$VERSION-$platform.deb" ] ||
+              echo "::warning::This release attaches no SuperTag-$VERSION-$platform.deb."
           done
       - name: Verify the archives and write SHA256SUMS
         working-directory: release
@@ -323,13 +327,18 @@ jobs:
             cat "$archive.sha256" >> SHA256SUMS
           done
           test "$(wc -l < SHA256SUMS)" -eq 3
-          for image in SuperTag-"$VERSION"-darwin-arm64.dmg SuperTag-"$VERSION"-linux-*.AppImage \
-            SuperTag-"$VERSION"-linux-*.deb; do
+          # The desktop app: the dmg and the two debs, whichever built.
+          for image in SuperTag-"$VERSION"-darwin-arm64.dmg SuperTag-"$VERSION"-linux-amd64.deb \
+            SuperTag-"$VERSION"-linux-arm64.deb; do
             if [ -f "$image" ]; then
               sha256sum --check "$image.sha256"
               cat "$image.sha256" >> SHA256SUMS
             fi
           done
+          # Nothing else, such as an AppImage, rides along.
+          unexpected=$(find . -maxdepth 1 -type f -name 'SuperTag-*' ! -name "SuperTag-$VERSION-darwin-arm64.dmg*" \
+            ! -name "SuperTag-$VERSION-linux-amd64.deb*" ! -name "SuperTag-$VERSION-linux-arm64.deb*")
+          [ -z "$unexpected" ] || { echo "::error::unexpected desktop files: $unexpected"; exit 1; }
       - name: Pin the installer to this release
         run: |
           sed -i "s/^RELEASE_DEFAULT_VERSION=\"latest\"$/RELEASE_DEFAULT_VERSION=\"$VERSION\"/" install.sh
@@ -357,6 +366,6 @@ jobs:
             *) echo "::error::$RELEASE_TAG is already published; publish a new version instead"; exit 1 ;;
           esac
           assets=(install.sh SHA256SUMS ./*-complete.tar.gz)
-          for image in ./*.dmg ./*.AppImage ./*.deb; do [ -f "$image" ] && assets+=("$image"); done
+          for image in ./*.dmg ./*.deb; do [ -f "$image" ] && assets+=("$image"); done
           gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
           echo "Review the draft $RELEASE_TAG release notes, then publish it." >> "$GITHUB_STEP_SUMMARY"

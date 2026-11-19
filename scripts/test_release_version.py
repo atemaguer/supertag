@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from release_version import REPO, drift, python_version, release_version, sync
+from release_version import REPO, drift, manifests, python_version, release_version, sync
 
 
 class ReleaseVersion(unittest.TestCase):
@@ -63,6 +63,10 @@ class ReleaseVersion(unittest.TestCase):
 
     def test_the_checkout_carries_one_version(self):
         self.assertEqual(drift(REPO), [])
+
+    def test_checks_the_desktop_app_version(self):
+        # electron-builder names the app, the disk image, and the Debian packages after it.
+        self.assertIn("apps/desktop/package.json", [name for name, _ in manifests(REPO)])
 
 
 if __name__ == "__main__":

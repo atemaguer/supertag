@@ -1,15 +1,23 @@
 name: Desktop
 
-# Builds the desktop app's frontend, then checks its Tauri backend with fmt, clippy, and cargo
-# test. The backend links the Control Plane, Gateway, and protocol crates, so core changes run it
-# too. It is its own workflow so that a desktop break shows as its own check rather than as one
-# more failed job in Core.
+# The desktop app. `electron` builds the Electron app and runs its tests: the unit suites, then
+# the Gateway and local-services integration suites against a CLI built from this commit, under
+# the repository's Node.js and again under Electron's own, which is newer and has caught bugs the
+# other didn't. `package` builds the Debian package the release ships, installs it, launches it
+# with Chromium's sandbox under Ubuntu's restriction on unprivileged user namespaces, and removes
+# it. `tauri` checks the Tauri shell, which the app is leaving, with fmt, clippy, and cargo test.
+# The integration suites and the Tauri backend use core crates, so core changes run this too.
+# It is its own workflow so that a desktop break shows as its own check rather than as one more
+# failed job in Core.
 on:
   pull_request:
     paths:
       - 'apps/desktop/**'
       - 'core/**'
       - 'proto/**'
+      - 'sdks/typescript/**'
+      - 'harnesses/sdk/**'
+      - 'scripts/check-desktop-deb.sh'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
@@ -20,6 +28,9 @@ on:
       - 'apps/desktop/**'
       - 'core/**'
       - 'proto/**'
+      - 'sdks/typescript/**'
+      - 'harnesses/sdk/**'
+      - 'scripts/check-desktop-deb.sh'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
@@ -33,7 +44,77 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  desktop:
+  electron:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      # Restores the registry and third-party dependency builds for the CLI the integration
+      # suites run; workspace crates are never cached. Only main saves, so pull requests reuse
+      # main's cache without evicting it.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: desktop-cli
+          workspaces: core -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      # The repository's Node.js, as the release builds with.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build the renderer, main process, and preload
+        run: pnpm --filter @supertag/desktop build
+      - name: Run the unit suites
+        run: pnpm vitest run apps/desktop
+      - name: Build the CLI
+        run: cargo build --locked --manifest-path core/Cargo.toml -p supertag-cli --bin supertag
+      - name: Run the integration suites under the repository's Node.js
+        env:
+          SUPERTAG_RUST_TEST_CLI: ${{ github.workspace }}/core/target/debug/supertag
+        run: |
+          node --version
+          pnpm vitest run apps/desktop/electron
+      - name: Run the integration suites under Electron's Node.js
+        env:
+          SUPERTAG_RUST_TEST_CLI: ${{ github.workspace }}/core/target/debug/supertag
+          ELECTRON_RUN_AS_NODE: '1'
+        run: |
+          # Fetches Electron's binary if a cached store skipped its postinstall; a no-op otherwise.
+          node apps/desktop/node_modules/electron/install.js
+          electron=apps/desktop/node_modules/electron/dist/electron
+          "$electron" --version
+          "$electron" node_modules/vitest/vitest.mjs run apps/desktop/electron
+
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build the Debian package
+        run: pnpm --filter @supertag/desktop package:linux
+      - name: Install, launch sandboxed, and remove the package
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          debs=(apps/desktop/release/*.deb)
+          [ "${#debs[@]}" = 1 ] && [ -f "${debs[0]}" ] || { echo "::error::expected one Debian package"; exit 1; }
+          scripts/check-desktop-deb.sh "${debs[0]}"
+
+  tauri:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

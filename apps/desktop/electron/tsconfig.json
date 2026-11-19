@@ -23,6 +23,8 @@
     "../src/gateway.ts",
     "../src/startup.ts",
     "../src/tag-admin.ts",
-    "../src/desktop.ts"
+    "../src/desktop.ts",
+    "../scripts/*.ts",
+    "../electron-builder.config.ts"
   ]
 }

@@ -3,14 +3,15 @@
 #
 #   package-desktop-macos.sh APP CLI_DIRECTORY IMAGE
 #
-# APP is the unsigned SuperTag.app from `tauri build --bundles app`. CLI_DIRECTORY is an extracted
+# APP is the unsigned SuperTag.app from `pnpm --filter @supertag/desktop package:mac`
+# (apps/desktop/release/mac-arm64/SuperTag.app), its fuses already flipped. CLI_DIRECTORY is an extracted
 # complete release archive: supertag, supertag-tui, supertag-shared-execution, and node-bridges/.
 # The CLI goes to SuperTag.app/Contents/Resources/supertag/, where the app looks for it first.
 # IMAGE is the disk image to write.
 #
 # With SIGNED=true it needs IDENTITY (a "Developer ID Application: ..." name), APPLE_DEVELOPER_ID_P12,
 # APPLE_DEVELOPER_ID_P12_PASSWORD, NOTARY_KEY_PATH, APPLE_NOTARY_KEY_ID and APPLE_NOTARY_ISSUER_ID.
-# Without it, the app keeps its ad-hoc signature, which is only good for local checks.
+# Without it, the app keeps electron-builder's ad-hoc signature, which is only good for local checks.
 set -euo pipefail
 
 app=${1:?Usage: package-desktop-macos.sh APP CLI_DIRECTORY IMAGE}
@@ -116,7 +117,10 @@ done
 for name in supertag supertag-tui supertag-shared-execution; do
   sign "$resources/$name"
 done
-sign "$app"
+# The Electron parts and the app last, inside out: frameworks, helper apps, then SuperTag.app, each
+# with the hardened runtime; the helpers and the app get only allow-jit. The CLI tree above keeps
+# the signatures it just got.
+node "$(dirname "$0")/../apps/desktop/build/sign-mac.mjs" "$app" "$IDENTITY" "$keychain"
 codesign --verify --deep --strict --verbose=2 "$app"
 
 # Apple notarizes only the outermost container: the service checks the nested app and every
