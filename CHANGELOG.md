@@ -9,6 +9,8 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-18
+
 ### Added
 
 - `supertag message TAG [TEXT]` sends a message to your conversation with a Tag, the same
@@ -17,11 +19,6 @@ within the pre-1.0 compatibility policy described in
   It names the command to run on standard error when the Tag waits for your approval or asks a
   question, and when the connection to the Gateway is lost.
   `task submit` now names the command when it refuses your conversation's own Session.
-
-## [0.3.2] - 2026-11-18
-
-### Added
-
 - When the desktop app can't connect because this machine's local services run an older
   SuperTag release, it offers "Restart SuperTag with VERSION". After a confirmation that running
   Tasks are interrupted, it runs its bundled `supertag down` and `supertag up` against the same
