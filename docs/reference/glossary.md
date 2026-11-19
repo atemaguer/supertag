@@ -100,7 +100,7 @@ whole system rather than another first-class resource.
 - <a id="surface-account"></a>**Surface Account** — one connected external workspace or account and the Gateway that serves
   it. Its credentials stay with that Gateway, in a credential vault.
 - <a id="gateway"></a>**Gateway** — the service clients connect to: the CLI, the terminal UI, the desktop app, and SDK
-  applications. It forwards their calls to the Control Plane, can forward a running Task Attempt's data calls under its Task Attempt credential, and carries collaboration surface
+  applications. It forwards their calls to the Control Plane, carries running Task Attempts' data calls under their Task Attempt credentials when the Control Plane names it as the data endpoint, and carries collaboration surface
   traffic and operator notifications as a client with its own credential, `gateway:NAME`.
 - <a id="worker-host"></a>**Worker Host** — a machine, container, VM, or sandbox that provides execution capacity,
   enrolled under a name, `host:NAME`. Its Worklet connects it outbound to the Control Plane. See
@@ -113,8 +113,8 @@ whole system rather than another first-class resource.
   the Task Attempt has started, and it runs a harness adapter and the harness it drives in their
   own process group, with a scratch directory and a token that last only for that Task Attempt.
   A Worker never holds its Worker Host's credential: its calls carry a
-  [Task Attempt credential](#task-attempt-credential), and its Worklet takes every lease action
-  for it. It dies with its Worklet.
+  [Task Attempt credential](#task-attempt-credential) and go to the data endpoint the Control
+  Plane names, usually a Gateway, and its Worklet takes every lease action for it. It dies with its Worklet.
 - <a id="task-attempt-credential"></a>**Task Attempt credential** — the secret (`stat_…`) the Control Plane returns when a Task
   Attempt starts. It authorizes only that Task Attempt's data calls, such as its events, questions,
   and Mailbox messages, and only while its Worklet holds the lease. It never claims, starts, renews,

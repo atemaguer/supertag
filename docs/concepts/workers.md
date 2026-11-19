@@ -79,10 +79,12 @@ questions, messages, and other reports carry it, and it cannot claim, start, or 
 ends with the Task Attempt's lease, so a Worker whose Worklet lost the lease can no longer report
 anything. A Worker never holds the host's own credential. It hands its outcome to the Worklet,
 which finishes the Task Attempt, and asks the Worklet for the few host calls its Task Attempt
-needs; the Worklet makes them for that Task Attempt only. A Gateway can carry the Worker's reports
-to the Control Plane, since the credential alone decides what they may do; for now, Workers send
-them to the Control Plane directly. A Workspace checkout, a Session checkpoint, and captured
-artifacts outlast the Worker; the Worklet keeps them.
+needs; the Worklet makes them for that Task Attempt only. The Worker sends its reports to the
+data endpoint the Control Plane names. That is usually a Gateway, which passes them on unchanged,
+since the credential alone decides what they may do; under `supertag up`, it is the local Gateway.
+The Worker has no other route: when the Gateway is unreachable, its reports wait and retry rather
+than going to the Control Plane. A Workspace checkout, a Session checkpoint, and captured artifacts
+outlast the Worker; the Worklet keeps them.
 
 The harness is the agent system that does the work. The harness adapter connects one Task Attempt
 to it: it receives the Task, its Session checkpoint, and its allowed capabilities from its Worker,

@@ -4,7 +4,8 @@ The Control Plane, the service that stores a SuperTag organization and schedules
 serves one gRPC API. Clients, such as the CLI, the terminal UI, the desktop app, and your own
 applications, call it through a **Gateway**, the service that forwards their calls and connects
 collaboration surfaces. The **Worklets** of **Worker Hosts**, the machines that run work, call it
-directly. A Gateway can also carry a running **Task Attempt**'s data calls. This page is the contract for calling it. See the
+directly. A running **Task Attempt**'s Worker sends its data calls to the data endpoint the Control
+Plane names, usually a Gateway. This page is the contract for calling it. See the
 [glossary](glossary.md) for terms.
 
 The API is the protobuf package `supertag.runtime.v2`, defined in
@@ -82,9 +83,10 @@ generation header. A caller that sends Task Attempt data calls through a Gateway
 `SERVICE_ROLE_WORKER_HOST`.
 
 When the Control Plane sets `SUPERTAG_DATA_ENDPOINT` to a Gateway URL, `RegisterHost` returns it
-in `HostRecord.data_endpoint`. Empty means the Control Plane itself. The field is advice to the
-host and grants nothing. In this release, Worklets still send their Task Attempts' data calls to
-the Control Plane directly.
+in `HostRecord.data_endpoint`. Empty means the Control Plane itself, at the URL the Worklet
+dials. The field grants nothing. The Worklet passes it to each Worker it starts, and the Worker
+sends all of its Task Attempt's data calls there, with no fallback to the Control Plane. A host
+that registers again applies the new value to the Workers it starts afterwards.
 
 An application usually runs with an Operator Token of its own, so its changes appear under its
 name in `supertag audit`.

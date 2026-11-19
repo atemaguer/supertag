@@ -60,11 +60,30 @@ stops before it finishes them, or a Worklet restarted meanwhile, leaves them to 
 which the Worklet starts for them with a new credential. After three such Workers die, the Task
 Attempt fails.
 
+## Data endpoint
+
 A Gateway can carry a Task Attempt's data calls to the Control Plane. It forwards only calls a
 Task Attempt credential may make, and passes the credential through unchanged. It never forwards
 the host credential's calls. When the deployment names such a Gateway, `RegisterHost` returns
-its URL; see [Control Plane API](control-plane-api.md#authenticate). In this release, Workers
-still send their data calls to the Control Plane directly.
+its URL as the data endpoint; see [Control Plane API](control-plane-api.md#authenticate).
+
+| Connection | From | To |
+| --- | --- | --- |
+| Registration, claims, leases, finishing, checkpoints, and other host calls | The Worklet, with the host credential | The Control Plane |
+| The Task Attempt's data calls: events, text, questions, usage, network log, history, Context Item pins, and the `Attempt…` services | The Worker, with the Task Attempt credential | The data endpoint: the named Gateway, or the Control Plane when none is named |
+| The few host calls a Task Attempt needs | The Worker | Its Worklet, over their local channel |
+
+Under `supertag up`, the data endpoint is the local Gateway. The Worklet passes the data endpoint
+of its latest registration to each Worker it starts. The Worker dials it with the host's own
+transport settings: the same URL rules, TLS trust, client certificate, and proxy. It has no
+connection to the Control Plane and no fallback to it.
+
+When the data endpoint is unreachable, each data call fails with `the data endpoint URL is
+unreachable: REASON` and is retried, as calls to an unreachable Control Plane are. The Worker
+logs `a data call will be retried` with that reason once per call, and keeps retrying while the
+Task Attempt's lease lasts. A data endpoint the Worker cannot dial at all, such as a cleartext
+`http://` URL outside loopback, stops the Worker with `the data endpoint URL is not usable:
+REASON`. After three Workers stop that way before launching the harness, the Task Attempt fails.
 
 ## Placement
 

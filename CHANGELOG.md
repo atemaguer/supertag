@@ -44,6 +44,12 @@ within the pre-1.0 compatibility policy described in
   with a directory per slot under `slots/` in the host's state directory; the old `lanes/`
   directories are not read, so let running Task Attempts finish before upgrading. `supertag
   worker-host` takes `--concurrency`. See [Worker Host reference](docs/reference/worker.md#process-supervision).
+- A Worker sends its Task Attempt's events, streamed text, and other data calls to the data
+  endpoint the Control Plane names, and nowhere else. Under `supertag up` that is the local
+  Gateway. A hosted Control Plane names the Gateway in `SUPERTAG_DATA_ENDPOINT`, and every Worker
+  Host must reach that URL; unset, Workers use the Control Plane. An unreachable data endpoint is
+  retried while the lease lasts and logged as `the data endpoint URL is unreachable`. See
+  [Worker Host reference](docs/reference/worker.md#data-endpoint).
 
 ## [0.3.2] - 2026-11-18
 

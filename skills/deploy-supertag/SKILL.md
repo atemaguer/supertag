@@ -59,6 +59,11 @@ supertag verify deployment https://supertag.example.com \
 - **TLS.** The Control Plane needs a certificate for its public host name. Platform host names
   such as `*.onrender.com` need a certificate from your own CA; clients then set
   `SUPERTAG_SERVER_CA_FILE`. See [TLS files](../../deploy/native/README.md#tls-files).
+- **Data endpoint.** To carry Task Attempts' events and streamed text through the Gateway, set
+  `SUPERTAG_DATA_ENDPOINT` on the Control Plane to the Gateway's `https://` or `wss://` URL, and
+  make that URL reachable from every Worker Host. Workers then use only the Gateway for those
+  calls, with no fallback; an unreachable one logs `the data endpoint URL is unreachable` on the
+  host. Unset, Workers send them to the Control Plane.
 - **Verification.** `verify deployment` checks gRPC health, that anonymous calls and invalid
   credentials are refused, and the operator token. `--require-ready` also requires a ready
   Worker Host. Use the `wss://` URL on Render, Cloudflare, and Modal.

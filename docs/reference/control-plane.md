@@ -87,8 +87,9 @@ longer names it (checked at start and every hour), and when it has not been writ
 These periods are fixed; there is no setting.
 
 The Gateway forwards client calls to the Control Plane, and a running Task Attempt's data calls
-under its Task Attempt credential. It never forwards a Worker Host's registration, claim, or lease
-calls. It terminates collaboration surface
+under its Task Attempt credential when the Control Plane names it as the data endpoint
+(`SUPERTAG_DATA_ENDPOINT`; the local Gateway under `supertag up`). It never forwards a Worker
+Host's registration, claim, or lease calls. It terminates collaboration surface
 connections, turns their events into Tasks through the `Connector` service, and delivers replies
 and operator notifications. It does not decide policy, create work on its own, or schedule Worker
 Hosts. Worker Hosts do not become part of the Control Plane; each host's Worklet claims work and

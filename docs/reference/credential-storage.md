@@ -135,7 +135,7 @@ revocation refuses it at once. `supertag get host` never shows the token or its 
 When a Task Attempt starts, the Control Plane returns a Task Attempt credential (`stat_` and 64
 hex digits) for that Task Attempt alone, again storing only its digest. The Worklet passes it to
 the Worker it starts for the Task Attempt over their private channel and keeps no copy; it is never
-written to the state directory. The Worker makes its data calls with it. It works only while the
+written to the state directory. The Worker makes its data calls with it, to the data endpoint the Control Plane named. It works only while the
 Worklet holds the lease. Renewing the
 lease extends it. Finishing or reclaiming the Task Attempt, a lapsed lease, revoking the host, the
 host registering again, or a repeated start ends it. After a cancellation it still records the

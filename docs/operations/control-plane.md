@@ -23,8 +23,11 @@ machine's, or `SUPERTAG_TIME_ZONE` for a hosted Control Plane. Each is an IANA n
 A Gateway can carry the data calls of running [Task Attempts](../reference/glossary.md#task-attempt), such as their events and streamed
 text. Set `SUPERTAG_DATA_ENDPOINT` to that Gateway's URL (`https://`, `wss://`, or a loopback
 `http://` or `ws://`). The Control Plane refuses to start with any other form. It names the URL to
-each Worker Host when the host registers. In this release, Worklets still send these calls to
-the Control Plane directly.
+each Worker Host when the host registers, and that host's Workers send every data call there and
+nowhere else. Every Worker Host must then reach the Gateway at that URL, with the same TLS trust it
+uses for the Control Plane. Without the variable, Workers send these calls to the Control Plane
+URL their Worklet uses. `supertag up` sets it to the local Gateway unless the process
+environment or the `control-plane` service's `env_file` names another.
 
 The Control Plane creates and migrates its schema when it starts. It stores no files: Session
 checkpoints stay on the Worker Host that wrote them, artifacts on the Worker Host that produced

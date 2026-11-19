@@ -163,6 +163,28 @@ supertag task resolve-attempt TASK_ID ATTEMPT_ID --decision failed \
 `--decision retry` runs the Task again. See
 [Scheduling and interrupted execution](../reference/scheduling-and-recovery.md).
 
+## A Worker cannot reach the Gateway
+
+A **Worker**, the process that runs one Task Attempt, sends its events, streamed text, and other
+reports to the data endpoint the Control Plane names: the local Gateway under `supertag up`, or
+the URL in the Control Plane's `SUPERTAG_DATA_ENDPOINT`. It never falls back to the Control
+Plane. When it cannot connect, the Task stays running with no new events, and
+`supertag logs HOST` shows:
+
+```text
+a data call will be retried: the data endpoint https://gateway.example:3434 is unreachable: Connection refused
+```
+
+The Worker keeps retrying while the Task Attempt's lease lasts. Locally, check that `supertag ps`
+shows `gateway` running, and run `supertag up` if it stopped. For a shared deployment, make the
+Gateway's listener reachable from every Worker Host at that exact URL, with a certificate the
+hosts trust, or correct `SUPERTAG_DATA_ENDPOINT` and restart the Control Plane. Worker Hosts
+read the new URL when they register again; restart them so later Workers use it.
+
+`the data endpoint URL is not usable: REASON` means the Worker could not even dial the URL, for
+example a cleartext `http://` URL outside loopback. Use `https://` or `wss://`. See
+[Data endpoint](../reference/worker.md#data-endpoint).
+
 ## A Task failed because the repository changed
 
 A Task Attempt fails when the repository's Git configuration, hooks, or attributes changed while
