@@ -61,6 +61,7 @@ pub async fn assert_restricted_report_continuation(
             .send_attempt_tag_message(
                 &supertag_control_plane::AttemptAccess::new(host, continued),
                 &SendAttemptTagMessageRequest {
+                    kind: 0,
                     operation_id: "send-from-report-continuation".into(),
                     recipient_tag_id: recipient.into(),
                     text: "Send unrelated mail.".into(),
@@ -97,6 +98,7 @@ pub async fn assert_restricted_report_continuation(
             .post_attempt_workstream(
                 &supertag_control_plane::AttemptAccess::new(host, continued),
                 &PostAttemptWorkstreamRequest {
+                    kind: 0,
                     operation_id: "post-from-report-continuation".into(),
                     body: "Send an unrelated post.".into(),
                     to_tag_ids: vec![],

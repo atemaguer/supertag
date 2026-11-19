@@ -87,6 +87,7 @@ async fn team(store: &Store, id: &str, members: &[&str]) -> Team {
         .create_team(
             OP,
             &CreateTeamRequest {
+                wake_limits: None,
                 operation_id: op(),
                 team_id: id.into(),
                 name: id.into(),

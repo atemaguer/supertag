@@ -99,6 +99,7 @@ impl Store {
             let post = post_by_id(&mut tx, &id).await?;
             tx.rollback().await?;
             return Ok(PostAttemptWorkstreamResponse {
+                wake_deferred: String::new(),
                 post: Some(post),
                 duplicate: true,
                 approval: None,
@@ -140,6 +141,7 @@ impl Store {
             if !authorization.granted {
                 tx.commit().await?;
                 return Ok(PostAttemptWorkstreamResponse {
+                    wake_deferred: String::new(),
                     post: None,
                     duplicate: false,
                     approval: authorization.approval,
@@ -157,6 +159,7 @@ impl Store {
                 .bind(&id).bind(&team.team_id).bind(&author).bind(&attempt.task_id).bind(serde_json::to_string(&recipients)?)
                 .bind(body).bind(&digest).bind(sequence).bind(now).execute(&mut *tx).await?;
             WorkstreamPost {
+                kind: 0,
                 post_id: id,
                 team_id: team.team_id,
                 author_tag_id: author,
@@ -175,6 +178,7 @@ impl Store {
             .execute(&mut *tx).await?;
         tx.commit().await?;
         Ok(PostAttemptWorkstreamResponse {
+            wake_deferred: String::new(),
             post: Some(post),
             duplicate,
             approval: None,
@@ -320,6 +324,7 @@ async fn post_by_id(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Workstrea
 
 fn post_row(row: &AnyRow) -> Result<WorkstreamPost> {
     Ok(WorkstreamPost {
+        kind: 0,
         post_id: row.try_get("post_id")?,
         team_id: row.try_get("team_id")?,
         author_tag_id: row.try_get("author_tag_id")?,

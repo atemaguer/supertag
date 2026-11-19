@@ -482,6 +482,7 @@ async fn objective_overview(store: &Store, host: &HostAuthority, clock: &AtomicI
         .create_team(
             OPERATOR,
             &CreateTeamRequest {
+                wake_limits: None,
                 operation_id: "team-delivery".into(),
                 team_id: "delivery".into(),
                 name: "delivery".into(),
@@ -541,6 +542,7 @@ async fn objective_overview(store: &Store, host: &HostAuthority, clock: &AtomicI
         .post_attempt_workstream(
             &supertag_control_plane::AttemptAccess::new(host, &turn),
             &PostAttemptWorkstreamRequest {
+                kind: 0,
                 operation_id: "post".into(),
                 body: "Exporter handed to helper.".into(),
                 to_tag_ids: vec!["helper".into()],
@@ -920,6 +922,7 @@ async fn skipped_report(store: &Store, url: &str, host: &HostAuthority) {
 /// (TS `tests/team-concurrency.test.ts`).
 async fn team_concurrency(store: &Store, host: &HostAuthority) {
     let team = |id: &str, limit: Option<u32>| CreateTeamRequest {
+        wake_limits: None,
         operation_id: format!("team-{id}"),
         team_id: id.into(),
         name: id.into(),

@@ -360,6 +360,7 @@ async fn contract(url: &str) {
         .create_team(
             OPERATOR,
             &CreateTeamRequest {
+                wake_limits: None,
                 operation_id: "create-team".into(),
                 team_id: "engineering".into(),
                 name: "Engineering".into(),

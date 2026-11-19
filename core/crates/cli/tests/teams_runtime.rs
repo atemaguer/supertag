@@ -1188,6 +1188,7 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
     assert_eq!(page["posts"].as_array().context("missing posts")?.len(), 1);
 
     let addressed_request = PostAttemptWorkstreamRequest {
+        kind: 0,
         operation_id: "address-reviewer".into(),
         body: "Please independently verify the rollback steps.".into(),
         to_tag_ids: vec!["reviewer".into()],

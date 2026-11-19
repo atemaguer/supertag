@@ -14,6 +14,7 @@ const NOW: i64 = 1_900_000_000_000;
 
 fn send(operation: &str, recipient: &str, text: &str) -> SendAttemptTagMessageRequest {
     SendAttemptTagMessageRequest {
+        kind: 0,
         operation_id: operation.into(),
         recipient_tag_id: recipient.into(),
         text: text.into(),
@@ -365,6 +366,7 @@ async fn submit_direct_messages(
         .post_attempt_workstream(
             &supertag_control_plane::AttemptAccess::new(sender, &source),
             &PostAttemptWorkstreamRequest {
+                kind: 0,
                 operation_id: "public".into(),
                 body: "Public update".into(),
                 to_tag_ids: vec!["beta".into()],

@@ -326,6 +326,7 @@ async fn message_row(tx: &mut Transaction<'_, Any>, row: &AnyRow) -> Result<TagM
     let message_id: String = row.try_get("message_id")?;
     let review = crate::commit_reviews::for_message_in(tx, &message_id).await?;
     Ok(TagMessage {
+        kind: 0,
         message_id,
         sender_tag_id: row.try_get("sender_tag_id")?,
         recipient_tag_id: row.try_get("recipient_tag_id")?,

@@ -1293,6 +1293,7 @@ impl<'a> Catalog<'a> {
                 Some((
                     true,
                     Write::UpdateTeam(UpdateTeamRequest {
+                        wake_limits: None,
                         operation_id: id(),
                         team: name.into(),
                         expected_revision: prior.revision,
@@ -1306,6 +1307,7 @@ impl<'a> Catalog<'a> {
             None => Some((
                 false,
                 Write::Team(CreateTeamRequest {
+                    wake_limits: None,
                     operation_id: id(),
                     team_id: name.into(),
                     name: display,

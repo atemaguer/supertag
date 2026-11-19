@@ -266,15 +266,17 @@ class ObjectiveTurn(_message.Message):
     def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., state: _Optional[_Union[_runtime_pb2.TaskState, str]] = ..., kind: _Optional[str] = ..., prompt: _Optional[str] = ..., result: _Optional[str] = ..., completed_at_ms: _Optional[int] = ..., failure: _Optional[_Union[ObjectiveSessionFailure, _Mapping]] = ...) -> None: ...
 
 class ObjectiveTeamPost(_message.Message):
-    __slots__ = ("sequence", "author_tag_id", "to_tag_ids", "body", "created_at_ms")
+    __slots__ = ("sequence", "author_tag_id", "to_tag_ids", "body", "created_at_ms", "kind")
     SEQUENCE_FIELD_NUMBER: _ClassVar[int]
     AUTHOR_TAG_ID_FIELD_NUMBER: _ClassVar[int]
     TO_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
     BODY_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
     sequence: int
     author_tag_id: str
     to_tag_ids: _containers.RepeatedScalarFieldContainer[str]
     body: str
     created_at_ms: int
-    def __init__(self, sequence: _Optional[int] = ..., author_tag_id: _Optional[str] = ..., to_tag_ids: _Optional[_Iterable[str]] = ..., body: _Optional[str] = ..., created_at_ms: _Optional[int] = ...) -> None: ...
+    kind: _runtime_pb2.MessageKind
+    def __init__(self, sequence: _Optional[int] = ..., author_tag_id: _Optional[str] = ..., to_tag_ids: _Optional[_Iterable[str]] = ..., body: _Optional[str] = ..., created_at_ms: _Optional[int] = ..., kind: _Optional[_Union[_runtime_pb2.MessageKind, str]] = ...) -> None: ...

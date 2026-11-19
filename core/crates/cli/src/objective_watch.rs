@@ -540,6 +540,7 @@ async fn all_posts(
     loop {
         let next = page(cursor).await?;
         posts.extend(next.posts.into_iter().map(|post| ObjectiveTeamPost {
+            kind: 0,
             sequence: post.sequence,
             author_tag_id: post.author_tag_id,
             to_tag_ids: post.to_tag_ids,
@@ -973,6 +974,7 @@ mod tests {
         asking.question = "Which region first?".into();
         let mut first = view(ObjectiveStatus::Working, vec![asking]);
         first.posts = vec![ObjectiveTeamPost {
+            kind: 0,
             sequence: 1,
             author_tag_id: "builder".into(),
             to_tag_ids: vec!["planner".into()],

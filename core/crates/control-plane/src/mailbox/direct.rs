@@ -317,6 +317,7 @@ impl Store {
             };
             tx.rollback().await?;
             return Ok(SendTagMessageResponse {
+                wake_deferred: String::new(),
                 message,
                 duplicate: true,
                 approval: None,
@@ -367,6 +368,7 @@ impl Store {
                     .await?;
                     tx.commit().await?;
                     return Ok(SendTagMessageResponse {
+                        wake_deferred: String::new(),
                         message: None,
                         duplicate: true,
                         approval: None,
@@ -394,6 +396,7 @@ impl Store {
         if !authorization.granted {
             tx.commit().await?;
             return Ok(SendTagMessageResponse {
+                wake_deferred: String::new(),
                 message: None,
                 duplicate: false,
                 approval: authorization.approval,
@@ -422,6 +425,7 @@ impl Store {
             .await?;
             tx.commit().await?;
             return Ok(SendTagMessageResponse {
+                wake_deferred: String::new(),
                 message: None,
                 duplicate,
                 approval: None,
@@ -445,6 +449,7 @@ impl Store {
         let message = message_in(&mut tx, &id).await?;
         tx.commit().await?;
         Ok(SendTagMessageResponse {
+            wake_deferred: String::new(),
             message: Some(message),
             duplicate: false,
             approval: None,

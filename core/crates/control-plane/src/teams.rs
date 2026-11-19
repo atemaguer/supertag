@@ -31,6 +31,7 @@ impl Store {
         let digest = digest(
             "create",
             &CreateTeamRequest {
+                wake_limits: None,
                 operation_id: String::new(),
                 team_id: id.into(),
                 name: label.into(),
@@ -64,6 +65,7 @@ impl Store {
                 .bind(id).bind(label).bind(concurrency.map(i64::from)).bind(revision).bind(now).execute(&mut *tx).await?;
             replace_members(&mut tx, id, &members).await?;
             Team {
+                wake_limits: None,
                 team_id: id.into(),
                 name: label.into(),
                 member_tag_ids: members,
@@ -217,6 +219,7 @@ impl Store {
         let digest = digest(
             "update",
             &UpdateTeamRequest {
+                wake_limits: None,
                 operation_id: String::new(),
                 team: input.team.clone(),
                 expected_revision: 0,
@@ -403,6 +406,7 @@ async fn team_with_members(tx: &mut Transaction<'_, Any>, row: &AnyRow) -> Resul
 
 fn team_row(row: &AnyRow) -> Result<Team> {
     Ok(Team {
+        wake_limits: None,
         team_id: row.try_get("team_id")?,
         name: row.try_get("name")?,
         member_tag_ids: Vec::new(),

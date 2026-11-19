@@ -771,6 +771,7 @@ impl Client {
         };
         let effect = PendingEffect::Post(post.clone());
         let input = HarnessPostWorkstreamRequest {
+            kind: 0,
             operation_id,
             body: post.text.clone(),
             to_tag_ids: post.to.clone(),
@@ -841,6 +842,7 @@ impl Client {
             review: message.review.clone(),
         };
         let input = HarnessSendTagMessageRequest {
+            kind: 0,
             operation_id,
             recipient_tag_id: message.to.clone(),
             text: text.clone(),

@@ -173,6 +173,7 @@ pub async fn run(connection: Connection, command: TeamCommand) -> Result<()> {
         } => {
             let name = name.unwrap_or_else(|| team_id.clone());
             let input = CreateTeamRequest {
+                wake_limits: None,
                 team_id,
                 name,
                 member_tag_ids: member,
@@ -203,6 +204,7 @@ pub async fn run(connection: Connection, command: TeamCommand) -> Result<()> {
                 "set at least one of --name, --member, --max-concurrency or --clear-concurrency"
             );
             let mut input = UpdateTeamRequest {
+                wake_limits: None,
                 operation_id: operation(operation_id),
                 team,
                 expected_revision: expected_revision.unwrap_or_default(),

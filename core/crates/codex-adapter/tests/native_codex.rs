@@ -489,6 +489,7 @@ impl HarnessWorkstreams for HarnessFixture {
             )
         };
         Ok(Response::new(PostAttemptWorkstreamResponse {
+            wake_deferred: String::new(),
             post,
             approval,
             duplicate: false,
@@ -551,6 +552,7 @@ impl HarnessMailbox for HarnessFixture {
             None => None,
         };
         Ok(Response::new(SendTagMessageResponse {
+            wake_deferred: String::new(),
             message: Some(TagMessage {
                 message_id: requested
                     .as_ref()

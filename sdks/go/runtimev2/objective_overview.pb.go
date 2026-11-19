@@ -1294,6 +1294,7 @@ type ObjectiveTeamPost struct {
 	ToTagIds      []string               `protobuf:"bytes,3,rep,name=to_tag_ids,json=toTagIds,proto3" json:"to_tag_ids,omitempty"`
 	Body          string                 `protobuf:"bytes,4,opt,name=body,proto3" json:"body,omitempty"`
 	CreatedAtMs   int64                  `protobuf:"varint,5,opt,name=created_at_ms,json=createdAtMs,proto3" json:"created_at_ms,omitempty"`
+	Kind          MessageKind            `protobuf:"varint,6,opt,name=kind,proto3,enum=supertag.runtime.v2.MessageKind" json:"kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1361,6 +1362,13 @@ func (x *ObjectiveTeamPost) GetCreatedAtMs() int64 {
 		return x.CreatedAtMs
 	}
 	return 0
+}
+
+func (x *ObjectiveTeamPost) GetKind() MessageKind {
+	if x != nil {
+		return x.Kind
+	}
+	return MessageKind_MESSAGE_KIND_UNSPECIFIED
 }
 
 var File_supertag_runtime_v2_objective_overview_proto protoreflect.FileDescriptor
@@ -1478,14 +1486,15 @@ const file_supertag_runtime_v2_objective_overview_proto_rawDesc = "" +
 	"\x06result\x18\a \x01(\tR\x06result\x12+\n" +
 	"\x0fcompleted_at_ms\x18\b \x01(\x03H\x00R\rcompletedAtMs\x88\x01\x01\x12G\n" +
 	"\afailure\x18\x98* \x01(\v2,.supertag.runtime.v2.ObjectiveSessionFailureR\afailureB\x12\n" +
-	"\x10_completed_at_ms\"\xa9\x01\n" +
+	"\x10_completed_at_ms\"\xdf\x01\n" +
 	"\x11ObjectiveTeamPost\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12\"\n" +
 	"\rauthor_tag_id\x18\x02 \x01(\tR\vauthorTagId\x12\x1c\n" +
 	"\n" +
 	"to_tag_ids\x18\x03 \x03(\tR\btoTagIds\x12\x12\n" +
 	"\x04body\x18\x04 \x01(\tR\x04body\x12\"\n" +
-	"\rcreated_at_ms\x18\x05 \x01(\x03R\vcreatedAtMs*\xc8\x01\n" +
+	"\rcreated_at_ms\x18\x05 \x01(\x03R\vcreatedAtMs\x124\n" +
+	"\x04kind\x18\x06 \x01(\x0e2 .supertag.runtime.v2.MessageKindR\x04kind*\xc8\x01\n" +
 	"\x16ObjectiveBudgetMeasure\x12(\n" +
 	"$OBJECTIVE_BUDGET_MEASURE_UNSPECIFIED\x10\x00\x12&\n" +
 	"\"OBJECTIVE_BUDGET_MEASURE_UNLIMITED\x10\x01\x12'\n" +
@@ -1546,6 +1555,7 @@ var file_supertag_runtime_v2_objective_overview_proto_goTypes = []any{
 	(*Objective)(nil),                   // 15: supertag.runtime.v2.Objective
 	(TaskState)(0),                      // 16: supertag.runtime.v2.TaskState
 	(HarnessKind)(0),                    // 17: supertag.runtime.v2.HarnessKind
+	(MessageKind)(0),                    // 18: supertag.runtime.v2.MessageKind
 }
 var file_supertag_runtime_v2_objective_overview_proto_depIdxs = []int32{
 	15, // 0: supertag.runtime.v2.ObjectiveOverview.objective:type_name -> supertag.runtime.v2.Objective
@@ -1567,13 +1577,14 @@ var file_supertag_runtime_v2_objective_overview_proto_depIdxs = []int32{
 	17, // 16: supertag.runtime.v2.ObjectiveSessionFailure.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
 	16, // 17: supertag.runtime.v2.ObjectiveTurn.state:type_name -> supertag.runtime.v2.TaskState
 	12, // 18: supertag.runtime.v2.ObjectiveTurn.failure:type_name -> supertag.runtime.v2.ObjectiveSessionFailure
-	3,  // 19: supertag.runtime.v2.ObjectiveOverviews.GetObjectiveOverview:input_type -> supertag.runtime.v2.GetObjectiveOverviewRequest
-	4,  // 20: supertag.runtime.v2.ObjectiveOverviews.GetObjectiveOverview:output_type -> supertag.runtime.v2.ObjectiveOverview
-	20, // [20:21] is the sub-list for method output_type
-	19, // [19:20] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	18, // 19: supertag.runtime.v2.ObjectiveTeamPost.kind:type_name -> supertag.runtime.v2.MessageKind
+	3,  // 20: supertag.runtime.v2.ObjectiveOverviews.GetObjectiveOverview:input_type -> supertag.runtime.v2.GetObjectiveOverviewRequest
+	4,  // 21: supertag.runtime.v2.ObjectiveOverviews.GetObjectiveOverview:output_type -> supertag.runtime.v2.ObjectiveOverview
+	21, // [21:22] is the sub-list for method output_type
+	20, // [20:21] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_objective_overview_proto_init() }

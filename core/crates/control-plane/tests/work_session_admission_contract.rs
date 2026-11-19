@@ -180,6 +180,7 @@ async fn contract(url: String) {
         .send_attempt_tag_message(
             &supertag_control_plane::AttemptAccess::new(&host, &sender_attempt),
             &SendAttemptTagMessageRequest {
+                kind: 0,
                 operation_id: "mail".into(),
                 recipient_tag_id: "recipient".into(),
                 text: "Read this fixture notice".into(),

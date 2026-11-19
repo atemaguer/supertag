@@ -35,6 +35,7 @@ async fn contract(url: String) {
         .create_team(
             OPERATOR,
             &CreateTeamRequest {
+                wake_limits: None,
                 operation_id: "create-team".into(),
                 team_id: "team".into(),
                 name: "Fixture team".into(),

@@ -219,6 +219,10 @@ enum WatchKind {
   // A Tag's note was kept, rewritten, or deleted (Memories). The change's id names the note and
   // its tag_id the Tag; a private note reaches only its person.
   WATCH_KIND_MEMORY = 8;
+  // A Tag's direct message to another Tag (Mailbox). The change's id names the message, its
+  // tag_id the recipient, and its objective_id the sender's Objective. A Workstream post addressed
+  // to a Tag is a WATCH_KIND_WORKSTREAM_POST change only.
+  WATCH_KIND_MAILBOX_MESSAGE = 9;
 }
 
 enum WatchReason {
@@ -287,6 +291,8 @@ enum InboxItemKind {
   INBOX_ITEM_KIND_OBJECTIVE_LIMIT = 3;
   INBOX_ITEM_KIND_TASK_ATTENTION = 4;
   INBOX_ITEM_KIND_APPROVAL = 5;
+  // Tags hit a wake limit: their messages waited for a later turn instead of waking the recipient.
+  INBOX_ITEM_KIND_WAKE_LIMIT = 6;
   // A queued Task needs an OAuth MCP server whose login lapsed on every Worker Host serving it.
   INBOX_ITEM_KIND_MCP_LOGIN = 1800;
 }
@@ -669,6 +675,20 @@ service AttemptMailbox {
   rpc SendMessage(SendAttemptTagMessageRequest) returns (SendTagMessageResponse);
 }
 
+// What a Mailbox message or Workstream post is for. Questions and blockers wake their recipient
+// sooner than notes. REVIEW marks a commit review request: the Control Plane sets it, and a request
+// that names it is refused.
+enum MessageKind {
+  // Treated as a note.
+  MESSAGE_KIND_UNSPECIFIED = 0;
+  MESSAGE_KIND_NOTE = 1;
+  MESSAGE_KIND_QUESTION = 2;
+  MESSAGE_KIND_BLOCKER = 3;
+  MESSAGE_KIND_EVIDENCE = 4;
+  MESSAGE_KIND_DECISION = 5;
+  MESSAGE_KIND_REVIEW = 6;
+}
+
 enum TagMessageOrigin {
   TAG_MESSAGE_ORIGIN_UNSPECIFIED = 0;
   TAG_MESSAGE_ORIGIN_DIRECT = 1;
@@ -696,6 +716,7 @@ message TagMessage {
   int64 created_at_ms = 11;
   TagMessageOrigin origin = 12;
   CommitReview review = 13;
+  MessageKind kind = 14;
 }
 
 enum CommitReviewDecision {
@@ -742,6 +763,7 @@ message SendAttemptTagMessageRequest {
   string recipient_tag_id = 3;
   string text = 4;
   CommitReviewSubmission review = 5;
+  MessageKind kind = 6;
 }
 
 message SendTagMessageResponse {
@@ -750,6 +772,9 @@ message SendTagMessageResponse {
   Approval approval = 3;
   // A recorded verdict returns the original review without a new Mailbox message.
   CommitReview review = 4;
+  // Why the message did not wake its recipient now, such as a wake limit; empty when it did or
+  // needed no wake. The message is stored either way.
+  string wake_deferred = 5;
 }
 
 message ChangeMailboxGrantRequest {
@@ -1461,6 +1486,7 @@ message HarnessPostWorkstreamRequest {
   string operation_id = 1;
   string body = 2;
   repeated string to_tag_ids = 3;
+  MessageKind kind = 4;
 }
 
 service HarnessMailbox {
@@ -1508,6 +1534,7 @@ message HarnessSendTagMessageRequest {
   string recipient_tag_id = 2;
   string text = 3;
   CommitReviewSubmission review = 4;
+  MessageKind kind = 5;
 }
 
 message HarnessReadMailboxRequest {
@@ -3171,6 +3198,18 @@ message Objective {
   optional int64 idle_since_ms = 7100;
 }
 
+// How often Tags may wake each other through messages; an unset value keeps the default. People's
+// messages never count. Over a limit, notes wait for the recipient's next turn and questions and
+// blockers are delivered later; nothing is dropped.
+message TeamWakeLimits {
+  // Wakes between two Tags for one originating Task, both directions (default 3).
+  optional uint32 mutual_per_task = 1;
+  // Tag-originated wakes of one Tag per hour (default 20).
+  optional uint32 per_tag_per_hour = 2;
+  // Tag-originated wakes in one Objective per hour (default 60).
+  optional uint32 per_objective_per_hour = 3;
+}
+
 message Team {
   string team_id = 1;
   string name = 2;
@@ -3179,6 +3218,7 @@ message Team {
   uint64 revision = 5;
   int64 created_at_ms = 6;
   int64 updated_at_ms = 7;
+  TeamWakeLimits wake_limits = 8;
 }
 
 message CreateTeamRequest {
@@ -3187,6 +3227,7 @@ message CreateTeamRequest {
   string name = 3;
   repeated string member_tag_ids = 4;
   optional uint32 max_concurrency = 5;
+  TeamWakeLimits wake_limits = 6;
 }
 
 message GetTeamRequest {
@@ -3215,6 +3256,8 @@ message UpdateTeamRequest {
   optional string name = 4;
   TeamMembers members = 5;
   optional uint32 max_concurrency = 6;
+  // When present, replaces all three limits.
+  TeamWakeLimits wake_limits = 7;
 }
 
 message DeleteTeamRequest {
@@ -3233,6 +3276,7 @@ message WorkstreamPost {
   string source_task_id = 6;
   uint64 sequence = 7;
   int64 created_at_ms = 8;
+  MessageKind kind = 9;
 }
 
 message ListWorkstreamPostsRequest {
@@ -3266,6 +3310,7 @@ message PostAttemptWorkstreamRequest {
   string operation_id = 2;
   string body = 3;
   repeated string to_tag_ids = 4;
+  MessageKind kind = 5;
 }
 
 message PostAttemptWorkstreamResponse {
@@ -3273,6 +3318,9 @@ message PostAttemptWorkstreamResponse {
   bool duplicate = 2;
   // A pending or denied approval is returned instead of writing a post.
   Approval approval = 3;
+  // Why some addressee was not woken now, such as a wake limit; empty when every addressee was
+  // woken or none needed a wake. The post is stored either way.
+  string wake_deferred = 4;
 }
 
 message GetObjectiveRequest {

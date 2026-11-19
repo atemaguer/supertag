@@ -648,6 +648,7 @@ async fn client_team_notices(url: &str) -> anyhow::Result<()> {
             .create_team(
                 "operator:local",
                 &CreateTeamRequest {
+                    wake_limits: None,
                     operation_id: format!("team-{team}"),
                     team_id: team.into(),
                     name: team.into(),

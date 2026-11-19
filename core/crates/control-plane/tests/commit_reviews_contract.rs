@@ -126,6 +126,7 @@ async fn finish_waiting(
 
 fn request(operation: &str, reviewer: &str, commit: &str) -> SendAttemptTagMessageRequest {
     SendAttemptTagMessageRequest {
+        kind: 0,
         operation_id: operation.into(),
         recipient_tag_id: reviewer.into(),
         text: "Review this exact commit".into(),
@@ -137,6 +138,7 @@ fn request(operation: &str, reviewer: &str, commit: &str) -> SendAttemptTagMessa
 
 fn response(request: &str) -> SendAttemptTagMessageRequest {
     SendAttemptTagMessageRequest {
+        kind: 0,
         operation_id: "verdict".into(),
         recipient_tag_id: "owner".into(),
         text: "Approved after inspecting the immutable patch".into(),
@@ -1372,6 +1374,7 @@ async fn record_separate_root_verdict(
         .send_attempt_tag_message(
             &supertag_control_plane::AttemptAccess::new(host, &root),
             &SendAttemptTagMessageRequest {
+                kind: 0,
                 operation_id: "separate-root-verdict".into(),
                 recipient_tag_id: "scoped-owner".into(),
                 text: "Approved based on the inspected commit".into(),

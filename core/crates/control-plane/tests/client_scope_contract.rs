@@ -254,6 +254,7 @@ async fn contract(url: &str) {
             .create_team(
                 OPERATOR,
                 &CreateTeamRequest {
+                    wake_limits: None,
                     operation_id: format!("team-{team}"),
                     team_id: team.into(),
                     name: team.into(),

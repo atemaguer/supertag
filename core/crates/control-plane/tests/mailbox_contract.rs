@@ -67,6 +67,7 @@ async fn post(
         .post_attempt_workstream(
             &supertag_control_plane::AttemptAccess::new(host, attempt),
             &PostAttemptWorkstreamRequest {
+                kind: 0,
                 operation_id: operation.into(),
                 body: text.into(),
                 to_tag_ids: recipients.iter().map(|s| (*s).into()).collect(),
@@ -668,6 +669,7 @@ async fn bounded_batches_and_hops(url: &str) {
     );
     assert_eq!(start(&store, &host, &source).await.session_id, session);
     let denied = PostAttemptWorkstreamRequest {
+        kind: 0,
         operation_id: "relay-denied".into(),
         body: body.into(),
         to_tag_ids: vec![to.into()],

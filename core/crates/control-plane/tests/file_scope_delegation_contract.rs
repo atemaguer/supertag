@@ -139,6 +139,7 @@ async fn delegated_scope(
         .create_team(
             OP,
             &CreateTeamRequest {
+                wake_limits: None,
                 operation_id: format!("{owner}-{member}-team"),
                 team_id: format!("{owner}-{member}-team"),
                 name: format!("{owner} {member} team"),

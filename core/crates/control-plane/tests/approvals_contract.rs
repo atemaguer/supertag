@@ -55,6 +55,7 @@ async fn start(store: &Store, host: &HostAuthority, attempt: &InspectAttemptRequ
 }
 fn post(operation: &str, body: &str) -> PostAttemptWorkstreamRequest {
     PostAttemptWorkstreamRequest {
+        kind: 0,
         operation_id: operation.into(),
         body: body.into(),
         to_tag_ids: vec![],
@@ -114,6 +115,7 @@ async fn contract(url: &str) {
         .create_team(
             ALICE,
             &CreateTeamRequest {
+                wake_limits: None,
                 operation_id: "team".into(),
                 team_id: "engineering".into(),
                 name: "Engineering".into(),
@@ -877,6 +879,7 @@ async fn coverage_contract(url: &str) {
         .create_team(
             ALICE,
             &CreateTeamRequest {
+                wake_limits: None,
                 operation_id: "team".into(),
                 team_id: "engineering".into(),
                 name: "Engineering".into(),

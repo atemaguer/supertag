@@ -681,7 +681,7 @@ fn headline(kind: InboxItemKind, item: &InboxItem, blocking: bool) -> (String, O
             "The Objective budget is used up".into(),
             Some(format!("supertag describe objective {objective}")),
         ),
-        InboxItemKind::ObjectiveLimit => (
+        InboxItemKind::ObjectiveLimit | InboxItemKind::WakeLimit => (
             summary(&item.reason),
             Some(format!("supertag describe objective {objective}")),
         ),

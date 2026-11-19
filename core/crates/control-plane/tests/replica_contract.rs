@@ -187,6 +187,7 @@ async fn claim_reads_the_inbox_under_its_lock(url: &str) {
     b.create_team(
         OPERATOR,
         &CreateTeamRequest {
+            wake_limits: None,
             operation_id: "team".into(),
             team_id: "engineering".into(),
             name: "Engineering".into(),

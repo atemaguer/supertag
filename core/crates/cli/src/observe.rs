@@ -929,6 +929,7 @@ fn kind_name(kind: WatchKind) -> &'static str {
         WatchKind::WorkstreamPost => "workstream-post",
         WatchKind::Schedule => "schedule",
         WatchKind::Memory => "memory",
+        WatchKind::MailboxMessage => "mailbox-message",
         WatchKind::Unspecified => "unknown",
     }
 }

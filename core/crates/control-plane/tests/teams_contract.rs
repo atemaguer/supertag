@@ -15,6 +15,7 @@ const NOW: i64 = 1_893_456_000_000;
 
 fn create_team(id: &str, name: &str, members: &[&str], limit: Option<u32>) -> CreateTeamRequest {
     CreateTeamRequest {
+        wake_limits: None,
         operation_id: format!("create-{id}"),
         team_id: id.into(),
         name: name.into(),
@@ -147,6 +148,7 @@ async fn team_lifecycle(store: &Store) {
     ));
 
     let update = UpdateTeamRequest {
+        wake_limits: None,
         operation_id: "rename-release".into(),
         team: "release".into(),
         expected_revision: team.revision,
@@ -265,6 +267,7 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
     finish(store, &other_host, &outside).await;
 
     let post = PostAttemptWorkstreamRequest {
+        kind: 0,
         operation_id: "progress".into(),
         body: " Reviewed the rollout. ".into(),
         to_tag_ids: vec![],
@@ -416,6 +419,7 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
     // tests/workstream-post-store.test.ts: text, addressees, and read options are validated.
     let invalid_post =
         |operation: &str, body: String, to: Vec<String>| PostAttemptWorkstreamRequest {
+            kind: 0,
             operation_id: operation.into(),
             body,
             to_tag_ids: to,

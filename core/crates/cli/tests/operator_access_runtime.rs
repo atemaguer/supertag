@@ -551,6 +551,7 @@ async fn audit_names_every_changed_resource(database: &str) -> Result<()> {
     teams
         .create_team(request(
             CreateTeamRequest {
+                wake_limits: None,
                 operation_id: "team".into(),
                 team_id: "core".into(),
                 name: "Core".into(),

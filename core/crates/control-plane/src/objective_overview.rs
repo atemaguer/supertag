@@ -544,7 +544,7 @@ pub(crate) async fn overview_in(
         for row in sqlx::query("SELECT sequence, author_tag_id, to_tag_ids, body, created_at_ms FROM supertag_v2_workstream_posts WHERE team_id=$1 ORDER BY sequence DESC LIMIT $2")
                 .bind(&team.team_id).bind(TEAM_POSTS).fetch_all(&mut **tx).await?
             {
-                posts.push(ObjectiveTeamPost {
+                posts.push(ObjectiveTeamPost { kind: 0,
                     sequence: row.try_get::<i64, _>("sequence")? as u64,
                     author_tag_id: row.try_get("author_tag_id")?,
                     to_tag_ids: serde_json::from_str(&row.try_get::<String, _>("to_tag_ids")?)?,

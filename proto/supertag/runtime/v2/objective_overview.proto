@@ -200,4 +200,5 @@ message ObjectiveTeamPost {
   repeated string to_tag_ids = 3;
   string body = 4;
   int64 created_at_ms = 5;
+  MessageKind kind = 6;
 }
