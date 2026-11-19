@@ -42,6 +42,10 @@ If `supertag up` says another program is using an address, such as `127.0.0.1:34
 program, or choose another port under `services.control-plane.ports` in `supertag.yaml` before
 the first `supertag up`.
 
+`supertag up` chooses a free port for the local Gateway just before starting it. If it says
+`Another program took port PORT after supertag up chose it for the local Gateway`, another program
+took that port in between. Run `supertag up` again; it chooses another.
+
 ## 2. Check the Surface Account
 
 ```sh

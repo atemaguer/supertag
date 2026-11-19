@@ -38,6 +38,9 @@ within the pre-1.0 compatibility policy described in
 - A Worker whose connection to the data endpoint times out now logs `the data endpoint URL is
   unreachable: connection timed out after 5s`, naming the endpoint as a refused connection does,
   instead of tonic's bare `timed out`.
+- When another program takes the port `supertag up` chose for the local Gateway before the Gateway
+  listens on it, `supertag up` now says which port was taken and to run it again, which chooses
+  another.
 
 ### Changed
 

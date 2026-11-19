@@ -456,7 +456,8 @@ impl Children {
             &self.logs,
             lifecycle::GATEWAY,
         )
-        .await?;
+        .await
+        .map_err(|error| gateway_port_taken(error, gateway_listen))?;
         let gateway_address = loopback_address(&address)?;
         ensure!(
             gateway_address == gateway_listen,
@@ -1425,6 +1426,22 @@ fn free_loopback_port() -> Result<SocketAddr> {
     Ok(listener.local_addr()?)
 }
 
+/// The port is chosen free but released before the Gateway binds it, so another program can take
+/// it in between. Say so, since the next `supertag up` chooses again.
+fn gateway_port_taken(error: anyhow::Error, listen: SocketAddr) -> anyhow::Error {
+    if !error
+        .to_string()
+        .contains(&format!("could not listen on {listen}:"))
+    {
+        return error;
+    }
+    anyhow::anyhow!(
+        "{error}. Another program took port {} after supertag up chose it for the local Gateway; \
+         run supertag up again to choose another",
+        listen.port()
+    )
+}
+
 /// The local Gateway's last loopback address, when its port is free again.
 fn previous_gateway(directory: &Path) -> Option<SocketAddr> {
     let address =
@@ -1691,6 +1708,31 @@ mod tests {
             last_error(&log).as_deref(),
             Some("packaged Node bridge interpreter is unavailable on PATH")
         );
+    }
+    #[test]
+    fn a_gateway_that_lost_its_port_says_which_and_to_run_up_again() {
+        let listen: SocketAddr = "127.0.0.1:43210".parse().unwrap();
+        let taken = anyhow::anyhow!(
+            "Gateway did not report readiness: could not listen on 127.0.0.1:43210: Address \
+             already in use (os error 48)"
+        );
+        assert_eq!(
+            gateway_port_taken(taken, listen).to_string(),
+            "Gateway did not report readiness: could not listen on 127.0.0.1:43210: Address \
+             already in use (os error 48). Another program took port 43210 after supertag up \
+             chose it for the local Gateway; run supertag up again to choose another"
+        );
+        // Any other failure, including another listener's, is reported unchanged.
+        for other in [
+            "Gateway did not report readiness: could not listen on 127.0.0.1:3000: Address \
+             already in use (os error 48)",
+            "Gateway did not become ready",
+        ] {
+            assert_eq!(
+                gateway_port_taken(anyhow::anyhow!(other), listen).to_string(),
+                other
+            );
+        }
     }
     #[test]
     fn the_local_gateway_comes_back_on_its_last_port_when_free() {
