@@ -348,7 +348,7 @@ async fn executing_capacity_and_recovery_suppression_are_reported_by_the_actual_
             .mode(0o600)
             .open(
                 state
-                    .join("attempt-processes")
+                    .join("slots/adapter-0/attempt-processes")
                     .join("process-unrecorded.json"),
             )?;
         std::io::Write::write_all(&mut file, br#"{"state":"pending"}"#)?;

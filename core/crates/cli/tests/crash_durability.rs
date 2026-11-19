@@ -134,7 +134,10 @@ const OPERATION: &str = "crash-submit";
 enum Target {
     ControlPlane,
     Gateway,
+    /// The Worker Host's Worklet: its Workers die with it.
     WorkerHost,
+    /// The Worker process running the Attempt: its Worklet stays up and recovers it.
+    Worker,
     Adapter,
 }
 
@@ -648,7 +651,11 @@ impl<'a> System<'a> {
             .arg(self.directory.join("host"))
             .arg("--adapter")
             .arg(&self.adapter);
-        if let Some((point, marker)) = self.crash_env(Target::WorkerHost) {
+        // A Worker inherits its Worklet's environment, crash point included.
+        if let Some((point, marker)) = self
+            .crash_env(Target::WorkerHost)
+            .or_else(|| self.crash_env(Target::Worker))
+        {
             command
                 .env(CRASH_POINT_ENV, point)
                 .env(CRASH_MARKER_ENV, marker);
@@ -730,8 +737,9 @@ impl<'a> System<'a> {
                 );
                 self.start_host()?;
             }
-            // The guardian observes the adapter's death; the host owns recovery.
-            Target::Adapter => {}
+            // The guardian observes the adapter's death, and the Worklet its Worker's; the host
+            // owns recovery.
+            Target::Adapter | Target::Worker => {}
         }
         Ok(())
     }
@@ -1263,7 +1271,7 @@ macro_rules! crash_matrix {
 
 use Expect::*;
 use Ingress::{Operator, Slack};
-use Target::{Adapter, ControlPlane, Gateway, WorkerHost};
+use Target::{Adapter, ControlPlane, Gateway, Worker, WorkerHost};
 
 crash_matrix! {
     // Admission.
@@ -1314,6 +1322,12 @@ crash_matrix! {
     worker_host_execute_journaled =>
         case(WorkerHost, "worker-host.execute.journaled", Slack,
             Reclaimed { launches: 0, events: 0 });
+    // The Worker dies once it read its Assign: its Worklet starts another for the Attempt.
+    worker_assign_received =>
+        case(Worker, "worker.assign.received", Slack, Delivered);
+    worker_execute_journaled =>
+        case(Worker, "worker.execute.journaled", Slack,
+            Reclaimed { launches: 0, events: 0 });
     adapter_attached =>
         case(Adapter, "adapter.attached", Slack, Failed { events: 0 });
 
@@ -1327,8 +1341,8 @@ crash_matrix! {
         case(ControlPlane, "api.append-event.before-forward", Slack, Delivered);
     api_event_after_forward =>
         case(ControlPlane, "api.append-event.after-forward", Slack, Delivered);
-    worker_host_event_answered =>
-        case(WorkerHost, "worker-host.append-event.answered", Slack,
+    worker_event_answered =>
+        case(Worker, "worker.append-event.answered", Slack,
             Reclaimed { launches: 1, events: 1 });
     adapter_published =>
         case(Adapter, "adapter.published", Slack, Failed { events: 1 });
@@ -1338,6 +1352,12 @@ crash_matrix! {
     // cleanly (worker-host/src/worker/adapter.rs), so a killed adapter settles as failed.
     adapter_completed =>
         case(Adapter, "adapter.completed", Slack, Failed { events: 2 });
+    // The Worklet journaled the outcome the Worker handed over, and dies with its Worker.
+    worker_host_outcome_journaled =>
+        case(WorkerHost, "worker-host.outcome.journaled", Slack, Delivered);
+    // The Worker handed its outcome over and dies before it exits.
+    worker_outcome_handed =>
+        case(Worker, "worker.outcome.handed", Slack, Delivered);
     worker_host_finish_journaled =>
         case(WorkerHost, "worker-host.finish.journaled", Slack, Delivered);
     control_plane_finish_before_commit =>
@@ -1350,6 +1370,8 @@ crash_matrix! {
         case(ControlPlane, "api.finish.after-forward", Slack, Delivered);
     worker_host_finish_answered =>
         case(WorkerHost, "worker-host.finish.answered", Slack, Delivered);
+    worker_host_terminal_journaled =>
+        case(WorkerHost, "worker-host.terminal.journaled", Slack, Delivered);
 
     // Outbound delivery.
     control_plane_reply_claim_before_commit =>

@@ -531,7 +531,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         );
         sleep(Duration::from_millis(20)).await;
     }
-    let cancelled_journal = directory.join("cancelled-host/attempt.json");
+    let cancelled_journal = directory.join("cancelled-host/slots/adapter-0/attempt.json");
     let executing: Value = serde_json::from_slice(&std::fs::read(&cancelled_journal)?)?;
     assert_eq!(executing["stage"], "executing");
     let cancelled_checkout =
@@ -740,8 +740,9 @@ async fn artifact_inputs_survive_control_plane_restart_and_do_not_enter_workspac
         );
         sleep(Duration::from_millis(20)).await;
     }
-    let executing: Value =
-        serde_json::from_slice(&std::fs::read(cancel_state.join("attempt.json"))?)?;
+    let executing: Value = serde_json::from_slice(&std::fs::read(
+        cancel_state.join("slots/adapter-0/attempt.json"),
+    )?)?;
     let checkout = std::path::PathBuf::from(field(&executing["prepared"]["checkout"], "path")?);
     assert!(checkout.join("inputs").exists());
     json(credentials.operator(&["task", "cancel", cancelled_id], &public)).await?;
@@ -749,7 +750,12 @@ async fn artifact_inputs_survive_control_plane_restart_and_do_not_enter_workspac
         timeout(WAIT, worker.wait()).await??.success(),
         "cancelled artifact consumer did not settle"
     );
-    assert!(!checkout.exists() && !cancel_state.join("artifact-inputs").exists());
+    assert!(
+        !checkout.exists()
+            && !cancel_state
+                .join("slots/adapter-0/artifact-inputs")
+                .exists()
+    );
     let cancelled = json(credentials.operator(&["get", "task", cancelled_id], &public)).await?;
     assert_eq!(cancelled["state"], "TASK_STATE_CANCELLED");
     assert!(cancelled["workspace_delivery"].is_null());

@@ -130,7 +130,7 @@ async fn frozen_outputs_survive_worker_restart(
     let snapshot = fixture
         .root
         .join(format!("host-{mode}"))
-        .join("artifact-snapshots");
+        .join("slots/cursor-0/artifact-snapshots");
     assert!(
         std::fs::read_dir(snapshot)?
             .filter_map(Result::ok)
@@ -138,9 +138,11 @@ async fn frozen_outputs_survive_worker_restart(
                 std::fs::read_dir(dir.path()).is_ok_and(|mut entries| {
                     entries.any(|file| {
                         file.is_ok_and(|file| {
-                            file.path()
-                                .extension()
-                                .is_some_and(|extension| extension == "pending")
+                            // Frozen, and published already: the Worker publishes a turn's
+                            // outputs before it hands its outcome over and stops the sandbox.
+                            file.path().extension().is_some_and(|extension| {
+                                extension == "pending" || extension == "receipt"
+                            })
                         })
                     })
                 })

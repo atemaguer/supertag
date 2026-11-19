@@ -1000,24 +1000,35 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
         names(&roles["gateway"]),
         expected(&["SUPERTAG_GATEWAY_CREDENTIAL"])
     );
-    // The Codex Host gets only Codex credentials, and in a file it read and deleted, never its
-    // environment. Each lane presents its Host credential; the guardian never passes it to a
-    // harness.
+    // The Codex Host's Worklet gets only Codex credentials, and in a file it read and deleted,
+    // never its environment. It reads its Host credential from its enrollment; neither the
+    // environment nor its Workers ever hold it.
     if let Some(codex) = roles.get("codex-host") {
-        assert_eq!(names(codex), expected(&["SUPERTAG_HOST_TOKEN"]));
+        assert_eq!(names(codex), expected(&[]));
     }
-    let credentials = commands["codex-host"]
-        .split_whitespace()
-        .skip_while(|argument| *argument != "--provider-credentials-file")
+    let harness_set = |host: &str| -> Result<String> {
+        Ok(fs::read_to_string(
+            state.join("hosts").join(host).join("harness-set.json"),
+        )?)
+    };
+    let codex_set: Value = serde_json::from_str(&harness_set("codex-host")?)?;
+    let codex_args = codex_set["harnesses"][0]
+        .as_array()
+        .context("the Codex Host's harness arguments")?;
+    let credentials = codex_args
+        .iter()
+        .skip_while(|argument| argument.as_str() != Some("--provider-credentials-file"))
         .nth(1)
+        .and_then(Value::as_str)
         .context("the Codex Host is given a provider credentials file")?;
     assert!(
         !Path::new(credentials).exists(),
         "the Codex Host deleted its provider credentials file"
     );
-    assert!(!commands["reporter"].contains("--provider-credentials-file"));
+    assert!(commands["codex-host"].contains("--harness-set"));
+    assert!(!harness_set("reporter")?.contains("--provider-credentials-file"));
     if let Some(reporter) = roles.get("reporter") {
-        assert_eq!(names(reporter), expected(&["SUPERTAG_HOST_TOKEN"]));
+        assert_eq!(names(reporter), expected(&[]));
     }
     for (role, environment) in &roles {
         // The database password reaches the Control Plane alone, under any name.
@@ -1198,7 +1209,7 @@ where
     let options =
         <sqlx::postgres::PgConnectOptions as std::str::FromStr>::from_str(admin_url.trim())?;
     let mut admin = sqlx::PgConnection::connect_with(&options).await?;
-    let name = format!("supertag_lanes_{}", Uuid::new_v4().simple());
+    let name = format!("supertag_slots_{}", Uuid::new_v4().simple());
     database::create_migrated_postgres(&mut admin, &options, &name).await?;
     let mut url = url::Url::parse(admin_url.trim())?;
     url.set_path(&name);
@@ -1210,7 +1221,7 @@ where
     result
 }
 
-/// A shared Host with a gated Codex lane group and a gated OpenAI Agents lane group.
+/// A shared Host whose Worklet runs gated Codex slots and gated OpenAI Agents slots.
 struct SharedHost {
     temp: tempfile::TempDir,
     state: PathBuf,
@@ -1401,11 +1412,38 @@ impl SharedHost {
         })?
     }
 
-    fn lanes(&self) -> Result<Vec<(i32, String)>> {
-        Ok(children(self.supervisor.child.id())?
+    /// The shared Host's one Worklet process.
+    fn worklet(&self) -> Result<(i32, String)> {
+        let mut worklets = children(self.supervisor.child.id())?
             .into_iter()
-            .filter(|(_, command)| command.contains("/hosts/shared/lanes/"))
+            .filter(|(_, command)| {
+                command.contains(" worker-host ") && command.contains("/hosts/shared")
+            })
+            .collect::<Vec<_>>();
+        ensure!(
+            worklets.len() == 1,
+            "the Host runs one Worklet: {worklets:?}"
+        );
+        Ok(worklets.remove(0))
+    }
+
+    /// The Worker processes the Worklet runs, one per running Task Attempt.
+    fn workers(&self) -> Result<Vec<(i32, String)>> {
+        let (worklet, _) = self.worklet()?;
+        Ok(children(worklet as u32)?
+            .into_iter()
+            .filter(|(_, command)| command.contains(" __worker "))
             .collect())
+    }
+
+    /// The Host credential the Worklet enrolled with.
+    fn credential(&self) -> Result<String> {
+        let enrollment: Value =
+            serde_json::from_slice(&fs::read(self.state.join("hosts/shared/enrollment.json"))?)?;
+        Ok(enrollment["token"]
+            .as_str()
+            .context("host token")?
+            .to_owned())
     }
 }
 
@@ -1606,24 +1644,17 @@ async fn shared_host_runs_harnesses_concurrently(database: String) -> Result<()>
             .model_ids,
         ["fixture-model"]
     );
-    // Each lane holds only its own harness's provider credentials (the OpenAI Agents stand-in
-    // checks its own), from a file it read and deleted rather than its environment.
-    let lanes = shared.lanes()?;
-    assert_eq!(lanes.len(), 4);
-    for (pid, command) in &lanes {
-        if let Some(environment) = host_environment(*pid)? {
-            let mut names = names(&environment);
-            names
-                .retain(|name| !["HOME", "PATH", "SUPERTAG_LOCAL_SERVICE_LIFELINE"].contains(name));
-            assert_eq!(names, ["SUPERTAG_HOST_TOKEN"], "{command}");
-        }
-        assert!(
-            command.contains("/lanes/codex-") || command.contains("/lanes/openai-agents-"),
-            "{command}"
-        );
-        assert!(command.contains("provider-credentials.json"), "{command}");
+    // One Worklet runs both harnesses. It holds each harness's provider credentials from a file
+    // it read and deleted, never its environment, and assigns each Worker only its own
+    // harness's (the OpenAI Agents stand-in checks its own).
+    let (worklet, command) = shared.worklet()?;
+    if let Some(environment) = host_environment(worklet)? {
+        let mut names = names(&environment);
+        names.retain(|name| !["HOME", "PATH", "SUPERTAG_LOCAL_SERVICE_LIFELINE"].contains(name));
+        assert_eq!(names, Vec::<&str>::new(), "{command}");
     }
-
+    assert!(command.contains("--harness-set"), "{command}");
+    assert!(shared.workers()?.is_empty(), "no Attempt runs yet");
     tag(&mut operator, &token, "coder", HarnessKind::Codex).await?;
     tag(&mut operator, &token, "agent", HarnessKind::OpenaiAgents).await?;
     let mut codex = Vec::new();
@@ -1663,8 +1694,29 @@ async fn shared_host_runs_harnesses_concurrently(database: String) -> Result<()>
     })
     .await?;
     assert_eq!(busy.available_slots, 0);
+    // Each running Attempt has a Worker process of its own, which never holds the Host
+    // credential: not in its arguments, and not in its environment, under any name.
+    let credential = shared.credential()?;
+    let workers = shared.workers()?;
+    assert_eq!(workers.len(), 4, "{workers:?}");
+    for (pid, command) in &workers {
+        assert!(!command.contains(&credential), "{command}");
+        if let Some(environment) = host_environment(*pid)? {
+            assert!(
+                !environment.contains_key("SUPERTAG_HOST_TOKEN"),
+                "{command}"
+            );
+            assert!(
+                environment
+                    .values()
+                    .all(|value| !value.contains(&credential)),
+                "{command}"
+            );
+        }
+    }
 
-    // One harness process crashes. Its Attempt fails; the sibling Attempts and lanes continue.
+    // One harness process crashes. Its Attempt fails; the sibling Attempts, their Workers, and
+    // the Worklet continue.
     let crashed = started
         .iter()
         .find(|(harness, _)| harness == "agents")
@@ -1708,13 +1760,21 @@ async fn shared_host_runs_harnesses_concurrently(database: String) -> Result<()>
         );
     }
     assert_eq!(
-        shared
-            .lanes()?
-            .into_iter()
-            .map(|(pid, _)| pid)
-            .collect::<Vec<_>>(),
-        lanes.iter().map(|(pid, _)| *pid).collect::<Vec<_>>(),
-        "a harness crash must not restart any lane"
+        shared.worklet()?.0,
+        worklet,
+        "a harness crash must not restart the Worklet"
+    );
+    let siblings = shared
+        .workers()?
+        .into_iter()
+        .map(|(pid, _)| pid)
+        .collect::<Vec<_>>();
+    assert_eq!(siblings.len(), 3, "the crashed Attempt's Worker exits");
+    assert!(
+        siblings
+            .iter()
+            .all(|pid| workers.iter().any(|(running, _)| running == pid)),
+        "a harness crash must not restart a sibling Worker"
     );
     assert_eq!(
         host(&mut operator, &token, "shared").await?.generation,
@@ -1741,13 +1801,17 @@ async fn shared_host_runs_harnesses_concurrently(database: String) -> Result<()>
     })
     .await?;
     assert_eq!(idle.generation, generation);
-    assert_eq!(shared.lanes()?.len(), 4);
+    assert_eq!(shared.worklet()?.0, worklet);
+    assert!(
+        shared.workers()?.is_empty(),
+        "each Worker exits with its Attempt"
+    );
     shared.supervisor.stop().await?;
     Ok(())
 }
 
-/// A lead on OpenAI Agents starts a Work Session that names Codex: the Work Session runs on the
-/// shared host's Codex lane, and its report returns to the lead's Session on OpenAI Agents.
+/// A lead on OpenAI Agents starts a Work Session that names Codex: the Work Session runs in the
+/// shared host's Codex slots, and its report returns to the lead's Session on OpenAI Agents.
 async fn shared_host_runs_a_work_session_on_another_harness(database: String) -> Result<()> {
     let central = Central::start(&database)?;
     let token = central.operator.clone();
@@ -1798,17 +1862,17 @@ async fn shared_host_runs_a_work_session_on_another_harness(database: String) ->
     let started = shared.started()?;
     ensure!(
         started.iter().any(|(harness, _)| harness == "codex"),
-        "the Work Session did not run on the Codex lane: {started:?}"
+        "the Work Session did not run in a Codex slot: {started:?}"
     );
     shared.supervisor.stop().await?;
     Ok(())
 }
 
-async fn replaced_shared_host_fences_every_lane(database: String) -> Result<()> {
+async fn replaced_shared_host_fences_every_slot(database: String) -> Result<()> {
     let central = Central::start(&database)?;
     let token = central.operator.clone();
     let mut operator = client(&central.public).await?;
-    // One busy and one idle lane per harness: idle lanes meet the fence in their claim loop.
+    // One busy and one idle slot per harness: idle slots meet the fence in their claim loop.
     let mut shared = SharedHost::start(&central, 2).await?;
     let ready = host_until(&mut operator, &token, |status| {
         status.phase() == HostPhase::Ready && status.available_slots == 4
@@ -1831,16 +1895,15 @@ async fn replaced_shared_host_fences_every_lane(database: String) -> Result<()> 
         }
         return Err(error.context(format!("Task states: {states:?}")));
     }
-    let lanes = shared
-        .lanes()?
+    let mut processes = shared
+        .workers()?
         .into_iter()
         .map(|(pid, _)| pid)
         .collect::<Vec<_>>();
+    processes.push(shared.worklet()?.0);
     // Another process presents this Host's credential with a different incarnation.
-    let enrollment: Value = serde_json::from_slice(&fs::read(
-        shared.state.join("hosts/shared/enrollment.json"),
-    )?)?;
-    let credential = enrollment["token"].as_str().context("host token")?;
+    let credential = shared.credential()?;
+    let credential = credential.as_str();
     let replaced =
         worker_host_client::WorkerHostClient::new(protocol::dial(central.public.clone()).await?)
             .register_host(authenticated_request(
@@ -1852,11 +1915,11 @@ async fn replaced_shared_host_fences_every_lane(database: String) -> Result<()> 
             )?)
             .await?
             .into_inner();
-    // Let the stale lanes' harnesses finish now, so the lanes try to complete their Attempts
-    // under the replaced generation before anything stops them.
+    // Let the stale Workers' harnesses finish now, so they try to complete their Attempts under
+    // the replaced generation before anything stops them.
     fs::write(shared.gate.join("release"), "")?;
     assert!(replaced.generation > ready.generation);
-    // Both lanes' Attempts belong to the replaced generation and are fenced together.
+    // Both slots' Attempts belong to the replaced generation and are fenced together.
     for id in &ids {
         let fenced = task(&mut operator, &token, id).await?;
         assert_eq!(fenced.state(), TaskState::Uncertain);
@@ -1873,13 +1936,13 @@ async fn replaced_shared_host_fences_every_lane(database: String) -> Result<()> 
     .await
     .context("supervisor kept a fenced Host running")??;
     assert!(!status.success());
-    // The supervisor's own presence check names the fenced registration, whichever lane or
-    // report noticed first.
+    // The Worklet's presence names the fenced registration, whichever slot or report noticed
+    // first, and the supervisor reports that.
     let log = fs::read_to_string(&shared.supervisor.log)?;
     assert!(log.contains("is no longer current"), "{log}");
     assert!(!log.contains("exited unexpectedly"), "{log}");
-    gone(&lanes).await?;
-    // No stale lane completed or renewed its Attempt under the old generation.
+    gone(&processes).await?;
+    // No stale Worker completed or renewed its Attempt under the old generation.
     for id in &ids {
         assert_eq!(
             task(&mut operator, &token, id).await?.state(),
@@ -1889,7 +1952,7 @@ async fn replaced_shared_host_fences_every_lane(database: String) -> Result<()> 
     Ok(())
 }
 
-async fn shared_host_lanes_use_separate_workspace_checkouts(database: String) -> Result<()> {
+async fn shared_host_slots_use_separate_workspace_checkouts(database: String) -> Result<()> {
     let central = Central::start(&database)?;
     let token = central.operator.clone();
     let mut operator = client(&central.public).await?;
@@ -1938,20 +2001,20 @@ async fn shared_host_lanes_use_separate_workspace_checkouts(database: String) ->
         checkouts.push(shared.codex_start(*pid)?);
     }
     checkouts.sort();
-    let lanes = shared.state.join("hosts/shared/lanes").canonicalize()?;
+    let slots = shared.state.join("hosts/shared/slots").canonicalize()?;
     let mut owners = Vec::new();
     for (marker, checkout) in &checkouts {
-        let lane = checkout
-            .strip_prefix(&lanes)
-            .with_context(|| format!("{} is not in a lane", checkout.display()))?
+        let slot = checkout
+            .strip_prefix(&slots)
+            .with_context(|| format!("{} is not in a slot", checkout.display()))?
             .components()
             .next()
-            .context("lane directory")?
+            .context("slot directory")?
             .as_os_str()
             .to_string_lossy()
             .into_owned();
-        assert!(lane.starts_with("codex-"), "{lane}");
-        owners.push(lane);
+        assert!(slot.starts_with("codex-"), "{slot}");
+        owners.push(slot);
         assert_eq!(fs::read_to_string(checkout.join("README.md"))?, "base\n");
         let others = ["Task-w1", "Task-w2"]
             .into_iter()
@@ -1965,7 +2028,7 @@ async fn shared_host_lanes_use_separate_workspace_checkouts(database: String) ->
             );
         }
     }
-    assert_ne!(owners[0], owners[1], "both Attempts ran in one lane");
+    assert_ne!(owners[0], owners[1], "both Attempts ran in one slot");
 
     // The first Attempt delivers while its sibling still runs in the same Workspace.
     fs::write(shared.gate.join("release-Task-w1"), "")?;
@@ -2000,7 +2063,7 @@ async fn shared_host_lanes_use_separate_workspace_checkouts(database: String) ->
     Ok(())
 }
 
-async fn stranded_lane_attempts_are_fenced_on_restart(database: String) -> Result<()> {
+async fn stranded_slot_attempts_are_fenced_on_restart(database: String) -> Result<()> {
     let central = Central::start(&database)?;
     let token = central.operator.clone();
     let mut operator = client(&central.public).await?;
@@ -2014,12 +2077,13 @@ async fn stranded_lane_attempts_are_fenced_on_restart(database: String) -> Resul
     settled(&mut operator, &token, &id, TaskState::Running).await?;
     let started = shared.wait_started(1, 0).await?;
     let generation = host(&mut operator, &token, "shared").await?.generation;
-    // The machine stops abruptly: the Codex lane's journal still holds its running Attempt.
+    // The machine stops abruptly: the Codex slot's journal entry still holds its running Attempt.
     let mut killed = shared
-        .lanes()?
+        .workers()?
         .into_iter()
         .map(|(pid, _)| pid)
         .collect::<Vec<_>>();
+    killed.push(shared.worklet()?.0);
     killed.extend(started.iter().map(|(_, pid)| *pid));
     killed.push(shared.supervisor.child.id() as i32);
     for pid in &killed {
@@ -2029,15 +2093,15 @@ async fn stranded_lane_attempts_are_fenced_on_restart(database: String) -> Resul
     }
     let _ = shared.supervisor.child.wait();
     gone(&killed).await?;
-    let lane = shared.state.join("hosts/shared/lanes/codex-0");
-    assert!(lane.join("attempt.json").exists());
+    let slot = shared.state.join("hosts/shared/slots/codex-0");
+    assert!(slot.join("attempt.json").exists());
     assert_eq!(
         task(&mut operator, &token, &id).await?.state(),
         TaskState::Running
     );
 
-    // The Host comes back without its Codex lane. No process will read that journal, so the
-    // Host registers a new incarnation and its Attempt is fenced now, not at lease expiry.
+    // The Host comes back without Codex. No slot will read that entry, so the Worklet retires
+    // it, registers a new incarnation, and its Attempt is fenced now, not at lease expiry.
     let agents_only = serde_json::json!({
         "harnesses": ["openai-agents"],
         "models": {"openai-agents": "fixture-model"},
@@ -2060,7 +2124,7 @@ async fn stranded_lane_attempts_are_fenced_on_restart(database: String) -> Resul
                 attempt_id: fenced.attempt_id.clone().context("fenced Attempt")?,
                 operation_id: Uuid::new_v4().to_string(),
                 decision: AttemptDecision::Failed as i32,
-                evidence: "the Codex lane was removed and its processes are gone".into(),
+                evidence: "the Codex harness was removed and its processes are gone".into(),
                 confirmed_stopped: true,
             },
             &token,
@@ -2071,7 +2135,7 @@ async fn stranded_lane_attempts_are_fenced_on_restart(database: String) -> Resul
         status.phase() == HostPhase::Ready && status.available_slots == 1
     })
     .await?;
-    assert!(!lane.exists());
+    assert!(!slot.exists());
     let retired = fs::read_dir(shared.state.join("hosts/shared/retired"))?
         .map(|entry| Ok(entry?.path().join("codex-0").join("attempt.json")))
         .collect::<Result<Vec<_>>>()?;
@@ -2091,8 +2155,8 @@ async fn stranded_lane_attempts_are_fenced_on_restart(database: String) -> Resul
 }
 
 /// `tests/concurrency-request.test.ts`: `supertag up` with only a host's `concurrency` changed
-/// raises or lowers its lanes in place. Running work continues, the registration and its
-/// generation stay, and a lowered lane finishes its Attempt before it stops.
+/// resizes its Worklet's pool in place. Running work continues, the Worklet, the registration,
+/// and its generation stay, and a lowered slot finishes its Attempt before it retires.
 async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
     let central = Central::start(&database)?;
     let token = central.operator.clone();
@@ -2111,11 +2175,12 @@ async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
     assert_eq!(
         task(&mut operator, &token, &second).await?.state(),
         TaskState::Queued,
-        "one Codex lane runs one Attempt"
+        "one Codex slot runs one Attempt"
     );
     let supervisor = shared.supervisor.child.id();
+    let (worklet, _) = shared.worklet()?;
 
-    // Raised: a second Codex lane starts under the same registration and takes the queued Task
+    // Raised: a second Codex slot starts under the same registration and takes the queued Task
     // while the first keeps running.
     let printed = shared.up(&serde_json::json!({"concurrency": 2}))?;
     ensure!(
@@ -2136,7 +2201,7 @@ async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
     let printed = shared.up(&serde_json::json!({"concurrency": 2}))?;
     ensure!(printed.contains("left alone"), "{printed}");
 
-    // Lowered: capacity drops at once, and the extra lane stops once its Attempt finished.
+    // Lowered: capacity drops at once, and the extra slot retires once its Attempt finished.
     let printed = shared.up(&serde_json::json!({"concurrency": 1}))?;
     ensure!(
         printed.contains("changed from 2 without a restart"),
@@ -2146,32 +2211,29 @@ async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
     assert_eq!(
         task(&mut operator, &token, &second).await?.state(),
         TaskState::Running,
-        "a lowered lane keeps its running Attempt"
+        "a lowered slot keeps its running Attempt"
     );
     fs::write(shared.gate.join("release"), "")?;
     settled(&mut operator, &token, &first, TaskState::Succeeded).await?;
     settled(&mut operator, &token, &second, TaskState::Succeeded).await?;
     timeout(WAIT, async {
         loop {
-            let codex = shared
-                .lanes()?
-                .into_iter()
-                .filter(|(_, command)| command.contains("/lanes/codex-"))
-                .count();
-            if codex == 1 {
+            let entry = ["attempt.json", "claim.json"].iter().any(|name| {
+                shared
+                    .state
+                    .join("hosts/shared/slots/codex-1")
+                    .join(name)
+                    .exists()
+            });
+            if !entry && shared.workers()?.is_empty() {
                 break Ok::<_, anyhow::Error>(());
             }
             sleep(Duration::from_millis(100)).await;
         }
     })
     .await
-    .context("the lowered Codex lane did not stop")??;
-    assert!(
-        !shared
-            .state
-            .join("hosts/shared/lanes/codex-1/attempt.json")
-            .exists()
-    );
+    .context("the lowered Codex slot did not retire")??;
+    assert_eq!(shared.worklet()?.0, worklet, "a resize keeps the Worklet");
     let third = submit(&mut operator, &token, "coder", "Task-c3").await?;
     settled(&mut operator, &token, &third, TaskState::Succeeded).await?;
     assert_eq!(shared.supervisor.child.id(), supervisor);
@@ -2182,8 +2244,8 @@ async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
     assert_eq!(status["pid"], supervisor);
     assert_eq!(status["services"][0]["concurrency"], 1);
 
-    // A raised lane that cannot start stays stopped; the supervisor and its lanes go on.
-    let blocked = shared.state.join("hosts/shared/lanes/codex-2");
+    // A raised slot that cannot start stays stopped; the Worklet and its other slots go on.
+    let blocked = shared.state.join("hosts/shared/slots/codex-2");
     fs::write(&blocked, "not a directory")?;
     let printed = shared.up(&serde_json::json!({"concurrency": 3}))?;
     ensure!(
@@ -2200,19 +2262,20 @@ async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
     settled(&mut operator, &token, &fourth, TaskState::Succeeded).await?;
     assert_eq!(shared.supervisor.child.id(), supervisor);
     fs::remove_file(&blocked)?;
-    // The lane that ran it clears its journal after the Task settles.
+    assert_eq!(shared.worklet()?.0, worklet);
+    // The slot that ran it clears its journal entry after the Task settles.
     timeout(WAIT, async {
-        while ["codex-0", "codex-1"].iter().any(|lane| {
+        while ["codex-0", "codex-1"].iter().any(|slot| {
             shared
                 .state
-                .join(format!("hosts/shared/lanes/{lane}/attempt.json"))
+                .join(format!("hosts/shared/slots/{slot}/attempt.json"))
                 .exists()
         }) {
             sleep(Duration::from_millis(100)).await;
         }
     })
     .await
-    .context("a lane kept its Attempt journal")?;
+    .context("a slot kept its Attempt's journal entry")?;
 
     let mut shared = shared;
     shared.supervisor.stop().await?;
@@ -2304,25 +2367,25 @@ async fn postgres_concurrency_changes_without_a_restart() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sqlite_shared_host_lanes_use_separate_workspace_checkouts() -> Result<()> {
-    with_database(false, shared_host_lanes_use_separate_workspace_checkouts).await
+async fn sqlite_shared_host_slots_use_separate_workspace_checkouts() -> Result<()> {
+    with_database(false, shared_host_slots_use_separate_workspace_checkouts).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
-async fn postgres_shared_host_lanes_use_separate_workspace_checkouts() -> Result<()> {
-    with_database(true, shared_host_lanes_use_separate_workspace_checkouts).await
+async fn postgres_shared_host_slots_use_separate_workspace_checkouts() -> Result<()> {
+    with_database(true, shared_host_slots_use_separate_workspace_checkouts).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sqlite_stranded_lane_attempts_are_fenced_on_restart() -> Result<()> {
-    with_database(false, stranded_lane_attempts_are_fenced_on_restart).await
+async fn sqlite_stranded_slot_attempts_are_fenced_on_restart() -> Result<()> {
+    with_database(false, stranded_slot_attempts_are_fenced_on_restart).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
-async fn postgres_stranded_lane_attempts_are_fenced_on_restart() -> Result<()> {
-    with_database(true, stranded_lane_attempts_are_fenced_on_restart).await
+async fn postgres_stranded_slot_attempts_are_fenced_on_restart() -> Result<()> {
+    with_database(true, stranded_slot_attempts_are_fenced_on_restart).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2348,14 +2411,14 @@ async fn postgres_shared_host_runs_a_work_session_on_another_harness() -> Result
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sqlite_replaced_shared_host_generation_fences_every_lane() -> Result<()> {
-    with_database(false, replaced_shared_host_fences_every_lane).await
+async fn sqlite_replaced_shared_host_generation_fences_every_slot() -> Result<()> {
+    with_database(false, replaced_shared_host_fences_every_slot).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
-async fn postgres_replaced_shared_host_generation_fences_every_lane() -> Result<()> {
-    with_database(true, replaced_shared_host_fences_every_lane).await
+async fn postgres_replaced_shared_host_generation_fences_every_slot() -> Result<()> {
+    with_database(true, replaced_shared_host_fences_every_slot).await
 }
 
 /// One recorded webhook POST: its Authorization header and JSON body.

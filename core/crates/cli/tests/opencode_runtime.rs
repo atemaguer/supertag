@@ -1163,7 +1163,15 @@ async fn opencode_claims_and_runs_the_accepted_role_model(database: String) -> R
         }),
         ..Default::default()
     };
-    let journal = wrong_state.join("attempt.json");
+    // The stale claim is the entry of the host's one OpenCode slot.
+    let slot = wrong_state.join("slots/opencode-0");
+    std::fs::create_dir_all(&slot)?;
+    std::fs::set_permissions(
+        wrong_state.join("slots"),
+        std::fs::Permissions::from_mode(0o700),
+    )?;
+    std::fs::set_permissions(&slot, std::fs::Permissions::from_mode(0o700))?;
+    let journal = slot.join("attempt.json");
     std::fs::write(
         &journal,
         serde_json::to_vec(&serde_json::json!({

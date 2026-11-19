@@ -304,8 +304,8 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     // Cleanup removed the copy and its receipts; the source is unchanged.
     assert_eq!(std::fs::read_dir(&root)?.count(), 0);
     assert!(
-        !state.join("workspace-mounts").exists()
-            || std::fs::read_dir(state.join("workspace-mounts"))?.count() == 0
+        !state.join("slots/codex-0/workspace-mounts").exists()
+            || std::fs::read_dir(state.join("slots/codex-0/workspace-mounts"))?.count() == 0
     );
     assert_eq!(
         std::fs::read_to_string(source.join("rows.csv"))?,
@@ -448,7 +448,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
             );
         } else {
             // Kill the Host while the harness reads the mount.
-            let journal = state.join("attempt.json");
+            let journal = state.join("slots/codex-0/attempt.json");
             while serde_json::from_slice::<Value>(&std::fs::read(&journal)?)?["stage"]
                 != "executing"
             {
@@ -501,7 +501,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         }
         assert_eq!(std::fs::read_dir(&root)?.count(), 0, "{case}");
         assert!(
-            std::fs::read_dir(state.join("workspace-mounts"))?
+            std::fs::read_dir(state.join("slots/codex-0/workspace-mounts"))?
                 .next()
                 .is_none(),
             "{case}"

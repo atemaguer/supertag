@@ -67,8 +67,9 @@ async fn interrupt_input_receipt(
             .stderr(Stdio::null())
             .spawn()?;
         timeout(WAIT, response.notified()).await?;
-        let journal: Value =
-            serde_json::from_slice(&std::fs::read(root.join("claude-producer/attempt.json"))?)?;
+        let journal: Value = serde_json::from_slice(&std::fs::read(
+            root.join("claude-producer/slots/claude-code-0/attempt.json"),
+        )?)?;
         assert_eq!(journal["stage"], "preparing_inputs");
         let checkout = journal["prepared"]["checkout"]["path"]
             .as_str()
@@ -89,6 +90,39 @@ async fn interrupt_input_receipt(
             std::fs::read_to_string(destination.join("evidence.txt"))?,
             "évidence from Python\n"
         );
+        // The Worker dies at this stage: its Worklet stays, keeps the entry, and starts another
+        // Worker for the same Attempt, which reaches the same boundary.
+        let worklet = running.id().context("Worklet PID")?;
+        let workers = || -> Result<Vec<i32>> {
+            let listed = std::process::Command::new("ps")
+                .args(["-axo", "pid=,ppid=,command="])
+                .output()?;
+            Ok(String::from_utf8(listed.stdout)?
+                .lines()
+                .filter_map(|line| {
+                    let mut parts = line.split_whitespace();
+                    let pid = parts.next()?.parse().ok()?;
+                    let parent = parts.next()?.parse::<u32>().ok()?;
+                    (parent == worklet && line.contains(" __worker ")).then_some(pid)
+                })
+                .collect())
+        };
+        let first = workers()?;
+        ensure!(first.len() == 1, "one Worker runs the Attempt: {first:?}");
+        // SAFETY: the PID is the running Worklet's child.
+        unsafe { libc::kill(first[0], libc::SIGKILL) };
+        timeout(WAIT, response.notified()).await?;
+        ensure!(
+            running.try_wait()?.is_none(),
+            "the Worklet survives its Worker"
+        );
+        let again: Value = serde_json::from_slice(&std::fs::read(
+            root.join("claude-producer/slots/claude-code-0/attempt.json"),
+        )?)?;
+        assert_eq!(again["stage"], "preparing_inputs");
+        assert_eq!(again["attempt_id"].as_str(), Some(attempt.as_str()));
+        ensure!(workers()? != first, "the Worklet started another Worker");
+        // The Worklet dies at this stage, and its Worker with it; the next one settles the Attempt.
         running.kill().await?;
         success(worker(&services.public)).await?;
         assert!(!Path::new(checkout).exists());

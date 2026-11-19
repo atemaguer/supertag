@@ -465,7 +465,7 @@ mod tests {
         let failing = tool(root.path(), "failing", 0o755);
         std::fs::write(
             &failing,
-            "#!/bin/sh\ntest \"$1 $2\" = 'up --state-directory' || exit 9\necho 'Starting SuperTag'\necho 'Error: Worker Host laptop lane 0 did not report readiness: no Node' >&2\nexit 1\n",
+            "#!/bin/sh\ntest \"$1 $2\" = 'up --state-directory' || exit 9\necho 'Starting SuperTag'\necho 'Error: Worker Host laptop did not report readiness: no Node' >&2\nexit 1\n",
         )
         .unwrap();
         let error = up(&failing, &state, None).await.unwrap_err();
