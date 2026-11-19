@@ -141,6 +141,32 @@ def drop_claude_executable(package):
     return len(removed)
 
 
+# Files only the TypeScript compiler, editors, and debuggers read: type declarations, TypeScript
+# sources, source maps, and build info. Node 22 loads none of them from node_modules (it refuses to
+# strip types there), and they were close to half of the deployed bytes and files.
+BUILD_ONLY_SUFFIXES = (".ts", ".mts", ".cts", ".map", ".tsbuildinfo")
+
+
+def drop_build_only_files(package):
+    """Remove the files in BUILD_ONLY_SUFFIXES, and the links pnpm made to them, from a deployed bridge."""
+    removed = 0
+    for parent, _directories, files in os.walk(package):
+        for name in files:
+            if name.endswith(BUILD_ONLY_SUFFIXES):
+                entry = Path(parent) / name
+                if not entry.is_symlink():
+                    removed += entry.stat().st_size
+                entry.unlink()
+    for parent, _directories, files in os.walk(package):
+        for name in files:
+            entry = Path(parent) / name
+            if entry.is_symlink() and not entry.exists():
+                target = entry.readlink()
+                require(str(target).endswith(BUILD_ONLY_SUFFIXES), f"unresolved staged link: {entry.relative_to(package)}")
+                entry.unlink()
+    return removed
+
+
 def verify_node(node):
     result = subprocess.run([node, "--version"], env={"PATH": os.defpath}, check=True,
                             stdout=subprocess.PIPE, text=True, timeout=10)
@@ -231,7 +257,8 @@ def stage_workspace(output, kinds, repo, env=None):
                 verify_cursor_assets(target, platform)
             if kind == "claude-code":
                 drop_claude_executable(target)
-                verify_relocatable_tree(target)
+            drop_build_only_files(target)
+            verify_relocatable_tree(target)
             smoke_entry(node, kind, target)
         manifest = {"format": FORMAT, "version": version_from_repo(repo), "protocol": PROTOCOL,
                     "platform": platform, "node_major": NODE_MAJOR,

@@ -77,6 +77,30 @@ class NodeBridgeContracts(unittest.TestCase):
         with self.assertRaisesRegex(ArchiveError, "leaves bundle"):
             verify_relocatable_tree(alias / "stage")
 
+    def test_drops_build_only_files_and_links_to_them(self):
+        stage = self.root / "stage"
+        package = stage / "node_modules/.pnpm/zod@4.0.0/node_modules/zod"
+        package.mkdir(parents=True)
+        kept = ["package.json", "index.js", "index.cjs", "index.mjs", "README.md", "LICENSE"]
+        dropped = ["index.d.ts", "index.d.mts", "index.d.cts", "index.js.map", "index.d.ts.map", "src.ts",
+                   "src.mts", "src.cts", ".tsbuildinfo"]
+        for name in [*kept, *dropped]:
+            (package / name).write_text(name)
+        (stage / "types.d.ts").symlink_to(package.relative_to(stage) / "index.d.ts")
+        (stage / "entry.js").symlink_to(package.relative_to(stage) / "index.js")
+        self.assertEqual(node_bridges.drop_build_only_files(stage), sum(len(name) for name in dropped))
+        self.assertEqual(sorted(path.name for path in package.iterdir()), sorted(kept))
+        self.assertFalse((stage / "types.d.ts").is_symlink())
+        self.assertEqual((stage / "entry.js").read_text(), "index.js")
+        verify_relocatable_tree(stage)
+
+    def test_keeps_failing_on_unrelated_dangling_links(self):
+        stage = self.root / "stage"
+        stage.mkdir()
+        (stage / "link").symlink_to("missing.js")
+        with self.assertRaisesRegex(ArchiveError, "unresolved staged link"):
+            node_bridges.drop_build_only_files(stage)
+
     def test_staging_uses_committed_source_in_a_separate_workspace(self):
         repo = self.root / "checkout"
         repo.mkdir()

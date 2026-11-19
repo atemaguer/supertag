@@ -39,10 +39,21 @@ while IFS= read -r -d '' path; do
 done < <(find "$resources/node-bridges" -type f \( -perm -u+x -o -name '*.node' -o -name '*.dylib' \) -print0)
 echo "Found ${#machos[@]} executables in the Node bridges."
 
+# Write the app to a read-write image, then compress it into IMAGE. `hdiutil create -srcfolder`
+# straight to a compressed format leaves unused space in the file: for this app, a 293 MB image
+# held 78 MB of compressed data. Converting a finished image writes only the compressed data.
+create_image() {
+  local scratch
+  scratch=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/supertag-app-image.XXXXXXXX")
+  hdiutil create -quiet -volname SuperTag -srcfolder "$app" -format UDRW "$scratch/SuperTag.dmg"
+  rm -f "$image"
+  hdiutil convert -quiet "$scratch/SuperTag.dmg" -format ULMO -o "$image"
+  rm -rf "$scratch"
+}
+
 if [[ "$signed" != true ]]; then
   echo "SIGNED is not true: leaving the app unsigned for a local check."
-  rm -f "$image"
-  hdiutil create -quiet -volname SuperTag -srcfolder "$app" -ov -format ULMO "$image"
+  create_image
   exit 0
 fi
 
@@ -112,8 +123,7 @@ codesign --verify --deep --strict --verbose=2 "$app"
 # executable in it and issues tickets for the disk image and the app alike. So the app is not
 # notarized or stapled on its own; the disk image carries the stapled ticket, and Gatekeeper finds
 # the app's ticket online once someone copies the app out of the image.
-rm -f "$image"
-hdiutil create -quiet -volname SuperTag -srcfolder "$app" -ov -format ULMO "$image"
+create_image
 security unlock-keychain -p "$password" "$keychain"
 codesign --force --timestamp --keychain "$keychain" --sign "$IDENTITY" "$image"
 codesign --verify --strict --verbose=2 "$image"
