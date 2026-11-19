@@ -122,6 +122,19 @@ impl Store {
         )
     }
 
+    /// How many of `host`'s claims are held waiting here now, each having recorded what it can
+    /// run. A claim counts once it has claimed again after being held, not while it first tries.
+    pub fn waiting_claims(&self, host: &HostAuthority) -> usize {
+        self.live
+            .claims
+            .scopes
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|(held_by, _)| *held_by == host.principal)
+            .count()
+    }
+
     /// Claims a Task as `claim_task_with_sources` does, holding a claim that finds none for up
     /// to `wait`.
     pub async fn claim_task_waiting(

@@ -15,6 +15,19 @@ fn claim(operation: &str, wait_ms: u32) -> ClaimTaskRequest {
     }
 }
 
+/// Waits until `count` of `host`'s claims are held waiting on `store`, failing after 10 s.
+async fn until_waiting(store: &Store, host: &supertag_control_plane::HostAuthority, count: usize) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while store.waiting_claims(host) < count {
+        assert!(
+            Instant::now() < deadline,
+            "{} of {count} claims held",
+            store.waiting_claims(host)
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 async fn exercise(database: &str) {
     let store = Store::open(database).await.unwrap();
     store
@@ -38,7 +51,7 @@ async fn exercise(database: &str) {
     let waiting = claim("held", 6_000);
     let held = store.claim_task_waiting(&host, &waiting, Duration::from_secs(6));
     let send = async {
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        until_waiting(&store, &host, 1).await;
         let sent = Instant::now();
         let message = store
             .send_message(
@@ -75,6 +88,7 @@ async fn exercise(database: &str) {
     assert!(at.elapsed() >= Duration::from_millis(650) && at.elapsed() < Duration::from_secs(3));
 
     // A host holds at most 16 claims at once, across its lanes; another answers at once.
+    // The 16 wait longer than they can take to be held, so none ends before the seventeenth.
     let held: Vec<_> = (0..16)
         .map(|index| {
             let store = store.clone();
@@ -83,14 +97,14 @@ async fn exercise(database: &str) {
                 store
                     .claim_task_waiting(
                         &host,
-                        &claim(&format!("cap-{index}"), 3_000),
-                        Duration::from_secs(3),
+                        &claim(&format!("cap-{index}"), 8_000),
+                        Duration::from_secs(8),
                     )
                     .await
             })
         })
         .collect();
-    tokio::time::sleep(Duration::from_millis(400)).await;
+    until_waiting(&store, &host, 16).await;
     let at = Instant::now();
     assert!(
         store
@@ -191,7 +205,7 @@ async fn exercise_sticky(database: &str) {
     let waiting = codex("warm-2", 6_000, HarnessKind::Codex);
     let held = store.claim_task_waiting(&warm, &waiting, Duration::from_secs(6));
     let race = async {
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        until_waiting(&store, &warm, 1).await;
         let second = send(&store, "Second turn").await;
         let taken = store
             .claim_task_waiting(
@@ -234,7 +248,7 @@ async fn exercise_sticky(database: &str) {
     let waiting = codex("warm-3", 6_000, HarnessKind::Cursor);
     let held = store.claim_task_waiting(&warm, &waiting, Duration::from_millis(1_500));
     let race = async {
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        until_waiting(&store, &warm, 1).await;
         let third = send(&store, "Third turn").await;
         let taken = store
             .claim_task_waiting(
@@ -332,7 +346,7 @@ async fn exercise_sandboxed(database: &str, sandboxed: HarnessExecutionProfile) 
     let waiting = lane(&format!("{kind}-1"), 6_000, sandboxed.clone());
     let held = store.claim_task_waiting(&vm, &waiting, Duration::from_secs(6));
     let race = async {
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        until_waiting(&store, &vm, 1).await;
         let task = submit(&store, &format!("{kind}-first")).await;
         let taken = store
             .claim_task_waiting(
