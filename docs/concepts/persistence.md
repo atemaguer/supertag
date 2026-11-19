@@ -4,7 +4,7 @@ A few terms first:
 
 - A **Task** is one unit of work an agent runs, such as a code change or a review.
 - A **Worker Host** is a machine that runs Tasks: a laptop, a server, or a cloud machine. A remote
-  sandbox (Modal, e2b) is a short-lived machine a Worker Host starts for a Cursor Task.
+  sandbox (Modal, e2b) is a short-lived machine started for one Task, away from its Worker Host.
 - A **harness** is the agent system a Task runs on, such as Codex, Claude Code, or Cursor. On
   the Worker Host, a **Worker** drives it through a harness adapter for one Task Attempt, and
   the host's **Worklet** keeps what outlasts that Worker.

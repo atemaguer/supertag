@@ -505,7 +505,7 @@ outside the Workspace.
 
 A network scope narrows a Permission Set's `web:fetch` grant to named origins, HTTP methods, and
 URL paths.
-It can also name a credential that the Worker Host adds to those requests. The Task's commands
+It can also name a credential that the Worker's egress proxy adds to those requests. The Task's commands
 never see the secret, only a placeholder. Network scopes live only in Permission Sets. A Tag's
 own `allowedActions` `web:fetch` reaches every origin.
 
@@ -577,7 +577,7 @@ Set names. Configure it on a host service in `supertag.yaml`; see
 [Network credentials](supertag-yaml.md#network-credentials). The Control Plane learns only its
 name.
 
-For each Task Attempt, the host makes a placeholder such as
+For each Task Attempt, the Worker makes a placeholder such as
 `supertag-credential-github-4f2c0d1e9b8a7c6d5e4f3a2b`. The Task's commands see it in the
 variable the host names, such as `GITHUB_TOKEN`. When a command sends a request that a grant
 naming the credential allows, the Worker's egress proxy replaces the placeholder with the
@@ -623,8 +623,8 @@ the managed proxy and the egress proxy as well.
 
 Claude Code's sandbox runs on macOS, and on Linux when `bubblewrap` and `socat` are installed and
 a process may create a user namespace inside bubblewrap's. Ubuntu's `bwrap-userns-restrict`
-AppArmor profile forbids that, so such a host does not offer the sandbox. A
-Claude Code host reports whether it can run the sandbox, and only such a host takes a Task that
+AppArmor profile forbids that, so such a host does not offer the sandbox. The
+Worklet of a Claude Code host reports whether it can run the sandbox, and only such a host takes a Task that
 may run commands under a network scope. Claude Code fails the Task Attempt instead of running
 commands unsandboxed when its sandbox does not start. The sandbox isolates only the network:
 commands still need `allow-unsandboxed-commands`. Go programs on macOS, such as `gh`, may not

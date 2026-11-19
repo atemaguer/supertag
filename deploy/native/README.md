@@ -267,9 +267,9 @@ Each replica keeps one more PostgreSQL connection of its own, outside its pool, 
 the other replicas' commits, so a conversation or Watch open on one replica shows a change made
 through another at once; the pooler must pass `LISTEN` through, as a session-mode one does. While
 that connection is down, streams catch up within about a second.
-A Worker Host's relay stream reaches one replica,
-so only that replica relays the host's artifacts and Workspace deliveries; a read through another
-replica fails as if the host were offline. A SQLite
+Each Worker Host's Worklet, the program that connects the host, keeps its relay stream on one
+replica, so only that replica relays the host's artifacts and Workspace deliveries; a read
+through another replica fails as if the host were offline. A SQLite
 database serves one Control Plane process; a second one on the same file refuses to start. See
 [Control Plane replicas](../../docs/development/control-plane-replicas.md) for the concurrency audit.
 
@@ -367,7 +367,7 @@ for that hostname and give every client that CA in `SUPERTAG_SERVER_CA_FILE`.
 Both ends send a WebSocket ping every 20 seconds, which keeps an idle tunnel open through proxies
 that close idle connections (about 100 seconds on Cloudflare), and both treat a peer that has sent
 nothing for 60 seconds as gone, noticing within the next 20. A dropped tunnel fails calls in
-flight the same way a dropped TCP connection does, and Worker Hosts and Gateways reconnect and
+flight the same way a dropped TCP connection does, and Worklets and Gateways reconnect and
 retry as they do with native gRPC. Opening a tunnel may take up to 30 seconds, rather than the
 5 allowed for native gRPC, so a platform can start a service that scaled to zero.
 

@@ -180,7 +180,7 @@ With the Gateway connected to Lark, mention the Tag in the Lark chat and confirm
 
 - The container is always running. A deploy or a host failure replaces it; the replacement pulls
   the image and starts within the two-minute startup timeout. Requests during that time get `503`,
-  opening a tunnel waits up to 30 seconds, and Worker Hosts and the Gateway retry.
+  opening a tunnel waits up to 30 seconds, and each host's Worklet and the Gateway retry.
 - Each open tunnel is one function call, closed after the 24-hour function timeout; clients
   reconnect at once.
 - Both ends of a tunnel ping every 20 seconds, which keeps idle tunnels open.

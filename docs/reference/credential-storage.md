@@ -56,15 +56,15 @@ key in the host's `env_file`, or, for a login that Task Attempts can copy, run
 `codex -c 'cli_auth_credentials_store="file"' login`; a Keychain-only login is not copied. The
 file-backed sign-in check verifies credential structure without testing account access.
 
-A background host started from a shell also inherits these variables from the shell; a service
+A background Worklet started from a shell also inherits these variables from the shell; a service
 unit does not.
 
 ### Operator and host credentials
 
 The local operator token in `credentials.json` is the local Control Plane's admin token. Commands
 that name no other Control Plane use it. A host service never connects with it. For a host in
-the same file as the local Control Plane, `supertag up` enrolls the host once, then the host uses
-its own Worker Host credential from `hosts/SERVICE/enrollment.json`. A host of a shared Control
+the same file as the local Control Plane, `supertag up` enrolls the host once, then the host's Worklet uses
+its Worker Host credential from `hosts/SERVICE/enrollment.json`. A host of a shared Control
 Plane joins with an Auth Key instead. See [supertag.yaml and local state](supertag-yaml.md#credentials).
 
 `supertag connect` saves a remote Gateway and its Operator Token or client device credential in
@@ -124,8 +124,8 @@ supertag host enroll build-east-1 --control-plane https://supertag.example.com \
   --state-directory /var/lib/supertag-host --auth-key file:build-east-1.key
 ```
 
-A host service in `supertag.yaml` does the same on its first `supertag up`. A host that reads its
-credential from its own secret manager uses `SUPERTAG_HOST_TOKEN`; an operator writes a new one
+A host service in `supertag.yaml` does the same on its first `supertag up`. A Worklet that reads its
+host credential from a secret manager uses `SUPERTAG_HOST_TOKEN`; an operator writes a new one
 with `supertag host rotate-credential build-east-1 --out FILE`, and a stopped host's own
 credential is rotated with `--host-state-directory`. Rotation replaces the credential at once;
 revocation refuses it at once. `supertag get host` never shows the token or its digest.
@@ -213,7 +213,7 @@ Gateway that serves it, never a secret. Its credentials reach that Gateway's vau
   or physical locations.
 - Tags, Permission Sets, Tasks, Worker Hosts, and harness prompts never contain Gateway
   collaboration surface credentials.
-- A Worker Host resolves MCP and git credential references itself. A Workspace `.mcp.json` can
+- MCP and git credential references resolve on the Worker Host itself. A Workspace `.mcp.json` can
   reach only `SUPERTAG_MCP_*` variables. Each Worker holds the process-level secret boundary for
   its harness adapter.
 - A shared backend must enforce distinct workload identities and policies; namespace names alone

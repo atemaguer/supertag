@@ -180,11 +180,11 @@ With the Gateway connected to Lark, mention the Tag in the Lark chat and confirm
 
 - The container starts on the first request or the next cron run, whichever comes first. The
   first start pulls the image and migrates the database; opening a tunnel waits up to 30 seconds,
-  and Worker Hosts retry after that.
+  and each host's Worklet retries after that.
 - Open tunnels keep the container awake, and the cron trigger renews it every minute, so the
   Control Plane's controllers keep running with no client connected. The container sleeps after
   ten minutes only if the cron trigger stops.
-- Cloudflare restarts containers on deploys and host maintenance. Tunnels drop, and Worker Hosts
+- Cloudflare restarts containers on deploys and host maintenance. Tunnels drop, and Worklets
   and the Gateway reconnect.
 - Both ends of a tunnel ping every 20 seconds, within Cloudflare's 100-second idle limit.
 

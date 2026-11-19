@@ -15,8 +15,9 @@ Worker Host (harness, model keys, delivery)        sandbox (no keys, no network)
   ── Stop ─────────────────────────────────────────>  gone, with every process in it
 ```
 
-The host never trusts what comes back. It checks the returned tree and the Task's path scope at
-delivery, exactly as it does for a local Task Attempt.
+The host's [Worklet](glossary.md#worklet), the program that delivers its Task Attempts' work,
+never trusts what comes back. It checks the returned tree and the Task's path scope at delivery,
+exactly as it does for a local Task Attempt.
 
 ## Two ways to implement
 
@@ -52,7 +53,7 @@ process for it:
    carries a bearer token.
 3. The helper prints one line on stdout within 10 seconds: `http://127.0.0.1:PORT`, a literal
    loopback address of at most 512 bytes.
-4. The host connects with gRPC over HTTP/2. Every call carries the token; the helper refuses any
+4. The Worker connects with gRPC over HTTP/2. Every call carries the token; the helper refuses any
    call without it.
 
 The helper serves `RemoteWorkspaceProvider`, the lifecycle calls below, and `HarnessWorkspace`,
@@ -97,7 +98,7 @@ then checks, as the Workspace user, that `codex --version` on the fixed PATH
 recreates `/opt/supertag-codex-home` empty, owned by root, and read-only. A mismatch, a missing
 `codex`, or a sandbox that can't do either fails Allocate, naming the version the image needs.
 
-When the allocation response is lost, the host recovers through Stop with the owner alone. The
+When the allocation response is lost, the Worker recovers through Stop with the owner alone. The
 provider then finds the sandbox by its five labels. It counts exactly one match as the owner's,
 and never trusts a sandbox ID it has not verified.
 
@@ -122,7 +123,7 @@ the Task's path scope. No tool reaches `.git`. Edits run one at a time. Each com
 ### A lost sandbox
 
 When a tool call fails because its sandbox no longer exists, the provider answers that call with
-`sandbox_lost` set, and every later call the same way. The Worklet then stops and journals the
+`sandbox_lost` set, and every later call the same way. The Worker then stops and journals the
 lost sandbox and replaces it from the turn's starting files, at most twice per Task Attempt; the call
 tells the harness that its earlier changes in the turn are gone. Set `sandbox_lost` only on the
 provider's own confirmation: a timeout, a network error, or a sandbox that is merely unresponsive
@@ -138,10 +139,10 @@ Capture returns the Workspace as one tree file:
 - entries in sorted order, with exact bytes and file modes;
 - symbolic links kept as links, never followed;
 - no `.git` entry, no staged input, and no Volume copy;
-- no untracked path the checkout's `.gitignore` files match, except the paths the host asks to
+- no untracked path the checkout's `.gitignore` files match, except the paths the Worker asks to
   keep, such as the Task output directory.
 
-The provider prints a receipt of the tree's length and SHA-256. The host reads the tree and
+The provider prints a receipt of the tree's length and SHA-256. The Worker reads the tree and
 refuses it when either differs. A tool call that did not settle, such as an edit whose wrapper
 was interrupted, makes Capture fail rather than return a tree it cannot vouch for.
 
@@ -149,13 +150,13 @@ was interrupted, makes Capture fail rather than return a tree it cannot vouch fo
 
 Stop ends the sandbox and every process in it. It returns `stopped` with the sandbox ID, or
 `uncertain`. It returns `stopped` only after the provider confirms the sandbox is gone; a
-missing acknowledgement is `uncertain`, and the host retries. Stop on a stopped sandbox succeeds.
+missing acknowledgement is `uncertain`, and the Worker retries. Stop on a stopped sandbox succeeds.
 
 ### Optional calls
 
 | Call | When |
 | --- | --- |
-| `StageCopy`, `CaptureCopy` | The host maps [Workspace Volume](worker.md#workspace-volumes) copies |
+| `StageCopy`, `CaptureCopy` | The Worker maps [Workspace Volume](worker.md#workspace-volumes) copies |
 | `RunStdioServer` | The Workspace declares stdio MCP servers, which run from a trusted copy of the start commit; or a Codex Task Attempt runs Codex's exec-server (see below) |
 | `Snapshot`, `RemoveArtifact` | The provider keeps prepared artifacts, so later sandboxes skip the image build and setup |
 
@@ -182,7 +183,7 @@ an outside caller can observe.
 2. **No keys in the sandbox.** The helper may hold the provider's own credentials. The sandbox
    gets no credential, no host environment variable, and no path on the host.
 3. **Nothing returned is trusted.** The provider passes back what the sandbox holds, bounded and
-   digested. The host validates the tree and enforces the path scope at delivery, so a provider
+   digested. The Worklet validates the tree and enforces the path scope at delivery, so a provider
    never needs to filter the Task's work for safety.
 4. **The seal is a reliability property.** See [The seal](#the-seal). A provider that cannot seal
    must not admit commands.
@@ -227,7 +228,7 @@ them.
 - **Egress relay.** A sandbox will reach the network only through a relay that carries its
   traffic over the provider's exec stream to the Worker's egress proxy, while the sandbox's
   own network stays fully blocked. The proxy applies the Task's
-  [network scope](iam.md#network-scopes). Egress, if offered, must go only to the host's proxy,
+  [network scope](iam.md#network-scopes). Egress, if offered, must go only to the Worker's proxy,
   with no other egress, DNS included. A tunnel that leaves the sandbox's resolver working does
   not meet this.
 
@@ -247,7 +248,7 @@ supertag worklet --harness claude-code --workspace-id repository \
   variables are the only ones it gets, besides `PATH`, `LANG`, and `TMPDIR`. A variable that is
   not set stops the Worklet at start.
 - The helper's executable, its arguments, and every passed name and value bind the sandboxes it
-  allocates. A host restarted with another value, such as a rotated key, never stops or recovers
+  allocates. A Worklet restarted with another value, such as a rotated key, never stops or recovers
   a sandbox the earlier one made.
 - SuperTag has not verified your provider's network rules, so placement never gives such a host
   a Task with a [network scope](iam.md#network-scopes). `supertag placement explain` names this

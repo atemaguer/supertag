@@ -156,7 +156,7 @@ supertag describe task TASK_ID
 - Never print the bootstrap token or pass it to the agent.
 - Publish each message once it is whole; a long message may go in pieces with increasing
   sequence numbers.
-- When a Task Attempt fails, the Worker Host's log shows the last lines the adapter wrote to standard
+- When a Task Attempt fails, the Worklet's log shows the last lines the adapter wrote to standard
   error, with secrets hidden. Write diagnostics there, never to standard output.
 - Send a checkpoint with `Complete` if your agent can resume a conversation. The Worklet keeps
   it, and the Session's next Task receives it when it runs on that host; on another host it starts

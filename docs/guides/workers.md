@@ -68,9 +68,9 @@ Otherwise a host does not run their Tasks that may run commands until you consen
     allow-unsandboxed-commands: [claude-code, cursor]
 ```
 
-`supertag worklet --allow-unsandboxed-commands` consents for a host started without
+`supertag worklet --allow-unsandboxed-commands` consents for a Worklet started without
 supertag.yaml. Commands then run as your user, with your files, network, and the environment the
-harness receives, which may include its provider key. Run such a host as a dedicated user
+harness receives, which may include its provider key. Run such a Worklet as a dedicated user
 or in a disposable machine when the work is untrusted.
 
 ### Run several Tasks at once
@@ -91,7 +91,7 @@ To keep one harness from taking the whole pool, give it a limit within it:
 ```
 
 `supertag up` changes running hosts' concurrency without restarting them; a changed
-`harness-limits` restarts the host. A host started with `supertag worklet` takes
+`harness-limits` restarts the host's Worklet. A Worklet started with `supertag worklet` takes
 `--concurrency N`.
 Teams can also cap how many of their Tasks run at once; see [Teams](teams.md).
 
@@ -242,7 +242,7 @@ has no built-in tool that could run on the host:
 | --- | --- |
 | `--local-vm` (`environment: local-vm`) | A container on this machine's Docker per Task Attempt |
 | `--e2b-workspace-provider` | An E2B sandbox per Task Attempt |
-| `--modal-workspace-provider` | A Modal sandbox per Task Attempt, in the existing Modal app named by `SUPERTAG_MODAL_WORKSPACE_APP` (the host never creates one; a missing app fails the Task naming it), with optionally `SUPERTAG_MODAL_WORKSPACE_IMAGE` and the token in `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` |
+| `--modal-workspace-provider` | A Modal sandbox per Task Attempt, in the existing Modal app named by `SUPERTAG_MODAL_WORKSPACE_APP` (the Worker never creates one; a missing app fails the Task naming it), with optionally `SUPERTAG_MODAL_WORKSPACE_IMAGE` and the token in `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` |
 | `--workspace-provider` | Your own provider's sandbox per Task Attempt, given only the variables you name with `--workspace-provider-env`; see [Run your own provider](../reference/sandbox-providers.md#run-your-own-provider) |
 | `--shared-execution-endpoint` | A long-lived shared execution environment, served by `supertag-shared-execution`, that several Cursor Sessions share (Cursor only) |
 
@@ -312,7 +312,7 @@ supertag host revoke build-1 --gateway team
 supertag host rotate-credential build-1 --gateway team --out build-1.credential
 ```
 
-A draining host finishes its running Task Attempts and claims no new ones. Revoking a host refuses
+A draining host's Worklet finishes its running Task Attempts and claims no new ones. Revoking a host refuses
 its credential at once. `supertag down` drains this machine's hosts before stopping them.
 
 A host keeps the only copy of the artifacts and Workspace deliveries it produced, so once it is
@@ -326,7 +326,7 @@ host, a new read fails as busy rather than as offline; retry it.
 
 ## Recover an interrupted Task Attempt
 
-A host restarted after it was killed checks the processes it recorded for an interrupted Task
+A Worklet restarted after it was killed checks the processes it recorded for an interrupted Task
 Attempt. When all of them are gone, it records the Task Attempt as failed with an unknown outcome
 and takes new work. Otherwise, and always for a Task Attempt that used a remote sandbox or shared
 execution, an operator decides:
@@ -352,7 +352,7 @@ confirm a reply.
 ## If something goes wrong
 
 - **A Task stays queued.** Run `supertag placement explain TASK_ID`.
-- **The host stops with a sign-in error.** Run `supertag sign-in HARNESS` as the host's user.
+- **The Worklet stops with a sign-in error.** Run `supertag sign-in HARNESS` as the host's user.
 - **A Claude Code, Cursor, or OpenCode Task that may run commands stays queued.** For Claude
   Code, add `sandbox-commands: [claude-code]` to the host. Otherwise set
   `environment: local-vm` on the host, add the harness to
@@ -364,7 +364,7 @@ confirm a reply.
 - **A Cursor Task fails.** The result gives Cursor's reason, such as a model outside the
   account's plan. Choose a model the plan includes in `models`, or add credits. A result naming
   a failed `Worker Host call` means the harness adapter's call through its Worklet failed; check
-  that host's log.
+  the Worklet's log on that host.
 
 See [Troubleshoot the first reply](troubleshooting.md).
 
