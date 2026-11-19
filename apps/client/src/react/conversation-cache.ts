@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { describe } from "../model/errors";
-import type { Conversation, Gateway, Message, WatchUpdate } from "../model/gateway";
+import type { Conversation, Gateway, Message, Tag, WatchUpdate } from "../model/gateway";
 import {
   type History,
   lastOf,
@@ -210,10 +210,12 @@ export function useConversationPrefetch(
   }, [gateway, others]);
 }
 
-/** The conversation list, and the Tag the app showed last. */
+/** The conversation list, the Tag the app showed last, and the Tags it listed. */
 export interface Roster {
   conversations: Conversation[];
   selectedTag?: string | undefined;
+  /** The Tags, so a launch lists them before the Gateway answers. */
+  tags?: Tag[] | undefined;
 }
 
 /** The roster as the app last showed it on this connection's Gateway, from memory. */
@@ -344,9 +346,15 @@ function parseRoster(value: unknown): Roster | undefined {
   const conversations = entry["conversations"] as Conversation[];
   if (!conversations.every((conversation) => typeof conversation?.tagId === "string"))
     return undefined;
+  const tags = Array.isArray(entry["tags"])
+    ? (entry["tags"] as Tag[]).filter(
+        (tag) => typeof tag?.tagId === "string" && typeof tag.instructions === "string",
+      )
+    : undefined;
   return {
     conversations,
     selectedTag: typeof entry["selectedTag"] === "string" ? entry["selectedTag"] : undefined,
+    ...(tags ? { tags } : {}),
   };
 }
 

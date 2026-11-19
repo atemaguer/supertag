@@ -9,6 +9,7 @@
     { "path": "harnesses/environments/modal" },
     { "path": "harnesses/environments/local-vm" },
     { "path": "apps/client" },
+    { "path": "apps/tui" },
     { "path": "apps/desktop/electron" }
   ]
 }

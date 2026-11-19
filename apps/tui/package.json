@@ -1,0 +1,27 @@
+{
+  "name": "@supertag/tui",
+  "version": "0.3.2",
+  "description": "The SuperTag terminal UI: OpenTUI and React, run and compiled by Bun.",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/main.tsx",
+    "test": "bun test .test.tsx",
+    "bench": "bun run bench/perf.tsx",
+    "build": "sh scripts/build.sh"
+  },
+  "dependencies": {
+    "@opentui/core": "0.9.4",
+    "@opentui/react": "0.9.4",
+    "@supertag/client": "workspace:*",
+    "react": "19.3.1"
+  },
+  "devDependencies": {
+    "@bufbuild/protobuf": "2.15.0",
+    "@connectrpc/connect": "2.2.0",
+    "@connectrpc/connect-node": "2.2.0",
+    "@types/bun": "1.4.4",
+    "@types/react": "19.3.0"
+  }
+}

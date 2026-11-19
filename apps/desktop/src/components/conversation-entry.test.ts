@@ -1,8 +1,8 @@
-import type { Message } from "@supertag/client/model";
+import { type Message, turnNotice } from "@supertag/client/model";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
-import { ConversationEntry, turnNotice } from "./conversation-entry";
+import { ConversationEntry } from "./conversation-entry";
 
 const task: Message["task"] = {
   taskId: "report-task",

@@ -33,6 +33,10 @@ After Python SDK changes, install it with `python -m pip install "./sdks/python[
 environment, then run `ruff check sdks/python` and `pytest sdks/python/tests`.
 After desktop or `apps/client` changes, run `pnpm --filter @supertag/desktop build` and
 `pnpm vitest run apps/client apps/desktop`. CI runs them, and the integration suites against a built CLI, in `.github/workflows/desktop.yml`.
+After terminal UI or `apps/client` changes, also run `pnpm vitest run apps/tui`, then, in `apps/tui`
+with the pinned Bun, `bun test .test.tsx` (screens) and `bun bench/perf.tsx` (it exits 1 when a
+performance budget is missed); `apps/tui/README.md` describes the end-to-end run against a
+throwaway `supertag up`.
 
 After changes under `proto/`, decide whether the protocol version changes and update
 `proto/protocol.lock` (see "Changing `proto/`" in `AGENTS.md`); `cargo test -p supertag-protocol

@@ -48,7 +48,9 @@ export function alertsFor(
     const newer = conversation.latestOrder > (before?.latestOrder ?? 0);
     const question =
       conversation.asking === true && (newer || !before?.asking) && conversation.unreadCount > 0;
-    const reply = newer && conversation.unreadCount > (before?.unreadCount ?? 0);
+    // A reply to the caller's own message keeps that message's order, so a reply is new when
+    // the unread count rose: the Gateway counts only finished replies.
+    const reply = conversation.unreadCount > (before?.unreadCount ?? 0);
     if (!question && (!reply || context.level === "questions")) continue;
     const name = context.name(conversation.tagId);
     const preview = previewLine(conversation.preview) || "New message";

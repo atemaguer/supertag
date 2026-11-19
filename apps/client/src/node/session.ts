@@ -37,6 +37,12 @@ export function newSecret(prefix: string): string {
   return `${prefix}${randomBytes(32).toString("hex")}`;
 }
 
+/** A Gateway's TLS beyond the system roots: a private certificate authority and a client identity. */
+export interface Tls {
+  readonly ca?: string | Buffer;
+  readonly identity?: { readonly cert: string | Buffer; readonly key: string | Buffer };
+}
+
 /** What every session of this app connects with besides the URL and the credential. */
 export interface SessionOptions {
   /** The release the app names while negotiating. */
@@ -62,15 +68,22 @@ export class Session {
   constructor(readonly client: GatewayClient) {}
 
   /** Connects and negotiates the protocol, which the Gateway requires before any call. */
-  static async connect(target: Target, token: string, options: SessionOptions): Promise<Session> {
+  static async connect(
+    target: Target,
+    token: string,
+    options: SessionOptions,
+    tls: Tls = {},
+  ): Promise<Session> {
     checkBearer(token);
     let client: GatewayClient;
+    const ca = tls.ca ?? options.ca;
     try {
       client = createGatewayClient({
         url: target.url,
         token,
         buildVersion: options.buildVersion,
-        ...(options.ca === undefined ? {} : { ca: options.ca }),
+        ...(ca === undefined ? {} : { ca }),
+        ...(tls.identity === undefined ? {} : { identity: tls.identity }),
       });
     } catch {
       throw UNREACHABLE;

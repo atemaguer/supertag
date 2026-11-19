@@ -42,7 +42,8 @@ Worker Hosts, in the desktop app, or in the `supertag-ai` SDK.
 | `harnesses/environments/{e2b,modal}` | Node Workspace providers a Worker Host starts |
 | `harnesses/sdk` | `@supertag/worker-sdk`, the code those bridges share; its domain types are in `src/domain` |
 | `apps/desktop` | Electron desktop app: main process in `electron/` (IPC channels, window, local services), React renderer in `src/`; it reaches SuperTag through `@supertag/client` and the `supertag` CLI |
-| `apps/client` | `@supertag/client`, private, what SuperTag's TypeScript front ends share: `/model` (view types, the `Gateway` interface, transcript and notification rules; no DOM or Node.js), `/react` (hooks, with a `Platform` in place of `window`), `/node` (`GatewayState`, Gateway sessions on `supertag-ai`'s Gateway client, Watch and follows, the conversation cache, the desktop's saved Gateways store, `supertag __local-gateway` discovery) |
+| `apps/client` | `@supertag/client`, private, what SuperTag's TypeScript front ends share: `/model` (view types, the `Gateway` interface, transcript and notification rules; no DOM or Node.js), `/react` (hooks, with a `Platform` in place of `window`), `/node` (`GatewayState`, Gateway sessions on `supertag-ai`'s Gateway client, Watch and follows, the conversation cache, the desktop's saved Gateways store and the CLI's (`supertag connect`), `supertag __local-gateway` discovery) |
+| `apps/tui` | `@supertag/tui`, private, the terminal UI `supertag-tui`: OpenTUI and React, run and compiled by Bun, on `@supertag/client`; OpenTUI imports stay in `src/ui/`. Screen tests run under `bun test`, the rest under vitest |
 
 ## Boundaries
 

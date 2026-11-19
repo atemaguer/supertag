@@ -1,0 +1,36 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "emitDeclarationOnly": true,
+    "declarationMap": false,
+    "sourceMap": false,
+    "rootDir": "../..",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "exactOptionalPropertyTypes": false,
+    "lib": ["ESNext", "DOM"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "@opentui/react",
+    "types": ["bun"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "bench/**/*.ts",
+    "bench/**/*.tsx",
+    "test/**/*.ts",
+    "test/**/*.tsx",
+    "../client/src/model/*.ts",
+    "../client/src/react/*.ts",
+    "../client/src/node/*.ts",
+    "../../sdks/typescript/src/gateway-client.ts",
+    "../../sdks/typescript/src/tunnel.ts",
+    "../../harnesses/sdk/src/rust-harness/gen/**/*.ts"
+  ],
+  "exclude": ["../client/src/**/*.test.ts"]
+}

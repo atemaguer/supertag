@@ -61,6 +61,15 @@ it("never notifies for the caller's own message, a running turn, or nothing new"
   expect(alertsFor(known(reply), [{ ...reply, working: false }], context())).toEqual([]);
 });
 
+it("notifies the reply to the caller's own message, which keeps that message's order", () => {
+  // The caller sent from this device, then opened another Tag; the list read the message first.
+  const sent = conversation("lead", { latestOrder: 2, previewFromTag: false, working: true });
+  const replied = conversation("lead", { latestOrder: 2, unreadCount: 1, preview: "Done" });
+  expect(alertsFor(known(sent), [replied], context({ focused: true, openTagId: "moss" }))).toEqual([
+    { key: "reply:lead", tagId: "lead", title: "Lead", body: "Done", question: false },
+  ]);
+});
+
 it("coalesces a Tag's replies and keeps a question apart", () => {
   const three = { ...reply, latestOrder: 5, unreadCount: 3 };
   const [alert] = alertsFor(known(reply), [three], context());

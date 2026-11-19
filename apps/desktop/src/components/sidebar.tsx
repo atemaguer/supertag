@@ -1,4 +1,4 @@
-import type { Tag, TagSummary } from "@supertag/client/model";
+import { orderTags, type Tag, type TagSummary } from "@supertag/client/model";
 import { Plus, Search, Star } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import mascot from "../../../../assets/images/supertag-mascot-round.png";
@@ -99,21 +99,6 @@ export function tagShortcut(
   if (event.key.toLowerCase() === "n") return { kind: "new" };
   if (event.key.toLowerCase() === "k") return { kind: "palette" };
   return undefined;
-}
-
-/** The lead Tag first, then the others by last activity, newest first, keeping the given order. */
-export function orderTags(tags: Tag[], summaries: Record<string, TagSummary> = {}) {
-  const lead = tags.find((entry) => entry.lead);
-  const others = tags
-    .filter((entry) => entry !== lead)
-    .map((entry, index) => ({ entry, index }))
-    .sort(
-      (a, b) =>
-        (summaries[b.entry.tagId]?.lastActivityMs ?? 0) -
-          (summaries[a.entry.tagId]?.lastActivityMs ?? 0) || a.index - b.index,
-    )
-    .map(({ entry }) => entry);
-  return { lead, others };
 }
 
 const tagName = (tag: Tag) => tag.name ?? tag.tagId;

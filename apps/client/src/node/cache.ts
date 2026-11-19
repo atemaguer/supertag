@@ -45,10 +45,10 @@ export function entryPath(root: string, scope: CacheScope, key: string): string 
   );
 }
 
-/** An entry's key: `roster`, `outbox`, or `tag:` and a Tag ID. */
+/** An entry's key: `roster`, `outbox`, `drafts`, or `tag:` and a Tag ID. */
 export function validKey(key: unknown): key is string {
   if (typeof key !== "string") return false;
-  if (key === "roster" || key === "outbox") return true;
+  if (key === "roster" || key === "outbox" || key === "drafts") return true;
   if (!key.startsWith("tag:")) return false;
   const tag = key.slice(4);
   return tag.length > 0 && Buffer.byteLength(tag) <= 256 && !/\p{Cc}/u.test(tag);

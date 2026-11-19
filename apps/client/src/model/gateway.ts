@@ -152,13 +152,13 @@ export interface Gateway {
   readonly scope: string;
   /**
    * What the app last cached for this connection's Gateway and principal under `key`:
-   * `roster`, `outbox`, or `tag:` and a Tag ID.
+   * `roster`, `outbox`, `drafts`, or `tag:` and a Tag ID.
    */
   readCache(key: CacheKey): Promise<unknown>;
   writeCache(key: CacheKey, value: unknown): Promise<void>;
 }
 
-export type CacheKey = "roster" | "outbox" | `tag:${string}`;
+export type CacheKey = "roster" | "outbox" | "drafts" | `tag:${string}`;
 
 /** Why a queued turn still waits for a Worker Host; an empty reason clears an earlier one. */
 export interface TurnWait {
@@ -336,4 +336,17 @@ export interface GatewayActivation {
 /** The scope of a connection's cached conversations: its Control Plane and principal. */
 export function cacheScope(origin: string, principal: string) {
   return JSON.stringify([origin, principal]);
+}
+
+/** How many of a Gateway's Worker Hosts are in each phase, by name: `ready`, `unreachable`… */
+export type HostPhases = Record<string, number>;
+
+/** The Worker Hosts as one status line: `2 ready, 1 unreachable`, or `no Worker Hosts`. */
+export function hostLine(phases: HostPhases): string {
+  const order = ["ready", "busy", "pending", "draining", "suppressed", "unreachable", "unknown"];
+  const parts = Object.entries(phases)
+    .filter(([, count]) => count > 0)
+    .sort(([a], [b]) => order.indexOf(a) - order.indexOf(b))
+    .map(([phase, count]) => `${count} ${phase}`);
+  return parts.length ? parts.join(", ") : "no Worker Hosts";
 }

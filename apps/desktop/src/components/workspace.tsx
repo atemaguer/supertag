@@ -1,8 +1,9 @@
-import type { Conversation, Gateway, Tag, WatchUpdate } from "@supertag/client/model";
+import type { Gateway, Tag, WatchUpdate } from "@supertag/client/model";
 import {
   describe,
   harnessLabel,
-  previewLine,
+  orderTags,
+  rowSummary,
   type TagAdmin,
   type TagSummary,
 } from "@supertag/client/model";
@@ -39,13 +40,7 @@ import {
 } from "./command-palette";
 import { ConversationPane, type Draft } from "./conversation";
 import { NewTagDialog } from "./new-tag";
-import {
-  orderTags,
-  Sidebar,
-  type SidebarMode,
-  useSidebarShortcut,
-  useSidebarWidth,
-} from "./sidebar";
+import { Sidebar, type SidebarMode, useSidebarShortcut, useSidebarWidth } from "./sidebar";
 import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
 
@@ -499,17 +494,6 @@ function useDrafts(scope: string) {
 }
 
 const rosterChanged = (update: WatchUpdate) => update.kind === "tag";
-
-/** What the sidebar shows for a conversation the Gateway lists. */
-export function rowSummary(conversation: Conversation): TagSummary {
-  const line = previewLine(conversation.preview);
-  return {
-    ...(line ? { preview: conversation.previewFromTag ? line : `You: ${line}` } : {}),
-    ...(conversation.lastActivityAtMs ? { lastActivityMs: conversation.lastActivityAtMs } : {}),
-    ...(conversation.unreadCount > 0 ? { unread: true } : {}),
-    ...(conversation.working ? { working: true } : {}),
-  };
-}
 
 function TagWorkspace({
   gateway,

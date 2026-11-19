@@ -4,6 +4,7 @@
  * and the local Gateway through `supertag __local-gateway`. Credentials stay in this process.
  */
 export * from "./cache";
+export * from "./cli-store";
 export * from "./endpoint";
 export * from "./errors";
 export * from "./local";

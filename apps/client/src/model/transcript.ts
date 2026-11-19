@@ -1,5 +1,5 @@
 /** How a conversation reads as a messaging app shows it: delivery, joined replies, time dividers. */
-import type { Message } from "./gateway";
+import type { Conversation, Message, Tag } from "./gateway";
 import { previewLine } from "./preview-line";
 
 /**
@@ -147,5 +147,59 @@ export function conversationSummary(messages: readonly Message[]): TagSummary {
     ...(line ? { preview: line } : {}),
     ...(last.task.createdAtMs !== undefined ? { lastActivityMs: last.task.createdAtMs } : {}),
     ...(RUNNING.has(last.task.state) ? { working: true } : {}),
+  };
+}
+
+/**
+ * What a settled turn says under its reply, only when there is something to say: a turn that
+ * succeeded says nothing. The tone colours it: muted, a warning, or an error.
+ */
+export function turnNotice(
+  taskState: string,
+  inputState?: string,
+): { text: string; tone: "muted" | "warning" | "error" } | undefined {
+  const input = {
+    pending: { text: "Waiting to join the running Task", tone: "muted" },
+    dispatching: { text: "Joining the running Task", tone: "muted" },
+    accepted: { text: "Joined the running Task", tone: "muted" },
+    unknown: { text: "Delivery uncertain", tone: "warning" },
+    withdrawn: { text: "Not delivered to the running Task", tone: "error" },
+  }[inputState ?? ""] as { text: string; tone: "muted" | "warning" | "error" } | undefined;
+  if (input) return input;
+  return (
+    {
+      queued: { text: "Queued", tone: "muted" },
+      claimed: { text: "Starting", tone: "muted" },
+      running: { text: "Working", tone: "muted" },
+      failed: { text: "Failed", tone: "error" },
+      cancelled: { text: "Cancelled", tone: "warning" },
+      uncertain: { text: "Interrupted: needs attention", tone: "warning" },
+    } as Record<string, { text: string; tone: "muted" | "warning" | "error" }>
+  )[taskState];
+}
+
+/** The lead Tag first, then the others by last activity, newest first, keeping the given order. */
+export function orderTags(tags: Tag[], summaries: Record<string, TagSummary> = {}) {
+  const lead = tags.find((entry) => entry.lead);
+  const others = tags
+    .filter((entry) => entry !== lead)
+    .map((entry, index) => ({ entry, index }))
+    .sort(
+      (a, b) =>
+        (summaries[b.entry.tagId]?.lastActivityMs ?? 0) -
+          (summaries[a.entry.tagId]?.lastActivityMs ?? 0) || a.index - b.index,
+    )
+    .map(({ entry }) => entry);
+  return { lead, others };
+}
+
+/** What the sidebar shows for a conversation the Gateway lists. */
+export function rowSummary(conversation: Conversation): TagSummary {
+  const line = previewLine(conversation.preview);
+  return {
+    ...(line ? { preview: conversation.previewFromTag ? line : `You: ${line}` } : {}),
+    ...(conversation.lastActivityAtMs ? { lastActivityMs: conversation.lastActivityAtMs } : {}),
+    ...(conversation.unreadCount > 0 ? { unread: true } : {}),
+    ...(conversation.working ? { working: true } : {}),
   };
 }

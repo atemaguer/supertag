@@ -23,8 +23,9 @@ data, or local state.
 
 SuperTag's services and CLI are written in Rust, in the `core/` workspace, from the protobuf
 contract in `proto/`. The Node.js harness bridges and Workspace providers that Workers start
-(`harnesses/`), the TypeScript SDK (`sdks/typescript`), the desktop app and the client package it
-runs on (`apps/client`), and the repository checks are TypeScript. `sdks/` holds one directory per
+(`harnesses/`), the TypeScript SDK (`sdks/typescript`), the desktop app, the terminal UI
+(`apps/tui`), the client package both run on (`apps/client`), and the repository checks are
+TypeScript. The terminal UI runs on Bun, pinned in its README; nothing else does. `sdks/` holds one directory per
 language, each with its SDK and generated bindings, and `scripts/` holds the repository checks and
 the release, packaging, and install scripts. Install the tools listed in
 [Requirements](docs/operations/requirements.md), the Rust toolchain pinned by

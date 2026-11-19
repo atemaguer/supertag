@@ -1,5 +1,5 @@
 import type { Gateway, Message as TagMessage, TaskEvent } from "@supertag/client/model";
-import { dividerLabel, fromOperator, RUNNING, turnView } from "@supertag/client/model";
+import { dividerLabel, fromOperator, RUNNING, turnNotice, turnView } from "@supertag/client/model";
 import { useTurnEvents } from "@supertag/client/react";
 import { Check, Copy, ListTree } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -23,34 +23,6 @@ const REHYPE_PLUGINS = [
 ] as NonNullable<Parameters<typeof MessageResponse>[0]["rehypePlugins"]>;
 
 import { Button } from "./ui/button";
-
-/**
- * What a settled turn says under its reply, only when there is something to say: a turn that
- * succeeded says nothing. The tone colours it: muted, a warning, or an error.
- */
-export function turnNotice(
-  taskState: string,
-  inputState?: string,
-): { text: string; tone: "muted" | "warning" | "error" } | undefined {
-  const input = {
-    pending: { text: "Waiting to join the running Task", tone: "muted" },
-    dispatching: { text: "Joining the running Task", tone: "muted" },
-    accepted: { text: "Joined the running Task", tone: "muted" },
-    unknown: { text: "Delivery uncertain", tone: "warning" },
-    withdrawn: { text: "Not delivered to the running Task", tone: "error" },
-  }[inputState ?? ""] as { text: string; tone: "muted" | "warning" | "error" } | undefined;
-  if (input) return input;
-  return (
-    {
-      queued: { text: "Queued", tone: "muted" },
-      claimed: { text: "Starting", tone: "muted" },
-      running: { text: "Working", tone: "muted" },
-      failed: { text: "Failed", tone: "error" },
-      cancelled: { text: "Cancelled", tone: "warning" },
-      uncertain: { text: "Interrupted: needs attention", tone: "warning" },
-    } as Record<string, { text: string; tone: "muted" | "warning" | "error" }>
-  )[taskState];
-}
 
 /**
  * A conversation entry that shows its turn's messages and what it is doing, as the conversation's

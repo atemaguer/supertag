@@ -5,12 +5,16 @@
  * Switching ends the Watch and every follow of the connection it replaces.
  */
 import { hostname } from "node:os";
-import type { WorkerHostStatus } from "../../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/runtime_pb";
+import {
+  HostPhase,
+  type WorkerHostStatus,
+} from "../../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/runtime_pb";
 import type {
   Conversation,
   FollowUpdate,
   GatewayActivation,
   GatewayList,
+  HostPhases,
   Message,
   MessagePage,
   NetworkLog,
@@ -35,7 +39,7 @@ import { type DiscoverLocal, discover, LOCAL, status } from "./local";
 import { branchToFollow, optionsOf, putTagRequest } from "./new-tag";
 import { loadProfiles, type Profiles, saveProfiles, storeDirectory } from "./profiles";
 import { Code } from "./sdk";
-import { CALL, isAuthKey, MAX_PAGES, Session, type SessionOptions } from "./session";
+import { CALL, isAuthKey, MAX_PAGES, Session, type SessionOptions, type Tls } from "./session";
 import type { Updates } from "./streams";
 import { place } from "./task-files";
 import { runWatch } from "./watch";
@@ -54,12 +58,54 @@ export interface GatewayStateOptions extends SessionOptions {
   readonly deviceName?: () => string;
 }
 
+/** A Gateway to connect to directly, as `GatewayState.connectTo` takes it. */
+export interface DirectConnection {
+  /** What the connection is shown as: `local` or the saved origin. */
+  readonly shown: string;
+  /** The cache identity: the origin, or `local` and the state directory. */
+  readonly gateway: string;
+  readonly url: string;
+  readonly token: string;
+  readonly tls?: Tls;
+  /** The local services' state directory, for the local Gateway. */
+  readonly localState?: string;
+}
+
+export interface DirectActivation {
+  connectionId: string;
+  principal: string;
+  tags: Tag[];
+  scope: CacheScope;
+}
+
 /** A stream the window receives until it stops. */
 export interface Subscriber<U> extends Updates<U> {
   /** Runs once the window stops receiving: its stop call, or the window reset. */
   onEnd(stop: () => void): void;
   /** The stream ended on the main side; the window drops its callback. */
   end(): void;
+}
+
+/** A Worker Host phase by the name a status line shows it under. */
+function hostPhase(phase: HostPhase): string {
+  switch (phase) {
+    case HostPhase.PENDING:
+      return "pending";
+    case HostPhase.READY:
+      return "ready";
+    case HostPhase.BUSY:
+      return "busy";
+    case HostPhase.SUPPRESSED:
+      return "suppressed";
+    case HostPhase.OFFLINE:
+      return "unreachable";
+    case HostPhase.DRAINING:
+      return "draining";
+    case HostPhase.REVOKED:
+      return "revoked";
+    default:
+      return "unknown";
+  }
 }
 
 interface Registration {
@@ -226,6 +272,30 @@ export class GatewayState {
       const target = endpoint(local.url);
       const profiles = await loadProfiles(this.options.store);
       return this.activate(profiles, null, target, local.token, local.stateDirectory);
+    });
+  }
+
+  /**
+   * Connects to `connection` and makes it current without reading or changing the desktop's
+   * saved Gateways: the terminal UI's own choice of Gateway, which may need TLS files.
+   * `gateway` names the cache the connection's conversations belong to, with its principal.
+   */
+  connectTo(connection: DirectConnection): Promise<DirectActivation> {
+    return this.serial(async () => {
+      const generation = this.generation;
+      const target = endpoint(connection.url);
+      const session = await Session.connect(target, connection.token, this.options, connection.tls);
+      try {
+        const principal = await session.principal();
+        const tags = await session.tags();
+        if (this.generation !== generation) throw "The connection changed. Connect again.";
+        const scope = { gateway: connection.gateway, principal };
+        const connectionId = this.adopt(session, connection.shown, scope, connection.localState);
+        return { connectionId, principal, tags, scope };
+      } catch (error) {
+        if (this.session !== session) session.close();
+        throw error;
+      }
     });
   }
 
@@ -399,6 +469,29 @@ export class GatewayState {
       cursor = listed.nextCursor;
     }
     return optionsOf(hosts);
+  }
+
+  /**
+   * How many of the Gateway's Worker Hosts are in each phase, such as `ready` or `offline`;
+   * revoked ones are left out. Operators only: a client device is refused.
+   */
+  hostPhases(connectionId: string): Promise<HostPhases> {
+    return this.call(connectionId, async (session) => {
+      const phases: HostPhases = {};
+      let cursor = "";
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const listed = await rpc(() =>
+          session.client.operator.listHosts({ limit: 100, cursor }, CALL),
+        );
+        for (const host of listed.hosts) {
+          const phase = hostPhase(host.phase);
+          if (phase !== "revoked") phases[phase] = (phases[phase] ?? 0) + 1;
+        }
+        if (listed.nextCursor === "" || listed.nextCursor === cursor) break;
+        cursor = listed.nextCursor;
+      }
+      return phases;
+    });
   }
 
   /** The harnesses and Workspaces of the Gateway's current Worker Hosts. Operators only. */

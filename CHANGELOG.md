@@ -37,6 +37,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- The desktop app notifies a Tag's reply to your own message when you opened another Tag's
+  conversation while it worked; it notified only replies that came with a new message.
 - A Worker hides a secret from its Worklet's environment again when a harness repeats it, such as
   a provider key it does not inherit. It had stopped doing so once Workers no longer inherited the
   Worklet's whole environment.
