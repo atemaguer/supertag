@@ -152,7 +152,8 @@ pub(crate) struct Assign {
     pub(crate) registration: Proto<HostRecord>,
     /// The protocol version the Worklet negotiated with its Control Plane.
     pub(crate) protocol: u32,
-    /// Where the Worker sends its Attempt's data calls.
+    /// Where the Worker sends every call its Attempt credential authorizes: the data endpoint
+    /// the Worklet's registration named, or the Control Plane's URL when it named none.
     pub(crate) data_endpoint: String,
     pub(crate) secrets: AttemptSecrets,
     /// Set for a Worker that only resumes the captures of an Attempt already Finalizing.

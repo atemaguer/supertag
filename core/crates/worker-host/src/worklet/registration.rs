@@ -87,6 +87,17 @@ pub(crate) async fn register(
     }
 }
 
+/// Where this Worklet's Workers send their Task Attempts' data calls: the data endpoint the
+/// Control Plane named when this incarnation registered, or, when it named none, the Control
+/// Plane itself at `control_plane`, the URL the Worklet dials.
+pub(crate) fn data_endpoint(registration: &HostRecord, control_plane: &str) -> String {
+    if registration.data_endpoint.is_empty() {
+        control_plane.to_owned()
+    } else {
+        registration.data_endpoint.clone()
+    }
+}
+
 /// The host's own storage, signed by `signer`: the Worklet's, with the host credential, or a
 /// Worker's, whose host calls its Worklet makes. `git` is where a reviewed delivery is read.
 pub(crate) fn host_storage(
@@ -182,5 +193,23 @@ pub(crate) fn attempt_clients(channel: &Channel, headers: &HostHeaders) -> Attem
         )
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workers_send_data_calls_to_the_endpoint_registration_named() {
+        let control_plane = "https://control-plane.example:3433/";
+        let mut registration = HostRecord::default();
+        // None named: the Control Plane itself, as the Worklet reaches it.
+        assert_eq!(data_endpoint(&registration, control_plane), control_plane);
+        registration.data_endpoint = "https://gateway.example:3434".into();
+        assert_eq!(
+            data_endpoint(&registration, control_plane),
+            "https://gateway.example:3434"
+        );
     }
 }

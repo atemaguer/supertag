@@ -187,6 +187,7 @@ impl InputLane {
         F: FnMut(Request<M>) -> Fut,
         Fut: Future<Output = Result<Response<R>, Status>>,
     {
+        let mut noted = false;
         loop {
             let deadline = self.active_deadline()?;
             let sent = Instant::now();
@@ -204,6 +205,11 @@ impl InputLane {
             match outcome {
                 Ok(response) => return Ok(response),
                 Err(error) if crate::retryable(&error) => {
+                    // Once per call: an unreachable data endpoint names itself in the message.
+                    if !noted {
+                        crate::failures::note("a data call will be retried", &error.message());
+                        noted = true;
+                    }
                     let authority = self.active_deadline()?;
                     time::sleep_until(authority.min(Instant::now() + RETRY_PAUSE)).await;
                 }

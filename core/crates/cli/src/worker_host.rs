@@ -670,11 +670,11 @@ pub(crate) async fn run_worker(args: WorkerHostArgs) -> Result<()> {
     // Before anything that can start a process, such as `codex --version` below.
     supertag_worker_host::protect_worker_channel()?;
     not_dumpable()?;
-    let control_plane = network::endpoint(args.control_plane.clone()).await?;
     let built = build(args, true).await?;
     supertag_worker_host::run_worker(supertag_worker_host::WorkerProcessOptions {
         worker: built.worker,
-        control_plane,
+        // The data endpoint its Assign names, dialed as the Worklet dials its Control Plane.
+        data_dialer: Box::new(|url| Box::pin(network::endpoint(url))),
         workspaces: built.workspaces,
         artifact_directory: built.artifact_directory,
         artifact_peers: built.artifact_peers,

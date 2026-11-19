@@ -1612,7 +1612,12 @@ async fn run_worker(
         .unwrap_or(u64::MAX),
         registration: Proto(worklet.registration.clone()),
         protocol: worklet.protocol,
-        data_endpoint: worklet.options.control_plane.url().to_owned(),
+        // This incarnation's registration names it; a new incarnation's applies to the Workers
+        // started after it registered.
+        data_endpoint: registration::data_endpoint(
+            &worklet.registration,
+            &worklet.options.control_plane.url(),
+        ),
         secrets: AttemptSecrets {
             provider: harness.provider_credentials.clone(),
             network,

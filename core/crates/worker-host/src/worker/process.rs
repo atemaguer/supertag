@@ -2,9 +2,12 @@
 //! Task Attempt, hands the outcome over, and exits. It holds the Attempt credential and the
 //! secrets its Attempt may use, never the host credential.
 
-use std::{collections::BTreeMap, os::fd::FromRawFd as _, path::PathBuf, sync::Arc};
+use std::{
+    collections::BTreeMap, future::Future, os::fd::FromRawFd as _, path::PathBuf, pin::Pin,
+    sync::Arc,
+};
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, anyhow, ensure};
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{attempt_inputs_client::AttemptInputsClient, worker_host_client::WorkerHostClient},
@@ -21,12 +24,20 @@ use crate::{
     },
 };
 
+/// Opens the connection to a data endpoint URL with the transport options the Worker Host uses
+/// for its Control Plane: the same scheme rules, TLS roots and client identity, and proxy.
+pub type DataDialer = Box<
+    dyn FnOnce(String) -> Pin<Box<dyn Future<Output = Result<supertag_transport::Target>> + Send>>
+        + Send,
+>;
+
 /// What a Worker reads from its own arguments, as its Worklet read the same harness's: what it
-/// runs, and the host's Workspaces, storage, Volumes, and catalogs. Its Attempt, and the secrets
-/// it may use, come in its `Assign`.
+/// runs, and the host's Workspaces, storage, Volumes, and catalogs. Its Attempt, the data
+/// endpoint its data calls go to, and the secrets it may use come in its `Assign`.
 pub struct WorkerProcessOptions {
     pub worker: WorkerOptions,
-    pub control_plane: supertag_transport::Target,
+    /// Dials the data endpoint the Worker's `Assign` names.
+    pub data_dialer: DataDialer,
     pub workspaces: Vec<WorkspaceMapping>,
     /// The host's artifact storage, which the Worklet serves and its Workers write captures to.
     pub artifact_directory: PathBuf,
@@ -84,12 +95,12 @@ pub async fn run_worker(options: WorkerProcessOptions) -> Result<()> {
             )
         })
         .collect::<Result<Vec<_>>>()?;
-    ensure!(
-        assign.data_endpoint == options.control_plane.url(),
-        "the Worklet assigned another data endpoint than this Worker's Control Plane"
-    );
     let registration = assign.registration.0.clone();
-    let channel = options.control_plane.clone().connect_lazy();
+    // Every call the Attempt credential authorizes goes to the data endpoint, and only there:
+    // the Worker has no connection to the Control Plane. Its host calls go to its Worklet.
+    let channel = data_target(&assign.data_endpoint, options.data_dialer)
+        .await?
+        .connect_lazy();
     let headers = HostHeaders::new(registration.generation, assign.protocol);
     let coordination = registration::attempt_clients(&channel, &headers);
     let inputs = AttemptInputsClient::with_interceptor(channel.clone(), headers.clone())
@@ -148,6 +159,99 @@ pub async fn run_worker(options: WorkerProcessOptions) -> Result<()> {
     run
 }
 
+/// The Worker's one connection for its Attempt's data calls: to `endpoint`, the data endpoint
+/// its Worklet assigned. A connection it cannot open fails `Unavailable`, as an unreachable
+/// Control Plane does, and names the endpoint. There is no fallback to another address.
+async fn data_target(endpoint: &str, dial: DataDialer) -> Result<supertag_transport::Target> {
+    ensure!(
+        !endpoint.is_empty(),
+        "the Worklet assigned no data endpoint"
+    );
+    dial(endpoint.to_owned())
+        .await
+        .with_context(|| format!("the data endpoint {endpoint} is not usable"))?
+        .named("the data endpoint")
+        .map_err(|error| anyhow!("the data endpoint {endpoint} is not usable: {error}"))
+}
+
 fn failures_remember(credential: &str) {
     crate::failures::remember_credential(credential);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A loopback URL nothing listens on.
+    fn refusing() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        format!("http://{address}")
+    }
+
+    /// A dialer that records the URL it was asked for.
+    fn recording(dialed: Arc<std::sync::Mutex<Vec<String>>>) -> DataDialer {
+        Box::new(move |url: String| {
+            dialed.lock().unwrap().push(url.clone());
+            Box::pin(async move {
+                Ok(supertag_transport::Target::native(
+                    tonic::transport::Endpoint::from_shared(url)?,
+                ))
+            })
+        })
+    }
+
+    #[tokio::test]
+    async fn a_worker_dials_only_the_data_endpoint_it_was_assigned() {
+        let endpoint = refusing();
+        let dialed = Arc::new(std::sync::Mutex::new(vec![]));
+        let target = data_target(&endpoint, recording(dialed.clone()))
+            .await
+            .unwrap();
+        assert_eq!(*dialed.lock().unwrap(), vec![endpoint.clone()]);
+        assert_eq!(target.url(), format!("{endpoint}/"));
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_data_endpoint_fails_retryably_and_names_itself() {
+        let endpoint = refusing();
+        let target = data_target(&endpoint, recording(Arc::default()))
+            .await
+            .unwrap();
+        let headers = crate::HostHeaders::new(1, 1);
+        let mut clients =
+            crate::worklet::registration::attempt_clients(&target.connect_lazy(), &headers);
+        let status = clients
+            .attempt
+            .append_event(tonic::Request::new(Default::default()))
+            .await
+            .unwrap_err();
+        // Retried exactly as an unreachable Control Plane is.
+        assert!(crate::retryable(&status), "{status:?}");
+        assert!(
+            status
+                .message()
+                .starts_with(&format!("the data endpoint {endpoint} is unreachable: ")),
+            "{status:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unusable_data_endpoint_is_an_error_naming_it() {
+        let failing: DataDialer = Box::new(|_| {
+            Box::pin(async { Err(anyhow!("cleartext endpoint must use a loopback IP address")) })
+        });
+        let error = data_target("http://gateway.example:3434", failing)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            format!("{error:#}"),
+            "the data endpoint http://gateway.example:3434 is not usable: cleartext endpoint must use a loopback IP address"
+        );
+        let error = data_target("", recording(Arc::default()))
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), "the Worklet assigned no data endpoint");
+    }
 }
