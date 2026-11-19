@@ -75,8 +75,9 @@ jobs:
   # build: releases ship no Intel Mac CLI. The app carries the package job's signed macOS archive
   # under Contents/Resources/supertag/, so it needs no separate install.
   # scripts/package-desktop-macos.sh signs the bridges' executables, then the app, with the
-  # Developer ID certificate and the hardened runtime, notarizes and staples it, and does the same
-  # for the disk image. Without any Apple secret the image is unsigned, with a warning, as for the
+  # Developer ID certificate and the hardened runtime, builds and signs the disk image, and
+  # notarizes and staples only the disk image, which covers the app inside it; Gatekeeper then
+  # accepts the app inside the mounted image. Without any Apple secret the image is unsigned, with a warning, as for the
   # archives; an incomplete set fails this job. For now a failure here leaves the image out of the
   # release with a warning instead of stopping it.
   desktop:
@@ -100,6 +101,12 @@ jobs:
           cache: pnpm
       - name: Use the pinned Rust toolchain
         run: rustup toolchain install "$(sed -n 's/^channel = "\(.*\)"$/\1/p' core/rust-toolchain.toml)" --profile minimal --no-self-update
+      # Restores the registry and third-party dependency builds for the app's Tauri backend;
+      # workspace crates are never cached. A tag run reads caches saved on main or on the same tag.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: desktop-macos-release
+          workspaces: apps/desktop/src-tauri -> target
       - run: pnpm install --frozen-lockfile
       - name: Prepare signing and notarization
         id: signing
@@ -161,7 +168,7 @@ jobs:
         working-directory: apps/desktop
         # The app is signed after the CLI goes into it, by the next step.
         run: pnpm tauri build --bundles app
-      - name: Put the CLI in the app, then sign, notarize, and check the app and disk image
+      - name: Put the CLI in the app, sign it, then build, sign, notarize, and check the disk image
         env:
           SIGNED: ${{ steps.signing.outputs.signed }}
           IDENTITY: ${{ steps.signing.outputs.identity }}

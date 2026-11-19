@@ -447,12 +447,14 @@ Set these GitHub Actions secrets on the release repository:
 | `APPLE_NOTARY_KEY_ID` | Key ID shown in App Store Connect |
 | `APPLE_NOTARY_ISSUER_ID` | Issuer ID shown on the App Store Connect Team Keys page |
 
-The same secrets sign the desktop app: Tauri signs `SuperTag.app` with the hardened runtime and
-notarizes and staples it, and the workflow then signs, notarizes, and staples the disk image. The
-app is built for Apple silicon only and runs the `supertag` CLI on `PATH`; it bundles none. For
-now a failed desktop build or notarization leaves the disk image out of the draft release with a
-warning, and the SDK publish workflows only warn when it is missing, so it never holds back the
-CLI release.
+The same secrets sign the desktop app. `scripts/package-desktop-macos.sh` puts the macOS archive's
+contents in `SuperTag.app`, signs every executable in it and then the app with the hardened
+runtime, builds and signs the disk image, and notarizes and staples only the disk image. Apple
+notarizes the outermost container, and its ticket covers the app and everything nested in it, so
+the app is not submitted on its own; the script checks that Gatekeeper accepts the app inside the
+mounted image. The app is built for Apple silicon only. For now a failed desktop build or
+notarization leaves the disk image out of the draft release with a warning, and the SDK publish
+workflows only warn when it is missing, so it never holds back the CLI release.
 
 Create the certificate and Team key under the same Apple Developer team. When all five
 secrets are absent, the workflow warns and produces unsigned builds. An incomplete

@@ -213,9 +213,12 @@ def prune_build_scratch(scratch):
 
 def smoke_built_release(archive, source, env, profile, node, *, install_smoke=False):
     # Test equipment is built separately after the production binary was
-    # captured. No test feature or fixture binary enters the archive.
+    # captured. No test feature or fixture binary enters the archive. The
+    # fixture-adapter feature enables no dependency features, so this reuses
+    # the release build's compiled crates and compiles only the adapter;
+    # test-fixtures would rebuild every workspace crate it changes.
     command = ["cargo", "build", "--locked", "--manifest-path", str(source / "core/Cargo.toml"),
-               "-p", "supertag-cli", "--features", "test-fixtures", "--bin", "supertag-fixture-adapter"]
+               "-p", "supertag-cli", "--features", "fixture-adapter", "--bin", "supertag-fixture-adapter"]
     if profile == "release":
         command.append("--release")
     subprocess.run(command, cwd=source, env=env, check=True)

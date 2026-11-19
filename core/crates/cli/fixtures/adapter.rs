@@ -40,7 +40,12 @@ fn crash_at(boundary: &str) {
                 .and_then(|arg| arg.strip_prefix("--crash-marker="))
                 .map(std::ffi::OsString::from)
         });
+        #[cfg(feature = "test-fixtures")]
         supertag_protocol::crash_now(&format!("adapter.{boundary}"), marker.as_deref());
+        #[cfg(not(feature = "test-fixtures"))]
+        panic!(
+            "--crash-at=adapter.{boundary} needs an adapter built with test-fixtures ({marker:?})"
+        );
     }
 }
 

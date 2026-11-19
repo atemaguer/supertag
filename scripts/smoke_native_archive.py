@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Verify a trusted local native archive with a real, disposable CLI/TUI round trip.
 
-Requires tmux and an existing SuperTag fixture adapter built with test-fixtures.
+Requires tmux and an existing SuperTag fixture adapter built with the fixture-adapter feature
+(test-fixtures includes it).
 The fixture adapter is test equipment and is never bundled in the archive.
 No provider credentials, user state, installer, or external service is used.
 """

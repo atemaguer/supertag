@@ -70,8 +70,15 @@ source dependencies, and unpacked staging are removed before the smoke tests ext
 archive; only the exact fixture equipment is retained. Keep temporary paths below a private or sticky
 parent; the installer intentionally refuses shared writable non-sticky ancestors.
 
+The smoke tests' fixture adapter is built after the archive with the `supertag-cli` feature
+`fixture-adapter`, which turns on no feature of any other crate, so Cargo reuses the release
+build's crates and compiles only the adapter. `test-fixtures` includes it and adds the crash points
+and test-only behavior of the other crates, which would rebuild all of them.
+
 The `native-release-check.yml` workflow has a fast `contracts` mode and a full
-three-platform `package` mode. Run it manually, or add the `release-check` label to a pull request
-to run the full `package` mode on its head commit. Its explicit host labels follow the
-[GitHub runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners). It uses read-only repository permissions and has no upload,
-registry, release, signing, or notarization step. No workflow publishes native releases yet.
+three-platform `package` mode, which builds the three platforms at once. Run it manually, or add
+the `release-check` label to a pull request to run the full `package` mode on its head commit. Its
+explicit host labels follow the
+[GitHub runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+It uses read-only repository permissions. On its own it uploads, signs, notarizes, and publishes
+nothing; `release.yml` calls it to build the signed archives it attaches to a draft release.

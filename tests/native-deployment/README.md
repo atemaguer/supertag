@@ -13,7 +13,8 @@ change an installation, import old state, publish images, or perform a productio
 
 Use a Linux complete archive assembled by `scripts/native_release.py` and its
 matching fixture adapter. The normal release CLI contains no test-only adapter; build
-that separately from the same source with the `test-fixtures` feature. Docker must support
+that separately from the same source with the `fixture-adapter` feature (`test-fixtures` includes
+it). Docker must support
 the archive's architecture, and Docker Compose must support `up --wait`.
 
 ```sh

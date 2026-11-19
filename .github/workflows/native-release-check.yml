@@ -76,7 +76,6 @@ jobs:
     needs: contracts
     strategy:
       fail-fast: false
-      max-parallel: 2
       matrix:
         include:
           - platform: linux-amd64

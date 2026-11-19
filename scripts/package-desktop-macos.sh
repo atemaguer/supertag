@@ -1,5 +1,5 @@
 #!/bin/bash
-# Put the supertag CLI inside the desktop app, sign and notarize the app, and build its disk image.
+# Put the supertag CLI inside the desktop app, sign it, and build, sign, and notarize its disk image.
 #
 #   package-desktop-macos.sh APP CLI_DIRECTORY IMAGE
 #
@@ -66,7 +66,7 @@ cleanup() {
 trap cleanup EXIT
 printf '%s' "$APPLE_DEVELOPER_ID_P12" | base64 -D > "$work/signing.p12"
 security create-keychain -p "$password" "$keychain"
-# A new keychain locks after five idle minutes, and notarizing the app takes longer than that;
+# A new keychain locks after five idle minutes, and building the disk image can take that long;
 # codesign then waits for a password prompt nobody can answer. Turn the lock off.
 security set-keychain-settings "$keychain"
 security unlock-keychain -p "$password" "$keychain"
@@ -108,20 +108,34 @@ done
 sign "$app"
 codesign --verify --deep --strict --verbose=2 "$app"
 
-ditto -c -k --keepParent "$app" "$work/SuperTag.zip"
-xcrun notarytool submit "$work/SuperTag.zip" --key "$NOTARY_KEY_PATH" \
-  --key-id "$APPLE_NOTARY_KEY_ID" --issuer "$APPLE_NOTARY_ISSUER_ID" --wait --timeout 30m
-xcrun stapler staple "$app"
-xcrun stapler validate "$app"
-spctl --assess --type execute --verbose=2 "$app"
-
+# Apple notarizes only the outermost container: the service checks the nested app and every
+# executable in it and issues tickets for the disk image and the app alike. So the app is not
+# notarized or stapled on its own; the disk image carries the stapled ticket, and Gatekeeper finds
+# the app's ticket online once someone copies the app out of the image.
 rm -f "$image"
 hdiutil create -quiet -volname SuperTag -srcfolder "$app" -ov -format ULMO "$image"
 security unlock-keychain -p "$password" "$keychain"
 codesign --force --timestamp --keychain "$keychain" --sign "$IDENTITY" "$image"
 codesign --verify --strict --verbose=2 "$image"
 xcrun notarytool submit "$image" --key "$NOTARY_KEY_PATH" \
-  --key-id "$APPLE_NOTARY_KEY_ID" --issuer "$APPLE_NOTARY_ISSUER_ID" --wait --timeout 20m
+  --key-id "$APPLE_NOTARY_KEY_ID" --issuer "$APPLE_NOTARY_ISSUER_ID" --wait --timeout 30m
 xcrun stapler staple "$image"
 xcrun stapler validate "$image"
 spctl --assess --type open --context context:primary-signature --verbose=2 "$image"
+
+# Check the app as shipped, inside the image. Its ticket is not stapled, so Gatekeeper looks it up
+# online; give a just-published ticket a moment to appear.
+mount="$work/mount"
+mkdir "$mount"
+hdiutil attach -quiet -readonly -nobrowse -noautoopen -mountpoint "$mount" "$image"
+assessed=false
+for attempt in 1 2 3 4 5; do
+  if spctl --assess --type execute --verbose=2 "$mount/SuperTag.app"; then
+    assessed=true
+    break
+  fi
+  echo "Gatekeeper has not accepted the app yet (attempt $attempt); retrying."
+  sleep 15
+done
+hdiutil detach -quiet "$mount"
+[[ "$assessed" == true ]] || { echo "Gatekeeper rejected the app inside $image" >&2; exit 1; }

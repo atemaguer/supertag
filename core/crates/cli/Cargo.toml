@@ -7,7 +7,11 @@ publish.workspace = true
 rust-version.workspace = true
 
 [features]
-test-fixtures = ["supertag-api/test-fixtures", "supertag-gateway/test-fixtures", "supertag-github/test-fixtures", "supertag-protocol/crash-points", "supertag-worker-host/test-fixtures"]
+# The fixture adapter alone, with no dependency features: the release smoke builds it from the
+# release build's dependencies, so only the adapter itself compiles. Its crash points need
+# test-fixtures.
+fixture-adapter = []
+test-fixtures = ["fixture-adapter", "supertag-api/test-fixtures", "supertag-gateway/test-fixtures", "supertag-github/test-fixtures", "supertag-protocol/crash-points", "supertag-worker-host/test-fixtures"]
 
 [[bin]]
 name = "supertag"
@@ -16,7 +20,7 @@ path = "src/main.rs"
 [[bin]]
 name = "supertag-fixture-adapter"
 path = "fixtures/adapter.rs"
-required-features = ["test-fixtures"]
+required-features = ["fixture-adapter"]
 
 [[bin]]
 name = "supertag-old-supervisor"
