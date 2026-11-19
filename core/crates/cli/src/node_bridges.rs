@@ -235,13 +235,63 @@ pub fn node_problem(bridge: NodeBridge) -> Option<String> {
         })
 }
 
+/// Where the Node bridges of the `supertag` at `executable` belong, and how to put them there.
+fn install_bridges(executable: &Path) -> String {
+    let directory = executable
+        .canonicalize()
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| executable.to_path_buf())
+        .join("node-bridges");
+    format!(
+        "install the Node bridges that match this supertag in {0}: the release installer puts them there, and for a supertag built from a checkout, run uv run scripts/node_bridges.py --output {0} in the checkout",
+        directory.display()
+    )
+}
+
+/// Why this `supertag` can't start `bridge`'s packaged Node bridge, for `supertag init` to say
+/// before it writes a supertag.yaml whose Worker Host could not start.
+pub struct BridgeProblem {
+    pub cause: String,
+    /// What to do, as a sentence without its final stop.
+    pub fix: String,
+}
+
+/// `None` when the bridge is installed.
+pub fn bridge_problem(bridge: NodeBridge) -> Option<BridgeProblem> {
+    let executable = match std::env::current_exe() {
+        Ok(executable) => executable,
+        Err(error) => {
+            return Some(BridgeProblem {
+                cause: format!("could not locate this supertag: {error}"),
+                fix: "Install SuperTag with its release installer".into(),
+            });
+        }
+    };
+    bridge_problem_at(&executable, bridge)
+}
+
+fn bridge_problem_at(executable: &Path, bridge: NodeBridge) -> Option<BridgeProblem> {
+    installed_entry(executable, bridge).err().map(|error| {
+        let fix = install_bridges(executable);
+        BridgeProblem {
+            cause: format!("{error:#}"),
+            fix: format!("I{}", &fix[1..]),
+        }
+    })
+}
+
 pub fn launch(
     executable: &Path,
     bridge: NodeBridge,
     runtime: PathBuf,
 ) -> Result<(PathBuf, PathBuf)> {
-    let entry = installed_entry(executable, bridge)
-        .context("install the matching Node bridges or supply an explicit harness entrypoint")?;
+    let entry = installed_entry(executable, bridge).with_context(|| {
+        format!(
+            "{}, or supply an explicit harness entrypoint",
+            install_bridges(executable)
+        )
+    })?;
     let runtime = resolve_node(runtime)?;
     check_node_version(&runtime, bridge, PROBE_TIMEOUT)?;
     Ok((runtime, entry))
@@ -389,6 +439,37 @@ mod tests {
             fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
             path
         }
+    }
+
+    #[test]
+    fn a_missing_bridge_names_where_it_belongs_and_the_checkout_command() {
+        let install = Installation::new();
+        // The manifest lists the bridge, but its entry is missing.
+        let problem = bridge_problem_at(&install.executable, NodeBridge::ClaudeCode).unwrap();
+        let directory = install.root.canonicalize().unwrap();
+        assert!(
+            problem.fix.starts_with("Install the Node bridges")
+                && problem.fix.contains(&format!(
+                    "uv run scripts/node_bridges.py --output {}",
+                    directory.display()
+                )),
+            "{}",
+            problem.fix
+        );
+        install.entry(NodeBridge::ClaudeCode);
+        assert!(bridge_problem_at(&install.executable, NodeBridge::ClaudeCode).is_none());
+        // A CLI with no bridges beside it at all, as one built from a checkout.
+        fs::remove_dir_all(&install.root).unwrap();
+        let problem = bridge_problem_at(&install.executable, NodeBridge::ClaudeCode).unwrap();
+        assert!(
+            problem
+                .cause
+                .starts_with("packaged Node bridges are unavailable")
+                && problem.fix.contains("scripts/node_bridges.py"),
+            "{}: {}",
+            problem.cause,
+            problem.fix
+        );
     }
 
     #[test]

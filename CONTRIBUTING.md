@@ -68,6 +68,16 @@ pnpm supertag get tag
 This builds and runs the Rust CLI from `core/` with `cargo run`. Use it when exercising
 uncommitted changes.
 
+A CLI built from the checkout has no Node bridges beside it, so it runs Codex Tasks only, and
+`supertag init` says Claude Code can't run. Stage the bridges where it looks for them, beside the
+built binary:
+
+```sh
+uv run scripts/node_bridges.py --output core/target/debug/node-bridges --bridge claude-code
+```
+
+Leave out `--bridge` to stage every bridge. Stage them again after a version change.
+
 ### Terminal UI (experimental)
 
 `apps/tui` is a Go terminal UI built with Bubble Tea. It is a client of the Control Plane API

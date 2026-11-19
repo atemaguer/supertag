@@ -94,9 +94,9 @@ Options:
       --harness <HARNESS>
           The harness the lead Tag runs on, instead of the first signed-in one. Applies to a new setup only: another repository's Tag uses the lead's harness. With --check, check only this harness [possible values: codex, claude-code]
       --check
-          Check this machine and folder without changing anything: whether the folder is a git repository, which harnesses are installed and signed in, and whether SuperTag is set up
+          Check this machine and folder without changing anything: whether the folder is a git repository, which harnesses are installed and signed in, and whether SuperTag is set up. Prints a readable report, or one JSON object with --json
       --json
-          Print the result as one JSON object, and progress on standard error. Needs --check or --yes
+          Print the result as one JSON object, and progress on standard error. Use it with --check or --yes
   -h, --help
           Print help
 ```

@@ -16,6 +16,8 @@ pub use models::ModelCheck;
 use probe::Variables;
 
 pub const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(30);
+/// The command that installs Claude Code, as every SuperTag message and the docs name it.
+pub const CLAUDE_CODE_INSTALL: &str = "curl -fsSL https://claude.ai/install.sh | bash";
 const CLI_TIMEOUT: Duration = Duration::from_secs(15);
 const LISTING_TIMEOUT: Duration = Duration::from_secs(20);
 const CURSOR_CLI_TIMEOUT: Duration = Duration::from_secs(5);

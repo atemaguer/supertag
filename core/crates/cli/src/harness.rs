@@ -710,9 +710,12 @@ fn claude_on_path() -> Result<PathBuf> {
             })
     });
     // Not canonicalized: `claude update` moves the link to a new version and removes the old one.
-    found.context(
-        "Claude Code isn't installed: no claude on PATH. Install it with curl -fsSL https://claude.ai/install.sh | bash, sign in with claude and /login, or pass --claude-path",
-    )
+    found.with_context(|| {
+        format!(
+            "Claude Code isn't installed: no claude on PATH. Install it with {}, sign in with claude and /login, then run supertag up again. (A Worklet you start with supertag worker-host can name it with --claude-path.)",
+            crate::harness_checks::CLAUDE_CODE_INSTALL
+        )
+    })
 }
 
 fn executable_path(path: PathBuf) -> Result<PathBuf> {

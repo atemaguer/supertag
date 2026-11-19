@@ -42,10 +42,11 @@ pub struct InitArgs {
     harness: Option<InitHarness>,
     /// Check this machine and folder without changing anything: whether the folder is a git
     /// repository, which harnesses are installed and signed in, and whether SuperTag is set up.
-    #[arg(long, requires = "json", conflicts_with = "yes")]
+    /// Prints a readable report, or one JSON object with --json.
+    #[arg(long, conflicts_with = "yes")]
     check: bool,
-    /// Print the result as one JSON object, and progress on standard error. Needs --check or
-    /// --yes.
+    /// Print the result as one JSON object, and progress on standard error. Use it with --check
+    /// or --yes.
     #[arg(long)]
     json: bool,
 }
@@ -562,7 +563,11 @@ pub async fn init(args: InitArgs) -> Result<()> {
             args.harness.map(InitHarness::found),
         )
         .await?;
-        outln!("{}", serde_json::to_string_pretty(&report)?);
+        if args.json {
+            outln!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            out!("{}", check_text(&report));
+        }
         return Ok(());
     }
     if !args.json {
@@ -602,16 +607,20 @@ async fn apply(args: InitArgs) -> Result<(PathBuf, PathBuf)> {
     {
         bail!(Fixable {
             error: format!("{} is not installed on this machine.", harness.harness()),
-            fix: install_line(harness).into(),
+            fix: install_line(
+                harness,
+                &local_config::state_directory(args.state_directory.clone())?,
+            ),
             command: install_command(harness),
         });
     }
     ensure!(
         !installed.is_empty(),
         "SuperTag runs Tasks with an installed coding agent, and none was found. Install Claude Code or Codex:
-  Claude Code: curl -fsSL https://claude.ai/install.sh | bash
+  Claude Code: {}
   Codex: npm install -g @openai/codex
-Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, and Cursor, with CURSOR_API_KEY set, also work.)"
+Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, and Cursor, with CURSOR_API_KEY set, also work.)",
+        harness_checks::CLAUDE_CODE_INSTALL
     );
     if args.yes && installed == [Found::Opencode] {
         bail!(
@@ -692,6 +701,17 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
             return Err(no_sign_in(&checked));
         }
         up(&state, config).await?;
+        // As a first init ends: which Tag works here, and how to talk to it.
+        match applied(&path, &repository.root)
+            .ok()
+            .and_then(|value| value["tag"].as_str().map(str::to_owned))
+        {
+            Some(tag) => outln!(
+                "\nTag {tag} works in {}. Run supertag in your terminal to talk to it.",
+                repository.root.display()
+            ),
+            None => outln!("\nRun supertag in your terminal to talk to your Tags."),
+        }
         return Ok((path, repository.root));
     }
 
@@ -704,7 +724,8 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
         timed_out: Vec::new(),
     };
     let mut signed_in = Vec::new();
-    let mut without_node = false;
+    // Why Claude Code can't run here, as the fix to name if it is the only harness.
+    let mut claude_cannot_run: Option<&str> = None;
     // A named harness is the only one checked.
     for harness in installed
         .iter()
@@ -726,7 +747,9 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
             outln!(
                 "  claude-code: can't run: {problem}. SuperTag runs Claude Code through Node.js 22.13 or later. Install it from https://nodejs.org/en/download (or brew install node), then run supertag init again."
             );
-            without_node = true;
+            claude_cannot_run = Some(
+                "Claude Code is the only harness on this machine, and it needs Node.js 22.13 or later on PATH. Install that, or install Codex (npm install -g @openai/codex), then run supertag init again.",
+            );
             if named.is_some() {
                 bail!(Fixable {
                     error: format!("Claude Code can't run: {problem}."),
@@ -742,13 +765,38 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
             outln!(
                 "  claude-code: can't run: {problem}. Update it with claude update, then run supertag init again."
             );
-            without_node = true;
+            claude_cannot_run = Some(
+                "Claude Code is the only harness on this machine, and it is too old for SuperTag. Update it with claude update, or install Codex (npm install -g @openai/codex), then run supertag init again.",
+            );
             if named.is_some() {
                 bail!(Fixable {
                     error: format!("{problem}."),
                     fix: "Update Claude Code with claude update, then run supertag init again."
                         .into(),
                     command: Some("claude update"),
+                });
+            }
+            continue;
+        }
+        // A supertag without its Node bridges, such as one built from a checkout, could not
+        // start Claude Code's Worker either.
+        if *harness == Found::ClaudeCode
+            && let Some(problem) =
+                crate::node_bridges::bridge_problem(crate::node_bridges::NodeBridge::ClaudeCode)
+        {
+            outln!(
+                "  claude-code: can't run: {}. {}, then run supertag init again.",
+                problem.cause,
+                problem.fix
+            );
+            claude_cannot_run = Some(
+                "Claude Code is the only harness on this machine, and this supertag has no Node bridge to run it. Install the bridges as shown above, or install Codex (npm install -g @openai/codex), then run supertag init again.",
+            );
+            if named.is_some() {
+                bail!(Fixable {
+                    error: format!("Claude Code can't run: {}.", problem.cause),
+                    fix: format!("{}, then run supertag init again.", problem.fix),
+                    command: None,
                 });
             }
             continue;
@@ -764,12 +812,13 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
     // A harness that can't run is not offered.
     let installed: Vec<Found> = installed
         .into_iter()
-        .filter(|harness| !(without_node && *harness == Found::ClaudeCode))
+        .filter(|harness| !(claude_cannot_run.is_some() && *harness == Found::ClaudeCode))
         .collect();
-    ensure!(
-        !installed.is_empty(),
-        "Claude Code is the only harness on this machine, and it needs Node.js 22.13 or later on PATH. Install that, or install Codex (npm install -g @openai/codex), then run supertag init again."
-    );
+    if installed.is_empty()
+        && let Some(problem) = claude_cannot_run
+    {
+        bail!(problem);
+    }
     if let Some(harness) = named
         && !signed_in.contains(&harness)
     {
@@ -790,6 +839,7 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
         &signed_in,
         &repository,
         named,
+        &state,
     )?;
     // A harness checked above already said whether it is signed in.
     let checked = sign_ins
@@ -1068,15 +1118,19 @@ fn expand_home(path: &str) -> PathBuf {
     }
 }
 
-/// The command that installs a harness, or what to set for Cursor.
-fn install_line(harness: Found) -> &'static str {
+/// The command that installs a harness, or what to set for Cursor in `state`'s .env.
+fn install_line(harness: Found, state: &Path) -> String {
     match harness {
-        Found::Codex => "Install Codex: npm install -g @openai/codex",
-        Found::ClaudeCode => "Install Claude Code: npm install -g @anthropic-ai/claude-code",
-        Found::Opencode => "Install OpenCode: npm install -g opencode-ai",
-        Found::Cursor => {
-            "Cursor: generate an API key at https://cursor.com/dashboard/api and set CURSOR_API_KEY in ~/.supertag/.env."
-        }
+        Found::Codex => "Install Codex: npm install -g @openai/codex".into(),
+        Found::ClaudeCode => format!(
+            "Install Claude Code: {}",
+            harness_checks::CLAUDE_CODE_INSTALL
+        ),
+        Found::Opencode => "Install OpenCode: npm install -g opencode-ai".into(),
+        Found::Cursor => format!(
+            "Cursor: generate an API key at https://cursor.com/dashboard/api and set CURSOR_API_KEY in {}.",
+            state.join(".env").display()
+        ),
     }
 }
 
@@ -1084,7 +1138,7 @@ fn install_line(harness: Found) -> &'static str {
 fn install_command(harness: Found) -> Option<&'static str> {
     match harness {
         Found::Codex => Some("npm install -g @openai/codex"),
-        Found::ClaudeCode => Some("npm install -g @anthropic-ai/claude-code"),
+        Found::ClaudeCode => Some(harness_checks::CLAUDE_CODE_INSTALL),
         Found::Opencode => Some("npm install -g opencode-ai"),
         Found::Cursor => None,
     }
@@ -1147,6 +1201,16 @@ fn bridge(harness: Found) -> Option<crate::node_bridges::NodeBridge> {
     }
 }
 
+/// What to fix before `bridge` can run, as `--check` reports it, or `None` when it can.
+fn bridge_fix(bridge: crate::node_bridges::NodeBridge) -> Option<String> {
+    crate::node_bridges::node_problem(bridge)
+        .map(|problem| format!("Node.js: {problem}"))
+        .or_else(|| {
+            crate::node_bridges::bridge_problem(bridge)
+                .map(|problem| format!("Node bridge: {}. {}.", problem.cause, problem.fix))
+        })
+}
+
 /// What `--check` found about one harness.
 struct HarnessFact {
     harness: Found,
@@ -1155,7 +1219,8 @@ struct HarnessFact {
     /// or when the check ran out of time.
     signed_in: Option<bool>,
     timed_out: bool,
-    /// `None` for a harness without a Node bridge; otherwise why its Node can't run, if it can't.
+    /// `None` for a harness without a Node bridge; otherwise what to fix when its bridge can't
+    /// run: the Node on PATH, or the bridge itself missing beside this supertag.
     node: Option<Option<String>>,
     /// Why the installed harness is too old to run, for Claude Code.
     version: Option<String>,
@@ -1215,7 +1280,7 @@ async fn check(
             installed: is_installed,
             signed_in: signed_in.filter(|_| !timed_out),
             timed_out,
-            node: bridge(harness).map(crate::node_bridges::node_problem),
+            node: bridge(harness).map(bridge_fix),
             version: (is_installed && harness == Found::ClaudeCode)
                 .then(claude_version_problem)
                 .flatten(),
@@ -1287,7 +1352,7 @@ fn check_report(
             let node_problem = fact.node.clone().flatten();
             let (fix, fix_command) = if !fact.installed {
                 (
-                    Some(install_line(fact.harness).to_owned()),
+                    Some(install_line(fact.harness, state)),
                     install_command(fact.harness),
                 )
             } else if let Some(problem) = &fact.version {
@@ -1301,12 +1366,7 @@ fn check_report(
                 let problem = sign_in_problem(fact.harness, fact.timed_out);
                 (Some(problem.fix), problem.command)
             } else {
-                (
-                    node_problem
-                        .as_ref()
-                        .map(|problem| format!("Node.js: {problem}")),
-                    None,
-                )
+                (node_problem.clone(), None)
             };
             ready_harness |=
                 fact.signed_in == Some(true) && node_problem.is_none() && fact.version.is_none();
@@ -1316,7 +1376,7 @@ fn check_report(
                 "signed_in": fact.signed_in,
                 "node": fact.node.as_ref().map(|problem| json!({
                     "ok": problem.is_none(),
-                    "fix": problem.as_ref().map(|problem| format!("Node.js: {problem}")),
+                    "fix": problem,
                 })),
                 "install_url": install_url(fact.harness),
                 "fix": fix,
@@ -1335,6 +1395,58 @@ fn check_report(
             "repository_mapped": repository_mapped,
         },
     })
+}
+
+/// The `--check` report as people read it, from its JSON object.
+fn check_text(report: &Value) -> String {
+    let text = |value: &Value| crate::terminal::text(value.as_str().unwrap_or_default());
+    let mut out = String::new();
+    let repository = &report["repository"];
+    if repository["fix"].is_null() {
+        let at = match repository["branch"].as_str() {
+            Some(_) => format!("branch {}", text(&repository["branch"])),
+            None => format!("commit {}", text(&repository["detached_commit"])),
+        };
+        out.push_str(&format!(
+            "Repository: {} ({at})\n",
+            text(&repository["root"])
+        ));
+    } else {
+        out.push_str(&format!("Repository: {}\n", text(&repository["fix"])));
+    }
+    out.push_str("Harnesses:\n");
+    for harness in report["harnesses"].as_array().into_iter().flatten() {
+        let status = match (&harness["fix"], harness["installed"].as_bool()) {
+            (Value::Null, Some(true)) if harness["signed_in"] == true => "ready".to_owned(),
+            (Value::Null, Some(true)) => "installed; sign-in not checked".to_owned(),
+            (fix, _) => text(fix),
+        };
+        out.push_str(&format!("  {}: {status}\n", text(&harness["harness"])));
+    }
+    let state = &report["state"];
+    out.push_str(&match (
+        state["configured"].as_bool(),
+        state["repository_mapped"].as_bool(),
+    ) {
+        (Some(true), Some(true)) => format!(
+            "SuperTag: set up in {}, with this repository.\n",
+            text(&state["directory"])
+        ),
+        (Some(true), _) => format!(
+            "SuperTag: set up in {}; supertag init adds this repository.\n",
+            text(&state["directory"])
+        ),
+        _ => format!(
+            "SuperTag: not set up yet in {}.\n",
+            text(&state["directory"])
+        ),
+    });
+    out.push_str(if report["ready"] == true {
+        "Ready: run supertag init here to set up and start SuperTag.\n"
+    } else {
+        "Not ready: fix what is named above, then check again.\n"
+    });
+    out
 }
 
 async fn up(state: &Path, config: local_config::Config) -> Result<()> {
@@ -1371,6 +1483,7 @@ fn answers(
     signed_in: &[Found],
     repository: &Repository,
     chosen: Option<Found>,
+    state: &Path,
 ) -> Result<Answers> {
     let free = (DEFAULT_PORT..=u16::MAX)
         .find(|port| port_free(*port))
@@ -1440,10 +1553,10 @@ fn answers(
             )? {
                 Commands::LocalVm
             } else {
-                unsandboxed(harness, Some(prompter))?
+                unsandboxed(harness, Some(prompter), state)?
             }
         }
-        (_, prompter) => unsandboxed(harness, prompter)?,
+        (_, prompter) => unsandboxed(harness, prompter, state)?,
     };
     let workspace = match ask.as_deref_mut() {
         None => repository.name.clone(),
@@ -1481,7 +1594,7 @@ fn answers(
 /// How to let a harness without a sandbox run commands after setup.
 const ENABLE_COMMANDS: &str = "To let it run commands later, see https://github.com/atemaguer/supertag/blob/main/docs/operations/cli.md#let-the-lead-run-commands";
 
-fn unsandboxed(harness: Found, ask: Option<&mut Prompter>) -> Result<Commands> {
+fn unsandboxed(harness: Found, ask: Option<&mut Prompter>, state: &Path) -> Result<Commands> {
     Ok(match (harness, ask) {
         (Found::ClaudeCode | Found::Opencode | Found::Cursor, Some(prompter)) => {
             let name = harness.harness();
@@ -1495,7 +1608,8 @@ fn unsandboxed(harness: Found, ask: Option<&mut Prompter>) -> Result<Commands> {
                 outln!("  {}", supertag_worker_host::unsandboxed_caveat(name));
                 if matches!(harness, Found::ClaudeCode) {
                     outln!(
-                        "  Those commands can read a Claude Code sign-in made with /login. With ANTHROPIC_API_KEY in ~/.supertag/.env instead, the key stays in the Worker Host and Claude Code gets a stand-in."
+                        "  Those commands can read a Claude Code sign-in made with /login. With ANTHROPIC_API_KEY in {} instead, the key stays in the Worker Host and Claude Code gets a stand-in.",
+                        state.join(".env").display()
                     );
                 }
                 Commands::Unsandboxed
@@ -1653,7 +1767,7 @@ mod tests {
                 installed: false,
                 signed_in: None,
                 timed_out: false,
-                node: Some(Some("Node.js is not on PATH".into())),
+                node: Some(Some("Node.js: Node.js is not on PATH".into())),
                 version: None,
             },
         ];
@@ -1689,6 +1803,19 @@ mod tests {
         assert_eq!(harnesses[2]["node"]["ok"], false);
         assert!(harnesses[2]["fix_command"].is_null(), "Cursor needs a key");
         assert_eq!(value["state"]["configured"], false);
+        // `--check` without --json reads the same report as text.
+        let text = check_text(&value);
+        assert!(
+            text.starts_with("Repository: /work/app (branch main)\n"),
+            "{text}"
+        );
+        assert!(text.contains("\n  codex: Codex: run codex"), "{text}");
+        assert!(text.contains("\n  claude-code: ready\n"), "{text}");
+        assert!(
+            text.contains("SuperTag: not set up yet in /home/me/.supertag.\n")
+                && text.ends_with("Ready: run supertag init here to set up and start SuperTag.\n"),
+            "{text}"
+        );
 
         // A signed-in harness whose Node can't run is not ready, and says so.
         let facts = [HarnessFact {
@@ -1696,7 +1823,7 @@ mod tests {
             installed: true,
             signed_in: Some(true),
             timed_out: false,
-            node: Some(Some("Node.js is not on PATH".into())),
+            node: Some(Some("Node.js: Node.js is not on PATH".into())),
             version: None,
         }];
         let value = check_report(
