@@ -218,8 +218,11 @@ export function EmptyWorkspace({
   localProblem,
   onLocal,
   starting,
+  localUpgrade,
 }: {
   connected?: boolean;
+  /** The local Gateway runs an older release: the offer to restart it with the app's. */
+  localUpgrade?: ReactNode;
   /** The app is starting this machine's stopped SuperTag services before it connects. */
   starting?: boolean;
   /** Opens the New Tag dialog, when this connection may create Tags. */
@@ -258,14 +261,15 @@ export function EmptyWorkspace({
             <h2>Your Tags, in one place</h2>
             <p>Connect to a SuperTag Gateway to work with your persistent coding agents.</p>
             {localProblem && <p>{localProblem}</p>}
-            {onLocal && (
+            {localUpgrade}
+            {onLocal && !localUpgrade && (
               <Button className="primary" onClick={onLocal}>
                 Connect to Local
               </Button>
             )}
             <Button
-              variant={onLocal ? "outline" : "default"}
-              className={onLocal ? "secondary" : "primary"}
+              variant={onLocal || localUpgrade ? "outline" : "default"}
+              className={onLocal || localUpgrade ? "secondary" : "primary"}
               onClick={onSettings}
             >
               Add Gateway

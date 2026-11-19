@@ -5,8 +5,8 @@ mod onboarding;
 use std::path::PathBuf;
 
 use gateway::{
-    Conversation, Event, FollowUpdate, GatewayActivation, GatewayList, GatewayState, Message,
-    Messages, NewTag, ReadMessages, Tag, TagOptions, WatchUpdate,
+    Conversation, Event, FollowUpdate, GatewayActivation, GatewayList, GatewayState, LocalUpgrade,
+    Message, Messages, NewTag, ReadMessages, Tag, TagOptions, WatchUpdate,
 };
 use tauri::{Manager, State, ipc::Channel, webview::PageLoadEvent};
 
@@ -67,6 +67,43 @@ async fn start_local_services() -> Result<bool, String> {
     }
     local_start::start(&state).await?;
     Ok(true)
+}
+
+/// The older SuperTag release the local Gateway runs, which the app can restart with its own
+/// version; `None` when it runs this app's protocol, a newer release, or not at all.
+#[tauri::command]
+async fn local_gateway_upgrade(
+    state: State<'_, GatewayState>,
+) -> Result<Option<LocalUpgrade>, String> {
+    Ok(state.local_upgrade().await)
+}
+
+/// Restarts the local services that run an older SuperTag release with the app's own CLI:
+/// `supertag down`, then `supertag up` against the same state directory, which migrates the
+/// database. Each step is sent to `on_progress` as it begins.
+#[tauri::command]
+async fn restart_local_services(
+    state: State<'_, GatewayState>,
+    on_progress: Channel<local_start::RestartStep>,
+) -> Result<(), String> {
+    let directory = local_state_directory().ok_or(
+        "Could not locate the local SuperTag state directory. Set HOME or SUPERTAG_STATE_DIR.",
+    )?;
+    // Only an older local release is restarted, or set-up services a failed restart left
+    // stopped; a remote Gateway, or a local one of this or a newer release, is never touched.
+    let running = local_gateway_running(&directory);
+    let restartable = if running {
+        state.local_upgrade().await.is_some()
+    } else {
+        local_start::should_start(Some(&directory), false)
+    };
+    if !restartable {
+        return Err("The local SuperTag does not run an older release, so it was not restarted. Connect to it again.".into());
+    }
+    local_start::restart(&directory, |step| {
+        let _ = on_progress.send(step);
+    })
+    .await
 }
 
 /// What stops the app from running the `supertag` CLI: none installed, or another version than
@@ -453,6 +490,8 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             local_start_needed,
             start_local_services,
             local_cli_problem,
+            local_gateway_upgrade,
+            restart_local_services,
             select_gateway,
             clear_gateway,
             start_gateway_watch,

@@ -9,6 +9,14 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Added
+
+- When the desktop app can't connect because this machine's local services run an older
+  SuperTag release, it offers "Restart SuperTag with VERSION". After a confirmation that running
+  Tasks are interrupted, it runs its bundled `supertag down` and `supertag up` against the same
+  state directory, which migrates the database, shows each step, and connects. A failure shows
+  what the CLI printed. A remote Gateway from another release still gets the error alone.
+
 ### Changed
 
 - SuperTag now speaks protocol 6; 0.3.1 spoke protocol 5. Upgrade the Control Plane, Gateways,

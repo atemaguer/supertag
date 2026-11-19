@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ConnectionDialog } from "./components/connection";
 import { GatewaySelector, gatewayActions } from "./components/gateway-selector";
+import { LocalUpgradeOffer } from "./components/local-upgrade";
 import { Onboarding } from "./components/onboarding";
 import type { SidebarMode } from "./components/sidebar";
 import { EmptyWorkspace, Workspace, WorkspaceShell } from "./components/workspace";
@@ -14,8 +15,10 @@ import {
   type GatewayProfile,
   gatewaySession,
   LOCAL_GATEWAY,
+  type LocalUpgrade,
   nativeGateway,
   nativeSetup,
+  type RestartStep,
   type SetupCheck,
   type Tag,
 } from "./gateway";
@@ -57,6 +60,24 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
   const [setup, setSetup] = useState<{ check: SetupCheck }>();
   /** The address of the local Gateway this window connected to, while it is connected to it. */
   const localAddress = useRef<string | undefined>(undefined);
+  /** The older release the local Gateway runs, when connecting to it was refused for that. */
+  const [upgrade, setUpgrade] = useState<LocalUpgrade>();
+  /** The step a restart of the local services with the app's CLI is on, while it runs. */
+  const [restartStep, setRestartStep] = useState<RestartStep>();
+  const [restartError, setRestartError] = useState("");
+
+  /** Connects to the local Gateway. When it refuses, finds out whether it runs an older
+   * release the app can restart with its own, so the window can offer that. */
+  const connectLocal = useCallback(async () => {
+    try {
+      const activation = await nativeGateway.connectLocal();
+      setUpgrade(undefined);
+      return activation;
+    } catch (error) {
+      setUpgrade((await nativeGateway.localUpgrade().catch(() => null)) ?? undefined);
+      throw error;
+    }
+  }, []);
 
   const activate = useCallback(
     ({ gateways, origin, connectionId, tags, principal }: GatewayActivation) => {
@@ -99,7 +120,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
         const next = saved.active
           ? await nativeGateway.select(saved.active)
           : saved.local?.origin
-            ? await nativeGateway.connectLocal()
+            ? await connectLocal()
             : undefined;
         if (live && next) activate(next);
         // No Gateway at all, and no SuperTag set up here to start: set it up.
@@ -120,7 +141,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
     return () => {
       live = false;
     };
-  }, [activate, initialConnection]);
+  }, [activate, connectLocal, initialConnection]);
 
   // `supertag up` starts the local Gateway on a new address each time, so a window connected to
   // it follows it: it checks the state directory every few seconds, shows when the Gateway is
@@ -172,6 +193,34 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
     }
   }
 
+  /** Restarts the local services with the app's own CLI, then connects to them. */
+  async function restartLocal() {
+    if (pendingSwitch.current || pendingWrites.current > 0) return;
+    pendingSwitch.current = true;
+    setError("");
+    setRestartError("");
+    try {
+      await nativeGateway.restartLocal(setRestartStep);
+    } catch (error) {
+      setRestartError(describe(error));
+      pendingSwitch.current = false;
+      setRestartStep(undefined);
+      return;
+    }
+    setRestartStep(undefined);
+    setSwitching(true);
+    try {
+      const list = await nativeGateway.list();
+      setGateways(list);
+      activate(await connectLocal());
+    } catch (error) {
+      setError(describe(error));
+    } finally {
+      pendingSwitch.current = false;
+      setSwitching(false);
+    }
+  }
+
   function open(profile?: GatewayProfile, button = trigger.current) {
     if (pendingSwitch.current || pendingWrites.current > 0) return;
     opener.current = button;
@@ -202,11 +251,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
     onSelect: (origin: string) => {
       if (origin === connection?.origin) return;
       void change(async () =>
-        activate(
-          await (origin === LOCAL_GATEWAY
-            ? nativeGateway.connectLocal()
-            : nativeGateway.select(origin)),
-        ),
+        activate(await (origin === LOCAL_GATEWAY ? connectLocal() : nativeGateway.select(origin))),
       );
     },
     onEdit: (profile?: GatewayProfile) => open(profile),
@@ -257,7 +302,8 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
           selector={selector}
           actions={actions}
           switching={switching}
-          error={editor ? "" : error}
+          // The restart offer says why the local Gateway was refused.
+          error={editor || upgrade ? "" : error}
         >
           {setup ? (
             <div className="work-area">
@@ -266,7 +312,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
                 initial={setup.check}
                 onReady={() =>
                   void change(async () => {
-                    activate(await nativeGateway.connectLocal());
+                    activate(await connectLocal());
                     setSetup(undefined);
                   })
                 }
@@ -280,8 +326,18 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
               localProblem={gateways.local?.problem}
               onLocal={
                 gateways.local?.origin
-                  ? () => void change(async () => activate(await nativeGateway.connectLocal()))
+                  ? () => void change(async () => activate(await connectLocal()))
                   : undefined
+              }
+              localUpgrade={
+                upgrade && (
+                  <LocalUpgradeOffer
+                    upgrade={upgrade}
+                    step={restartStep}
+                    error={restartError}
+                    onRestart={() => void restartLocal()}
+                  />
+                )
               }
             />
           )}

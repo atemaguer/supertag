@@ -29,6 +29,7 @@ pub mod schedules;
 pub mod task_files;
 mod watch;
 pub use follow::FollowUpdate;
+pub use local::LocalUpgrade;
 pub use new_tag::{NewTag, TagOptions};
 pub use profiles::{GatewayActivation, GatewayList};
 pub use watch::WatchUpdate;

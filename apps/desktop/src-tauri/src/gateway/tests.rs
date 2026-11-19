@@ -919,6 +919,84 @@ async fn the_local_gateway_connects_with_its_current_token_and_is_never_saved() 
     plane.abort();
 }
 
+/// A local Gateway from an older release, such as the 0.3.0 an installed CLI still runs after
+/// the app was upgraded, is offered a restart with the app's version; a remote Gateway, a
+/// Gateway that speaks the app's protocol, and a newer Gateway never are.
+#[cfg(unix)]
+#[tokio::test]
+async fn only_an_older_local_gateway_is_offered_a_restart() {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    let negotiator = |versions: &'static [u32]| async move {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(
+            Server::builder()
+                .add_service(
+                    supertag_protocol::negotiation::Negotiator::new(
+                        v2::ServiceRole::Gateway,
+                        &[v2::ServiceRole::Client],
+                    )
+                    .with_versions(versions)
+                    .service(),
+                )
+                .serve_with_incoming(TcpListenerStream::new(listener)),
+        );
+        (address, server)
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let state_directory = directory.path().join("supertag");
+    let state = GatewayState::new(Some(state_directory.clone()));
+    // Nothing runs locally.
+    assert_eq!(state.local_upgrade().await, None);
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&state_directory)
+        .unwrap();
+    let private = |name: &str, contents: String| {
+        let path = state_directory.join(name);
+        std::fs::write(&path, contents).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    };
+    private(
+        "credentials.json",
+        serde_json::json!({
+            "gateway_credential": supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
+            "operator_token": "e".repeat(64),
+            "host_credential": supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
+        })
+        .to_string(),
+    );
+    let lock =
+        supertag_local_state::open_private_file(&state_directory.join(".lock"), true).unwrap();
+    lock.try_lock().unwrap();
+
+    let (older, older_server) = negotiator(&[2]).await;
+    private("gateway-endpoint", format!("{older}\n"));
+    let offer = serde_json::to_value(state.local_upgrade().await.unwrap()).unwrap();
+    assert_eq!(
+        offer,
+        serde_json::json!({
+            "running": supertag_protocol::negotiation::build_version(),
+            "version": crate::local_start::APP_VERSION,
+        })
+    );
+    // The same Gateway elsewhere is not this machine's: no state directory names it.
+    assert_eq!(GatewayState::new(None).local_upgrade().await, None);
+
+    let (newer, newer_server) = negotiator(&[99]).await;
+    private("gateway-endpoint", format!("{newer}\n"));
+    assert_eq!(state.local_upgrade().await, None);
+
+    let (current, current_server) =
+        negotiator(supertag_protocol::negotiation::PROTOCOL_VERSIONS).await;
+    private("gateway-endpoint", format!("{current}\n"));
+    assert_eq!(state.local_upgrade().await, None);
+    drop(lock);
+    for server in [older_server, newer_server, current_server] {
+        server.abort();
+    }
+}
+
 #[tokio::test]
 async fn an_operator_creates_a_tag_once_with_the_lead_tag_defaults() {
     let directory = tempfile::tempdir().unwrap();

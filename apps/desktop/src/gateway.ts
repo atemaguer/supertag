@@ -304,6 +304,15 @@ export interface LocalGateway {
   problem?: string;
 }
 
+/** The local Gateway runs `running`, an older SuperTag release than this app's `version`. */
+export interface LocalUpgrade {
+  running: string;
+  version: string;
+}
+
+/** What a restart of the local services is doing: `supertag down`, then `supertag up`. */
+export type RestartStep = "stopping" | "starting";
+
 export interface GatewayList {
   profiles: GatewayProfile[];
   active?: string | null;
@@ -420,6 +429,13 @@ export const nativeGateway = {
   /** Why the app can't run the `supertag` CLI (missing, or another version), with the command
    * that installs the right one; null when it can. */
   localCliProblem: () => invoke<string | null>("local_cli_problem"),
+  /** The older release the local Gateway runs, which the app can restart with its own version;
+   * null when it runs this app's protocol, a newer release, or not at all. */
+  localUpgrade: () => invoke<LocalUpgrade | null>("local_gateway_upgrade"),
+  /** Restarts the local services with the app's own CLI: `supertag down`, then `supertag up`
+   * against the same state directory, which migrates the database. */
+  restartLocal: (progress: (step: RestartStep) => void) =>
+    invoke<void>("restart_local_services", { onProgress: new Channel<RestartStep>(progress) }),
   clear: (forget?: string) => invoke<GatewayList>("clear_gateway", { forget }),
   async watch(connectionId: string, watchEpoch: number, receive: (update: WatchUpdate) => void) {
     const onUpdate = new Channel<WatchUpdate>(receive);

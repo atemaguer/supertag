@@ -100,6 +100,15 @@ SuperTag up and opens your conversation with `lead`. On later launches it connec
 SuperTag, and when its services are stopped it shows "Starting SuperTag…" and starts them with
 `supertag up`. If they can't start, it shows what `supertag up` printed and where the logs are.
 
+After you upgrade the app, your local services may still run the release an older `supertag`
+started. The app then can't connect, and offers **Restart SuperTag with VERSION**, its own
+version. It asks first, because Tasks running now are interrupted. Then it runs its bundled
+`supertag down` and `supertag up` against the same state directory (`~/.supertag`, or
+`SUPERTAG_STATE_DIR`), shows each step, and connects. `up` migrates the database, as in
+[Upgrade](#upgrade). If either command fails, the app shows what it printed and where the logs
+are. The app offers this only for the local services, and only when they run an older release. A
+remote Gateway from another release gets the error alone: upgrade it where it runs.
+
 ## Build only the CLI
 
 For a server or container that runs only the Control Plane or a Gateway, or on an Intel Mac,

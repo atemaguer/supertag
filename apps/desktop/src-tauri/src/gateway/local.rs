@@ -4,6 +4,10 @@
 use std::path::Path;
 
 use serde::Serialize;
+use supertag_protocol::{
+    negotiation::{NegotiationError, PROTOCOL_VERSIONS, connect},
+    v2::ServiceRole,
+};
 
 use super::Result;
 
@@ -40,6 +44,42 @@ pub(super) fn status(state: Option<&Path>) -> LocalGateway {
     }
 }
 
+/// The local Gateway runs an older SuperTag release than this app, one the app can restart with
+/// its own CLI: `running` is that release, `version` the app's.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalUpgrade {
+    running: String,
+    version: String,
+}
+
+impl super::GatewayState {
+    /// Whether the local Gateway runs now from an older SuperTag release than this app, which
+    /// speaks only older protocol versions. A Gateway newer than the app, or one whose release
+    /// can't be told, is never offered a restart: the app's CLI would run it backwards.
+    pub async fn local_upgrade(&self) -> Option<LocalUpgrade> {
+        let local = discover(self.2.as_deref()).ok()?;
+        let channel = super::endpoint(&local.url).ok()?.connect().await.ok()?;
+        let mismatch = match connect(channel, ServiceRole::Client, ServiceRole::Gateway).await {
+            Err(NegotiationError::Mismatch(mismatch)) => mismatch,
+            _ => return None,
+        };
+        let running = mismatch.peer_build()?;
+        older(mismatch.peer_versions()?, PROTOCOL_VERSIONS).then(|| LocalUpgrade {
+            running: running.to_owned(),
+            version: crate::local_start::APP_VERSION.to_owned(),
+        })
+    }
+}
+
+/// Whether every protocol version `peer` speaks is older than all of `ours`.
+fn older(peer: &[u32], ours: &[u32]) -> bool {
+    match (peer.iter().max(), ours.iter().min()) {
+        (Some(peer), Some(ours)) => peer < ours,
+        _ => false,
+    }
+}
+
 #[cfg(unix)]
 pub(super) fn discover(state: Option<&Path>) -> Result<Discovered> {
     let state = state.ok_or(
@@ -62,4 +102,18 @@ pub(super) fn discover(state: Option<&Path>) -> Result<Discovered> {
 #[cfg(not(unix))]
 pub(super) fn discover(_: Option<&Path>) -> Result<Discovered> {
     Err("A local Gateway runs only on macOS and Linux.".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::older;
+
+    #[test]
+    fn only_a_release_that_speaks_older_protocols_is_older() {
+        assert!(older(&[2], &[6]));
+        assert!(older(&[2, 5], &[6, 7]));
+        assert!(!older(&[7], &[6]));
+        assert!(!older(&[5, 6], &[6]));
+        assert!(!older(&[], &[6]));
+    }
 }

@@ -10,6 +10,8 @@ use std::{
 
 /// How long `supertag up` may take to report its services ready.
 const UP_LIMIT: Duration = Duration::from_secs(180);
+/// How long `supertag down` may take: it waits up to five minutes for running Task Attempts.
+const DOWN_LIMIT: Duration = Duration::from_secs(360);
 
 /// The command that installs or updates the `supertag` CLI.
 pub const INSTALL_COMMAND: &str =
@@ -205,25 +207,94 @@ fn marked_path(output: &str) -> Option<String> {
     (!path.trim().is_empty()).then(|| path.to_owned())
 }
 
+/// What the app reports while it restarts the local services with its own CLI.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RestartStep {
+    /// `supertag down` is stopping the services that run now.
+    Stopping,
+    /// `supertag up` is starting them again with this app's CLI, migrating the database.
+    Starting,
+}
+
+/// Restarts the local services from `state` with the app's own CLI: `supertag down`, then
+/// `supertag up`, which migrates the database. `step` hears each step as it begins. On failure,
+/// says what the CLI printed and where the logs are.
+pub async fn restart(state: &Path, step: impl Fn(RestartStep)) -> Result<(), String> {
+    let (cli, path) = usable_cli().await?;
+    restart_with(&cli, state, path.as_deref(), step).await
+}
+
+async fn restart_with(
+    cli: &Path,
+    state: &Path,
+    path: Option<&str>,
+    step: impl Fn(RestartStep),
+) -> Result<(), String> {
+    step(RestartStep::Stopping);
+    run(cli, Verb::Down, state, path).await?;
+    step(RestartStep::Starting);
+    up(cli, state, path).await
+}
+
+#[derive(Clone, Copy)]
+enum Verb {
+    Up,
+    Down,
+}
+
+impl Verb {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Up => "up",
+            Self::Down => "down",
+        }
+    }
+
+    fn failure(self) -> &'static str {
+        match self {
+            Self::Up => "Could not start SuperTag",
+            Self::Down => "Could not stop SuperTag",
+        }
+    }
+
+    /// What it says when it outlasts its limit.
+    fn timed_out(self) -> &'static str {
+        match self {
+            Self::Up => "supertag up did not report its services ready in 3 minutes.",
+            Self::Down => "supertag down did not stop the services in 6 minutes.",
+        }
+    }
+
+    fn limit(self) -> Duration {
+        match self {
+            Self::Up => UP_LIMIT,
+            Self::Down => DOWN_LIMIT,
+        }
+    }
+}
+
 async fn up(cli: &Path, state: &Path, path: Option<&str>) -> Result<(), String> {
+    run(cli, Verb::Up, state, path).await
+}
+
+/// Runs `supertag VERB --state-directory STATE`.
+async fn run(cli: &Path, verb: Verb, state: &Path, path: Option<&str>) -> Result<(), String> {
     let logs = state.join("logs");
     let failed = |detail: &str| {
         let detail = detail.trim();
         let detail = if detail.is_empty() {
-            "supertag up stopped without saying why.".to_owned()
+            format!("supertag {} stopped without saying why.", verb.name())
         } else {
             // Its last lines say why; earlier ones are progress.
             let lines: Vec<&str> = detail.lines().collect();
             lines[lines.len().saturating_sub(12)..].join("\n")
         };
-        format!(
-            "Could not start SuperTag:\n{detail}\nLogs: {}",
-            logs.display()
-        )
+        format!("{}:\n{detail}\nLogs: {}", verb.failure(), logs.display())
     };
     let mut command = tokio::process::Command::new(cli);
     command
-        .arg("up")
+        .arg(verb.name())
         .arg("--state-directory")
         .arg(state)
         .stdin(Stdio::null())
@@ -233,9 +304,9 @@ async fn up(cli: &Path, state: &Path, path: Option<&str>) -> Result<(), String> 
     if let Some(path) = path {
         command.env("PATH", path);
     }
-    let output = tokio::time::timeout(UP_LIMIT, command.output())
+    let output = tokio::time::timeout(verb.limit(), command.output())
         .await
-        .map_err(|_| failed("supertag up did not report its services ready in 3 minutes."))?
+        .map_err(|_| failed(verb.timed_out()))?
         .map_err(|error| failed(&format!("could not run {}: {error}", cli.display())))?;
     if output.status.success() {
         return Ok(());
@@ -395,5 +466,62 @@ mod tests {
         let working = tool(root.path(), "working", 0o755);
         std::fs::write(&working, "#!/bin/sh\ntest \"$1\" = up && echo ready\n").unwrap();
         assert_eq!(up(&working, &state, None).await, Ok(()));
+    }
+
+    /// A restart runs `down`, then `up`, both against the same state directory, and reports each
+    /// step as it begins; a failed `down` never starts `up` and says what `down` printed.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_restart_stops_then_starts_the_same_state_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let state = root.path().join("state");
+        let calls = root.path().join("calls");
+        let cli = tool(root.path(), "supertag", 0o755);
+        std::fs::write(
+            &cli,
+            format!("#!/bin/sh\necho \"$*\" >> '{}'\n", calls.display()),
+        )
+        .unwrap();
+        let steps = std::sync::Mutex::new(Vec::new());
+        restart_with(&cli, &state, None, |step| steps.lock().unwrap().push(step))
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&calls).unwrap(),
+            format!(
+                "down --state-directory {0}\nup --state-directory {0}\n",
+                state.display()
+            )
+        );
+        assert_eq!(
+            *steps.lock().unwrap(),
+            [RestartStep::Stopping, RestartStep::Starting]
+        );
+
+        std::fs::remove_file(&calls).unwrap();
+        std::fs::write(
+            &cli,
+            format!(
+                "#!/bin/sh\necho \"$*\" >> '{}'\ntest \"$1\" = down && echo 'Error: drain Worker Host laptop: timed out' >&2 && exit 1\nexit 0\n",
+                calls.display()
+            ),
+        )
+        .unwrap();
+        let steps = std::sync::Mutex::new(Vec::new());
+        let error = restart_with(&cli, &state, None, |step| steps.lock().unwrap().push(step))
+            .await
+            .unwrap_err();
+        assert!(error.starts_with("Could not stop SuperTag:\n"), "{error}");
+        assert!(
+            error.contains("drain Worker Host laptop: timed out"),
+            "{error}"
+        );
+        assert!(
+            std::fs::read_to_string(&calls)
+                .unwrap()
+                .starts_with("down "),
+        );
+        assert_eq!(std::fs::read_to_string(&calls).unwrap().lines().count(), 1);
+        assert_eq!(*steps.lock().unwrap(), [RestartStep::Stopping]);
     }
 }
