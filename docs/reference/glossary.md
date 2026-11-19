@@ -111,8 +111,8 @@ whole system rather than another first-class resource.
   results. See [Worker Hosts, Worklets, Workers, and harnesses](../concepts/workers.md).
 - <a id="worker"></a>**Worker** — what runs one [Task Attempt](#task-attempt): a harness adapter and the harness it
   drives, started by the Worklet in their own process group, with a scratch directory and a
-  token that last only for that Task Attempt. A Worker never holds its Worker Host's credential:
-  its calls carry a [Task Attempt credential](#task-attempt-credential), and its Worklet takes
+  token that last only for that Task Attempt. A Worker's own calls never carry its Worker Host's
+  credential: they carry a [Task Attempt credential](#task-attempt-credential), and its Worklet takes
   every lease action for it.
 - <a id="task-attempt-credential"></a>**Task Attempt credential** — the secret (`stat_…`) the Control Plane returns when a Task
   Attempt starts. It authorizes only that Task Attempt's data calls, such as its events, questions,

@@ -6,6 +6,7 @@
 use std::{path::Path, time::Duration};
 
 use anyhow::{Context, Result};
+use supertag_protocol::redaction::SensitiveValue;
 use supertag_protocol::v2::{
     AppendEventRequest, AskQuestionRequest, AttemptAuthority, AttemptCapabilities, AttemptHistory,
     CommitContextResolutionRequest, ContextResolutionManifest, GetAttemptCapabilitiesRequest,
@@ -35,7 +36,8 @@ use crate::{
 /// lease while an operation or a cleanup runs, lend the harness bridge a `Lease`, report what it
 /// waits for, hand its outcome to the Worklet for Finish, and give the Attempt back before
 /// launch. The Worklet's registration, Control Plane client, host credential, journal, and
-/// checkouts stay behind this handle: a Worker's own calls carry only its Attempt credential.
+/// checkouts stay behind this handle: a Worker's data calls carry only its Attempt credential,
+/// while the lease-bound actions here, and the host storage it lends, are host calls.
 pub(crate) struct Authority<'a> {
     host: &'a mut RegisteredHost,
     token: &'a HostToken,
@@ -298,6 +300,12 @@ impl Lease {
         Ok(request)
     }
 
+    /// The host credential, as a value the harness bridge redacts from what the harness says.
+    /// The harness never receives it, but runs as the OS account whose state directory holds it.
+    pub(crate) fn redaction(&self) -> SensitiveValue {
+        SensitiveValue::High(self.token.secret().to_owned())
+    }
+
     /// Renews the Attempt's lease once; the call carries `timeout`.
     pub(crate) async fn renew(&self, timeout: Duration) -> Result<AttemptAuthority, Status> {
         let request = self.request(timeout)?;
@@ -315,8 +323,9 @@ impl Lease {
             .into_inner())
     }
 
-    /// Reports the execution limits the adapter applied, as the host: whatever credential
-    /// `request` carries is replaced with the host's.
+    /// Reports the execution limits the adapter applied, as the host, for this lease's Attempt:
+    /// whatever credential and Attempt `request` carries are replaced with the host's and the
+    /// lease's.
     pub(crate) async fn report_applied_limits(
         &self,
         mut request: Request<ReportAppliedLimitsRequest>,
@@ -325,6 +334,7 @@ impl Lease {
             .parse::<tonic::metadata::MetadataValue<_>>()
             .map_err(|_| Status::internal("invalid host credential"))?;
         request.metadata_mut().insert("authorization", bearer);
+        request.get_mut().attempt = Some(self.attempt.clone());
         self.host.clone().report_applied_limits(request).await
     }
 }
@@ -616,5 +626,30 @@ mod authority_tests {
         let error = result.expect_err("authority ended");
         assert_eq!(error.message(), "execution authority ended");
         assert!(cancel.is_cancelled());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn the_lease_lends_the_host_credential_only_for_redaction() {
+        let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy();
+        let lease = Lease::unconnected(
+            supertag_protocol::v2::worker_host_client::WorkerHostClient::with_interceptor(
+                channel,
+                crate::HostHeaders::new(1, 2),
+            ),
+            InspectAttemptRequest::default(),
+        );
+        assert_eq!(
+            supertag_protocol::redaction::redact_text(
+                "read host-token from the state directory",
+                &[lease.redaction()],
+                false
+            ),
+            "read [REDACTED] from the state directory"
+        );
     }
 }

@@ -72,7 +72,7 @@ pub use policy::{
     normalize_tag_execution,
 };
 pub use remote_workspaces::validate_manifest_workspace;
-pub use store::{AttemptAccess, HostAuthority, Role, Store, StoreError};
+pub use store::{AttemptAccess, AttemptCall, HostAuthority, Role, Store, StoreError};
 pub use surface_policy::{validate_manifest_account, validate_manifest_location};
 pub use watch::OperatorWatch;
 pub use workspace_landings::{GIT_DELIVERY_PRINCIPAL, LandingClaimer};
@@ -191,11 +191,24 @@ impl ControlPlane {
     /// by its SHA-256; it is resolved here on every call, so a finished, reclaimed, or expired
     /// Attempt, or a revoked or re-registered host, ends it on the next call.
     async fn attempt<T>(&self, request: &Request<T>) -> Result<AttemptAccess, Status> {
+        self.attempt_for(request, AttemptCall::Data).await
+    }
+
+    /// The authority of a presented Attempt credential for a report of what its Attempt did.
+    async fn attempt_report<T>(&self, request: &Request<T>) -> Result<AttemptAccess, Status> {
+        self.attempt_for(request, AttemptCall::Report).await
+    }
+
+    async fn attempt_for<T>(
+        &self,
+        request: &Request<T>,
+        call: AttemptCall,
+    ) -> Result<AttemptAccess, Status> {
         let principal = self.principal(request, supertag_protocol::ATTEMPT_PRINCIPAL_PREFIX)?;
         let digest = hex_digest(&principal[supertag_protocol::ATTEMPT_PRINCIPAL_PREFIX.len()..])
             .ok_or_else(|| Status::permission_denied("invalid caller identity"))?;
         self.store
-            .resolve_attempt_credential(&digest)
+            .resolve_attempt_credential(&digest, call)
             .await?
             .ok_or_else(|| Status::unauthenticated("valid bearer credential required"))
     }
@@ -740,7 +753,7 @@ impl worker_host_server::WorkerHost for ControlPlane {
         &self,
         request: Request<ReportNetworkLogRequest>,
     ) -> Result<Response<ReportNetworkLogResponse>, Status> {
-        let principal = self.attempt(&request).await?;
+        let principal = self.attempt_report(&request).await?;
         self.store
             .report_network_log(&principal, &request.into_inner())
             .await?;
@@ -811,7 +824,7 @@ impl worker_host_server::WorkerHost for ControlPlane {
         &self,
         request: Request<ReportAttemptMilestoneRequest>,
     ) -> Result<Response<ReportAttemptMilestoneResponse>, Status> {
-        let host = self.attempt(&request).await?;
+        let host = self.attempt_report(&request).await?;
         self.store
             .report_attempt_milestone(&host, &request.into_inner())
             .await?;
@@ -834,7 +847,7 @@ impl worker_host_server::WorkerHost for ControlPlane {
         &self,
         request: Request<ReportAttemptUsageRequest>,
     ) -> Result<Response<ReportAttemptUsageResponse>, Status> {
-        let principal = self.attempt(&request).await?;
+        let principal = self.attempt_report(&request).await?;
         self.store
             .report_attempt_usage(&principal, &request.into_inner())
             .await?;

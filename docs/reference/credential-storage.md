@@ -137,11 +137,14 @@ hex digits) for that Task Attempt alone, again storing only its digest. The Work
 Attempt makes its data calls with it, and the Worklet keeps it in the Task Attempt's journal entry
 in the owner-only state directory. It works only while the Worklet holds the lease. Renewing the
 lease extends it. Finishing or reclaiming the Task Attempt, a lapsed lease, revoking the host, the
-host registering again, or a repeated start ends it. A harness adapter never receives it: the
+host registering again, or a repeated start ends it. After a cancellation it still records the
+Task Attempt's usage, milestones, and network log until the Worklet reports that execution
+stopped. A harness adapter never receives it: the
 adapter's bootstrap token works only on its Worker's loopback endpoint.
 
-A host credential is never a CLI flag. The Worker never holds it, and the built-in supervisor
-removes the exact Task Attempt credential and bootstrap token values from harness events and errors. Local-process execution under the same operating-system account is
+A host credential is never a CLI flag. The Worker's own calls never carry it, and the built-in
+supervisor removes the exact host credential, Task Attempt credential, and bootstrap token values
+from harness events and errors. Local-process execution under the same operating-system account is
 not a filesystem security boundary; production deployments must keep the supervisor credential
 outside the Task Attempt sandbox or run the harness under a separately confined identity.
 

@@ -10,10 +10,11 @@ use std::sync::{
 
 use sha2::{Digest, Sha256};
 use sqlx::{Connection, Executor};
-use supertag_control_plane::{AttemptAccess, HostAuthority, Store};
+use supertag_control_plane::{AttemptAccess, AttemptCall, HostAuthority, Store};
 use supertag_protocol::v2::{
-    AppendEventRequest, FinishTaskRequest, InspectAttemptRequest, ReclaimAttemptRequest,
-    StartTaskRequest, SubmitTaskRequest, TaskEventKind,
+    AppendEventRequest, FinishTaskRequest, InspectAttemptRequest, NetworkLog,
+    ReclaimAttemptRequest, ReportNetworkLogRequest, StartTaskRequest, SubmitTaskRequest,
+    TaskEventKind,
 };
 use uuid::Uuid;
 
@@ -67,8 +68,12 @@ async fn started(store: &Store, host: &HostAuthority, operation: &str) -> Starte
 }
 
 async fn resolve(store: &Store, credential: &str) -> Option<AttemptAccess> {
+    resolve_for(store, credential, AttemptCall::Data).await
+}
+
+async fn resolve_for(store: &Store, credential: &str, call: AttemptCall) -> Option<AttemptAccess> {
     store
-        .resolve_attempt_credential(&Sha256::digest(credential.as_bytes()))
+        .resolve_attempt_credential(&Sha256::digest(credential.as_bytes()), call)
         .await
         .unwrap()
 }
@@ -177,6 +182,59 @@ async fn contract(url: &str) {
         .await
         .unwrap();
     assert!(resolve(&store, &reclaimed.credential).await.is_none());
+
+    // Cancelling ends its data calls, but its reports still land, after its lease lapses too,
+    // until its host's Finish confirms execution stopped.
+    let cancelled = started(&store, &host, "cancelled").await;
+    assert!(
+        resolve_for(&store, &cancelled.credential, AttemptCall::Report)
+            .await
+            .is_some()
+    );
+    store.cancel_task(&cancelled.lease.task_id).await.unwrap();
+    assert!(resolve(&store, &cancelled.credential).await.is_none());
+    clock.store(BASE + 3 * LEASE, Ordering::SeqCst);
+    let report = resolve_for(&store, &cancelled.credential, AttemptCall::Report)
+        .await
+        .expect("a cancelled Attempt still reports");
+    store
+        .report_network_log(
+            &report,
+            &ReportNetworkLogRequest {
+                log: Some(NetworkLog::default()),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .get_task(&cancelled.lease.task_id)
+            .await
+            .unwrap()
+            .network_logs
+            .len(),
+        1
+    );
+    store
+        .finish_task(
+            &host,
+            &FinishTaskRequest {
+                task_id: cancelled.lease.task_id.clone(),
+                attempt_id: cancelled.lease.attempt_id.clone(),
+                lease_token: cancelled.lease.lease_token.clone(),
+                succeeded: false,
+                result: "Stopped".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        resolve_for(&store, &cancelled.credential, AttemptCall::Report)
+            .await
+            .is_none(),
+        "Finish ends its reports"
+    );
 
     // A new generation of its host ends it.
     let fenced = started(&store, &host, "fenced").await;

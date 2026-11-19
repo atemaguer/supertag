@@ -64,7 +64,9 @@ table of roles:
 
 A Task Attempt credential names its Task Attempt, so data requests carry no Task Attempt or lease
 fields. It works only while the Worklet holds the Task Attempt's lease, and it never claims,
-starts, renews, or finishes a Task Attempt.
+starts, renews, or finishes a Task Attempt. After a cancellation, `ReportAttemptUsage`,
+`ReportAttemptMilestone`, and `ReportNetworkLog` still accept it until the Worklet's
+`FinishTask` confirms execution stopped.
 
 An application usually runs with an Operator Token of its own, so its changes appear under its
 name in `supertag audit`.

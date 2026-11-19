@@ -23,7 +23,7 @@ mod replica_tests;
 #[path = "slack_threads.rs"]
 mod slack_threads;
 mod sqlite_files;
-pub use attempt_credentials::AttemptAccess;
+pub use attempt_credentials::{AttemptAccess, AttemptCall};
 pub(crate) use authority::ClaimScope;
 pub(crate) use authority::lease_is_live;
 pub use enrollments::Role;

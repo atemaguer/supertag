@@ -21,8 +21,9 @@ Two more terms come up below:
 | Execution environment | Where the Task's files and commands live: a local checkout, an E2B or Modal sandbox, or a shared execution environment |
 
 The Worklet handles control: what to run, and whether it is still allowed to. The Worker handles
-the work. A Worker never holds the Worker Host's credential. It reports with a credential of its
-own that names its one Task Attempt and stops working when the Worklet's lease on it ends.
+the work. A Worker's own calls never carry the Worker Host's credential. It reports with a
+credential of its own that names its one Task Attempt and stops working when the Worklet's lease
+on it ends.
 
 ## Follow one Task
 

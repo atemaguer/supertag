@@ -32,9 +32,10 @@ use crate::{
 };
 
 /// This Worker Host's enrolled credential, which authenticates its lease operations. Only the
-/// Worklet reads it: the handles it lends a Worker (the lease, checkpoint and delivery transfers,
-/// Volume object grants) hold it privately, so a Worker cannot make a host call of its own. A
-/// Worker's data calls carry its Attempt credential instead.
+/// Worklet reads it. The handles it lends a Worker (the lease, checkpoint and delivery transfers,
+/// held artifact transfers, Volume object grants) hold it privately and make host calls with it,
+/// so a Worker cannot read it but does make those host calls through them, until it runs as a
+/// process of its own. A Worker's data calls carry its Attempt credential instead.
 #[derive(Clone)]
 pub(crate) struct HostToken(String);
 

@@ -2,9 +2,11 @@
 //!
 //! Only its SHA-256 is stored, one per Task, bound to the Attempt, its lease, and the Worker Host
 //! generation holding it. It resolves only while the Task still runs that Attempt under that
-//! lease and generation, the lease is live, and the host is not revoked: renewing the lease extends it, and
-//! finishing, reclaiming, lease expiry, revocation, or a new generation ends it without touching
-//! this table. Starting the Attempt again replaces it.
+//! lease and generation, the lease is live, and the host is not revoked: renewing the lease
+//! extends it, and finishing, reclaiming, lease expiry, revocation, or a new generation ends it
+//! without touching this table. Starting the Attempt again replaces it. A cancelled Attempt's
+//! reports (its usage, milestones, and network log) still resolve until its host's Finish
+//! confirms execution stopped, so what it did before it stopped is kept.
 
 use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction};
@@ -74,20 +76,36 @@ pub(super) async fn mint_in(
     Ok(secret)
 }
 
+/// What a presented Attempt credential is used for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttemptCall {
+    /// A data call of the running Attempt: it needs the Task running and the lease live.
+    Data,
+    /// A report of what the Attempt did (usage, a milestone, the network log): it also resolves
+    /// after the Task is cancelled, until the host's Finish confirms execution stopped.
+    Report,
+}
+
 impl Store {
-    /// Resolves the SHA-256 of a presented Attempt credential to the authority it grants. `None`
-    /// when it names no credential, or its Attempt, lease, or host generation is no longer live.
+    /// Resolves the SHA-256 of a presented Attempt credential to the authority it grants for
+    /// `call`. `None` when it names no credential, or its Attempt, lease, or host generation is
+    /// no longer live for that call.
     pub async fn resolve_attempt_credential(
         &self,
         token_digest: &[u8],
+        call: AttemptCall,
     ) -> Result<Option<AttemptAccess>> {
         let Ok(digest) = credential_digest(token_digest) else {
             return Ok(None);
         };
-        let row = sqlx::query("SELECT c.task_id,c.attempt_id,c.lease_token,c.host_id,c.host_generation FROM supertag_v2_attempt_credentials c JOIN supertag_v2_tasks t ON t.task_id=c.task_id AND t.attempt_id=c.attempt_id AND t.lease_token=c.lease_token AND t.host_principal=('host:' || c.host_id) AND t.host_generation=c.host_generation JOIN supertag_v2_hosts h ON h.host_id=c.host_id AND h.generation=c.host_generation AND h.revoked_at_ms IS NULL WHERE c.token_digest=$1 AND t.state=$2 AND t.lease_expires_at_ms>$3")
+        // Cancellation leaves the Attempt bound to its host, which stops renewing the lease; its
+        // Finish sets `cleanup_observed` once execution stopped.
+        let row = sqlx::query("SELECT c.task_id,c.attempt_id,c.lease_token,c.host_id,c.host_generation FROM supertag_v2_attempt_credentials c JOIN supertag_v2_tasks t ON t.task_id=c.task_id AND t.attempt_id=c.attempt_id AND t.lease_token=c.lease_token AND t.host_principal=('host:' || c.host_id) AND t.host_generation=c.host_generation JOIN supertag_v2_hosts h ON h.host_id=c.host_id AND h.generation=c.host_generation AND h.revoked_at_ms IS NULL WHERE c.token_digest=$1 AND ((t.state=$2 AND t.lease_expires_at_ms>$3) OR ($4=1 AND t.state=$5 AND t.cleanup_observed=0))")
             .bind(&digest)
             .bind(TaskState::Running as i64)
             .bind(self.execution_now_ms())
+            .bind(i64::from(call == AttemptCall::Report))
+            .bind(TaskState::Cancelled as i64)
             .fetch_optional(&self.pool)
             .await?;
         let Some(row) = row else {

@@ -515,7 +515,11 @@ pub(crate) async fn execute(
     shutdown: &CancellationToken,
 ) -> Result<HarnessCompleteRequest> {
     let bootstrap_token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-    let secrets = Arc::new(host_secrets(&[attempt_token, &bootstrap_token]));
+    // The host credential stays redacted too: the harness runs as the OS account whose state
+    // directory holds it, so it could read and repeat it.
+    let mut secrets = host_secrets(&[attempt_token, &bootstrap_token]);
+    secrets.push(clients.1.redaction());
+    let secrets = Arc::new(unique_sensitive_values(secrets));
     let mcp_secrets = inputs
         .mcp
         .as_ref()
