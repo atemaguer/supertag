@@ -59,8 +59,8 @@ a container. It enrolls once with an **Auth Key** and keeps its own credential.
 
 Its Worklet is the `supertag worker-host` program, which `supertag up` runs for each host service
 in `supertag.yaml`. The Worklet reports the host's harnesses, models, labels, and concurrency,
-and claims only Tasks of the Tags the host may run. It runs one Worker at a time for each unit of
-concurrency.
+and claims only Tasks of the Tags the host may run. It runs up to `concurrency` Workers of each
+harness at once, and keeps one journal with an entry for each Task Attempt they run.
 
 A host never receives other hosts' credentials or the Control Plane's database credential. It
 holds the harness sign-ins and MCP credentials its Tasks use, and the Worklet passes each Worker
@@ -68,14 +68,20 @@ only its own harness's. See [Run Worker Hosts](../guides/workers.md).
 
 ## Worker, harness, and harness adapter
 
-A Worker exists for one Task Attempt. The Worklet starts it in its own process group, with a
-scratch directory and a token that work only for that Task Attempt, and stops every process it
-left when the Task Attempt ends. The Control Plane gives each Task Attempt a credential when it
-starts. The Worker's events, questions, messages, and other reports carry it, and it cannot claim,
-start, or finish work. It ends with the Task Attempt's lease, so a Worker whose Worklet lost the
-lease can no longer report anything. A Gateway can carry these reports to the Control Plane,
-since the credential alone decides what they may do; for now, Workers send them to the Control
-Plane directly. A Workspace checkout, a Session checkpoint, and captured
+A Worker exists for one Task Attempt. It is a process of its own, which the Worklet starts once it
+has started the Task Attempt and prepared its checkout. The Worker runs the harness in its own
+process group, with a scratch directory and a token that work only for that Task Attempt, and
+stops every process it left when the Task Attempt ends. A Worker dies with its Worklet; the
+Worklet's next start recovers the Task Attempt from its journal.
+
+The Control Plane gives each Task Attempt a credential when it starts. The Worker's events,
+questions, messages, and other reports carry it, and it cannot claim, start, or finish work. It
+ends with the Task Attempt's lease, so a Worker whose Worklet lost the lease can no longer report
+anything. A Worker never holds the host's own credential. It hands its outcome to the Worklet,
+which finishes the Task Attempt, and asks the Worklet for the few host calls its Task Attempt
+needs; the Worklet makes them for that Task Attempt only. A Gateway can carry the Worker's reports
+to the Control Plane, since the credential alone decides what they may do; for now, Workers send
+them to the Control Plane directly. A Workspace checkout, a Session checkpoint, and captured
 artifacts outlast the Worker; the Worklet keeps them.
 
 The harness is the agent system that does the work. The harness adapter connects one Task Attempt

@@ -682,7 +682,7 @@ start of each turn and updates with its file tools. A Tag that keeps memory keep
 memory too, beside its [notes](#memory), across Tasks:
 
 - **Where it lives.** On the Worker Host that ran the turn, in its artifact storage
-  (`--artifact-directory`, by default `artifacts` in its state directory), which every lane of the
+  (`--artifact-directory`, by default `artifacts` in its state directory), which every Worker of the
   host shares, at `tags/<SHA-256 of TAG>/native-memory/HARNESS/SCOPE/current`, beside
   the Tag's Session checkpoints. The Control Plane never holds the files, only a record of what
   each host holds: the revision, file count, size, and a digest.

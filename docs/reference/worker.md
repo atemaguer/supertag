@@ -84,19 +84,43 @@ default and at most 86400; a host whose Workspace runs in an E2B or Modal sandbo
 
 ## The execution journal
 
-Before each step with an effect outside the host, the host records it in its journal: claiming,
-preparing the checkout, running, capturing artifacts, delivering, and finalizing. A restarted host
-reads the journal and finishes or reports what it started, without running a step twice.
+Before each step with an effect outside the host, the Worklet records it in its journal: claiming,
+starting, preparing inputs, executing, finalizing, finishing, and the final cleanup. A Worker
+reports the steps it reaches, and the Worklet records each one before the Worker goes on. A
+restarted Worklet reads the journal and finishes or reports what it started, without running a
+step twice.
 
-A host restarted after it was killed checks the processes it recorded for an interrupted Task
-Attempt. When every one is gone, it records the Task Attempt as failed with an unknown outcome and
+The journal keeps one entry for each slot of the Worklet's pool, beside that slot's checkouts:
+
+```text
+STATE_DIRECTORY/
+  enrollment.json, incarnation, host.lock   the host's identity and the Worklet's lock
+  artifacts/                                artifacts and Workspace deliveries this host holds
+  slots/codex-0/                            one slot: one Task Attempt of one harness at a time
+    attempt.json                            the journal entry; claim.json while a claim is held
+    attempt-processes/, checkpoint.bin      what recovery reads: processes, staged checkpoint
+    workspaces/                             the slot's checkouts
+```
+
+A host service whose harness was removed leaves its slots stranded. The Worklet moves them to
+`STATE_DIRECTORY/retired/` and registers a new incarnation, which fences their Task Attempts.
+
+When a Worker dies, or a Worklet restarts after it was killed, the Worklet checks the processes
+recorded for the interrupted Task Attempt, the Worker's own included. When every one is gone, it records the Task Attempt as failed with an unknown outcome and
 does not run it again. Otherwise, and always for a Task Attempt that used a remote sandbox or
 shared execution, it waits for `supertag task resolve-attempt`. With `--wait-for-recovery`, the
 host stays connected while it waits. See [Scheduling and interrupted execution](scheduling-and-recovery.md).
 
 ## Process supervision
 
-The host starts each adapter in its own process group and stops the group when the Task Attempt
+The Worklet runs each Task Attempt in a Worker, a `supertag` process of its own in its own process
+group. It runs up to `--concurrency` Workers of each harness at once, 1 by default; `supertag up`
+sets it from the host service's `concurrency` and changes it without a restart. A Worker inherits
+one end of a socket pair from its Worklet, and nothing else connects to it. It never receives the
+host credential, in its environment, its arguments, or any message. It exits when its Worklet
+does, and the Worklet kills a Worker that does not stop when asked.
+
+The Worker starts each adapter in its own process group and stops the group when the Task Attempt
 is cancelled, times out, or ends. On Linux it is a child subreaper, so processes that leave the
 adapter's group are still found and stopped. On macOS it finds such processes with a scan every
 100 milliseconds; a process that detaches with a double fork within one scan interval can escape.
@@ -107,7 +131,7 @@ already-running daemon, such as a tmux server or `ssh localhost`, also escapes s
 
 A Task may require limits. A Task whose Tag's harness cannot enforce a requested limit is refused
 when it is submitted. Cursor, OpenCode, and OpenAI Agents enforce none. A Task of a Tag with no
-fixed harness waits for a lane whose harness enforces its limits, and `supertag placement explain`
+fixed harness waits for a host whose harness enforces its limits, and `supertag placement explain`
 names them.
 
 | Limit | Set with | Enforced by |
@@ -187,8 +211,8 @@ mapped with `--workspace-patch ID` (`land: patch`); or, for a remote Workspace, 
 the git server. The host never switches your checkout's branch or changes its files, and leaves a
 branch someone moved outside SuperTag as it is.
 
-The Session's next Task continues from that delivery. On the host that produced it, or another
-lane of that host, it reads the commit from that host's own repository. For a remote Workspace,
+The Session's next Task continues from that delivery. On the host that produced it, in any of
+its slots, it reads the commit from that host's own repository. For a remote Workspace,
 any other host reads the Session's branch from the git server; until the producing host has
 pushed it, the Task Attempt keeps its slot and retries. A local Workspace's Session continues only
 on the host that produced its last delivery, since only that host has its commits: no other host

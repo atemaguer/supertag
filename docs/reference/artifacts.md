@@ -332,7 +332,7 @@ bytes live in up to two places:
 
 A Worker Host's artifact storage is an owner-only directory, one file per Task Attempt and
 SHA-256 digest. For a Worker Host that `supertag up` starts, it is an `artifacts` directory in
-that host's state under `~/.supertag`, shared by all of the host's execution lanes. Keep the
+that host's state under `~/.supertag`, shared by all of the host's Workers. Keep the
 directory on persistent storage, and back it up with the database.
 
 ### How readers reach the bytes

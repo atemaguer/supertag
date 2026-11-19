@@ -2250,7 +2250,9 @@ Options:
 ## `supertag worker-host`
 
 ```text
-Connect a Worker Host and run accepted Tasks through an adapter
+Connect a Worker Host and run accepted Tasks through an adapter.
+
+This is the host's Worklet: it registers the host, claims Tasks, and runs each Task Attempt in a Worker process of its own.
 
 Usage: supertag worker-host [OPTIONS] --control-plane <CONTROL_PLANE> --state-directory <STATE_DIRECTORY>
 
@@ -2433,6 +2435,11 @@ Options:
           Seconds a Task Attempt may run before this host stops it, from 1 through 86400
           
           [default: 3600]
+
+      --concurrency <CONCURRENCY>
+          Task Attempts of each harness this host runs at once: the slots of its Worker pool per harness, from 1 through 16
+          
+          [default: 1]
 
       --once
           Exit after running one Task Attempt

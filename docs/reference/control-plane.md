@@ -55,7 +55,7 @@ turn without a checkpoint starts from a recap of them (see
 [Continuity and recaps](../concepts/tasks.md#continuity-and-recaps)).
 
 The Worklet that ran the turn keeps the checkpoint in its host's artifact storage, which every
-lane of the host shares. The Control Plane records only its holder, size, and digest. Only the holder
+Worker of the host shares. The Control Plane records only its holder, size, and digest. Only the holder
 resumes it:
 
 - The Session's next Task waits up to 10 minutes for the holder while the holder is ready, bound
