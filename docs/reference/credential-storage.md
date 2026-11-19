@@ -117,7 +117,13 @@ compares them in constant time. Operator Tokens (`stop_`) are stored the same wa
 
 A Worker Host enrolls from its own side and keeps its credential in its owner-only state
 directory, outside any checkout a harness can read. Its Worklet uses that credential, and no Worker receives
-it:
+it. When a Task Attempt starts, the Control Plane returns a Task Attempt credential (`stat_` and 64
+hex digits) for that Task Attempt alone, again storing only its digest. The Worker running the Task
+Attempt makes its data calls with it. It works only while the Worklet holds the lease: finishing
+or reclaiming the Task Attempt, a lapsed lease, revoking the host, or the host registering again
+ends it.
+
+
 
 ```bash
 supertag host enroll build-east-1 --control-plane https://supertag.example.com \

@@ -122,6 +122,7 @@ missing from the table is refused.
 | `host:NAME` | Enrolled credential (`stcr_…`) | `supertag host enroll NAME` with a host Auth Key |
 | `gateway:NAME` | Enrolled credential (`stcr_…`) | `supertag gateway enroll NAME` with a gateway Auth Key |
 | `client:NAME` | Enrolled credential (`stcr_…`) | `supertag connect URL` with a client Auth Key, or the terminal UI or desktop app |
+| One running Task Attempt | Task Attempt credential (`stat_…`) | Returned by `StartTask` to the Worker Host that holds the Task Attempt's lease |
 
 An Auth Key (`stak_…`) admits one role, chosen when an operator creates it with
 `supertag auth-key create NAME --role host|gateway|client`. It is accepted only to enroll. The
@@ -134,7 +135,8 @@ credential is refused on the next call and ends open streams within about a seco
 | Admin operator | Everything an operator may, plus Operator Tokens |
 | Operator | Configuration, fleet, recovery, audit, Auth Keys and enrollments, and all work |
 | Client | Tags its Auth Key allows, Teams made only of those Tags, its own conversations and Objectives, and their Inbox items |
-| Worker Host | Execution of the work its Worklet claims, for its current generation |
+| Worker Host | Registration, claims, leases, finishing, checkpoints, and transfers of the work its Worklet claims, for its current generation |
+| Task Attempt | The data calls of the one Task Attempt its credential names, while its lease lives: events, text, questions, usage, milestones, its network log, history and Context Item pins, and the `Attempt…` services. Never a lease operation |
 | Gateway | Connector and reply progress calls for the Surface Accounts that name it. With `--all-tags` on its key, also accounts no Surface Account names and the admin operator's notifications |
 
 A client is a device. It sees only the work it started, never work without an owner, and never
