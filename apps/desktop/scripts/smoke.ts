@@ -4,11 +4,13 @@
  * Linux it also checks that every renderer runs inside Chromium's sandbox, and that the app
  * logged no sandbox error.
  *
- *   tsx apps/desktop/scripts/smoke.ts EXECUTABLE [APP_DIRECTORY]
+ *   tsx apps/desktop/scripts/smoke.ts EXECUTABLE [APP_DIRECTORY] [--expect=TEXT]
  *
  * EXECUTABLE is the app's binary: `SuperTag.app/Contents/MacOS/SuperTag`,
  * `/opt/SuperTag/supertag-desktop`, or Electron itself with the app directory after it. The app
- * runs with a throwaway HOME and state directory and is stopped after.
+ * runs with a throwaway HOME and state directory and is stopped after. The window must settle:
+ * leave "Starting SuperTag…" and "Connecting to Gateway…" within the timeout. With `--expect`, the
+ * settled window must also show TEXT, such as "Set up SuperTag" for a Mac app with its CLI.
  *
  * Playwright drives it over Chromium's DevTools protocol rather than `_electron.launch`, which
  * needs the Node inspector that the packaged app's fuses turn off.
@@ -20,14 +22,19 @@ import path from "node:path";
 import { type Browser, chromium } from "playwright-core";
 import { CHANNELS } from "../electron/channels";
 
-const args = process.argv.slice(2);
+const expected = process.argv.find((arg) => arg.startsWith("--expect="))?.slice("--expect=".length);
+const args = process.argv.slice(2).filter((arg) => !arg.startsWith("--expect="));
 if (args.length === 0) {
-  console.error("Usage: smoke.ts EXECUTABLE [APP_DIRECTORY]");
+  console.error("Usage: smoke.ts EXECUTABLE [APP_DIRECTORY] [--expect=TEXT]");
   process.exit(2);
 }
+/** What the window shows while it is still finding SuperTag. */
+const TRANSIENT = ["Starting SuperTag…", "Connecting to Gateway…"];
 const executable = path.resolve(args[0] as string);
 const appArgs = args.slice(1);
 const TIMEOUT_MS = 60_000;
+// Onboarding shows about 4 s after launch, once `init --check` has run its sign-in probes.
+const SETTLE_MS = 20_000;
 
 function fail(message: string): never {
   throw new Error(message);
@@ -137,9 +144,25 @@ try {
   await page.waitForFunction(() => (document.getElementById("app")?.childElementCount ?? 0) > 0, {
     timeout: TIMEOUT_MS,
   });
-  const text = (await page.locator("#app").innerText()).trim();
+  // Setup checks and the local Gateway can take seconds, so poll until the window settles.
+  const settled = (shown: string) =>
+    shown !== "" &&
+    !TRANSIENT.some((status) => shown.includes(status)) &&
+    (!expected || shown.includes(expected));
+  let text = "";
+  const settleBy = Date.now() + SETTLE_MS;
+  while (Date.now() < settleBy) {
+    text = (await page.locator("#app").innerText()).trim();
+    if (settled(text)) break;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
   if (!text) fail("the window rendered no text");
-  console.log(`window: ${page.url()} shows "${text.split("\n")[0]}"`);
+  const shown = JSON.stringify(text.replace(/\s+/g, " "));
+  if (!settled(text)) {
+    fail(`the window did not settle${expected ? ` on "${expected}"` : ""}; it shows ${shown}`);
+  }
+  const headings = await page.locator("#app h2").allInnerTexts();
+  console.log(`window: ${page.url()} settled on ${JSON.stringify(headings)}`);
 
   const globals = await page.evaluate(() =>
     Object.fromEntries(
@@ -156,11 +179,11 @@ try {
   const api = await page.evaluate(() =>
     Object.keys((window as unknown as { supertag?: object }).supertag ?? {}).sort(),
   );
-  const expected = [...Object.keys(CHANNELS), "onNotificationClick"].sort();
-  if (JSON.stringify(api) !== JSON.stringify(expected)) {
-    fail(`window.supertag is ${JSON.stringify(api)}, expected ${JSON.stringify(expected)}`);
+  const keys = [...Object.keys(CHANNELS), "onNotificationClick"].sort();
+  if (JSON.stringify(api) !== JSON.stringify(keys)) {
+    fail(`window.supertag is ${JSON.stringify(api)}, expected ${JSON.stringify(keys)}`);
   }
-  console.log(`window.supertag: exactly the ${expected.length} expected entries`);
+  console.log(`window.supertag: exactly the ${keys.length} expected entries`);
 
   if (process.platform === "linux") await checkSandbox(home);
   await browser.close().catch(() => {});

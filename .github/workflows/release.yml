@@ -197,7 +197,8 @@ jobs:
           # ditto must have kept every relative symlink of the bridges' pnpm layout.
           broken=$(find "$app/Contents/Resources/supertag" -type l ! -exec test -e {} \; -print | wc -l)
           [ "$broken" -eq 0 ] || { echo "::error::$broken symlinks in the bundled CLI are broken"; exit 1; }
-          pnpm --filter @supertag/desktop smoke "$app/Contents/MacOS/SuperTag"
+          # A fresh home with the bundled CLI opens on setup.
+          pnpm --filter @supertag/desktop smoke "$app/Contents/MacOS/SuperTag" --expect="Set up SuperTag"
           du -sh "$app" "$RUNNER_TEMP/desktop/SuperTag-$VERSION-darwin-arm64.dmg"
       - uses: actions/upload-artifact@v4
         with:

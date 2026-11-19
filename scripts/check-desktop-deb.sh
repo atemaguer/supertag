@@ -11,7 +11,8 @@
 # AppArmor doesn't run, such as in most containers, it launches the app once, on the setuid helper.
 #
 # Run it as a user with passwordless sudo (Chromium never runs sandboxed as root), from a checkout
-# with `pnpm install` done: the launch is apps/desktop's smoke test, under xvfb-run.
+# with `pnpm install` done: the launch is apps/desktop's smoke test, under xvfb-run. The package
+# bundles no CLI, so on a machine without `supertag` the app must open on "Install SuperTag".
 set -euo pipefail
 
 deb=$(realpath "${1:?Usage: check-desktop-deb.sh DEB}")
@@ -37,7 +38,8 @@ fi
 loaded() { sudo grep -q '^supertag-desktop ' /sys/kernel/security/apparmor/profiles; }
 
 launch() {
-  (cd "$repo" && xvfb-run -a pnpm --filter @supertag/desktop smoke "$app/supertag-desktop")
+  (cd "$repo" && xvfb-run -a pnpm --filter @supertag/desktop smoke "$app/supertag-desktop" \
+    --expect="Install SuperTag")
 }
 
 if [[ "$apparmor" == true ]]; then
