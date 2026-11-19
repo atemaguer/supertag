@@ -2,11 +2,7 @@
  * Asking the local Gateway which release it runs, with `supertag-ai`'s own negotiation, so the
  * app's protocol versions stay single-sourced in the SDK.
  */
-import {
-  createGatewayClient,
-  PROTOCOL_VERSIONS,
-  ProtocolMismatchError,
-} from "../../../../sdks/typescript/src/gateway-client";
+import { createGatewayClient, PROTOCOL_VERSIONS, ProtocolMismatchError } from "../gateway/sdk";
 import type { Peer } from "./services";
 
 export { PROTOCOL_VERSIONS };

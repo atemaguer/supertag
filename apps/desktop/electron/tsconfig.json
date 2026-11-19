@@ -15,6 +15,7 @@
   },
   "include": [
     "*.ts",
+    "gateway/*.ts",
     "local/*.ts",
     "../../../sdks/typescript/src/gateway-client.ts",
     "../../../sdks/typescript/src/tunnel.ts",

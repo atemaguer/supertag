@@ -4,9 +4,9 @@
  * commands of the same names (`lib.rs`).
  */
 import type { SetupCheck } from "../../src/gateway";
+import { type LocalDiscovery, readLocalGateway } from "../gateway/local";
 import type { Handlers } from "../ipc";
 import { type AppIdentity, environment, installCommand, usableCli } from "./cli";
-import { type LocalDiscovery, readLocalGateway } from "./discovery";
 import { checkWith, setUpWith } from "./onboarding";
 import { addWorkspace, localUpgrade, type Peer, restart, shouldStart, up } from "./services";
 

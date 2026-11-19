@@ -18,12 +18,14 @@ import {
   type WebContents,
 } from "electron";
 import { NOTIFICATION_CLICK } from "./channels";
-import { handlers, notPorted } from "./handlers";
+import { readLocalGateway } from "./gateway/local";
+import { GatewayState } from "./gateway/state";
+import { handlers } from "./handlers";
 import { originOf, registerChannels, Streams } from "./ipc";
-import type { AppIdentity } from "./local/cli";
+import { type AppIdentity, appCli } from "./local/cli";
 import { PROTOCOL_VERSIONS, probe } from "./local/negotiate";
 import { menuTemplate } from "./menu";
-import { configDirectory } from "./paths";
+import { cacheDirectory, configDirectory, gatewayStore } from "./paths";
 import { APP_ORIGIN, APP_SCHEME, APP_URL, appResponse, contentSecurityPolicy } from "./protocol";
 import { chooseFolder, FOLDER_TITLES, Notifications, webUrl } from "./shell";
 
@@ -71,6 +73,20 @@ const appIdentity: AppIdentity = {
 
 let mainWindow: BrowserWindow | undefined;
 const streams = new Streams();
+
+const gateway = new GatewayState({
+  store: gatewayStore(),
+  cache: cacheDirectory(),
+  buildVersion: app.getVersion(),
+  // The local Gateway, as the app's own CLI reports it.
+  discoverLocal: async () => readLocalGateway(await appCli(appIdentity), appIdentity.env),
+});
+
+/** A reload, a crash or a closed window drops the session, its Watch and its follows. */
+function resetWindow() {
+  streams.endAll();
+  gateway.disconnect();
+}
 const mainContents = (): WebContents | undefined =>
   mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : undefined;
 
@@ -136,12 +152,12 @@ function createWindow() {
   const contents = window.webContents;
   // A reload or a new page drops what the last one opened, as the Tauri app disconnects.
   contents.on("did-start-navigation", (event) => {
-    if (event.isMainFrame && !event.isSameDocument) streams.endAll();
+    if (event.isMainFrame && !event.isSameDocument) resetWindow();
   });
-  contents.on("render-process-gone", () => streams.endAll());
+  contents.on("render-process-gone", resetWindow);
   window.once("ready-to-show", () => window.show());
   window.on("closed", () => {
-    streams.endAll();
+    resetWindow();
     if (mainWindow === window) mainWindow = undefined;
   });
   void window.loadURL(devUrl ? devUrl.href : APP_URL);
@@ -186,16 +202,15 @@ function start() {
         },
         openExternal: (url) => shell.openExternal(url),
         chooseFolder: () => chooseFolder(dialog, mainWindow),
+        reveal: (file) => shell.showItemInFolder(file),
       },
+      { state: gateway, cacheRoot: cacheDirectory() },
       {
         app: appIdentity,
         protocolVersions: PROTOCOL_VERSIONS,
         probe: (url, token) => probe(url, token, app.getVersion()),
         chooseWorkspaceFolder: () => chooseFolder(dialog, mainWindow, FOLDER_TITLES.workspace),
-        // The Gateway backend answers which connection is the local Gateway's.
-        localStateOf: async () => {
-          throw notPorted("addLocalWorkspace");
-        },
+        localStateOf: (connectionId) => gateway.localStateOf(connectionId),
       },
     ),
     { mainWindow: mainContents, trusted, streams },

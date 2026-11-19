@@ -1,7 +1,8 @@
 import type { IpcMainInvokeEvent, WebContents } from "electron";
 import { expect, it, vi } from "vitest";
 import { CHANNELS, type Channel, STREAM_END, STREAM_UPDATE } from "./channels";
-import { handlers, notPorted } from "./handlers";
+import { GatewayState } from "./gateway/state";
+import { handlers } from "./handlers";
 import {
   dispatch,
   type Handlers,
@@ -82,11 +83,15 @@ it("defines an origin for the custom app scheme", () => {
 
 it("registers exactly the table's channels", () => {
   const registered: string[] = [];
-  registerChannels({ handle: (channel) => registered.push(channel) }, handlers(shell(), local()), {
-    mainWindow: () => undefined,
-    trusted,
-    streams: new Streams(),
-  });
+  registerChannels(
+    { handle: (channel) => registered.push(channel) },
+    handlers(shell(), backend(), local()),
+    {
+      mainWindow: () => undefined,
+      trusted,
+      streams: new Streams(),
+    },
+  );
   expect(registered.sort()).toEqual(
     Object.keys(CHANNELS)
       .map((name) => `supertag:${name}`)
@@ -102,6 +107,7 @@ function shell() {
     setBadge: vi.fn(),
     openExternal: vi.fn(async () => {}),
     chooseFolder: vi.fn(async () => "/tmp/project"),
+    reveal: vi.fn(),
   };
 }
 
@@ -118,6 +124,19 @@ function local(): LocalDependencies {
   };
 }
 
+/** A Gateway connection that never connects: nothing here reaches a Gateway or the disk. */
+function backend() {
+  const state = new GatewayState({
+    store: "/nonexistent/gateways.json",
+    cache: "/nonexistent/cache",
+    buildVersion: "test",
+    discoverLocal: async () => {
+      throw "No local Gateway in this test.";
+    },
+  });
+  return { state, cacheRoot: "/nonexistent/cache" };
+}
+
 function setup(table: Handlers) {
   const main = contents("app://supertag/index.html");
   const streams = new Streams();
@@ -129,7 +148,7 @@ function setup(table: Handlers) {
 
 it("refuses an untrusted caller before any handler runs, and malformed arguments", async () => {
   const fake = shell();
-  const { call } = setup(handlers(fake, local()));
+  const { call } = setup(handlers(fake, backend(), local()));
   const remote = contents("https://untrusted.example/");
   expect(await call("openExternal", { url: "https://example.com" }, undefined, remote)).toEqual({
     ok: false,
@@ -143,9 +162,24 @@ it("refuses an untrusted caller before any handler runs, and malformed arguments
 
 it("answers with the handler's value, or its own message, never an internal error", async () => {
   const fake = shell();
-  const { call } = setup(handlers(fake, local()));
+  const { call } = setup(handlers(fake, backend(), local()));
   expect(await call("chooseProjectFolder", {})).toEqual({ ok: true, value: "/tmp/project" });
-  expect(await call("listGateways", {})).toEqual({ ok: false, error: notPorted("listGateways") });
+  // With no CLI, nothing local needs starting.
+  expect(await call("localStartNeeded", {})).toEqual({ ok: true, value: false });
+  // The Gateway channels answer as the Tauri commands did before a connection.
+  const send = { connectionId: "1", tagId: "engineer", text: "hello", operationId: "ipc-test" };
+  expect(await call("sendMessage", send)).toEqual({
+    ok: false,
+    error: "Connect to a Gateway first.",
+  });
+  expect(await call("startGatewayWatch", { connectionId: "1", watchEpoch: 1 }, "s9")).toEqual({
+    ok: false,
+    error: "The connection changed. Refresh this view.",
+  });
+  expect(await call("sendMessage", { ...send, tagId: 7 })).toEqual({
+    ok: false,
+    error: "The app sent an invalid request.",
+  });
   expect(await call("openExternal", { url: "javascript:alert(1)" })).toEqual({
     ok: false,
     error: "Only web links open in the browser.",
@@ -158,7 +192,7 @@ it("answers with the handler's value, or its own message, never an internal erro
 
   const log = vi.spyOn(console, "error").mockImplementation(() => {});
   const broken = {
-    ...handlers(fake, local()),
+    ...handlers(fake, backend(), local()),
     listTags: async () => {
       throw new Error("upstream detail: token abc");
     },
@@ -173,7 +207,7 @@ it("pushes stream updates under the preload's key until the stream ends", async 
   let pushed: ((update: unknown) => void) | undefined;
   const stopped = vi.fn();
   const table: Handlers = {
-    ...handlers(shell(), local()),
+    ...handlers(shell(), backend(), local()),
     async startGatewayWatch(_args, stream) {
       pushed = (update) => stream.send(update as never);
       stream.onEnd(stopped);

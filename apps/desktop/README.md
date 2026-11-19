@@ -34,9 +34,21 @@ same renderer. The Electron shell is in `electron/`: `main.ts` opens the window,
 renderer from `app://supertag/` with its Content Security Policy, and keeps the window on it;
 `preload.ts` exposes `window.supertag`, one method per entry of the channel table in
 `channels.ts`; `ipc.ts` refuses any call that isn't from the main window's own page. In a Tauri
-window, `src-tauri/bridge.ts` provides the same `window.supertag`. The Electron shell connects to
-no Gateway yet: its Gateway, local-services and setup channels answer that they are not yet
-ported.
+window, `src-tauri/bridge.ts` provides the same `window.supertag`. The main process connects to
+Gateways in `electron/gateway/` with `supertag-ai`'s Gateway client, so tokens and Auth Keys stay
+in it, and runs the local services and setup with the app's CLI in `electron/local/`.
+
+The Gateway backend's integration tests run against Control Planes and Gateways started by a
+built CLI, each with throwaway directories and ports:
+
+```sh
+cargo build --manifest-path core/Cargo.toml --locked -p supertag-cli --bin supertag
+SUPERTAG_RUST_TEST_CLI=$PWD/core/target/debug/supertag pnpm vitest run apps/desktop/electron
+```
+
+Run them under Electron's own Node.js as well, which differs from the repository's:
+`ELECTRON_RUN_AS_NODE=1 apps/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron node_modules/vitest/vitest.mjs run apps/desktop/electron`
+(on Linux, `apps/desktop/node_modules/electron/dist/electron`).
 
 ```sh
 pnpm --filter @supertag/desktop build      # renderer, main process and preload

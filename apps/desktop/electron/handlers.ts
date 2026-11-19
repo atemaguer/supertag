@@ -1,9 +1,11 @@
 /**
- * The main process's handler for every channel. The shell's own channels and the local services
- * and onboarding (`local/`) work here; the Gateway connection is still the Tauri app's Rust
- * backend and is ported onto `supertag-ai` next, so until then it refuses with one clear message.
+ * The main process's handler for every channel: the shell's own channels, the Gateway
+ * connection (`gateway/`, on `supertag-ai`), and the local services and onboarding (`local/`,
+ * on the app's CLI).
  */
-import type { Channel, NotificationRequest } from "./channels";
+import type { NotificationRequest } from "./channels";
+import { gatewayHandlers } from "./gateway/handlers";
+import type { GatewayState } from "./gateway/state";
 import type { Handlers } from "./ipc";
 import { type LocalDependencies, localHandlers } from "./local/handlers";
 import { badgeCount, notificationRequest, webUrl } from "./shell";
@@ -13,48 +15,23 @@ export interface Shell {
   setBadge(count: number): void;
   openExternal(url: string): Promise<void>;
   chooseFolder(): Promise<string | null>;
+  /** Shows a file in Finder or the file manager. */
+  reveal(path: string): void;
 }
 
-/** What a channel that is not ported yet answers. */
-export function notPorted(name: Channel): string {
-  return `The Electron desktop app can't do this yet: ${name} is not yet ported.`;
+/** The Gateway connection the window's Gateway channels use, and where it caches. */
+export interface GatewayBackend {
+  state: GatewayState;
+  cacheRoot: string;
 }
 
-export function handlers(shell: Shell, local: LocalDependencies): Handlers {
-  const missing = (name: Channel) => async (): Promise<never> => {
-    throw notPorted(name);
-  };
+export function handlers(
+  shell: Shell,
+  gateway: GatewayBackend,
+  local: LocalDependencies,
+): Handlers {
   return {
-    listGateways: missing("listGateways"),
-    saveGateway: missing("saveGateway"),
-    selectGateway: missing("selectGateway"),
-    connectLocalGateway: missing("connectLocalGateway"),
-    clearGateway: missing("clearGateway"),
-    startGatewayWatch: missing("startGatewayWatch"),
-    stopGatewayWatch: missing("stopGatewayWatch"),
-    listConversations: missing("listConversations"),
-    listMessages: missing("listMessages"),
-    sendMessage: missing("sendMessage"),
-    getMessage: missing("getMessage"),
-    listTaskEvents: missing("listTaskEvents"),
-    markConversationRead: missing("markConversationRead"),
-    startConversationFollow: missing("startConversationFollow"),
-    stopConversationFollow: missing("stopConversationFollow"),
-    listTags: missing("listTags"),
-    tagActivity: missing("tagActivity"),
-    listTagOptions: missing("listTagOptions"),
-    createTag: missing("createTag"),
-    listNotes: missing("listNotes"),
-    deleteNote: missing("deleteNote"),
-    listNetworkLogs: missing("listNetworkLogs"),
-    listSchedules: missing("listSchedules"),
-    changeSchedule: missing("changeSchedule"),
-    locateTaskFiles: missing("locateTaskFiles"),
-    listTaskFiles: missing("listTaskFiles"),
-    readTaskFile: missing("readTaskFile"),
-    revealTaskFile: missing("revealTaskFile"),
-    readCache: missing("readCache"),
-    writeCache: missing("writeCache"),
+    ...gatewayHandlers(gateway.state, { reveal: shell.reveal }, gateway.cacheRoot),
     chooseProjectFolder: () => shell.chooseFolder(),
     ...localHandlers(local),
     async notify(args) {

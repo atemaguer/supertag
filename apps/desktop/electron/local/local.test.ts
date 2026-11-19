@@ -7,6 +7,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
+import { parseLocalGateway } from "../gateway/local";
 import {
   bundledCli,
   cliVersion,
@@ -19,7 +20,6 @@ import {
   usableCli,
   versionMismatch,
 } from "./cli";
-import { parseLocalGateway } from "./discovery";
 import { type LocalDependencies, localHandlers } from "./handlers";
 import { checkWith } from "./onboarding";
 import { jsonOf, MAX_REASON_CHARS, reason } from "./run";
