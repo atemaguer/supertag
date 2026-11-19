@@ -116,7 +116,7 @@ pub async fn run_worker(options: WorkerProcessOptions) -> Result<()> {
     let host = WorkerHostClient::with_interceptor(channel, headers)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
-    Box::pin(
+    let run = Box::pin(
         Worker {
             options: Settings {
                 options: &options.worker,
@@ -142,7 +142,10 @@ pub async fn run_worker(options: WorkerProcessOptions) -> Result<()> {
         }
         .run(assign),
     )
-    .await
+    .await;
+    // The harness's reply may still be on its way to the Control Plane.
+    crate::worker::milestones::flush().await;
+    run
 }
 
 fn failures_remember(credential: &str) {
