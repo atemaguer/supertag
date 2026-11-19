@@ -534,7 +534,15 @@ async fn history_contract(store: &Store, url: &str, host: &supertag_control_plan
         }
         if index == 10 {
             // An orphaned private Task has no audience and cannot contribute history.
-            sqlx::query("DELETE FROM supertag_v2_conversation_messages WHERE task_id=$1")
+            sqlx::query(
+                "DELETE FROM supertag_v2_message_operations WHERE message_id IN
+                     (SELECT message_id FROM supertag_v2_messages WHERE task_id=$1)",
+            )
+            .bind(&task.task_id)
+            .execute(&mut connection)
+            .await
+            .unwrap();
+            sqlx::query("DELETE FROM supertag_v2_messages WHERE task_id=$1")
                 .bind(&task.task_id)
                 .execute(&mut connection)
                 .await

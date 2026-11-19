@@ -225,7 +225,18 @@ async fn a_follow_replays_after_its_cursor_and_resyncs_one_too_old_to_replay() {
         .await
         .unwrap();
     let first = store.send_message(ALICE, &send("0")).await.unwrap();
-    let conversation = first.task.as_ref().unwrap().session_id.clone();
+    // The conversation's own ID, as a client's copy holds it.
+    let conversation = store
+        .list_messages(
+            ALICE,
+            &ListMessagesRequest {
+                tag_id: "engineer".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .conversation_id;
     let mut sent = vec![first];
     // More than a page of messages, which ListMessages holds 32 of.
     for number in 1..=33 {

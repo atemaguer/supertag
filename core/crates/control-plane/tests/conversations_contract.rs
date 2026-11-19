@@ -328,7 +328,9 @@ async fn exercise(database: &str) {
         .await
         .unwrap();
     assert_eq!(all.messages.len(), 3);
-    assert_eq!(all.conversation_id, alice.session_id);
+    // The conversation's ID is its own, not a Session's.
+    assert!(all.conversation_id.starts_with("direct/"), "{all:?}");
+    assert_ne!(all.conversation_id, alice.session_id);
     assert!(!all.incremental);
     assert!(
         all.messages
@@ -355,7 +357,11 @@ async fn exercise(database: &str) {
     let changes = store
         .list_messages(
             ALICE,
-            &since(head_order, &alice.session_id, vec![alice.task_id.clone()]),
+            &since(
+                head_order,
+                &all.conversation_id,
+                vec![alice.task_id.clone()],
+            ),
         )
         .await
         .unwrap();
@@ -373,7 +379,7 @@ async fn exercise(database: &str) {
         .await
         .unwrap();
     let changes = store
-        .list_messages(ALICE, &since(head_order, &alice.session_id, vec![]))
+        .list_messages(ALICE, &since(head_order, &all.conversation_id, vec![]))
         .await
         .unwrap();
     assert!(changes.incremental);
@@ -391,7 +397,7 @@ async fn exercise(database: &str) {
             ALICE,
             &ListMessagesRequest {
                 limit: 1,
-                ..since(1, &alice.session_id, vec![])
+                ..since(1, &all.conversation_id, vec![])
             },
         )
         .await
@@ -407,7 +413,7 @@ async fn exercise(database: &str) {
     assert_eq!(listed.conversations.len(), 1);
     let conversation = &listed.conversations[0];
     assert_eq!(conversation.tag_id, "engineer");
-    assert_eq!(conversation.conversation_id, alice.session_id);
+    assert_eq!(conversation.conversation_id, all.conversation_id);
     assert_eq!(conversation.session_id, alice.session_id);
     assert_eq!(conversation.preview, "Alice newest");
     assert!(!conversation.preview_from_tag);

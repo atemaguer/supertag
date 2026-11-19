@@ -307,6 +307,15 @@ async fn private_work_sessions(
         .bind(&child.task_id).bind(work_session_id).bind(&report.task_id).bind(order).execute(&mut *tx).await?;
     sqlx::query("INSERT INTO supertag_v2_work_session_tasks (task_id,work_session_id,kind) VALUES ($1,$2,2)")
         .bind(&report.task_id).bind(work_session_id).execute(&mut *tx).await?;
+    // The Tag sends the report into the person's conversation, as `work_sessions::reports` does.
+    crate::conversations::append_turn_in(
+        &mut tx,
+        &report,
+        crate::conversations::TurnSender::Tag,
+        None,
+        0,
+    )
+    .await?;
     tx.commit().await?;
 
     for task in [&child, &report] {

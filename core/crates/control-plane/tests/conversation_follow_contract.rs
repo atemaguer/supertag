@@ -87,7 +87,9 @@ async fn exercise(database: &str) {
     let sent_task = sent.task.clone().unwrap();
     let page = next_messages(&mut alice, PUSHED).await;
     assert!(!page.incremental);
-    assert_eq!(page.conversation_id, sent_task.session_id);
+    // The conversation's own ID, which a reconnecting client sends back.
+    assert!(page.conversation_id.starts_with("direct/"), "{page:?}");
+    let conversation_id = page.conversation_id.clone();
     assert_eq!(page.messages.len(), 1);
     assert_eq!(task(&page).task_id, sent_task.task_id);
     assert_eq!(task(&page).state(), TaskState::Queued);
@@ -329,16 +331,22 @@ async fn exercise(database: &str) {
 
     // A reconnecting client with a current copy is told nothing changed.
     let mut again = store
-        .follow_conversation(ALICE, follow(order, &sent_task.session_id))
+        .follow_conversation(ALICE, follow(order, &conversation_id))
         .await
         .unwrap();
     assert_eq!(
         next(&mut again, PUSHED).await.unwrap(),
         FollowConversationResponse::default()
     );
-    // And with a copy from an older order, it gets what it missed.
+    // And with a copy that still holds the turn unfinished, it gets what it missed.
     let mut behind = store
-        .follow_conversation(ALICE, follow(order - 1, &sent_task.session_id))
+        .follow_conversation(
+            ALICE,
+            FollowConversationRequest {
+                refresh_task_ids: vec![sent_task.task_id.clone()],
+                ..follow(order, &conversation_id)
+            },
+        )
         .await
         .unwrap();
     let missed = next_messages(&mut behind, PUSHED).await;

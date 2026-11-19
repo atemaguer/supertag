@@ -524,7 +524,7 @@ pub(crate) async fn joined_in(
 async fn person_message_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> Result<bool> {
     let found: Option<i64> = sqlx::query_scalar(
         "SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM supertag_v2_schedule_fires WHERE task_id=$1)
-            AND (EXISTS (SELECT 1 FROM supertag_v2_conversation_messages WHERE task_id=$1)
+            AND (EXISTS (SELECT 1 FROM supertag_v2_messages WHERE task_id=$1 AND sender_kind=2)
             OR EXISTS (SELECT 1 FROM supertag_v2_slack_messages WHERE task_id=$1)
             OR EXISTS (SELECT 1 FROM supertag_v2_lark_messages WHERE task_id=$1)
             OR EXISTS (SELECT 1 FROM supertag_v2_microsoft_teams_activities WHERE task_id=$1)

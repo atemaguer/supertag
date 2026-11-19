@@ -71,7 +71,7 @@ fn prompt(
 pub(crate) async fn settle_in(
     tx: &mut Transaction<'_, Any>,
     task: &Task,
-    _now_ms: i64,
+    now_ms: i64,
 ) -> Result<()> {
     if !matches!(
         task.state(),
@@ -143,6 +143,15 @@ pub(crate) async fn settle_in(
     }
     sqlx::query("INSERT INTO supertag_v2_work_session_tasks (task_id,work_session_id,kind) VALUES ($1,$2,2)")
         .bind(&report.task_id).bind(&session).execute(&mut **tx).await?;
+    // In a person's conversation, the Tag sends the report.
+    crate::conversations::append_turn_in(
+        tx,
+        &report,
+        crate::conversations::TurnSender::Tag,
+        None,
+        now_ms,
+    )
+    .await?;
     sqlx::query("INSERT INTO supertag_v2_work_session_reports (child_task_id,work_session_id,report_task_id,created_order) VALUES ($1,$2,$3,$4)")
         .bind(&task.task_id).bind(&session).bind(&report.task_id).bind(order).execute(&mut **tx).await?;
     // The route is an immutable copy. No mutable connector subscription or location

@@ -665,7 +665,7 @@ async fn continue_in(tx: &mut Transaction<'_, Any>, task_id: &str, now: i64) -> 
         {
             Ok(value) => value,
             Err(StoreError::FailedPrecondition(_)) => {
-                return budget_stop_in(tx, &source, scope.as_ref()).await;
+                return budget_stop_in(tx, &source, scope.as_ref(), now).await;
             }
             Err(error) => return Err(error),
         }
@@ -738,17 +738,17 @@ async fn continue_in(tx: &mut Transaction<'_, Any>, task_id: &str, now: i64) -> 
     objective_link_task_in(tx, &task).await?;
     // A continuation of a private Conversation remains private and visible in
     // that owner's conversation history, regardless of the decision transport.
-    let owner: Option<String> = sqlx::query_scalar(
-        "SELECT principal FROM supertag_v2_conversation_sessions WHERE session_id=$1 AND tag_id=$2",
+    crate::conversations::append_turn_in(
+        tx,
+        &task,
+        crate::conversations::TurnSender::Person,
+        Some((
+            &format!("approval-continuation:{}", task.task_id),
+            &digest(&task_id)?,
+        )),
+        now,
     )
-    .bind(&source.session_id)
-    .bind(&source.tag_id)
-    .fetch_optional(&mut **tx)
     .await?;
-    if let Some(owner) = owner {
-        sqlx::query("INSERT INTO supertag_v2_conversation_messages (task_id,session_id,principal,operation_id,request_digest,accepted_order) VALUES ($1,$2,$3,$4,$5,$6)")
-            .bind(&task.task_id).bind(&source.session_id).bind(owner).bind(format!("approval-continuation:{}",task.task_id)).bind(digest(&task_id)?).bind(order).execute(&mut **tx).await?;
-    }
     sqlx::query("UPDATE supertag_v2_approval_waits SET continuation_task_id=$1 WHERE task_id=$2 AND continuation_task_id IS NULL").bind(&task.task_id).bind(task_id).execute(&mut **tx).await?;
     Ok(())
 }
@@ -759,6 +759,7 @@ async fn budget_stop_in(
     tx: &mut Transaction<'_, Any>,
     source: &supertag_protocol::v2::Task,
     scope: Option<&crate::work_sessions::WorkSessionTaskScope>,
+    now: i64,
 ) -> Result<()> {
     let order = crate::store::next_order(tx).await?;
     let prompt = "This Session was not continued after the operator's approval decision because too little of its reported budget remains. Report this limit and wait for a new allowance from the operator.";
@@ -788,8 +789,26 @@ async fn budget_stop_in(
     let event = format!("approval-budget-stop:{}", source.task_id);
     let route_digest = format!("{:x}", Sha256::digest(event.as_bytes()));
     sqlx::query("INSERT INTO supertag_v2_inbound_events (account_id,event_id,request_digest,task_id,conversation_id,thread_id) SELECT account_id,$1,$2,$3,conversation_id,thread_id FROM supertag_v2_inbound_events WHERE task_id=$4").bind(&event).bind(&route_digest).bind(&notice.task_id).bind(&source.task_id).execute(&mut **tx).await?;
+    // In a person's conversation: a stop of the person's own turn is theirs; one in a Work
+    // Session's report is the Tag's notice, beside the report.
     if scope.is_none() {
-        sqlx::query("INSERT INTO supertag_v2_conversation_messages (task_id,session_id,principal,operation_id,request_digest,accepted_order) SELECT $1,session_id,principal,$2,$3,$4 FROM supertag_v2_conversation_sessions WHERE session_id=$5 AND tag_id=$6").bind(&notice.task_id).bind(event).bind(route_digest).bind(order).bind(&source.session_id).bind(&source.tag_id).execute(&mut **tx).await?;
+        crate::conversations::append_turn_in(
+            tx,
+            &notice,
+            crate::conversations::TurnSender::Person,
+            Some((&event, &route_digest)),
+            now,
+        )
+        .await?;
+    } else {
+        crate::conversations::append_turn_in(
+            tx,
+            &notice,
+            crate::conversations::TurnSender::Tag,
+            None,
+            now,
+        )
+        .await?;
     }
     sqlx::query("INSERT INTO supertag_v2_approval_continuation_stops (task_id,reason,notice_task_id) VALUES ($1,'budget',$2)").bind(&source.task_id).bind(&notice.task_id).execute(&mut **tx).await?;
     Ok(())

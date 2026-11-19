@@ -239,7 +239,7 @@ For a coding agent that operates SuperTag from a separate conversation, see
 ## Check that it worked
 
 Your conversation shows under its Tag with its latest message, and the
-desktop app marks replies you have not read. The desktop app's Dock badge counts them; see [Notifications in the apps](#notifications-in-the-apps). An Objective's conversation is titled by the Objective. A work Session the Tag started appears
+desktop app marks replies you have not read. The desktop app's Dock badge counts them; see [Notifications in the apps](#notifications-in-the-apps). What you have read is kept once for each conversation, so reading a reply in one app clears it in the others. An Objective's conversation is titled by the Objective. A work Session the Tag started appears
 beneath the conversation that started it; `supertag get session --parent-tag lead --parent-session SESSION_ID`
 lists them, and `supertag describe session ID` shows one with its latest Task and report.
 

@@ -92,7 +92,8 @@ async fn contract(url: String) {
         .map(|message| message.task.as_ref().unwrap().task_id.as_str())
         .collect();
     assert_eq!(ids, ["t3", "t2", "t1"]);
-    assert_eq!(page.conversation_id, "conversation/a");
+    // The conversation has its own ID now, so a client's copy is replaced.
+    assert!(page.conversation_id.starts_with("direct/"), "{page:?}");
     assert_eq!(page.messages[2].sent_at_ms, 1000);
     // Every earlier Task keeps its audience.
     store.get_message(ALICE, "owner", "t2").await.unwrap();

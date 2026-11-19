@@ -58,6 +58,7 @@ pub(crate) async fn continue_in(
                 &session,
                 objective.as_deref(),
                 "permissions",
+                now,
             )
             .await;
         }
@@ -80,6 +81,7 @@ pub(crate) async fn continue_in(
                 &session,
                 objective.as_deref(),
                 "budget",
+                now,
             )
             .await;
         }
@@ -108,6 +110,7 @@ async fn stop_in(
     session: &str,
     objective: Option<&str>,
     reason: &str,
+    now: i64,
 ) -> Result<()> {
     let order = next_order(tx).await?;
     let prompt = format!(
@@ -127,6 +130,15 @@ async fn stop_in(
         sqlx::query("INSERT INTO supertag_v2_objective_tasks (task_id,objective_id,kind) VALUES ($1,$2,'notice')").bind(&notice.task_id).bind(id).execute(&mut **tx).await?;
     }
     sqlx::query("INSERT INTO supertag_v2_work_session_tasks (task_id,work_session_id,kind) VALUES ($1,$2,2)").bind(&notice.task_id).bind(session).execute(&mut **tx).await?;
+    // In a person's conversation, the Tag sends the notice beside its reports.
+    crate::conversations::append_turn_in(
+        tx,
+        &notice,
+        crate::conversations::TurnSender::Tag,
+        None,
+        now,
+    )
+    .await?;
     let event = format!("work-session-approval-stop:{}", source.task_id);
     let digest = format!("{:x}", Sha256::digest(event.as_bytes()));
     sqlx::query("INSERT INTO supertag_v2_inbound_events (account_id,event_id,request_digest,task_id,conversation_id,thread_id) SELECT account_id,$1,$2,$3,conversation_id,thread_id FROM supertag_v2_inbound_events WHERE task_id=$4").bind(event).bind(digest).bind(&notice.task_id).bind(&starter.task_id).execute(&mut **tx).await?;

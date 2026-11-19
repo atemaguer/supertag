@@ -1110,9 +1110,15 @@ async fn queue_turn_in(
                 Some(session) => session,
                 None => {
                     let order = next_order(tx).await?;
-                    sqlx::query("INSERT INTO supertag_v2_conversation_sessions (session_id,principal,tag_id,created_order) VALUES ($1,$2,$3,$4)")
-                        .bind(&schedule.session_id).bind(principal).bind(&schedule.tag_id).bind(order)
-                        .execute(&mut **tx).await?;
+                    crate::conversations::open_session_in(
+                        tx,
+                        principal,
+                        &schedule.tag_id,
+                        &schedule.session_id,
+                        order,
+                        now,
+                    )
+                    .await?;
                     schedule.session_id.clone()
                 }
             }
@@ -1127,10 +1133,16 @@ async fn queue_turn_in(
         .bind(&task.tag_id).bind(&task.session_id).execute(&mut **tx).await?;
     let operation = format!("schedule/{}/{due}", schedule.schedule_id);
     match &schedule.audience {
-        Some(principal) => {
-            sqlx::query("INSERT INTO supertag_v2_conversation_messages (task_id,session_id,principal,operation_id,request_digest,accepted_order) VALUES ($1,$2,$3,$4,'',$5)")
-                .bind(&task.task_id).bind(&session).bind(principal).bind(&operation).bind(order)
-                .execute(&mut **tx).await?;
+        // The Tag sends a Schedule's turn into the conversation.
+        Some(_) => {
+            crate::conversations::append_turn_in(
+                tx,
+                &task,
+                crate::conversations::TurnSender::Tag,
+                Some((&operation, "")),
+                now,
+            )
+            .await?;
         }
         None => {
             // A surface thread's Schedule answers in the thread its turn came from.

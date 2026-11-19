@@ -65,6 +65,11 @@ within the pre-1.0 compatibility policy described in
   on a local-vm host, and says how to remove it. The desktop app's New Tag form has a **Web
   access** switch, on by default. A Tag without `web:fetch` hears so at the start of each turn, so
   it names the missing permission instead of refusing vaguely.
+- A person's conversation with a Tag numbers its own messages from 1, and its
+  `conversation_id` no longer names a Session. Upgrading gives every conversation a new ID, so the
+  terminal UI, the desktop app, and other clients read each conversation again once. Your read
+  mark is kept once per conversation for all of your clients, and `ListConversations` counts
+  unread replies from that mark and ranks conversations by when they were last active.
 - A Gateway no longer polls for replies once a second. `ClaimReply` takes `wait_ms`, and the
   Control Plane holds a claim that finds no due reply until one is due, for at most 8 seconds,
   then answers empty. A held claim writes nothing while it waits, so an idle Surface account no

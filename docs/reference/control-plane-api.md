@@ -153,17 +153,24 @@ worked, and its latest activity or plan. One call renders a page; a client needs
 message. When a turn's messages exceed the page's share, the oldest are left out and
 `events_truncated` is set.
 
+Each conversation numbers its own messages: the first is `order` 1, and each later message,
+whether yours, a Schedule's turn, or a Work Session's report, takes the next number. A Schedule's
+post held for pacing takes its number when it reaches the conversation, after the messages you
+already saw. The `conversation_id` is the conversation's own and does not name a Session.
+
 A client that keeps a copy reads only what changed: it passes the `conversation_id` the copy came
 from, the latest `order` it holds as `after`, and its unfinished turns as `refresh_task_ids`. The
 response then sets `incremental` and holds the newer messages and those turns. When the
 conversation was replaced, or more than a page arrived since, the response is the newest page
-instead, which replaces the copy.
+instead, which replaces the copy. Upgrading the Control Plane to this numbering gave every
+conversation a new `conversation_id`, so each client reads its conversations again once.
 
 A conversation leaves out turns that finished quietly ([quiet results](coordination.md#quiet-results)).
 A refreshed turn that ended that way comes back with `Task.quiet` set, so a client that held it
 running drops it.
 
-`Conversations.ListConversations` lists your conversations, one per Tag, the latest active first.
+`Conversations.ListConversations` lists your conversations, one per Tag, the most recently active
+first.
 Each has a preview of its latest message, when it was active, how many finished replies you have
 not read, whether one of its Tasks is queued or running, and `asking` when its latest message is
 the Tag's question still waiting for an answer. Quiet turns count in none of these, and a
@@ -172,7 +179,10 @@ Schedule's turn counts only once it finishes or a person's message joins it. Whi
 once it finishes, or at once when a message's `live_input` names it as the turn the message
 joins. Clients use
 the list for notifications and badges. `MarkConversationRead` records the
-latest finished turn you have read.
+latest finished turn you have read. You have one read mark per conversation, shared by all of your
+clients: reading on one device clears the badge on the others, and the mark never moves back.
+Unread counts only the turns after your mark, so the list costs the same however long the
+conversation is.
 
 ## Follow a conversation
 

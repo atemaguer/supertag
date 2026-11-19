@@ -16,6 +16,7 @@ use uuid::Uuid;
 use crate::{
     ControlPlane, Store, StoreError,
     inputs::inputs_for_followers_in,
+    messages::{self, Member, OperationScope},
     objectives::{objective_admission_in, objective_link_task_in},
     store::{
         ID_BATCH, Result, insert_task_with_requirements, invalid, name, next_order,
@@ -180,29 +181,39 @@ impl Store {
         }
         let digest = output_policy_digest(digest, output_policy.as_ref())?;
         let (mut tx, order) = self.write().await?;
-        let prior = sqlx::query("SELECT task_id,request_digest,accepted_order FROM supertag_v2_conversation_messages WHERE principal=$1 AND operation_id=$2")
-            .bind(principal).bind(&input.operation_id).fetch_optional(&mut *tx).await?;
-        if let Some(prior) = prior {
-            if prior.try_get::<String, _>("request_digest")? != digest {
+        let prior = messages::operation_in(
+            &mut tx,
+            OperationScope::Conversation,
+            principal,
+            &input.operation_id,
+        )
+        .await?;
+        if let Some((prior_digest, message_id)) = prior {
+            if prior_digest != digest {
                 return Err(StoreError::Conflict(
                     "operation ID was used with a different message".into(),
                 ));
             }
+            let prior = messages::message_by_id_in(&mut tx, &message_id)
+                .await?
+                .ok_or_else(|| StoreError::NotFound("Message was not found".into()))?;
             let entry = HistoryEntry {
-                task_id: prior.try_get("task_id")?,
+                task_id: prior
+                    .task_id
+                    .ok_or_else(|| StoreError::NotFound("Task was not found".into()))?,
                 report_id: None,
-                order: prior.try_get("accepted_order")?,
+                order: prior.seq,
             };
             let message = message_in(&mut tx, entry).await?;
             tx.rollback().await?;
             return Ok(message);
         }
 
+        let now = self.execution_now_ms();
         let previous = session_in(&mut tx, principal, &input.tag_id).await?;
         let session = previous
             .clone()
             .unwrap_or_else(|| format!("{SESSION_PREFIX}{}", Uuid::new_v4()));
-        let now = self.execution_now_ms();
         objective_admission_in(&mut tx, &input.tag_id, &session, now).await?;
         let task = insert_task_with_requirements(
             &mut tx,
@@ -215,24 +226,17 @@ impl Store {
         .await?;
         objective_link_task_in(&mut tx, &task).await?;
         if previous.is_none() {
-            sqlx::query("INSERT INTO supertag_v2_conversation_sessions (session_id,principal,tag_id,created_order) VALUES ($1,$2,$3,$4)")
-                .bind(&session).bind(principal).bind(&input.tag_id)
-                .bind(order).execute(&mut *tx).await?;
+            open_session_in(&mut tx, principal, &input.tag_id, &session, order, now).await?;
         }
 
         // Posts held for this person go out first, so the Tag's answer follows what they saw.
-        let order = if crate::attention::release_in(
+        crate::attention::release_in(
             &mut tx,
             &input.tag_id,
             &format!("conversation:{principal}"),
             now,
         )
-        .await?
-        {
-            next_order(&mut tx).await?
-        } else {
-            order
-        };
+        .await?;
         // As recorded, so a replay of this send returns the same message.
         let sent_at: Option<i64> =
             sqlx::query_scalar("SELECT accepted_at_ms FROM supertag_v2_tasks WHERE task_id=$1")
@@ -240,9 +244,15 @@ impl Store {
                 .fetch_one(&mut *tx)
                 .await?;
         let sent_at = sent_at.unwrap_or_default();
-        sqlx::query("INSERT INTO supertag_v2_conversation_messages (task_id,session_id,principal,operation_id,request_digest,accepted_order) VALUES ($1,$2,$3,$4,$5,$6)")
-            .bind(&task.task_id).bind(&session).bind(principal).bind(&input.operation_id).bind(digest)
-            .bind(order).execute(&mut *tx).await?;
+        let seq = append_turn_in(
+            &mut tx,
+            &task,
+            TurnSender::Person,
+            Some((&input.operation_id, &digest)),
+            now,
+        )
+        .await?
+        .ok_or_else(|| StoreError::NotFound("Conversation was not found".into()))?;
         // `/goal <outcome>` creates the Objective here: the Tag owns it, this conversation is its
         // home, and the Control Plane answers the message itself.
         if let Some(goal) = goal_command(&input.text) {
@@ -251,7 +261,7 @@ impl Store {
             let entry = HistoryEntry {
                 task_id: task.task_id,
                 report_id: None,
-                order,
+                order: seq,
             };
             let message = message_in(&mut tx, entry).await?;
             tx.commit().await?;
@@ -261,10 +271,12 @@ impl Store {
         let live_input =
             crate::inputs::fold_in(&mut tx, principal, &operation, &task, order, now).await?;
         tx.commit().await?;
-        Ok(sent(task, live_input, order, sent_at))
+        Ok(sent(task, live_input, seq, sent_at))
     }
 
-    /// The caller's conversations, the latest active first, in a fixed number of queries.
+    /// The caller's conversations, the latest active first, in a fixed number of queries. Each
+    /// count reads only what it needs: unread turns are the range after the caller's read mark, the
+    /// latest turn is found from the newest, and work is the conversation's unfinished Tasks.
     pub async fn list_conversations(
         &self,
         principal: &str,
@@ -273,16 +285,42 @@ impl Store {
         operator(principal)?;
         let allowed = self.client_tags(principal).await?;
         let mut tx = self.pool.begin().await?;
-        let sessions = sqlx::query(
-            "SELECT tag_id,session_id,created_order FROM supertag_v2_conversation_sessions
-             WHERE principal=$1 ORDER BY created_order",
-        )
+        // A Schedule's turn counts once it finished, or once a person's message joined it: it may
+        // stay quiet, so until then it is neither the latest message nor work the conversation
+        // shows.
+        let rows = sqlx::query(&format!(
+            "SELECT mb.conversation_id,mb.read_seq,tag.member_id AS tag_id,
+                    (SELECT m.seq FROM supertag_v2_messages m
+                     JOIN supertag_v2_tasks t ON t.task_id=m.task_id AND t.quiet=0
+                     WHERE m.conversation_id=mb.conversation_id AND m.task_id IS NOT NULL
+                       AND {not_held} AND {shown}
+                     ORDER BY m.seq DESC LIMIT 1) AS latest_seq,
+                    (SELECT COUNT(*) FROM supertag_v2_messages m
+                     JOIN supertag_v2_tasks t ON t.task_id=m.task_id AND t.quiet=0
+                     WHERE m.conversation_id=mb.conversation_id AND m.seq>mb.read_seq
+                       AND m.task_id IS NOT NULL AND {not_held}
+                       AND (t.state IN ({FINISHED}) OR (t.state=2 AND t.result IS NOT NULL))) AS unread,
+                    (SELECT COUNT(*) FROM supertag_v2_conversation_sessions s
+                     JOIN supertag_v2_tasks t ON t.tag_id=s.tag_id AND t.session_id=s.session_id
+                         AND t.state IN ({UNFINISHED}) AND t.quiet=0
+                     JOIN supertag_v2_messages m ON m.task_id=t.task_id
+                         AND m.conversation_id=s.conversation_id
+                     WHERE s.conversation_id=mb.conversation_id
+                       AND NOT (t.state=2 AND t.result IS NOT NULL) AND {shown}) AS working
+             FROM supertag_v2_conversation_members mb
+             JOIN supertag_v2_conversations c ON c.conversation_id=mb.conversation_id AND c.kind=1
+             JOIN supertag_v2_conversation_members tag ON tag.conversation_id=mb.conversation_id
+                 AND tag.member_kind=1
+             WHERE mb.member_kind=2 AND mb.member_id=$1",
+            not_held = crate::attention::NOT_HELD,
+            shown = SCHEDULE_SHOWN,
+        ))
         .bind(principal)
         .fetch_all(&mut *tx)
         .await?;
-        let mut conversations: std::collections::BTreeMap<String, Conversation> =
-            Default::default();
-        for row in sessions {
+        let mut conversations: std::collections::HashMap<String, Conversation> = Default::default();
+        let mut latest_seqs = Vec::with_capacity(rows.len());
+        for row in rows {
             let tag_id: String = row.try_get("tag_id")?;
             if allowed
                 .as_ref()
@@ -290,64 +328,37 @@ impl Store {
             {
                 continue;
             }
-            let session_id: String = row.try_get("session_id")?;
-            conversations
-                .entry(tag_id.clone())
-                .or_insert_with(|| Conversation {
+            let conversation_id: String = row.try_get("conversation_id")?;
+            let latest: Option<i64> = row.try_get("latest_seq")?;
+            if let Some(latest) = latest {
+                latest_seqs.push((conversation_id.clone(), latest));
+            }
+            conversations.insert(
+                conversation_id.clone(),
+                Conversation {
                     tag_id,
-                    conversation_id: session_id,
+                    conversation_id,
+                    latest_order: latest.unwrap_or_default() as u64,
+                    read_order: row.try_get::<i64, _>("read_seq")? as u64,
+                    working: row.try_get::<i64, _>("working")? > 0,
+                    unread_count: row.try_get::<i64, _>("unread")?.try_into().unwrap_or(0),
                     ..Default::default()
-                });
+                },
+            );
         }
-        // Per conversation: its latest message, its unfinished Tasks, and its finished turns
-        // after the read mark. A Schedule's turn counts once it finished, or once a person's
-        // message joined it: it may stay quiet, so until then it is neither the latest message
-        // nor work the conversation shows.
-        let rows = sqlx::query(&format!(
-            "SELECT c.tag_id,MAX(h.accepted_order) AS latest_order,
-                    SUM(CASE WHEN t.state IN ({UNFINISHED}) AND NOT (t.state=2 AND t.result IS NOT NULL) THEN 1 ELSE 0 END) AS working,
-                    SUM(CASE WHEN (t.state IN ({FINISHED}) OR (t.state=2 AND t.result IS NOT NULL))
-                             AND h.accepted_order>COALESCE(r.read_order,0)
-                        THEN 1 ELSE 0 END) AS unread,
-                    COALESCE(MAX(r.read_order),0) AS read_order
-             FROM supertag_v2_conversation_sessions c
-             JOIN supertag_v2_conversation_history h ON h.session_id=c.session_id
-             JOIN supertag_v2_tasks t ON t.task_id=h.task_id AND t.quiet=0
-             LEFT JOIN supertag_v2_conversation_reads r ON r.principal=c.principal AND r.tag_id=c.tag_id
-             WHERE c.principal=$1 AND {not_held}
-               AND NOT (t.state IN ({UNFINISHED})
-                        AND EXISTS (SELECT 1 FROM supertag_v2_schedule_fires f WHERE f.task_id=t.task_id)
-                        AND NOT EXISTS (SELECT 1 FROM supertag_v2_live_inputs i
-                                        WHERE i.task_id=t.task_id AND i.state IN ({JOINING})))
-             GROUP BY c.tag_id",
-            not_held = crate::attention::NOT_HELD
-        ))
-        .bind(principal)
-        .fetch_all(&mut *tx)
-        .await?;
-        let mut latest_orders = Vec::with_capacity(rows.len());
-        for row in rows {
-            let Some(conversation) = conversations.get_mut(&row.try_get::<String, _>("tag_id")?)
-            else {
-                continue;
-            };
-            let latest: i64 = row.try_get("latest_order")?;
-            conversation.latest_order = latest as u64;
-            conversation.read_order = row.try_get::<i64, _>("read_order")? as u64;
-            conversation.working = row.try_get::<i64, _>("working")? > 0;
-            conversation.unread_count = row.try_get::<i64, _>("unread")?.try_into().unwrap_or(0);
-            latest_orders.push(latest);
-        }
-        let latest = history_at_orders_in(&mut tx, &latest_orders).await?;
-        let ids: Vec<&str> = latest.iter().map(|entry| entry.task_id.as_str()).collect();
+        let latest = history_at_seqs_in(&mut tx, &latest_seqs).await?;
+        let ids: Vec<&str> = latest
+            .iter()
+            .map(|(_, entry)| entry.task_id.as_str())
+            .collect();
         let tasks = tasks_in(&mut tx, &ids).await?;
         let fired = crate::schedules::fired_by_in(&mut tx, &ids).await?;
         let asking = open_questions_in(&mut tx, &ids).await?;
-        for entry in &latest {
+        for (conversation_id, entry) in &latest {
             let Some(row) = tasks.get(&entry.task_id) else {
                 continue;
             };
-            let Some(conversation) = conversations.get_mut(&row.task.tag_id) else {
+            let Some(conversation) = conversations.get_mut(conversation_id) else {
                 continue;
             };
             conversation.session_id = row.task.session_id.clone();
@@ -377,8 +388,14 @@ impl Store {
                 .unwrap_or_default();
         }
         tx.commit().await?;
+        // Each conversation numbers its own messages, so they are ranked by when they were last
+        // active.
         let mut conversations: Vec<_> = conversations.into_values().collect();
-        conversations.sort_by(|a, b| b.latest_order.cmp(&a.latest_order));
+        conversations.sort_by(|a, b| {
+            b.last_activity_at_ms
+                .cmp(&a.last_activity_at_ms)
+                .then_with(|| a.tag_id.cmp(&b.tag_id))
+        });
         Ok(ListConversationsResponse { conversations })
     }
 
@@ -400,14 +417,15 @@ impl Store {
         let cursor = order_cursor(&input.cursor)?;
         let after = i64::try_from(input.after).map_err(|_| invalid("invalid message order"))?;
         let mut tx = self.pool.begin().await?;
-        let conversation_id = conversation_id_in(&mut tx, principal, &input.tag_id)
-            .await?
-            .unwrap_or_default();
+        let Some(conversation_id) = conversation_id_in(&mut tx, principal, &input.tag_id).await?
+        else {
+            tx.commit().await?;
+            return Ok(ListMessagesResponse::default());
+        };
         if after > 0
-            && !conversation_id.is_empty()
             && input.conversation_id == conversation_id
             && let Some(messages) =
-                changes_in(&mut tx, principal, &input.tag_id, after, limit, input).await?
+                changes_in(&mut tx, &conversation_id, after, limit, input).await?
         {
             tx.commit().await?;
             return Ok(ListMessagesResponse {
@@ -418,10 +436,9 @@ impl Store {
             });
         }
         let rows = sqlx::query(&format!(
-            "{HISTORY} AND h.accepted_order<$3 ORDER BY h.accepted_order DESC LIMIT $4"
+            "{HISTORY} AND m.seq<$2 ORDER BY m.seq DESC LIMIT $3"
         ))
-        .bind(principal)
-        .bind(&input.tag_id)
+        .bind(&conversation_id)
         .bind(cursor)
         .bind(limit + 1)
         .fetch_all(&mut *tx)
@@ -455,9 +472,11 @@ impl Store {
         name("Tag ID", tag_id)?;
         name("Task ID", task_id)?;
         let mut tx = self.pool.begin().await?;
-        let row = sqlx::query(&format!("{HISTORY_WITH_QUIET} AND h.task_id=$3"))
-            .bind(principal)
-            .bind(tag_id)
+        let conversation_id = conversation_id_in(&mut tx, principal, tag_id)
+            .await?
+            .ok_or_else(|| StoreError::NotFound("Message was not found".into()))?;
+        let row = sqlx::query(&format!("{HISTORY_WITH_QUIET} AND m.task_id=$2"))
+            .bind(&conversation_id)
             .bind(task_id)
             .fetch_optional(&mut *tx)
             .await?
@@ -479,33 +498,21 @@ impl Store {
         self.ensure_client_tag(principal, &input.tag_id).await?;
         let order = i64::try_from(input.order).map_err(|_| invalid("invalid message order"))?;
         let (mut tx, _) = self.write().await?;
-        if conversation_id_in(&mut tx, principal, &input.tag_id)
-            .await?
-            .is_none()
-        {
+        let Some(conversation_id) = conversation_id_in(&mut tx, principal, &input.tag_id).await?
+        else {
             return Err(StoreError::NotFound("Conversation was not found".into()));
-        }
+        };
         let now = self.execution_now_ms();
-        let prior: Option<i64> = sqlx::query_scalar(
-            "SELECT read_order FROM supertag_v2_conversation_reads WHERE principal=$1 AND tag_id=$2",
+        // One mark for all of the person's devices; the read trigger tells their other clients.
+        messages::advance_in(
+            &mut tx,
+            &conversation_id,
+            Member::Principal(principal),
+            Some(order),
+            None,
+            now,
         )
-        .bind(principal)
-        .bind(&input.tag_id)
-        .fetch_optional(&mut *tx)
         .await?;
-        match prior {
-            None => {
-                sqlx::query("INSERT INTO supertag_v2_conversation_reads (principal,tag_id,read_order,read_at_ms) VALUES ($1,$2,$3,$4)")
-                    .bind(principal).bind(&input.tag_id).bind(order).bind(now)
-                    .execute(&mut *tx).await?;
-            }
-            Some(prior) if prior < order => {
-                sqlx::query("UPDATE supertag_v2_conversation_reads SET read_order=$1,read_at_ms=$2 WHERE principal=$3 AND tag_id=$4")
-                    .bind(order).bind(now).bind(principal).bind(&input.tag_id)
-                    .execute(&mut *tx).await?;
-            }
-            Some(_) => {}
-        }
         crate::attention::read_in(&mut tx, principal, &input.tag_id, order, now).await?;
         tx.commit().await?;
         self.list_conversations(principal, &ListConversationsRequest {})
@@ -569,29 +576,34 @@ pub(crate) async fn task_access_in(
         .is_some_and(|owner| crate::store::sees_owner(principal, &owner)))
 }
 
-/// The conversation's history: the messages of every Session of `principal`'s conversation with
-/// the Tag in `$2`, without quiet turns or posts held for pacing (`attention`). Callers add
-/// conditions from `$3`.
-const HISTORY: &str = "SELECT h.task_id,h.accepted_order,h.work_session_report_id
-     FROM supertag_v2_conversation_history h
-     WHERE h.session_id IN (SELECT c.session_id FROM supertag_v2_conversation_sessions c
-                            WHERE c.principal=$1 AND c.tag_id=$2)
-       AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks q WHERE q.task_id=h.task_id AND q.quiet=1)
-       AND NOT EXISTS (SELECT 1 FROM supertag_v2_proactive_posts hp WHERE hp.task_id=h.task_id
+/// The conversation's history: the turns of the conversation in `$1`, across all of its Sessions,
+/// without quiet turns or posts held for pacing (`attention`). Callers add conditions from `$2`.
+const HISTORY: &str =
+    "SELECT m.conversation_id,m.task_id,m.seq,wt.work_session_id AS work_session_report_id
+     FROM supertag_v2_messages m
+     LEFT JOIN supertag_v2_work_session_tasks wt ON wt.task_id=m.task_id AND wt.kind=2
+     WHERE m.conversation_id=$1 AND m.task_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks q WHERE q.task_id=m.task_id AND q.quiet=1)
+       AND NOT EXISTS (SELECT 1 FROM supertag_v2_proactive_posts hp WHERE hp.task_id=m.task_id
                        AND hp.held_until_ms IS NOT NULL AND hp.released_at_ms IS NULL)";
 /// [`HISTORY`] with its quiet turns, for a client that holds one as unfinished or asks for it: it
 /// learns the turn ended quietly (`Task.quiet`) and drops it. A held post stays out until it is
 /// delivered, when it arrives as the newest message.
-const HISTORY_WITH_QUIET: &str = "SELECT h.task_id,h.accepted_order,h.work_session_report_id
-     FROM supertag_v2_conversation_history h
-     WHERE h.session_id IN (SELECT c.session_id FROM supertag_v2_conversation_sessions c
-                            WHERE c.principal=$1 AND c.tag_id=$2)
-       AND NOT EXISTS (SELECT 1 FROM supertag_v2_proactive_posts hp WHERE hp.task_id=h.task_id
+const HISTORY_WITH_QUIET: &str =
+    "SELECT m.conversation_id,m.task_id,m.seq,wt.work_session_id AS work_session_report_id
+     FROM supertag_v2_messages m
+     LEFT JOIN supertag_v2_work_session_tasks wt ON wt.task_id=m.task_id AND wt.kind=2
+     WHERE m.conversation_id=$1 AND m.task_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM supertag_v2_proactive_posts hp WHERE hp.task_id=m.task_id
                        AND hp.held_until_ms IS NOT NULL AND hp.released_at_ms IS NULL)";
+/// A Schedule's unfinished turn shows only once a person's message is on its way into it or was
+/// taken in (live input states 1, 2, 3 and 5), since it may stay quiet; `t` is the turn's Task.
+const SCHEDULE_SHOWN: &str = "NOT (t.state IN (1,2,6)
+    AND EXISTS (SELECT 1 FROM supertag_v2_schedule_fires f WHERE f.task_id=t.task_id)
+    AND NOT EXISTS (SELECT 1 FROM supertag_v2_live_inputs i
+                    WHERE i.task_id=t.task_id AND i.state IN (1,2,3,5)))";
 const UNFINISHED: &str = "1,2,6";
 const FINISHED: &str = "3,4,5";
-/// Live input states of a person's message on its way into, or taken in by, a running turn.
-const JOINING: &str = "1,2,3,5";
 /// How much of the latest message a conversation list shows.
 const PREVIEW_CHARS: usize = 200;
 
@@ -613,27 +625,37 @@ fn history_entry(row: &sqlx::any::AnyRow) -> Result<HistoryEntry> {
     Ok(HistoryEntry {
         task_id: row.try_get("task_id")?,
         report_id: row.try_get("work_session_report_id")?,
-        order: row.try_get("accepted_order")?,
+        order: row.try_get("seq")?,
     })
 }
 
-async fn history_at_orders_in(
+/// The history entries at these places, each with its conversation.
+async fn history_at_seqs_in(
     tx: &mut Transaction<'_, Any>,
-    orders: &[i64],
-) -> Result<Vec<HistoryEntry>> {
-    let mut entries = Vec::with_capacity(orders.len());
-    for chunk in orders.chunks(ID_BATCH) {
+    places: &[(String, i64)],
+) -> Result<Vec<(String, HistoryEntry)>> {
+    let mut entries = Vec::with_capacity(places.len());
+    for chunk in places.chunks(ID_BATCH / 2) {
         let sql = format!(
-            "SELECT task_id,accepted_order,work_session_report_id FROM supertag_v2_conversation_history
-             WHERE accepted_order IN ({})",
-            placeholders(1, chunk.len())
+            "SELECT m.conversation_id,m.task_id,m.seq,wt.work_session_id AS work_session_report_id
+             FROM supertag_v2_messages m
+             LEFT JOIN supertag_v2_work_session_tasks wt ON wt.task_id=m.task_id AND wt.kind=2
+             WHERE m.task_id IS NOT NULL AND ({})",
+            (0..chunk.len())
+                .map(|index| format!(
+                    "(m.conversation_id=${} AND m.seq=${})",
+                    2 * index + 1,
+                    2 * index + 2
+                ))
+                .collect::<Vec<_>>()
+                .join(" OR ")
         );
         let mut query = sqlx::query(&sql);
-        for order in chunk {
-            query = query.bind(*order);
+        for (conversation_id, seq) in chunk {
+            query = query.bind(conversation_id).bind(*seq);
         }
         for row in query.fetch_all(&mut **tx).await? {
-            entries.push(history_entry(&row)?);
+            entries.push((row.try_get("conversation_id")?, history_entry(&row)?));
         }
     }
     Ok(entries)
@@ -644,31 +666,27 @@ async fn history_at_orders_in(
 /// newest page instead.
 async fn changes_in(
     tx: &mut Transaction<'_, Any>,
-    principal: &str,
-    tag_id: &str,
+    conversation_id: &str,
     after: i64,
     limit: i64,
     input: &ListMessagesRequest,
 ) -> Result<Option<Vec<ConversationMessage>>> {
-    let rows = sqlx::query(&format!(
-        "{HISTORY} AND h.accepted_order>$3 ORDER BY h.accepted_order LIMIT $4"
-    ))
-    .bind(principal)
-    .bind(tag_id)
-    .bind(after)
-    .bind(limit + 1)
-    .fetch_all(&mut **tx)
-    .await?;
+    let rows = sqlx::query(&format!("{HISTORY} AND m.seq>$2 ORDER BY m.seq LIMIT $3"))
+        .bind(conversation_id)
+        .bind(after)
+        .bind(limit + 1)
+        .fetch_all(&mut **tx)
+        .await?;
     if rows.len() as i64 > limit {
         return Ok(None);
     }
     let mut entries = rows.iter().map(history_entry).collect::<Result<Vec<_>>>()?;
     if !input.refresh_task_ids.is_empty() {
         let sql = format!(
-            "{HISTORY_WITH_QUIET} AND h.accepted_order<=$3 AND h.task_id IN ({})",
-            placeholders(4, input.refresh_task_ids.len())
+            "{HISTORY_WITH_QUIET} AND m.seq<=$2 AND m.task_id IN ({})",
+            placeholders(3, input.refresh_task_ids.len())
         );
-        let mut query = sqlx::query(&sql).bind(principal).bind(tag_id).bind(after);
+        let mut query = sqlx::query(&sql).bind(conversation_id).bind(after);
         for id in &input.refresh_task_ids {
             query = query.bind(id);
         }
@@ -714,17 +732,27 @@ pub(crate) fn new_session_id() -> String {
     format!("{SESSION_PREFIX}{}", Uuid::new_v4())
 }
 
-/// The Session the conversation continues: the one its latest message is in.
+/// The Session the conversation continues: the one its latest message is in, otherwise its newest.
 pub(crate) async fn session_in(
     tx: &mut Transaction<'_, Any>,
     principal: &str,
     tag: &str,
 ) -> Result<Option<String>> {
+    let latest: Option<String> = sqlx::query_scalar(
+        "SELECT t.session_id FROM supertag_v2_conversations c
+         JOIN supertag_v2_messages m ON m.conversation_id=c.conversation_id
+         JOIN supertag_v2_tasks t ON t.task_id=m.task_id
+         WHERE c.direct_key=$1 ORDER BY m.seq DESC LIMIT 1",
+    )
+    .bind(person_key(principal, tag))
+    .fetch_optional(&mut **tx)
+    .await?;
+    if latest.is_some() {
+        return Ok(latest);
+    }
     Ok(sqlx::query_scalar(
-        "SELECT c.session_id FROM supertag_v2_conversation_sessions c
-         LEFT JOIN supertag_v2_conversation_messages m ON m.session_id=c.session_id
-         WHERE c.principal=$1 AND c.tag_id=$2
-         ORDER BY COALESCE(m.accepted_order,c.created_order) DESC LIMIT 1",
+        "SELECT session_id FROM supertag_v2_conversation_sessions WHERE principal=$1 AND tag_id=$2
+         ORDER BY created_order DESC LIMIT 1",
     )
     .bind(principal)
     .bind(tag)
@@ -732,20 +760,117 @@ pub(crate) async fn session_in(
     .await?)
 }
 
-/// The conversation's ID: its first Session's.
+/// The direct-conversation key of a person's conversation with a Tag.
+fn person_key(principal: &str, tag: &str) -> String {
+    messages::direct_key(Member::Principal(principal), Member::Tag(tag))
+}
+
+/// The ID of `principal`'s conversation with a Tag, once it has one.
 async fn conversation_id_in(
     tx: &mut Transaction<'_, Any>,
     principal: &str,
     tag: &str,
 ) -> Result<Option<String>> {
     Ok(sqlx::query_scalar(
-        "SELECT session_id FROM supertag_v2_conversation_sessions WHERE principal=$1 AND tag_id=$2
-         ORDER BY created_order LIMIT 1",
+        "SELECT conversation_id FROM supertag_v2_conversations WHERE direct_key=$1",
     )
-    .bind(principal)
-    .bind(tag)
+    .bind(person_key(principal, tag))
     .fetch_optional(&mut **tx)
     .await?)
+}
+
+/// Starts a Session of `principal`'s conversation with a Tag, and the conversation with it when it
+/// is the first.
+pub(crate) async fn open_session_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    tag: &str,
+    session_id: &str,
+    order: i64,
+    now: i64,
+) -> Result<()> {
+    let conversation_id =
+        messages::direct_conversation_in(tx, Member::Principal(principal), Member::Tag(tag), now)
+            .await?;
+    sqlx::query(
+        "INSERT INTO supertag_v2_conversation_sessions
+            (session_id,principal,tag_id,created_order,conversation_id)
+         VALUES ($1,$2,$3,$4,$5)",
+    )
+    .bind(session_id)
+    .bind(principal)
+    .bind(tag)
+    .bind(order)
+    .bind(conversation_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// Who sends a turn into a person's conversation with a Tag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TurnSender {
+    /// The person: their message, or an action they took (an approval's continuation or stop).
+    Person,
+    /// The Tag: a Schedule's fire, a Work Session's report, or a notice about one.
+    Tag,
+}
+
+/// The one place a turn enters a person's conversation: the conversation of the Session the Task
+/// runs in, as its newest message. Its content is the Task, so the message has no text. With an
+/// operation, the person's receipt for it. Returns the message's seq, or `None` when the Task's
+/// Session is no conversation's.
+pub(crate) async fn append_turn_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &Task,
+    sender: TurnSender,
+    operation: Option<(&str, &str)>,
+    now: i64,
+) -> Result<Option<i64>> {
+    let session: Option<(String, String)> = sqlx::query_as(
+        "SELECT principal,conversation_id FROM supertag_v2_conversation_sessions
+         WHERE session_id=$1 AND tag_id=$2",
+    )
+    .bind(&task.session_id)
+    .bind(&task.tag_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some((principal, conversation_id)) = session else {
+        return Ok(None);
+    };
+    let stored = messages::insert_message_in(
+        tx,
+        &messages::NewMessage {
+            conversation_id: &conversation_id,
+            sender: match sender {
+                TurnSender::Person => Member::Principal(&principal),
+                TurnSender::Tag => Member::Tag(&task.tag_id),
+            },
+            kind: MessageKind::Note,
+            text: "",
+            hops: 0,
+            source_task_id: None,
+            origin_task_id: None,
+            objective_id: None,
+            task_id: Some(&task.task_id),
+            effect_digest: None,
+            addressees: &[],
+            now,
+        },
+    )
+    .await?;
+    if let Some((operation_id, digest)) = operation {
+        messages::record_operation_in(
+            tx,
+            OperationScope::Conversation,
+            &principal,
+            operation_id,
+            digest,
+            &stored.message_id,
+        )
+        .await?;
+    }
+    Ok(Some(stored.seq))
 }
 
 /// A message the Control Plane just accepted.

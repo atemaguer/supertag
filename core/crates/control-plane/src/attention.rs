@@ -31,9 +31,9 @@ const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 const SCHEDULE_FIRES: i64 = 10;
 /// The least time between two unprompted posts to one person or thread.
 pub(crate) const PACE_MS: i64 = 30 * 60 * 1000;
-/// Held posts that have not gone out yet; `h` is the conversation history row.
+/// Held posts that have not gone out yet; `m` is the conversation's message.
 pub(crate) const NOT_HELD: &str = "NOT EXISTS (SELECT 1 FROM supertag_v2_proactive_posts hp
-    WHERE hp.task_id=h.task_id AND hp.held_until_ms IS NOT NULL AND hp.released_at_ms IS NULL)";
+    WHERE hp.task_id=m.task_id AND hp.held_until_ms IS NOT NULL AND hp.released_at_ms IS NULL)";
 
 /// Whether a finished turn's reply is delivered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -146,8 +146,12 @@ pub(crate) async fn finish_in(
 ) -> Result<()> {
     match turn_in(tx, task).await? {
         Turn::Unprompted if task.state() == supertag_protocol::v2::TaskState::Succeeded => {
+            // The turn's place in its person's conversation, and that person.
             let conversation: Option<(i64, String)> = sqlx::query_as(
-                "SELECT accepted_order,principal FROM supertag_v2_conversation_messages WHERE task_id=$1",
+                "SELECT m.seq,p.member_id FROM supertag_v2_messages m
+                 JOIN supertag_v2_conversation_members p
+                   ON p.conversation_id=m.conversation_id AND p.member_kind=2
+                 WHERE m.task_id=$1",
             )
             .bind(&task.task_id)
             .fetch_optional(&mut **tx)
@@ -176,9 +180,9 @@ pub(crate) async fn finish_in(
                 None
             };
             let delivered = (!task.quiet && held_until.is_none()).then_some(now);
-            sqlx::query("INSERT INTO supertag_v2_proactive_posts (task_id,tag_id,session_id,conversation_order,posted_at_ms,quiet,audience,held_until_ms,delivered_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(task_id) DO NOTHING")
+            sqlx::query("INSERT INTO supertag_v2_proactive_posts (task_id,tag_id,session_id,conversation_seq,posted_at_ms,quiet,audience,held_until_ms,delivered_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(task_id) DO NOTHING")
                 .bind(&task.task_id).bind(&task.tag_id).bind(&task.session_id)
-                .bind(conversation.map(|(order, _)| order)).bind(now).bind(i64::from(task.quiet))
+                .bind(conversation.map(|(seq, _)| seq)).bind(now).bind(i64::from(task.quiet))
                 .bind(&audience).bind(held_until).bind(delivered)
                 .execute(&mut **tx).await?;
         }
@@ -273,22 +277,24 @@ pub(crate) async fn release_in(
         .execute(&mut **tx).await?;
     if audience.starts_with("conversation:") {
         for task_id in &held {
-            // It reaches the conversation now, so it takes the newest place and counts unread.
-            let order = crate::store::next_order(tx).await?;
-            sqlx::query(
-                "UPDATE supertag_v2_conversation_messages SET accepted_order=$1 WHERE task_id=$2",
+            // It reaches the conversation now, so it takes the newest place and counts unread. No
+            // reader saw it at its old place.
+            let place: Option<(String, i64)> = sqlx::query_as(
+                "SELECT conversation_id,seq FROM supertag_v2_messages WHERE task_id=$1",
             )
-            .bind(order)
             .bind(task_id)
-            .execute(&mut **tx)
+            .fetch_optional(&mut **tx)
             .await?;
-            sqlx::query(
-                "UPDATE supertag_v2_proactive_posts SET conversation_order=$1 WHERE task_id=$2",
-            )
-            .bind(order)
-            .bind(task_id)
-            .execute(&mut **tx)
-            .await?;
+            if let Some((conversation_id, seq)) = place {
+                let seq = crate::messages::move_to_end_in(tx, &conversation_id, seq).await?;
+                sqlx::query(
+                    "UPDATE supertag_v2_proactive_posts SET conversation_seq=$1 WHERE task_id=$2",
+                )
+                .bind(seq)
+                .bind(task_id)
+                .execute(&mut **tx)
+                .await?;
+            }
             sqlx::query("INSERT INTO supertag_v2_watch_append SELECT 3, 1, task_id, tag_id, session_id, objective_id, '', conversation, owner FROM supertag_v2_watch_tasks WHERE task_id=$1")
                 .bind(task_id).execute(&mut **tx).await?;
         }
@@ -385,16 +391,16 @@ fn released_text(tag: &str, earlier: &[String], newest: &str) -> String {
     text
 }
 
-/// A person read their conversation with a Tag up to `order`.
+/// A person read their conversation with a Tag up to `seq`.
 pub(crate) async fn read_in(
     tx: &mut Transaction<'_, Any>,
     principal: &str,
     tag: &str,
-    order: i64,
+    seq: i64,
     now: i64,
 ) -> Result<()> {
-    sqlx::query("UPDATE supertag_v2_proactive_posts SET read_at_ms=$1 WHERE tag_id=$2 AND quiet=0 AND read_at_ms IS NULL AND conversation_order<=$3 AND session_id IN (SELECT session_id FROM supertag_v2_conversation_sessions WHERE principal=$4 AND tag_id=$2)")
-        .bind(now).bind(tag).bind(order).bind(principal)
+    sqlx::query("UPDATE supertag_v2_proactive_posts SET read_at_ms=$1 WHERE tag_id=$2 AND quiet=0 AND read_at_ms IS NULL AND conversation_seq<=$3 AND session_id IN (SELECT session_id FROM supertag_v2_conversation_sessions WHERE principal=$4 AND tag_id=$2)")
+        .bind(now).bind(tag).bind(seq).bind(principal)
         .execute(&mut **tx).await?;
     Ok(())
 }
