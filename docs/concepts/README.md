@@ -47,7 +47,7 @@ An [Objective](../guides/objectives.md) states an outcome and how the organizati
 completion. It has a budget, a deadline, and a status. A **Session** is one Tag's thread of work,
 and a [Task](tasks.md) is one turn of a Session.
 
-A person directs an Objective in the terminal UI or its home thread. Its owner Tag asks the
+A person directs an Objective from the CLI or its home thread. Its owner Tag asks the
 person a question when it needs a decision. The work happens in Sessions started beneath it,
 including Sessions of other Tags in its Team.
 

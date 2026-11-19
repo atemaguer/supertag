@@ -19,7 +19,7 @@ SuperTag has three kinds of services, all run by the one `supertag` program:
   For each Task Attempt it starts a **Worker**, a process of its own that runs a **harness
   adapter**, the program that drives an agent system such as Codex or Claude Code, and that
   harness.
-- A **Gateway** is the endpoint clients connect to: the CLI, the terminal UI, the desktop app,
+- A **Gateway** is the endpoint clients connect to: the CLI, the desktop app,
   and applications built on the SDKs. It forwards their calls to the Control Plane, and it
   connects collaboration surfaces, such as Slack or GitHub.
 
@@ -32,7 +32,7 @@ knowledge may be added, which actions are allowed, which approvals apply, and wh
 limits must be followed. A harness cannot expand the Task's permissions.
 
 ```text
-Slack / GitHub / Linear / Lark / Teams     CLI / terminal UI / desktop app / your application
+Slack / GitHub / Linear / Lark / Teams     CLI / desktop app / your application
                  |                                         |
                  └──────────────> Gateway <────────────────┘
                                      |  forwards calls as a client
@@ -76,8 +76,8 @@ against one table of roles: operators, client devices, Worker Hosts, and Gateway
 
 ## The Gateway
 
-The Gateway is the boundary for clients and collaboration surfaces. The CLI, the terminal UI,
-the desktop app, and SDK applications connect to it, and it forwards their calls to the Control
+The Gateway is the boundary for clients and collaboration surfaces. The CLI, the desktop
+app, and SDK applications connect to it, and it forwards their calls to the Control
 Plane under the caller's own credential. It also receives and authenticates surface traffic,
 turns it into Tasks through the Control Plane's connector API, delivers replies, and sends
 operator notifications. For that work it is an ordinary client of the Control Plane with its own

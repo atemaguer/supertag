@@ -103,9 +103,10 @@ git diff main...supertag/session/HASH
 
 ## 5. Answer, push back, or approve
 
-Plain `supertag` opens the terminal UI. Answer questions under **Waiting on you**; to redirect
-work, select the Objective, press `m`, type the follow-up, and press Enter. For scripted answers,
-follow [Operate SuperTag](../operate-supertag/SKILL.md#read-pending-questions-before-messaging).
+`supertag get inbox-item` lists the questions waiting on you; answer one with
+`supertag question answer TASK_ID TEXT`. To redirect work, send the Objective's owner a turn in its
+Session. For both, follow
+[Operate SuperTag](../operate-supertag/SKILL.md#read-pending-questions-before-messaging).
 
 ```sh
 supertag objective review readme-setup approve
@@ -161,7 +162,7 @@ be connected. Without a channel, check execution and the reply from the terminal
 supertag message lead "Reply with hello."
 ```
 
-It sends to your conversation with `lead`, the one the terminal UI and the desktop app show, waits
+It sends to your conversation with `lead`, the one the desktop app shows, waits
 for the reply, and prints it. In the configured channel, send `@SuperTag Reply with hello.` A threaded reply checks
 delivery, routing, execution, and the return path together. It uses the configured model and may
 incur charges.

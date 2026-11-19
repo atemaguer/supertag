@@ -44,8 +44,8 @@ to you.
 
 ## 1. Answer a question
 
-A Tag that needs a decision asks and ends its turn. In the terminal UI, open **Waiting on you**
-and select its question. Type your answer and press Enter. The answer becomes the owner's next
+A Tag that needs a decision asks and ends its turn. `supertag get inbox-item` lists its
+question; answer it with `supertag question answer TASK_ID TEXT`. The answer becomes the owner's next
 turn. You can also reply in the Objective's home thread.
 
 Make any resource change before answering. For example, if the repair needs more budget, run
@@ -113,8 +113,9 @@ An Objective ends each turn with work running, a question asked, or the outcome 
 turn ends with none of those and the Objective is still `working`, SuperTag wakes it once. If
 that woken turn also ends with nothing running and nothing asked, the Objective becomes `blocked`.
 
-Select the blocked Objective in the terminal UI and check what the last turn did. Press `m`,
-enter a direction such as “Start with the overdue tickets from last week,” and press Enter. The
+Check what the blocked Objective's last turn did with `supertag describe objective ID`. Then send
+its owner a direction, such as “Start with the overdue tickets from last week,” as a turn in the
+Objective's Session with `supertag task submit --tag OWNER --session SESSION_ID TEXT`. The
 Objective returns to `working` and its owner takes a new turn.
 
 An `--ongoing` Objective is exempt from this rule. It may rest with nothing running and waits for
@@ -124,8 +125,8 @@ its next message, report, or notice.
 
 An owner stops at `ready_for_review` when it reports the Objective ready for review with
 `report_objective` (see
-[Complete it, or review it first](objectives.md#5-complete-it-or-review-it-first)). Select the
-Objective in the terminal UI to read its assessment and see what needs your attention. To request
+[Complete it, or review it first](objectives.md#5-complete-it-or-review-it-first)). Run
+`supertag describe objective ID` to read its assessment and see what needs your attention. To request
 a revision, run `supertag objective review service-operations request-changes --feedback TEXT`,
 for example with “The runbook still names the old dashboard. Update it.” The Objective returns to
 `working` and the owner acts on your text.

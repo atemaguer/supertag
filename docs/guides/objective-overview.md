@@ -64,7 +64,7 @@ Details:
   [Workspaces](workspaces.md#3-see-the-branches-appear).
 - **Needs you** lists approval requests, questions, results submitted for review, pauses, and
   budget or deadline limits, each with the command that acts on it. A question appears in full.
-  Answer it under **Waiting on you** in the terminal UI.
+  Answer it with `supertag question answer TASK_ID TEXT`.
 - **Work** lists the Objective's conversation first, then each Session started beneath it, with
   the status of its latest turn and the Tag that runs it. A turn shows `waiting` when it asked a
   question or waits on an approval. Under a failed turn, the Control Plane explains why in its
@@ -175,8 +175,8 @@ Explanations are evidence and suggested next steps, not permission grants.
 
 - A spent budget pool stops new turns. The Objective's status becomes `limited`; raise the budget
   to let work continue.
-- An Objective marked `blocked` ended two turns with nothing running and nothing asked. Select
-  it in the terminal UI and press `m` to direct it. See
+- An Objective marked `blocked` ended two turns with nothing running and nothing asked. Send its
+  owner a turn in the Objective's Session to direct it. See
   [restart a blocked Objective](objective-decisions.md#5-restart-a-blocked-objective).
 - A `cancelled` Objective shows when it was cancelled and the operator's reason. No new work
   starts for it. See [Cancel an Objective](objectives.md#cancel-an-objective).

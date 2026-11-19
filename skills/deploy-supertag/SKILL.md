@@ -12,7 +12,7 @@ connects collaboration surfaces as a client of the Control Plane. Worker Hosts c
 
 ```text
 Slack / GitHub / Lark / Linear / Teams ──> Gateway (optional) ──┐
-operators: CLI, terminal UI, desktop app ───────────────────────┤ https:// or wss://
+operators: CLI, desktop app ───────────────────────────────────┤ https:// or wss://
 Worker Hosts (outbound only) ───────────────────────────────────┴──> Control Plane ── PostgreSQL
 ```
 

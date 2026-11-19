@@ -10,12 +10,11 @@ edit by hand: change the command's help, then rerun that test with
 ## `supertag`
 
 ```text
-Usage: supertag [OPTIONS] [COMMAND]
+Usage: supertag [OPTIONS] <COMMAND>
 
 Commands:
   init                  Set up SuperTag on this machine for the git repository in the current directory
   up                    Start local services or configured Worker Hosts in the background and return when ready
-  tui                   Open the terminal UI; plain supertag opens it for this machine's services
   message               Send a message to your conversation with a Tag and print its reply
   status                Show Worker Hosts, Tags, unfinished Objectives, and the operator inbox
   ps                    List this machine's SuperTag services and the Workers each Worklet runs
@@ -52,7 +51,7 @@ Commands:
   worklet               Run this Worker Host's Worklet, which connects the host and runs accepted Tasks
   client                Revoke client devices and rotate their credentials
   auth-key              Create and revoke Auth Keys that enroll Worker Hosts, Gateways, and clients
-  connect               Save a Gateway under a name for `--gateway NAME` and the terminal UI. Reads one secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a masked prompt in a terminal: an operator token is checked and saved; a client Auth Key (stak_...) enrolls this device as client:NAME and saves only the resulting credential
+  connect               Save a Gateway under a name for `--gateway NAME`. Reads one secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a masked prompt in a terminal: an operator token is checked and saved; a client Auth Key (stak_...) enrolls this device as client:NAME and saves only the resulting credential
   tag                   Set up and retire Tags
   task                  Submit, cancel, and steer Tasks, and read their events, usage, and published results
   artifact-publication  Publish completed artifact files for named destination Objectives, and withdraw them
@@ -73,7 +72,7 @@ Commands:
   help                  Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>  Gateway URL or the name of a Gateway saved in the terminal UI or desktop app, for the operator command that follows
+      --gateway <URL|NAME>  Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app, for the operator command that follows
   -h, --help                Print help
   -V, --version             Print version
 ```
@@ -217,32 +216,12 @@ Options:
           Print help (see a summary with '-h')
 ```
 
-## `supertag tui`
-
-```text
-Open the terminal UI; plain supertag opens it for this machine's services
-
-Usage: supertag tui [OPTIONS]
-
-Options:
-      --gateway <GATEWAY>
-          Gateway URL or the name of a saved Gateway
-      --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway URL
-      --binary <BINARY>
-          Terminal UI executable. Also reads SUPERTAG_TUI_BINARY
-      --workspace <WORKSPACE>
-          Workspace ID the terminal UI starts in
-  -h, --help
-          Print help
-```
-
 ## `supertag message`
 
 ```text
 Send a message to your conversation with a Tag and print its reply.
 
-The conversation is the one the terminal UI and the desktop app show, so a message sent here appears there, and a message sent there continues here. The command waits for the reply, printing the Tag's messages as they arrive, and fails when the turn fails.
+The conversation is the one the desktop app shows, so a message sent here appears there, and a message sent there continues here. The command waits for the reply, printing the Tag's messages as they arrive, and fails when the turn fails.
 
 Usage: supertag message [OPTIONS] <TAG> [TEXT]
 
@@ -258,7 +237,7 @@ Options:
           Return once the message is accepted, without waiting for the reply
 
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
 
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
@@ -684,7 +663,7 @@ Usage: supertag diff [OPTIONS] --file <FILES>
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -f, --file <FILES>
@@ -708,7 +687,7 @@ Usage: supertag apply [OPTIONS] --file <FILES>
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -f, --file <FILES>
@@ -739,7 +718,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -758,7 +737,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --name <NAME>
           The Workspace's name. Default: the repository folder's name, in lowercase letters, digits, and hyphens
       --host <HOST>
@@ -784,7 +763,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
 
       --remote <REMOTE>
           The git remote: https://..., ssh://..., user@host:path, or file:///path/to/bare.git
@@ -845,7 +824,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -867,7 +846,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -886,7 +865,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --ssh-key <PATH>
           An SSH private key file, such as a deploy key without a passphrase
       --known-hosts <PATH>
@@ -920,7 +899,7 @@ Usage: supertag workspace credential list [OPTIONS]
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -939,7 +918,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -959,7 +938,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -980,7 +959,7 @@ Options:
       --decision <DECISION>
           What the provider shows happened to the reply [possible values: delivered, failed]
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --evidence <EVIDENCE>
           What you checked at the provider that shows the outcome
       --state-directory <STATE_DIRECTORY>
@@ -1006,7 +985,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1027,7 +1006,7 @@ Options:
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. If given, the change is refused when the resource has changed since
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
@@ -1050,7 +1029,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1070,7 +1049,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
@@ -1093,7 +1072,7 @@ Options:
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. The change is refused when the resource has changed since
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
@@ -1117,7 +1096,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1138,7 +1117,7 @@ Options:
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. If given, the change is refused when the resource has changed since
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
@@ -1236,7 +1215,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1257,7 +1236,7 @@ Options:
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. If given, the change is refused when the resource has changed since
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
@@ -1353,7 +1332,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1374,7 +1353,7 @@ Options:
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. If given, the change is refused when the resource has changed since
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
@@ -1396,7 +1375,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1419,7 +1398,7 @@ Options:
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. If given, the change is refused when the resource has changed since
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
@@ -1445,7 +1424,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1464,7 +1443,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1483,7 +1462,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1504,7 +1483,7 @@ Options:
       --control-plane <CONTROL_PLANE>
           Control Plane URL to enroll with
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Private directory for this Worker Host's enrollment and execution journal
       --auth-key <AUTH_KEY>
@@ -1525,7 +1504,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1544,7 +1523,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --out <OUT>
           Write the new credential to this new owner-only file, for a host that reads SUPERTAG_HOST_TOKEN from its own secret manager
       --host-state-directory <HOST_STATE_DIRECTORY>
@@ -1569,7 +1548,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1589,7 +1568,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1608,7 +1587,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1628,7 +1607,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1648,7 +1627,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Supply the same ID to retry an answer after a lost response
       --state-directory <STATE_DIRECTORY>
@@ -1671,7 +1650,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1690,7 +1669,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --objective-scope
           Also allow this Tag's later requests for the same action and resource in this Objective. Not for GitHub publications
       --state-directory <STATE_DIRECTORY>
@@ -1715,7 +1694,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --reason <REASON>
           Why the request is denied; the Tag sees this reason
       --operation-id <OPERATION_ID>
@@ -1791,7 +1770,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1811,7 +1790,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
@@ -1833,7 +1812,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
@@ -1857,7 +1836,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1879,7 +1858,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
 
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
@@ -1900,7 +1879,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1919,7 +1898,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1935,7 +1914,7 @@ Usage: supertag audit [OPTIONS]
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
       --since <SINCE>
@@ -1966,7 +1945,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -1985,7 +1964,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --name <NAME>
           Display name. Defaults to the Team ID
       --member <MEMBER>
@@ -2012,7 +1991,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --name <NAME>
           New display name
       --member <MEMBER>
@@ -2246,7 +2225,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -2265,7 +2244,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
       --out <OUT>
@@ -2514,7 +2493,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -2533,7 +2512,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
       --out <OUT>
@@ -2556,7 +2535,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -2576,7 +2555,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
 
       --role <ROLE>
           The role every enrollee takes. It never changes
@@ -2584,7 +2563,7 @@ Options:
           Possible values:
           - host:    Worker Hosts, with `supertag host enroll`
           - gateway: Gateways, with `supertag gateway enroll`
-          - client:  Clients (a device running the CLI, terminal UI, or desktop app), with `supertag connect`
+          - client:  Clients (a device running the CLI or desktop app), with `supertag connect`
 
       --reusable
           Enroll any number of principals instead of one. A host name already taken enrolls as NAME-2, NAME-3, and so on
@@ -2623,7 +2602,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -2633,7 +2612,7 @@ Options:
 ## `supertag connect`
 
 ```text
-Save a Gateway under a name for `--gateway NAME` and the terminal UI. Reads one secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a masked prompt in a terminal: an operator token is checked and saved; a client Auth Key (stak_...) enrolls this device as client:NAME and saves only the resulting credential
+Save a Gateway under a name for `--gateway NAME`. Reads one secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a masked prompt in a terminal: an operator token is checked and saved; a client Auth Key (stak_...) enrolls this device as client:NAME and saves only the resulting credential
 
 Usage: supertag connect [OPTIONS] --name <NAME> <URL>
 
@@ -2672,7 +2651,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -2691,7 +2670,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --name <DISPLAY_NAME>
           Display name. Defaults to the Tag ID for a new Tag
       --instructions <INSTRUCTIONS>
@@ -2754,7 +2733,7 @@ Options:
       --dry-run
           Show blockers and what retirement would detach
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -2820,7 +2799,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -2839,7 +2818,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --tag <TAG>
           Tag that does the work
       --session <SESSION>
@@ -2878,7 +2857,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -2899,7 +2878,7 @@ Options:
       --after <AFTER>
           Only entries after this sequence number [default: 0]
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -2921,7 +2900,7 @@ Options:
       --after <AFTER>
           Only entries after this sequence number [default: 0]
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -2941,7 +2920,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
@@ -2965,7 +2944,7 @@ Options:
       --decision <DECISION>
           Mark the Attempt failed, or run the Task again [possible values: failed, retry]
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --evidence <EVIDENCE>
           What you checked that shows the Attempt stopped and what it did
       --state-directory <STATE_DIRECTORY>
@@ -2993,7 +2972,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3013,7 +2992,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --path <PATH>
           File in the artifact to publish. Repeat for each file
       --audience <AUDIENCE>
@@ -3040,7 +3019,7 @@ Options:
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. The change is refused when the resource has changed since
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3059,7 +3038,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3081,7 +3060,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3102,7 +3081,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3123,7 +3102,7 @@ Options:
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. The change is refused when the resource has changed since
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3142,7 +3121,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3163,7 +3142,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3182,7 +3161,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --source <SOURCE>
           Canonical file:///absolute/path or s3://bucket/prefix. The Control Plane supplies storage endpoints and credentials
       --operation-id <OPERATION_ID>
@@ -3209,7 +3188,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3230,7 +3209,7 @@ Options:
       --endpoint <ENDPOINT>
           The S3-compatible service's HTTPS origin, such as https://s3.us-east-1.amazonaws.com
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --region <REGION>
           The service's region, such as us-east-1, or auto
       --state-directory <STATE_DIRECTORY>
@@ -3251,7 +3230,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3271,7 +3250,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3290,7 +3269,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --source <SOURCE>
           Canonical file:///absolute/path of the data directory, or s3://bucket/prefix
       --credential <CREDENTIAL>
@@ -3316,7 +3295,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3335,7 +3314,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3358,7 +3337,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3377,7 +3356,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --tag <TAG>
           The Tag to wake
       --at <AT>
@@ -3406,7 +3385,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3425,7 +3404,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3446,7 +3425,7 @@ Options:
       --from <FROM>
           The earliest occurrence to replay: an RFC 3339 time such as 2026-11-10T09:00:00Z, or a duration ago such as 3d or 12h
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3466,7 +3445,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3488,7 +3467,7 @@ Options:
       --evidence <EVIDENCE>
           What you checked that shows whether the message arrived
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
@@ -3539,7 +3518,7 @@ Usage: supertag spend [OPTIONS]
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
       --by <BY>
@@ -3561,7 +3540,7 @@ Usage: supertag metrics [OPTIONS]
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
       --output <OUTPUT>
@@ -3616,7 +3595,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3635,7 +3614,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --include-retired
           Also list retired Tags
       --limit <LIMIT>
@@ -3660,7 +3639,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --tag <TAG>
           Only this Tag's Tasks
       --session <SESSION>
@@ -3687,7 +3666,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 20]
       --after-id <AFTER_ID>
@@ -3710,7 +3689,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --member <MEMBER>
           Only Teams this Tag belongs to [default: ""]
       --limit <LIMIT>
@@ -3735,7 +3714,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 32]
       --cursor <CURSOR>
@@ -3758,7 +3737,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 100]
       --cursor <CURSOR>
@@ -3781,7 +3760,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 100]
       --cursor <CURSOR>
@@ -3804,7 +3783,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --report-task <REPORT_TASK>
           Show the child Task associated with this report
       --parent-tag <PARENT_TAG>
@@ -3835,7 +3814,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 20]
       --cursor <CURSOR>
@@ -3858,7 +3837,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 20]
       --cursor <CURSOR>
@@ -3881,7 +3860,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 20]
       --cursor <CURSOR>
@@ -3904,7 +3883,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 30]
       --after-id <AFTER_ID>
@@ -3927,7 +3906,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --volume-id <VOLUME_ID>
           Only copies made into this Volume [default: ""]
       --limit <LIMIT>
@@ -3952,7 +3931,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -3971,7 +3950,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 50]
       --after-id <AFTER_ID>
@@ -3994,7 +3973,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 100]
       --cursor <CURSOR>
@@ -4017,7 +3996,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 50]
       --cursor <CURSOR>
@@ -4040,7 +4019,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --task <TASK>
           Task whose artifacts to list
       --limit <LIMIT>
@@ -4065,7 +4044,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --objective <OBJECTIVE>
           Objective whose approvals to list
       --limit <LIMIT>
@@ -4090,7 +4069,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --objective <OBJECTIVE>
           Objective whose approvals to list
       --limit <LIMIT>
@@ -4115,7 +4094,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --task-id <TASK_ID>
           Only landings of this Task's delivery [default: ""]
       --session-id <SESSION_ID>
@@ -4144,7 +4123,7 @@ Options:
       --account <ACCOUNT>
           Only replies sent through this connector account [default: ""]
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state <STATE>
           Only replies in this delivery state [possible values: pending, claimed, delivered, failed, uncertain]
       --state-directory <STATE_DIRECTORY>
@@ -4169,7 +4148,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -4188,7 +4167,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 20]
       --cursor <CURSOR>
@@ -4213,7 +4192,7 @@ Options:
       --account <ACCOUNT>
           Only locations of this account [default: ""]
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 20]
       --state-directory <STATE_DIRECTORY>
@@ -4233,7 +4212,7 @@ Usage: supertag get role-assignment [OPTIONS]
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --role <ROLE>
           Only assignments of this Role [default: ""]
       --state-directory <STATE_DIRECTORY>
@@ -4259,7 +4238,7 @@ Usage: supertag get mailbox-grant [OPTIONS] --tag <TAG>
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --tag <TAG>
           The Tag whose incoming and outgoing grants to list
       --limit <LIMIT>
@@ -4281,7 +4260,7 @@ Usage: supertag get message [OPTIONS] --mailbox <MAILBOX>
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --mailbox <MAILBOX>
           The Tag whose sent and received messages to list
       --limit <LIMIT>
@@ -4303,7 +4282,7 @@ Usage: supertag get workstream-post [OPTIONS] --team <TEAM>
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --team <TEAM>
           The Team whose Workstream to read, by ID or name
       --after-sequence <AFTER_SEQUENCE>
@@ -4330,7 +4309,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --objective <OBJECTIVE>
           Only approvals for this Objective [default: ""]
       --state-directory <STATE_DIRECTORY>
@@ -4359,7 +4338,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -4375,7 +4354,7 @@ Usage: supertag get inbox-item [OPTIONS]
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --objective <OBJECTIVE>
           Only items for this Objective [default: ""]
       --kind <KIND>
@@ -4402,7 +4381,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --tag <TAG>
           Only this Tag's Schedules
       --all
@@ -4425,7 +4404,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --tag <TAG>
           Only this Tag's notes
       --state-directory <STATE_DIRECTORY>
@@ -4447,7 +4426,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
       --output <OUTPUT>
@@ -4476,7 +4455,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -4495,7 +4474,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --dry-run
@@ -4520,7 +4499,7 @@ Options:
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. The change is refused when the resource has changed since
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
@@ -4545,7 +4524,7 @@ Options:
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. The change is refused when the resource has changed since
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
@@ -4568,7 +4547,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --expected-revision <EXPECTED_REVISION>
@@ -4595,7 +4574,7 @@ Options:
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. The change is refused when the resource has changed since
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
@@ -4620,7 +4599,7 @@ Options:
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. The change is refused when the resource has changed since
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
@@ -4645,7 +4624,7 @@ Options:
       --dry-run
           Check that the Schedule exists and show what would be deleted, without deleting it
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -4664,7 +4643,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --native <TAG>
           Instead of a note, drop this Tag's harness-native memory (such as Claude Code's auto-memory), which Worker Hosts keep: each host deletes its copies before it next runs one of the Tag's Tasks. Operators only
       --dry-run
@@ -4687,7 +4666,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
       --objective <OBJECTIVE>
@@ -4729,7 +4708,7 @@ Commands:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -4749,7 +4728,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --owner <OWNER>
           Tag that owns the Objective until it is met
       --state-directory <STATE_DIRECTORY>
@@ -4788,7 +4767,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 50]
       --before-order <BEFORE_ORDER>
@@ -4813,7 +4792,7 @@ Options:
       --deadline <DEADLINE>
           New RFC 3339 deadline with a time zone
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --clear-deadline
           Remove the deadline
       --state-directory <STATE_DIRECTORY>
@@ -4844,7 +4823,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --runtime-action <RUNTIME_ACTIONS>
           Runtime action future turns may use. Repeat for each action
       --no-runtime-actions
@@ -4871,7 +4850,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --reason <REASON>
           Why, recorded in the Objective history [default: ""]
       --operation-id <OPERATION_ID>
@@ -4894,7 +4873,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --reason <REASON>
           Why, recorded in the Objective history [default: ""]
       --operation-id <OPERATION_ID>
@@ -4917,7 +4896,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --reason <REASON>
           Why, recorded in the Objective history [default: ""]
       --operation-id <OPERATION_ID>
@@ -4943,7 +4922,7 @@ Options:
       --feedback <FEEDBACK>
           What to change; required to request changes, refused on approval [default: ""]
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
@@ -4964,7 +4943,7 @@ Arguments:
 
 Options:
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --summary-file <SUMMARY_FILE>
           File holding the assessment; `-` reads standard input
       --expected-revision <EXPECTED_REVISION>

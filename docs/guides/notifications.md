@@ -5,7 +5,7 @@ example, a **Task**, one assignment accepted for an AI agent, can wait for appro
 your Slack or a webhook. Use notifications when you do not want to keep checking
 `supertag get inbox-item`.
 
-The desktop app and the terminal UI notify on their own device when a Tag replies or asks you a
+The desktop app notifies on its own device when a Tag replies or asks you a
 question, with no setup; see
 [Notifications in the apps](talk-to-a-tag.md#notifications-in-the-apps). The destinations below
 reach people away from the apps.

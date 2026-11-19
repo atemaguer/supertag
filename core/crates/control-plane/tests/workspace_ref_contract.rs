@@ -118,7 +118,7 @@ async fn exercise(url: &str) {
         Some(following("main"))
     );
 
-    // A second Tag that names only the Workspace, as the terminal UI's New Tag form does, follows
+    // A second Tag that names only the Workspace, as a client's New Tag form does, follows
     // the branch the Workspace's other Tag follows.
     let helper = store
         .put_tag_spec(PutTagRequest {

@@ -8,10 +8,11 @@ recorded in [Legacy protocols](#legacy-protocols) and [Bridge package pruning](#
 deleted the `supertag.operator.v1` and Worklet protocols and pruned the kept packages to what the
 Rust services start.
 
-**Keep** means the Rust system uses it at build or run time, or the Go terminal UI, the desktop
-app, the generated bindings, the documentation checks, or the capability ledger check needs it.
+**Keep** means the Rust system uses it at build or run time, or the Go TUI, the desktop app,
+the generated bindings, the documentation checks, or the capability ledger check needs it.
 Everything else that only served the TypeScript Control Plane, Gateway, CLI, or Worker runtime is
-removed. Removed code remains available at `6c934be8`.
+removed. Removed code remains available at `6c934be8`. The Go TUI this record keeps was removed
+later, on 2026-11-19, with its launcher, tests, and release packaging.
 
 Evidence was gathered with `git grep` over `rust/`, `apps/tui`, `apps/desktop`, `scripts/`,
 `.github/workflows/`, `deploy/`, and `sdks/`, and by building and testing what remains.
@@ -36,7 +37,7 @@ sits beside the ledger in this directory.
 | `packages/runtime/sdk` | `@supertag/worker-sdk` | Keep, pruned | Dependency of all five bridges and `supertag-ai` (`internal/rust-harness`, `internal/rust-workspace-provider`, `internal/process-inventory`, `redaction`); `cursor_runtime.rs` loads `dist/rust-harness` and `dist/rust-workspace-provider`; `generate-bindings.py` writes `src/rust-harness/gen` |
 | `packages/core` | `@supertag/core` | Keep, pruned | Dependency of `@supertag/worker-sdk` and `@supertag/worker-cursor`; 13 of 49 source files remain |
 | `apps/desktop` | `@supertag/desktop` | Keep | Electron desktop app; `desktop.yml` builds and tests it |
-| `apps/tui` | Go module | Keep | Go terminal UI started by `supertag tui`; `rust-port.yml` builds it for `operator_runtime.rs` |
+| `apps/tui` | Go module | Keep (removed 2026-11-19) | The Go TUI the CLI started; `rust-port.yml` built it for `operator_runtime.rs` |
 | `packages/operator-api/go` | Go module | Remove (2026-11-14) | Generated `supertag.operator.v1` Go types and Connect clients. The TUI's presentation types moved to `apps/tui/views`; the protoc Go plugins it pinned moved to `rust/bindings/go` |
 | `packages/operator-api` (TypeScript: `src`, `package.json`, tests) | `@supertag/operator-api` | Remove | Imported only by `apps/cli` and TypeScript tests |
 | `apps/cli` | `@supertag/cli` | Remove | The TypeScript CLI and runtime composition root; the Rust CLI replaces it |
@@ -137,7 +138,7 @@ from `rust/proto`; nothing served the older contracts.
 | Python `supertag.transport` (`WorkletConnection`), `supertag.durable` (`DurableLocalWorklet`, `FileAttemptJournal`), `WORKLET_PROTOCOL_VERSION`, the protocol 18, transport, and durable tests, and `examples/codex_worker.py` and `openai_agents_worker.py` | The Python side of the Worklet protocol; the examples connected Workers over it |
 | The TUI's Connect-over-HTTP/1.1 client (`client.New` for `operator.v1`, the `FollowMessage` follower, legacy watch frames) and every `RuntimeV2()` branch | The TUI's path to the TypeScript Control Plane |
 
-The terminal UI keeps its presentation model as plain Go structs in `apps/tui/views`, generated
+The Go TUI kept its presentation model as plain Go structs in `apps/tui/views`, generated
 once from the removed `operatorv1` types and pruned to the fields it reads; `runtime.v2` replies
 are projected into them as before. The handover must name protocol `runtime.v2`. The TUI's client
 tests for the `operator.v1` fake (30) are removed; the `runtime.v2` client tests stay. The main
@@ -194,7 +195,8 @@ kept packages.
 
 `scripts/check-docs.mjs` previously read command help from the built TypeScript CLI. It now checks
 every page against `docs/reference/cli.md`, the reference generated from the Rust CLI's help
-(moved from `rust/docs/cli-reference.md`), including plain `supertag`, which opens the terminal UI.
+(moved from `rust/docs/cli-reference.md`), including plain `supertag`, which then opened the Go TUI
+and now prints help.
 The documentation pass rewrote README, every page under `docs/`, and `skills/` for the Rust system,
 including `docs/guides/deployment-setup.md`, the Fly.io and Railway guides (against
 `deploy/native`), and a harness adapter guide that replaced the Python Worker, custom Worker, MCP
@@ -244,7 +246,7 @@ semantic pass over the long reference pages.
 4. **Legacy protocol definitions.** Decided and done on 2026-11-14; see
    [Legacy protocols](#legacy-protocols). Before that, `spec/proto` still held `supertag.worklet.v1`,
    `environment.v1`, `session.v1`, `artifact.v1`, and `coordination.v1`, which no kept code uses,
-   and `supertag.operator.v1`, which only the terminal UI uses for its view types. The
+   and `supertag.operator.v1`, which only the Go TUI used for its view types. The
    `spec/*.schema.json` wire schemas, `docs/reference/operator-api`, and the Python SDK's
    `supertag/operator/v1` bindings come from the same era. Decide whether to delete them (an
    accepted breaking change for `proto:breaking`) and move the TUI to the `runtime.v2` Go bindings.

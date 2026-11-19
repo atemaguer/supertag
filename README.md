@@ -144,29 +144,28 @@ at least one commit.
 curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 supertag init
-supertag
+supertag message lead "Read this repository and tell me what you would improve first."
 ```
 
 `supertag init` checks your coding agent's sign-in, asks a few questions, and starts SuperTag in
 the background. Keep the default Tag name, `lead`. It works in this repository, starting from the
-latest commit of the branch you have checked out. Plain `supertag`
-opens the terminal UI. Select `lead` and ask:
+latest commit of the branch you have checked out. `supertag message` sends your message to
+`lead` and prints the reply as it arrives.
 
-> Read this repository and tell me what you would improve first.
+Follow up in the same conversation with another `supertag message lead`. When you’re ready to give
+it part of a job, start an Objective like this.
 
-Follow up in the same conversation. When you’re ready to give it part of a job, try an Objective
-like this.
-
-```text
-/goal Add a test for an uncovered edge case. Done when the new test and its suite pass. Ask me before changing application code.
+```sh
+supertag message lead "/goal Add a test for an uncovered edge case. Done when the new test and its suite pass. Ask me before changing application code."
 ```
 
 A Codex lead runs the tests. A Claude Code lead set up without Docker or the unsandboxed opt-in
 reads and edits files but runs no commands, so it reports that condition as unchecked; see
 [Let the lead run commands](docs/operations/cli.md#let-the-lead-run-commands).
 
-Questions the Tag asks you appear under **Waiting on you**. When the Objective is ready, the
-Objectives list in the sidebar shows it as `review`. Each delivered change arrives in your
+`supertag get inbox-item` lists the questions the Tag asks you; answer one with
+`supertag question answer TASK_ID "..."`. When the Objective is ready, `supertag status` shows it
+as `review`. Each delivered change arrives in your
 repository as a `supertag/session/...` branch. Review it, then approve the Objective or ask for a
 revision:
 

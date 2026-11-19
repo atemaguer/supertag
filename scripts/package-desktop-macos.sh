@@ -5,7 +5,7 @@
 #
 # APP is the unsigned SuperTag.app from `pnpm --filter @supertag/desktop package:mac`
 # (apps/desktop/release/mac-arm64/SuperTag.app), its fuses already flipped. CLI_DIRECTORY is an extracted
-# complete release archive: supertag, supertag-tui, supertag-shared-execution, and node-bridges/.
+# complete release archive: supertag, supertag-shared-execution, and node-bridges/
 # The CLI goes to SuperTag.app/Contents/Resources/supertag/, where the app looks for it first.
 # IMAGE is the disk image to write.
 #
@@ -19,7 +19,7 @@ cli=${2:?Usage: package-desktop-macos.sh APP CLI_DIRECTORY IMAGE}
 image=${3:?Usage: package-desktop-macos.sh APP CLI_DIRECTORY IMAGE}
 signed=${SIGNED:-false}
 
-for name in supertag supertag-tui supertag-shared-execution; do
+for name in supertag supertag-shared-execution; do
   [[ -f "$cli/$name" && -x "$cli/$name" ]] || { echo "$cli has no executable $name" >&2; exit 1; }
 done
 [[ -f "$cli/node-bridges/manifest.json" ]] || { echo "$cli has no node-bridges/manifest.json" >&2; exit 1; }
@@ -114,7 +114,7 @@ for path in "${machos[@]}"; do
 done
 # The CLI binaries arrive already signed and notarized by the release's package job; signing them
 # again keeps one identity throughout and fails here, not later, if one is missing.
-for name in supertag supertag-tui supertag-shared-execution; do
+for name in supertag supertag-shared-execution; do
   sign "$resources/$name"
 done
 # The Electron parts and the app last, inside out: frameworks, helper apps, then SuperTag.app, each

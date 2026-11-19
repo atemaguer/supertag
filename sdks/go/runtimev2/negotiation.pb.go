@@ -28,7 +28,7 @@ const (
 	ServiceRole_SERVICE_ROLE_CONTROL_PLANE ServiceRole = 1
 	ServiceRole_SERVICE_ROLE_GATEWAY       ServiceRole = 2
 	ServiceRole_SERVICE_ROLE_WORKER_HOST   ServiceRole = 3
-	// A client of the Control Plane's API: the CLI, the TUI, the desktop app, or
+	// A client of the Control Plane's API: the CLI, the desktop app, or
 	// an SDK client, acting for an operator or an enrolled client.
 	ServiceRole_SERVICE_ROLE_CLIENT ServiceRole = 4
 )

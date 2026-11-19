@@ -160,7 +160,7 @@ Runtime permissions use the same Permission Set but have a different target:
 | `schedule:create` | Set and cancel [Schedules](coordination.md#schedules), wake-ups for the Tag itself, with the `schedule` and `cancel_schedule` tools |
 
 `schedule:create` is an ordinary runtime action. Add `schedule:create` to a Permission Set to let
-a Tag schedule; Tags created by `supertag init`, the desktop app, or the terminal UI have it. A
+a Tag schedule; Tags created by `supertag init` or the desktop app have it. A
 Tag without it cannot schedule. It offers only SuperTag's own tools, never a harness tool.
 
 Other `namespace:action` names can be stored but enable nothing in the built-in harnesses. Published actions should describe authority, not a particular harness API.
@@ -644,7 +644,7 @@ the credential it added. It never records headers or bodies, and it removes secr
 placeholders from paths. It keeps the first 500 requests of a Task Attempt and counts the rest.
 `supertag describe task` shows each Task Attempt's log under `network_log`. Operators also see a
 Tag's 20 newest logs in the desktop app's Tag details, opened from the Tag's name above the
-conversation, and under **Network** in the terminal UI's command palette. A log names the origins
+conversation. A log names the origins
 and paths of other people's Tasks, so only operators may read it.
 
 ### Fail-closed behavior

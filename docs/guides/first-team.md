@@ -11,8 +11,7 @@ The lead delegates a file to the builder, reviews what comes back, posts the res
 
 ## Before you start
 
-Finish the quickstart and send your first message to `lead` in the terminal UI. From the
-repository, run `supertag` to reopen that conversation. The quickstart creates `lead`, the
+Finish the quickstart and send your first message to `lead` with `supertag message`. The quickstart creates `lead`, the
 `local-tools` **Permission Set** (allowed file reads and edits, Schedules the Tag sets for itself, and commands when the host can run them), and a **Workspace** named
 after your repository: an entry under the host's `workspaces` in `supertag.yaml` that maps the name
 to your checkout, with `lead` bound to it. Commands below use the local Control Plane, which they
@@ -87,11 +86,7 @@ and share one Workstream.
 
 ## 3. Create the Objective
 
-In your quickstart checkout, open `supertag`, select `lead`, and enter `/goal` on its own.
-Enter the outcome from the example below, choose `first-team`, and leave the budget blank.
-Copy the Objective ID shown after creation for the CLI commands that follow.
-
-To choose the Objective ID yourself, or for a shared Control Plane, use the CLI.
+Create the Objective with the CLI, which names its ID and its Team:
 
 ```sh
 supertag objective create team-greeting \
@@ -107,8 +102,7 @@ nothing is left running. Use new Objective and Team IDs if these already exist.
 
 ## 4. Follow the work
 
-Select the new Objective under **Objectives** to follow its Sessions and see what needs your
-attention. To follow along from a shell, use its ID in these commands in place of `team-greeting`.
+Follow its Sessions and see what needs your attention from a shell:
 
 ```sh
 supertag watch objective team-greeting
@@ -155,8 +149,8 @@ printf '%s\n' "builder wrote TEAM-HELLO.md; lead posted the summary and messaged
   supertag objective complete team-greeting --summary-file -
 ```
 
-In the terminal UI, open **Waiting on you** to answer a question from the lead. Your answer
-becomes its next turn. If no builder Session starts, check `supertag placement explain TASK_ID`, then use [first-reply troubleshooting](troubleshooting.md). A provider error needs a
+`supertag get inbox-item` lists the lead's questions; answer one with
+`supertag question answer TASK_ID TEXT`. Your answer becomes its next turn. If no builder Session starts, check `supertag placement explain TASK_ID`, then use [first-reply troubleshooting](troubleshooting.md). A provider error needs a
 working harness sign-in before the Team can finish.
 
 ## Stop or continue

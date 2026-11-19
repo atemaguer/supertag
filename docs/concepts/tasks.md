@@ -29,7 +29,7 @@ policy change affects later Tasks without rewriting work that was already accept
 ## An Objective's conversation
 
 An Objective is a conversation with a goal. It runs where it was created, such as a Slack thread,
-a GitHub issue, or a conversation in the terminal UI. Each turn is a Task of the owner Tag, and
+a GitHub issue, or a conversation in the desktop app. Each turn is a Task of the owner Tag, and
 the owner replies in the same conversation.
 
 Turns are delivered, never scheduled. A turn runs when the Objective starts, when a Session
@@ -40,7 +40,7 @@ to continue or finish. The owner finishes it, or reports it blocked, with `repor
 only `report_objective` changes an Objective's status from a turn. If the woken turn also ends
 idle, the Objective stays working and shows as idle until a person acts.
 
-A person directs the Objective from the terminal UI or by replying in its home thread. The
+A person directs the Objective from the CLI or by replying in its home thread. The
 owner asks the person a question with `ask`, which ends the turn. The answer arrives as the
 next turn. See [Define and complete an Objective](../guides/objectives.md).
 
@@ -58,7 +58,7 @@ cannot. Losing a connection to an execution machine does not erase the Task.
 
 A Session groups the Tasks that belong to one native conversation, such as a
 Slack thread, GitHub issue, Linear issue, Lark chat thread, Teams channel
-thread, or conversation in the terminal UI. Replies in an established Session do not need to
+thread, or conversation in the desktop app. Replies in an established Session do not need to
 mention `@SuperTag` again.
 
 ### Continuity and recaps
@@ -109,7 +109,7 @@ notes; to change one, they tell the Tag. See [Memory](../reference/coordination.
 
 Different threads remain different Sessions, even when they invoke the same Tag. A Tag reads
 its other Sessions with `search_sessions` and `read_session`, but only shared
-Sessions and those private to the same person. A direct chat or a conversation in the terminal UI
+Sessions and those private to the same person. A direct chat or a conversation in the desktop app
 is private to that person. See
 [across Sessions](multiplayer.md#across-sessions-one-tag-many-conversations).
 
@@ -149,7 +149,7 @@ An Objective started in a conversation reports back there: its questions, progre
 notices, and completion. The work itself runs in the Sessions started beneath it, so planning and
 tool output stay out of the thread.
 
-You can also talk to a Tag in the terminal UI. See
+You can also talk to a Tag in the desktop app or with `supertag message`. See
 [Talk to a Tag from your terminal](../guides/talk-to-a-tag.md).
 
 ### A Tag's inbox
@@ -173,7 +173,7 @@ Sessions only through the conversation.
 
 Nothing a work Session writes is posted while it works; the only thing posted mid-run is
 SuperTag's own [approval notice](#when-a-work-session-needs-the-person). Its Task streams its
-activity, which appears in the terminal UI when you expand the work Session. The Tag speaks
+activity, which `supertag task events` prints. The Tag speaks
 when the work Session finishes or waits, in a report turn. Nothing a work Session writes reaches
 a person without a Tag turn.
 
@@ -193,9 +193,8 @@ and its report turn has run.
 
 When a work Session's Task calls an action that needs approval, the call doesn't run. The Task
 ends, completed and **waiting on approval** of that request. The approval notice posts to the
-conversation. The notice names the request and the permission that requires approval. If it
-appears under **Waiting on you** in the terminal UI, decide it there. For a request shown only
-in the conversation, use `supertag approval approve` or `supertag approval deny`.
+conversation. The notice names the request and the permission that requires approval. Decide it
+with `supertag approval approve` or `supertag approval deny`.
 The notice says the work Session continues on its own once the person decides.
 `supertag get approval` shows the work Session's description of the request. A work Session's
 Task gets one notice per permission while its requests wait, however many it makes. The report
@@ -350,7 +349,7 @@ signal completion.
 ### Messages while work is running
 
 A Session has one active conversational execution. New human messages are persisted before
-routing. This holds for a conversation in the desktop app or the terminal UI, and
+routing. This holds for a conversation in the desktop app, and
 for a thread in Slack, Microsoft Teams or Lark. When the active harness advertises native input
 support, SuperTag delivers the message to that exact Task Attempt using the harness's queue or
 steering behavior. An accepted input is not also executed as a separate Task, unless the harness

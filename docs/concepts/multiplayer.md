@@ -71,7 +71,7 @@ completed Tasks in that Session instead. Stored Task results remain the source f
 ## Across Sessions: one Tag, many conversations
 
 A Tag talks to people in many conversations: Slack threads, GitHub issues, Lark chats, and
-conversations in the terminal UI. Each conversation is its own Session, and every Session belongs
+conversations in the desktop app. Each conversation is its own Session, and every Session belongs
 to the one Tag. Its configuration, Roles, Mailbox, and Objectives are the same in all of them.
 
 A Session's harness session holds only that conversation, so what the Tag learned in Alice's
@@ -103,10 +103,10 @@ Every Session has an audience, decided by the conversation it comes from. Nobody
 | Audience | Conversations |
 | --- | --- |
 | shared | channels, threads, issues, pull requests, group chats, the Tag's inbox, an operator's Objective |
-| private | a Lark direct chat, a person's conversation in the terminal UI, a Session an operator or client started with `supertag task submit`, a client's Objective |
+| private | a Lark direct chat, a person's conversation in the desktop app or with `supertag message`, a Session an operator or client started with `supertag task submit`, a client's Objective |
 
 A turn sees the Tag's shared Sessions and the private Sessions of the same person: Alice's
-conversation in the terminal UI reads the Sessions she started with `supertag task submit`, never
+conversation in the desktop app reads the Sessions she started with `supertag task submit`, never
 Bob's. A turn in a shared
 thread sees only shared Sessions, because SuperTag does not record who wrote each message there.
 A work Session inherits its starting Session's audience. An Objective started in a private

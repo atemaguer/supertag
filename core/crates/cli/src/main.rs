@@ -18,6 +18,7 @@ mod inputs;
 mod lifecycle;
 mod local;
 mod local_config;
+mod local_gateway;
 mod local_landing;
 mod local_workspaces;
 mod mailbox;
@@ -50,7 +51,6 @@ mod tags;
 mod task_artifact_inputs;
 mod tasks;
 mod teams;
-mod tui;
 mod volumes;
 mod work_sessions;
 mod worker_host;
@@ -103,14 +103,14 @@ use tokio_util::sync::CancellationToken;
 use tonic::Request;
 
 #[derive(Parser)]
-#[command(name = "supertag", version)]
+#[command(name = "supertag", version, arg_required_else_help = true)]
 struct Cli {
-    /// Gateway URL or the name of a Gateway saved in the terminal UI or desktop app, for the
-    /// operator command that follows.
+    /// Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app,
+    /// for the operator command that follows.
     #[arg(long = "gateway", id = "root_gateway", value_name = "URL|NAME")]
     gateway: Option<String>,
     #[command(subcommand)]
-    command: Option<Command>,
+    command: Command,
 }
 
 /// The Gateway selected before the command name, if any.
@@ -121,8 +121,8 @@ static ROOT_GATEWAY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 /// Operator commands connect to a Gateway, which forwards them to its Control Plane.
 #[derive(Args)]
 struct Connection {
-    /// Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads
-    /// the operator token from SUPERTAG_OPERATOR_TOKEN.
+    /// Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app.
+    /// A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN.
     #[arg(
         long,
         global = true,
@@ -182,24 +182,9 @@ enum Command {
         #[arg(long, default_value = "127.0.0.1:0")]
         control_plane_listen: SocketAddr,
     },
-    /// Open the terminal UI; plain supertag opens it for this machine's services.
-    Tui {
-        /// Gateway URL or the name of a saved Gateway.
-        #[arg(long, conflicts_with = "state_directory")]
-        gateway: Option<String>,
-        /// Use the local services in this state directory instead of a Gateway URL.
-        #[arg(long)]
-        state_directory: Option<PathBuf>,
-        /// Terminal UI executable. Also reads SUPERTAG_TUI_BINARY.
-        #[arg(long)]
-        binary: Option<PathBuf>,
-        /// Workspace ID the terminal UI starts in.
-        #[arg(long)]
-        workspace: Option<String>,
-    },
     /// Send a message to your conversation with a Tag and print its reply.
     ///
-    /// The conversation is the one the terminal UI and the desktop app show, so a message sent
+    /// The conversation is the one the desktop app shows, so a message sent
     /// here appears there, and a message sent there continues here. The command waits for the
     /// reply, printing the Tag's messages as they arrive, and fails when the turn fails.
     Message(conversation_message::MessageArgs),
@@ -482,7 +467,7 @@ enum Command {
         #[command(subcommand)]
         command: auth_keys::AuthKeyCommand,
     },
-    /// Save a Gateway under a name for `--gateway NAME` and the terminal UI. Reads one secret from
+    /// Save a Gateway under a name for `--gateway NAME`. Reads one secret from
     /// SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a masked prompt
     /// in a terminal: an operator token is checked and saved; a client Auth Key (stak_...) enrolls
     /// this device as client:NAME and saves only the resulting credential.
@@ -517,8 +502,7 @@ enum Command {
         #[arg(long)]
         socket: PathBuf,
     },
-    /// The local Gateway and its current operator token, as JSON for the terminal UI and the
-    /// desktop app.
+    /// The local Gateway and its current operator token, as JSON for the desktop app.
     #[command(name = "__local-gateway", hide = true)]
     LocalGateway,
     #[command(name = "__adapter-guardian", hide = true)]
@@ -694,7 +678,9 @@ fn usage_error(error: clap::Error) -> ! {
     use clap::error::ErrorKind;
     if matches!(
         error.kind(),
-        ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+        ErrorKind::DisplayHelp
+            | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+            | ErrorKind::DisplayVersion
     ) {
         error.exit()
     }
@@ -725,15 +711,7 @@ fn usage_error_text(error: &clap::Error, filtered: impl IntoIterator<Item = Stri
 }
 
 fn dispatch(cli: Cli) -> Result<()> {
-    let command = match cli.command {
-        Some(command) => command,
-        None => Command::Tui {
-            gateway: None,
-            state_directory: None,
-            binary: None,
-            workspace: None,
-        },
-    };
+    let command = cli.command;
     if let Some(gateway) = cli.gateway {
         ensure!(
             !matches!(
@@ -771,7 +749,7 @@ fn dispatch(cli: Cli) -> Result<()> {
             adapter,
             adapter_args,
         } => supertag_worker_host::guard_adapter(&adapter, &adapter_args),
-        Command::LocalGateway => tui::print_local_gateway(),
+        Command::LocalGateway => local_gateway::print_local_gateway(),
         Command::CodexAdapter(args) => tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?
@@ -1020,22 +998,6 @@ async fn run(command: Command) -> Result<()> {
                 },
             )
             .await?
-        }
-        Command::Tui {
-            gateway,
-            state_directory,
-            binary,
-            workspace,
-        } => {
-            tui::launch(
-                Connection {
-                    gateway,
-                    state_directory,
-                },
-                binary,
-                workspace,
-            )
-            .await?;
         }
         Command::Worklet(args) => worker_host::run_worklet(*args).await?,
         Command::Worker(args) => worker_host::run_worker(*args).await?,
@@ -2880,7 +2842,7 @@ mod tests {
 
     /// Top-level commands that act on this machine, a deployment, or a report rather than on one
     /// resource kind. `connect` is the one verb: it saves a Control Plane on this machine.
-    const OPERATIONS: [&str; 18] = [
+    const OPERATIONS: [&str; 17] = [
         "message",
         "health",
         "init",
@@ -2893,7 +2855,6 @@ mod tests {
         "version",
         "config",
         "control-plane",
-        "tui",
         "worklet",
         "connect",
         "spend",
@@ -3352,7 +3313,7 @@ mod tests {
         ])
         .expect("host enroll parses");
         match enroll.command {
-            Some(super::Command::Host {
+            super::Command::Host {
                 command:
                     crate::host_status::HostCommand::Enroll {
                         control_plane,
@@ -3360,7 +3321,7 @@ mod tests {
                         ..
                     },
                 ..
-            }) => {
+            } => {
                 assert_eq!(control_plane, "https://control-plane.example");
                 assert_eq!(state_directory, std::path::Path::new("/tmp/host"));
             }

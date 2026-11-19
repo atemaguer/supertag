@@ -18,7 +18,7 @@ class SplitImagesContracts(unittest.TestCase):
         self.root = Path(temporary.name)
         self.stage = self.root / "stage"
         self.stage.mkdir()
-        for name in ("supertag", "supertag-tui", "supertag-shared-execution"):
+        for name in ("supertag", "supertag-shared-execution"):
             path = self.stage / name
             path.write_bytes(elf() + name.encode())
             path.chmod(0o755)
@@ -28,7 +28,7 @@ class SplitImagesContracts(unittest.TestCase):
             entry.write_text("synthetic helper")
         (self.stage / "node-bridges/manifest.json").write_text("{}")
         self.source = {"commit": "a" * 40, "archive_sha256": "b" * 64,
-                       "lockfiles": {name: "c" * 64 for name in ("pnpm-lock.yaml", "core/Cargo.lock", "apps/tui/go.sum")}}
+                       "lockfiles": {name: "c" * 64 for name in ("pnpm-lock.yaml", "core/Cargo.lock")}}
 
     def package(self):
         return create_release(self.stage, self.root / "out", version="0.1.0", platform="linux-arm64",
@@ -61,9 +61,9 @@ class SplitImagesContracts(unittest.TestCase):
                 images.build_images(archive, "fixture")
         run.assert_not_called()
 
-    def test_older_cli_tui_fixture_requires_explicit_format_and_preserves_dirty_label(self):
+    def test_cli_fixture_requires_explicit_format_and_preserves_dirty_label(self):
         with patch("native_archive.check_versions"):
-            archive = create_archive(self.stage / "supertag", self.stage / "supertag-tui", self.root / "thin",
+            archive = create_archive(self.stage / "supertag", self.root / "thin",
                                      version="0.1.0", platform="linux-arm64", profile="dev", features=[],
                                      source={"commit": "a" * 40, "dirty": True})
         with patch.object(images.subprocess, "run") as run:
@@ -72,7 +72,7 @@ class SplitImagesContracts(unittest.TestCase):
             run.assert_not_called()
         with patch.object(images.subprocess, "run") as run, \
              patch.object(images.subprocess, "check_output", return_value="supertag 0.1.0\n"):
-            images.build_images(archive, "fixture", archive_format="cli-tui")
+            images.build_images(archive, "fixture", archive_format="cli")
         self.assertIn("org.supertag.source.dirty=true", run.call_args_list[0].args[0])
 
 

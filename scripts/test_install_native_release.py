@@ -26,7 +26,7 @@ class NativeInstallContracts(unittest.TestCase):
         self.node.chmod(0o755)
         self.stage = self.root / "stage"
         self.stage.mkdir()
-        for name in ("supertag", "supertag-tui", "supertag-shared-execution"):
+        for name in ("supertag", "supertag-shared-execution"):
             (self.stage / name).write_bytes(elf() + name.encode())
             (self.stage / name).chmod(0o755)
         for kind, package in PACKAGES.items():
@@ -35,7 +35,7 @@ class NativeInstallContracts(unittest.TestCase):
             entry.write_text("compiled helper")
         (self.stage / "node-bridges/manifest.json").write_text("{}")
         self.source = {"commit": "a" * 40, "archive_sha256": "b" * 64,
-                       "lockfiles": {name: "c" * 64 for name in ("pnpm-lock.yaml", "core/Cargo.lock", "apps/tui/go.sum")}}
+                       "lockfiles": {name: "c" * 64 for name in ("pnpm-lock.yaml", "core/Cargo.lock")}}
         self.archive = self.package("0.1.0")
         for name in ("verify_node", "check_versions", "check_provider_version", "smoke_entry"):
             context = patch.object(installer, name)

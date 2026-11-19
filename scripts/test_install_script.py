@@ -37,14 +37,13 @@ class InstallScript(unittest.TestCase):
         self.assets.mkdir()
         self.platform = native_platform()
 
-    def release(self, version="1.2.3", *, cli=None, tui=None, extra=(), root=None, sums=None, indent=None):
+    def release(self, version="1.2.3", *, cli=None, extra=(), root=None, sums=None, indent=None):
         root = root or f"supertag-{version}-{self.platform}-complete"
         manifest = {"source": {"archive_sha256": "b" * 64, "commit": COMMIT}}
         files = {
             "manifest.json": (json.dumps(manifest, indent=indent,
                                          separators=None if indent else (",", ":")).encode(), 0o644),
             "supertag": (script(cli or f'[ "$1" = --version ] && echo "supertag {version}"'), 0o755),
-            "supertag-tui": (script(tui or f'[ "$1" = --version ] && echo "{version}"'), 0o755),
             "node-bridges/manifest.json": (b"{}\n", 0o644),
         }
         archive = self.assets / f"supertag-{version}-{self.platform}-complete.tar.gz"
@@ -131,10 +130,6 @@ class InstallScript(unittest.TestCase):
     def test_refuses_binaries_that_report_another_version(self):
         self.release(cli='echo "supertag 0.0.1"')
         self.assert_refused("reports supertag 0.0.1, not 1.2.3")
-
-    def test_refuses_a_terminal_ui_from_another_release(self):
-        self.release(tui="echo 0.0.1")
-        self.assert_refused("supertag-tui binary reports 0.0.1")
 
     def test_refuses_a_missing_platform_build(self):
         (self.assets / "SHA256SUMS").write_text(f"{'1' * 64}  supertag-1.2.3-plan9-amd64-complete.tar.gz\n")

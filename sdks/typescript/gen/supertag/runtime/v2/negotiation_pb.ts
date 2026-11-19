@@ -108,7 +108,7 @@ export enum ServiceRole {
   WORKER_HOST = 3,
 
   /**
-   * A client of the Control Plane's API: the CLI, the TUI, the desktop app, or
+   * A client of the Control Plane's API: the CLI, the desktop app, or
    * an SDK client, acting for an operator or an enrolled client.
    *
    * @generated from enum value: SERVICE_ROLE_CLIENT = 4;

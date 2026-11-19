@@ -106,8 +106,7 @@ The reviewer uses `send_message` with the requester as `to` and its evidence as 
 Set `review.requestId` to the request message ID and `review.verdict` to `approved` or
 `changes_requested`. Both directions use the usual Mailbox grants. SuperTag records the
 verdict on the Objective for that commit and brings it to the owner's Objective conversation.
-See it under **Commit reviews** in the terminal UI or with
-`supertag objective commit-reviews OBJECTIVE_ID`. A new
+See it with `supertag objective commit-reviews OBJECTIVE_ID`. A new
 commit needs its own request. The operator still decides whether to accept the result.
 
 ## Check that it worked

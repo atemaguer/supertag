@@ -6,7 +6,6 @@ and permissions, on your repositories. One installation holds everything a machi
 | Part | What it is |
 | --- | --- |
 | `supertag` | The CLI. It also runs the **Control Plane** (the service that stores your organization and schedules work), the **Gateway** (the service clients connect to, which also connects collaboration surfaces such as Slack), and the **Worklet** (`supertag worklet`, the program that connects a machine to the Control Plane as a **Worker Host** and runs its work) |
-| `supertag-tui` | The terminal UI that plain `supertag` opens |
 | `supertag-shared-execution` | An optional shared execution provider for Cursor Tasks |
 | Node bridges | The harness adapters for Claude Code, Cursor, and OpenCode, run with your Node.js |
 
@@ -33,7 +32,7 @@ supertag --version
 ```
 
 It downloads your platform's archive and checks it against the release's `SHA256SUMS` before
-unpacking it. It checks that `supertag` and the terminal UI report the release's version, then
+unpacking it. It checks that `supertag` reports the release's version, then
 installs the release under `~/.local/share/supertag` and links `supertag` into `~/.local/bin`.
 It never starts services or reads existing SuperTag state. Add the `export` line to your shell
 startup file to use the command in new terminals.
@@ -71,7 +70,7 @@ reads the same `SUPERTAG_INSTALL_ROOT` and `SUPERTAG_BIN_DIR`.
 
 The desktop app gives your conversations with Tags a window of their own, on an Apple silicon Mac
 with macOS 13 or later, or on Linux (amd64 or arm64) with `apt`, such as Ubuntu or Debian. Intel
-Macs have no desktop app; use the terminal UI there. Get the files from the
+Macs have no desktop app; use the CLI there. Get the files from the
 [latest release](https://github.com/atemaguer/supertag/releases/latest).
 
 On a Mac:
@@ -80,7 +79,7 @@ On a Mac:
    **Applications**.
 2. Open SuperTag from Applications.
 
-The Mac app carries its own `supertag` CLI, terminal UI, and Node.js bridges, so it needs no
+The Mac app carries its own `supertag` CLI and Node.js bridges, so it needs no
 separate SuperTag install. It doesn't carry Claude Code or Codex: install the ones you want to use
 yourself, as in [Requirements](requirements.md). The setup screen checks that each is installed and
 signed in, and says how when it isn't. Claude Code also needs [Node.js](requirements.md). To use
@@ -97,7 +96,7 @@ On Linux:
 The app runs its pages in Chromium's sandbox. Ubuntu 23.10 and later allow that sandbox only to
 programs with an AppArmor profile, so the package installs one for the app,
 `/etc/apparmor.d/supertag-desktop`, and removes it when you uninstall. There is no AppImage: its
-sandbox can't start under that restriction. Without `apt`, use the terminal UI.
+sandbox can't start under that restriction. Without `apt`, use the CLI.
 
 On first launch the app's setup screen asks for your project folder and coding agent, then sets
 SuperTag up and opens your conversation with `lead`. On later launches it connects to your local
@@ -180,7 +179,7 @@ hosted deployment, follow [Upgrade a deployment](control-plane.md#upgrade-a-depl
 
 ## Check the CLI and the local services
 
-Your CLI, the terminal UI, the desktop app, and Worklets negotiate a protocol version with
+Your CLI, the desktop app, and Worklets negotiate a protocol version with
 the Control Plane on every connection, and refuse a Control Plane that speaks none of theirs. The
 error names both releases and which to upgrade, such as `This CLI speaks SuperTag protocol 5, but
 the Control Plane at http://127.0.0.1:3434 runs SuperTag 0.3.0 (protocol 2). Upgrade the Control

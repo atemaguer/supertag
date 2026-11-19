@@ -12,14 +12,14 @@ import tarfile
 import tempfile
 import zlib
 
-from native_archive import (ArchiveError, BINARIES as CLI_TUI_BINARIES, MAX_BINARY_BYTES, check_architecture,
+from native_archive import (ArchiveError, BINARIES as CLI_BINARIES, MAX_BINARY_BYTES, check_architecture,
                             copy_bounded, copy_stream_bounded, digest, package_root,
                             publish_files, require, validate_metadata, validate_tar_footer,
                             write_checksum)
 
 FORMAT = "supertag-native-release-v1"
-# The small CLI/TUI fixture archive intentionally keeps its existing two files.
-BINARIES = (*CLI_TUI_BINARIES, "supertag-shared-execution")
+# The small CLI fixture archive holds only the CLI.
+BINARIES = (*CLI_BINARIES, "supertag-shared-execution")
 
 
 def check_provider_version(binary, version):
@@ -119,7 +119,7 @@ def validate_manifest(manifest):
     validate_metadata(manifest["version"], manifest["platform"], manifest["profile"], [],
                       {"commit": source["commit"], "dirty": False})
     require(isinstance(source["lockfiles"], dict) and set(source["lockfiles"]) == {
-        "pnpm-lock.yaml", "core/Cargo.lock", "apps/tui/go.sum"}, "invalid source lockfiles")
+        "pnpm-lock.yaml", "core/Cargo.lock"}, "invalid source lockfiles")
     for value in [source["archive_sha256"], *source["lockfiles"].values()]:
         require(isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value), "invalid source digest")
     runtime = manifest["runtime"]

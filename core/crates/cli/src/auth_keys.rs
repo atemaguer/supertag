@@ -23,7 +23,7 @@ pub enum KeyRole {
     Host,
     /// Gateways, with `supertag gateway enroll`.
     Gateway,
-    /// Clients (a device running the CLI, terminal UI, or desktop app), with `supertag connect`.
+    /// Clients (a device running the CLI or desktop app), with `supertag connect`.
     Client,
 }
 

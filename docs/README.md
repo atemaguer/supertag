@@ -21,8 +21,8 @@ an external work tool, such as Slack or GitHub.
 Follow this order on your first visit:
 
 1. [Install SuperTag](operations/install.md).
-2. [Talk to your first Tag](../README.md#run-your-first-tag) in the terminal UI. The
-   [terminal guide](guides/talk-to-a-tag.md) shows how to review a branch or create an Objective.
+2. [Talk to your first Tag](../README.md#run-your-first-tag) from the terminal.
+   [Talk to a Tag](guides/talk-to-a-tag.md) shows how to review a branch or create an Objective.
    [Write an Objective](guides/write-an-objective.md) explains how to state outcomes a Tag can verify.
 3. [Add a builder](guides/first-team.md) and put two Tags in a [Team](guides/teams.md).
    To direct SuperTag from Claude Code, Codex, or another coding agent, set up the
@@ -93,7 +93,7 @@ Once those ideas are clear, learn where the organization and its work run:
 - [Multiplayer](concepts/multiplayer.md) explains how teammates and their Tags work together and share completed work safely.
 - [Persistence](concepts/persistence.md) explains what survives when a sandbox or host dies.
 
-The **Gateway** is the service the CLI, the terminal UI, the desktop app, and SDK applications
+The **Gateway** is the service the CLI, the desktop app, and SDK applications
 connect to. It forwards their calls to the Control Plane, and it receives and sends collaboration
 surface traffic. Worker Hosts connect to the Control Plane directly.
 

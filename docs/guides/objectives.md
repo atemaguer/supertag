@@ -7,7 +7,7 @@ execution of a Task. A **Team** is a flat list of member Tags. The **Control Pla
 SuperTag service that stores and runs this work. See the [glossary](../reference/glossary.md) for
 other terms.
 
-An Objective is a conversation with a goal. You can direct it from the terminal UI or its home
+An Objective is a conversation with a goal. You can direct it from the CLI or its home
 thread. Its owner Tag asks you a question when it needs a decision. Work happens in Sessions
 started beneath it, including Sessions of other Tags in its Team.
 
@@ -61,19 +61,18 @@ See [monetary budgets](../reference/coordination.md#the-budget-pool) and
 
 ## 1. Create the Objective
 
-Open `supertag`, select `lead`, and enter a goal in its conversation.
+Send `lead` a goal in its conversation, from the desktop app or the CLI:
 
-```text
-/goal Customers are billed for metered usage. Done when the billing reconciliation suite passes and a billing review accepts the change.
+```sh
+supertag message lead "/goal Customers are billed for metered usage. Done when the billing reconciliation suite passes and a billing review accepts the change."
 ```
 
 The Control Plane creates the Objective, answers in the conversation with its ID, and starts the
-owner's first turn. The Objective appears in the rail; select it to open its progress view. The owner's turns work in the owner Tag's
-[Workspace](../reference/resource-model.md#workspaces). Enter `/goal` on its own to set a Team or
-budget in the form. You can also open the form with Ctrl-K and **Create Objective**.
+owner's first turn. `supertag describe objective ID` shows its progress. The owner's turns work in
+the owner Tag's [Workspace](../reference/resource-model.md#workspaces).
 
-Use the CLI when scripting creation, choosing the Objective's ID, or setting a deadline. You can
-also [declare the Objective in a manifest](../operations/resources.md#declare-objectives).
+Use `supertag objective create` when scripting creation, choosing the Objective's ID, or setting a
+Team, a budget, or a deadline. You can also [declare the Objective in a manifest](../operations/resources.md#declare-objectives).
 
 ```sh
 supertag objective create usage-billing \
@@ -87,8 +86,7 @@ The command prints the Objective as JSON, including its `session_id` and the
 Creating the Objective starts it: the owner takes its first turn at once, in the Objective's own
 conversation. Running the same command again is refused, because the ID already exists. To retry
 after a lost response, pass the same `--operation-id` both times; the retry returns the first
-result and never starts a second turn. The terminal UI makes an ID from the first words of the
-outcome plus a short suffix, such as `customers-are-billed-7f3e9a2c`.
+result and never starts a second turn.
 
 In this example, the owner starts its own work Sessions. To let it hand work to other Tags,
 create a Team and name it with `--team`. See [Organize Tags into Teams](teams.md).
@@ -218,8 +216,8 @@ Three rules shape what the owner can do:
 - **The Objective keeps moving or stops.** When a turn ends with nothing running and no question
   asked while the Objective is still `working`, SuperTag wakes the owner once and asks it to
   continue or to report the Objective's status. If that woken turn also ends that way, the Objective
-  stays `working` and shows "Idle since …" in `supertag describe objective`, the terminal UI's
-  Objective view, and its owner Tag's **Activity**, until a person messages it or acts on it. Only
+  stays `working` and shows "Idle since …" in `supertag describe objective` and its owner Tag's
+  **Activity**, until a person messages it or acts on it. Only
   the owner's `report_objective` makes it `blocked` or finished from a turn. An `--ongoing`
   Objective is exempt: it may rest until its next message.
 
@@ -229,8 +227,8 @@ the Objective's conversation. See [Request a commit review](tag-messaging.md#req
 
 ## 4. Answer a question
 
-When the owner needs a decision, it asks and ends its turn. In the terminal UI, open **Waiting
-on you**, select its question, type your answer, and press Enter. The answer is the owner's
+When the owner needs a decision, it asks and ends its turn. Answer it with
+`supertag question answer TASK_ID TEXT`; `supertag get inbox-item` lists the questions. The answer is the owner's
 next turn. You can also answer in the Objective's home thread. See
 [Respond to an Objective](objective-decisions.md).
 
@@ -241,10 +239,8 @@ conversation. When the outcome is met, it calls `report_objective` with `complet
 `ready_for_review` and a summary, and the Objective finishes with that summary. The owner can also
 report `blocked`. You can record the result yourself with `supertag objective complete`.
 
-If the owner stopped at `ready_for_review`, the Objective counts under **Waiting on you** in the
-terminal UI. Open it to read the owner's assessment and the branch each Session delivered, then
-press `a` to approve or `c` to request changes with your feedback. From the CLI, request changes
-with
+If the owner stopped at `ready_for_review`, run `supertag describe objective ID` to read the
+owner's assessment and the branch each Session delivered. Request changes with
 `supertag objective review usage-billing request-changes --feedback TEXT`. The Objective returns
 to `working` and the owner acts on your text. To approve, run
 `supertag objective review usage-billing approve`; approval completes the Objective with the
@@ -348,7 +344,8 @@ reason.
   `supertag placement explain TASK_ID` with the Task that `supertag describe objective ID` lists
   under **Work**; it names each bound host and why it cannot take the Task.
 - **The Objective is `blocked`.** Its turns ended twice with nothing running and nothing asked.
-  Open the Objective in the terminal UI, review its last turn, and press `m` to give it a direction.
+  Review its last turn with `supertag describe objective ID`, then send its owner a direction as a
+  turn in the Objective's Session.
 - **The Objective is `limited`.** Its budget pool is spent or its deadline passed. Raise the
   budget or move the deadline to let work continue.
 - **Nothing starts although the budget has room.** The Objective may be paused, or its Team's

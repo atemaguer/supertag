@@ -92,10 +92,9 @@ only members may post to its Workstream.
 ## 2. Deliver evidence to the Objective
 
 An ongoing Objective wakes when a message, Session report, approval decision, or budget or
-deadline notice reaches its conversation. To send a finding, select the Objective in the
-terminal UI, press `m`, and enter it. For example, “Overdue ticket 42: first response took
-90 minutes against a 30-minute target. Plan: enterprise.” Press Enter to send it as the
-manager's next turn.
+deadline notice reaches its conversation. To send a finding, submit it as the manager's
+next turn in the Objective's Session with `supertag task submit`. For example, “Overdue ticket
+42: first response took 90 minutes against a 30-minute target. Plan: enterprise.”
 
 For a monitoring script, or a small webhook relay that forwards alerts from tools like Sentry,
 PagerDuty, or your CI, call the [Control Plane API](../reference/control-plane-api.md) with an
@@ -144,8 +143,8 @@ wake is scheduled, and it is never marked `blocked` for resting.
 
 ## 4. Answer the manager's questions
 
-When the manager needs a decision, it asks and ends its turn. Select the question under
-**Waiting on you** in the terminal UI, type your answer, and press Enter. You can also reply in
+When the manager needs a decision, it asks and ends its turn. Answer it with
+`supertag question answer TASK_ID TEXT`. You can also reply in
 the Objective's home thread.
 
 Apply any resource change, such as a budget increase, before you answer. A message alone

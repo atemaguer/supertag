@@ -17,7 +17,7 @@ actors.
 
 Follow the [quickstart](../../README.md#get-started) to install SuperTag, run `supertag init`,
 and get a reply from `lead`. Use the same checkout when you ask your coding agent to direct
-SuperTag. The terminal UI and your coding agent use the same local services.
+SuperTag. The CLI, the desktop app, and your coding agent use the same local services.
 The operator skill is a separate text file; download it from the SuperTag repository:
 
 ```sh
@@ -193,9 +193,8 @@ answer_file='PATH_FROM_MKTEMP'
 The trap removes the private file when finished. Reread the inbox to verify that the question no
 longer waits.
 
-To reply yourself, open **Waiting on you** in the terminal UI and select the question. For a
-general follow-up, select the Objective and press `m`, or send the owner a turn in the
-Objective's Session with `supertag task submit --tag lead --session SESSION_ID`.
+To reply yourself, run `supertag question answer TASK_ID -` and type the answer. For a general
+follow-up, send the owner a turn in the Objective's Session with `supertag task submit --tag lead --session SESSION_ID`.
 
 If the Objective asks to change application configuration or spend more, the agent presents
 the question, relevant evidence, and its recommendation to you. It waits for your decision.

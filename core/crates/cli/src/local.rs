@@ -40,7 +40,7 @@ const KILL_TIMEOUT: Duration = Duration::from_secs(3);
 /// The Control Plane address an enrolled installation keeps across restarts.
 const CONTROL_PLANE_ADDRESS: &str = "control-plane-address";
 /// The local Gateway's last address, kept across `supertag down` so it comes back on the same
-/// port and a terminal UI left open reconnects.
+/// port and a desktop app left open reconnects.
 const GATEWAY_ADDRESS: &str = "gateway-address";
 /// Where the Control Plane tells Worker Hosts their Workers send Task Attempts' data calls.
 const DATA_ENDPOINT: &str = "SUPERTAG_DATA_ENDPOINT";

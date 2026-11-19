@@ -17,7 +17,7 @@ whole system rather than another first-class resource.
   permissions, and work history. It exists independently of the model or harness executing its
   work. See [Tags](../concepts/tags.md).
 - <a id="lead-tag"></a>**lead Tag** — the Control Plane's default Tag, the one `supertag init` creates,
-  which the terminal UI and the desktop app show first. At most one Tag is the lead. See
+  which the desktop app shows first. At most one Tag is the lead. See
   [the Tag fields](resource-model.md).
 - <a id="role"></a>**Role** — an enduring responsibility assigned to a Tag. It can include a purpose, instructions,
   reusable knowledge, and allowed actions. See [Roles](../concepts/roles.md).
@@ -36,7 +36,7 @@ whole system rather than another first-class resource.
   message. See [Schedules](coordination.md#schedules).
 - <a id="session"></a>**Session** — a group of Tasks from the same conversation, with its own harness
   session. A Session is shared, such as a channel thread, or private to one person, such as a
-  conversation in the terminal UI. A work Session is a Session a
+  conversation in the desktop app. A work Session is a Session a
   conversation started for longer work; its parent is that conversation, it sees only its own
   work, and its result returns there through the Tag. See
   [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-many-conversations) and
@@ -99,7 +99,7 @@ whole system rather than another first-class resource.
   receives events and replies.
 - <a id="surface-account"></a>**Surface Account** — one connected external workspace or account and the Gateway that serves
   it. Its credentials stay with that Gateway, in a credential vault.
-- <a id="gateway"></a>**Gateway** — the service clients connect to: the CLI, the terminal UI, the desktop app, and SDK
+- <a id="gateway"></a>**Gateway** — the service clients connect to: the CLI, the desktop app, and SDK
   applications. It forwards their calls to the Control Plane, carries running Task Attempts' data calls under their Task Attempt credentials when the Control Plane names it as the data endpoint, and carries collaboration surface
   traffic and operator notifications as a client with its own credential, `gateway:NAME`.
 - <a id="worker-host"></a>**Worker Host** — a machine, container, VM, or sandbox that provides execution capacity,
@@ -125,7 +125,7 @@ whole system rather than another first-class resource.
   Worker Host (`host`), a Gateway (`gateway`), or a client device (`client`). A one-time key
   lasts at most an hour, and a reusable key at most 90 days. See
   [Identities and access](../operations/control-plane.md#identities-and-access).
-- <a id="client"></a>**client** — a device running the CLI, the terminal UI, or the desktop app, enrolled with a client
+- <a id="client"></a>**client** — a device running the CLI or the desktop app, enrolled with a client
   Auth Key as `client:NAME`.
 - <a id="admin-token"></a>**admin token** — the admin Operator Token: the Control Plane's full operator credential, which
   alone manages Operator Tokens. `supertag setup deployment` generates it; a local Control Plane

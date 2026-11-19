@@ -115,6 +115,12 @@ within the pre-1.0 compatibility policy described in
 
 - The Linux AppImage of the desktop app. On Linux the desktop app ships as a Debian package for
   amd64 and arm64.
+- The terminal UI (`supertag tui`, and plain `supertag` opening it) is removed; plain `supertag`
+  prints help. Use the desktop app or the CLI's commands: `supertag message` to talk to a Tag,
+  `supertag status` and `supertag get inbox-item` for what waits on you, `supertag question answer`
+  and `supertag approval` to answer and decide. The native archive no longer carries
+  `supertag-tui`. `supertag connect` saves Gateways in `supertag/gateways.json` in the user
+  configuration directory; save a Gateway saved earlier again.
 
 ## [0.3.2] - 2026-11-18
 

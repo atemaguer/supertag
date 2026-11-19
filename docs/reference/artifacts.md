@@ -433,7 +433,7 @@ it again; the refusal says how many objects are still waiting.
 
 ### Client downloads
 
-Clients can't download artifact files: the CLI, the terminal UI, the desktop app, and the SDKs
+Clients can't download artifact files: the CLI, the desktop app, and the SDKs
 list artifacts and their files, but the bytes stay on the Worker Host that captured them or on
 the Tag's Volume. The Control Plane doesn't pass files to clients.
 

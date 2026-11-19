@@ -1,7 +1,7 @@
 # Control Plane API
 
 The Control Plane, the service that stores a SuperTag organization and schedules its work,
-serves one gRPC API. Clients, such as the CLI, the terminal UI, the desktop app, and your own
+serves one gRPC API. Clients, such as the CLI, the desktop app, and your own
 applications, call it through a **Gateway**, the service that forwards their calls and connects
 collaboration surfaces. The **Worklets** of **Worker Hosts**, the machines that run work, call it
 directly. A running **Task Attempt**'s Worker sends its data calls to the data endpoint the Control
@@ -45,7 +45,7 @@ both services
 ```
 
 The part `(SuperTag BUILD) speaks protocol versions [V, ...]` names the Control Plane's release and
-versions, and every release keeps that form. The CLI, terminal UI, desktop app, and Worklets
+versions, and every release keeps that form. The CLI, desktop app, and Worklets
 read it to show which release to upgrade, for example: `This app speaks SuperTag protocol 5, but
 the Control Plane at http://127.0.0.1:3434 runs SuperTag 0.3.0 (protocol 2). Upgrade the Control
 Plane.`

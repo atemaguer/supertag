@@ -1,6 +1,6 @@
 //! `supertag message` through the local services `supertag up` runs, with the fixture adapter as
 //! the Tag's harness: the reply prints, and the message and reply land in the conversation the
-//! terminal UI and the desktop app read.
+//! desktop app reads.
 #[path = "support/children.rs"]
 mod children;
 use children::reaped;
@@ -116,7 +116,7 @@ fn stdout(output: &std::process::Output) -> Result<String> {
     Ok(String::from_utf8(output.stdout.clone())?)
 }
 
-/// The caller's conversation with `tag`, oldest first, as the terminal UI reads it.
+/// The caller's conversation with `tag`, oldest first, as the desktop app reads it.
 async fn conversation(
     client: &mut ConversationsClient<ProtocolChannel>,
     token: &str,
@@ -232,14 +232,14 @@ async fn message_prints_the_reply_in_the_conversation_other_clients_show(
     // The reply printed here counts as read in the other clients.
     ensure!(thread.unread_count == 0, "{thread:?}");
 
-    // A message from another client, as the terminal UI sends it, continues the same
+    // A message from another client, as the desktop app sends it, continues the same
     // conversation; standard input carries the next one.
     client
         .send_message(authenticated_request(
             SendMessageRequest {
                 tag_id: "engineer".into(),
                 operation_id: "from-the-terminal-ui".into(),
-                text: "From the terminal UI".into(),
+                text: "From the desktop app".into(),
                 ..Default::default()
             },
             &token,
@@ -251,7 +251,7 @@ async fn message_prints_the_reply_in_the_conversation_other_clients_show(
         loop {
             let (_, messages) = conversation(&mut client, &token, "engineer").await?;
             if messages.last().is_some_and(|message| {
-                prompt(message) == "From the terminal UI"
+                prompt(message) == "From the desktop app"
                     && message.task.as_ref().unwrap().state() == TaskState::Succeeded
             }) {
                 return Ok::<_, anyhow::Error>(());
@@ -260,7 +260,7 @@ async fn message_prints_the_reply_in_the_conversation_other_clients_show(
         }
     })
     .await
-    .context("the terminal UI's message was not answered")??;
+    .context("the desktop app's message was not answered")??;
     let printed =
         stdout(&supertag(&state, &["message", "engineer"], Some("Read from stdin\n")).await?)?;
     ensure!(
@@ -298,7 +298,7 @@ async fn message_prints_the_reply_in_the_conversation_other_clients_show(
         prompts
             == [
                 "Hello there",
-                "From the terminal UI",
+                "From the desktop app",
                 "Read from stdin",
                 "No wait"
             ],

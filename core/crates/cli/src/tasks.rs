@@ -134,7 +134,7 @@ pub async fn run(connection: Connection, command: TaskCommand) -> Result<()> {
         } => {
             ensure!(
                 !conversation_session(&session),
-                "{session} is your conversation with {tag}, which the terminal UI and desktop app show; send to it with supertag message {tag} TEXT. task submit runs a separate Session: name another --session."
+                "{session} is your conversation with {tag}, which the desktop app shows; send to it with supertag message {tag} TEXT. task submit runs a separate Session: name another --session."
             );
             let (mut operator, token) = crate::operator(connection).await?;
             let max_reported_cost = max_reported_cost_minor.zip(reported_cost_currency).map(

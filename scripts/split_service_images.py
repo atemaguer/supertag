@@ -19,8 +19,8 @@ def build_images(archive, repository, tag=None, checksum=None, *, archive_format
     with tempfile.TemporaryDirectory(prefix="supertag-service-images-") as temporary:
         root = Path(temporary)
         # Verify the entire selected archive before copying its CLI. Service
-        # images deliberately do not contain harnesses, the TUI, or provider secrets.
-        require(archive_format in ("complete", "cli-tui"), "unknown archive format")
+        # images deliberately do not contain harnesses or provider secrets.
+        require(archive_format in ("complete", "cli"), "unknown archive format")
         extractor = extract_release if archive_format == "complete" else extract_archive
         # The labels and extracted bytes must describe the same private input,
         # even if the caller replaces the original archive during a build.
@@ -71,8 +71,8 @@ def main():
     parser.add_argument("--checksum", type=Path)
     parser.add_argument("--repository", default="supertag-native")
     parser.add_argument("--tag")
-    parser.add_argument("--archive-format", choices=("complete", "cli-tui"), default="complete",
-                        help="complete release (default), or the older CLI/TUI fixture archive")
+    parser.add_argument("--archive-format", choices=("complete", "cli"), default="complete",
+                        help="complete release (default), or the CLI-only fixture archive")
     args = parser.parse_args()
     try:
         print(json.dumps(build_images(args.archive, args.repository, args.tag, args.checksum, archive_format=args.archive_format), sort_keys=True))

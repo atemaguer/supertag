@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Build and verify an unpublished native CLI/TUI archive. Requires Python 3.11+.
+"""Build and verify an unpublished native CLI archive. Requires Python 3.11+.
 
 This is a local packaging tool, not an installer or a signed release channel.
-Default builds use release Rust code and the repository's Go TUI version flags.
-Prebuilt inputs require an explicit profile and record supplied Cargo features.
+Default builds use release Rust code. Prebuilt inputs require an explicit profile and record supplied Cargo features.
 Source metadata describes the packaging checkout, not an attestation that supplied
 binaries were built from it. Binary versions and architecture are verified.
 """
@@ -30,7 +29,7 @@ MAX_BINARY_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024
 MAX_MANIFEST_BYTES = 16 * 1024
 PLATFORMS = {"linux-arm64", "linux-amd64", "darwin-arm64"}
-BINARIES = ("supertag", "supertag-tui")
+BINARIES = ("supertag",)
 REPO = Path(__file__).resolve().parents[1]
 
 
@@ -89,14 +88,12 @@ def check_architecture(header, platform):
     require(len(header) >= 32 and valid, "binary architecture does not match the package platform")
 
 
-def check_versions(cli, tui, version):
+def check_versions(cli, version):
     with tempfile.TemporaryDirectory(prefix="supertag-version-") as home:
-        env = {"PATH": os.defpath, "HOME": home}
-        for binary, expected in [(cli, f"supertag {version}"), (tui, version)]:
-            result = subprocess.run([str(binary), "--version"], env=env, capture_output=True,
-                                    text=True, timeout=10, check=False)
-            require(result.returncode == 0 and result.stdout.strip() == expected,
-                    f"{binary.name} does not report the package version")
+        result = subprocess.run([str(cli), "--version"], env={"PATH": os.defpath, "HOME": home},
+                                capture_output=True, text=True, timeout=10, check=False)
+        require(result.returncode == 0 and result.stdout.strip() == f"supertag {version}",
+                f"{Path(cli).name} does not report the package version")
 
 
 def source_metadata(repo=REPO):
@@ -157,7 +154,7 @@ def publish_files(files):
 def uncompressed_archive(path):
     # Fully consume gzip before parsing tar: tar readers stop at the first
     # footer, which alone does not verify gzip's checksum or truncation.
-    limit = 2 * MAX_BINARY_BYTES + MAX_MANIFEST_BYTES + 1024 * 1024
+    limit = len(BINARIES) * MAX_BINARY_BYTES + MAX_MANIFEST_BYTES + 1024 * 1024
     with tempfile.TemporaryFile() as raw:
         size = 0
         try:
@@ -179,7 +176,7 @@ def validate_tar_footer(raw, offset):
             and not any(padding), "invalid tar footer or trailing archive data")
 
 
-def create_archive(cli, tui, output, *, version, platform, profile, features, source):
+def create_archive(cli, output, *, version, platform, profile, features, source):
     features = sorted(set(features))
     validate_metadata(version, platform, profile, features, source)
     output = Path(output).resolve()
@@ -191,7 +188,7 @@ def create_archive(cli, tui, output, *, version, platform, profile, features, so
     with tempfile.TemporaryDirectory(prefix=".supertag-native-stage-", dir=output) as temporary:
         stage = Path(temporary)
         files = {}
-        for name, source_path in zip(BINARIES, (cli, tui), strict=True):
+        for name, source_path in zip(BINARIES, (cli,), strict=True):
             source_path = Path(source_path)
             require(source_path.is_file(), "native binary is unavailable")
             require(0 < source_path.stat().st_size <= MAX_BINARY_BYTES, "native binary exceeds size limit")
@@ -201,7 +198,7 @@ def create_archive(cli, tui, output, *, version, platform, profile, features, so
             with target.open("rb") as handle:
                 check_architecture(handle.read(32), platform)
             files[name] = {"sha256": digest(target), "bytes": target.stat().st_size, "mode": 0o755}
-        check_versions(stage / "supertag", stage / "supertag-tui", version)
+        check_versions(stage / "supertag", version)
         manifest = {"format": FORMAT, "version": version, "platform": platform, "profile": profile,
                     "features": features, "source": source, "files": files}
         payload = json.dumps(manifest, sort_keys=True, indent=2).encode() + b"\n"
@@ -243,7 +240,7 @@ def validate_archive(path, checksum=None):
         with uncompressed_archive(path) as raw, tarfile.open(fileobj=raw, mode="r:") as source:
             end = 0
             for index, member in enumerate(source):
-                require(index < 4, "unexpected or duplicate archive entry")
+                require(index < 2 + len(BINARIES), "unexpected or duplicate archive entry")
                 require(not member.issym() and not member.islnk() and not member.sparse,
                         "archive links and sparse files are forbidden")
                 parts = member.name.split("/")
@@ -327,7 +324,7 @@ def extract_archive(path, destination, checksum=None):
     return root
 
 
-def build_binaries(stage, profile, features, repo=REPO, env=None):
+def build_cli(profile, features, repo=REPO, env=None):
     command = ["cargo", "build", "--locked", "--manifest-path", str(repo / "core/Cargo.toml"),
                "-p", "supertag-cli", "--bin", "supertag"]
     if profile == "release":
@@ -337,14 +334,7 @@ def build_binaries(stage, profile, features, repo=REPO, env=None):
     subprocess.run(command, cwd=repo, env=env, check=True)
     metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1",
         "--manifest-path", str(repo / "core/Cargo.toml")], cwd=repo, env=env))
-    cli = Path(metadata["target_directory"]) / ("release" if profile == "release" else "debug") / "supertag"
-    version = version_from_repo(repo)
-    system, arch = native_platform().split("-")
-    env = dict(os.environ if env is None else env, CGO_ENABLED="0", GOOS=system, GOARCH=arch, GOWORK="off")
-    tui = stage / "supertag-tui"
-    subprocess.run(["go", "build", "-mod=readonly", "-trimpath", "-ldflags", f"-s -w -X main.version={version}",
-                    "-o", str(tui), "."], cwd=repo / "apps/tui", env=env, check=True)
-    return cli, tui
+    return Path(metadata["target_directory"]) / ("release" if profile == "release" else "debug") / "supertag"
 
 
 def main():
@@ -353,7 +343,6 @@ def main():
     package = commands.add_parser("package", help="build or package supplied native binaries")
     package.add_argument("--output", type=Path, required=True)
     package.add_argument("--cli", type=Path)
-    package.add_argument("--tui", type=Path)
     package.add_argument("--profile", choices=("dev", "release"))
     package.add_argument("--feature", action="append", default=[], help="compiled Cargo feature, recorded in manifest")
     verify = commands.add_parser("verify", help="validate checksum, members, architecture, and binary hashes")
@@ -364,13 +353,11 @@ def main():
         if args.command == "verify":
             print(json.dumps(validate_archive(args.archive, args.checksum), sort_keys=True))
             return
-        require(bool(args.cli) == bool(args.tui), "supply both --cli and --tui")
         require(not args.cli or args.profile is not None, "prebuilt binaries require an explicit --profile")
         profile = args.profile or "release"
-        with tempfile.TemporaryDirectory(prefix="supertag-native-build-") as temporary:
-            cli, tui = (args.cli, args.tui) if args.cli else build_binaries(Path(temporary), profile, args.feature)
-            path = create_archive(cli, tui, args.output, version=version_from_repo(), platform=native_platform(),
-                                  profile=profile, features=args.feature, source=source_metadata())
+        cli = args.cli or build_cli(profile, args.feature)
+        path = create_archive(cli, args.output, version=version_from_repo(), platform=native_platform(),
+                              profile=profile, features=args.feature, source=source_metadata())
         print(path)
     except (ArchiveError, OSError, subprocess.SubprocessError) as error:
         parser.exit(1, f"native archive: {error}\n")

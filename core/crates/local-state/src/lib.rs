@@ -1,7 +1,7 @@
 //! The machine-wide local state `supertag up` keeps (`SUPERTAG_STATE_DIR`, else `~/.supertag`), and
 //! how a client on this machine finds the local Gateway (and, for supervision, the local Control
-//! Plane) in it. The CLI, the desktop app's backend and, through `supertag __local-gateway`, the
-//! terminal UI all discover the local services here, so the files' format has one reader.
+//! Plane) in it. The CLI and, through `supertag __local-gateway`, the desktop app discover the
+//! local services here, so the files' format has one reader.
 //!
 //! Only state owned by this user is read: the directory and every file must be private to the
 //! effective user, files are opened without following links, and endpoints must be loopback.

@@ -37,7 +37,7 @@ each host's state: busy, offline, draining, or a slot kept by an uncertain Task 
 `supertag task resolve-attempt` command that frees it. It is `harness` when no eligible host runs
 the Task's harness. A Task waiting for the Session's last delivery reports `workspace-holder` with
 the name of the Worker Host holding it: a local Workspace's Session continues only on that host,
-and a remote Workspace's waits until that host's Worklet has pushed the Session's branch. The desktop app and the terminal UI show this summary under a waiting message.
+and a remote Workspace's waits until that host's Worklet has pushed the Session's branch. The desktop app shows this summary under a waiting message.
 
 ## Placement by harness and model
 
@@ -83,7 +83,7 @@ A waiting turn says so wherever a waiting turn's reason shows, such as "Tag lead
 Attempts in the last 1h, its start rate; the next can start at 2026-11-17 10:42 UTC".
 `supertag placement explain TASK` reports the requirement `start-rate`, and
 `supertag describe tag` shows `start_rate` with how many Task Attempts started in the current
-window, as do the desktop app's Tag details and the terminal UI under **Activity**. A Tag manifest sets it with `spec.startRate`. A new Tag has no start rate.
+window, as do the desktop app's Tag details. A Tag manifest sets it with `spec.startRate`. A new Tag has no start rate.
 
 ### Objective turns
 

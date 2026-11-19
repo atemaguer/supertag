@@ -86,7 +86,7 @@ scheduler then chooses a compatible harness and model on one of those hosts. Non
 - **Mailbox** is a Tag's inbox for plain-text messages from other Tags. Every message waiting
   when a turn starts is handled together in that turn. See [Mailbox](coordination.md#mailbox).
 - **Session** preserves automatic continuity for one Tag conversation. The `audience` field is
-  `shared` or `private`. A direct chat or a conversation in the terminal UI is private to one
+  `shared` or `private`. A direct chat or a conversation in the desktop app is private to one
   person. One Session does not read another's transcript. See
   [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-many-conversations). A [work Session](../concepts/tasks.md#session)
   reports its conversation as `parent_session_id`. In `supertag get session`, `latest_task_state`
@@ -172,7 +172,7 @@ it activates there. `supertag tag update TAG --add-location PROVIDER` creates on
 Gateway. See [Manage resources](../operations/resources.md).
 
 The lead Tag is the Control Plane's default Tag: `supertag init` makes the Tag it creates the lead,
-and the terminal UI and the desktop app show it first. At most one active Tag is the lead; making
+and the desktop app shows it first. At most one active Tag is the lead; making
 a second one the lead is refused with the name of the current one, so clear that one first with
 `lead: false` or `supertag tag put TAG --lead false`. Retiring the lead Tag leaves no lead.
 
@@ -191,7 +191,7 @@ creates it for one role, and the enrollee redeems it from its own side, choosing
 | --- | --- | --- |
 | `host` | A Worker Host | `supertag host enroll HOST_ID`, or a host service's `auth-key` in `supertag.yaml` |
 | `gateway` | A Gateway | `supertag gateway enroll` |
-| `client` | A device running the CLI, terminal UI, or desktop app | `supertag connect URL --name NAME` |
+| `client` | A device running the CLI or desktop app | `supertag connect URL --name NAME` |
 
 ```sh
 supertag auth-key create ci --role host --tag builder --label linux-ci --reusable --ephemeral
@@ -819,7 +819,7 @@ without a grant; across Teams, a grant records that a recipient accepts messages
 Delivery grants no execution authority. See [Mailbox](coordination.md#mailbox) and
 [Send messages between Tags](../guides/tag-messaging.md).
 
-A message from the terminal UI or a reply in the Objective's home thread delivers its next
+A message from the CLI or a reply in the Objective's home thread delivers its next
 turn. The owner uses `ask` to put a question to a person. A message grants no authority and
 changes no budget. See
 [Operator messages](coordination.md#operator-messages).

@@ -105,16 +105,10 @@ jobs:
         if: runner.os == 'macOS'
         with:
           node-version: '22.13.0'
-      - uses: actions/setup-go@v5
-        if: runner.os == 'macOS'
-        with:
-          go-version: '1.26.1'
-          cache: false
       - name: Prepare native macOS tools
         if: runner.os == 'macOS'
         run: |
           npm install --global --ignore-scripts --no-audit --no-fund pnpm@11.18.0
-          command -v tmux || brew install tmux
       # Release builds restore Cargo's registry and third-party dependency builds from a cache
       # with its own key prefix, kept under the checkout but outside the tracked files the build
       # snapshots. rust-cache never saves workspace crates, and --cargo-cache stamps every
@@ -136,7 +130,7 @@ jobs:
           cache-bin: false
           # Pull requests labelled release-check reuse the cache without adding their own.
           save-if: ${{ github.event_name != 'pull_request' }}
-      # The Linux builder image (Rust, Node, Go, Python and pnpm on Debian 12) comes from the
+      # The Linux builder image (Rust, Node, Python and pnpm on Debian 12) comes from the
       # GitHub Actions cache through buildx, one scope per platform. Its layers are keyed by
       # content: the digest-pinned base image and each Dockerfile step, so a changed Dockerfile or
       # entrypoint misses only from the changed step on. Release-builder-cache.yml fills the cache

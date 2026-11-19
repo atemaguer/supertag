@@ -6,8 +6,7 @@ import { connect as tlsConnect } from "node:tls";
 // A `wss://` or `ws://` Gateway URL carries the same gRPC connection inside a WebSocket, for
 // platforms whose proxy forwards only HTTP/1.1. The tunnel is a byte pipe: SuperTag's own TLS,
 // with any client certificate, runs end to end inside it, so a proxy that terminates the outer
-// `wss://` TLS sees only ciphertext. This matches the Rust transport (core/crates/transport) and
-// the terminal UI's tunnel (apps/tui/client/tunnel.go).
+// `wss://` TLS sees only ciphertext. This matches the Rust transport (core/crates/transport).
 
 /** The largest WebSocket message either side sends or accepts. */
 export const TUNNEL_MAX_MESSAGE = 256 * 1024;

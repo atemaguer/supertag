@@ -468,7 +468,7 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
 }
 
 /// `supertag connect` checks the token first, saves the Control Plane owner-only in the
-/// terminal UI's store as the active one, and later commands use it by name.
+/// CLI's store, and later commands use it by name.
 async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Result<()> {
     let services = Services::start(&database, None).await?;
     let home = tempfile::tempdir()?;
@@ -490,9 +490,9 @@ async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Re
     };
     let store = if cfg!(target_os = "macos") {
         home.path()
-            .join("Library/Application Support/supertag/tui-gateways.json")
+            .join("Library/Application Support/supertag/gateways.json")
     } else {
-        home.path().join(".config/supertag/tui-gateways.json")
+        home.path().join(".config/supertag/gateways.json")
     };
 
     let (saved, stderr) = connect("not-the-token", "prod", &services.public, false).await?;
@@ -517,7 +517,6 @@ async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Re
     );
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
     assert_eq!(profiles["version"], 1);
-    assert_eq!(profiles["active"], "prod");
     assert_eq!(profiles["gateways"][0]["name"], "prod");
     assert_eq!(profiles["gateways"][0]["url"], services.public.as_str());
     assert_eq!(profiles["gateways"][0]["token"], token.as_str());
@@ -534,14 +533,10 @@ async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Re
 
     let (saved, stderr) = connect(&token, "prod", &services.public, false).await?;
     ensure!(!saved && stderr.contains("--replace"), "{stderr}");
-    // Replacing a connection keeps the Workspace the terminal UI chose for it.
-    let mut profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
-    profiles["gateways"][0]["workspace"] = "project".into();
-    std::fs::write(&store, serde_json::to_vec(&profiles)?)?;
     let (saved, stderr) = connect(&token, "prod", &services.public, true).await?;
     ensure!(saved, "{stderr}");
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
-    assert_eq!(profiles["gateways"][0]["workspace"], "project");
+    assert_eq!(profiles["gateways"].as_array().map(Vec::len), Some(1));
     // A URL that cannot be saved is refused before the token is sent anywhere.
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
     listener.set_nonblocking(true)?;

@@ -87,8 +87,8 @@ supertag connect https://supertag.example.com --name team
 
 `connect` reads one secret from `SUPERTAG_OPERATOR_TOKEN` or a masked prompt. It saves an
 Operator Token after checking it. It uses a client Auth Key (`stak_...`) to enroll this device and
-saves only the device credential. Saved Control Planes live in the terminal UI's and the desktop
-app's stores, so all three clients share them. For a certificate from your own CA, add
+saves only the device credential. It saves the Control Plane in the CLI's store; commands also read the
+names the desktop app saves. For a certificate from your own CA, add
 `--server-ca-file`; for a Control Plane that requires client certificates, add
 `--client-cert-file` and `--client-key-file`.
 

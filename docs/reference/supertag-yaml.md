@@ -5,8 +5,8 @@
 
 - A **`control-plane` service** runs a local **Control Plane**, the SuperTag service that stores
   your [organization](glossary.md#autonomous-organization) and schedules its work. A file has at
-  most one. `supertag up` always runs a local **Gateway** beside it: the service the CLI, the
-  terminal UI, and the desktop app connect to, which also carries collaboration surfaces and
+  most one. `supertag up` always runs a local **Gateway** beside it: the service the CLI and the
+  desktop app connect to, which also carries collaboration surfaces and
   operator notifications.
 - A **`host` service** runs a **Worklet** that connects this machine as a **Worker Host**, a
   computer that runs [Tasks](glossary.md#task) for Tags, the persistent AI actors with their own

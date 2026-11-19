@@ -1,9 +1,8 @@
 #!/bin/sh
 # Installs SuperTag's native release for macOS on Apple silicon or Linux on arm64 or amd64: the
-# supertag CLI, the supertag-tui terminal UI, the shared execution provider, and the Node.js bridges
-# for Claude Code, Cursor, OpenCode, E2B, and Modal. The archive must match the release's SHA256SUMS before it is
-# unpacked, and the CLI and terminal UI must report the release's version before the command is
-# linked. The installer never starts services or reads SuperTag state.
+# supertag CLI, the shared execution provider, and the Node.js bridges for Claude Code, Cursor,
+# OpenCode, E2B, and Modal. The archive must match the release's SHA256SUMS before it is unpacked,
+# and the CLI must report the release's version before the command is linked. The installer never starts services or reads SuperTag state.
 set -eu
 umask 022
 
@@ -150,7 +149,7 @@ awk -v root="$ROOT_NAME" '
   END { exit bad }' "$STAGING/download/entries" || fail "$ROOT_NAME.tar.gz has an entry outside $ROOT_NAME"
 tar -xzf "$ARCHIVE" -C "$STAGING/unpacked" || fail "could not unpack $ROOT_NAME.tar.gz"
 PACKAGE="$STAGING/unpacked/$ROOT_NAME"
-[ -f "$PACKAGE/manifest.json" ] && [ -x "$PACKAGE/supertag" ] && [ -x "$PACKAGE/supertag-tui" ] ||
+[ -f "$PACKAGE/manifest.json" ] && [ -x "$PACKAGE/supertag" ] ||
   fail "$ROOT_NAME.tar.gz is not a complete SuperTag release"
 # macOS applies the umask to symbolic links; the release records them as 0777, as Linux creates them.
 if [ "$os" = darwin ]; then
@@ -159,8 +158,6 @@ fi
 
 cli_version=$("$PACKAGE/supertag" --version 2>/dev/null || true)
 [ "$cli_version" = "supertag $VERSION" ] || fail "the supertag binary reports ${cli_version:-no version}, not $VERSION"
-tui_version=$("$PACKAGE/supertag-tui" --version 2>/dev/null || true)
-[ "$tui_version" = "$VERSION" ] || fail "the supertag-tui binary reports ${tui_version:-no version}, not $VERSION"
 
 # The layout and receipt of scripts/install_native_release.py, so either can replace the other.
 commit=$(grep -o '"commit"[[:space:]]*:[[:space:]]*"[0-9a-f]\{40\}"' "$PACKAGE/manifest.json" |

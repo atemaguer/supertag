@@ -18,7 +18,7 @@ the Gateway in this order:
 
 | You pass | Commands use |
 | --- | --- |
-| `--gateway NAME` | A Gateway saved under `NAME` by `supertag connect`, the terminal UI, or the desktop app |
+| `--gateway NAME` | A Gateway saved under `NAME` by `supertag connect` or the desktop app |
 | `--gateway https://HOST` or `wss://HOST` | That Gateway, with the Operator Token in `SUPERTAG_OPERATOR_TOKEN` |
 | `--state-directory DIR` | The Gateway that `supertag up` runs from `DIR`, with that directory's local operator credential |
 | `SUPERTAG_GATEWAY_URL` set to a saved name or a URL | That Gateway, as with `--gateway` |
@@ -222,18 +222,18 @@ place to run the commands makes every Task of the lead wait, with `unsandboxed-c
 
 ## Talk to a Tag
 
-The terminal UI is the place for conversations. Plain `supertag` opens it for your local
-services; `supertag tui --gateway NAME` opens it for a saved Control Plane. See
-[Talk to a Tag from your terminal](../guides/talk-to-a-tag.md).
+`supertag message` talks to a Tag from the terminal; see
+[Send messages from the CLI](#send-messages-from-the-cli) and
+[Talk to a Tag from your terminal](../guides/talk-to-a-tag.md). The desktop app gives your
+conversations a window of their own.
 
-The terminal UI and the desktop app find the local Control Plane on their own. While
-`supertag up` runs one from `SUPERTAG_STATE_DIR` or `~/.supertag`, each lists it as **Local**
-and connects with the local operator token, with nothing to enter. With no saved Control Plane
-last used, each opens Local at launch. The token is read at each connect and never saved. When no
-local Control Plane runs, they say so, name `supertag up`, and offer the saved Control Planes.
-When SuperTag isn't set up in that state directory yet, they name `supertag init` instead, as
-`supertag ps` and every operator command do.
-The desktop app goes one step further at launch: when SuperTag is set up in that state directory
+The desktop app finds the local Control Plane on its own. While `supertag up` runs one from
+`SUPERTAG_STATE_DIR` or `~/.supertag`, it lists it as **Local** and connects with the local
+operator token, with nothing to enter. With no saved Control Plane last used, it opens Local at
+launch. The token is read at each connect and never saved. When no local Control Plane runs, it
+says so, names `supertag up`, and offers the saved Control Planes. When SuperTag isn't set up in
+that state directory yet, it names `supertag init` instead, as `supertag ps` and every operator
+command do. At launch, when SuperTag is set up in that state directory
 but its services are stopped, and no saved Control Plane was last used, it shows "Starting
 SuperTag…", runs `supertag up` itself with your login shell's `PATH` (the copy bundled with the
 app, else the one on that `PATH` or in `~/.local/bin`), and connects. If that `supertag` is another version than the app's, the app says so and names
@@ -242,8 +242,8 @@ where the logs are.
 
 ## Send messages from the CLI
 
-`message` sends a message to your conversation with a Tag, the same conversation the terminal UI
-and the desktop app show. It waits for the reply and prints the Tag's messages as they arrive:
+`message` sends a message to your conversation with a Tag, the same conversation the desktop app
+shows. It waits for the reply and prints the Tag's messages as they arrive:
 
 ```sh
 supertag message lead "What changed in the payment module this week?"
@@ -270,7 +270,7 @@ next:
 
 `task submit` sends one turn of work to a Tag in a Session you name. A new Session name starts a
 new Session; reusing it continues one. These Sessions are separate from your conversation with
-the Tag, and don't appear in the terminal UI or the desktop app. `task submit` refuses that
+the Tag, and don't appear in the desktop app. `task submit` refuses that
 conversation's own Session and suggests `message` instead. Start a separate Session like this:
 
 ```sh
@@ -394,10 +394,9 @@ Save a shared Control Plane under a name. `connect` reads one secret, from
 ```sh
 supertag connect https://supertag.example.com --name team
 supertag get objective --gateway team
-supertag tui --gateway team
 ```
 
-The terminal UI and the desktop app read the same saved names. Add `--server-ca-file` when the
+Commands also read the names the desktop app saves. Add `--server-ca-file` when the
 Control Plane's certificate comes from a private CA. See
 [Manage a remote Control Plane](control-plane.md#manage-a-remote-control-plane).
 

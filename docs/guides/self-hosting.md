@@ -117,7 +117,7 @@ Save the Control Plane under a name with the admin Operator Token from `operator
 supertag connect https://supertag.example.com --name team
 ```
 
-Paste the token at the masked prompt. Commands, the terminal UI, and the desktop app then use
+Paste the token at the masked prompt. Commands and the desktop app then use
 `--gateway team`.
 
 ## 6. Connect a Worker Host
@@ -161,7 +161,7 @@ Keep the admin token to yourself. Each teammate gets the secrets for what they d
 
 | Secret | Lets them | Create it with |
 | --- | --- | --- |
-| A client Auth Key | Connect their CLI, terminal UI, or desktop app as their own device | `supertag auth-key create NAME --role client --tag TAG` |
+| A client Auth Key | Connect their CLI or desktop app as their own device | `supertag auth-key create NAME --role client --tag TAG` |
 | An Operator Token | Run operator commands, recorded under the token's name | `supertag operator-token create NAME` |
 | A host Auth Key | Join their computer as a Worker Host | `supertag auth-key create NAME --role host --tag TAG` |
 

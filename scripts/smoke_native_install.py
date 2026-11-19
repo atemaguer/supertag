@@ -43,13 +43,14 @@ def smoke_install(archive, fixture, node, opencode_fixture=None, provider_proto=
         runtime = root / "runtime"
         runtime.mkdir(mode=0o700)
         installed_bridge(package, node, opencode_fixture, runtime, cli_override=command)
-        ui = smoke(archive, fixture, validator=validate_release, extractor=lambda *_: package, cli_override=command)
+        round_trip = smoke(archive, fixture, validator=validate_release, extractor=lambda *_: package, cli_override=command)
         require(digest(old_data) == before and set(state.iterdir()) == {old_data}, "installation changed old state")
         return {"archive_sha256": digest(archive), "version": first["version"], "platform": first["platform"],
                 "normal_install_paths": True, "fresh_home": True, "idempotent_reinstall": True,
                 "shared_execution_provider": provider,
                 "old_state_preserved": True, "installed_opencode_task": True,
-                "installed_tui_task": ui["real_ui_task_round_trip"], "clean_service_shutdown": ui["clean_service_shutdown"],
+                "installed_cli_task": round_trip["real_cli_task_round_trip"],
+                "clean_service_shutdown": round_trip["clean_service_shutdown"],
                 "fixture_adapter_sha256": digest(fixture), "synthetic_native_fixture_sha256": digest(opencode_fixture),
                 "real_provider_calls": False}
 

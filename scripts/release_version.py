@@ -1,7 +1,7 @@
 """Keep every released artifact on the Rust workspace version.
 
 `workspace.package.version` in core/Cargo.toml is the single source of truth for the SuperTag
-version. The native archive, the supertag and supertag-tui binaries, the installer, the Python
+version. The native archive, the supertag binary, the installer, the Python
 SDK, the TypeScript SDK, every package.json, the desktop app, and the lockfiles must carry it.
 
     release_version.py --check        fail if any file drifts from core/Cargo.toml

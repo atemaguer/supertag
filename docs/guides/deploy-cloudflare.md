@@ -194,8 +194,8 @@ With the Gateway connected to Lark, mention the Tag in the Lark chat and confirm
 - Session checkpoints, artifacts, and Workspace deliveries stay on the Worker Hosts that produced
   them, so a container restart loses none of them.
 - Native gRPC (`https://`) does not reach this deployment; clients use the `wss://` URL. The
-  terminal UI uses your CA when you save the Control Plane with `supertag connect
-  --server-ca-file`; the desktop app trusts only the system roots, so it cannot connect to a
+  CLI uses your CA when you save the Control Plane with `supertag connect --server-ca-file`;
+  the desktop app trusts only the system roots, so it cannot connect to a
   certificate from your own CA.
 - The Worker forwards no webhook routes, so the Gateway here serves Lark, Slack Socket Mode, and
   webhook notifications only. GitHub, Linear, Microsoft Teams, and Slack HTTP events need a

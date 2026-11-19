@@ -37,7 +37,7 @@ labels. `supertag tag retire TAG` retires a Tag and keeps its history; `--dry-ru
 retirement would detach.
 
 One Tag may be the Control Plane's lead Tag, the default Tag `supertag init` creates, which the
-terminal UI and desktop app show first. `tag put TAG --lead` or a manifest's `spec.lead: true`
+desktop app shows first. `tag put TAG --lead` or a manifest's `spec.lead: true`
 makes a Tag the lead; the Control Plane refuses a second lead and names the current one, so clear
 it first with `--lead false`. `tag put` without `--lead` keeps the Tag's current value. An
 operator can also create a Tag from the desktop app's New Tag dialog, which offers every harness

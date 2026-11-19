@@ -1,7 +1,7 @@
 //! The client API a Gateway serves: every operator and client call, client enrollment, and a
 //! running Task Attempt's data calls, forwarded to the Control Plane.
 //!
-//! Clients (the desktop app, the terminal UI, the CLI and the SDKs) connect to a Gateway, and a
+//! Clients (the desktop app, the CLI and the SDKs) connect to a Gateway, and a
 //! Worker may send its Task Attempt's data calls through one with its Attempt credential. The
 //! Gateway authorizes nothing itself and adds no authority: it passes the caller's own bearer
 //! credential through unchanged, and the Control Plane resolves it and checks the method against

@@ -104,10 +104,6 @@ fn every_client_speaks_the_current_protocol_version() {
             "sdks/python/src/supertag/gateway_client.py",
             format!("_PROTOCOL_VERSIONS = ({current},)"),
         ),
-        (
-            "apps/tui/client/protocol.go",
-            format!("var protocolVersions = []uint32{{{current}}}"),
-        ),
     ] {
         let text = std::fs::read_to_string(repository().join(file)).expect("read a client");
         assert!(

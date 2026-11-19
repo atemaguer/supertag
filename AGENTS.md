@@ -20,13 +20,12 @@ policy recorded when SuperTag accepted it.
 The runtime is the Rust workspace in `core/`, one `supertag` binary. The **Control Plane** stores
 the organization, accepts and schedules work, recovers interrupted work, and preserves audit
 history. It serves one gRPC API (`supertag.runtime.v2`), over native gRPC or a `wss://` WebSocket
-tunnel. The **Gateway** is the endpoint clients connect to (the CLI, the Go terminal UI in
-`apps/tui`, the Electron desktop app in `apps/desktop`, and SDK bindings): it forwards their calls to
-the Control Plane, and carries collaboration surface traffic as a client of the Control Plane. A
-**Worker Host** is a machine or sandbox that provides execution capacity. Its **Worklet**
-(`supertag worklet`) connects it to the Control Plane, claims Tasks, holds their leases, and
-keeps one journal; for each Task Attempt it starts a **Worker**, a hidden `supertag __worker`
-process that runs a **harness adapter** and the **harness** it drives, such as Codex or Claude
+tunnel. The **Gateway** is the endpoint clients connect to (the CLI, the Electron desktop app in
+`apps/desktop`, and SDK bindings): it forwards their calls to the Control Plane, and carries
+collaboration surface traffic as a client of the Control Plane. A **Worker Host** is a machine
+or sandbox that provides execution capacity. Its **Worklet** (`supertag worklet`) connects it to
+the Control Plane, claims Tasks, holds their leases, and keeps one journal; for each Task Attempt it starts a **Worker**, a
+hidden `supertag __worker` process that runs a **harness adapter** and the **harness** it drives, such as Codex or Claude
 Code. The Worker never receives the host credential: it talks to its Worklet over an inherited
 socket pair (`core/crates/worker-host/src/local.rs`) and dies with it. Keep the four layers apart
 in code and docs. Auth Keys enroll principals in one role: `host`, `gateway`, or `client`;
@@ -36,8 +35,8 @@ The services and CLI are Rust (`core/`), built from the protobuf contract in `pr
 TypeScript that remains is the Node harness bridges and Workspace providers that Workers
 start, with the Worker SDK they share (`harnesses/`), the `supertag-ai` SDK (`sdks/typescript`),
 and the desktop app's frontend (`apps/desktop`). `sdks/` holds one directory per language, each
-with its hand-written SDK and generated bindings. The terminal UI is Go (`apps/tui`). The
-repo-orientation skill (`.claude/skills/repo-orientation/SKILL.md`) maps each directory.
+with its hand-written SDK and generated bindings. The repo-orientation skill
+(`.claude/skills/repo-orientation/SKILL.md`) maps each directory.
 
 ## Rules that are easy to violate
 
@@ -54,10 +53,10 @@ protocol version with a digest of `proto/`, and `cargo test -p supertag-protocol
 protocol_lock` fails until you update it. If a peer from the last release would misread or refuse
 the change (a removed, renamed or renumbered field, method or message; a changed type; a new
 meaning for an old value), bump `PROTOCOL_VERSIONS` in `core/crates/protocol/src/negotiation.rs`
-and its copies in `sdks/typescript/src/gateway-client.ts`,
-`sdks/python/src/supertag/gateway_client.py`, and `apps/tui/client/protocol.go`, and write the
-new version to the lock. Before a stable release a build speaks only the current version; peers
-from earlier releases are refused at connect with an error naming both releases.
+and its copies in `sdks/typescript/src/gateway-client.ts` and
+`sdks/python/src/supertag/gateway_client.py`, and write the new version to the lock. Before a
+stable release a build speaks only the current version; peers from earlier releases are refused
+at connect with an error naming both releases.
 
 **`docs/` is for users and integrators.** Explain how to use SuperTag and how it works.
 Put contributor workflows, repository layout, testing, and simulation instructions in
@@ -114,5 +113,5 @@ pnpm build   # tsc --build
 cargo test --manifest-path core/Cargo.toml --locked --workspace --all-features
 ```
 
-Run `go test ./...` in `apps/tui` after terminal UI changes. PostgreSQL and fixture-dependent Rust
-tests are ignored by default; CONTRIBUTING.md describes how to include them.
+PostgreSQL and fixture-dependent Rust tests are ignored by default; CONTRIBUTING.md describes how
+to include them.

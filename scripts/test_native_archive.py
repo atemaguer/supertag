@@ -25,9 +25,7 @@ class ArchiveContract(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.cli = self.root / "cli"
-        self.tui = self.root / "tui"
         self.cli.write_bytes(elf() + b"cli")
-        self.tui.write_bytes(elf() + b"tui")
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -36,7 +34,7 @@ class ArchiveContract(unittest.TestCase):
         output = output or f"out-{len(list(self.root.iterdir()))}"
         with patch.object(archive, "check_versions"):
             return archive.create_archive(
-                self.cli, self.tui, self.root / output,
+                self.cli, self.root / output,
                 version="0.1.0", platform="linux-arm64", profile="dev",
                 features=["test-fixtures"], source={"commit": "a" * 40, "dirty": True},
             )
@@ -55,7 +53,7 @@ class ArchiveContract(unittest.TestCase):
         archive.write_checksum(path)
         return path
 
-    def test_deterministic_pair_checksum_manifest_and_private_extraction(self):
+    def test_deterministic_checksum_manifest_and_private_extraction(self):
         first = self.package()
         second = self.package("second")
         self.assertEqual(first.read_bytes(), second.read_bytes())
@@ -67,14 +65,13 @@ class ArchiveContract(unittest.TestCase):
         self.assertTrue(manifest["source"]["dirty"])
         destination = archive.extract_archive(first, self.root / "fresh")
         self.assertEqual((destination / "supertag").read_bytes(), self.cli.read_bytes())
-        self.assertEqual((destination / "supertag-tui").read_bytes(), self.tui.read_bytes())
         self.assertEqual((destination / "supertag").stat().st_mode & 0o777, 0o755)
         self.assertEqual((self.root / "fresh").stat().st_mode & 0o777, 0o700)
 
     def test_mismatched_versions_fail_before_emitting_archive(self):
         with patch.object(archive, "check_versions", side_effect=archive.ArchiveError("version mismatch")):
             with self.assertRaises(archive.ArchiveError):
-                archive.create_archive(self.cli, self.tui, self.root / "out", version="0.1.0",
+                archive.create_archive(self.cli, self.root / "out", version="0.1.0",
                     platform="linux-arm64", profile="release", features=[], source={"commit": None, "dirty": True})
         self.assertFalse(list((self.root / "out").glob("*.tar.gz")))
 

@@ -3,11 +3,10 @@ name: Release SuperTag
 # Pushing a release tag builds the native archives for macOS on Apple silicon and Linux (arm64,
 # amd64), the desktop app's macOS disk image and Linux Debian packages, and attaches them, their
 # SHA256SUMS, and an install.sh pinned to the release to a draft GitHub Release. The archives hold
-# the supertag CLI, the supertag-tui terminal UI, the shared execution provider, and the Node.js
-# bridges; the Mac app carries the macOS archive's contents, so it needs no separate install. A
-# maintainer publishes the draft once every asset is attached; publishing runs the installer
-# check and the SDK publish workflows, so the README's latest installer URL never points at a
-# release without its archives.
+# the supertag CLI, the shared execution provider, and the Node.js bridges; the Mac app carries
+# the macOS archive's contents, so it needs no separate install. A maintainer publishes the draft
+# once every asset is attached; publishing runs the installer check and the SDK publish
+# workflows, so the README's latest installer URL never points at a release without its archives.
 on:
   push:
     tags:

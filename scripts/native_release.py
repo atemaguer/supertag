@@ -4,10 +4,10 @@
 # ///
 """Assemble a complete unpublished native release from an exact clean commit.
 
-Builds happen in disposable source, HOME, Cargo target, and Go cache directories. With
+Builds happen in disposable source, HOME, and Cargo target directories. With
 --cargo-cache, Cargo's registry and target directory live in that directory instead, so CI can
 restore third-party dependency builds; every workspace crate is still rebuilt from the snapshot.
-The output includes CLI, matching Go TUI, shared execution provider, and all five private Node runtime helpers.
+The output includes the CLI, the shared execution provider, and all five private Node runtime helpers.
 Node 22.13+ (22.x), Git, and optional provider credentials remain external.
 macOS binaries are signed only with --sign-command. No upload, registry publication, or state migration is performed.
 """
@@ -24,7 +24,7 @@ import tempfile
 import time
 import tomllib
 
-from native_archive import (ArchiveError, REPO, build_binaries, check_versions, copy_bounded,
+from native_archive import (ArchiveError, REPO, build_cli, check_versions, copy_bounded,
                             digest, native_platform, publish_files, require, version_from_repo, MAX_BINARY_BYTES, PLATFORMS)
 from node_bridges import PACKAGES, stage_workspace
 from release_archive import BINARIES, check_provider_version, create_release, extract_release, validate_release
@@ -42,7 +42,7 @@ def snapshot(repo, commit, scratch):
     with tarfile.open(archive) as contents:
         contents.extractall(source, filter="data")
     identity = {"commit": commit, "archive_sha256": digest(archive), "lockfiles": {
-        name: digest(source / name) for name in ("pnpm-lock.yaml", "core/Cargo.lock", "apps/tui/go.sum")}}
+        name: digest(source / name) for name in ("pnpm-lock.yaml", "core/Cargo.lock")}}
     archive.unlink()
     return source, identity
 
@@ -53,9 +53,8 @@ def build_environment(scratch, cargo_cache=None):
     # Build tools can use caches only below the disposable HOME, or the named Cargo cache. Do not
     # inherit npm config, Node injection hooks, compiler flags, Git config, or credentials.
     env = {"PATH": os.environ.get("PATH", os.defpath), "HOME": str(home), "LANG": "C.UTF-8",
-           "CI": "true", "CARGO_BUILD_JOBS": "2", "GOMAXPROCS": "2",
-           "CARGO_TARGET_DIR": str(scratch / "cargo-target"), "GOCACHE": str(scratch / "go-cache"),
-           "GOPATH": str(scratch / "go"), "NODE_OPTIONS": "--max-old-space-size=4096"}
+           "CI": "true", "CARGO_BUILD_JOBS": "2",
+           "CARGO_TARGET_DIR": str(scratch / "cargo-target"), "NODE_OPTIONS": "--max-old-space-size=4096"}
     if cargo_cache is not None:
         cargo_home, target = cargo_cache / "home", cargo_cache / "target"
         for directory in (cargo_home, target):
@@ -104,9 +103,7 @@ def tool_versions(source, env, platform):
     pnpm = probe(["pnpm", "--version"])
     require(json.loads((source / "package.json").read_text())["packageManager"] == f"pnpm@{pnpm}",
             "pnpm version differs from the source pin")
-    go = json.loads(probe(["go", "env", "-json", "GOVERSION", "GOHOSTOS", "GOHOSTARCH"]))
-    return {"rust": rust, "cargo": cargo, "node": node, "pnpm": pnpm, "go": go,
-            "python": sys.version.split()[0]}
+    return {"rust": rust, "cargo": cargo, "node": node, "pnpm": pnpm, "python": sys.version.split()[0]}
 
 
 SIGNING_VARIABLES = ("APPLE_DEVELOPER_ID_P12", "APPLE_DEVELOPER_ID_P12_PASSWORD", "APPLE_NOTARY_KEY",
@@ -119,7 +116,7 @@ def sign_binaries(command, stage, version):
     env = {name: os.environ[name] for name in ("PATH", "HOME", "TMPDIR", "RUNNER_TEMP", *SIGNING_VARIABLES)
            if name in os.environ}
     subprocess.run([str(command), str(stage), *BINARIES], env=env, check=True)
-    check_versions(stage / "supertag", stage / "supertag-tui", version)
+    check_versions(stage / "supertag", version)
     check_provider_version(stage / "supertag-shared-execution", version)
 
 
@@ -154,12 +151,12 @@ def assemble(repo, commit, output, profile="release", *, smoke=False, install_sm
         tools = tool_versions(source, env, platform)
         stage = scratch / "release"
         stage.mkdir()
-        cli, tui = build_binaries(scratch, profile, [], source, env)
+        cli = build_cli(profile, [], source, env)
         provider = build_shared_provider(source, env, profile)
         version = version_from_repo(source)
-        check_versions(cli, tui, version)
+        check_versions(cli, version)
         check_provider_version(provider, version)
-        for name, path in (("supertag", cli), ("supertag-tui", tui), ("supertag-shared-execution", provider)):
+        for name, path in (("supertag", cli), ("supertag-shared-execution", provider)):
             copy_bounded(path, stage / name, MAX_BINARY_BYTES)
             (stage / name).chmod(0o755)
         if sign_command is not None:
@@ -195,12 +192,12 @@ def prune_build_scratch(scratch):
     """Release disposable build inputs before smoke extracts another full copy."""
     require(scratch.name.startswith("supertag-release-build-") and scratch.is_dir()
             and not scratch.is_symlink(), "cleanup requires owned build scratch")
-    for name in ("source", "release", "cargo-target", "go-cache", "go", "home"):
+    for name in ("source", "release", "cargo-target", "home"):
         path = scratch / name
         if path.is_symlink():
             path.unlink()
         elif path.exists():
-            # Go's module cache is read-only. Make only owned real directories
+            # Some dependency caches are read-only. Make only owned real directories
             # removable; never traverse or chmod a dependency symlink target.
             path.chmod(0o700)
             for parent, directories, _files in os.walk(path, followlinks=False):
@@ -237,7 +234,7 @@ def smoke_built_release(archive, source, env, profile, node, *, install_smoke=Fa
         copy_bounded(path, retained[name], limit)
         retained[name].chmod(0o700 if name in ("fixture", "node") else 0o600)
     # The archive has already been validated and the exact smoke equipment is
-    # retained. Keeping Cargo, Go, pnpm and unpacked helper trees here doubles
+    # retained. Keeping Cargo, pnpm and unpacked helper trees here doubles
     # peak disk use without adding evidence to extracted/installed verification.
     # A --cargo-cache directory is not scratch and stays for the caller to save.
     prune_build_scratch(scratch)
@@ -266,7 +263,7 @@ def main():
     package.add_argument("--profile", choices=("dev", "release"), default="release")
     package.add_argument("--expect-platform", choices=sorted(PLATFORMS), help="require the builder and runtime tools to match this platform")
     package.add_argument("--install-smoke", action="store_true", help="also verify fresh install/reinstall before publishing local output; implies --smoke")
-    package.add_argument("--smoke", action="store_true", help="also build test equipment and verify extracted CLI/TUI/helpers")
+    package.add_argument("--smoke", action="store_true", help="also build test equipment and verify the extracted CLI and helpers")
     package.add_argument("--cargo-cache", type=Path, help="keep Cargo's registry and target directory in DIR (home/, target/) so third-party dependency builds can be reused; workspace crates are always rebuilt")
     package.add_argument("--sign-command", type=Path, help="macOS only: run COMMAND STAGE BINARY... to sign and notarize the binaries before archiving")
     verify = commands.add_parser("verify")

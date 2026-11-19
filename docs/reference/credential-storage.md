@@ -21,7 +21,7 @@ surface secrets, an operator's token, and a Worker Host's keys never share a sto
 | Boundary | Owner | Examples | Default implementation |
 | --- | --- | --- | --- |
 | Gateway credential vault | The Gateway | Collaboration surface secrets, such as a Slack bot token | `~/.supertag/gateway-credentials.json`, or HashiCorp Vault |
-| Operator credentials | Operator's CLI, terminal UI, and desktop app | The admin token, an [Operator Token](resource-model.md#operator-tokens), or a client device credential | The saved Control Plane stores of the terminal UI and desktop app, or `SUPERTAG_OPERATOR_TOKEN` |
+| Operator credentials | Operator's CLI and desktop app | The admin token, an [Operator Token](resource-model.md#operator-tokens), or a client device credential | The saved Gateway stores of the CLI and the desktop app, or `SUPERTAG_OPERATOR_TOKEN` |
 | Worker Host enrollment credential | One Worker Host | Its connection to the Control Plane | The host's own state directory, on that host |
 | MCP and git credentials | One Worker Host | MCP server and git credentials | The host's environment, owner-only files, or `~/.supertag/.env`; see [MCP and git credentials](#mcp-and-git-credentials) |
 | Network credentials | One Worker Host | Secrets the egress proxy adds to a Task's web requests, such as a GitHub token | A `secrets` entry in `supertag.yaml`; see [Network credentials](supertag-yaml.md#network-credentials) |
@@ -68,11 +68,11 @@ its Worker Host credential from `hosts/SERVICE/enrollment.json`. A host of a sha
 Plane joins with an Auth Key instead. See [supertag.yaml and local state](supertag-yaml.md#credentials).
 
 `supertag connect` saves a remote Gateway and its Operator Token or client device credential in
-the per-user stores the terminal UI and desktop app read:
-`supertag/tui-gateways.json` and `ai.supertag.desktop/gateways.json` in the user
-configuration directory (`~/Library/Application Support` on macOS, `~/.config` on Linux).
-Neither store ever holds the local operator token: the terminal UI and the desktop app read it
-from `credentials.json` each time they connect to the local Gateway.
+`supertag/gateways.json` in the user configuration directory (`~/Library/Application Support` on
+macOS, `~/.config` on Linux). The desktop app saves its own in `ai.supertag.desktop/gateways.json`
+there, and `--gateway NAME` reads both stores. Neither store ever holds the local operator token:
+the CLI and the desktop app read it from `credentials.json` each time they connect to the local
+Gateway.
 
 The desktop app also caches what it shows on launch, so it shows at once: the conversation list,
 the selected Tag, the latest messages of each conversation, and messages not yet sent. It keeps
@@ -80,18 +80,6 @@ them in `ai.supertag.desktop/cache/` in the user data directory, which is the co
 directory on macOS and `~/.local/share` on Linux. Each Control Plane and principal has its own
 owner-only directory there. The cache never holds a credential. Forgetting a saved Control Plane
 deletes its cache.
-
-The terminal UI keeps the same kind of cache, so `supertag` shows the last Tag's conversation
-before the Control Plane answers: the Tag list with each conversation's row, the selected Tag,
-the latest 50 messages of each conversation shown, messages not yet sent, and unsent drafts. It
-keeps them in `supertag/tui/` in the user cache directory (`~/Library/Caches` on macOS,
-`~/.cache` on Linux), in an owner-only directory per Control Plane and principal, with one
-owner-only file per entry, each replaced in one step. To find the principal before the Control
-Plane answers, it records whom each credential acted as under a one-way digest of the
-credential, which cannot be used to connect. The cache never holds a credential. An entry in
-another format is discarded. Forgetting a saved Control Plane deletes its cache; deleting the
-directory loses only unsent messages and drafts. The rail's width and whether it is folded are
-kept beside it, in `preferences.json`.
 
 ### Gateway credential vault
 

@@ -335,8 +335,8 @@ unchanged.
 Clients choose the tunnel by URL scheme: give a `wss://HOST[:PORT][/PATH]` URL instead of
 `https://` wherever a Control Plane URL is expected. That covers operator commands,
 `host enroll`, `worklet`, a host's `control-plane` in `supertag.yaml`, `health`,
-`verify deployment`, `connect` and the saved Control Planes it writes, the terminal UI, the
-desktop app, and the Gateway's `--control-plane`. Saved Control Planes keep the tunnel URL's path,
+`verify deployment`, `connect` and the saved Control Planes it writes, the desktop app,
+and the Gateway's `--control-plane`. Saved Control Planes keep the tunnel URL's path,
 which may not contain `.` or `..` segments or backslashes. The desktop app trusts only the system
 roots, so its Control Plane needs a publicly trusted certificate.
 

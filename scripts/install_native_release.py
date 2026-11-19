@@ -200,7 +200,7 @@ def verify_installed(package, manifest, archive_hash):
 
 
 def probe(package, manifest, node):
-    check_versions(package / "supertag", package / "supertag-tui", manifest["version"])
+    check_versions(package / "supertag", manifest["version"])
     check_provider_version(package / "supertag-shared-execution", manifest["version"])
     for kind, name in PACKAGES.items():
         smoke_entry(node, kind, package / "node-bridges/node_modules" / name)

@@ -1,5 +1,5 @@
 //! `supertag message TAG [TEXT]`: sends a message into the caller's conversation with a Tag, the
-//! one the terminal UI and the desktop app show, and prints the Tag's reply.
+//! one the desktop app shows, and prints the Tag's reply.
 //!
 //! It calls the Conversations service as those clients do: `SendMessage` sends, then
 //! `FollowConversation` follows the turn until it finishes. When the stream drops, `GetMessage`
@@ -225,7 +225,7 @@ async fn read(rpc: &mut Rpc, reply: &mut Reply, link: &mut Link) -> Result<()> {
 }
 
 /// Where a reopened follow stream resumes: the conversation, the latest message order taken from
-/// it, and the turns it showed unfinished, as the terminal UI and the desktop app keep. The first
+/// it, and the turns it showed unfinished, as the desktop app keeps. The first
 /// stream has none and opens on the newest page. A reopened one replays only what changed after
 /// it; when that cannot be replayed, its first page is the newest, not incremental, and the cursor
 /// starts again from that page.
@@ -435,7 +435,7 @@ fn transient(status: &tonic::Status) -> bool {
 
 /// The turn that answers one sent message, and what of it has been printed.
 ///
-/// As in the terminal UI, the Tag's last message before its reply is left out when the reply
+/// As in the desktop app, the Tag's last message before its reply is left out when the reply
 /// contains it: a harness records its final answer both as a message and as the turn's result.
 /// So the latest recorded message is held until something follows it.
 struct Reply {

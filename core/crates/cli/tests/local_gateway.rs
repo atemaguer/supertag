@@ -1,5 +1,5 @@
-//! `supertag __local-gateway`: the format the terminal UI's local discovery reads
-//! (`apps/tui/local_gateway.go`).
+//! `supertag __local-gateway`: the format the desktop app's local discovery reads
+//! (`apps/desktop/electron/gateway/local.ts`).
 #[path = "support/children.rs"]
 mod children;
 use children::reaped;

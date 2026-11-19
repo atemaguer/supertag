@@ -26,7 +26,7 @@ class NativeReleaseContracts(unittest.TestCase):
         self.root = Path(temporary.name)
         self.stage = self.root / "stage"
         self.stage.mkdir()
-        for name in ("supertag", "supertag-tui", "supertag-shared-execution"):
+        for name in ("supertag", "supertag-shared-execution"):
             (self.stage / name).write_bytes(elf() + name.encode())
             (self.stage / name).chmod(0o755)
         for kind, package in PACKAGES.items():
@@ -35,7 +35,7 @@ class NativeReleaseContracts(unittest.TestCase):
             entry.write_text("compiled helper")
         (self.stage / "node-bridges/manifest.json").write_text("{}")
         self.source = {"commit": "a" * 40, "archive_sha256": "b" * 64,
-                       "lockfiles": {name: "c" * 64 for name in ("pnpm-lock.yaml", "core/Cargo.lock", "apps/tui/go.sum")}}
+                       "lockfiles": {name: "c" * 64 for name in ("pnpm-lock.yaml", "core/Cargo.lock")}}
 
     def package(self, name="out"):
         return release.create_release(self.stage, self.root / name, version="0.1.0", platform="linux-arm64",
@@ -173,7 +173,7 @@ class NativeReleaseContracts(unittest.TestCase):
             shutil.copytree(self.stage / "node-bridges", target)
             return target, Path("/verified/node")
         with patch.object(assembly, "snapshot", return_value=(source, self.source)), \
-             patch.object(assembly, "build_binaries", return_value=(self.stage / "supertag", self.stage / "supertag-tui")), \
+             patch.object(assembly, "build_cli", return_value=self.stage / "supertag"), \
              patch.object(assembly, "build_shared_provider", return_value=self.stage / "supertag-shared-execution"), \
              patch.object(assembly, "tool_versions", return_value={}), \
              patch.object(assembly, "check_provider_version"), \
@@ -226,7 +226,7 @@ class NativeReleaseContracts(unittest.TestCase):
             outside = self.root / "outside"
             outside.mkdir()
             (outside / "sentinel").write_text("preserved")
-            for name in ("source", "release", "cargo-target", "go-cache", "go", "home"):
+            for name in ("source", "release", "cargo-target", "home"):
                 root = scratch / name
                 root.mkdir()
                 (root / "payload").write_text("discard")
@@ -249,7 +249,7 @@ class NativeReleaseContracts(unittest.TestCase):
         repo = self.root / "repo"
         repo.mkdir()
         subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
-        for name in ("pnpm-lock.yaml", "core/Cargo.lock", "apps/tui/go.sum"):
+        for name in ("pnpm-lock.yaml", "core/Cargo.lock"):
             target = repo / name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text("locked")

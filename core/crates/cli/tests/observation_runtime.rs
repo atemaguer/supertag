@@ -328,13 +328,13 @@ async fn exercise(database_url: &str) -> Result<()> {
     )
     .await?;
 
-    // Saved Control Planes: the terminal UI and desktop stores are read by name,
+    // Saved Control Planes: the CLI and desktop stores are read by name,
     // before or after the command, with no operator token in the environment.
-    let tui_store = config_directory(&home).join("supertag/tui-gateways.json");
+    let cli_store = config_directory(&home).join("supertag/gateways.json");
     let desktop_store = config_directory(&home).join("ai.supertag.desktop/gateways.json");
     write_private(
-        &tui_store,
-        &json!({"version":1,"active":"local","gateways":[{"url":public,"token":operator,"name":"local"}]}),
+        &cli_store,
+        &json!({"version":1,"gateways":[{"url":public,"token":operator,"name":"local"}]}),
     )?;
     let desktop = json!({"active":public,"gateways":[{"profile":{"name":"desk","origin":public},"token":operator}]});
     write_private(&desktop_store, &desktop)?;
@@ -391,7 +391,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     );
     write_private(&desktop_store, &desktop)?;
     // A store other users can read is refused.
-    std::fs::set_permissions(&tui_store, std::fs::Permissions::from_mode(0o644))?;
+    std::fs::set_permissions(&cli_store, std::fs::Permissions::from_mode(0o644))?;
     let (success, _, stderr) = run(
         &home,
         &["--gateway", "local", "get", "tag", "builder"],
@@ -402,7 +402,7 @@ async fn exercise(database_url: &str) -> Result<()> {
         !success && stderr.contains("private regular file"),
         "{stderr}"
     );
-    std::fs::set_permissions(&tui_store, std::fs::Permissions::from_mode(0o600))?;
+    std::fs::set_permissions(&cli_store, std::fs::Permissions::from_mode(0o600))?;
 
     // Watch continues across a Control Plane restart from its last resume token:
     // a Tag created while the watcher is disconnected arrives exactly once
@@ -1212,10 +1212,10 @@ async fn exercise(database_url: &str) -> Result<()> {
         "{stderr}"
     );
 
-    // Each client's store directory rule applies: the terminal UI's must be
-    // private, the desktop app's only owner-writable.
-    let tui_directory = tui_store.parent().context("store directory")?;
-    std::fs::set_permissions(tui_directory, std::fs::Permissions::from_mode(0o750))?;
+    // Each store's directory rule applies: the CLI's must be private, the
+    // desktop app's only owner-writable.
+    let cli_directory = cli_store.parent().context("store directory")?;
+    std::fs::set_permissions(cli_directory, std::fs::Permissions::from_mode(0o750))?;
     let (success, _, stderr) = run(
         &home,
         &["--gateway", "local", "get", "tag", "builder"],
@@ -1226,7 +1226,7 @@ async fn exercise(database_url: &str) -> Result<()> {
         !success && stderr.contains("saved Gateway directory"),
         "{stderr}"
     );
-    std::fs::set_permissions(tui_directory, std::fs::Permissions::from_mode(0o700))?;
+    std::fs::set_permissions(cli_directory, std::fs::Permissions::from_mode(0o700))?;
     let desktop_directory = desktop_store.parent().context("store directory")?;
     std::fs::set_permissions(desktop_directory, std::fs::Permissions::from_mode(0o755))?;
     json_of(&home, &["--gateway", "desk", "get", "tag", "builder"], None).await?;
@@ -1239,8 +1239,8 @@ async fn exercise(database_url: &str) -> Result<()> {
     );
     std::fs::set_permissions(desktop_directory, std::fs::Permissions::from_mode(0o700))?;
 
-    // A saved profile's TLS files reach both operator commands and the
-    // terminal UI handover, with no TLS environment variables set.
+    // A saved profile's TLS files reach operator commands, with no TLS
+    // environment variables set.
     let tls = Certificates::create(&temporary.path().join("tls"))?;
     services.stop_plane().await?;
     let (mut secure, secure_url) = services
@@ -1253,8 +1253,8 @@ async fn exercise(database_url: &str) -> Result<()> {
     let secure_url = secure_url.replacen("http://", "https://", 1);
     let path = |path: &Path| path.to_str().map(str::to_owned).context("TLS path");
     write_private(
-        &tui_store,
-        &json!({"version":1,"active":"local","gateways":[
+        &cli_store,
+        &json!({"version":1,"gateways":[
             {"url":public,"token":operator,"name":"local"},
             {"url":secure_url,"token":operator,"name":"secure",
              "server_ca_file":path(&tls.ca)?,"client_cert_file":path(&tls.client_cert)?,
@@ -1276,39 +1276,6 @@ async fn exercise(database_url: &str) -> Result<()> {
             run(&home, &["--gateway", name, "get", "tag", "builder"], None).await?;
         ensure!(!success, "{name} connected without its TLS files: {stderr}");
     }
-    let fixture = temporary.path().join("tui-fixture");
-    std::fs::write(
-        &fixture,
-        format!(
-            "#!/bin/sh\nif [ \"$1\" = --version ]; then printf '%s\\n' '{}'; exit 0; fi\nexec cat <&3\n",
-            env!("CARGO_PKG_VERSION")
-        ),
-    )?;
-    std::fs::set_permissions(&fixture, std::fs::Permissions::from_mode(0o755))?;
-    let handover = json_of(
-        &home,
-        &[
-            "tui",
-            "--gateway",
-            "secure",
-            "--binary",
-            path(&fixture)?.as_str(),
-        ],
-        None,
-    )
-    .await?;
-    let context = &handover["contexts"][0];
-    assert_eq!(context["url"], secure_url);
-    assert_eq!(context["token"], operator);
-    assert_eq!(context["server_ca_file"], path(&tls.ca.canonicalize()?)?);
-    assert_eq!(
-        context["client_cert_file"],
-        path(&tls.client_cert.canonicalize()?)?
-    );
-    assert_eq!(
-        context["client_key_file"],
-        path(&tls.client_key.canonicalize()?)?
-    );
     secure.kill().await?;
 
     services.stop().await

@@ -38,7 +38,7 @@ Three rules cover every exchange in SuperTag.
    they started, Tags in their Team, and the Workstream. To get another Tag's work, start a
    Session of that Tag with `start_session {tag}`.
 
-An Objective is a conversation with a goal. A person directs it from the terminal UI or the
+An Objective is a conversation with a goal. A person directs it from the CLI or the
 thread where it was created. Its owner Tag asks the person when it needs a decision. The work
 happens in Sessions started beneath it, including Sessions of other Tags in its Team.
 
@@ -100,13 +100,12 @@ the Objective itself, answers with its ID, and starts its first turn at once:
   as `ship-sso-for-7f3a9c2e`.
 - From a Slack or Microsoft Teams thread, that thread is its home: later messages there steer it,
   its turns answer there, and the runtime actions are what that location grants the Tag.
-- From a conversation in the terminal UI, the desktop app, or the API, the person who wrote
+- From a conversation in the desktop app or the API, the person who wrote
   `/goal` creates it with their own authority, and the conversation is its home. The Objective has
   the conversation's audience: only that person's turns see it. The Control Plane alone records
   which conversation created an Objective; no command or API call can set it.
 - `/goal` with no outcome creates nothing; the answer says how to write the command. Use
-  `supertag objective create`, or the terminal UI's Create Objective form, to set a Team, a
-  deadline, or a budget.
+  `supertag objective create` to set a Team, a deadline, or a budget.
 
 ### Objective runtime actions
 
@@ -142,7 +141,7 @@ picks it in this order:
 2. the surface Task that created the Objective;
 3. the Control Plane's default operator notification Task.
 
-Without any of these, the Objective has no home thread; direct it from the terminal UI or the CLI.
+Without any of these, the Objective has no home thread; direct it from the CLI.
 
 Every turn of the conversation is delivered into that thread's location, and the owner's final
 reply is posted there exactly as written. While an Objective is open, a plain reply in its home
@@ -166,9 +165,9 @@ next.
 
 ### Operator messages
 
-A message delivers the next turn of the conversation, attributed to the operator. Send it from
-the Objective view in the terminal UI with `m`. For scripts, submit a turn to the owner in the
-Objective's Session with `supertag task submit`; see [Control Plane API](control-plane-api.md#operator-services).
+A message delivers the next turn of the conversation, attributed to the operator. Send it as a
+turn to the owner in the Objective's Session with `supertag task submit`; see
+[Control Plane API](control-plane-api.md#operator-services).
 
 In a Slack home thread, a plain reply also delivers the next turn. `@SuperTag approve`
 acts as `supertag objective review ID approve`, and `@SuperTag pause` and `@SuperTag resume` act as the
@@ -194,7 +193,7 @@ any open Objective with an operator's assessment.
 
 An Objective's turn calls `ask {text}` with one concise question, then ends its turn. The
 Task ends waiting. The question reaches the person in the home thread and as a `question` item
-in the operator inbox. An answer from **Waiting on you** in the terminal UI or from the home
+in the operator inbox. An answer from `supertag question answer` or from the home
 thread becomes the conversation's next turn. The same tool in a work Session asks the Session that started it.
 
 ### Work and delegation
@@ -247,14 +246,13 @@ Closing a work Session leaves a turn it already queued. An explicit close is fin
 Session cannot be continued. An idle close is not: `continue_session` reopens the work Session
 when the Tag is under its limit, and at the limit is refused with the same list as
 `start_session`. `supertag get session ID` shows `closed_at_ms` and `close_reason`, and the
-desktop app and the terminal UI mark a closed work Session, such as `closed: idle`.
+desktop app marks a closed work Session, such as `closed: idle`.
 
 At the limit, `start_session` starts nothing and the turn goes on. The tool returns an error
 that lists the open work Sessions, each with its ID, title, and state, and asks the Tag to
 continue one or close one. A work Session in a conversation the turn may not see is listed without
 its title. The `start_session` description says how many are open, such as "3 of 8", and so do
-`supertag get session`, `supertag get tag`, the desktop app's conversation, and the terminal UI's
-work Sessions pane.
+`supertag get session`, `supertag get tag`, and the desktop app's conversation.
 
 Set the limit, from 1 to 64, with `supertag tag put TAG --max-work-sessions N`, the
 `maxWorkSessions` field of a Tag manifest, or the New Tag form of the desktop app or the terminal
@@ -268,8 +266,8 @@ When a turn ends with none of those, and the Objective is still `working` and no
 1. The Control Plane wakes the conversation once, saying that nothing is running and nothing was
    asked, and asking the owner to continue or to call `report_objective`.
 2. When that woken turn also ends idle, nothing more happens: the Objective stays `working` with
-   `idle_since_ms` set. `describe objective` and the terminal UI's Objective view say "Idle since
-   …", and the owner Tag's **Activity** in the desktop app and the terminal UI lists it. A message
+   `idle_since_ms` set. `describe objective` says "Idle since
+   …", and the owner Tag's **Activity** in the desktop app lists it. A message
    or new work clears it, and so does any status change.
 
 Only the owner's `report_objective` changes an Objective's status from a turn (`blocked`,
@@ -666,9 +664,8 @@ manifest) keeps no notes, has neither tool, and never reviews. Retiring a Tag de
 
 People read notes with `supertag get memories [--tag TAG]` and `supertag describe memory ID`, and
 delete one with `supertag delete memory ID`. The desktop app shows a Tag's notes in its details
-panel, opened from the Tag's name above the conversation, and the terminal UI under **Notes** in
-the command palette; both delete a note too. They never write a note: they tell the Tag
-("remember that I prefer squash merges", "forget that"). An operator sees shared notes and those
+panel, opened from the Tag's name above the conversation, and deletes a note too. It never writes a
+note: people tell the Tag ("remember that I prefer squash merges", "forget that"). An operator sees shared notes and those
 of clients' conversations; a client sees shared notes and its own. Each note records when a turn
 last had it in its context (`last_seen_at` in `describe memory`), so a note no turn has used for
 a long time is easy to spot. `supertag watch memory` follows notes as they are kept, rewritten,
@@ -767,8 +764,7 @@ only answers count.
 "attention": {"window_days": 30, "posted": 12, "read": 9, "answered": 4, "quiet": 20}
 ```
 
-The desktop app shows the same counts under **Activity** in the Tag's details, and the terminal
-UI under **Activity** in its command palette.
+The desktop app shows the same counts under **Activity** in the Tag's details.
 
 Nothing throttles a Tag on these numbers yet.
 
@@ -778,7 +774,7 @@ nothing unread. When the 30 minutes end, the held messages go out together. In a
 appears as the newest message. In a surface thread they post as one reply: the newest in full,
 under a list of the earlier ones' first lines ("2 earlier updates from lead:"). A message from the
 person releases them at once, before the Tag answers. In a conversation only a Schedule's turn is
-held, since the desktop app and the terminal UI show any other unprompted turn while it runs. A
+held, since the desktop app shows any other unprompted turn while it runs. A
 reported Objective status or a wait for approvals is never held.
 
 ### Identity and preconditions
@@ -1064,8 +1060,7 @@ inbox and returns prints again.
   `operator_eligible`, which is false for an item only a Tag can act on. A `question` item
   carries the question, an `approval` item the approval's ID, requesting Tag, action, resource
   and summary.
-- To answer a `question` item, use **Waiting on you** in the terminal UI or
-  `supertag question answer TASK_ID TEXT`; pass `-` as the text to read the answer from standard
+- To answer a `question` item, use `supertag question answer TASK_ID TEXT`; pass `-` as the text to read the answer from standard
   input, which keeps it out of the process list. Decide an approval with
   `supertag approval approve APPROVAL_ID` or `supertag approval deny APPROVAL_ID --reason TEXT`.
 - Item identity for notification is the item's `occurrence`: its `key`, plus the Task Attempt

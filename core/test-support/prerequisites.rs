@@ -1,7 +1,7 @@
 //! Prerequisite gates shared by ignored fixture tests.
 //!
 //! Ignored tests need local fixtures such as an isolated PostgreSQL server, Node, the Python
-//! agents runtime, the terminal UI, an isolated Linux root, Docker, Codex's native sandbox, or
+//! agents runtime, an isolated Linux root, Docker, Codex's native sandbox, or
 //! Claude Code's sandbox runtime (bubblewrap, socat, and ripgrep on Linux).
 //! Without one, a test reports the skip on stderr and passes, so `--include-ignored` stays usable
 //! on a partial workstation.
@@ -20,7 +20,6 @@ pub const KNOWN: &[&str] = &[
     "postgres",
     "node",
     "agents-python",
-    "tui",
     "linux-root",
     "docker",
     "codex-sandbox",

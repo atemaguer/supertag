@@ -174,7 +174,7 @@ async fn require_credentials_in(tx: &mut Transaction<'_, Any>, value: &Workspace
 
 /// A Tag on a local Workspace that names neither a commit nor a branch follows the branch another
 /// Tag on that Workspace follows, such as the lead `supertag init` created, so a client that only
-/// picks the Workspace, like the terminal UI's New Tag form, gets the branch the repository's
+/// picks the Workspace gets the branch the repository's
 /// other Tags work from. With no such Tag, or two that follow different branches, it stays unset
 /// and is refused as before.
 pub(crate) async fn follow_shared_branch_in(

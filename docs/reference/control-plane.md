@@ -16,7 +16,7 @@ This page uses these SuperTag terms, each defined in the glossary: [Tag](glossar
 ## System boundary
 
 ```text
-Slack / GitHub / Linear / Lark / Teams     CLI / terminal UI / desktop app / applications
+Slack / GitHub / Linear / Lark / Teams     CLI / desktop app / applications
                  |                                         |
                  └───────────────> Gateway <───────────────┘
                                         |  forwards calls as a client
@@ -103,14 +103,14 @@ the WebSocket tunnel behind platforms that forward only HTTP, or `http://` on lo
 reach it through a Gateway, which takes the same kinds of URL. Every
 connection first negotiates a protocol version. See [Control Plane API](control-plane-api.md).
 
-The CLI, the terminal UI, and the desktop app share saved Gateways: `supertag connect URL
---name NAME` saves one, and `--gateway NAME` uses it. `--state-directory` reaches the local
+`supertag connect URL --name NAME` saves a Gateway, and `--gateway NAME` uses it or one the
+desktop app saved. `--state-directory` reaches the local
 services that `supertag up` runs.
 
 Every client finds the local Gateway the same way. The state directory
 (`SUPERTAG_STATE_DIR`, else `~/.supertag`) must be private to the user, the `supertag up`
 supervisor must hold its lock, and the endpoint must be a loopback address. The client then reads
-the admin operator token from `credentials.json`. The terminal UI and the desktop app show this
+the admin operator token from `credentials.json`. The desktop app shows this
 Gateway as **Local**, read its token at each connect, and never save it.
 
 ## Callers and roles
@@ -124,7 +124,7 @@ missing from the table is refused.
 | `operator:local` (admin), `operator:token:NAME` | The admin operator token, or an Operator Token (`stop_…`) | Deployment configuration; `supertag operator-token create` |
 | `host:NAME` | Enrolled credential (`stcr_…`) | `supertag host enroll NAME` with a host Auth Key |
 | `gateway:NAME` | Enrolled credential (`stcr_…`) | `supertag gateway enroll NAME` with a gateway Auth Key |
-| `client:NAME` | Enrolled credential (`stcr_…`) | `supertag connect URL` with a client Auth Key, or the terminal UI or desktop app |
+| `client:NAME` | Enrolled credential (`stcr_…`) | `supertag connect URL` with a client Auth Key, or the desktop app |
 | One running Task Attempt | Task Attempt credential (`stat_…`) | Returned by `StartTask` to the Worklet that holds the Task Attempt's lease |
 
 An Auth Key (`stak_…`) admits one role, chosen when an operator creates it with
@@ -160,7 +160,7 @@ Manifests describe Control Plane resources with `apiVersion`, `kind`, `metadata.
   reports it.
 
 The resource contract is versioned with the API's protocol, independently of database schemas
-and CLI syntax, so the CLI, the terminal UI, the desktop app, and applications share it.
+and CLI syntax, so the CLI, the desktop app, and applications share it.
 
 ## Background work
 

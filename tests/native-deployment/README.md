@@ -29,10 +29,10 @@ python3 scripts/smoke_native_compose.py \
 
 The image builder verifies every archive entry and its checksum before copying only the
 CLI into the two service images. It records the archive digest, source commit, and version
-as image labels. Harness helpers, the terminal UI, and the shared execution provider stay
+as image labels. Harness helpers and the shared execution provider stay
 out of these images. They remain in the complete archive for their respective deployments.
-The older two-binary fixture archive is still accepted explicitly with
-`--archive-format cli-tui`.
+The small fixture archive, which holds only `supertag`, is accepted explicitly with
+`--archive-format cli`.
 
 The rehearsal verifies private mutual TLS, public TLS, operator authentication, service
 UID 10001, real gRPC health, Task completion, recorded events, request deduplication, and

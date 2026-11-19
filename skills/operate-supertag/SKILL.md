@@ -127,8 +127,8 @@ answer_file='PATH_FROM_MKTEMP'
 ```
 
 Reread the inbox to verify that the question no longer waits. If you cannot run operator
-commands, surface the question to the user so they can answer it under **Waiting on you** in the
-terminal UI.
+commands, surface the question to the user so they can answer it with
+`supertag question answer TASK_ID -`.
 
 For a general follow-up to a working Objective, send the owner a turn in the Objective's Session,
 with the text read from a private file in the same way:
@@ -138,7 +138,7 @@ supertag task submit --tag OWNER_TAG --session OBJECTIVE_SESSION_ID "$(cat "$mes
 ```
 
 To ask a Tag something outside an Objective, send it to the user's conversation with the Tag. The
-message and the reply show in the terminal UI and the desktop app, and the command waits for the
+message and the reply show in the desktop app, and the command waits for the
 reply and prints it:
 
 ```sh

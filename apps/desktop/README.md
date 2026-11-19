@@ -7,7 +7,7 @@ on an Apple silicon Mac or on Linux. To install it, see
 
 ## How it finds SuperTag
 
-The app is a client of a Gateway, as the terminal UI is. On first launch, with no `supertag.yaml`
+The app is a client of a Gateway, as the CLI is. On first launch, with no `supertag.yaml`
 in the state directory (`SUPERTAG_STATE_DIR`, else `~/.supertag`), its setup screen runs
 `supertag init --check --json` for the folder you choose, then `supertag init --yes`. On later
 launches it connects to the local Gateway, and starts the local services with `supertag up` when

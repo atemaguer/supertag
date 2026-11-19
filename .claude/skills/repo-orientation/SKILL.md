@@ -5,7 +5,7 @@ description: Decide which crate, package, or app a change belongs in. Read befor
 
 # Repo orientation
 
-The services and CLI are Rust. The terminal UI is Go. The TypeScript that remains runs under
+The services and CLI are Rust. The TypeScript that remains runs under
 Worker Hosts, in the desktop app, or in the `supertag-ai` SDK.
 
 ## Top-level layout
@@ -16,7 +16,7 @@ Worker Hosts, in the desktop app, or in the `supertag-ai` SDK.
 | `proto/` | The `supertag.runtime.v2` protobuf contract every language uses, and the shared execution provider's `supertag.environment.v2` |
 | `sdks/` | One directory per language: the hand-written SDK and its generated bindings |
 | `harnesses/` | Node harness bridges and Workspace providers a Worker Host starts, and their shared SDK |
-| `apps/` | The Go terminal UI and the Electron desktop app |
+| `apps/` | The Electron desktop app |
 | `scripts/` | Repository checks, binding generation, and release, packaging, and install scripts |
 | `deploy/` | Container images and platform definitions for the native services |
 | `docs/` | User documentation; `docs/development/` holds contributor records |
@@ -41,7 +41,6 @@ Worker Hosts, in the desktop app, or in the `supertag-ai` SDK.
 | `harnesses/{claude-code,cursor,opencode}` | Node harness bridges a Worker Host starts |
 | `harnesses/environments/{e2b,modal}` | Node Workspace providers a Worker Host starts |
 | `harnesses/sdk` | `@supertag/worker-sdk`, the code those bridges share; its domain types are in `src/domain` |
-| `apps/tui` | Go terminal UI; runtime.v2 client in `client/`, presentation types in `views/` |
 | `apps/desktop` | Electron desktop app: main process in `electron/`, React renderer in `src/`; it reaches SuperTag through `supertag-ai` and the `supertag` CLI |
 
 ## Boundaries

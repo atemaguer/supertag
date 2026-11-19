@@ -1,9 +1,7 @@
-//! Resolve a saved Gateway by name from the stores the terminal UI and the
-//! desktop app maintain, and save one in the terminal UI's store for
-//! `supertag connect`. Saving follows the terminal UI's own protocol
-//! (`apps/tui/gateway_store.go`): an exclusive non-blocking lock on
-//! `tui-gateways.json.lock`, a private staged file renamed into place, and the
-//! saved Gateway made active. The clients own switching and removal.
+//! Resolve a saved Gateway by name from the CLI's store and the desktop app's,
+//! and save one in the CLI's store for `supertag connect`. Saving takes an
+//! exclusive non-blocking lock on `gateways.json.lock` and renames a private
+//! staged file into place. The desktop app owns its own store.
 use std::{
     fs::{File, OpenOptions},
     io::Read,
@@ -28,14 +26,14 @@ pub struct SavedGateway {
 }
 
 #[derive(Deserialize)]
-struct TuiProfiles {
+struct CliProfiles {
     version: u32,
     #[serde(default)]
-    gateways: Vec<TuiGateway>,
+    gateways: Vec<CliGateway>,
 }
 
 #[derive(Deserialize)]
-struct TuiGateway {
+struct CliGateway {
     url: String,
     token: String,
     #[serde(default)]
@@ -66,8 +64,7 @@ struct DesktopProfile {
     origin: String,
 }
 
-/// The per-user configuration directory used by Go's `os.UserConfigDir` and the
-/// desktop app on this platform.
+/// The per-user configuration directory the CLI and the desktop app use on this platform.
 fn config_directory() -> Result<PathBuf> {
     let home = std::env::var_os("HOME").filter(|home| !home.is_empty());
     if cfg!(target_os = "macos") {
@@ -84,18 +81,18 @@ fn config_directory() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".config"))
 }
 
-pub fn tui_store() -> Result<PathBuf> {
-    Ok(config_directory()?.join("supertag/tui-gateways.json"))
+pub fn cli_store() -> Result<PathBuf> {
+    Ok(config_directory()?.join("supertag/gateways.json"))
 }
 
 pub fn desktop_store() -> Result<PathBuf> {
     Ok(config_directory()?.join("ai.supertag.desktop/gateways.json"))
 }
 
-/// Group or other permission bits each client refuses on its store directory:
-/// the terminal UI requires a private directory (`gatewayStore.directory`),
-/// the desktop app one that only its owner can write (`lock_profiles`).
-const TUI_DIRECTORY_MASK: u32 = 0o077;
+/// Group or other permission bits each store's directory must not have: the
+/// CLI's must be private, the desktop app's writable only by its owner
+/// (`lock_profiles`).
+const CLI_DIRECTORY_MASK: u32 = 0o077;
 const DESKTOP_DIRECTORY_MASK: u32 = 0o022;
 
 /// Reads an owner-only regular file without following links from a directory
@@ -165,12 +162,12 @@ fn valid_token(token: &str) -> bool {
     !token.is_empty() && token.len() <= 8192 && token.bytes().all(|byte| (33..=126).contains(&byte))
 }
 
-fn tui_matches(bytes: &[u8], name: &str) -> Result<Vec<SavedGateway>> {
-    let profiles: TuiProfiles =
-        serde_json::from_slice(bytes).context("terminal UI saved Gateways are unreadable")?;
+fn cli_matches(bytes: &[u8], name: &str) -> Result<Vec<SavedGateway>> {
+    let profiles: CliProfiles =
+        serde_json::from_slice(bytes).context("saved Gateways are unreadable")?;
     ensure!(
         profiles.version == 1,
-        "terminal UI saved Gateways have an unsupported format"
+        "saved Gateways have an unsupported format"
     );
     Ok(profiles
         .gateways
@@ -208,8 +205,8 @@ pub fn is_url(gateway: &str) -> bool {
     gateway.contains("://")
 }
 
-/// Finds the one saved Gateway with this name across the terminal UI and
-/// desktop stores. The same name saved for different Gateways is refused
+/// Finds the one saved Gateway with this name across the CLI and desktop
+/// stores. The same name saved for different Gateways is refused
 /// rather than guessed.
 pub fn resolve(name: &str) -> Result<SavedGateway> {
     ensure!(
@@ -217,22 +214,22 @@ pub fn resolve(name: &str) -> Result<SavedGateway> {
         "enter a saved Gateway name or a Gateway URL"
     );
     let mut found = Vec::new();
-    if let Some(bytes) = read_private(&tui_store()?, TUI_DIRECTORY_MASK)? {
-        found.extend(tui_matches(&bytes, name)?);
+    if let Some(bytes) = read_private(&cli_store()?, CLI_DIRECTORY_MASK)? {
+        found.extend(cli_matches(&bytes, name)?);
     }
     if let Some(bytes) = read_private(&desktop_store()?, DESKTOP_DIRECTORY_MASK)? {
         found.extend(desktop_matches(&bytes, name)?);
     }
     let Some(first) = found.first().cloned() else {
         bail!(
-            "no saved Gateway is named {name:?}; save it in the terminal UI or desktop app, or pass a Gateway URL"
+            "no saved Gateway is named {name:?}; save it with supertag connect or in the desktop app, or pass a Gateway URL"
         );
     };
     ensure!(
         found.iter().all(|other| other.url.trim_end_matches('/')
             == first.url.trim_end_matches('/')
             && other.token == first.token),
-        "saved Gateway name {name:?} refers to different connections; rename one in the terminal UI or desktop app"
+        "saved Gateway name {name:?} refers to different connections; save it again with supertag connect --replace or rename it in the desktop app"
     );
     ensure!(
         valid_token(&first.token),
@@ -255,8 +252,8 @@ pub struct NewGateway {
     pub client_key_file: Option<PathBuf>,
 }
 
-/// Whether the path of `raw` as typed has no backslash and no `.` or `..` segment, which the
-/// terminal UI and this parser would resolve differently.
+/// Whether the path of `raw` as typed has no backslash and no `.` or `..` segment, which
+/// clients and this parser could resolve differently.
 fn plain_path(raw: &str) -> bool {
     let rest = raw.trim().split_once("://").map_or("", |(_, rest)| rest);
     let path = rest.find('/').map_or("", |start| &rest[start..]);
@@ -268,8 +265,8 @@ fn plain_path(raw: &str) -> bool {
         })
 }
 
-/// The form the terminal UI stores a Gateway URL in: lowercase scheme and host and no default
-/// port, plus the path of a `ws://` or `wss://` tunnel URL.
+/// The form a Gateway URL is saved in: lowercase scheme and host and no default port, plus the
+/// path of a `ws://` or `wss://` tunnel URL.
 fn gateway_origin(raw: &str) -> Result<String> {
     let url = url::Url::parse(raw.trim()).context("enter a Gateway URL")?;
     let tunnel = matches!(url.scheme(), "ws" | "wss");
@@ -327,7 +324,7 @@ fn path_text(path: &Option<PathBuf>) -> Result<String> {
     Ok(text.to_owned())
 }
 
-/// A Gateway connection in the form the terminal UI stores.
+/// A Gateway connection in the form the CLI saves.
 struct Checked {
     url: String,
     server_ca: String,
@@ -374,9 +371,8 @@ pub fn checked_origin(saved: &NewGateway) -> Result<String> {
     Ok(check(saved)?.url)
 }
 
-/// Saves `saved` in the terminal UI's store and makes it active. A name already saved for
-/// this origin is replaced only with `replace`, keeping the Workspace the terminal UI chose for
-/// it; a name saved for another origin is refused.
+/// Saves `saved` in the CLI's store. A name already saved for this origin is replaced only with
+/// `replace`; a name saved for another origin is refused.
 pub fn save(saved: &NewGateway, replace: bool) -> Result<PathBuf> {
     let name = saved.name.as_str();
     let Checked {
@@ -385,7 +381,7 @@ pub fn save(saved: &NewGateway, replace: bool) -> Result<PathBuf> {
         client_cert,
         client_key,
     } = check(saved)?;
-    let path = tui_store()?;
+    let path = cli_store()?;
     let directory = path
         .parent()
         .context("saved Gateway store has no directory")?;
@@ -398,7 +394,7 @@ pub fn save(saved: &NewGateway, replace: bool) -> Result<PathBuf> {
     // SAFETY: geteuid takes no arguments and cannot fail.
     let uid = unsafe { libc::geteuid() };
     ensure!(
-        metadata.is_dir() && metadata.uid() == uid && metadata.mode() & TUI_DIRECTORY_MASK == 0,
+        metadata.is_dir() && metadata.uid() == uid && metadata.mode() & CLI_DIRECTORY_MASK == 0,
         "saved Gateway directory {} must be private and owned by this user",
         directory.display()
     );
@@ -417,7 +413,7 @@ pub fn save(saved: &NewGateway, replace: bool) -> Result<PathBuf> {
     lock.try_lock()
         .map_err(|_| anyhow::anyhow!("saved Gateways are busy; try again"))?;
 
-    let mut profiles = match read_private(&path, TUI_DIRECTORY_MASK)? {
+    let mut profiles = match read_private(&path, CLI_DIRECTORY_MASK)? {
         Some(bytes) => {
             let value: serde_json::Value = serde_json::from_slice(&bytes)
                 .context("saved Gateway file has an unsupported format")?;
@@ -453,21 +449,17 @@ pub fn save(saved: &NewGateway, replace: bool) -> Result<PathBuf> {
                 replace,
                 "Gateway {name:?} is already saved; pass --replace to replace it"
             );
-            if let Some(workspace) = saved.get("workspace").filter(|value| value.is_string()) {
-                entry["workspace"] = workspace.clone();
-            }
             *saved = entry;
         }
         None => gateways.push(entry),
     }
-    profiles["active"] = name.into();
     let mut data = serde_json::to_vec(&profiles)?;
     data.push(b'\n');
     ensure!(
         data.len() <= 1 << 20,
         "saved Gateways exceed the storage limit"
     );
-    let staged = directory.join(format!(".tui-gateways-{}", uuid::Uuid::new_v4().simple()));
+    let staged = directory.join(format!(".gateways-{}", uuid::Uuid::new_v4().simple()));
     let written = (|| -> std::io::Result<()> {
         let mut file = OpenOptions::new()
             .write(true)
@@ -489,7 +481,7 @@ pub fn save(saved: &NewGateway, replace: bool) -> Result<PathBuf> {
 }
 
 /// Replaces the credential of a Gateway saved by name, as after a client credential
-/// rotation. The terminal UI's store is rewritten; the desktop app's is its own.
+/// rotation. The CLI's store is rewritten; the desktop app's is its own.
 pub fn replace_token(name: &str, token: &str) -> Result<PathBuf> {
     let saved = resolve(name)?;
     save(
@@ -511,8 +503,8 @@ mod tests {
 
     #[test]
     fn reads_both_store_formats_by_name() {
-        let tui = br#"{"version":1,"active":"prod","gateways":[{"url":"https://gw.example","token":"tok","name":"prod","server_ca_file":"/ca.pem"},{"url":"http://127.0.0.1:1","token":"t2","name":"dev"}]}"#;
-        let found = tui_matches(tui, "prod").unwrap();
+        let cli = br#"{"version":1,"gateways":[{"url":"https://gw.example","token":"tok","name":"prod","server_ca_file":"/ca.pem"},{"url":"http://127.0.0.1:1","token":"t2","name":"dev"}]}"#;
+        let found = cli_matches(cli, "prod").unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].url, "https://gw.example");
         assert_eq!(
@@ -522,11 +514,11 @@ mod tests {
         let desktop = br#"{"active":"https://gw.example","gateways":[{"profile":{"name":"prod","origin":"https://gw.example"},"token":"tok"}]}"#;
         assert_eq!(desktop_matches(desktop, "prod").unwrap()[0].token, "tok");
         assert!(desktop_matches(desktop, "missing").unwrap().is_empty());
-        assert!(tui_matches(br#"{"version":2,"gateways":[]}"#, "prod").is_err());
+        assert!(cli_matches(br#"{"version":2,"gateways":[]}"#, "prod").is_err());
     }
 
     #[test]
-    fn saved_gateways_accept_tunnel_urls_in_the_terminal_ui_form() {
+    fn saved_gateways_accept_tunnel_urls_in_their_saved_form() {
         for (raw, saved) in [
             ("WSS://Cp.Example:443/", "wss://cp.example"),
             (

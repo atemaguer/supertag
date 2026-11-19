@@ -24,9 +24,9 @@ data, or local state.
 SuperTag's services and CLI are written in Rust, in the `core/` workspace, from the protobuf
 contract in `proto/`. The Node.js harness bridges and Workspace providers that Workers start
 (`harnesses/`), the TypeScript SDK (`sdks/typescript`), the desktop app's frontend, and the
-repository checks are TypeScript; the terminal UI is Go. `sdks/` holds one directory per language,
-each with its SDK and generated bindings, and `scripts/` holds the repository checks and the
-release, packaging, and install scripts. Install the tools listed in
+repository checks are TypeScript. `sdks/` holds one directory per language, each with its SDK and
+generated bindings, and `scripts/` holds the repository checks and the release, packaging, and
+install scripts. Install the tools listed in
 [Requirements](docs/operations/requirements.md), the Rust toolchain pinned by
 `core/rust-toolchain.toml`, Go 1.26 or later, Python 3.13 with `uv`, and the pnpm version pinned by
 `packageManager` in the root `package.json`:
@@ -78,22 +78,6 @@ uv run scripts/node_bridges.py --output core/target/debug/node-bridges --bridge 
 
 Leave out `--bridge` to stage every bridge. Stage them again after a version change.
 
-### Terminal UI (experimental)
-
-`apps/tui` is a Go terminal UI built with Bubble Tea. It is a client of the Control Plane API
-only. Build it with Go 1.26 or later, then open it with `supertag tui`:
-
-```sh
-cd apps/tui && ./build.sh && cd ../..
-pnpm supertag tui
-```
-
-`go test ./...` in `apps/tui` runs its tests. The Rust CLI's `operator_runtime.rs` tests drive a
-built binary under tmux when `SUPERTAG_RUST_TEST_TUI` names it.
-
-Releases ship the terminal UI inside each platform's native archive, next to the `supertag`
-command; see [Test an installable release](#test-an-installable-release).
-
 ### Protobuf contracts
 
 The protobuf contract lives in `proto`; see [binding generation](sdks/README.md).
@@ -132,7 +116,7 @@ and milliseconds, and a run that misses its deadline is marked `TIMEOUT`.
 Set `SUPERTAG_RUST_TEST_REQUIRE` to a comma-separated list of the prerequisites a run must have,
 or `all`; a listed prerequisite that is missing then fails the test. The prerequisites are
 `postgres` (`SUPERTAG_RUST_TEST_POSTGRES_URL_FILE`), `node` (`SUPERTAG_RUST_TEST_NODE`),
-`agents-python` (`SUPERTAG_RUST_TEST_AGENTS_PYTHON`), `tui` (`SUPERTAG_RUST_TEST_TUI` and tmux),
+`agents-python` (`SUPERTAG_RUST_TEST_AGENTS_PYTHON`),
 `docker` (`SUPERTAG_RUST_TEST_DOCKER`, the `docker` executable; the WebSocket tunnel's nginx case
 pulls `nginx:1.27-alpine`), `codex-sandbox` (on Linux, Codex's bubblewrap sandbox: the `bwrap`
 package and unprivileged user namespaces, with `SUPERTAG_TEST_CODEX_BINARY` set to a native
@@ -178,8 +162,7 @@ pnpm build
 ```
 
 `pnpm test` runs the TypeScript tests. For Rust changes, also run the Cargo tests described in
-[Rust runtime development](#rust-runtime-development); for terminal UI changes, `go test ./...` in
-`apps/tui`.
+[Rust runtime development](#rust-runtime-development).
 
 Wait for the operation being asserted: final replies for completed Tasks, and consumed output
 for log followers. Bound those waits so failures still run cleanup. Test startup timeouts
@@ -378,7 +361,7 @@ documentation check reads the same version: docs may name only the current relea
 
 Users install SuperTag with `install.sh`, which downloads a native archive from a GitHub
 Release. The Python SDK comes from PyPI and the TypeScript SDK, `supertag-ai`, from npm (see
-[Install SuperTag](docs/operations/install.md)). Each archive holds the `supertag` command, the terminal UI, the
+[Install SuperTag](docs/operations/install.md)). Each archive holds the `supertag` command, the
 shared execution provider, and the Node.js bridges; the
 [native release platform checks](tests/native-release/README.md) build one. To install a local
 build the way users do, put the archive and a `SHA256SUMS` in one directory and point the
@@ -418,7 +401,7 @@ release without its archives:
    `gh release edit v0.3.0 --draft=false --latest`. Don't mark it as a prerelease:
    `releases/latest` skips prereleases.
 3. Publishing runs **Verify public installer** (`verify-installer.yml`), which installs from the
-   README's URL on each platform in a clean home, checks the CLI and terminal UI versions, and
+   README's URL on each platform in a clean home, checks the CLI version, and
    starts and stops local services. It also runs **Publish Python SDK** (`publish-python.yml`) and
    **Publish supertag-ai** (`publish.yml`). Each checks that the release carries every archive
    before it publishes, because registry versions cannot be replaced.
@@ -442,7 +425,7 @@ Select `check_latest` to check the README's installer URL for the current releas
 
 ### Sign and notarize the macOS binaries
 
-The release workflow signs the `supertag`, `supertag-tui`, and `supertag-shared-execution`
+The release workflow signs the `supertag` and `supertag-shared-execution`
 binaries of each macOS archive with a Developer ID Application certificate and the hardened
 runtime, before the archive records their digests. It submits them to Apple in a single ZIP and
 checks that Apple issued a ticket for each binary. Gatekeeper looks up tickets for standalone
