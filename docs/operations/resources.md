@@ -284,7 +284,7 @@ A **work Session** is a thread of work a Tag starts beneath another Session, suc
 Objective's. List those started from a Session, or read one with its latest Task and report:
 
 ```sh
-supertag get session --parent-session SESSION_ID
+supertag get session --parent-tag TAG --parent-session SESSION_ID
 supertag get session WORK_SESSION_ID
 ```
 

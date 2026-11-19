@@ -46,8 +46,8 @@ then reads and edits files and replies, but runs no commands. Keep that default 
 run; [Let the lead run commands](../../docs/operations/cli.md#let-the-lead-run-commands) turns them
 on later. `--yes` accepts every default and needs no terminal. It writes `~/.supertag/supertag.yaml` and starts, in the background:
 
-- a `control-plane` service, which creates the Permission Set `local-tools` (`files:read` and
-  `files:write`, and for Codex also `commands:execute` and `web:fetch`), the Role `Lead`, and the Tag `lead`, bound to this repository's Workspace and
+- a `control-plane` service, which creates the Permission Set `local-tools` (`files:read`,
+  `files:write`, and `schedule:create`, and for Codex also `commands:execute` and `web:fetch`), the Role `Lead`, and the Tag `lead`, bound to this repository's Workspace and
   following the branch checked out when `init` ran;
 - a Gateway; and
 - a `host` service named after the machine, which maps this repository as the Workspace,

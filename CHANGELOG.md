@@ -26,6 +26,26 @@ within the pre-1.0 compatibility policy described in
   longer carry Task Attempt or lease token fields, and the host-wide artifact source calls moved
   to a new `ArtifactSources` service. Harness adapters need no change.
 
+### Fixed
+
+- First-run messages point to the right step. Before `supertag init`, plain `supertag`, the
+  terminal UI, `supertag ps`, `supertag up`, and every operator command say SuperTag isn't set up
+  on this machine yet and name `supertag init`, instead of `supertag up`. The terminal UI's empty
+  Local Gateway names `supertag init` too.
+- `supertag init` and `init --check` say when this `supertag` has no Node bridge for Claude Code,
+  as a CLI built from a checkout has none, and name the directory it belongs in, before writing
+  `supertag.yaml`. With only an outdated Claude Code, `init` says to run `claude update`, not to
+  install Node.js. Every message names one Claude Code installer,
+  `curl -fsSL https://claude.ai/install.sh | bash`, and the `.env` hints name the state directory
+  in use.
+- `supertag init --check` works without `--json` and prints a readable report. Rerunning `init`
+  on a set-up machine ends with the Tag that works there and how to talk to it.
+- Errors from SuperTag's services print their message alone, without the gRPC status code text.
+  `task submit` refuses a conversation's own Session in plain words: talk in your conversation
+  from the terminal UI or desktop app. `supertag up` names the address another program holds.
+- The desktop app's install command installs the CLI of the app's own version, and its setup
+  screen no longer says "this Mac" on Linux.
+
 ### Security
 
 - Each running Task Attempt gets its own credential. `WorkerHost.StartTask` returns a Task
