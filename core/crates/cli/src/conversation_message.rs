@@ -6,9 +6,13 @@
 //! reads the turn until it opens again. A Gateway that cannot push the conversation is read with
 //! `GetMessage` alone. Once the reply is printed, `MarkConversationRead` records that the caller
 //! read it, so the other clients do not count it as unread.
+//!
+//! What the Tag waits on beside the conversation goes to standard error, with the command that
+//! settles it: an approval its turn waits for, read with `Inbox.ListApprovals`, and the question a
+//! finished turn asked, read with `Inbox.GetQuestion`. So does a lost connection to the Gateway.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::{IsTerminal as _, Read as _},
     time::Duration,
 };
@@ -18,9 +22,10 @@ use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     negotiation::ProtocolChannel,
     v2::{
-        ConversationMessage, FollowConversationRequest, GetMessageRequest, LiveInputState,
-        MarkConversationReadRequest, SendMessageRequest, TaskEventKind, TaskState, TurnText,
-        conversations_client::ConversationsClient,
+        ApprovalState, ConversationMessage, FollowConversationRequest, GetMessageRequest,
+        GetQuestionRequest, ListApprovalsRequest, LiveInputState, MarkConversationReadRequest,
+        SendMessageRequest, TaskEventKind, TaskState, TurnText,
+        conversations_client::ConversationsClient, inbox_client::InboxClient,
     },
 };
 use tonic::Code;
@@ -48,11 +53,20 @@ const STREAM_IDLE: Duration = Duration::from_secs(45);
 const POLL: Duration = Duration::from_secs(2);
 /// How often the turn is read while the stream is open.
 const READ_EVERY: Duration = Duration::from_secs(5);
-/// Attempts at sending while the Gateway is unavailable. Each retry carries the same operation
-/// ID, so the message is sent once.
+/// Attempts at sending while the Gateway is unavailable or slow. Each retry carries the same
+/// operation ID, so the message is sent once.
 const SEND_ATTEMPTS: usize = 3;
+/// How long the Gateway may stay out of reach before the command gives up waiting.
+const OUTAGE: Duration = Duration::from_secs(300);
 
 type Client = ConversationsClient<ProtocolChannel>;
+
+/// The services the command calls, and the caller's credential.
+struct Rpc {
+    conversations: Client,
+    inbox: InboxClient<ProtocolChannel>,
+    token: String,
+}
 
 pub async fn run(args: MessageArgs) -> Result<()> {
     let target = crate::resolve_target(args.connection)?;
@@ -69,10 +83,17 @@ pub async fn run(args: MessageArgs) -> Result<()> {
     let endpoint = target
         .endpoint(Duration::from_secs(u32::MAX as u64))
         .await?;
-    let mut client = ConversationsClient::new(crate::network::operator_channel(&endpoint).await?)
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
-    let sent = send(&mut client, &target.token, &args.tag, text).await?;
+    let channel = crate::network::operator_channel(&endpoint).await?;
+    let mut rpc = Rpc {
+        conversations: ConversationsClient::new(channel.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        inbox: InboxClient::new(channel)
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        token: target.token,
+    };
+    let sent = send(&mut rpc, &args.tag, text).await?;
     if args.no_wait {
         return Ok(());
     }
@@ -80,15 +101,19 @@ pub async fn run(args: MessageArgs) -> Result<()> {
     // terminal-safe: asks whether standard output is a terminal; it writes nothing.
     let streams = std::io::stdout().is_terminal();
     let mut reply = Reply::new(args.tag, sent, streams);
-    follow(&mut client, &target.token, &mut reply).await?;
+    follow(&mut rpc, &mut reply).await?;
+    // A finished turn may leave an approval or a question for the caller.
+    approvals(&mut rpc, &mut reply).await;
+    question(&mut rpc, &reply).await;
     // Best effort: the reply was printed whether or not the read mark is recorded.
-    let _ = client
+    let _ = rpc
+        .conversations
         .mark_conversation_read(request(
             MarkConversationReadRequest {
                 tag_id: reply.tag.clone(),
                 order: reply.read_order(),
             },
-            &target.token,
+            &rpc.token,
         )?)
         .await;
     Ok(())
@@ -105,12 +130,7 @@ fn read_stdin() -> Result<String> {
     Ok(text.trim_end().to_owned())
 }
 
-async fn send(
-    client: &mut Client,
-    token: &str,
-    tag: &str,
-    text: String,
-) -> Result<ConversationMessage> {
+async fn send(rpc: &mut Rpc, tag: &str, text: String) -> Result<ConversationMessage> {
     let body = SendMessageRequest {
         tag_id: tag.to_owned(),
         text,
@@ -119,7 +139,11 @@ async fn send(
     };
     let mut attempt = 1;
     loop {
-        match client.send_message(request(body.clone(), token)?).await {
+        match rpc
+            .conversations
+            .send_message(request(body.clone(), &rpc.token)?)
+            .await
+        {
             Ok(response) => {
                 let message = response.into_inner();
                 ensure!(
@@ -131,7 +155,9 @@ async fn send(
                 );
                 return Ok(message);
             }
-            Err(status) if status.code() == Code::Unavailable && attempt < SEND_ATTEMPTS => {
+            // A slow Gateway may have accepted the message; the same operation ID makes the
+            // retry return it rather than send it again.
+            Err(status) if transient(&status) && attempt < SEND_ATTEMPTS => {
                 attempt += 1;
                 tokio::time::sleep(POLL).await;
             }
@@ -141,73 +167,78 @@ async fn send(
 }
 
 /// Follows the turn until it finishes, printing what it shows as it arrives.
-async fn follow(client: &mut Client, token: &str, reply: &mut Reply) -> Result<()> {
+async fn follow(rpc: &mut Rpc, reply: &mut Reply) -> Result<()> {
     if reply.step()? {
         return Ok(());
     }
+    let mut link = Link::default();
     let mut push = true;
     loop {
         if push {
-            match stream(client, token, reply).await {
+            match stream(rpc, reply, &mut link).await {
                 Ok(true) => return Ok(()),
                 Ok(false) => {}
-                // A Gateway that does not push conversations to this caller is read instead.
-                Err(error)
-                    if error.downcast_ref::<tonic::Status>().is_some_and(|status| {
-                        matches!(status.code(), Code::Unimplemented | Code::PermissionDenied)
-                    }) =>
-                {
-                    push = false;
-                }
-                // The turn failed, rather than the connection.
-                Err(error) if reply.failure.is_some() => return Err(error),
-                Err(_) => {}
+                // The turn failed or the Gateway stayed out of reach, rather than the stream.
+                Err(error) if reply.failure.is_some() || link.gave_up => return Err(error),
+                Err(error) => match error.downcast_ref::<tonic::Status>() {
+                    Some(status) if transient(status) => link.down(&reply.tag)?,
+                    // A Gateway that does not push conversations to this caller is read instead;
+                    // a read reports any other failure.
+                    _ => push = false,
+                },
             }
         }
         tokio::time::sleep(POLL).await;
-        read(client, token, reply).await?;
+        read(rpc, reply, &mut link).await?;
         if reply.step()? {
             return Ok(());
         }
     }
 }
 
-/// Reads the followed turns once.
-async fn read(client: &mut Client, token: &str, reply: &mut Reply) -> Result<()> {
+/// Reads the followed turns once, and the approvals the answering turn waits for.
+async fn read(rpc: &mut Rpc, reply: &mut Reply, link: &mut Link) -> Result<()> {
     for task_id in reply.followed() {
-        match client
+        match rpc
+            .conversations
             .get_message(request(
                 GetMessageRequest {
                     tag_id: reply.tag.clone(),
                     task_id,
                 },
-                token,
+                &rpc.token,
             )?)
             .await
         {
-            Ok(message) => reply.take(message.into_inner()),
-            Err(status) if transient(&status) => {}
+            Ok(message) => {
+                link.up();
+                reply.take(message.into_inner());
+            }
+            Err(status) if transient(&status) => return link.down(&reply.tag),
             Err(status) => return Err(status.into()),
         }
     }
+    approvals(rpc, reply).await;
     Ok(())
 }
 
 /// Reads one follow stream until the turn finishes (true) or the stream ends or goes idle
 /// (false). The turns are also read every [`READ_EVERY`]: the stream pushes changes to turns, and
 /// a message delivered into a running turn changes only its own delivery.
-async fn stream(client: &mut Client, token: &str, reply: &mut Reply) -> Result<bool> {
-    let mut stream = client
+async fn stream(rpc: &mut Rpc, reply: &mut Reply, link: &mut Link) -> Result<bool> {
+    let mut stream = rpc
+        .conversations
         .follow_conversation(authenticated_request(
             FollowConversationRequest {
                 tag_id: reply.tag.clone(),
                 ..Default::default()
             },
-            token,
+            &rpc.token,
             None,
         )?)
         .await?
         .into_inner();
+    link.up();
     let mut reads = tokio::time::interval(READ_EVERY);
     reads.reset();
     let mut idle = tokio::time::Instant::now() + STREAM_IDLE;
@@ -229,13 +260,108 @@ async fn stream(client: &mut Client, token: &str, reply: &mut Reply) -> Result<b
                 }
             }
             _ = reads.tick() => {
-                read(client, token, reply).await?;
+                read(rpc, reply, link).await?;
                 if reply.step()? {
                     return Ok(true);
                 }
             }
             () = tokio::time::sleep_until(idle) => return Ok(false),
         }
+    }
+}
+
+/// Says on standard error, once each, which approvals the answering turn waits for and how to
+/// decide them. Best effort: a caller that may not read approvals still gets the reply.
+async fn approvals(rpc: &mut Rpc, reply: &mut Reply) {
+    let Some(task_id) = reply.answering.clone() else {
+        return;
+    };
+    let Ok(request) = request(
+        ListApprovalsRequest {
+            task_id,
+            state: ApprovalState::Pending as i32,
+            limit: 20,
+            ..Default::default()
+        },
+        &rpc.token,
+    ) else {
+        return;
+    };
+    let Ok(page) = rpc.inbox.list_approvals(request).await else {
+        return;
+    };
+    for approval in page.into_inner().approvals {
+        if reply.noticed.insert(approval.approval_id.clone()) {
+            errln!(
+                "{} waits for your approval: {}\nApprove it with `supertag approval approve {}`, or deny it with `supertag approval deny {} --reason TEXT`.",
+                reply.tag,
+                approval.summary.trim(),
+                approval.approval_id,
+                approval.approval_id
+            );
+        }
+    }
+}
+
+/// Says on standard error what the finished turn asked, and how to answer. Best effort, as for
+/// approvals.
+async fn question(rpc: &mut Rpc, reply: &Reply) {
+    let Some(task_id) = reply.answering.clone() else {
+        return;
+    };
+    let Ok(request) = request(
+        GetQuestionRequest {
+            task_id: task_id.clone(),
+        },
+        &rpc.token,
+    ) else {
+        return;
+    };
+    let Ok(question) = rpc.inbox.get_question(request).await else {
+        return;
+    };
+    let question = question.into_inner();
+    if question.published_at_ms.is_some() && question.answer_task_id.is_none() {
+        errln!(
+            "{} asks: {}\nAnswer with `supertag question answer {task_id} TEXT`.",
+            reply.tag,
+            question.text.trim()
+        );
+    }
+}
+
+/// Whether the Gateway is in reach. A lost connection is said once on standard error, and so is
+/// its return; after [`OUTAGE`] out of reach the command gives up.
+#[derive(Default)]
+struct Link {
+    lost_at: Option<tokio::time::Instant>,
+    gave_up: bool,
+}
+
+impl Link {
+    fn up(&mut self) {
+        if self.lost_at.take().is_some() {
+            errln!("Reached the Gateway again.");
+        }
+    }
+
+    fn down(&mut self, tag: &str) -> Result<()> {
+        let now = tokio::time::Instant::now();
+        match self.lost_at {
+            None => {
+                errln!("Lost the connection to the Gateway; trying again.");
+                self.lost_at = Some(now);
+            }
+            Some(since) if now - since >= OUTAGE => {
+                self.gave_up = true;
+                bail!(
+                    "could not reach the Gateway for {} minutes; {tag}'s reply will still show in your conversation",
+                    OUTAGE.as_secs() / 60
+                );
+            }
+            Some(_) => {}
+        }
+        Ok(())
     }
 }
 
@@ -257,6 +383,9 @@ struct Reply {
     own: String,
     /// The Task whose reply answers the message: its own, or the running turn it joined.
     answering: Option<String>,
+    /// The latest event of the running turn the message is delivered into, read before the turn
+    /// took it: what the turn showed up to there answers earlier messages.
+    joined_after: u64,
     /// The latest copy of each message read.
     messages: HashMap<String, ConversationMessage>,
     /// The sequence of the latest event of the answering turn taken in.
@@ -274,6 +403,12 @@ struct Reply {
     stream_text: bool,
     /// A failure that ended the follow: the turn's own, not the connection's.
     failure: Option<String>,
+    /// What to say on standard error next, not printed yet.
+    note: Option<String>,
+    /// The delivery was said to be uncertain.
+    uncertain: bool,
+    /// The approvals said to wait for the caller.
+    noticed: HashSet<String>,
 }
 
 impl Reply {
@@ -287,6 +422,7 @@ impl Reply {
             tag,
             own,
             answering: None,
+            joined_after: 0,
             messages: HashMap::new(),
             seen: 0,
             said: 0,
@@ -296,6 +432,9 @@ impl Reply {
             replied: false,
             stream_text,
             failure: None,
+            note: None,
+            uncertain: false,
+            noticed: HashSet::new(),
         };
         reply.take(sent);
         reply
@@ -310,10 +449,21 @@ impl Reply {
         }
     }
 
-    /// The Tasks a poll reads.
+    /// The Tasks a poll reads: the message's own, the running turn it is delivered into, and the
+    /// turn that answers it.
     fn followed(&self) -> Vec<String> {
         let mut ids = vec![self.own.clone()];
-        ids.extend(self.answering.iter().filter(|id| **id != self.own).cloned());
+        let delivering = self
+            .messages
+            .get(&self.own)
+            .and_then(|message| message.live_input.as_ref())
+            .map(|input| input.task_id.clone())
+            .filter(|id| !id.is_empty());
+        for id in self.answering.iter().cloned().chain(delivering) {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
         ids
     }
 
@@ -331,6 +481,9 @@ impl Reply {
     fn step(&mut self) -> Result<bool> {
         let (output, done) = self.advance();
         out!("{output}");
+        if let Some(note) = self.note.take() {
+            errln!("{note}");
+        }
         if let Some(failure) = &self.failure {
             bail!("{failure}");
         }
@@ -354,24 +507,37 @@ impl Reply {
             Some(input)
                 if matches!(
                     input.state(),
-                    LiveInputState::Pending | LiveInputState::Dispatching
+                    LiveInputState::Pending | LiveInputState::Dispatching | LiveInputState::Unknown
                 ) =>
             {
+                // What the running turn shows before it takes the message answers earlier ones.
+                if let Some(running) = self.messages.get(&input.task_id) {
+                    let latest = running.events.iter().map(|event| event.sequence).max();
+                    self.joined_after = self.joined_after.max(latest.unwrap_or_default());
+                }
+                // Operator recovery may still deliver it, so the command keeps waiting.
+                if input.state() == LiveInputState::Unknown && !self.uncertain {
+                    self.uncertain = true;
+                    self.note = Some(format!(
+                        "Delivery of your message to {}'s running turn is uncertain and needs operator recovery; still waiting, since recovery may yet deliver it.",
+                        self.tag
+                    ));
+                }
                 return (output, false);
-            }
-            Some(input) if input.state() == LiveInputState::Unknown => {
-                self.failure = Some(format!(
-                    "delivery of your message to {}'s running turn is uncertain and needs operator recovery",
-                    self.tag
-                ));
-                return (output, true);
             }
             _ => self.own.clone(),
         };
         if self.answering.as_deref() != Some(answering.as_str()) {
+            // A turn the message joined is followed from where it took the message; one that
+            // claimed it before starting, from its start.
+            let after = if answering == self.own {
+                0
+            } else {
+                self.joined_after
+            };
             self.answering = Some(answering.clone());
-            self.seen = 0;
-            self.said = 0;
+            self.seen = after;
+            self.said = after;
         }
         let Some(message) = self.messages.get(&answering) else {
             return (output, false);
@@ -653,7 +819,61 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_turn_or_uncertain_delivery_is_an_error() {
+    fn a_message_taken_by_a_running_turn_prints_only_what_follows_it() {
+        let mut sent = message("t2", TaskState::Queued, None);
+        sent.live_input = Some(LiveInput {
+            task_id: "t1".into(),
+            state: LiveInputState::Pending as i32,
+            ..Default::default()
+        });
+        let mut reply = Reply::new("lead".into(), sent.clone(), false);
+        assert_eq!(reply.followed(), ["t2", "t1"]);
+        let mut running = message("t1", TaskState::Running, None);
+        running.events = vec![said(3, "Looking at A.")];
+        reply.take(running.clone());
+        assert_eq!(reply.advance(), (String::new(), false));
+        let mut accepted = sent;
+        accepted.live_input.as_mut().unwrap().state = LiveInputState::Accepted as i32;
+        reply.take(accepted);
+        let mut done = message("t1", TaskState::Succeeded, Some("A and B done."));
+        done.events = running.events;
+        done.events.push(said(5, "Now B too."));
+        done.events.push(TaskEvent {
+            sequence: 6,
+            text: "Reading".into(),
+            kind: TaskEventKind::Activity as i32,
+        });
+        reply.take(done);
+        assert_eq!(
+            reply.advance(),
+            ("Now B too.\nA and B done.\n".into(), true)
+        );
+    }
+
+    #[test]
+    fn an_uncertain_delivery_is_said_once_and_still_followed() {
+        let mut sent = message("t2", TaskState::Queued, None);
+        sent.live_input = Some(LiveInput {
+            task_id: "t1".into(),
+            state: LiveInputState::Unknown as i32,
+            ..Default::default()
+        });
+        let mut reply = Reply::new("lead".into(), sent.clone(), false);
+        assert_eq!(reply.advance(), (String::new(), false));
+        assert!(reply.failure.is_none());
+        assert!(reply.note.take().unwrap().contains("uncertain"));
+        reply.advance();
+        assert!(reply.note.is_none());
+        // Recovery delivered it: the turn's reply answers it.
+        let mut accepted = sent;
+        accepted.live_input.as_mut().unwrap().state = LiveInputState::Accepted as i32;
+        reply.take(accepted);
+        reply.take(message("t1", TaskState::Succeeded, Some("Done.")));
+        assert_eq!(reply.advance(), ("Done.\n".into(), true));
+    }
+
+    #[test]
+    fn a_failed_turn_is_an_error() {
         let mut reply = Reply::new(
             "lead".into(),
             message(
@@ -678,15 +898,6 @@ mod tests {
             reply.failure.as_deref(),
             Some("lead could not answer: the turn was cancelled")
         );
-        let mut sent = message("t2", TaskState::Queued, None);
-        sent.live_input = Some(LiveInput {
-            task_id: "t1".into(),
-            state: LiveInputState::Unknown as i32,
-            ..Default::default()
-        });
-        let mut reply = Reply::new("lead".into(), sent, false);
-        assert_eq!(reply.advance(), (String::new(), true));
-        assert!(reply.failure.as_deref().unwrap().contains("uncertain"));
     }
 
     #[test]

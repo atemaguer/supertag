@@ -236,7 +236,9 @@ another member. See [Define and complete an Objective](objectives.md).
 
 `supertag message` sends to your conversation with a Tag from a terminal or a script. It is the
 conversation the terminal UI and the desktop app show, so the message and the reply appear there
-too. The command waits for the reply and prints it; without the text, it reads standard input:
+too. The command waits for the reply and prints it; without the text, it reads standard input.
+When the Tag needs your approval or asks you a question, the command says so on standard error
+and names the command that answers:
 
 ```sh
 supertag message lead "Draft the release notes for 2.4."

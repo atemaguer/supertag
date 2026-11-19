@@ -14,6 +14,8 @@ within the pre-1.0 compatibility policy described in
 - `supertag message TAG [TEXT]` sends a message to your conversation with a Tag, the same
   conversation the terminal UI and the desktop app show, and prints the reply as it arrives.
   Without the text it reads standard input; `--no-wait` returns once the message is accepted.
+  It names the command to run on standard error when the Tag waits for your approval or asks a
+  question, and when the connection to the Gateway is lost.
   `task submit` now names the command when it refuses your conversation's own Session.
 
 ## [0.3.2] - 2026-11-18

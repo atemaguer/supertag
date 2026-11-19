@@ -227,6 +227,19 @@ Without the text, `message` reads the message from standard input. `--no-wait` r
 message is accepted; the reply shows in the conversation. The command fails when the Tag's turn
 fails, and prints why.
 
+The reply goes to standard output. Anything else goes to standard error, with the command to run
+next:
+
+- The Tag's turn waits for your approval. Decide it with `supertag approval approve ID` or
+  `supertag approval deny ID --reason TEXT`, and the command keeps waiting for the reply.
+- The turn finished by asking you a question. The command prints the reply, names
+  `supertag question answer TASK_ID TEXT`, and exits 0.
+- The message was sent into a turn that was already running, and its delivery is uncertain. The
+  command keeps waiting, because operator recovery may still deliver it.
+- The connection to the Gateway is lost. The command says so, and says again when the connection
+  is back. After 5 minutes without the Gateway, it exits non-zero. The reply still shows in
+  the conversation.
+
 `task submit` sends one turn of work to a Tag in a Session you name. A new Session name starts a
 new Session; reusing it continues one. These Sessions are separate from your conversation with
 the Tag, and don't appear in the terminal UI or the desktop app. `task submit` refuses that
