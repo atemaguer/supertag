@@ -1,5 +1,7 @@
 use super::{Connector, DELIVERY_TIMEOUT, valid_id};
-use crate::delivery_journal::{Claim, Entry, Outcome, claim_call, settle_call, with_claim_lease};
+use crate::delivery_journal::{
+    Claim, Entry, Hold, Outcome, claim_call, settle_call, with_claim_lease,
+};
 use anyhow::{Result, ensure};
 use serde_json::{Value, json};
 use supertag_protocol::v2::{ClaimReplyRequest, Reply, ReplyState, SettleReplyRequest};
@@ -14,13 +16,13 @@ impl Connector {
             account: &self.account,
             journal: &self.journal,
         }
-        .drive(shutdown, |owner| async move {
-            self.advance_delivery(&owner).await
+        .drive(shutdown, |owner, hold| async move {
+            self.advance_delivery(&owner, &hold).await
         })
         .await
     }
 
-    async fn advance_delivery(&self, owner: &str) -> Result<bool> {
+    async fn advance_delivery(&self, owner: &str, hold: &Hold) -> Result<bool> {
         let entry = match self.journal.load()? {
             Some(entry) => entry,
             None => {
@@ -37,11 +39,13 @@ impl Connector {
                     ClaimReplyRequest {
                         operation_id,
                         connector_lease_token: owner.into(),
+                        wait_ms: hold.wait_ms(),
                     },
-                    DELIVERY_TIMEOUT,
+                    hold.deadline(),
                 )?;
                 let Some(claim) = claim_call(
                     self.control_plane.clone().claim_reply(request),
+                    hold,
                     "claim GitHub reply",
                 )
                 .await?
@@ -290,7 +294,7 @@ mod tests {
         })?;
         drop(first);
         let recovered = super::super::tests::connector(temporary.path())?;
-        assert!(recovered.0.advance_delivery("").await?);
+        assert!(recovered.0.advance_delivery("", &Hold::default()).await?);
         assert!(matches!(
             recovered.0.journal.load()?,
             Some(Entry::Settle {

@@ -35,7 +35,7 @@ Audited 2026-11-13 against `core/crates/control-plane`. "Fixed" rows changed in 
 | Watch positions | Triggers append notices under the Watch head row lock inside the triggering write; positions are gap-free in commit order; the feed ID and resume tokens are shared | Safe. Any replica resumes any token |
 | A PostgreSQL session that holds the write lock and goes silent | `idle_in_transaction_session_timeout` and TCP keepalives set on every connection | Fixed. A replica stopped (`SIGSTOP`) or cut off inside a write held the lock until it resumed or a two-hour keepalive fired, stalling every replica |
 | Task claims, Attempt leases and renewal, fencing by host generation | Write lock; lease tokens and deadlines in rows | Safe |
-| Reply delivery claims, connector ownership leases | Write lock; fenced lease rows | Safe |
+| Reply delivery claims, connector ownership leases | Write lock; fenced lease rows. A held reply claim (`replies.rs`) only reads until its check finds a reply, then claims under the write lock; it rechecks on its replica's hints and every second, so a reply another replica queued waits at most a second | Safe. The check is advisory: the claim decides under the lock, and a check that finds what another claim took leaves this one waiting |
 | Workspace landing claims | Write lock; lease rows | Safe |
 | Operator notification claims (`claim_operator_notification`) | Write lock; leased outbox rows; the Inbox is read in the claim's transaction, at the claim's instant | Fixed. The Inbox was read before the lock, so a Gateway could settle, unsent, a message another replica had just recorded for an item its stale read lacked |
 | Notification batching window | `MAX(created_at_ms)` read under the write lock | Safe |

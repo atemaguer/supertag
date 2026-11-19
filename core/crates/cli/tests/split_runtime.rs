@@ -2019,6 +2019,7 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
             ClaimReplyRequest {
                 operation_id: "test-after-settlement".into(),
                 connector_lease_token: lease.lease_token,
+                wait_ms: 0,
             },
         )?)
         .await?

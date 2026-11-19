@@ -3528,6 +3528,11 @@ message ReplyResultCard {
 
 message ClaimReplyRequest {
   string operation_id = 1;
+  // How long the Control Plane may hold a claim that finds no ready reply, waiting for one; it
+  // answers as soon as one is ready. Zero answers at once. The Control Plane holds a claim for at
+  // most 8 seconds, and answers at once beyond a few held claims per account. A held claim that
+  // finds nothing writes nothing.
+  uint32 wait_ms = 2;
   // The account's current connector ownership lease. Only its owner claims replies.
   string connector_lease_token = 1300;
 }

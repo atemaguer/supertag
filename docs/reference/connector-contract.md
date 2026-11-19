@@ -122,9 +122,14 @@ One connector at a time delivers an account's replies. It holds the account with
 
 | Call | Effect |
 | --- | --- |
-| `ClaimReply { operation_id, connector_lease_token }` | Leases the next due reply for the account. `reply` is empty when none is due. Repeating an `operation_id` returns the same claim |
+| `ClaimReply { operation_id, connector_lease_token, wait_ms }` | Leases the next due reply for the account. With `wait_ms`, a claim that finds none is held until one is due, for at most 8 seconds; `reply` is empty when none became due. Repeating an `operation_id` returns the same claim |
 | `RenewReply { reply_id, lease_token }` | Extends a reply lease while a slow post is in flight |
 | `SettleReply { reply_id, lease_token, state, provider_receipt }` | Records the outcome: `REPLY_STATE_DELIVERED` with the surface's receipt, `REPLY_STATE_FAILED`, or `REPLY_STATE_UNCERTAIN` when the surface may have posted it |
+
+Hold the claim instead of polling: a held claim writes nothing while it waits, answers as soon as
+a reply is due, and answers empty at once when the Control Plane shuts down. Keep `wait_ms` short
+enough to renew the account's lease on time, and claim again when the answer is empty. Without
+`wait_ms` the claim answers at once.
 
 A reply answers one Task, named by `task_id`. A notice the Control Plane posts on its own, such as
 the answer to a refused message, has an empty `task_id`; deliver it the same way.

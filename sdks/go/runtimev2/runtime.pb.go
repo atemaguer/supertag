@@ -25467,6 +25467,11 @@ func (x *ReplyResultCard) GetPullRequestUrl() string {
 type ClaimReplyRequest struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	OperationId string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	// How long the Control Plane may hold a claim that finds no ready reply, waiting for one; it
+	// answers as soon as one is ready. Zero answers at once. The Control Plane holds a claim for at
+	// most 8 seconds, and answers at once beyond a few held claims per account. A held claim that
+	// finds nothing writes nothing.
+	WaitMs uint32 `protobuf:"varint,2,opt,name=wait_ms,json=waitMs,proto3" json:"wait_ms,omitempty"`
 	// The account's current connector ownership lease. Only its owner claims replies.
 	ConnectorLeaseToken string `protobuf:"bytes,1300,opt,name=connector_lease_token,json=connectorLeaseToken,proto3" json:"connector_lease_token,omitempty"`
 	unknownFields       protoimpl.UnknownFields
@@ -25508,6 +25513,13 @@ func (x *ClaimReplyRequest) GetOperationId() string {
 		return x.OperationId
 	}
 	return ""
+}
+
+func (x *ClaimReplyRequest) GetWaitMs() uint32 {
+	if x != nil {
+		return x.WaitMs
+	}
+	return 0
 }
 
 func (x *ClaimReplyRequest) GetConnectorLeaseToken() string {
@@ -28425,9 +28437,10 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x06branch\x18\x01 \x01(\tH\x00R\x06branch\x88\x01\x01\x12-\n" +
 	"\x10pull_request_url\x18\x02 \x01(\tH\x01R\x0epullRequestUrl\x88\x01\x01B\t\n" +
 	"\a_branchB\x13\n" +
-	"\x11_pull_request_url\"k\n" +
+	"\x11_pull_request_url\"\x84\x01\n" +
 	"\x11ClaimReplyRequest\x12!\n" +
-	"\foperation_id\x18\x01 \x01(\tR\voperationId\x123\n" +
+	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x17\n" +
+	"\await_ms\x18\x02 \x01(\rR\x06waitMs\x123\n" +
 	"\x15connector_lease_token\x18\x94\n" +
 	" \x01(\tR\x13connectorLeaseToken\"g\n" +
 	"\x12ClaimReplyResponse\x120\n" +

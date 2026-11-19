@@ -438,3 +438,35 @@ impl supertag_protocol::v2::connector_server::Connector for Fixture {
         Err(tonic::Status::unimplemented("lease fixture only"))
     }
 }
+
+#[tokio::test]
+async fn shutdown_ends_only_a_held_reply_claim() -> anyhow::Result<()> {
+    let shutdown = CancellationToken::new();
+    shutdown.cancel();
+    // A held claim the Control Plane has not answered ends at shutdown, without its answer; the
+    // journal keeps its operation for drain to replay.
+    let held = Hold {
+        wait: Duration::from_secs(8),
+        shutdown: shutdown.clone(),
+    };
+    assert_eq!(held.wait_ms(), 8_000);
+    assert_eq!(held.deadline(), Duration::from_secs(13));
+    let unanswered = std::future::pending::<Result<(), tonic::Status>>();
+    let at = time::Instant::now();
+    assert!(
+        claim_call(unanswered, &held, "claim reply")
+            .await?
+            .is_none()
+    );
+    assert!(at.elapsed() < Duration::from_secs(1));
+    // Drain replays it without a wait, which shutdown does not cut short.
+    let replay = Hold {
+        shutdown,
+        ..Hold::default()
+    };
+    assert_eq!(
+        claim_call(async { Ok::<_, tonic::Status>(7) }, &replay, "claim reply").await?,
+        Some(7)
+    );
+    Ok(())
+}

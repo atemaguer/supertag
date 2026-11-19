@@ -24,6 +24,7 @@ fn reply(operation: &str, lease: &str) -> ClaimReplyRequest {
     ClaimReplyRequest {
         operation_id: operation.into(),
         connector_lease_token: lease.into(),
+        wait_ms: 0,
     }
 }
 

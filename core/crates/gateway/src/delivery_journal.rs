@@ -16,6 +16,7 @@ use supertag_protocol::{
 };
 use tempfile::NamedTempFile;
 use tokio::time;
+use tokio_util::sync::CancellationToken;
 const REPLY_FILE: &str = "reply.json";
 const OWNER_FILE: &str = "connector-owner";
 const DELIVERY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -190,12 +191,39 @@ fn owner_id(directory: &Path) -> Result<String> {
     }
 }
 
-/// Claim a reply. A lost ownership lease is not an error: the driver reclaims or waits.
+/// How long a reply claim may wait at the Control Plane for a reply to become ready, and what
+/// ends that wait early. The default answers at once.
+#[derive(Clone, Default)]
+pub(crate) struct Hold {
+    pub(crate) wait: Duration,
+    pub(crate) shutdown: CancellationToken,
+}
+
+impl Hold {
+    pub(crate) fn wait_ms(&self) -> u32 {
+        self.wait.as_millis().try_into().unwrap_or(u32::MAX)
+    }
+
+    /// The claim call's deadline: its wait, then the time to answer.
+    pub(crate) fn deadline(&self) -> Duration {
+        DELIVERY_TIMEOUT + self.wait
+    }
+}
+
+/// Claim a reply, held for up to `hold.wait` until one is ready. A lost ownership lease is not
+/// an error: the driver reclaims or waits. A shutdown ends a held claim without its answer; the
+/// journal keeps the claim's operation, which drain replays without a wait.
 pub(crate) async fn claim_call<T>(
     call: impl Future<Output = Result<T, tonic::Status>>,
+    hold: &Hold,
     operation: &str,
 ) -> Result<Option<T>> {
-    match time::timeout(DELIVERY_TIMEOUT, call).await {
+    let answered = tokio::select! {
+        biased;
+        _ = hold.shutdown.cancelled(), if !hold.wait.is_zero() => return Ok(None),
+        answered = time::timeout(hold.deadline(), call) => answered,
+    };
+    match answered {
         Ok(Err(error)) if error.code() == tonic::Code::FailedPrecondition => Ok(None),
         Ok(result) => private_call(async { result }, operation).await,
         Err(_) => Ok(None),

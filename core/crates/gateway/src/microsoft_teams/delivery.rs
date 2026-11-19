@@ -1,6 +1,6 @@
 use super::{Connector, DELIVERY_TIMEOUT, bounded_json, numeric_id, service_url};
 use crate::delivery_journal::{
-    Claim, Entry, Outcome, claim_call, private_call, settle_call, with_claim_lease,
+    Claim, Entry, Hold, Outcome, claim_call, private_call, settle_call, with_claim_lease,
 };
 use anyhow::{Result, ensure};
 use serde_json::json;
@@ -18,13 +18,13 @@ impl Connector {
             account: &self.account,
             journal: &self.journal,
         }
-        .drive(shutdown, |owner| async move {
-            self.advance_delivery(&owner).await
+        .drive(shutdown, |owner, hold| async move {
+            self.advance_delivery(&owner, &hold).await
         })
         .await
     }
 
-    pub(super) async fn advance_delivery(&self, owner: &str) -> Result<bool> {
+    pub(super) async fn advance_delivery(&self, owner: &str, hold: &Hold) -> Result<bool> {
         let entry = match self.journal.load()? {
             Some(entry) => entry,
             None => {
@@ -41,11 +41,13 @@ impl Connector {
                     ClaimReplyRequest {
                         operation_id,
                         connector_lease_token: owner.into(),
+                        wait_ms: hold.wait_ms(),
                     },
-                    DELIVERY_TIMEOUT,
+                    hold.deadline(),
                 )?;
                 let Some(claim) = claim_call(
                     self.control_plane.clone().claim_reply(request),
+                    hold,
                     "claim Microsoft Teams reply",
                 )
                 .await?

@@ -1,6 +1,8 @@
 use super::{Connector, DELIVERY_TIMEOUT, render, slack_ts};
 pub(super) use crate::delivery_journal::Journal;
-use crate::delivery_journal::{Claim, Entry, Outcome, claim_call, settle_call, with_claim_lease};
+use crate::delivery_journal::{
+    Claim, Entry, Hold, Outcome, claim_call, settle_call, with_claim_lease,
+};
 use anyhow::{Result, ensure};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -14,6 +16,8 @@ const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const RATE_LIMIT_ATTEMPTS: usize = 3;
 const RATE_LIMIT_WAIT: Duration = Duration::from_secs(1);
 const MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(3);
+/// How often progress is claimed while this Gateway owns the account's delivery.
+const PROGRESS_CHECK: Duration = Duration::from_secs(1);
 impl Connector {
     pub(super) async fn deliver(&self, shutdown: &CancellationToken) -> Result<()> {
         crate::ownership::Owner {
@@ -22,8 +26,14 @@ impl Connector {
             account: &self.account,
             journal: &self.journal,
         }
-        .drive(shutdown, |owner| async move {
-            let advanced = self.advance_delivery(&owner).await?;
+        .drive(shutdown, |owner, hold| async move {
+            // Progress is claimed between reply claims, so a reply claim waits no longer than
+            // progress may.
+            let hold = Hold {
+                wait: hold.wait.min(PROGRESS_CHECK),
+                ..hold
+            };
+            let advanced = self.advance_delivery(&owner, &hold).await?;
             // Progress runs only while this Gateway owns the account's delivery.
             let progressed = self.progress_step().await?;
             Ok(advanced || progressed)
@@ -46,7 +56,7 @@ impl Connector {
         }
     }
 
-    async fn advance_delivery(&self, owner: &str) -> Result<bool> {
+    async fn advance_delivery(&self, owner: &str, hold: &Hold) -> Result<bool> {
         let entry = match self.journal.load()? {
             Some(entry) => entry,
             None => {
@@ -63,11 +73,13 @@ impl Connector {
                     ClaimReplyRequest {
                         operation_id,
                         connector_lease_token: owner.into(),
+                        wait_ms: hold.wait_ms(),
                     },
-                    DELIVERY_TIMEOUT,
+                    hold.deadline(),
                 )?;
                 let Some(claim) = claim_call(
                     self.control_plane.clone().claim_reply(request),
+                    hold,
                     "claim Slack reply",
                 )
                 .await?
@@ -410,7 +422,7 @@ mod tests {
         drop(first);
 
         let reopened = connector(&directory)?;
-        assert!(reopened.0.advance_delivery("").await?);
+        assert!(reopened.0.advance_delivery("", &Hold::default()).await?);
         assert!(matches!(
             reopened.0.journal.load()?,
             Some(Entry::Settle { target, outcome: Outcome::Uncertain }) if target.reply_id == "reply"
@@ -439,7 +451,7 @@ mod tests {
         .with_test_reply_url(&endpoint)?;
 
         // The claim is answered but its first renewal fails: nothing is sent or settled.
-        assert!(!slack.0.advance_delivery("owner").await?);
+        assert!(!slack.0.advance_delivery("owner", &Hold::default()).await?);
         assert!(recorded.lock().unwrap().is_empty());
         assert!(fixture.settled.lock().unwrap().is_empty());
         let Some(Entry::Claim { operation_id }) = slack.0.journal.load()? else {
@@ -447,13 +459,13 @@ mod tests {
         };
 
         // The next round replays the same claim operation, proves the lease, and posts once.
-        assert!(slack.0.advance_delivery("owner").await?);
+        assert!(slack.0.advance_delivery("owner", &Hold::default()).await?);
         assert_eq!(
             *fixture.claims.lock().unwrap(),
             [operation_id.clone(), operation_id]
         );
         assert_eq!(recorded.lock().unwrap().len(), 1);
-        assert!(!slack.0.advance_delivery("owner").await?);
+        assert!(!slack.0.advance_delivery("owner", &Hold::default()).await?);
         let settled = fixture.settled.lock().unwrap().clone();
         assert_eq!(settled.len(), 1);
         assert_eq!(settled[0].state(), ReplyState::Delivered);

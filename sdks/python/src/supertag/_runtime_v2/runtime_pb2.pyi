@@ -4416,12 +4416,14 @@ class ReplyResultCard(_message.Message):
     def __init__(self, branch: _Optional[str] = ..., pull_request_url: _Optional[str] = ...) -> None: ...
 
 class ClaimReplyRequest(_message.Message):
-    __slots__ = ("operation_id", "connector_lease_token")
+    __slots__ = ("operation_id", "wait_ms", "connector_lease_token")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    WAIT_MS_FIELD_NUMBER: _ClassVar[int]
     CONNECTOR_LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
+    wait_ms: int
     connector_lease_token: str
-    def __init__(self, operation_id: _Optional[str] = ..., connector_lease_token: _Optional[str] = ...) -> None: ...
+    def __init__(self, operation_id: _Optional[str] = ..., wait_ms: _Optional[int] = ..., connector_lease_token: _Optional[str] = ...) -> None: ...
 
 class ClaimReplyResponse(_message.Message):
     __slots__ = ("reply", "lease_token")

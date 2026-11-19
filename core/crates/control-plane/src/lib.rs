@@ -1244,6 +1244,7 @@ mod tests {
                     ClaimReplyRequest {
                         operation_id: "delivery".into(),
                         connector_lease_token: String::new(),
+                        wait_ms: 0,
                     },
                     "private-key",
                     Some("operator:alice")

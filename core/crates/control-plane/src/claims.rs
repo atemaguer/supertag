@@ -32,7 +32,7 @@ pub(crate) struct HeldClaims {
     next: Mutex<u64>,
 }
 
-struct Held<'a> {
+pub(crate) struct Held<'a> {
     claims: &'a HeldClaims,
     principal: String,
     id: u64,
@@ -95,7 +95,9 @@ impl HeldClaims {
             .collect()
     }
 
-    fn hold(&self, principal: &str) -> Option<Held<'_>> {
+    /// Counts a held claim of `principal`: a Worker Host's Task claim or a connector account's
+    /// reply claim. None when `principal` already holds as many as it may.
+    pub(crate) fn hold(&self, principal: &str) -> Option<Held<'_>> {
         let mut held = self.held.lock().unwrap();
         let count = held.entry(principal.to_owned()).or_default();
         if *count >= MAX_HELD_PER_HOST {

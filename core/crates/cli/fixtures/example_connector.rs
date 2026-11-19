@@ -91,9 +91,11 @@ async fn deliver(url: &str, account: &str) -> Result<()> {
     ensure!(lease.granted, "another connector owns {account}");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     let (reply, lease_token) = loop {
+        // The Control Plane holds the claim until a reply is due, or answers empty after the wait.
         let request = connector.request(ClaimReplyRequest {
             operation_id: uuid::Uuid::new_v4().to_string(),
             connector_lease_token: lease.lease_token.clone(),
+            wait_ms: 5_000,
         })?;
         let claimed = connector.client.claim_reply(request).await?.into_inner();
         if let Some(reply) = claimed.reply {
@@ -103,7 +105,6 @@ async fn deliver(url: &str, account: &str) -> Result<()> {
             tokio::time::Instant::now() < deadline,
             "no reply became due"
         );
-        tokio::time::sleep(Duration::from_millis(100)).await;
     };
     // A real connector posts `reply.text` to its surface here, then records the receipt.
     let request = connector.request(SettleReplyRequest {

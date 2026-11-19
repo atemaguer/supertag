@@ -65,6 +65,12 @@ within the pre-1.0 compatibility policy described in
   on a local-vm host, and says how to remove it. The desktop app's New Tag form has a **Web
   access** switch, on by default. A Tag without `web:fetch` hears so at the start of each turn, so
   it names the missing permission instead of refusing vaguely.
+- A Gateway no longer polls for replies once a second. `ClaimReply` takes `wait_ms`, and the
+  Control Plane holds a claim that finds no due reply until one is due, for at most 8 seconds,
+  then answers empty. A held claim writes nothing while it waits, so an idle Surface account no
+  longer writes to the database every second, and a reply goes out as soon as it is due. Slack
+  still claims progress updates once a second. See
+  [Delivering replies](docs/reference/connector-contract.md#delivering-replies).
 - A host's `concurrency` is now the machine's total: how many Task Attempts it runs at once
   across all its harnesses, instead of that many for each harness. Its harnesses share the
   slots, so one harness with no work leaves them to the others. A host service's

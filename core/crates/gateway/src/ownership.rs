@@ -5,7 +5,7 @@
 //! Draining stops new ingress, never interrupts a provider send in progress,
 //! settles what it already sent, and then releases ownership so another Gateway
 //! takes over at once instead of waiting for the lease to expire.
-use crate::delivery_journal::{Entry, Journal};
+use crate::delivery_journal::{Entry, Hold, Journal};
 use anyhow::Result;
 use axum::{
     Json,
@@ -28,6 +28,8 @@ use tokio::time::{self, Instant};
 use tokio_util::sync::CancellationToken;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
+/// The longest the Control Plane holds a reply claim waiting for a ready reply.
+const MAX_HOLD: Duration = Duration::from_secs(8);
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 /// Bound on finishing in-flight delivery after a drain begins. The Gateway
 /// process allows 15 seconds for every service to stop.
@@ -157,14 +159,16 @@ impl Owner<'_> {
     }
 
     /// Deliver replies while this Gateway owns the account, then drain.
-    /// `advance` performs one journaled delivery step with the current lease token.
+    /// `advance` performs one journaled delivery step with the current lease token. A reply
+    /// claim in that step may wait at the Control Plane as long as its `Hold` allows: until
+    /// ownership is next renewed, so a held claim never delays the renewal.
     pub(crate) async fn drive<F, Fut>(
         &self,
         shutdown: &CancellationToken,
         mut advance: F,
     ) -> Result<()>
     where
-        F: FnMut(String) -> Fut,
+        F: FnMut(String, Hold) -> Fut,
         Fut: Future<Output = Result<bool>>,
     {
         let owner_id = self.journal.owner_id().to_owned();
@@ -196,9 +200,22 @@ impl Owner<'_> {
                 .as_ref()
                 .map(|lease| lease.token.clone())
                 .unwrap_or_default();
-            // A step runs to completion: cancelling it could drop a sent reply's receipt.
-            if !advance(token).await? {
-                pause(shutdown, POLL_INTERVAL).await;
+            let hold = Hold {
+                wait: held.as_ref().map_or(Duration::ZERO, |lease| {
+                    lease
+                        .renew_at
+                        .saturating_duration_since(Instant::now())
+                        .min(MAX_HOLD)
+                }),
+                shutdown: shutdown.clone(),
+            };
+            let started = Instant::now();
+            // A step runs to completion: cancelling it could drop a sent reply's receipt. Only
+            // a held claim, before anything is sent, ends early at shutdown.
+            if !advance(token, hold).await? {
+                // A claim the Control Plane held has waited already; one answered at once waits
+                // here instead.
+                pause(shutdown, POLL_INTERVAL.saturating_sub(started.elapsed())).await;
             }
         }
         // Drain: start no new delivery, but settle any reply already claimed or sent.
@@ -208,7 +225,7 @@ impl Owner<'_> {
                 .as_ref()
                 .map(|lease| lease.token.clone())
                 .unwrap_or_default();
-            match time::timeout_at(deadline, advance(token)).await {
+            match time::timeout_at(deadline, advance(token, Hold::default())).await {
                 Ok(Ok(true)) => {}
                 Ok(Ok(false)) => time::sleep(Duration::from_millis(200)).await,
                 Ok(Err(error)) => return Err(error),

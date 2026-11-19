@@ -121,6 +121,14 @@ impl Run {
     }
 }
 
+/// A held reply claim, whose read-only check must find every reply an immediate claim would.
+async fn held_claim(store: &Store, op: &str) -> ClaimReplyResponse {
+    store
+        .claim_reply_waiting(PRINCIPAL, op, std::time::Duration::from_millis(50))
+        .await
+        .unwrap()
+}
+
 async fn claim(store: &Store, op: &str) -> ClaimReplyProgressResponse {
     store.claim_reply_progress(PRINCIPAL, op).await.unwrap()
 }
@@ -282,10 +290,7 @@ async fn contract(url: String) {
     // The final reply waits for the in-flight update, then for the pace, then replaces the
     // acknowledgement in place. Stale progress is never sent after it.
     run.finish(&store, &host, "**Done**").await;
-    assert_eq!(
-        store.claim_reply(PRINCIPAL, "r1").await.unwrap().reply,
-        None
-    );
+    assert_eq!(held_claim(&store, "r1").await.reply, None);
     assert_eq!(claim(&store, "p7").await.update, None);
     settle(
         &store,
@@ -296,12 +301,9 @@ async fn contract(url: String) {
     )
     .await
     .unwrap();
-    assert_eq!(
-        store.claim_reply(PRINCIPAL, "r2").await.unwrap().reply,
-        None
-    );
+    assert_eq!(held_claim(&store, "r2").await.reply, None);
     clock.fetch_add(UPDATE_INTERVAL_MS, Ordering::SeqCst);
-    let final_reply = store.claim_reply(PRINCIPAL, "r3").await.unwrap();
+    let final_reply = held_claim(&store, "r3").await;
     let reply = final_reply.reply.clone().unwrap();
     assert_eq!(reply.task_id, task.task_id);
     assert_eq!(reply.text, "**Done**");
@@ -534,7 +536,7 @@ async fn contract(url: String) {
         .await
         .end(&store, &host, "Harness exited\n   with code 2", false)
         .await;
-    let failed = store.claim_reply(PRINCIPAL, "w2").await.unwrap();
+    let failed = held_claim(&store, "w2").await;
     let reply = failed.reply.clone().unwrap();
     assert_eq!(reply.task_id, task.task_id);
     assert_eq!(

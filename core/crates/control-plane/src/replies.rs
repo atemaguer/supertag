@@ -1,4 +1,13 @@
 //! Durable reply claim expiry and evidence-backed reconciliation. Never repost on expiry.
+//!
+//! A Gateway account's reply claim that finds nothing ready is held, as a Worker Host's Task
+//! claim is (see [`crate::claims`]). While held it only reads: it checks whether a claim would
+//! find anything when a committed write wakes it, and at least once a second for what becomes
+//! ready with time or on another replica. It claims, in a write transaction, only once that
+//! check finds something, so an idle account writes nothing. It answers as soon as it claims a
+//! reply, empty when its wait ends, or at once when the Control Plane drains.
+use std::time::Duration;
+
 use crate::{
     Store, StoreError,
     policy::operator,
@@ -8,10 +17,20 @@ use prost::Message;
 use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::v2::*;
+use tokio::time::Instant;
 use uuid::Uuid;
 
 const LEASE_MS: i64 = 30_000;
 const PAGE_BYTES: usize = 900 * 1024;
+/// The longest a reply claim is held, inside the API tier's 10-second call budget.
+const MAX_HOLD: Duration = Duration::from_secs(8);
+/// How often a held reply claim checks without a signal: for a reply that becomes ready when a
+/// progress message's pace or lease runs out, or that another replica queued.
+const RECHECK: Duration = Duration::from_secs(1);
+
+/// SQL condition on `supertag_v2_replies`: [`crate::reply_progress::FINAL_READY`] as it holds
+/// once the claim's sweep released the progress leases that expired by `$4`.
+const READY_AFTER_SWEEP: &str = "NOT EXISTS (SELECT 1 FROM supertag_v2_reply_progress p WHERE p.task_id=supertag_v2_replies.task_id AND p.provider_receipt IS NOT NULL AND ((p.lease_token IS NOT NULL AND (p.lease_expires_at_ms IS NULL OR p.lease_expires_at_ms>$4)) OR p.next_at_ms>$4)) AND NOT EXISTS (SELECT 1 FROM supertag_v2_reply_progress p WHERE p.task_id=supertag_v2_replies.task_id AND p.provider_receipt IS NULL AND p.lease_token IS NOT NULL AND (p.lease_expires_at_ms IS NULL OR p.lease_expires_at_ms>$4))";
 
 impl Store {
     pub async fn claim_reply(
@@ -20,6 +39,92 @@ impl Store {
         operation_id: &str,
     ) -> Result<ClaimReplyResponse> {
         self.claim_reply_as(principal, operation_id, None).await
+    }
+
+    /// Claims a reply as [`Store::claim_reply`] does, holding a claim that finds none for up to
+    /// `wait`.
+    pub async fn claim_reply_waiting(
+        &self,
+        principal: &str,
+        operation_id: &str,
+        wait: Duration,
+    ) -> Result<ClaimReplyResponse> {
+        self.claim_reply_waiting_as(principal, operation_id, None, wait)
+            .await
+    }
+
+    /// `owner` fences the claim to the account's current connector ownership lease.
+    pub(crate) async fn claim_reply_waiting_as(
+        &self,
+        principal: &str,
+        operation_id: &str,
+        owner: Option<&str>,
+        wait: Duration,
+    ) -> Result<ClaimReplyResponse> {
+        let account = connector_account(principal)?;
+        name("operation ID", operation_id)?;
+        let wait = wait.min(MAX_HOLD);
+        let held = (!wait.is_zero())
+            .then(|| self.live.claims.hold(principal))
+            .flatten();
+        let Some(_held) = held else {
+            return self.claim_reply_as(principal, operation_id, owner).await;
+        };
+        let mut changes = self.live.bus.changes.subscribe();
+        let until = Instant::now() + wait;
+        loop {
+            if self.reply_claimable(account, operation_id, owner).await? {
+                let claim = self.claim_reply_as(principal, operation_id, owner).await?;
+                if claim.reply.is_some() {
+                    return Ok(claim);
+                }
+            }
+            let next = (Instant::now() + RECHECK).min(until);
+            tokio::select! {
+                biased;
+                _ = self.live.closing.cancelled() => return Ok(ClaimReplyResponse::default()),
+                _ = changes.changed() => {}
+                _ = tokio::time::sleep_until(next) => {}
+            }
+            if Instant::now() >= until {
+                return Ok(ClaimReplyResponse::default());
+            }
+        }
+    }
+
+    /// Whether claiming now would return or queue a reply for `account`: one this operation
+    /// already claimed, a ready one, or the final reply of a failed or cancelled Task. Reads
+    /// only, so a held claim that finds nothing writes nothing. Checks `owner` as the claim does.
+    async fn reply_claimable(
+        &self,
+        account: &str,
+        operation_id: &str,
+        owner: Option<&str>,
+    ) -> Result<bool> {
+        let now = self.execution_now_ms();
+        let mut tx = self.pool.begin().await?;
+        if let Some(owner) = owner {
+            crate::connector_leases::current_in(&mut tx, account, owner, now).await?;
+        }
+        let found = sqlx::query(&format!(
+            "SELECT 1 FROM supertag_v2_reply_claims WHERE account_id=$1 AND operation_id=$2
+             UNION ALL SELECT 1 FROM supertag_v2_replies WHERE account_id=$1 AND state=$3 AND {READY_AFTER_SWEEP}
+             UNION ALL SELECT 1 FROM supertag_v2_reply_progress p JOIN supertag_v2_tasks t ON t.task_id=p.task_id
+               WHERE p.account_id=$1 AND p.closed=0 AND t.state IN ($5,$6)
+                 AND NOT EXISTS (SELECT 1 FROM supertag_v2_replies r WHERE r.task_id=p.task_id)
+             LIMIT 1"
+        ))
+        .bind(account)
+        .bind(operation_id)
+        .bind(ReplyState::Pending as i64)
+        .bind(now)
+        .bind(TaskState::Failed as i64)
+        .bind(TaskState::Cancelled as i64)
+        .fetch_optional(&mut *tx)
+        .await?
+        .is_some();
+        tx.commit().await?;
+        Ok(found)
     }
 
     /// `owner` fences the claim to the account's current connector ownership lease.

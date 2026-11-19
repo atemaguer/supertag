@@ -194,10 +194,11 @@ impl Store {
     ) -> Result<supertag_protocol::v2::ClaimReplyResponse> {
         connector_account(principal)?;
         name("connector lease token", &input.connector_lease_token)?;
-        self.claim_reply_as(
+        self.claim_reply_waiting_as(
             principal,
             &input.operation_id,
             Some(&input.connector_lease_token),
+            std::time::Duration::from_millis(input.wait_ms.into()),
         )
         .await
     }
