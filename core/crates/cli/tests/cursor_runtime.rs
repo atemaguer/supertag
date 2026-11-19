@@ -24,7 +24,7 @@ use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use sqlx::Connection;
 use supertag_protocol::{
-    authenticated_request,
+    CRASH_MARKER_ENV, CRASH_POINT_ENV, authenticated_request,
     v2::{
         AttemptCleanup, CancelTaskRequest, GetTaskRequest, HarnessKind, ListEventsRequest,
         ListNativeUsageRequest, PolicyExecutionSettings, PutTagRequest, SubmitTaskRequest, Task,
@@ -152,6 +152,15 @@ impl Fixture {
             .find(|entry| entry["type"] == "started" && entry["mode"] == mode)
             .cloned()
             .with_context(|| format!("Cursor fixture never started {mode}: {trace:?}"))
+    }
+
+    /// The Attempts whose reply a Worklet reported again because its Worker's report didn't land.
+    fn reply_resends(&self) -> Result<Vec<String>> {
+        match std::fs::read_to_string(self.root.join("reply-resends")) {
+            Ok(text) => Ok(text.lines().map(str::to_owned).collect()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
+            Err(error) => Err(error.into()),
+        }
     }
 
     fn provider_trace(&self) -> Result<Vec<Value>> {
@@ -514,6 +523,10 @@ impl<'a> Runtime<'a> {
             .env("SUPERTAG_MODAL_WORKSPACE_IMAGE", "fixture-modal-image")
             .env("NODE_OPTIONS", "--invalid-fixture-option")
             .env("PYTHONPATH", "unrelated-python-path")
+            .env(
+                "SUPERTAG_TEST_REPLY_RESENDS",
+                fixture.root.join("reply-resends"),
+            )
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
         command
@@ -690,6 +703,8 @@ database_tests! {
     #[tokio::test]
     cursor_remote_cleanup_failure_reaches_the_task_report_redacted;
     #[tokio::test]
+    cursor_reply_reaches_the_fenced_task_from_a_restarted_worklets_journal;
+    #[tokio::test]
     cursor_remote_workspace_reuses_and_warms_prepared_artifacts;
     #[tokio::test]
     cursor_remote_workspace_runs_commands_in_the_sandbox_without_the_unsandboxed_opt_in;
@@ -829,16 +844,17 @@ async fn cursor_shared_execution_reopens_the_fixed_root_and_revokes_each_access(
         state.join("state.sqlite").display()
     ))
     .await?;
-    let start_host = |runtime: &Runtime<'_>| {
-        runtime
-            .worker_command(&fixture, "shared")
+    let host_command = |runtime: &Runtime<'_>| {
+        let mut command = runtime.worker_command(&fixture, "shared");
+        command
             .arg("--shared-execution-endpoint")
             .arg(&endpoint)
             .arg("--shared-execution-environment")
             .arg(ENVIRONMENT)
-            .env("SUPERTAG_EXECUTION_ADMIN_TOKEN", &admin)
-            .spawn()
+            .env("SUPERTAG_EXECUTION_ADMIN_TOKEN", &admin);
+        command
     };
+    let start_host = |runtime: &Runtime<'_>| host_command(runtime).spawn();
     // A real provider storage failure during revocation must fence completion until
     // the same Host can replay and verify cleanup. No model call should run twice.
     sqlx::query(
@@ -850,14 +866,20 @@ async fn cursor_shared_execution_reopens_the_fixed_root_and_revokes_each_access(
     for (index, mode) in ["shared-first", "shared-resume"].into_iter().enumerate() {
         let queued = runtime.submit(TAG, mode).await?;
         if index == 0 {
-            let output = timeout(WAIT, start_host(&runtime)?.wait_with_output()).await??;
+            // The Worker's own report of the reply is lost, as one slower than the Worker's
+            // exit or a Worker that died loses it.
+            let host = host_command(&runtime)
+                .env("SUPERTAG_TEST_DROP_HARNESS_FINISHED", "1")
+                .spawn()?;
+            let output = timeout(WAIT, host.wait_with_output()).await??;
             assert!(!output.status.success());
             assert!(
                 String::from_utf8_lossy(&output.stderr).contains("cleanup receipt is unavailable")
             );
             // The harness finished, so its reply becomes the Task's result, but completion
-            // stays fenced until cleanup is verified. The host reports the reply without
-            // waiting for the answer, so under load it can still be in flight as the host exits.
+            // stays fenced until cleanup is verified. The Worklet reports the reply from its
+            // journal before it tries the cleanup again, so the fenced Task shows it before its
+            // lease can lapse into Uncertain.
             let unsettled = timeout(WAIT, async {
                 loop {
                     let task = runtime.task(&queued.task_id).await?;
@@ -870,7 +892,16 @@ async fn cursor_shared_execution_reopens_the_fixed_root_and_revokes_each_access(
             .await
             .context("the harness's reply never reached the fenced Task")??;
             assert_eq!(unsettled.state(), TaskState::Running);
-            assert!(unsettled.result.is_some());
+            assert!(
+                unsettled
+                    .result
+                    .as_deref()
+                    .is_some_and(|result| result.contains("cursor-complete:shared-first")),
+                "{:?}",
+                unsettled.result
+            );
+            // Only the lost report is sent again.
+            assert_eq!(fixture.reply_resends()?.len(), 1);
             fixture.started(mode)?;
             sqlx::query("DROP TRIGGER hold_revoke")
                 .execute(&mut database)
@@ -922,6 +953,9 @@ async fn cursor_shared_execution_reopens_the_fixed_root_and_revokes_each_access(
         fixture.started("shared-resume")?["restoredFrom"],
         "shared-first"
     );
+    // The resent reply is recorded in the journal, and a Worker whose own report landed leaves
+    // nothing to send again.
+    assert_eq!(fixture.reply_resends()?.len(), 1);
     runtime.stop().await?;
     let _ = stop.send(());
     timeout(WAIT, provider_task).await???;
@@ -1644,6 +1678,101 @@ async fn cursor_remote_cleanup_failure_reaches_the_task_report_redacted(
     runtime.stop().await
 }
 
+/// A Worklet that dies once it journaled a finished turn's Finalizing stage, after its Worker's
+/// report of the reply was lost, reports the reply from its journal when it starts again, even
+/// though the sandbox it cannot stop keeps the Task fenced: the Task shows the reply rather than
+/// waiting for its lease to lapse into Uncertain. Once the sandbox stops, it finishes.
+async fn cursor_reply_reaches_the_fenced_task_from_a_restarted_worklets_journal(
+    database: String,
+) -> Result<()> {
+    const MODE: &str = "remote-first";
+    let directory = tempfile::tempdir()?;
+    let fixture = Fixture::prepare(directory.path()).await?;
+    let fail_stop = fixture.root.join("fail-stop-revealing-credentials");
+    std::fs::write(&fail_stop, b"enabled")?;
+    let marker = fixture.root.join("crash-marker");
+    let credentials = Credentials::new();
+    let mut runtime = Runtime::start(&fixture.root, &credentials, &database).await?;
+    runtime
+        .tag(
+            &fixture,
+            TAG,
+            HarnessKind::Cursor,
+            &["files:read", "files:write"],
+        )
+        .await?;
+    let task = runtime.submit(TAG, MODE).await?;
+    let host = |runtime: &Runtime<'_>| {
+        let mut command =
+            runtime.remote_worker_command(&fixture, "restart", false, Some(RemoteWorkspace::E2b));
+        command
+            .env("SUPERTAG_TEST_DROP_HARNESS_FINISHED", "1")
+            .env(CRASH_POINT_ENV, "worker-host.finalizing.journaled")
+            .env(CRASH_MARKER_ENV, &marker);
+        command
+    };
+    let crashed = host(&runtime).spawn()?;
+    runtime.wait_stream(&fixture, &task.task_id, MODE).await?;
+    let runner = pid(&fixture.started(MODE)?, "pid")?;
+    std::fs::write(fixture.root.join(format!("release-{runner}")), b"go")?;
+    let output = timeout(WAIT, crashed.wait_with_output()).await??;
+    ensure!(
+        !output.status.success() && marker.exists(),
+        "the Worklet did not stop at its Finalizing stage: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let interrupted = runtime.task(&task.task_id).await?;
+    ensure!(
+        interrupted.state() == TaskState::Running && interrupted.result.is_none(),
+        "the lost report reached the Task: {interrupted:?}"
+    );
+    assert!(fixture.reply_resends()?.is_empty());
+    // The restarted Worklet reports the reply, then cannot stop the sandbox.
+    let output = timeout(WAIT, host(&runtime).spawn()?.wait_with_output()).await??;
+    ensure!(
+        !output.status.success(),
+        "a sandbox the host could not stop was treated as stopped: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let fenced = runtime.task(&task.task_id).await?;
+    ensure!(
+        fenced.state() == TaskState::Running
+            && fenced
+                .result
+                .as_deref()
+                .is_some_and(|result| result.contains(&format!("cursor-complete:{MODE}"))),
+        "the fenced Task never showed the reply: {fenced:?}"
+    );
+    assert_eq!(fixture.reply_resends()?.len(), 1);
+    std::fs::remove_file(&fail_stop)?;
+    let output = timeout(WAIT, host(&runtime).spawn()?.wait_with_output()).await??;
+    ensure!(
+        output.status.success(),
+        "the Worker Host did not finish the Attempt: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let finished = runtime.task(&task.task_id).await?;
+    ensure!(
+        finished.state() == TaskState::Succeeded
+            && finished
+                .result
+                .as_deref()
+                .is_some_and(|result| result.contains(&format!("cursor-complete:{MODE}"))),
+        "{finished:?}"
+    );
+    // The journal recorded the reply acknowledged, so the last host sent it no more.
+    assert_eq!(fixture.reply_resends()?.len(), 1);
+    assert_eq!(
+        fixture
+            .trace()?
+            .iter()
+            .filter(|entry| entry["type"] == "started" && entry["mode"] == MODE)
+            .count(),
+        1,
+    );
+    runtime.stop().await
+}
+
 /// A Dockerfile USER that is not a literal name is refused before any provider call, even when
 /// remoteUser would override it, and the refusal names the rule.
 async fn cursor_remote_workspace_refuses_a_nonliteral_dockerfile_user_before_any_provider_call(
@@ -1785,6 +1914,12 @@ async fn remote_workspace_round_trip(provider: RemoteWorkspace, database: &str) 
         .context("remote delivery missing")?;
     ensure!(first_delivery.committed && first_delivery.changed_files == 1);
     ensure!(first_delivery.start_commit == fixture.base);
+    // The Worker's own report of the reply landed, so its Worklet sent it no more.
+    ensure!(
+        fixture.reply_resends()?.is_empty(),
+        "{:?}",
+        fixture.reply_resends()?
+    );
     runtime.assert_usage(&first).await?;
     let checkpoint = runtime.checkpoint().await?;
     runtime.stop().await?;
@@ -1966,6 +2101,8 @@ async fn cursor_streams_scoped_tools_and_resumes_after_services_restart(
             .as_ref()
             .is_some_and(|delivery| delivery.committed)
     );
+    // The Worker's own report of the reply landed, so its Worklet sent it no more.
+    assert!(fixture.reply_resends()?.is_empty());
     runtime.assert_usage(&completed).await?;
     assert_eq!(
         runtime.task(&wrong.task_id).await?.state(),

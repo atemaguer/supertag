@@ -30,7 +30,9 @@ use crate::local::{
 };
 use crate::worklet::authority::{Authority, with_authority, with_cleanup_authority};
 use crate::worklet::claim::{CLAIM_WAIT, claim_request};
-use crate::worklet::finish::{ensure_providers_stopped, save_finish, write_session_branch};
+use crate::worklet::finish::{
+    deliver_reply, ensure_providers_stopped, save_finish, write_session_branch,
+};
 use crate::worklet::launch::{Launched, launch};
 use crate::worklet::pool::{OutcomeKind, Serve, WorkerProcess, serve};
 use crate::worklet::recovery::{
@@ -786,6 +788,9 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
             _ => readiness::State::Busy,
         };
         worklet.set(slot, state);
+        // The turn's reply, which only the Worker's one report carried: made durable here before
+        // the Attempt goes on, since an Attempt that cannot finish would otherwise lose it.
+        let entry = deliver_reply(&mut host, journal, entry, token, shutdown).await?;
         match entry {
             Entry::Claim {
                 operation_id,
@@ -989,6 +994,7 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                 file_scope,
                 failure_detail,
                 captured,
+                reply_reported,
             } => {
                 // This stage is recorded only after the adapter process group was reaped.
                 // Exact finalization can safely resume after a Host restart.
@@ -1015,6 +1021,7 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                         file_scope,
                         failure_detail,
                         captured: false,
+                        reply_reported,
                     };
                     Box::pin(resume_captures(worklet, slot, entry, &mut deaths)).await?;
                     continue;
@@ -1137,6 +1144,7 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                         } else {
                             failures::merged_detail(failure_detail)
                         },
+                        reply_reported,
                     })?,
                     Err(_) if shutdown.is_cancelled() => return Ok(()),
                     Err(error) if retryable(&error) => wait_for_work(shutdown).await,
@@ -1165,6 +1173,7 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                 prepared,
                 outputs,
                 failure_detail,
+                reply_reported,
             } => {
                 with_cleanup_authority(
                     &mut host,
@@ -1232,6 +1241,7 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                                 prepared,
                                 outputs,
                                 failure_detail: failure_detail.clone(),
+                                reply_reported,
                             })?;
                         }
                         Err(error)
@@ -1287,6 +1297,7 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                                 prepared,
                                 outputs,
                                 failure_detail: failure_detail.clone(),
+                                reply_reported,
                             })?;
                         }
                         Err(error)
@@ -1427,6 +1438,7 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                             prepared,
                             outputs: None,
                             failure_detail: vec![],
+                            reply_reported: false,
                         })?;
                         continue;
                     }
@@ -1809,6 +1821,7 @@ impl Serve for Serving<'_> {
                     file_scope: self.file_scope.clone(),
                     failure_detail,
                     captured: false,
+                    reply_reported: false,
                 })?;
                 supertag_protocol::crash_point("worker-host.finalizing", "journaled");
                 Ok(())
@@ -1842,6 +1855,7 @@ impl Serve for Serving<'_> {
                 explained,
                 checkpoint,
                 failure_detail,
+                reply_reported,
             } if starting || executing || capturing => {
                 if !explained && !completion.succeeded {
                     supertag_protocol::terminal_text::warn(&format!(
@@ -1866,16 +1880,25 @@ impl Serve for Serving<'_> {
                     } else {
                         failures::merged_detail(failure_detail.clone())
                     },
+                    // A Worker resuming the captures sent no report: the entry knows.
+                    reply_reported: *reply_reported || current.reply_is_reported(),
                 })
             }
-            Outcome::Finalizing { outputs: kept } if capturing => {
+            Outcome::Finalizing {
+                outputs: kept,
+                reply_reported: acknowledged,
+            } if capturing => {
                 let mut entry = current;
                 if let Entry::Finalizing {
-                    outputs, captured, ..
+                    outputs,
+                    captured,
+                    reply_reported,
+                    ..
                 } = &mut entry
                 {
                     outputs.clone_from(kept);
                     *captured = true;
+                    *reply_reported |= *acknowledged;
                 }
                 self.save(&entry)
             }

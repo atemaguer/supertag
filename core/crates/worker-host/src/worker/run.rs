@@ -102,7 +102,12 @@ impl Worker<'_> {
             )
             .await;
             return match kept {
-                Captures::Kept(outputs) => authority.outcome(Outcome::Finalizing { outputs }).await,
+                Captures::Kept(outputs) => authority
+                    .outcome(Outcome::Finalizing {
+                        outputs,
+                        reply_reported: false,
+                    })
+                    .await,
                 Captures::Failed(failed) => authority.finish_now(failed, false).await,
                 Captures::Stopped => Ok(()),
             };
@@ -1045,7 +1050,12 @@ impl Worker<'_> {
                 )
                 .await;
                 match kept {
-                    Captures::Kept(outputs) => authority.outcome(Outcome::Finalizing { outputs }).await,
+                    Captures::Kept(outputs) => authority
+                    .outcome(Outcome::Finalizing {
+                        outputs,
+                        reply_reported: false,
+                    })
+                    .await,
                     Captures::Failed(failed) => authority.finish_now(failed, false).await,
                     // The Worker stops; another resumes the captures from the Finalizing entry.
                     Captures::Stopped => Ok(()),

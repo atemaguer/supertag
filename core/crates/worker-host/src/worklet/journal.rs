@@ -201,6 +201,10 @@ pub(crate) enum Entry {
         /// finalizes the delivery: the Worker that ran the turn, or one started to resume it.
         #[serde(default)]
         captured: bool,
+        /// Whether the Control Plane acknowledged the turn's reply, which the Worklet reports
+        /// again from this entry: see `Entry::unreported_reply`.
+        #[serde(default)]
+        reply_reported: bool,
     },
     Finish {
         #[serde(flatten)]
@@ -224,6 +228,9 @@ pub(crate) enum Entry {
         /// Why the host failed the Attempt, for operators: see `failures::take_detail`.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         failure_detail: Vec<String>,
+        /// Whether the Control Plane acknowledged the turn's reply: see `Entry::unreported_reply`.
+        #[serde(default)]
+        reply_reported: bool,
     },
     Terminal {
         #[serde(flatten)]
@@ -240,6 +247,62 @@ impl Entry {
             | Self::Finalizing { attempt, .. }
             | Self::Finish { attempt, .. } => Some(attempt),
             _ => None,
+        }
+    }
+
+    /// The reply of a turn that succeeded and waits for no approval, while the Control Plane has
+    /// not acknowledged it: its Attempt, text, quiet flag, and Objective signal. The Worker reports
+    /// it once, in the background, as the harness finishes, and its outcome says whether the
+    /// Control Plane acknowledged that report; a report it lost, or never sent because it died,
+    /// would leave an Attempt that cannot finish without its reply, so the Worklet reports it
+    /// again from the entry.
+    pub(crate) fn unreported_reply(&self) -> Option<(&Attempt, &str, bool, i32)> {
+        match self {
+            Self::Finalizing {
+                attempt,
+                result,
+                succeeded: true,
+                objective_signal,
+                waiting_approval_ids,
+                quiet,
+                reply_reported: false,
+                ..
+            }
+            | Self::Finish {
+                attempt,
+                result,
+                succeeded: true,
+                objective_signal,
+                waiting_approval_ids,
+                quiet,
+                reply_reported: false,
+                ..
+            } if waiting_approval_ids.is_empty() => {
+                Some((attempt, result.as_str(), *quiet, *objective_signal))
+            }
+            _ => None,
+        }
+    }
+
+    /// Whether the entry records the turn's reply acknowledged.
+    pub(crate) fn reply_is_reported(&self) -> bool {
+        matches!(
+            self,
+            Self::Finalizing {
+                reply_reported: true,
+                ..
+            } | Self::Finish {
+                reply_reported: true,
+                ..
+            }
+        )
+    }
+
+    /// Records that the Control Plane acknowledged the turn's reply, or will never show it.
+    pub(crate) fn reply_reported(&mut self) {
+        if let Self::Finalizing { reply_reported, .. } | Self::Finish { reply_reported, .. } = self
+        {
+            *reply_reported = true;
         }
     }
 

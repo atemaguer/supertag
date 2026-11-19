@@ -259,12 +259,18 @@ pub(crate) enum Outcome {
         explained: bool,
         checkpoint: Option<PendingCheckpoint>,
         failure_detail: Vec<String>,
+        /// The Control Plane acknowledged this Worker's report of the harness's reply.
+        #[serde(default)]
+        reply_reported: bool,
     },
     /// The captures of the Finalizing turn are kept: its Task outputs, now frozen and
     /// published, and its Volume copies, written back. The Worklet finalizes and lands the
     /// delivery, then finishes with it.
     Finalizing {
         outputs: Option<Box<PendingOutputs>>,
+        /// The Control Plane acknowledged this Worker's report of the harness's reply.
+        #[serde(default)]
+        reply_reported: bool,
     },
 }
 

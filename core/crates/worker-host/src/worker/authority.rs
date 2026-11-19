@@ -152,11 +152,19 @@ impl<'a> WorkerAuthority<'a> {
             explained,
             checkpoint,
             failure_detail,
+            reply_reported: false,
         })
         .await
     }
 
-    pub(crate) async fn outcome(&self, outcome: Outcome) -> Result<()> {
+    /// Hands `outcome` over, saying whether this Worker's report of the harness's reply was
+    /// acknowledged, so that the Worklet reports it again only when it was not.
+    pub(crate) async fn outcome(&self, mut outcome: Outcome) -> Result<()> {
+        if let Outcome::Finish { reply_reported, .. } | Outcome::Finalizing { reply_reported, .. } =
+            &mut outcome
+        {
+            *reply_reported = crate::worker::milestones::reply_acknowledged().await;
+        }
         self.handed.store(true, std::sync::atomic::Ordering::SeqCst);
         self.link.outcome(outcome).await?;
         supertag_protocol::crash_point("worker.outcome", "handed");

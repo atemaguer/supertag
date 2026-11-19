@@ -54,8 +54,8 @@ the Worklet reports that its execution stopped. A Worklet that starts the
 same Task Attempt again after a restart receives a new credential, and the old one stops working.
 The Worklet passes the credential to the Worker in its assignment and keeps no copy, in memory or
 in its journal. The Worker records the Task Attempt's captures and writes back its Workspace
-Volume copies before it hands over its outcome, so the Worklet never needs the credential. The
-Worklet records that the Task Attempt is finalizing before the Worker starts them. A Worker that
+Volume copies before it hands over its outcome, so the Worklet never needs the credential for
+them. The Worklet records that the Task Attempt is finalizing before the Worker starts them. A Worker that
 stops before it finishes them, or a Worklet restarted meanwhile, leaves them to a new Worker,
 which the Worklet starts for them with a new credential. After three such Workers die, the Task
 Attempt fails.
@@ -117,6 +117,15 @@ starting, preparing inputs, executing, finalizing, finishing, and the final clea
 reports the steps it reaches, and the Worklet records each one before the Worker goes on. A
 restarted Worklet reads the journal and finishes or reports what it started, without running a
 step twice.
+
+The Worker reports the harness's reply as soon as a successful turn ends, without waiting for the
+answer, so the reply shows while the Worker captures and delivers the turn's files, and its
+outcome says whether the Control Plane acknowledged that report. The journal keeps the reply with
+the finalizing step, so when the Worker's report didn't land, or the Worker died first, the
+Worklet reports it again, with a credential it starts the Task Attempt again for, and records
+when the Control Plane has it. The Control Plane shows a Task Attempt's reply only once. A Task Attempt that can't
+finish yet, such as one held until its cleanup is confirmed, still shows its reply, even when the
+Worker's report was lost or the Worklet restarted, instead of waiting until its lease runs out.
 
 The journal keeps one entry for each slot of the Worklet's pool, beside that slot's checkouts:
 

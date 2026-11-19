@@ -1196,6 +1196,7 @@ mod tests {
             file_scope: None,
             failure_detail: vec![],
             captured: true,
+            reply_reported: false,
         })?;
         drop(journal);
         drop(workspaces);
@@ -1249,6 +1250,7 @@ mod tests {
             prepared: Some(workspace),
             outputs: None,
             failure_detail: vec![],
+            reply_reported: false,
         })?;
         drop(journal);
         let journal = Journal::open(&state)?;
