@@ -177,6 +177,7 @@ pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Re
                     host_id: Some(FLAGS_HOST.into()),
                     remote: false,
                     concurrency: None,
+                    state_directory: Some(directory.join("host")),
                 });
             }
             lifecycle::record(
@@ -538,6 +539,7 @@ impl Children {
                 host_id: None,
                 remote: false,
                 concurrency: None,
+                state_directory: None,
             });
         }
         if let Some(service) = &self.gateway {
@@ -549,6 +551,7 @@ impl Children {
                 host_id: None,
                 remote: false,
                 concurrency: None,
+                state_directory: None,
             });
         }
         services
@@ -1341,6 +1344,7 @@ pub async fn configured(
                 host_id: Some(host.definition.name.clone()),
                 remote: host.definition.control_plane.is_some(),
                 concurrency: Some(host.definition.concurrency),
+                state_directory: Some(host.directory.clone()),
             });
         }
         lifecycle::record(

@@ -18,7 +18,7 @@ Commands:
   tui                   Open the terminal UI; plain supertag opens it for this machine's services
   message               Send a message to your conversation with a Tag and print its reply
   status                Show Worker Hosts, Tags, unfinished Objectives, and the operator inbox
-  ps                    List this machine's SuperTag services
+  ps                    List this machine's SuperTag services and the Workers each Worker Host runs
   logs                  Print this machine's service logs
   down                  Stop this machine's SuperTag services, draining local Worker Hosts first
   health                Check a public or private gRPC service using the configured TLS trust
@@ -285,7 +285,7 @@ Options:
 ## `supertag ps`
 
 ```text
-List this machine's SuperTag services
+List this machine's SuperTag services and the Workers each Worker Host runs
 
 Usage: supertag ps [OPTIONS]
 

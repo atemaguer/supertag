@@ -205,7 +205,7 @@ enum Command {
     Message(conversation_message::MessageArgs),
     /// Show Worker Hosts, Tags, unfinished Objectives, and the operator inbox.
     Status(status::StatusArgs),
-    /// List this machine's SuperTag services.
+    /// List this machine's SuperTag services and the Workers each Worker Host runs.
     Ps(lifecycle::PsArgs),
     /// Print this machine's service logs.
     Logs(lifecycle::LogsArgs),

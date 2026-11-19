@@ -36,7 +36,7 @@ use crate::worklet::pool::{OutcomeKind, Serve, WorkerProcess, serve};
 use crate::worklet::recovery::{
     cleanup_terminal, purge_discarded, reclaim, recovery_notice, resolved,
 };
-use crate::worklet::{HostSigner, HostStorage, background, registration};
+use crate::worklet::{HostSigner, HostStorage, background, registration, workers};
 use crate::{
     ArtifactSourceConfig, HostHeaders, McpCatalog, RegisteredHost, SharedExecutionConfig,
     WorkerOptions, WorkletOptions, artifact_inputs, environment, failures, lost_ownership,
@@ -81,6 +81,8 @@ struct Worklet {
     storage: HostStorage,
     landings: landing::Landings,
     slots: Arc<readiness::Slots>,
+    /// The running Workers, as `supertag ps` lists them.
+    workers: workers::Workers,
     keep_awake: Arc<environment::KeepAwake>,
     reported: tokio::sync::watch::Receiver<bool>,
     ready: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
@@ -492,6 +494,7 @@ pub(crate) async fn run(
         storage,
         landings,
         slots: slots.clone(),
+        workers: workers::Workers::open(&options.state_directory),
         keep_awake: keep_awake.clone(),
         reported: presence.reported(),
         ready: std::sync::Mutex::new(Some(Box::new(ready))),
@@ -1625,6 +1628,20 @@ async fn run_worker(
         })
         .collect();
     let process = WorkerProcess::spawn(&harness.launch, &worklet.token)?;
+    worklet.workers.started(workers::RunningWorker {
+        pid: process.pid(),
+        harness: harness_name(harness.worker.harness),
+        slot: slot.name.clone(),
+        task_id: attempt.task_id.clone(),
+        attempt_id: attempt.attempt_id.clone(),
+        tag_id: task.tag_id.clone(),
+        state: workers::RunningState::Starting,
+        started_at_ms: workers::now_ms(),
+    });
+    let listed = ListedWorker {
+        workers: &worklet.workers,
+        slot: &slot.name,
+    };
     let assign = Assign {
         slot: slot.name.clone(),
         state_directory: slot.directory.clone(),
@@ -1661,14 +1678,28 @@ async fn run_worker(
         workspace,
         file_scope,
     };
-    Ok(serve(
+    let end = serve(
         process,
         assign,
         &serving,
         &worklet.shutdown,
         crate::worklet::pool::Limits::for_attempt(harness.worker.attempt_timeout),
     )
-    .await)
+    .await;
+    drop(listed);
+    Ok(end)
+}
+
+/// Takes a Worker off the status file once it is reaped, or when its slot's task is aborted.
+struct ListedWorker<'a> {
+    workers: &'a workers::Workers,
+    slot: &'a str,
+}
+
+impl Drop for ListedWorker<'_> {
+    fn drop(&mut self) {
+        self.workers.ended(self.slot);
+    }
 }
 
 /// The Worklet's end of one Worker's contract.
@@ -1860,8 +1891,8 @@ impl Serve for Serving<'_> {
 
     fn state(&self, state: WorkerState) {
         // Starting and finalizing hold the slot as executing does; presence counts all three
-        // as busy. Recorded for `supertag ps`.
-        let _ = state;
+        // as busy. `supertag ps` shows which.
+        self.worklet.workers.state(&self.slot.name, state);
         self.worklet.set(self.slot, readiness::State::Busy);
     }
 

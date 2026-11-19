@@ -23,6 +23,10 @@ within the pre-1.0 compatibility policy described in
   HTTP/2 keepalive pings, time out connecting after 5 seconds (30 through a tunnel, or
   `connectTimeoutMs`), name their release with `buildVersion`, and accept any token of up to 8192
   ASCII characters without spaces, as the CLI does.
+- `supertag ps` lists, under each Worker Host, one row per running Worker: its process ID,
+  harness, slot, state (starting, executing, or finalizing), how long it has run, and its Task,
+  Task Attempt, and Tag. `--output json` adds them as the host's `workers`. The Worklet keeps them
+  in `workers.json` in the host's state directory, and `ps` shows none for a Worklet that died.
 
 ### Fixed
 

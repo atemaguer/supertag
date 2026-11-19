@@ -190,6 +190,11 @@ impl WorkerProcess {
         write_frame(&mut *writer.lock().await, message).await
     }
 
+    /// The Worker's process ID, which also names its process group.
+    pub(crate) fn pid(&self) -> u32 {
+        self.group.unsigned_abs()
+    }
+
     fn kill(&self) {
         // SAFETY: signalling the Worker's own process group, which only it and its children
         // belong to.

@@ -154,6 +154,12 @@ runs outside its sandbox as that user can read it. The harness's sandbox, or ano
 keeps it out. The Worker hides any value shaped like an enrolled credential, in any of its
 encodings, from what the harness sends upstream.
 
+`supertag ps` lists each running Worker under its host's row: its process ID, harness, slot, state
+(starting, executing, or finalizing), how long it has run, and its Task, Task Attempt, and Tag.
+The Worklet keeps them in `workers.json` in the host's state directory, so `ps` asks the Control
+Plane nothing for them. It lists a Worker only while the Worklet that wrote the file is alive and
+is the Worker's parent process, so a Worklet that died leaves no Worker listed.
+
 A Worker exits when its Worklet does. The Worklet cancels a Worker that is still running 30
 minutes past its harness's time limit, 2 minutes after its lease ended, or 5 minutes after it
 handed over its outcome, or that does not stop when asked, and kills its process group 10

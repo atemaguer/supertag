@@ -172,6 +172,9 @@ pub struct ServiceStatus {
     /// A host's Attempts per harness at once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub concurrency: Option<u32>,
+    /// A host's state directory, where its Worklet lists the Workers it runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_directory: Option<PathBuf>,
 }
 
 fn now_ms() -> u64 {
@@ -1204,6 +1207,70 @@ struct Row {
     /// A laptop power risk to the host's running Task Attempts.
     #[serde(skip_serializing_if = "Option::is_none")]
     power_warning: Option<String>,
+    /// The host's running Worker processes, one per Task Attempt, as its Worklet lists them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    workers: Vec<WorkerRow>,
+}
+
+#[derive(Serialize)]
+struct WorkerRow {
+    pid: u32,
+    harness: String,
+    slot: String,
+    task_id: String,
+    attempt_id: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    tag_id: String,
+    /// `starting`, `executing`, or `finalizing`.
+    state: &'static str,
+    started_at: String,
+    running_seconds: u64,
+}
+
+impl WorkerRow {
+    fn from(worker: supertag_worker_host::RunningWorker, now_ms: u64) -> Self {
+        Self {
+            started_at: timestamp(UNIX_EPOCH + Duration::from_millis(worker.started_at_ms)),
+            running_seconds: now_ms.saturating_sub(worker.started_at_ms) / 1_000,
+            state: worker.state.as_str(),
+            pid: worker.pid,
+            harness: worker.harness,
+            slot: worker.slot,
+            task_id: worker.task_id,
+            attempt_id: worker.attempt_id,
+            tag_id: worker.tag_id,
+        }
+    }
+}
+
+/// The Workers a local host's Worklet runs: none when it is stopped, or when its status file
+/// names no live Worker of it.
+fn worker_rows(service: &ServiceStatus, running: bool) -> Vec<WorkerRow> {
+    let (Some(pid), Some(directory), true) = (service.pid, &service.state_directory, running)
+    else {
+        return Vec::new();
+    };
+    let now = now_ms();
+    supertag_worker_host::running_workers(directory, pid)
+        .into_iter()
+        .map(|worker| WorkerRow::from(worker, now))
+        .collect()
+}
+
+/// `90` as `1m 30s`: the largest two units.
+fn running_for(seconds: u64) -> String {
+    let (days, hours, minutes, seconds) = (
+        seconds / 86_400,
+        seconds / 3_600 % 24,
+        seconds / 60 % 60,
+        seconds % 60,
+    );
+    match (days, hours, minutes) {
+        (0, 0, 0) => format!("{seconds}s"),
+        (0, 0, _) => format!("{minutes}m {seconds}s"),
+        (0, _, _) => format!("{hours}h {minutes}m"),
+        _ => format!("{days}d {hours}h"),
+    }
 }
 
 #[derive(Serialize)]
@@ -1329,6 +1396,11 @@ pub async fn ps(args: PsArgs) -> Result<()> {
                         .map(|host| host.total_uncertain_attempts)
                         .filter(|total| *total > 0),
                     power_warning: None,
+                    workers: if service.kind == HOST {
+                        worker_rows(service, running)
+                    } else {
+                        Vec::new()
+                    },
                 });
             }
             if services
@@ -1393,6 +1465,7 @@ fn stopped_row(name: &str, kind: &str, state: &'static str) -> Row {
         uncertain_attempts: Vec::new(),
         uncertain_total: None,
         power_warning: None,
+        workers: Vec::new(),
     }
 }
 
@@ -1532,6 +1605,23 @@ fn format_ps(report: &PsReport, supervisor: &Supervisor) -> String {
         out.push_str(&line([&row[0], &row[1], &row[2], &row[3], &row[4]]));
         if let Some(warning) = &service.power_warning {
             out.push_str(&format!("  {}\n", text(warning)));
+        }
+        for worker in &service.workers {
+            let tag = if worker.tag_id.is_empty() {
+                String::new()
+            } else {
+                format!(" of Tag {}", text(&worker.tag_id))
+            };
+            out.push_str(&format!(
+                "  Worker {}  {}  slot {}  {} for {}  Task {} Attempt {}{tag}\n",
+                worker.pid,
+                text(&worker.harness),
+                text(&worker.slot),
+                worker.state,
+                running_for(worker.running_seconds),
+                text(&worker.task_id),
+                text(&worker.attempt_id),
+            ));
         }
     }
     // A slot held by an uncertain Attempt counts as occupied, so a host can look full while
@@ -1774,6 +1864,7 @@ mod tests {
             uncertain_attempts: Vec::new(),
             uncertain_total: None,
             power_warning: None,
+            workers: Vec::new(),
         };
         let report = PsReport {
             state_directory: format!("/tmp/{hostile}"),
@@ -1827,6 +1918,7 @@ mod tests {
             ],
             uncertain_total: Some(3),
             power_warning: None,
+            workers: Vec::new(),
         };
         let report = PsReport {
             state_directory: "/tmp/state".into(),
@@ -1887,6 +1979,7 @@ mod tests {
                 uncertain_attempts: Vec::new(),
                 uncertain_total: None,
                 power_warning: None,
+                workers: Vec::new(),
             }],
         };
         let text = format_ps(&report, &Supervisor::Stopped);
@@ -1919,6 +2012,7 @@ mod tests {
                 power_warning: Some(
                     "warning: Task Attempts are running, but closing the lid will sleep it.".into(),
                 ),
+                workers: Vec::new(),
             }],
         };
         let text = format_ps(&report, &Supervisor::Stopped);
@@ -1928,6 +2022,61 @@ mod tests {
             ),
             "{text}"
         );
+    }
+
+    #[test]
+    fn ps_lists_each_worker_under_its_host_row() {
+        let worker = supertag_worker_host::RunningWorker {
+            pid: 4242,
+            harness: "claude-code".into(),
+            slot: "claude-code-0".into(),
+            task_id: "task_1".into(),
+            attempt_id: "attempt_1".into(),
+            tag_id: "tag_1".into(),
+            state: supertag_worker_host::RunningState::Executing,
+            started_at_ms: 1_000,
+        };
+        let report = PsReport {
+            state_directory: "/tmp/state".into(),
+            supervisor: None,
+            services: vec![Row {
+                service: "laptop".into(),
+                kind: HOST.into(),
+                state: "running",
+                address: None,
+                pid: Some(7),
+                worker_host_id: Some("laptop".into()),
+                connected: Some(true),
+                draining: None,
+                attempts: Some(1),
+                capacity: Some(6),
+                uncertain_attempts: Vec::new(),
+                uncertain_total: None,
+                power_warning: None,
+                workers: vec![WorkerRow::from(worker, 1_000 + 754_000)],
+            }],
+        };
+        let text = format_ps(&report, &Supervisor::Stopped);
+        assert!(
+            text.ends_with(
+                "7  connected, 1/6 Task Attempts\n  Worker 4242  claude-code  slot claude-code-0  executing for 12m 34s  Task task_1 Attempt attempt_1 of Tag tag_1\n"
+            ),
+            "{text}"
+        );
+        let json = serde_json::to_value(&report).unwrap();
+        let listed = &json["services"][0]["workers"][0];
+        assert_eq!(listed["pid"], 4242);
+        assert_eq!(listed["state"], "executing");
+        assert_eq!(listed["running_seconds"], 754);
+        assert_eq!(listed["started_at"], "1970-01-01T00:00:01.000Z");
+    }
+
+    #[test]
+    fn worker_run_times_name_their_two_largest_units() {
+        assert_eq!(running_for(9), "9s");
+        assert_eq!(running_for(90), "1m 30s");
+        assert_eq!(running_for(3_725), "1h 2m");
+        assert_eq!(running_for(90_000), "1d 1h");
     }
 
     #[test]

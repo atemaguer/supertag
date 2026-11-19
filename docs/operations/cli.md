@@ -119,7 +119,7 @@ A script or app can run `init` without a terminal:
 | `supertag up --foreground` | Runs them in this terminal, with their logs, until you interrupt it |
 | `supertag down` | Drains this machine's Worker Hosts through their Worklets, waits for running Task Attempts, and stops every service |
 | `supertag down --force` | Stops without waiting for running Task Attempts |
-| `supertag ps` | Lists this machine's services and their state |
+| `supertag ps` | Lists this machine's services and their state, and under each Worker Host its running Workers |
 | `supertag logs -f` | Follows the service logs; name `control-plane`, `gateway`, or a host to narrow them |
 | `supertag config` | Prints the resolved `supertag.yaml`, or every problem in it |
 | `supertag status` | Shows Worker Hosts, Tags, unfinished Objectives, and the operator inbox |

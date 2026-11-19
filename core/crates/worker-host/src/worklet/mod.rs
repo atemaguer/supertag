@@ -21,6 +21,7 @@ pub(crate) mod registration;
 pub(crate) mod run;
 pub(crate) mod shared_host;
 pub(crate) mod volume_objects;
+pub(crate) mod workers;
 pub(crate) mod workspaces;
 
 use std::{collections::BTreeMap, path::PathBuf};

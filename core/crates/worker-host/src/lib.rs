@@ -31,6 +31,7 @@ pub use worklet::enrollment::{
     EnrolledRole, credential, enroll, enrolled_control_plane, enrolled_host, rotate_own_credential,
 };
 pub use worklet::readiness::host_labels;
+pub use worklet::workers::{RunningState, RunningWorker, WORKERS_FILE, running_workers};
 pub use worklet::workspaces::{WORKSPACE_DIRECTORY, WorkspaceMapping, WorkspaceSource};
 pub use worklet::{HarnessService, WorkerLaunch, WorkletOptions};
 pub use workspace_mounts::WorkspaceMounts;
