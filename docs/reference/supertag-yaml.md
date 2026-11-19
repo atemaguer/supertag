@@ -337,7 +337,7 @@ The host needs Claude Code 2.1.323 or later, whose sandbox fixes cases where a c
 outside it; with an older `claude` the host refuses to start and asks you to run `claude update`.
 A host names a harness in `sandbox-commands` or `allow-unsandboxed-commands`, not both, and
 cannot combine it with `environment: local-vm`. A host started without supertag.yaml takes
-`supertag worker-host --sandbox-commands`.
+`supertag worklet --sandbox-commands`.
 
 ### Network credentials
 
