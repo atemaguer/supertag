@@ -44,6 +44,14 @@ pub(crate) fn set_provider_credentials(credentials: BTreeMap<String, String>) ->
     Ok(())
 }
 
+/// The values of the provider credentials this Worker was assigned, which its redaction hides.
+pub(crate) fn assigned_values() -> Vec<String> {
+    FILE_CREDENTIALS
+        .get()
+        .map(|credentials| credentials.values().cloned().collect())
+        .unwrap_or_default()
+}
+
 /// A provider variable's value: from the credentials the Worker was assigned, else from the
 /// host's environment.
 pub fn provider_variable(name: &str) -> Option<OsString> {

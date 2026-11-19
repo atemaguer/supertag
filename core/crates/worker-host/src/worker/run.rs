@@ -76,6 +76,7 @@ impl Worker<'_> {
             workspace,
             checkpoint,
             valid_for_ms,
+            resume_captures,
             ..
         } = assign;
         let mut task = task.0;
@@ -84,6 +85,28 @@ impl Worker<'_> {
         let credential = attempt.attempt_credential.clone();
         let token = credential.as_str();
         let run = async {
+        if let Some(resume) = resume_captures {
+            authority.link().state(WorkerState::Finalizing);
+            let workspace = workspace
+                .as_ref()
+                .context("a Finalizing Attempt has no prepared Workspace")?;
+            let kept = captures(
+                &mut authority,
+                options,
+                &attempt,
+                (workspace, workspaces, transfers),
+                (coordination, storage, token),
+                (true, resume.remote),
+                resume.outputs,
+                shutdown,
+            )
+            .await;
+            return match kept {
+                Captures::Kept(outputs) => authority.outcome(Outcome::Finalizing { outputs }).await,
+                Captures::Failed(failed) => authority.finish_now(failed, false).await,
+                Captures::Stopped => Ok(()),
+            };
+        }
         // A local Attempt's Workspace is ready once its Worklet prepared it; a remote one once
         // its sandbox is.
         if workspace.is_some() && options.remote_provider.is_none() {
@@ -163,11 +186,7 @@ impl Worker<'_> {
             let prepared = workspace
                 .as_ref()
                 .context("Task artifact input Workspace is missing")?;
-            authority
-                .milestone(Milestone::PreparingInputs {
-                    prepared: prepared.clone(),
-                })
-                .await?;
+            authority.milestone(Milestone::PreparingInputs).await?;
             let cancel = shutdown.child_token();
             let staged = Box::pin(authority.keep(
                 &attempt,
@@ -210,11 +229,7 @@ impl Worker<'_> {
             let checkout = workspace
                 .as_ref()
                 .context("Workspace mount checkout is missing")?;
-            authority
-                .milestone(Milestone::PreparingInputs {
-                    prepared: checkout.clone(),
-                })
-                .await?;
+            authority.milestone(Milestone::PreparingInputs).await?;
             let state = options.state_directory.clone();
             let checkout = checkout.checkout.path.clone();
             let attempt_id = attempt.attempt_id.clone();
@@ -288,11 +303,7 @@ impl Worker<'_> {
         };
         let processes = journal.processes(&attempt);
         processes.begin(options.remote_provider.is_none() && options.shared_execution.is_none())?;
-        authority
-            .milestone(Milestone::Executing {
-                prepared: workspace.clone(),
-            })
-            .await?;
+        authority.milestone(Milestone::Executing).await?;
         supertag_protocol::crash_point("worker.execute", "journaled");
         authority.link().state(WorkerState::Executing);
         let workspace_mcp = if supertag_protocol::mcp::workspace_servers(&task).is_empty() {
@@ -719,9 +730,6 @@ impl Worker<'_> {
                     stop_reports.clone(),
                 ))
             });
-        // The delivery check applies the Task's path scope to what it changed.
-        let file_scope = supertag_protocol::file_scope::of_task(&task)
-            .map(supertag_protocol::file_scope::Rules::from);
         let sandbox_task = defer_sandbox.then(|| task.clone());
         // The harness answers the joined messages in the same turn. The Task's stored prompt keeps
         // only the person's own text.
@@ -1008,6 +1016,23 @@ impl Worker<'_> {
                     .take()
                     .map(|checkpoint| journal.stage_checkpoint(checkpoint))
                     .transpose()?;
+                let failure_detail = if outcome.succeeded {
+                    vec![]
+                } else {
+                    failures::take_detail()
+                };
+                // Durable before the captures: a Worker stopped while they run leaves them for
+                // another Worker of the Attempt to resume.
+                authority
+                    .milestone(Milestone::Finalizing {
+                        completion: Completion::of(&outcome),
+                        checkpoint,
+                        remote_tree: remote_tree.clone(),
+                        outputs: outputs.clone(),
+                        failure_detail,
+                    })
+                    .await?;
+                supertag_protocol::crash_point("worker.finalizing", "journaled");
                 let kept = captures(
                     &mut authority,
                     options,
@@ -1020,26 +1045,9 @@ impl Worker<'_> {
                 )
                 .await;
                 match kept {
-                    Captures::Kept(outputs) => {
-                        let failure_detail = if outcome.succeeded {
-                            vec![]
-                        } else {
-                            failures::take_detail()
-                        };
-                        authority
-                            .outcome(Outcome::Finalizing {
-                                completion: Completion::of(&outcome),
-                                checkpoint,
-                                workspace,
-                                remote_tree,
-                                outputs,
-                                file_scope,
-                                failure_detail,
-                            })
-                            .await
-                    }
+                    Captures::Kept(outputs) => authority.outcome(Outcome::Finalizing { outputs }).await,
                     Captures::Failed(failed) => authority.finish_now(failed, false).await,
-                    // The Worklet stops; recovery resumes the Attempt from its journal.
+                    // The Worker stops; another resumes the captures from the Finalizing entry.
                     Captures::Stopped => Ok(()),
                 }
             } else {

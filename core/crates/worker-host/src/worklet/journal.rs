@@ -196,6 +196,11 @@ pub(crate) enum Entry {
         /// Why the Worker failed the turn, for operators: see `failures::take_detail`.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         failure_detail: Vec<String>,
+        /// Whether a Worker froze and published a successful turn's Task outputs and wrote its
+        /// Volume copies back. Until then a Worker of the Attempt does that before the Worklet
+        /// finalizes the delivery: the Worker that ran the turn, or one started to resume it.
+        #[serde(default)]
+        captured: bool,
     },
     Finish {
         #[serde(flatten)]

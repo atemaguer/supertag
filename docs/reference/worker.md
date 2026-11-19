@@ -54,7 +54,11 @@ the Worklet reports that its execution stopped. A Worklet that starts the
 same Task Attempt again after a restart receives a new credential, and the old one stops working.
 The Worklet passes the credential to the Worker in its assignment and keeps no copy, in memory or
 in its journal. The Worker records the Task Attempt's captures and writes back its Workspace
-Volume copies before it hands over its outcome, so the Worklet never needs the credential.
+Volume copies before it hands over its outcome, so the Worklet never needs the credential. The
+Worklet records that the Task Attempt is finalizing before the Worker starts them. A Worker that
+stops before it finishes them, or a Worklet restarted meanwhile, leaves them to a new Worker,
+which the Worklet starts for them with a new credential. After three such Workers die, the Task
+Attempt fails.
 
 A Gateway can carry a Task Attempt's data calls to the Control Plane. It forwards only calls a
 Task Attempt credential may make, and passes the credential through unchanged. It never forwards
@@ -107,8 +111,8 @@ STATE_DIRECTORY/
 A host service whose harness was removed leaves its slots stranded. The Worklet moves them to
 `STATE_DIRECTORY/retired/` and registers a new incarnation, which fences their Task Attempts.
 
-When a Worker dies, or a Worklet restarts after it was killed, the Worklet checks the processes
-recorded for the interrupted Task Attempt, the Worker's own included. When every one is gone, it
+When a Worker dies while its harness runs, or a Worklet restarts after it was killed then, the
+Worklet checks the processes recorded for the interrupted Task Attempt, the Worker's own included. When every one is gone, it
 records the Task Attempt as failed with an unknown outcome and does not run it again. Otherwise, and always for a Task Attempt that used a remote sandbox or
 shared execution, it waits for `supertag task resolve-attempt`. With `--wait-for-recovery`, the
 host stays connected while it waits. See [Scheduling and interrupted execution](scheduling-and-recovery.md).
@@ -121,9 +125,18 @@ sets it from the host service's `concurrency` and changes it without a restart. 
 takes effect as running Task Attempts finish. Background work that belongs to the host, such as
 presence, landings, cleanup, and the artifact transfer listener, runs once, in the Worklet.
 
-A Worker never receives the host credential, in its environment, its arguments, or any message.
-It exits when its Worklet does, and the Worklet kills a Worker that does not stop when asked. A
-Worker writes its log lines to its Worklet's standard error, so they appear in the host's log.
+A Worker is never given the host credential, in its environment, its arguments, or any message.
+That is not a boundary within one OS user: the state directory's enrollment holds the credential,
+and on macOS `ps eww` shows the environment the Worklet started with, so a harness command that
+runs outside its sandbox as that user can read it. The harness's sandbox, or another OS user,
+keeps it out. The Worker hides any value shaped like an enrolled credential, in any of its
+encodings, from what the harness sends upstream.
+
+A Worker exits when its Worklet does. The Worklet cancels a Worker that is still running 30
+minutes past its harness's time limit, 2 minutes after its lease ended, or 5 minutes after it
+handed over its outcome, or that does not stop when asked, and kills its process group 10
+seconds later. A Worker writes its log lines to its Worklet's standard error, so they appear in
+the host's log.
 
 The Worker starts each adapter in its own process group and stops the group when the Task Attempt
 is cancelled, times out, or ends. On Linux it is a child subreaper, so processes that leave the
@@ -137,16 +150,17 @@ already-running daemon, such as a tmux server or `ssh localhost`, also escapes s
 | A Worker holds, for its one Task Attempt | Only the Worklet holds |
 | --- | --- |
 | The Task Attempt credential | The host credential |
-| Its harness's provider credentials, and the network credentials its egress proxy may add | The journal, the claims, and every lease |
+| Its harness's provider credentials, and the network credentials its Task's network scope names | The journal, the claims, and every lease |
 | The adapter's bootstrap token, its egress and provider proxies, and its MCP servers | Host-wide work: presence, landings, cleanup, and the artifact transfer listener |
 | Its scratch directory and the checkout its Worklet prepared | The host's other checkouts, and the checkpoints and deliveries it holds |
 
 ### The local channel
 
 A Worker inherits one end of a socket pair from its Worklet as file descriptor 3. The channel
-has no name in the filesystem or on the network, so nothing else can connect to it. It is also
-the Worker's lifeline: when the Worklet dies, the Worker reads end-of-file, stops its harness,
-and exits.
+has no name in the filesystem or on the network, so nothing else can connect to it. A Worker
+inherits no other descriptor, such as another Worker's channel, and nothing it starts inherits
+its own. It is also the Worker's lifeline: when the Worklet dies, the Worker reads end-of-file,
+stops its harness, and exits.
 
 | Direction | Messages |
 | --- | --- |
@@ -154,8 +168,9 @@ and exits.
 | Worker to Worklet | Its state (starting, executing, finalizing), the journal steps it reaches, its outcome, and requests for host calls |
 
 The Worklet records each step and the outcome in its journal before it answers, and the Worker
-does not go on until it has. A host call names the Task Attempt it is for, and the Worklet refuses
-one that names another. After the Worker exits, the Worklet lands any Workspace delivery and
+does not go on until it has. The checkout a step names is the one the Worklet assigned, and the
+delivery check applies the started Task's path scope; the Worker names neither. A host call
+names the Task Attempt it is for, and the Worklet refuses one that names another. After the Worker exits, the Worklet lands any Workspace delivery and
 finishes the Task Attempt.
 
 ## Execution limits

@@ -156,6 +156,13 @@ A Worker inherits its Worklet's environment, except the host credential and the
 any message. A Worker that needs a call only the host may make asks its Worklet, which makes
 it only for that Worker's own Task Attempt.
 
+These are boundaries between processes, not between OS users. The state directory's enrollment
+holds the host credential, and on macOS `ps eww` shows the environment the Worklet started with,
+so a harness command that runs outside its sandbox as the host's OS user can read it. The
+harness's sandbox, or running the harness as another OS user, keeps it out. The Worker hides any
+value shaped like an enrolled credential, in any of its encodings, and every secret its
+assignment carried, from what the harness sends upstream.
+
 A host credential is never a CLI flag. The Worker's own calls never carry it, and the built-in
 supervisor removes the exact host credential, Task Attempt credential, and bootstrap token values
 from harness events and errors. Local-process execution under the same operating-system account is

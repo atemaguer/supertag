@@ -1195,6 +1195,7 @@ mod tests {
             outputs: None,
             file_scope: None,
             failure_detail: vec![],
+            captured: true,
         })?;
         drop(journal);
         drop(workspaces);

@@ -36,22 +36,30 @@ pub struct WorkerProcessOptions {
     pub mcp_catalog: McpCatalog,
 }
 
-/// Runs the one Attempt its Worklet assigns on the inherited channel. Returns once the outcome is
-/// handed over and the Attempt's processes and sandbox are stopped; exits at once if the Worklet
-/// dies.
-pub async fn run_worker(options: WorkerProcessOptions) -> Result<()> {
+/// Marks the channel its Worklet passed this Worker close-on-exec, so that nothing the Worker
+/// starts inherits it. A Worker calls it first, before it starts any process, even to read its
+/// options.
+pub fn protect_worker_channel() -> Result<()> {
     // SAFETY: F_GETFD only reads the descriptor's flags.
     ensure!(
         unsafe { libc::fcntl(CHANNEL_FD, libc::F_GETFD) } >= 0,
         "a Worker runs only under its Worklet, which passes it descriptor {CHANNEL_FD}"
     );
-    // SAFETY: the Worklet passed its end of a socket pair as this descriptor, which nothing else
-    // in this process owns. The harness and its adapter never inherit it.
-    let channel = unsafe { std::os::unix::net::UnixStream::from_raw_fd(CHANNEL_FD) };
     // SAFETY: setting FD_CLOEXEC on a descriptor this process owns.
     if unsafe { libc::fcntl(CHANNEL_FD, libc::F_SETFD, libc::FD_CLOEXEC) } != 0 {
         return Err(std::io::Error::last_os_error()).context("protect the Worklet channel");
     }
+    Ok(())
+}
+
+/// Runs the one Attempt its Worklet assigns on the inherited channel. Returns once the outcome is
+/// handed over and the Attempt's processes and sandbox are stopped; exits at once if the Worklet
+/// dies.
+pub async fn run_worker(options: WorkerProcessOptions) -> Result<()> {
+    protect_worker_channel()?;
+    // SAFETY: the Worklet passed its end of a socket pair as this descriptor, which nothing else
+    // in this process owns. The harness and its adapter never inherit it.
+    let channel = unsafe { std::os::unix::net::UnixStream::from_raw_fd(CHANNEL_FD) };
     channel.set_nonblocking(true)?;
     let stop = CancellationToken::new();
     let (link, assign) = WorkletLink::connect(

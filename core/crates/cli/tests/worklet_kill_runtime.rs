@@ -1,6 +1,8 @@
 //! A Worklet and its Worker killed at the journal stages of a Task that delivers to a local
-//! Workspace: Finalizing (the Worklet journaled the Worker's outcome, or the Worker handed it
-//! over and died before it exited) and Terminal (the Worklet journaled the settled Task, before
+//! Workspace: Finalizing (the Worklet journaled that the turn ended, and either it or its Worker
+//! died before the Worker kept the turn's captures, which a new Worker then resumes; or the
+//! Worklet journaled the Worker's outcome, or the Worker handed it over and died before it
+//! exited) and Terminal (the Worklet journaled the settled Task, before
 //! its cleanup). Each case runs the shipped `supertag` Control Plane and Worker Host processes
 //! with a test-only crash point, restarts only the Worklet when it was the one killed, and
 //! asserts the Task succeeds once: one harness launch, its delivery committed, one Attempt, and
@@ -47,11 +49,39 @@ enum Killed {
 
 database_tests! {
     #[tokio::test]
+    worklet_killed_before_the_captures_resumes_them_on_restart;
+    #[tokio::test]
+    worker_killed_before_the_captures_leaves_them_to_another_worker;
+    #[tokio::test]
     worklet_killed_with_its_outcome_journaled_finalizes_on_restart;
     #[tokio::test]
     worker_killed_after_its_outcome_leaves_its_worklet_to_finalize;
     #[tokio::test]
     worklet_killed_after_the_terminal_record_cleans_up_on_restart;
+}
+
+async fn worklet_killed_before_the_captures_resumes_them_on_restart(
+    database: String,
+) -> Result<()> {
+    scenario(
+        &database,
+        Killed::Worklet,
+        "worker-host.finalizing.journaled",
+        "finalizing",
+    )
+    .await
+}
+
+async fn worker_killed_before_the_captures_leaves_them_to_another_worker(
+    database: String,
+) -> Result<()> {
+    scenario(
+        &database,
+        Killed::Worker,
+        "worker.finalizing.journaled",
+        "finalizing",
+    )
+    .await
 }
 
 async fn worklet_killed_with_its_outcome_journaled_finalizes_on_restart(

@@ -117,7 +117,8 @@ its own:
 - A [Worker](glossary.md#worker), the process that runs one Task Attempt, dies with its Worklet. A Worklet restarted after it was killed, or one whose Worker
   died, checks the processes it recorded for the Task Attempt, the Worker's own included. When
   every one is gone, it records the Task Attempt as failed with an unknown outcome and takes new
-  work.
+  work. A Task Attempt whose harness had finished is not interrupted: a new Worker resumes
+  capturing what it produced, and the Worklet finishes it.
 - Otherwise, and always for a Task Attempt that used a remote sandbox or shared execution, the
   Task Attempt is **uncertain**. It appears in the operator inbox as `task-attention` and in
   `supertag metrics` under recovery.

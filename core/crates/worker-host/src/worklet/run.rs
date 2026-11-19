@@ -26,7 +26,7 @@ use uuid::Uuid;
 
 use crate::local::{
     Assign, AttemptSecrets, Bytes, HostCall, LeaseChange, Milestone, NetworkCredential, Outcome,
-    Proto, WorkerState,
+    Proto, ResumeCaptures, WorkerState,
 };
 use crate::worklet::authority::{Authority, with_authority, with_cleanup_authority};
 use crate::worklet::claim::{CLAIM_WAIT, claim_request};
@@ -49,8 +49,8 @@ use crate::{
     },
 };
 
-/// How many times a Worker may die before it launched the harness before the Worklet fails the
-/// Attempt instead of starting another.
+/// How many times a Worker may die before it launched the harness, or before it kept a Finalizing
+/// turn's captures, before the Worklet fails the Attempt instead of starting another.
 const PRELAUNCH_DEATHS: u32 = 3;
 
 /// What every slot of the Worklet shares.
@@ -207,16 +207,19 @@ fn validate(options: &WorkletOptions) -> Result<()> {
 }
 
 /// Moves the slots no configured harness runs out of the way, keeping them for inspection.
-/// Their Attempts are fenced when the new incarnation registers.
-fn retire_stranded(options: &WorkletOptions, journal: &Journal) -> Result<bool> {
+/// Their Attempts are fenced when the new incarnation, durable before any slot moves, registers.
+fn retire_stranded(options: &WorkletOptions, journal: &Journal) -> Result<()> {
     let stranded = journal
         .occupied_slots()?
         .into_iter()
         .filter(|name| parse_slot(options, name).is_none())
         .collect::<Vec<_>>();
     if stranded.is_empty() {
-        return Ok(false);
+        return Ok(());
     }
+    // A start that stops before it registers still registers the new incarnation next time,
+    // when the moved slots are no longer there to tell it to.
+    journal.replace_incarnation()?;
     let retired = options
         .state_directory
         .join("retired")
@@ -231,7 +234,7 @@ fn retire_stranded(options: &WorkletOptions, journal: &Journal) -> Result<bool> 
             retired.join(&name),
         )?;
     }
-    Ok(true)
+    Ok(())
 }
 
 use std::os::unix::fs::DirBuilderExt as _;
@@ -298,7 +301,7 @@ pub(crate) async fn run(
             Some(artifact_storage.as_path()),
         )?;
     }
-    let replaced = retire_stranded(&options, &journal)?;
+    retire_stranded(&options, &journal)?;
     // Terminal proof is durable; finishing a slot's local cleanup needs neither the source
     // repository nor a new network registration.
     let mut cleaned = false;
@@ -332,11 +335,7 @@ pub(crate) async fn run(
         None => enrollment::host_token(&journal, &options.control_plane)?,
     };
     failures::remember_credential(&token);
-    let incarnation_id = if replaced {
-        journal.replace_incarnation()?
-    } else {
-        journal.incarnation()?
-    };
+    let incarnation_id = journal.incarnation()?;
     let channel = options.control_plane.clone().connect_lazy();
     let Some((registration, protocol)) = registration::register(
         &channel,
@@ -574,7 +573,12 @@ async fn pool(worklet: Arc<Worklet>) -> Result<(), SlotFailure> {
     initial.sort_unstable();
     initial.dedup();
     for slot in initial {
-        start(&mut tasks, &mut running, slot)?;
+        if let Err(failure) = start(&mut tasks, &mut running, slot) {
+            // The slots started already drain their Workers rather than being dropped.
+            worklet.shutdown.cancel();
+            while tasks.join_next().await.is_some() {}
+            return Err(failure);
+        }
     }
     // A slot beyond the pool size resumes the Attempt it holds, then retires.
     let sized = wanted(size);
@@ -618,12 +622,26 @@ async fn pool(worklet: Arc<Worklet>) -> Result<(), SlotFailure> {
             }
             joined = tasks.join_next() => {
                 let Some(joined) = joined else {
-                    return Ok(());
+                    if worklet.shutdown.is_cancelled() || options.once {
+                        return Ok(());
+                    }
+                    return Err((anyhow::anyhow!("every Worker pool slot stopped"), None));
                 };
                 let (name, result) = match joined {
                     Ok(joined) => joined,
                     Err(error) if error.is_cancelled() => continue,
-                    Err(error) => return Err((anyhow::anyhow!("a Worker pool slot stopped: {error}"), None)),
+                    // A slot that panicked failed as one that returned an error does: its
+                    // siblings and their Workers go on.
+                    Err(error) => {
+                        let Some(name) = running
+                            .iter()
+                            .find(|(_, (_, task))| task.id() == error.id())
+                            .map(|(name, _)| name.clone())
+                        else {
+                            continue;
+                        };
+                        (name, Err((anyhow::anyhow!("the slot stopped: {error}"), None)))
+                    }
                 };
                 running.remove(&name);
                 match result {
@@ -634,7 +652,13 @@ async fn pool(worklet: Arc<Worklet>) -> Result<(), SlotFailure> {
                         // A retired slot left; one the pool size wants again starts afresh.
                         let slot = parse_slot(options, &name);
                         if let Some(slot) = slot.filter(|slot| wanted(size).contains(slot)) {
-                            start(&mut tasks, &mut running, slot)?;
+                            if let Err((error, _)) = start(&mut tasks, &mut running, slot) {
+                                failures::note_unrecorded(
+                                    &format!("Worker pool slot {name} did not start and stays stopped"),
+                                    &error,
+                                );
+                                worklet.slots.remove(&name);
+                            }
                         } else {
                             worklet.slots.remove(&name);
                         }
@@ -675,8 +699,14 @@ async fn pool(worklet: Arc<Worklet>) -> Result<(), SlotFailure> {
                         }
                         if let Some(slot) = parse_slot(options, &name)
                             && !worklet.shutdown.is_cancelled()
+                            && let Err((error, _)) = start(&mut tasks, &mut running, slot)
                         {
-                            start(&mut tasks, &mut running, slot)?;
+                            // The next resize tries it again.
+                            failures::note_unrecorded(
+                                &format!("Worker pool slot {name} did not restart and stays stopped"),
+                                &error,
+                            );
+                            worklet.slots.remove(&name);
                         }
                     }
                 }
@@ -838,7 +868,7 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                     continue;
                 };
                 let attempt_id = launched.attempt.attempt_id.clone();
-                let end = Box::pin(run_worker(worklet, slot, launched)).await?;
+                let end = Box::pin(run_worker(worklet, slot, launched, None)).await?;
                 if shutdown.is_cancelled() {
                     return Ok(());
                 }
@@ -927,6 +957,7 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                 outputs,
                 file_scope,
                 failure_detail,
+                captured,
             } => {
                 // This stage is recorded only after the adapter process group was reaped.
                 // Exact finalization can safely resume after a Host restart.
@@ -938,6 +969,25 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                     ensure_providers_stopped(worker, journal, &attempt, registration),
                 )
                 .await?;
+                if !captured {
+                    let entry = Entry::Finalizing {
+                        attempt,
+                        result,
+                        succeeded,
+                        objective_signal,
+                        waiting_approval_ids,
+                        quiet,
+                        checkpoint,
+                        workspace,
+                        remote_tree,
+                        outputs,
+                        file_scope,
+                        failure_detail,
+                        captured: false,
+                    };
+                    Box::pin(resume_captures(worklet, slot, entry, &mut deaths)).await?;
+                    continue;
+                }
                 // The Worker froze and published a successful turn's outputs, and wrote its
                 // Volume copies back, before it handed the outcome over.
                 if outputs
@@ -1385,6 +1435,116 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
     Ok(())
 }
 
+/// Resumes the captures of a Finalizing turn that its Worker left: a failed turn has none, and a
+/// successful one's go to a Worker started for them, which the Attempt's credential is minted
+/// for again. The Worklet holds no Attempt credential to make them itself.
+async fn resume_captures(
+    worklet: &Worklet,
+    slot: &Slot,
+    entry: Entry,
+    deaths: &mut (String, u32),
+) -> Result<()> {
+    let journal = &slot.journal;
+    let shutdown = &worklet.shutdown;
+    let Entry::Finalizing {
+        attempt,
+        succeeded,
+        workspace,
+        remote_tree,
+        outputs,
+        ..
+    } = &entry
+    else {
+        bail!("only a Finalizing entry has captures to resume");
+    };
+    let succeeded = *succeeded;
+    let capture_failed = |attempt: &Attempt| {
+        save_finish(
+            journal,
+            attempt.clone(),
+            adapter::failed("Task output files could not be captured safely"),
+        )
+    };
+    if !succeeded {
+        // A failed turn froze and published nothing.
+        let mut entry = entry;
+        if let Entry::Finalizing { captured, .. } = &mut entry {
+            *captured = true;
+        }
+        return journal.save(&entry);
+    }
+    let key = format!("{}/captures", attempt.attempt_id);
+    if deaths.0 == key && deaths.1 >= PRELAUNCH_DEATHS {
+        return capture_failed(attempt);
+    }
+    let mut host = worklet.host.clone();
+    let mut authority = Authority::new(
+        (&mut host, &worklet.credential),
+        shutdown,
+        (journal, &slot.workspaces),
+        (&slot.directory, worklet.options.once),
+    );
+    // A repeated start mints the Attempt a new credential and ends the last, which no running
+    // Worker holds any more.
+    let started = match authority.start(attempt).await? {
+        Ok(started) => started,
+        Err(error) if retryable(&error) => {
+            wait_for_work(shutdown).await;
+            return Ok(());
+        }
+        Err(error) => {
+            supertag_protocol::terminal_text::warn(&format!(
+                "Task {} Attempt {}: its captures could not resume ({:?}): {}",
+                attempt.task_id,
+                attempt.attempt_id,
+                error.code(),
+                error.message()
+            ));
+            return capture_failed(attempt);
+        }
+    };
+    let task = started
+        .task
+        .context("Control Plane started the Attempt without its Task")?;
+    crate::ensure_attempt(&task, attempt)?;
+    let mut credentialed = attempt.clone();
+    credentialed.attempt_credential = started.attempt_credential;
+    if credentialed.attempt_credential.is_empty() {
+        return capture_failed(attempt);
+    }
+    let end = run_worker(
+        worklet,
+        slot,
+        Launched {
+            attempt: credentialed,
+            task,
+            workspace: Some((**workspace).clone()),
+            checkpoint: None,
+            valid_until: Instant::now(),
+        },
+        Some(ResumeCaptures {
+            remote: remote_tree.is_some(),
+            outputs: outputs.clone(),
+        }),
+    )
+    .await?;
+    if end.died() && !shutdown.is_cancelled() {
+        supertag_protocol::terminal_text::warn(&format!(
+            "the Worker resuming the captures of Task Attempt {} {} before it kept them",
+            attempt.attempt_id,
+            end.describe()
+        ));
+        if deaths.0 != key {
+            *deaths = (key, 0);
+        }
+        deaths.1 += 1;
+        if deaths.1 < PRELAUNCH_DEATHS {
+            wait_for_work(shutdown).await;
+        }
+    }
+    Ok(())
+}
+
 /// How long recovery waits for an Attempt's recorded processes to stop: its guardian gives the
 /// harness a grace period after its Worker dies.
 const PROCESS_STOP_WAIT: Duration = Duration::from_secs(10);
@@ -1409,6 +1569,7 @@ async fn run_worker(
     worklet: &Worklet,
     slot: &Slot,
     launched: Launched,
+    resume_captures: Option<ResumeCaptures>,
 ) -> Result<crate::worklet::pool::WorkerEnd> {
     let Launched {
         mut attempt,
@@ -1418,13 +1579,30 @@ async fn run_worker(
         valid_until,
     } = launched;
     let harness = &worklet.options.harnesses[slot.harness];
+    // The delivery check applies the started Task's path scope to what the turn changed.
+    let file_scope = supertag_protocol::file_scope::of_task(&task)
+        .map(supertag_protocol::file_scope::Rules::from);
+    // Only the network credentials the Task's scope names reach its Worker.
+    let named = supertag_protocol::network_scope::of_task(&task)
+        .map(supertag_protocol::network_scope::credentials)
+        .unwrap_or_default();
+    let network = harness
+        .network_credentials
+        .iter()
+        .filter(|credential| named.contains(credential.name.as_str()))
+        .map(|credential| NetworkCredential {
+            name: credential.name.clone(),
+            variable: credential.variable.clone(),
+            value: credential.value().to_owned(),
+        })
+        .collect();
     let process = WorkerProcess::spawn(&harness.launch, &worklet.token)?;
     let assign = Assign {
         slot: slot.name.clone(),
         state_directory: slot.directory.clone(),
         attempt: attempt.clone(),
         task: Proto(task),
-        workspace,
+        workspace: workspace.clone(),
         checkpoint: checkpoint.map(Proto),
         valid_for_ms: u64::try_from(
             valid_until
@@ -1437,16 +1615,9 @@ async fn run_worker(
         data_endpoint: worklet.options.control_plane.url().to_owned(),
         secrets: AttemptSecrets {
             provider: harness.provider_credentials.clone(),
-            network: harness
-                .network_credentials
-                .iter()
-                .map(|credential| NetworkCredential {
-                    name: credential.name.clone(),
-                    variable: credential.variable.clone(),
-                    value: credential.value().to_owned(),
-                })
-                .collect(),
+            network,
         },
+        resume_captures,
     };
     // The Attempt credential is the Worker's; the Worklet keeps none of it.
     attempt.attempt_credential.clear();
@@ -1454,8 +1625,17 @@ async fn run_worker(
         worklet,
         slot,
         attempt,
+        workspace,
+        file_scope,
     };
-    Ok(serve(process, assign, &serving, &worklet.shutdown).await)
+    Ok(serve(
+        process,
+        assign,
+        &serving,
+        &worklet.shutdown,
+        crate::worklet::pool::Limits::for_attempt(harness.worker.attempt_timeout),
+    )
+    .await)
 }
 
 /// The Worklet's end of one Worker's contract.
@@ -1463,9 +1643,19 @@ struct Serving<'a> {
     worklet: &'a Worklet,
     slot: &'a Slot,
     attempt: Attempt,
+    /// The checkout the Worklet assigned: the one every stage the Worker reports names.
+    workspace: Option<workspaces::PreparedWorkspace>,
+    /// The started Task's path scope, which the delivery check applies.
+    file_scope: Option<supertag_protocol::file_scope::Rules>,
 }
 
 impl Serving<'_> {
+    fn assigned(&self) -> Result<&workspaces::PreparedWorkspace, Status> {
+        self.workspace
+            .as_ref()
+            .ok_or_else(|| Status::failed_precondition("the Attempt was assigned no Workspace"))
+    }
+
     /// The journal entry's stage, which must still be this Attempt's.
     fn current(&self) -> Result<Entry, Status> {
         let entry = self
@@ -1494,20 +1684,25 @@ impl Serving<'_> {
 impl Serve for Serving<'_> {
     fn milestone(&self, milestone: Milestone, group: i32) -> Result<(), Status> {
         let current = self.current()?;
-        if !matches!(
+        let starting = matches!(
             current,
             Entry::Starting { .. } | Entry::PreparingInputs { .. }
-        ) {
+        );
+        let follows = match &milestone {
+            Milestone::PreparingInputs | Milestone::Executing => starting,
+            Milestone::Finalizing { .. } => matches!(current, Entry::Executing { .. }),
+        };
+        if !follows {
             return Err(Status::failed_precondition(
-                "the Attempt is past the stages a Worker reports",
+                "the milestone does not follow the Attempt's stage",
             ));
         }
         match milestone {
-            Milestone::PreparingInputs { prepared } => self.save(&Entry::PreparingInputs {
+            Milestone::PreparingInputs => self.save(&Entry::PreparingInputs {
                 attempt: self.attempt.clone(),
-                prepared: Box::new(prepared),
+                prepared: Box::new(self.assigned()?.clone()),
             }),
-            Milestone::Executing { prepared } => {
+            Milestone::Executing => {
                 // The Worker's own process group joins the Attempt's process record: recovery
                 // reclaims the Attempt only once it is gone too.
                 let processes = self.slot.journal.processes(&self.attempt);
@@ -1522,10 +1717,36 @@ impl Serve for Serving<'_> {
                 }
                 self.save(&Entry::Executing {
                     attempt: self.attempt.clone(),
-                    prepared: prepared.map(Box::new),
+                    prepared: self.workspace.clone().map(Box::new),
                 })?;
                 supertag_protocol::crash_point("worker-host.execute", "journaled");
                 self.worklet.set(self.slot, readiness::State::Busy);
+                Ok(())
+            }
+            Milestone::Finalizing {
+                completion,
+                checkpoint,
+                remote_tree,
+                outputs,
+                failure_detail,
+            } => {
+                self.save(&Entry::Finalizing {
+                    attempt: self.attempt.clone(),
+                    result: completion.result,
+                    succeeded: completion.succeeded,
+                    objective_signal: completion.objective_signal,
+                    waiting_approval_ids: completion.waiting_approval_ids,
+                    quiet: completion.quiet,
+                    checkpoint,
+                    workspace: Box::new(self.assigned()?.clone()),
+                    remote_tree,
+                    outputs,
+                    // The Task's own scope, never one the Worker names.
+                    file_scope: self.file_scope.clone(),
+                    failure_detail,
+                    captured: false,
+                })?;
+                supertag_protocol::crash_point("worker-host.finalizing", "journaled");
                 Ok(())
             }
         }
@@ -1538,8 +1759,17 @@ impl Serve for Serving<'_> {
             current,
             Entry::Starting { .. } | Entry::PreparingInputs { .. }
         );
+        let capturing = matches!(
+            current,
+            Entry::Finalizing {
+                captured: false,
+                ..
+            }
+        );
         let saved = match outcome {
-            Outcome::Retry if starting => Ok(()),
+            // A Worker stopped before it launched anything, or before it kept a Finalizing
+            // turn's captures: the entry resumes later.
+            Outcome::Retry if starting || capturing => Ok(()),
             Outcome::Retry => Err(Status::failed_precondition(
                 "a launched Attempt is not retried",
             )),
@@ -1548,7 +1778,7 @@ impl Serve for Serving<'_> {
                 explained,
                 checkpoint,
                 failure_detail,
-            } if starting || executing => {
+            } if starting || executing || capturing => {
                 if !explained && !completion.succeeded {
                     supertag_protocol::terminal_text::warn(&format!(
                         "Task {} Attempt {} failed: {}",
@@ -1574,28 +1804,17 @@ impl Serve for Serving<'_> {
                     },
                 })
             }
-            Outcome::Finalizing {
-                completion,
-                checkpoint,
-                workspace,
-                remote_tree,
-                outputs,
-                file_scope,
-                failure_detail,
-            } if executing => self.save(&Entry::Finalizing {
-                attempt: self.attempt.clone(),
-                result: completion.result.clone(),
-                succeeded: completion.succeeded,
-                objective_signal: completion.objective_signal,
-                waiting_approval_ids: completion.waiting_approval_ids.clone(),
-                quiet: completion.quiet,
-                checkpoint: checkpoint.clone(),
-                workspace: Box::new(workspace.clone()),
-                remote_tree: remote_tree.clone(),
-                outputs: outputs.clone(),
-                file_scope: file_scope.clone(),
-                failure_detail: failure_detail.clone(),
-            }),
+            Outcome::Finalizing { outputs: kept } if capturing => {
+                let mut entry = current;
+                if let Entry::Finalizing {
+                    outputs, captured, ..
+                } = &mut entry
+                {
+                    outputs.clone_from(kept);
+                    *captured = true;
+                }
+                self.save(&entry)
+            }
             _ => Err(Status::failed_precondition(
                 "the outcome does not follow the Attempt's stage",
             )),

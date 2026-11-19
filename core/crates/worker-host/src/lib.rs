@@ -22,7 +22,7 @@ pub use worker::mcp::{
     McpCatalog, McpCatalogEntry, McpLogin, McpLoginOptions, McpLoginState, McpLoginStore,
     login_command as mcp_login_command, run_mcp_login,
 };
-pub use worker::process::{WorkerProcessOptions, run_worker};
+pub use worker::process::{WorkerProcessOptions, protect_worker_channel, run_worker};
 pub use worker::remote_provider::{ProviderAuthority, ProviderConfig};
 pub use worker::shared_execution::SharedExecutionConfig;
 pub use worker::{WorkerOptions, context, egress};

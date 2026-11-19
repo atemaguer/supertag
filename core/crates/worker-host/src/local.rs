@@ -3,8 +3,11 @@
 //! Transport: one `AF_UNIX` stream socket pair per Worker, made by the Worklet before it starts
 //! the Worker and inherited by the Worker as file descriptor 3. Nothing else can reach it: it has
 //! no name in the filesystem or the network, so a peer on it is the Worker the Worklet started,
-//! authenticated by inheritance. It is also the Worker's lifeline: the Worker exits the moment it
-//! reads end-of-file, which is what it reads when its Worklet dies.
+//! authenticated by inheritance. The Worklet closes every other descriptor a Worker would inherit,
+//! such as a sibling's channel another thread just made, and the Worker marks descriptor 3
+//! close-on-exec before it starts anything, so neither a sibling nor a harness holds it. It is
+//! also the Worker's lifeline: the Worker exits the moment it reads end-of-file, which is what it
+//! reads when its Worklet dies.
 //!
 //! Each message is a 4-byte big-endian length and a JSON document; protocol messages inside it
 //! are their protobuf encoding in base64.
@@ -16,8 +19,12 @@
 //!   host-signed calls. The Worklet makes a host-signed call only for the requesting Worker's own
 //!   Attempt.
 //!
-//! The Worker never receives the host credential: not in its environment, its arguments, a file
-//! it is told about, or any message here.
+//! The Worker is never handed the host credential: not in its environment, its arguments, or any
+//! message here. That is no boundary between processes of one OS user: the host's state directory
+//! holds the credential in its enrollment, and on macOS `ps eww` shows the environment the
+//! Worklet started with, so a harness command run outside its sandbox as that user can read it.
+//! The harness's sandbox, or another OS user, keeps it out; the Worker redacts any value shaped
+//! like an enrolled credential, in any of its encodings, from what the harness sends upstream.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -148,6 +155,8 @@ pub(crate) struct Assign {
     /// Where the Worker sends its Attempt's data calls.
     pub(crate) data_endpoint: String,
     pub(crate) secrets: AttemptSecrets,
+    /// Set for a Worker that only resumes the captures of an Attempt already Finalizing.
+    pub(crate) resume_captures: Option<ResumeCaptures>,
 }
 
 /// A change to the Attempt's lease the Worklet observed.
@@ -184,11 +193,33 @@ pub(crate) enum WorkerState {
 }
 
 /// A stage of the journal entry the Worker reached. The Worklet makes it durable before it
-/// answers; the Worker does not go on until it has.
+/// answers; the Worker does not go on until it has. The checkout each names is the one the
+/// Worklet assigned, and the delivery's path scope the Task's: the Worker names neither.
+#[allow(clippy::large_enum_variant)]
 #[derive(Deserialize, Serialize)]
 pub(crate) enum Milestone {
-    PreparingInputs { prepared: PreparedWorkspace },
-    Executing { prepared: Option<PreparedWorkspace> },
+    /// Staging the Task's artifact inputs or Workspace copies in the assigned checkout.
+    PreparingInputs,
+    /// Launching the harness.
+    Executing,
+    /// The turn ended in the assigned Workspace. Durable before the Worker freezes and publishes
+    /// its Task outputs and writes its Volume copies back, so that a Worker stopped meanwhile
+    /// leaves the captures for another to resume rather than an interrupted Attempt.
+    Finalizing {
+        completion: Completion,
+        checkpoint: Option<PendingCheckpoint>,
+        remote_tree: Option<TransferArtifact>,
+        outputs: Option<Box<PendingOutputs>>,
+        failure_detail: Vec<String>,
+    },
+}
+
+/// What a Worker started to resume a Finalizing Attempt's captures needs: the Task outputs a
+/// successful turn left, and whether a remote Workspace's capture froze them already.
+#[derive(Deserialize, Serialize)]
+pub(crate) struct ResumeCaptures {
+    pub(crate) remote: bool,
+    pub(crate) outputs: Option<Box<PendingOutputs>>,
 }
 
 /// How the harness turn, or the Worker's own verdict, ended.
@@ -228,16 +259,11 @@ pub(crate) enum Outcome {
         checkpoint: Option<PendingCheckpoint>,
         failure_detail: Vec<String>,
     },
-    /// The turn ended in a Workspace: the Worklet lands its delivery, then finishes with it.
-    /// Task outputs are frozen and published, and Volume copies written back, already.
+    /// The captures of the Finalizing turn are kept: its Task outputs, now frozen and
+    /// published, and its Volume copies, written back. The Worklet finalizes and lands the
+    /// delivery, then finishes with it.
     Finalizing {
-        completion: Completion,
-        checkpoint: Option<PendingCheckpoint>,
-        workspace: PreparedWorkspace,
-        remote_tree: Option<TransferArtifact>,
         outputs: Option<Box<PendingOutputs>>,
-        file_scope: Option<supertag_protocol::file_scope::Rules>,
-        failure_detail: Vec<String>,
     },
 }
 

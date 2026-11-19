@@ -667,6 +667,8 @@ pub(crate) async fn run_worklet(args: WorkerHostArgs) -> Result<()> {
 
 /// `supertag __worker`: one Task Attempt its Worklet assigns, read from descriptor 3.
 pub(crate) async fn run_worker(args: WorkerHostArgs) -> Result<()> {
+    // Before anything that can start a process, such as `codex --version` below.
+    supertag_worker_host::protect_worker_channel()?;
     not_dumpable()?;
     let control_plane = network::endpoint(args.control_plane.clone()).await?;
     let built = build(args, true).await?;

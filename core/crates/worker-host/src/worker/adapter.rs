@@ -521,9 +521,24 @@ pub(crate) async fn execute(
     shutdown: &CancellationToken,
 ) -> Result<HarnessCompleteRequest> {
     let bootstrap_token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-    // The host credential stays redacted too: the harness runs as the OS account whose state
-    // directory holds it, so it could read and repeat it.
+    // The secrets the Worker's `Assign` carried are redacted as its environment's are: its
+    // harness's provider credentials, and the network credentials its egress proxy injects,
+    // which an upstream can echo back. The host credential stays redacted too, by its shape
+    // (see `Bridge::redact`): the harness runs as the OS account whose state directory holds
+    // it, so it could read and repeat it.
     let mut secrets = host_secrets(&[attempt_token, &bootstrap_token]);
+    secrets.extend(
+        crate::credentials::assigned_values()
+            .into_iter()
+            .chain(
+                options
+                    .network_credentials
+                    .iter()
+                    .map(|credential| credential.value().to_owned()),
+            )
+            .filter(|value| !value.is_empty())
+            .map(SensitiveValue::High),
+    );
     secrets.extend(clients.1.redaction());
     let secrets = Arc::new(unique_sensitive_values(secrets));
     let mcp_secrets = inputs
@@ -1352,26 +1367,85 @@ fn not_launched(bridge: &Bridge, reason: &str) -> HarnessCompleteRequest {
     failed(reason)
 }
 
-/// The secrets of this Worker Host's environment, plus `credentials` it holds itself.
 /// Every value in `text` shaped like an enrolled credential (`stcr_` and 64 lowercase hex
 /// digits), such as the host's own, which a Worker does not hold but its harness, running as the
-/// host's OS account, could read from the state directory and repeat.
+/// host's OS account, could read from the state directory and repeat. Its percent and JSON
+/// encodings are the credential's own characters; a base64 run that decodes to text holding one
+/// is found too, and hidden whole along with the credential itself.
 pub(crate) fn enrolled_credentials(text: &str) -> Vec<SensitiveValue> {
+    let mut found: Vec<SensitiveValue> = shaped_credentials(text.as_bytes())
+        .into_iter()
+        .map(SensitiveValue::High)
+        .collect();
     let prefix = supertag_protocol::CREDENTIAL_SECRET_PREFIX;
-    let mut found = Vec::new();
-    let mut rest = text;
-    while let Some(start) = rest.find(prefix) {
-        let candidate = rest[start..]
-            .get(..prefix.len() + 64)
-            .filter(|candidate| supertag_protocol::is_secret(prefix, candidate));
-        if let Some(candidate) = candidate {
-            found.push(SensitiveValue::High(candidate.to_owned()));
+    // The fewest base64 characters that can hold a whole credential.
+    let shortest = (prefix.len() + 64).div_ceil(3) * 4;
+    for run in text
+        .split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '-' | '_')))
+        .filter(|run| run.len() >= shortest)
+    {
+        // The run may start mid-quantum when letters join it to the text before.
+        for offset in 0..4 {
+            let shaped = shaped_credentials(&decode_base64_lenient(&run[offset..]));
+            if !shaped.is_empty() {
+                found.extend(shaped.into_iter().map(SensitiveValue::High));
+                found.push(SensitiveValue::High(run.to_owned()));
+                break;
+            }
         }
-        rest = &rest[start + prefix.len()..];
     }
     found
 }
 
+/// The enrolled-credential-shaped values in `bytes`.
+fn shaped_credentials(bytes: &[u8]) -> Vec<String> {
+    let prefix = supertag_protocol::CREDENTIAL_SECRET_PREFIX.as_bytes();
+    let mut found = Vec::new();
+    let mut start = 0;
+    while let Some(at) = bytes[start..]
+        .windows(prefix.len())
+        .position(|window| window == prefix)
+    {
+        let at = start + at;
+        if let Some(candidate) = bytes
+            .get(at..at + prefix.len() + 64)
+            .and_then(|candidate| std::str::from_utf8(candidate).ok())
+            .filter(|candidate| {
+                supertag_protocol::is_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX, candidate)
+            })
+        {
+            found.push(candidate.to_owned());
+        }
+        start = at + prefix.len();
+    }
+    found
+}
+
+/// Decodes standard or URL-safe base64 without padding, a trailing partial quantum included.
+fn decode_base64_lenient(text: &str) -> Vec<u8> {
+    let value = |byte: u8| -> u32 {
+        match byte {
+            b'A'..=b'Z' => u32::from(byte - b'A'),
+            b'a'..=b'z' => u32::from(byte - b'a') + 26,
+            b'0'..=b'9' => u32::from(byte - b'0') + 52,
+            b'+' | b'-' => 62,
+            _ => 63,
+        }
+    };
+    let mut decoded = Vec::with_capacity(text.len() / 4 * 3 + 2);
+    for quantum in text.as_bytes().chunks(4) {
+        // Two characters carry one byte, three carry two; one carries none.
+        let bytes = quantum.len() * 6 / 8;
+        let bits = quantum
+            .iter()
+            .fold(0u32, |bits, byte| (bits << 6) | value(*byte))
+            << (6 * (4 - quantum.len()));
+        decoded.extend_from_slice(&bits.to_be_bytes()[1..=bytes]);
+    }
+    decoded
+}
+
+/// The secrets of this Worker Host's environment, plus `credentials` it holds itself.
 pub(crate) fn host_secrets(credentials: &[&str]) -> Vec<SensitiveValue> {
     let environment = std::env::vars_os()
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
@@ -1529,4 +1603,38 @@ fn bounded(mut text: String, limit: usize) -> String {
         text.truncate(end);
     }
     text
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+    use base64::Engine as _;
+    use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+
+    #[test]
+    fn an_enrolled_credential_is_found_and_hidden_in_its_encodings() {
+        let token = format!(
+            "{}{}",
+            supertag_protocol::CREDENTIAL_SECRET_PREFIX,
+            "ab12".repeat(16)
+        );
+        for encoded in [
+            token.clone(),
+            STANDARD.encode(&token),
+            URL_SAFE_NO_PAD.encode(&token),
+            // Inside a larger document, at an offset its own encoding does not start at.
+            STANDARD.encode(format!("{{\"token\":\"{token}\"}}")),
+            URL_SAFE_NO_PAD.encode(format!("x{token}y")),
+        ] {
+            let text = format!("the harness said: {encoded} and stopped");
+            let found = enrolled_credentials(&text);
+            let redacted = redact_text(&text, &found, false);
+            assert!(!redacted.contains(&encoded), "{redacted}");
+            assert!(!redacted.contains(&token), "{redacted}");
+            assert!(redacted.starts_with("the harness said: "), "{redacted}");
+        }
+        assert!(enrolled_credentials("nothing shaped like a credential here").is_empty());
+        let unrelated = STANDARD.encode("a".repeat(120));
+        assert!(enrolled_credentials(&unrelated).is_empty());
+    }
 }

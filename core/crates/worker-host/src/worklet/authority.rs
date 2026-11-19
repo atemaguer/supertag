@@ -548,7 +548,7 @@ where
 pub(crate) const AUTHORITY_EXPIRED: &str = "execution authority expired";
 
 /// Aborts a background task when its owner returns early.
-pub(crate) struct AbortOnDrop(tokio::task::JoinHandle<()>);
+pub(crate) struct AbortOnDrop(pub(crate) tokio::task::JoinHandle<()>);
 
 impl Drop for AbortOnDrop {
     fn drop(&mut self) {
