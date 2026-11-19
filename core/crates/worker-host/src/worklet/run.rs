@@ -507,7 +507,11 @@ pub(crate) async fn run(
     let stopped = presence.stop().await.with_context(|| {
         format!("Worker Host registration generation {generation} is no longer current")
     });
-    outcome.map_err(|(error, _)| error).and(stopped)
+    // A fenced registration explains whatever its slots then failed with.
+    match stopped {
+        Err(fenced) => Err(fenced),
+        Ok(()) => outcome.map_err(|(error, _)| error),
+    }
 }
 
 /// A slot's failure, with the Attempt it left unsettled.
@@ -663,6 +667,8 @@ async fn pool(worklet: Arc<Worklet>) -> Result<(), SlotFailure> {
                             )
                             .await;
                         }
+                        // A report now tells a fenced registration from a slot's own failure.
+                        worklet.slots.notify();
                         tokio::select! {
                             () = tokio::time::sleep(Duration::from_secs(1)) => {}
                             () = worklet.shutdown.cancelled() => {}
