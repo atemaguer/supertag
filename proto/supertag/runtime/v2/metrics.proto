@@ -20,7 +20,7 @@ message MetricSnapshot {
   MetricTaskCounts tasks = 3;
   MetricUsage usage = 4;
   MetricScheduling scheduling = 5;
-  // Mailbox messages no inbox turn has taken yet.
+  // Wakes no inbox turn has taken yet: one per Tag and conversation with waiting messages.
   MetricBacklog mailbox = 6;
   // Replies waiting to reach collaboration surfaces.
   MetricReplyDelivery reply_delivery = 7;

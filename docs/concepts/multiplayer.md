@@ -36,12 +36,15 @@ text to that Tag's inbox, and the Tag handles it in its next turn. Messages that
 that turn runs are handled together in the one after it, so a burst of messages costs one turn.
 
 A Tag may message another when the two share a Team, or when the recipient accepts messages from
-the sender. A message is plain text: it has no type and no priority, it assigns no work, and it
-grants no authority. Start a Session when work needs a result. See
+the sender. A message is plain text with a type: a note, question, blocker, evidence, or
+decision. A blocker wakes the recipient at once; other messages wait a few seconds so a burst
+lands in one turn. A message assigns no work and grants no authority. Wake limits stop two Tags
+from waking each other in a loop: over a limit the message waits for the recipient's next turn,
+and the operator hears about it once. Start a Session when work needs a result. See
 [Send messages between Tags](../guides/tag-messaging.md).
 
 A Team's Workstream is its shared record of posts. `post` adds a note every member can read, and
-it wakes nobody; members see it in the digest that opens their next inbox turn. Give the post a
+it wakes nobody; members see it in a digest the next time the Workstream wakes them. Give the post a
 `to` list and each addressed member receives it in its inbox as a message. A post typed
 `question` or `blocker` with no `to` goes to the Tag that owns the Objective. See [Coordinate in a Team Workstream](../guides/workstreams.md).
 

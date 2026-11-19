@@ -256,6 +256,7 @@ impl Store {
         authority: &AttemptAccess,
         input: &SendAttemptTagMessageRequest,
     ) -> Result<SendTagMessageResponse> {
+        let _wake = self.hint_after_commit();
         let host = authority.host();
         let attempt = authority.lease();
         name("operation ID", &input.operation_id)?;

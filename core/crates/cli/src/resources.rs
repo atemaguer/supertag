@@ -264,7 +264,13 @@ pub(crate) const KINDS: &[KindSpec] = &[
         "Mailbox Grant",
         LIST_ONLY,
     ),
-    kind(Kind::Message, "message", "messages", "Message", LIST_ONLY),
+    kind(
+        Kind::Message,
+        "message",
+        "messages",
+        "Message",
+        [false, true, false, true],
+    ),
     kind(
         Kind::WorkstreamPost,
         "workstream-post",

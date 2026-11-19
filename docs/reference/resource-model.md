@@ -80,11 +80,15 @@ scheduler then chooses a compatible harness and model on one of those hosts. Non
 - **Team** is a flat list of member Tags with an optional concurrency limit. Members may message
   one another and share the Team's Workstream. A Team stands alone: any number of Objectives may
   name one Team. See [Teams](coordination.md#teams).
-- **Workstream** is a Team's shared record of posts. Every member reads it, and a post wakes
-  nobody; each Tag a post addresses receives it in its Mailbox. See
+- **Workstream** is a Team's shared record of posts. Every member reads it. Each Tag a post
+  addresses receives it in its Mailbox, and an unaddressed question or blocker goes to the
+  Objective's owner Tag; other posts wake nobody. See
   [Workstream](coordination.md#workstream).
-- **Mailbox** is a Tag's inbox for plain-text messages from other Tags. Every message waiting
-  when a turn starts is handled together in that turn. See [Mailbox](coordination.md#mailbox).
+- **Mailbox** is a Tag's inbox for plain-text messages from other Tags. Each message has a type:
+  note, question, blocker, evidence, or decision. Every message waiting when a turn starts is
+  handled together in that turn, and a message counts as seen once a turn takes it. A Team's
+  `spec.wakeLimits` overrides the [wake limits](coordination.md#wake-limits). See
+  [Mailbox](coordination.md#mailbox).
 - **Session** preserves automatic continuity for one Tag conversation. The `audience` field is
   `shared` or `private`. A direct chat or a conversation in the desktop app is private to one
   person. One Session does not read another's transcript. See

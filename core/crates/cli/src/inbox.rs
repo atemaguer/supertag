@@ -14,6 +14,7 @@ pub enum Kind {
     TaskAttention,
     Approval,
     McpLogin,
+    WakeLimit,
 }
 
 impl From<Kind> for InboxItemKind {
@@ -25,6 +26,7 @@ impl From<Kind> for InboxItemKind {
             Kind::TaskAttention => Self::TaskAttention,
             Kind::Approval => Self::Approval,
             Kind::McpLogin => Self::McpLogin,
+            Kind::WakeLimit => Self::WakeLimit,
         }
     }
 }

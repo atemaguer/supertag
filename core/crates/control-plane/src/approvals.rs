@@ -338,6 +338,7 @@ impl Store {
         principal: &str,
         input: &DecideApprovalRequest,
     ) -> Result<Approval> {
+        let _wake = self.hint_after_commit();
         let id = operator(principal)?;
         name("approval ID", &input.approval_id)?;
         name("decision operation ID", &input.operation_id)?;

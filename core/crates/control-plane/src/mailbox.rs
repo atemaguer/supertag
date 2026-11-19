@@ -93,6 +93,7 @@ impl Store {
     }
 
     pub async fn sweep_mailbox(&self) -> Result<()> {
+        let _wake = self.hint_after_commit();
         let (mut tx, _) = self.write().await?;
         sweep_in(&mut tx, self.execution_now_ms()).await?;
         tx.commit().await?;

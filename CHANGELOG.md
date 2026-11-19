@@ -14,16 +14,21 @@ within the pre-1.0 compatibility policy described in
 - Workstream posts and Mailbox messages have a type: `post` and `send_message` take an optional
   `type` of `note` (the default), `question`, `blocker`, `evidence`, or `decision`, and
   `read_workstream`, `read_mailbox`, and `supertag get workstream-posts` show it. An unaddressed
-  question or blocker goes to the Tag that owns the post's Objective. An inbox turn now opens with
-  a digest of the Team's Workstream posts its Tag has not seen, addressed posts first, then
+  question or blocker goes to the Tag that owns the post's Objective. An inbox turn the Workstream
+  wakes now opens with a digest of the posts its Tag has not seen, addressed posts first, then
   blockers and decisions; it holds about 8 KiB and points to `read_workstream` for the rest.
 - Wake limits keep Tags from waking each other in loops: by default 3 wakes between two Tags for
   one originating Task, 20 wakes of a Tag by other Tags per hour, and 60 per Objective per hour,
   overridable with a Team manifest's `spec.wakeLimits`. Over a limit nothing is dropped: notes
   wait for the recipient's next turn, questions and blockers arrive late, the sender's result says
-  why in `wake_deferred`, and the operator Inbox gets one wake-limit item. Notes and questions now
+  why in `wake_deferred`, and the operator Inbox gets one item (`supertag get inbox-item --kind
+  wake-limit`). Notes and questions now
   wake their recipient after about 3 seconds so a burst lands in one turn; blockers and commit
   review requests wake it at once, and inbox turns take the most urgent messages first.
+- `supertag watch message` streams a notice for each Tag's direct message as it is sent. Mailbox
+  messages, Workstream posts, the inbox turns they start, and a person's read mark now reach open
+  Watches and waiting Worker Hosts as soon as they commit, on every Control Plane replica, instead
+  of at the next poll.
 - `sandbox-commands: [claude-code]` on a host service (`supertag worker-host --sandbox-commands`)
   runs Claude Code's commands in Claude Code's own operating-system sandbox: they write only the
   Workspace, never its `.git` or read-only and hidden paths, cannot read hidden paths or the home's

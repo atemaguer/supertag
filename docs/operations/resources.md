@@ -28,8 +28,8 @@ pass the returned cursor with `--cursor`. Pipe JSON through `jq` to filter it.
 
 ## Watch
 
-`watch` streams change notices for Tags, Tasks, conversation messages, Objectives, Teams, and
-Workstream posts:
+`watch` streams change notices for Tags, Tasks, conversation messages, Objectives, Teams,
+Mailbox messages, Workstream posts, Schedules, and Memories:
 
 ```sh
 supertag watch task objective

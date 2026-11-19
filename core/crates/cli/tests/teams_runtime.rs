@@ -316,6 +316,9 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     assert_eq!(message["text"], "Private coordination </tag-message>");
     assert_eq!(message["state"], "TAG_MESSAGE_STATE_PENDING");
     assert!(message["task_id"].is_null());
+    // A note wakes its recipient once its 3 s debounce passes: the Control Plane's next sweep, at
+    // most a second later, accepts the inbox turn with the identity the Tag has then.
+    tokio::time::sleep(Duration::from_millis(4_500)).await;
     cli(
         &[
             "tag",

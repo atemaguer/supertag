@@ -154,10 +154,13 @@ You can also talk to a Tag in the desktop app or with `supertag message`. See
 
 ### A Tag's inbox
 
-A Tag's **Mailbox** is its inbox for messages from other Tags. A message is plain text, sent with
-`send_message`, and it arrives as a turn of the recipient Tag. Messages that arrive while that
-turn runs are handled together in the next one, so a Tag answers a burst of messages once. A
-message's status is the status of the Task that handled it.
+A Tag's **Mailbox** is its inbox for messages from other Tags. A message is plain text with a
+type, such as a question or a blocker, sent with `send_message`, and it arrives as a turn of the
+recipient Tag. A blocker starts that turn at once; other messages wait a few seconds, so a burst
+lands in one turn. Messages that arrive while that turn runs are handled together in the next
+one, so a Tag answers a burst of messages once. A message's status is the status of the Task that
+handled it, and it counts as seen once a turn takes it. Wake limits stop Tags from waking each
+other in a loop; over a limit a message waits for the next turn and is never dropped.
 
 A Tag may message another Tag when the two share a Team, or when the recipient accepts messages
 from the sender. A grant is exactly that: this recipient accepts messages from this sender. See

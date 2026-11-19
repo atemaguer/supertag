@@ -73,6 +73,7 @@ impl Store {
         authority: &AttemptAccess,
         input: &PostAttemptWorkstreamRequest,
     ) -> Result<PostAttemptWorkstreamResponse> {
+        let _wake = self.hint_after_commit();
         let host = authority.host();
         let attempt = authority.lease();
         name("operation ID", &input.operation_id)?;
@@ -136,14 +137,17 @@ impl Store {
         .bind(&digest)
         .fetch_optional(&mut *tx)
         .await?;
+        // A note's arguments name no type, as a direct message's do.
+        let mut arguments = serde_json::json!({"body": body, "to_tag_ids": recipients});
+        if kind != MessageKind::Note {
+            arguments["type"] = messages::digest::kind_name(kind).into();
+        }
         let approval_request = RequestApprovalRequest {
             attempt: Some(attempt.clone()),
             operation_id: input.operation_id.clone(),
             action: WORKSTREAM_POST_ACTION.into(),
             resource: team.team_id.clone(),
-            arguments_json: serde_json::to_string(&serde_json::json!({
-                "body": body, "to_tag_ids": recipients, "type": messages::digest::kind_name(kind),
-            }))?,
+            arguments_json: serde_json::to_string(&arguments)?,
             summary: format!(
                 "Post a {} to the Team Workstream with {} addressed Tags.",
                 messages::digest::kind_name(kind),

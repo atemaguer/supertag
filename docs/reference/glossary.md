@@ -49,11 +49,18 @@ whole system rather than another first-class resource.
 - <a id="post"></a>**post** — one append-only entry in a Team's Workstream. It is plain text with a
   type (note, question, blocker, evidence, or decision) and carries no authority. Each Tag it
   addresses receives it in that Tag's Mailbox; an unaddressed question or blocker goes to the
-  Objective's owner Tag, and other members see it in their next inbox turn's digest. See
+  Objective's owner Tag, and other members see it in a digest the next time the Workstream wakes
+  them. See
   [Share progress in a Workstream](../guides/workstreams.md).
-- <a id="mailbox"></a>**Mailbox** — a Tag's inbox for plain-text messages from other Tags. Everything
-  waiting when a turn starts is handled together in that turn. See
+- <a id="mailbox"></a>**Mailbox** — a Tag's inbox for plain-text messages from other Tags. Each
+  message has the same types as a post. Everything waiting when a turn starts is handled together
+  in that turn, and a message counts as seen once a turn takes it. See
   [Mailbox](coordination.md#mailbox).
+- <a id="wake-limit"></a>**wake limit** — a cap on how often Tags wake one another: by default 3
+  wakes between two Tags per originating Task, 20 wakes of one Tag per hour, and 60 per
+  Objective per hour. Messages from people never count. Over a limit a message waits and is never
+  dropped. A Team overrides the limits in its manifest. See
+  [Wake limits](coordination.md#wake-limits).
 
 ## Security and knowledge
 

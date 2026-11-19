@@ -176,11 +176,21 @@ reply.
 
 A Tag reads its own Mailbox with the `read_mailbox` tool.
 
+To see messages as they arrive, follow them:
+
+```sh
+supertag watch message
+```
+
+Each notice names a new direct message and the Tag it went to. Read the message with
+`supertag get message --mailbox TAG`. Workstream posts appear as `workstream-post` notices
+instead.
+
 ## If something goes wrong
 
 - **The send is refused as not permitted.** The two Tags share no Team and there is no grant.
   Add one with `supertag mailbox-grant allow SENDER RECIPIENT` or put both in a Team. See
-  [A Tag cannot send a message to another Tag](troubleshooting.md).
+  [A Tag's message is refused or waits](troubleshooting.md#a-tags-message-is-refused-or-waits).
 - **The send is refused for too many messages.** A turn sends at most 3. Say what the recipient
   needs in one message.
 - **The send is refused for too many hops.** The message answers a chain that is already 4

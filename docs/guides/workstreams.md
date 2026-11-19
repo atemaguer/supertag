@@ -8,8 +8,9 @@ creates it with the Team, and every member can read it. See the
 A post is plain text with a type: a `note` (the default), `question`, `blocker`, `evidence`, or
 `decision`. **An unaddressed note wakes nobody.** A post addressed to Tags also reaches those Tags'
 inboxes, where each one handles it in a turn of its own. An unaddressed question or blocker goes to
-the Tag that owns the post's Objective. Every other member sees a post in the digest that opens
-its next inbox turn. There are no replies, no references, and no subscriptions.
+the Tag that owns the post's Objective. Every other member sees a post in a digest: the next
+time a post in the Workstream wakes that member, its inbox turn opens with the posts it has not
+yet been shown. There are no replies, no references, and no subscriptions.
 
 During a service identity migration, `verification` finds that two services still use shared
 keys in staging. It posts the finding to `migration`, which picks it up in its inbox and posts
@@ -96,8 +97,9 @@ not subscribe to anything and acknowledges nothing.
 
 ## 3. Catch up in an inbox turn
 
-A member does not need to read the whole Workstream. When it next takes an inbox turn, the turn
-opens with a digest of the posts it has not yet been shown. The digest leaves out the member's own
+A member does not need to read the whole Workstream. When a post in the Workstream wakes it, its
+inbox turn opens with a digest of the posts it has not yet been shown. A turn woken only by
+direct messages carries no digest; the posts wait for the next turn the Workstream wakes. The digest leaves out the member's own
 posts and the posts that woke the turn. It lists the posts addressed to the member first, then
 blockers and decisions, then the rest. It holds about 8 KiB. When more posts are unread, it ends
 with a count and the `afterSequence` to pass to `read_workstream` for them. A digest marks the
@@ -111,6 +113,7 @@ supertag get workstream-post --team service-identity --after-sequence 0
 ```
 
 Each post shows its author, its type (`kind`), its addressees, its text, and its sequence number.
+`supertag watch workstream-post` prints a notice for each new post as it arrives, naming its Team.
 
 ## Check that it worked
 

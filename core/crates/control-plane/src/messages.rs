@@ -9,9 +9,6 @@
 //! "Mailbox" and "Workstream" stay the names users and Tags see: a direct conversation between
 //! Tags is the Mailbox, and a Team's channel is its Workstream. "direct" and "channel" are storage
 //! kinds only.
-// The Mailbox, Workstream, and conversation paths move onto this layer next; until they do,
-// only its tests call it.
-#![allow(dead_code)]
 
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::v2::MessageKind;

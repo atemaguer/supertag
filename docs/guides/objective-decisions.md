@@ -25,7 +25,7 @@ supertag get inbox-item
 ```
 
 Each item names its kind, its Objective or Task, and why it waits. Filter with `--kind`:
-`approval`, `question`, `budget`, `limit`, `task-attention`, or `mcp-login`.
+`approval`, `question`, `budget`, `limit`, `task-attention`, `mcp-login`, or `wake-limit`.
 
 To see new items as they arrive, keep this running; press Ctrl-C to stop:
 

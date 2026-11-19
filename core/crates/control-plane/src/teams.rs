@@ -18,6 +18,7 @@ const PAGE_LIMIT: u32 = 32;
 
 impl Store {
     pub async fn create_team(&self, principal: &str, input: &CreateTeamRequest) -> Result<Team> {
+        let _wake = self.hint_after_commit();
         operator(principal)?;
         name("operation ID", &input.operation_id)?;
         let label = team_name(&input.name)?;
@@ -193,6 +194,7 @@ impl Store {
     }
 
     pub async fn update_team(&self, principal: &str, input: &UpdateTeamRequest) -> Result<Team> {
+        let _wake = self.hint_after_commit();
         operator(principal)?;
         name("operation ID", &input.operation_id)?;
         if input.expected_revision == 0 || input.expected_revision > i64::MAX as u64 {
@@ -297,6 +299,7 @@ impl Store {
     }
 
     pub async fn delete_team(&self, principal: &str, input: &DeleteTeamRequest) -> Result<Team> {
+        let _wake = self.hint_after_commit();
         operator(principal)?;
         name("operation ID", &input.operation_id)?;
         let digest = digest("delete", input);

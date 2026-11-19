@@ -493,6 +493,7 @@ impl Store {
         principal: &str,
         input: &MarkConversationReadRequest,
     ) -> Result<Conversation> {
+        let _wake = self.hint_after_commit();
         operator(principal)?;
         name("Tag ID", &input.tag_id)?;
         self.ensure_client_tag(principal, &input.tag_id).await?;

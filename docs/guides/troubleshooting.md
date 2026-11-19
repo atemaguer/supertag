@@ -219,6 +219,32 @@ session-mode pooler, and allow each 9 connections. A transaction-mode pooler, su
 with `pool_mode = transaction`, accepts the connection but delivers no notifications. See
 [Replicas](../operations/control-plane.md#replicas).
 
+<a id="a-tags-message-is-refused-or-waits"></a>
+
+## A Tag's message is refused or waits
+
+A Tag messages another through its **Mailbox**, its inbox for messages from other Tags, and posts
+to its Team's **Workstream**. Find the message first:
+
+```sh
+supertag get message --mailbox RECIPIENT
+```
+
+- **The send was refused as not permitted.** The two Tags share no Team and the recipient has no
+  grant for the sender. Add one with `supertag mailbox-grant allow SENDER RECIPIENT`, or put both
+  Tags in one Team.
+- **The send was refused for too many messages or hops.** A turn sends at most 3 messages, and a
+  chain of messages stops after 4 inbox turns. The Tag must answer in its reply instead.
+- **The message is stored but its recipient did not wake.** The sender's result carried
+  `wake_deferred`, and `supertag get inbox-item --kind wake-limit` shows the limit that held it.
+  A note waits for the recipient's next turn. A question or blocker arrives when the hour ends,
+  or an hour later when two Tags kept waking each other. Nothing is dropped. If the Tags loop,
+  give the work to one of them; if the traffic is expected, raise the Team's `spec.wakeLimits`.
+  See [Wake limits](tag-messaging.md#wake-limits).
+- **The message stays `TAG_MESSAGE_STATE_PENDING` with no wake limit.** A note waits about 3
+  seconds before it wakes its recipient. Longer means the recipient has no connected Worker Host
+  to take its inbox turn. Check `supertag describe tag RECIPIENT` and `supertag ps`.
+
 ## A Task failed because the repository changed
 
 A Task Attempt fails when the repository's Git configuration, hooks, or attributes changed while

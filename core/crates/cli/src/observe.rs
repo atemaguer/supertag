@@ -670,6 +670,8 @@ pub enum WatchKindArg {
     Objective,
     #[value(alias = "teams")]
     Team,
+    #[value(alias = "messages")]
+    Message,
     #[value(alias = "workstream-posts")]
     WorkstreamPost,
     #[value(alias = "inbox-items")]
@@ -696,6 +698,7 @@ impl WatchKindArg {
             WatchKindArg::ConversationMessage => WatchKind::ConversationMessage,
             WatchKindArg::Objective => WatchKind::Objective,
             WatchKindArg::Team => WatchKind::Team,
+            WatchKindArg::Message => WatchKind::MailboxMessage,
             WatchKindArg::WorkstreamPost => WatchKind::WorkstreamPost,
             WatchKindArg::Schedule => WatchKind::Schedule,
             WatchKindArg::Memory => WatchKind::Memory,
@@ -929,7 +932,7 @@ fn kind_name(kind: WatchKind) -> &'static str {
         WatchKind::WorkstreamPost => "workstream-post",
         WatchKind::Schedule => "schedule",
         WatchKind::Memory => "memory",
-        WatchKind::MailboxMessage => "mailbox-message",
+        WatchKind::MailboxMessage => "message",
         WatchKind::Unspecified => "unknown",
     }
 }

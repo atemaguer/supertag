@@ -58,7 +58,9 @@ each other.
 ## Communicate within and across Teams
 
 A Tag's [Mailbox](../guides/tag-messaging.md) is its own inbox. Messages from other Tags arrive
-there, and several pending messages are handled together in one turn. A message is plain text.
+there, and several pending messages are handled together in one turn. A message is plain text
+with a type, such as a question or a blocker. Wake limits keep Tags from waking each other in a
+loop.
 
 A Team's [Workstream](../guides/workstreams.md) is its shared record of posts. Every member can
 read it. A note wakes nobody; a post addressed to Tags reaches those Tags' inboxes, and an

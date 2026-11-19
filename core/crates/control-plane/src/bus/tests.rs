@@ -446,3 +446,226 @@ async fn postgres_the_listener_connection_gets_the_pools_tcp_keepalives() -> any
     }
     Ok(())
 }
+
+/// Mailbox and Workstream writes publish a hint after they commit, so a Watch of them gets each
+/// new message pushed: on the writer's replica from its own hint, on another from the notify.
+#[tokio::test]
+async fn mailbox_and_workstream_messages_reach_watches_after_commit() {
+    let clock = Arc::new(std::sync::atomic::AtomicI64::new(NOW_MS));
+    let now = clock.clone();
+    let store = Store::open("sqlite::memory:")
+        .await
+        .unwrap()
+        .with_execution_clock(move || now.load(Ordering::SeqCst));
+    store.live.bus.set_poll(NO_POLL);
+    messages(&store, &store, &clock).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_mailbox_and_workstream_messages_reach_watches_on_another_replica()
+-> anyhow::Result<()> {
+    let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
+        .ok_or_else(|| anyhow::anyhow!("set SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"))?;
+    let url = std::fs::read_to_string(path)?;
+    let mut admin = sqlx::PgConnection::connect(url.trim()).await?;
+    let database = format!(
+        "supertag_rust_message_hints_{}",
+        uuid::Uuid::new_v4().simple()
+    );
+    admin
+        .execute(format!("CREATE DATABASE {database}").as_str())
+        .await?;
+    let mut test_url = url::Url::parse(url.trim())?;
+    test_url.set_path(&database);
+    let result = async {
+        let clock = Arc::new(std::sync::atomic::AtomicI64::new(NOW_MS));
+        let now = clock.clone();
+        let writer = Store::open(test_url.as_str())
+            .await?
+            .with_execution_clock(move || now.load(Ordering::SeqCst));
+        let watcher = Store::open(test_url.as_str()).await?;
+        watcher.live.bus.set_poll(NO_POLL);
+        let outcome = messages(&writer, &watcher, &clock).await;
+        writer.close().await;
+        watcher.close().await;
+        outcome
+    }
+    .await;
+    admin
+        .execute(format!("DROP DATABASE {database} WITH (FORCE)").as_str())
+        .await?;
+    result
+}
+
+const NOW_MS: i64 = 1_794_009_600_000;
+
+/// The next notice a Watch feed delivers, within `within`.
+async fn delivered(feed: &mut WatchFeed, within: Duration) -> Option<Arc<crate::watch::Notice>> {
+    match timeout(within, feed.next()).await {
+        Ok(Delivery::Notice(notice)) => Some(notice),
+        Ok(Delivery::Gap) => panic!("unexpected gap"),
+        Err(_) => None,
+    }
+}
+
+async fn messages(
+    writer: &Store,
+    watcher: &Store,
+    clock: &Arc<std::sync::atomic::AtomicI64>,
+) -> anyhow::Result<()> {
+    use sha2::Digest;
+    for tag in ["builder", "reviewer"] {
+        writer.put_tag(tag, "Coordinate", vec![]).await?;
+    }
+    writer
+        .create_team(
+            ALICE,
+            &CreateTeamRequest {
+                operation_id: "crew".into(),
+                team_id: "crew".into(),
+                name: "Crew".into(),
+                member_tag_ids: vec!["builder".into(), "reviewer".into()],
+                ..Default::default()
+            },
+        )
+        .await?;
+    let credential = sha2::Sha256::digest(b"bus message hints");
+    writer.seed_host("bus", &credential).await?;
+    let record = writer.register_host("bus", "test-incarnation").await?;
+    let host = crate::HostAuthority::new(String::from("host:bus"), record.generation)?;
+    // The builder's turn in Alice's conversation sends the messages below.
+    let turn = writer
+        .send_message(
+            ALICE,
+            &SendMessageRequest {
+                tag_id: "builder".into(),
+                text: "Ask the reviewer".into(),
+                operation_id: "ask".into(),
+                ..Default::default()
+            },
+        )
+        .await?;
+    let assignment = writer
+        .claim_task(&host, "claim")
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("no Task to claim"))?;
+    let attempt = InspectAttemptRequest {
+        task_id: assignment.task.unwrap().task_id,
+        attempt_id: assignment.attempt_id,
+        lease_token: assignment.lease_token,
+    };
+    writer
+        .start_task(
+            &host,
+            &StartTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+            },
+        )
+        .await?;
+    let access = crate::AttemptAccess::new(&host, &attempt);
+
+    // Subscribed before anything below is written, as a Watch subscribes before its first read.
+    let of =
+        |kind: WatchKind| move |notice: &crate::watch::Notice| notice.change.kind == kind as i32;
+    let mut mailbox = watcher.watch_feed(of(WatchKind::MailboxMessage)).await?;
+    let mut posts = watcher.watch_feed(of(WatchKind::WorkstreamPost)).await?;
+    let mut tasks = watcher
+        .watch_feed(|notice| {
+            notice.change.kind == WatchKind::Task as i32 && notice.change.tag_id == "reviewer"
+        })
+        .await?;
+    let mut reads = watcher
+        .watch_feed(|notice| {
+            notice.change.kind == WatchKind::ConversationMessage as i32
+                && notice.change.reason == WatchReason::Changed as i32
+        })
+        .await?;
+    let reviewer = watcher.follow_feed("reviewer").await?;
+    let within = Duration::from_secs(2);
+    let quiet = Duration::from_millis(300);
+
+    // A direct message is a Mailbox notice naming its recipient, readable once delivered.
+    let sent = writer
+        .send_attempt_tag_message(
+            &access,
+            &SendAttemptTagMessageRequest {
+                operation_id: "note".into(),
+                recipient_tag_id: "reviewer".into(),
+                text: "Can you review the parser?".into(),
+                ..Default::default()
+            },
+        )
+        .await?
+        .message
+        .unwrap();
+    let notice = delivered(&mut mailbox, within)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("the Mailbox message was not pushed"))?;
+    assert_eq!(notice.change.id, sent.message_id);
+    assert_eq!(notice.change.tag_id, "reviewer");
+    let page = watcher.watch_page(notice.position - 1).await?;
+    assert_eq!(page.notices[0].change.id, sent.message_id);
+
+    // A post is a Workstream notice for its Team, never a Mailbox one, even addressed.
+    let post = writer
+        .post_attempt_workstream(
+            &access,
+            &PostAttemptWorkstreamRequest {
+                operation_id: "post".into(),
+                body: "Parser is ready for review".into(),
+                to_tag_ids: vec!["reviewer".into()],
+                ..Default::default()
+            },
+        )
+        .await?
+        .post
+        .unwrap();
+    let notice = delivered(&mut posts, within)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("the Workstream post was not pushed"))?;
+    assert_eq!(notice.change.id, post.post_id);
+    assert_eq!(notice.change.team_id, "crew");
+    assert!(delivered(&mut mailbox, quiet).await.is_none());
+    // Neither wakes a follow of the recipient's conversations.
+    assert!(timeout(quiet, reviewer.wait()).await.is_err());
+
+    // Once the debounce passes, the sweep's inbox Task is pushed too.
+    clock.fetch_add(3_000, Ordering::SeqCst);
+    writer.sweep_mailbox().await?;
+    let notice = delivered(&mut tasks, within)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("the inbox Task was not pushed"))?;
+    assert_eq!(notice.change.tag_id, "reviewer");
+
+    // A person marking their conversation read is pushed.
+    writer
+        .finish_task(
+            &host,
+            &FinishTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+                succeeded: true,
+                result: "Asked".into(),
+                ..Default::default()
+            },
+        )
+        .await?;
+    writer
+        .mark_conversation_read(
+            ALICE,
+            &MarkConversationReadRequest {
+                tag_id: "builder".into(),
+                order: turn.order,
+            },
+        )
+        .await?;
+    let notice = delivered(&mut reads, within)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("the read mark was not pushed"))?;
+    assert_eq!(notice.change.tag_id, "builder");
+    Ok(())
+}

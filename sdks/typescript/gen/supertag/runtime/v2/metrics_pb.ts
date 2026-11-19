@@ -61,7 +61,7 @@ export type MetricSnapshot = Message<"supertag.runtime.v2.MetricSnapshot"> & {
   scheduling?: MetricScheduling | undefined;
 
   /**
-   * Mailbox messages no inbox turn has taken yet.
+   * Wakes no inbox turn has taken yet: one per Tag and conversation with waiting messages.
    *
    * @generated from field: supertag.runtime.v2.MetricBacklog mailbox = 6;
    */

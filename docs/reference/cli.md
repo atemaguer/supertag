@@ -4358,7 +4358,7 @@ Options:
       --objective <OBJECTIVE>
           Only items for this Objective [default: ""]
       --kind <KIND>
-          Only items of this kind [possible values: question, budget, limit, task-attention, approval, mcp-login]
+          Only items of this kind [possible values: question, budget, limit, task-attention, approval, mcp-login, wake-limit]
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
       --limit <LIMIT>
@@ -4662,7 +4662,7 @@ Stream change notices, reconnecting from the last resume token
 Usage: supertag watch [OPTIONS] [KIND]...
 
 Arguments:
-  [KIND]...  Only these kinds of change; omit for every kind. `watch objective ID` follows one Objective's progress as a timeline until it closes. `watch inbox-item` prints each item waiting on a person once, as it appears [possible values: tag, task, conversation-message, objective, team, workstream-post, inbox-item, schedule, memory]
+  [KIND]...  Only these kinds of change; omit for every kind. `watch objective ID` follows one Objective's progress as a timeline until it closes. `watch inbox-item` prints each item waiting on a person once, as it appears [possible values: tag, task, conversation-message, objective, team, message, workstream-post, inbox-item, schedule, memory]
 
 Options:
       --gateway <URL|NAME>
@@ -4672,7 +4672,7 @@ Options:
       --objective <OBJECTIVE>
           With `watch inbox-item`: only items for this Objective
       --kind <KIND>
-          With `watch inbox-item`: only items of this kind [possible values: question, budget, limit, task-attention, approval, mcp-login]
+          With `watch inbox-item`: only items of this kind [possible values: question, budget, limit, task-attention, approval, mcp-login, wake-limit]
       --settle-seconds <SETTLE_SECONDS>
           With `watch objective ID`: seconds to wait after the Objective closes for its running Sessions to record their turns [default: 10]
       --resume-token <RESUME_TOKEN>

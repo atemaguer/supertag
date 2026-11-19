@@ -866,8 +866,8 @@ Over a limit, the message is stored and never dropped:
   later for the mutual limit. Its turn says why it waited.
 - The response's `wake_deferred` tells the sender why. It is empty when the message woke its
   recipient or joined a waiting turn.
-- The operator Inbox shows one `INBOX_ITEM_KIND_WAKE_LIMIT` item per tripped limit and window
-  for 24 hours, with how many messages waited. A client sees only the items of Objectives it
+- The operator Inbox shows one `wake-limit` item (`INBOX_ITEM_KIND_WAKE_LIMIT`) per tripped
+  limit and window for 24 hours, with how many messages waited. A client sees only the items of Objectives it
   created.
 
 A Tag with 64 wakes waiting gets no new wake for a note, evidence, or decision; the sender is told
@@ -898,6 +898,14 @@ addressed to several Tags has one status per addressee.
 
 `supertag get message --mailbox TAG [--limit N]` lists the messages a Tag sent and received,
 newest first, with a cursor for older pages. The Tag reads its own Mailbox with `read_mailbox`.
+Neither read moves the Tag's read position.
+
+`supertag watch message` streams a `WATCH_KIND_MAILBOX_MESSAGE` notice for each direct message
+as its send commits: the notice's `id` is the message, its `tag_id` the recipient, and its
+`objective_id` the sender's Objective. A post is a `WATCH_KIND_WORKSTREAM_POST` notice for its
+Team instead, even when it addresses Tags. Only operators see either notice, as only they read
+Mailboxes and Workstreams. A Tag needs no notice: the send creates its inbox turn once the wake is
+due, and a Worker Host holding a claim takes that turn at once.
 
 ## Workstream
 
@@ -910,13 +918,16 @@ A Team's Workstream is its shared record of posts. Every member can read it, and
 - The Team is the Objective's Team for an Objective's turn, and otherwise the Tag's only Team. A
   Tag in several Teams gets 409 listing them; a Tag in none gets 409 saying so.
 - A post body holds 1 to 16,384 characters, and `to` names at most 20 Tags.
-- Posting the same text to the same Tags again in the same Task stores nothing new and returns the
-  earlier post.
+- Posting the same text and type to the same Tags again in the same Task stores nothing new and
+  returns the earlier post.
 - Posts carry information only. A post cannot approve, assign, accept or close anything.
 - `read_workstream` returns the newest posts, or the posts after `afterSequence`, oldest first.
   Each post has its sequence in the Team's Workstream, from 1.
 - `supertag get workstream-post --team TEAM [--after-sequence N] [--limit N]` reads the same
-  record as an operator.
+  record as an operator, and `supertag watch workstream-post` streams a notice for each new post.
+- Each member has a read position in the Workstream. An inbox turn the Workstream wakes opens with
+  a digest of the posts after it, about 8 KiB, and moves it to the latest post. A Tag that joins
+  starts at the latest post. `read_workstream` moves nothing.
 
 ## Teams
 
@@ -1105,6 +1116,7 @@ inbox and returns prints again.
 | `limit` | A budget warning, budget exhaustion, deadline warning or deadline passage |
 | `task-attention` | A Task needs an operator, such as an uncertain Task Attempt |
 | `mcp-login` | A queued Task needs an MCP server whose login lapsed on every Worker Host serving it |
+| `wake-limit` | A [wake limit](#wake-limits) held a Tag's messages in the last 24 hours |
 
 - Each item carries `key`, `occurrence`, `kind`, `objective_id`, `task_id`, `reason`, and
   `operator_eligible`, which is false for an item only a Tag can act on. A `question` item

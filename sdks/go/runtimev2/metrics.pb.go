@@ -65,7 +65,7 @@ type MetricSnapshot struct {
 	Tasks        *MetricTaskCounts `protobuf:"bytes,3,opt,name=tasks,proto3" json:"tasks,omitempty"`
 	Usage        *MetricUsage      `protobuf:"bytes,4,opt,name=usage,proto3" json:"usage,omitempty"`
 	Scheduling   *MetricScheduling `protobuf:"bytes,5,opt,name=scheduling,proto3" json:"scheduling,omitempty"`
-	// Mailbox messages no inbox turn has taken yet.
+	// Wakes no inbox turn has taken yet: one per Tag and conversation with waiting messages.
 	Mailbox *MetricBacklog `protobuf:"bytes,6,opt,name=mailbox,proto3" json:"mailbox,omitempty"`
 	// Replies waiting to reach collaboration surfaces.
 	ReplyDelivery *MetricReplyDelivery `protobuf:"bytes,7,opt,name=reply_delivery,json=replyDelivery,proto3" json:"reply_delivery,omitempty"`
