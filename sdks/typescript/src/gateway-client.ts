@@ -1,7 +1,7 @@
-import type { ClientSessionOptions, Http2Session } from "node:http2";
+import type { ClientHttp2Stream, ClientSessionOptions, Http2Session } from "node:http2";
 import { isIP, type Socket, connect as tcpConnect } from "node:net";
 import * as tls from "node:tls";
-import { Code, ConnectError, createClient } from "@connectrpc/connect";
+import { Code, ConnectError, createClient, type Interceptor } from "@connectrpc/connect";
 import { createGrpcTransport, Http2SessionManager } from "@connectrpc/connect-node";
 import {
   ArtifactCatalog,
@@ -38,7 +38,7 @@ import {
   WorkspaceCredentials,
   Workspaces,
 } from "../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/workspaces_pb.js";
-import { TunnelSocket, tunnelOrigin } from "./tunnel.js";
+import { TUNNEL_FAILURE, TunnelSocket, tunnelOrigin } from "./tunnel.js";
 
 export { Code, ConnectError } from "@connectrpc/connect";
 export { PrincipalRole } from "../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/runtime_pb.js";
@@ -201,16 +201,42 @@ function connector(
 }
 
 /**
- * connect-node stops listening for a session's errors once it leaves the session, as `close()`
- * after a failed call does, and Node emits a failed session's error as it closes; the calls on it
- * already reported that error. Every session that carried a call keeps a listener, so the late
- * event cannot crash the process.
+ * Starts reading a response stream as soon as it exists. Node.js 24 fails an async iterator
+ * created on an HTTP/2 stream that has already closed with ERR_STREAM_PREMATURE_CLOSE, even when
+ * the stream ended cleanly, and connect-node creates its iterator only once a promise for the
+ * response headers settles. Over a native socket Node runs microtasks between the HTTP/2 frames
+ * of one read, so the iterator exists before the trailers close the stream. A tunnel's bytes reach
+ * HTTP/2 from JavaScript instead (Node's JSStreamSocket), which handles every frame of a WebSocket
+ * message before any microtask runs, so a small reply closes its stream first. The iterator made
+ * here holds at most the one message it has read until connect-node asks for it.
+ */
+function readFromTheStart(stream: ClientHttp2Stream) {
+  const iterator = stream[Symbol.asyncIterator]();
+  const first = iterator.next();
+  // The caller sees a failure when it reads; an unread one must not be unhandled.
+  first.catch(() => {});
+  stream[Symbol.asyncIterator] = async function* (): AsyncGenerator<unknown, undefined> {
+    try {
+      for (let read = await first; !read.done; read = await iterator.next()) yield read.value;
+      return undefined;
+    } finally {
+      await iterator.return?.();
+    }
+  };
+}
+
+/**
+ * The session manager every call goes through. Besides reading each response from the start, it
+ * keeps an error listener on every session that carried a call: connect-node stops listening for
+ * a session's errors once it leaves the session, as `close()` after a failed call does, and Node
+ * emits a failed session's error as it closes, after the calls on it already reported it.
  */
 class SessionManager extends Http2SessionManager {
   readonly #watched = new WeakSet<Http2Session>();
 
   override async request(...args: Parameters<Http2SessionManager["request"]>) {
     const stream = await super.request(...args);
+    readFromTheStart(stream);
     const session = stream.session;
     if (session !== undefined && !this.#watched.has(session)) {
       this.#watched.add(session);
@@ -219,6 +245,43 @@ class SessionManager extends Http2SessionManager {
     return stream;
   }
 }
+
+/** Whether `error` or any error it was caused by is a tunnel failure. */
+function tunnelFailure(error: unknown): boolean {
+  for (let cause = error, depth = 0; cause instanceof Error && depth < 8; depth++) {
+    if ((cause as { code?: unknown }).code === TUNNEL_FAILURE) return true;
+    cause = cause.cause;
+  }
+  return false;
+}
+
+/** A call that failed because its tunnel failed is Unavailable, as over a broken connection. */
+function unavailable(error: unknown): unknown {
+  if (!tunnelFailure(error)) return error;
+  const status = ConnectError.from(error);
+  return new ConnectError(status.rawMessage, Code.Unavailable, status.metadata, undefined, error);
+}
+
+const tunnelFailures: Interceptor = (next) => async (request) => {
+  let response: Awaited<ReturnType<typeof next>>;
+  try {
+    response = await next(request);
+  } catch (error) {
+    throw unavailable(error);
+  }
+  if (!response.stream) return response;
+  const messages = response.message;
+  return {
+    ...response,
+    message: (async function* () {
+      try {
+        yield* messages;
+      } catch (error) {
+        throw unavailable(error);
+      }
+    })(),
+  };
+};
 
 /** Up to 64 visible ASCII characters of a peer's release, as the Rust client keeps them. */
 function printable(build: string): string {
@@ -372,6 +435,7 @@ export function createGatewayClient(options: GatewayClientOptions) {
       sessionManager: session,
       readMaxBytes: 4096,
       writeMaxBytes: 4096,
+      interceptors: [tunnelFailures],
     }),
   );
   let negotiated: Promise<number> | undefined;
@@ -432,6 +496,7 @@ export function createGatewayClient(options: GatewayClientOptions) {
           throw error;
         }
       },
+      tunnelFailures,
     ],
   });
   return {

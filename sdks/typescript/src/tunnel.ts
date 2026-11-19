@@ -31,7 +31,14 @@ export function tunnelOrigin(url: URL): string {
   return `${scheme}://${url.hostname}:${port}`;
 }
 
-function failure(message: string, code = "ECONNRESET"): Error {
+/**
+ * The code of every error a tunnel fails with. connect-node knows only Node's own socket codes,
+ * so the Gateway client reports a call whose cause carries this code as Unavailable, as gRPC
+ * does for a broken connection.
+ */
+export const TUNNEL_FAILURE = "ERR_SUPERTAG_TUNNEL";
+
+function failure(message: string, code = TUNNEL_FAILURE): Error {
   return Object.assign(new Error(message), { code });
 }
 
@@ -68,18 +75,13 @@ export class TunnelSocket extends Duplex {
     this.#url = url;
     this.#ping = ping;
     this.#ready = this.#dial(outer).catch((error: unknown) => {
-      // A tunnel that never opened is unreachable, as a refused TCP connection is: connect-node
-      // reads the code (along the cause chain, so none is attached) and reports Unavailable.
-      const cause = error instanceof Error ? error : failure(String(error));
-      const code = (cause as { code?: unknown }).code;
-      if (["ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED"].includes(String(code))) {
-        throw cause;
-      }
+      // No cause is attached: connect-node reads codes along the cause chain, and would report
+      // a reset socket's ECONNRESET as Aborted.
+      const message = error instanceof Error ? error.message : String(error);
       throw failure(
-        cause.message.startsWith("the WebSocket tunnel")
-          ? cause.message
-          : `the WebSocket tunnel could not open: ${cause.message}`,
-        "ECONNREFUSED",
+        message.startsWith("the WebSocket tunnel")
+          ? message
+          : `the WebSocket tunnel could not open: ${message}`,
       );
     });
     this.#ready.then(
@@ -173,7 +175,9 @@ export class TunnelSocket extends Duplex {
     this.#open = true;
     this.#last = Date.now();
     socket.on("data", (chunk: Buffer) => this.#receive(chunk));
-    socket.on("error", (error) => this.destroy(error));
+    socket.on("error", (error) =>
+      this.destroy(failure(`the WebSocket tunnel connection failed: ${error.message}`)),
+    );
     socket.on("close", () => {
       if (!this.destroyed) this.destroy(failure("the WebSocket tunnel connection closed"));
     });
@@ -187,7 +191,7 @@ export class TunnelSocket extends Duplex {
     if (socket === undefined || this.destroyed) return;
     // A paused read side is this end's backpressure, not the peer's silence.
     if (!socket.isPaused() && Date.now() - this.#last >= 3 * this.#ping) {
-      this.destroy(failure("the WebSocket tunnel peer stopped answering", "ETIMEDOUT"));
+      this.destroy(failure("the WebSocket tunnel peer stopped answering"));
       return;
     }
     this.#send(OP_PING, Buffer.alloc(0));
@@ -265,12 +269,17 @@ export class TunnelSocket extends Duplex {
         return;
       case OP_PONG:
         return;
-      case OP_CLOSE:
+      case OP_CLOSE: {
+        // The Gateway never ends a tunnel this side still uses: its close is a failure, which
+        // the calls on the tunnel report, not an end of stream HTTP/2 would take as clean.
+        const unexpected = !this.#closing;
         this.#closing = true;
         this.#send(OP_CLOSE, payload.subarray(0, Math.min(payload.length, 2)));
+        if (unexpected) throw failure("the Gateway closed the WebSocket tunnel");
         this.push(null);
         this.#socket?.end();
         return;
+      }
       case OP_TEXT:
         throw failure("the WebSocket tunnel carries only binary messages");
       default:

@@ -217,6 +217,53 @@ for (const [answer, expected] of [
 }
 console.log("Gateway client URL, token, connect timeout, and protocol mismatch checks passed.");
 
+/**
+ * A WebSocket listener that accepts the upgrade and then ends the tunnel as `ending` says: with a
+ * close frame, or by dropping the connection once the client writes.
+ */
+async function endingTunnel(ending) {
+  const server = createServer((socket) => {
+    let head = Buffer.alloc(0);
+    let upgraded = false;
+    socket.on("error", () => {});
+    socket.on("data", (chunk) => {
+      if (upgraded) {
+        if (ending === "drop") socket.destroy();
+        return;
+      }
+      head = Buffer.concat([head, chunk]);
+      const text = head.toString("latin1");
+      if (!text.includes("\r\n\r\n")) return;
+      const key = /sec-websocket-key: *(\S+)/iu.exec(text)?.[1] ?? "";
+      const accept = createHash("sha1")
+        .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+        .digest("base64");
+      upgraded = true;
+      socket.write(
+        `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+      );
+      if (ending === "close") socket.write(Buffer.from([0x88, 0x02, 0x03, 0xe8]));
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  return { url: `ws://127.0.0.1:${server.address().port}/t`, close: () => server.close() };
+}
+for (const ending of ["close", "drop"]) {
+  const tunnel = await endingTunnel(ending);
+  const client = createGatewayClient({ url: tunnel.url, token });
+  try {
+    await assert.rejects(client.negotiate(), {
+      code: Code.Unavailable,
+      rawMessage: /WebSocket tunnel/u,
+    });
+  } finally {
+    client.close();
+    tunnel.close();
+  }
+}
+console.log("A tunnel the Gateway closes or drops fails its calls as Unavailable.");
+
 /** A private certificate authority and a certificate it issued for 127.0.0.1, or none. */
 async function privateCertificates(directory) {
   const openssl = (args) => execute("openssl", args, { cwd: directory, timeout: 30_000 });
@@ -330,7 +377,16 @@ async function verifyServices(client, taskId) {
   await client.schedules.delete({ scheduleId }, options);
 }
 
-async function verifyTunnels(binary, root, start, controlPlane, nativeUrl, tunnelAddress, taskId) {
+async function verifyTunnels(
+  binary,
+  root,
+  start,
+  children,
+  controlPlane,
+  nativeUrl,
+  tunnelAddress,
+  taskId,
+) {
   const tunnelUrl = `ws://${tunnelAddress}/supertag/tunnel`;
   const tunnel = createGatewayClient({ url: tunnelUrl, token });
   try {
@@ -416,6 +472,36 @@ async function verifyTunnels(binary, root, start, controlPlane, nativeUrl, tunne
     enrolled.close();
   }
   console.log("ws:// tunnel, Auth Key enrollment, and every added service passed.");
+
+  // A Gateway that stops mid-stream fails the stream through its tunnel as Unavailable.
+  const [, stoppingTunnel] = await start(
+    [
+      "gateway",
+      "--control-plane",
+      controlPlane,
+      "--listen",
+      "127.0.0.1:0",
+      "--websocket-listen",
+      "127.0.0.1:0",
+    ],
+    { SUPERTAG_GATEWAY_CREDENTIAL: gatewayCredential },
+    2,
+  );
+  const stopping = createGatewayClient({ url: `ws://${stoppingTunnel}/t`, token });
+  try {
+    const watch = stopping.events.watch({}, { timeoutMs: 30_000 })[Symbol.asyncIterator]();
+    assert.equal((await watch.next()).value.update.case, "heartbeat");
+    children.at(-1).kill("SIGKILL");
+    await assert.rejects(
+      (async () => {
+        while (!(await watch.next()).done) {}
+      })(),
+      { code: Code.Unavailable },
+    );
+  } finally {
+    stopping.close();
+  }
+  console.log("A stream through a tunnel whose Gateway stopped failed as Unavailable.");
 
   const certificates = await privateCertificates(await mkdtemp(join(root, "tls-")));
   if (certificates === undefined) {
@@ -611,7 +697,16 @@ try {
     console.log(
       "Installed Node harness executed one Task with an exact event replay and effect receipts.",
     );
-    await verifyTunnels(binary, root, start, controlPlane, url, tunnelAddress, accepted.taskId);
+    await verifyTunnels(
+      binary,
+      root,
+      start,
+      children,
+      controlPlane,
+      url,
+      tunnelAddress,
+      accepted.taskId,
+    );
   } finally {
     abort.abort();
     client?.close();
