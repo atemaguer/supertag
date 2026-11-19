@@ -24,7 +24,6 @@ use supertag_local_state::{
     CREDENTIALS, Credentials, ENDPOINT, GATEWAY_ENDPOINT, STATE_LOCK, loopback_address,
 };
 pub(crate) use supertag_local_state::{open_private_file, private_directory, read_private};
-use supertag_worker_host::LaneState;
 
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::json;
@@ -485,13 +484,16 @@ impl Children {
         if let Some(catalog) = &options.skill_catalog {
             host.arg("--skill-catalog").arg(catalog);
         }
-        provider_credentials(
-            &mut host,
+        let (variables, file) = provider_credentials(
             directory,
             "host",
             &Environment::default(),
             options.adapter.provider_environment()?,
         )?;
+        host.envs(variables);
+        if let Some(file) = file {
+            host.arg("--provider-credentials-file").arg(file);
+        }
         let ready = start_child(
             &mut self.worker_host,
             &mut host,
@@ -587,15 +589,6 @@ fn proxy_environment(environment: &Environment) -> Vec<(String, OsString)> {
         .selected(PROXY_ENVIRONMENT)
         .map(|(name, value)| (name.to_owned(), value))
         .collect()
-}
-
-/// The proxy the supervisor itself reaches a remote service through, as its services do.
-fn proxy(environment: &Environment) -> Option<supertag_transport::Proxy> {
-    supertag_transport::Proxy::from_variables(|name| {
-        environment
-            .variable(name)
-            .and_then(|value| value.into_string().ok())
-    })
 }
 
 fn command(executable: &Path, mode: &str) -> Command {
@@ -847,18 +840,18 @@ fn remove_endpoint(directory: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Give a Worker Host its harness's provider variables: paths such as `HOME` in its environment,
-/// and keys and tokens in a private file it reads and deletes at start, so they never sit in its
+/// A Worker Host harness's provider variables: paths such as `HOME` for its environment, and keys
+/// and tokens in a private file its Worklet reads and deletes at start, so they never sit in an
 /// initial environment for `ps eww` or `/proc/<pid>/environ` to show. That closes accidental
 /// leaks, not a boundary: the env_file and the host's memory stay readable to its user.
 fn provider_credentials(
-    host: &mut Command,
     directory: &Path,
     name: &str,
     environment: &Environment,
     variables: &[&str],
-) -> Result<()> {
+) -> Result<(Variables, Option<PathBuf>)> {
     let mut secrets = BTreeMap::new();
+    let mut plain = Vec::new();
     for (variable, value) in environment.selected(variables.iter().copied()) {
         if supertag_worker_host::is_provider_secret(variable) {
             let value = value
@@ -866,11 +859,11 @@ fn provider_credentials(
                 .map_err(|_| anyhow::anyhow!("{variable} is not valid UTF-8"))?;
             secrets.insert(variable, value);
         } else {
-            host.env(variable, value);
+            plain.push((variable.to_owned(), value));
         }
     }
     if secrets.is_empty() {
-        return Ok(());
+        return Ok((plain, None));
     }
     let file = format!(".{name}.provider-credentials.json");
     fs::DirBuilder::new()
@@ -879,9 +872,7 @@ fn provider_credentials(
         .create(directory)?;
     write_private(directory, &file, &serde_json::to_vec(&secrets)?)
         .context("write the Worker Host's provider credentials")?;
-    host.arg("--provider-credentials-file")
-        .arg(directory.join(file));
-    Ok(())
+    Ok((plain, Some(directory.join(file))))
 }
 
 pub(crate) fn write_private(directory: &Path, name: &str, bytes: &[u8]) -> Result<()> {
@@ -919,104 +910,17 @@ fn sqlite_url(database: &Path) -> Result<String> {
     Ok(url)
 }
 
-/// One configured Worker Host: a single enrollment and registration shared by its lanes.
+/// One configured Worker Host: its enrollment and its Worklet process, which registers the host
+/// once, reports its presence, and runs `concurrency` Worker slots for each of its harnesses.
 struct ManagedHost {
     logs: Logs,
     definition: crate::local_config::Host,
     environment: Arc<Environment>,
     endpoint: String,
     directory: PathBuf,
-    lanes: Vec<ManagedLane>,
-    states: Arc<LaneStates>,
-    presence: Option<Presence>,
-    /// The registered incarnation and Host credential every lane presents.
-    authority: Option<(String, String)>,
-}
-
-/// One execution lane: a Worker Host process that runs one Attempt of one harness at a time.
-struct ManagedLane {
-    harness: usize,
-    /// The lane's number among its harness's lanes, which names its state directory.
-    slot: u32,
-    directory: PathBuf,
     service: Option<Service>,
-    /// Lowered `concurrency` asked the lane to stop once it holds no Attempt.
-    retiring: bool,
-    /// Raised `concurrency` wants the retiring lane back once it stopped.
-    respawn: bool,
-}
-
-#[derive(Default)]
-struct LaneStates {
-    states: std::sync::Mutex<Vec<LaneState>>,
-    /// Each lane's harness, or `None` for a lane that lowered `concurrency` stopped.
-    harness_of: std::sync::Mutex<Vec<Option<usize>>>,
-    /// The lanes each harness runs, as presence reports them.
-    capacity: std::sync::atomic::AtomicU32,
-    changed: tokio::sync::Notify,
-    /// Presence reports the Control Plane answered, current or transiently unavailable.
-    reports: std::sync::atomic::AtomicU64,
-    /// Each harness's execution profile as its lanes report it, which presence reports in place
-    /// of the one built from the service's settings: only a lane knows, for example, that its
-    /// Workspaces run in local-vm containers.
-    profiles: std::sync::Mutex<BTreeMap<usize, supertag_protocol::v2::HarnessExecutionProfile>>,
-}
-
-impl LaneStates {
-    fn set(&self, lane: usize, state: LaneState) {
-        let mut states = self.states.lock().expect("lane states");
-        if states[lane] != state {
-            states[lane] = state;
-            drop(states);
-            self.changed.notify_one();
-        }
-    }
-
-    fn set_profile(&self, harness: usize, profile: supertag_protocol::v2::HarnessExecutionProfile) {
-        let mut profiles = self.profiles.lock().expect("lane profiles");
-        if profiles.get(&harness) != Some(&profile) {
-            profiles.insert(harness, profile);
-            drop(profiles);
-            self.changed.notify_one();
-        }
-    }
-}
-
-/// The longest line a lane writes to its supervisor, its encoded execution profile.
-const LANE_LINE_LIMIT: u64 = 256 * 1024;
-
-fn decode_profile(encoded: &str) -> Option<supertag_protocol::v2::HarnessExecutionProfile> {
-    use base64::Engine as _;
-    use prost::Message as _;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(encoded)
-        .ok()?;
-    supertag_protocol::v2::HarnessExecutionProfile::decode(bytes.as_slice()).ok()
-}
-
-impl ManagedLane {
-    fn new(
-        harness: usize,
-        slot: u32,
-        host: &Path,
-        adapter: &crate::harness::AdapterOptions,
-    ) -> Self {
-        Self {
-            harness,
-            slot,
-            directory: host
-                .join("lanes")
-                .join(format!("{}-{slot}", lane_name(adapter.harness_kind()))),
-            service: None,
-            retiring: false,
-            respawn: false,
-        }
-    }
-}
-
-struct Presence {
-    stop: tokio_util::sync::CancellationToken,
-    task: tokio::task::JoinHandle<Result<()>>,
+    /// Where the running Worklet's output starts in the host's log.
+    log_offset: u64,
 }
 
 impl ManagedHost {
@@ -1027,204 +931,72 @@ impl ManagedHost {
         endpoint: String,
         directory: PathBuf,
     ) -> Self {
-        let mut lanes = Vec::new();
-        for (harness, adapter) in definition.harnesses.iter().enumerate() {
-            for slot in 0..definition.concurrency {
-                lanes.push(ManagedLane::new(harness, slot, &directory, adapter));
-            }
-        }
-        let states = Arc::new(LaneStates {
-            states: std::sync::Mutex::new(vec![LaneState::Pending; lanes.len()]),
-            harness_of: std::sync::Mutex::new(
-                lanes.iter().map(|lane| Some(lane.harness)).collect(),
-            ),
-            capacity: std::sync::atomic::AtomicU32::new(definition.concurrency),
-            ..Default::default()
-        });
         Self {
             logs,
             definition,
             environment,
             endpoint,
             directory,
-            lanes,
-            states,
-            presence: None,
-            authority: None,
+            service: None,
+            log_offset: 0,
         }
     }
 
-    /// Attempt journals no configured lane will read: the single-process layout's own journal,
-    /// or a lane removed by lowering `concurrency` or dropping a harness.
-    fn stranded_journals(&self) -> Result<Vec<PathBuf>> {
-        let mut stranded = Vec::new();
-        if supertag_worker_host::holds_attempt(&self.directory) {
-            stranded.push(self.directory.clone());
-        }
-        let configured = self
-            .lanes
-            .iter()
-            .map(|lane| lane.directory.clone())
-            .collect::<std::collections::HashSet<_>>();
-        match std::fs::read_dir(self.directory.join("lanes")) {
-            Ok(entries) => {
-                for entry in entries {
-                    let path = entry?.path();
-                    if !configured.contains(&path) && supertag_worker_host::holds_attempt(&path) {
-                        stranded.push(path);
-                    }
-                }
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
-        }
-        stranded.sort();
-        Ok(stranded)
-    }
-
-    /// Keep a stranded journal for inspection where no lane reads it again. Its Attempt was
-    /// fenced when the replacement incarnation registered.
-    fn retire(&self, stranded: &[PathBuf]) -> Result<()> {
-        if stranded.is_empty() {
-            return Ok(());
-        }
-        let retired = self
-            .directory
-            .join("retired")
-            .join(Uuid::new_v4().simple().to_string());
-        DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(&retired)?;
-        for path in stranded {
-            if *path == self.directory {
-                // Single-process layout: its Workspace and Session state stays in place.
-                let host = retired.join("host");
-                DirBuilder::new().mode(0o700).create(&host)?;
-                for name in ["attempt.json", "checkpoint.bin"] {
-                    match std::fs::rename(path.join(name), host.join(name)) {
-                        Ok(()) => {}
-                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                        Err(error) => return Err(error.into()),
-                    }
-                }
-            } else {
-                std::fs::rename(path, retired.join(path.file_name().context("lane name")?))?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Register the Host once, report its aggregate presence, then start every lane.
-    async fn start(&mut self, executable: &Path) -> Result<()> {
-        let control_plane =
-            crate::network::endpoint_through(self.endpoint.clone(), proxy(&self.environment))
-                .await?;
-        let stranded = self.stranded_journals()?;
-        let shared = supertag_worker_host::SharedHost::register(
-            control_plane,
-            &self.directory,
-            &self.definition.labels,
-            !stranded.is_empty(),
-            &tokio_util::sync::CancellationToken::new(),
-        )
-        .await?
-        .context("Worker Host registration was cancelled")?;
-        self.retire(&stranded)?;
-        let incarnation = shared.incarnation_id().to_owned();
-        let token = shared.token().to_owned();
-        self.authority = Some((incarnation.clone(), token.clone()));
-        let mut slots = Vec::new();
-        for adapter in &self.definition.harnesses {
-            slots.push(supertag_worker_host::HarnessSlots {
-                harness: adapter.harness_kind(),
-                profile: configured_profile(adapter)?,
-                // Reported from the shared lane states, which a concurrency change updates.
-                capacity: 0,
-            });
-        }
-        let workspaces = match self.definition.harnesses.first() {
-            Some(adapter) => adapter
-                .workspace_mappings()?
-                .into_iter()
-                .filter(|mapping| match &mapping.source {
-                    supertag_worker_host::WorkspaceSource::Local(path) => path.is_dir(),
-                    supertag_worker_host::WorkspaceSource::ControlPlane => true,
-                })
-                .map(|mapping| mapping.workspace_id)
-                .collect(),
-            None => vec![],
-        };
-        self.presence = Some(report_presence(
-            shared,
-            slots,
-            workspaces,
-            self.states.clone(),
-        ));
-        for lane in 0..self.lanes.len() {
-            self.start_lane(lane, executable, &incarnation, &token)
-                .await?;
-        }
-        Ok(())
-    }
-
-    async fn start_lane(
-        &mut self,
-        index: usize,
-        executable: &Path,
-        incarnation: &str,
-        token: &str,
-    ) -> Result<()> {
-        let lane = &mut self.lanes[index];
-        let adapter = &self.definition.harnesses[lane.harness];
-        let mut host = command(executable, "worker-host");
-        host.envs(proxy_environment(&self.environment))
-            .args(["--control-plane", &self.endpoint, "--state-directory"])
-            .arg(&lane.directory)
-            // Every lane keeps the Host's artifacts and Workspace deliveries in one storage
-            // directory, so any lane can relay what another produced.
-            .arg("--artifact-directory")
-            .arg(self.directory.join("artifacts"))
-            .arg("--wait-for-recovery")
-            .args(["--supervised-lane", incarnation])
-            .arg("--attempt-timeout-seconds")
-            .arg(self.definition.attempt_timeout_seconds.to_string())
-            .args(adapter.worker_args());
+    /// One harness's `supertag worker-host` arguments, and the variables its Workers need.
+    fn harness_arguments(
+        &self,
+        adapter: &crate::harness::AdapterOptions,
+    ) -> Result<(Vec<OsString>, Variables)> {
+        let mut args: Vec<OsString> = vec![
+            "--control-plane".into(),
+            self.endpoint.clone().into(),
+            "--state-directory".into(),
+            self.directory.clone().into_os_string(),
+            // Every Worker of the host keeps its artifacts and Workspace deliveries in the host's
+            // one storage directory, which its Worklet serves.
+            "--artifact-directory".into(),
+            self.directory.join("artifacts").into_os_string(),
+            "--attempt-timeout-seconds".into(),
+            self.definition.attempt_timeout_seconds.to_string().into(),
+        ];
+        args.extend(adapter.worker_args());
         for (volume, path) in &self.definition.volumes {
-            host.arg("--volume")
-                .arg(format!("{volume}={}", path.display()));
+            args.push("--volume".into());
+            args.push(format!("{volume}={}", path.display()).into());
         }
         if let Some(path) = &self.definition.skills
             && loads_skills(adapter.harness_kind())
         {
-            host.arg("--skill-catalog").arg(path);
+            args.push("--skill-catalog".into());
+            args.push(path.clone().into_os_string());
         }
+        let mut environment = Vec::new();
         if self.definition.local_vm {
             let names: Vec<&str> =
                 supertag_worker_host::ProviderAuthority::local_vm_variables().collect();
-            host.arg("--local-vm")
-                .envs(self.environment.selected(names.iter().copied()));
+            args.push("--local-vm".into());
+            environment.extend(
+                self.environment
+                    .selected(names.iter().copied())
+                    .map(|(name, value)| (name.to_owned(), value)),
+            );
         }
-        // Only this lane's harness credentials, from the shell or env_file. Service tokens and
-        // other harnesses' credentials never reach the lane or its harness children.
-        provider_credentials(
-            &mut host,
+        // Only this harness's provider credentials, from the shell or env_file: its keys and
+        // tokens in a file the Worklet reads and deletes, which only this harness's Workers are
+        // assigned. Service tokens and other harnesses' credentials never reach them.
+        let (variables, file) = provider_credentials(
             &self.directory,
-            &lane
-                .directory
-                .file_name()
-                .context("lane directory has no name")?
-                .to_string_lossy(),
+            &harness_name(adapter.harness_kind()),
             &self.environment,
             adapter.provider_environment()?,
         )?;
-        host.envs(
-            HOST_TLS_ENVIRONMENT
-                .into_iter()
-                .filter_map(|name| std::env::var_os(name).map(|value| (name, value))),
-        );
-        // Network credentials reach only the lanes whose egress proxy injects them (Codex, or every
-        // lane of a local-vm host), never a harness.
+        environment.extend(variables);
+        if let Some(file) = file {
+            args.push("--provider-credentials-file".into());
+            args.push(file.into_os_string());
+        }
+        // Network credentials reach only the Worklet, which assigns them only to the Workers whose
+        // egress proxy injects them (Codex, or every Worker of a local-vm host), never a harness.
         for (name, variable) in adapter.network_credentials()? {
             let (_, secret) = self
                 .definition
@@ -1235,225 +1007,122 @@ impl ManagedHost {
             let value = secret
                 .read(&self.environment)
                 .with_context(|| format!("read network credential {name} ({variable})"))?;
-            host.env(
+            environment.push((
                 supertag_worker_host::egress::credential_source_variable(&name),
-                value,
+                value.into(),
+            ));
+        }
+        Ok((args, environment))
+    }
+
+    /// Start the host's Worklet, and wait until it is ready.
+    async fn start(&mut self, executable: &Path) -> Result<()> {
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&self.directory)?;
+        let mut harnesses = Vec::new();
+        let mut environment = Vec::new();
+        for adapter in &self.definition.harnesses {
+            let (args, variables) = self.harness_arguments(adapter)?;
+            harnesses.push(
+                args.into_iter()
+                    .map(|arg| {
+                        arg.into_string()
+                            .map_err(|_| anyhow::anyhow!("a Worker Host argument is not UTF-8"))
+                    })
+                    .collect::<Result<Vec<_>>>()?,
             );
+            environment.extend(variables);
         }
-        // The lane presents the Host credential; the guardian clears it for harness children.
-        host.env("SUPERTAG_HOST_TOKEN", token);
-        let name = format!("Worker Host {} lane {index}", self.definition.name);
+        write_private(
+            &self.directory,
+            HARNESS_SET,
+            &serde_json::to_vec(&json!({ "harnesses": harnesses }))?,
+        )?;
+        write_private(
+            &self.directory,
+            crate::worker_host::CONCURRENCY_FILE,
+            self.definition.concurrency.to_string().as_bytes(),
+        )?;
+        let mut host = command(executable, "worker-host");
+        host.envs(proxy_environment(&self.environment))
+            .args(["--control-plane", &self.endpoint, "--state-directory"])
+            .arg(&self.directory)
+            .arg("--wait-for-recovery")
+            .arg("--concurrency")
+            .arg(self.definition.concurrency.to_string())
+            .arg("--harness-set")
+            .arg(self.directory.join(HARNESS_SET))
+            .envs(environment);
+        for label in &self.definition.labels {
+            host.arg("--label").arg(label);
+        }
+        host.envs(
+            HOST_TLS_ENVIRONMENT
+                .into_iter()
+                .filter_map(|name| std::env::var_os(name).map(|value| (name, value))),
+        );
+        // The Worklet presents the host credential, which it reads from the host's enrollment;
+        // its Workers never receive it.
+        let name = format!("Worker Host {}", self.definition.name);
         let log = lifecycle::log_path(&self.logs.state, &self.definition.name);
-        // Where this lane's output starts in the Host's log, so a failure names its own error.
+        // Where this start's output begins in the host's log, so a failure names its own error.
         let logged_before = fs::metadata(&log).map_or(0, |metadata| metadata.len());
-        let mut process = host.spawn().with_context(|| format!("start {name}"))?;
-        // Every lane of a Host writes to the Host's one log.
-        capture_log(&mut process, &self.logs, &self.definition.name)?;
-        let lifeline = process
-            .stdin
-            .take()
-            .context("child lifeline pipe missing")?;
-        let stdout = process
-            .stdout
-            .take()
-            .context("child readiness pipe missing")?;
-        lane.service = Some(Service {
-            process,
-            _lifeline: lifeline,
-        });
-        let states = self.states.clone();
-        states.set(index, LaneState::Pending);
-        let harness = lane.harness;
-        let (ready, started) = tokio::sync::oneshot::channel();
-        tokio::spawn(async move {
-            let mut ready = Some(ready);
-            let mut lines = BufReader::new(stdout);
-            loop {
-                let mut line = String::new();
-                // A lane's profile line carries its encoded execution profile.
-                match (&mut lines)
-                    .take(LANE_LINE_LIMIT)
-                    .read_line(&mut line)
-                    .await
-                {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {}
-                }
-                match line.trim() {
-                    "ready" => {
-                        if let Some(ready) = ready.take() {
-                            let _ = ready.send(());
-                        }
-                    }
-                    other => {
-                        if let Some(state) = other.strip_prefix("state ").and_then(LaneState::parse)
-                        {
-                            states.set(index, state);
-                        } else if let Some(profile) =
-                            other.strip_prefix("profile ").and_then(decode_profile)
-                        {
-                            states.set_profile(harness, profile);
-                        }
-                    }
-                }
-            }
-            // A stopped lane offers no capacity until its replacement reports.
-            states.set(index, LaneState::Pending);
-        });
-        match time::timeout(START_TIMEOUT, started).await {
-            Err(_) => bail!("{name} did not become ready"),
-            Ok(Err(_)) => {
-                // The lane exited: say why, from the error it logged, such as a harness it can't
-                // start. The copy into the log may lag the exit by a moment.
-                time::sleep(Duration::from_millis(200)).await;
-                let reason = last_error_since(&log, logged_before)
-                    .map(|reason| format!(": {reason}"))
-                    .unwrap_or_default();
-                bail!("{name} did not report readiness{reason}")
-            }
-            Ok(Ok(())) => Ok(()),
-        }
-    }
-
-    /// After a lane exits, report presence once more and wait for the answer, so a replaced or
-    /// revoked registration is reported as such instead of as an ordinary lane failure.
-    async fn confirm_registration(&mut self) -> Result<()> {
-        let Some(presence) = &mut self.presence else {
-            bail!("presence reporting stopped");
-        };
-        let before = self
-            .states
-            .reports
-            .load(std::sync::atomic::Ordering::SeqCst);
-        self.states.changed.notify_one();
-        let deadline = time::Instant::now() + Duration::from_secs(10);
-        while !presence.task.is_finished()
-            && self
-                .states
-                .reports
-                .load(std::sync::atomic::Ordering::SeqCst)
-                == before
-            && time::Instant::now() < deadline
-        {
-            time::sleep(Duration::from_millis(20)).await;
-        }
-        if presence.task.is_finished() {
-            let presence = self.presence.take().expect("presence task");
-            return Err(match presence.task.await {
-                Ok(Err(error)) => error,
-                Ok(Ok(())) => anyhow::anyhow!("presence reporting stopped"),
-                Err(error) => anyhow::anyhow!("presence reporting failed: {error}"),
-            });
-        }
-        Ok(())
-    }
-
-    async fn restart_lane(&mut self, index: usize, executable: &Path) -> Result<()> {
-        let (incarnation, token) = self
-            .authority
-            .clone()
-            .context("Worker Host was not registered")?;
-        self.start_lane(index, executable, &incarnation, &token)
-            .await
-    }
-
-    /// Start a lane a raised `concurrency` added. A lane that does not start is stopped and left
-    /// out, with the reason in the Host's log, so the running lanes and their Attempts go on;
-    /// the next `supertag up` that changes `concurrency` tries it again.
-    async fn raise_lane(&mut self, index: usize, executable: &Path) -> Result<()> {
-        let Err(error) = self.restart_lane(index, executable).await else {
-            return Ok(());
-        };
-        if let Some(mut service) = self.lanes[index].service.take() {
-            let _ = service.process.start_kill();
-            let _ = service.process.wait().await;
-        }
-        self.states.harness_of.lock().expect("lane harnesses")[index] = None;
-        self.states.set(index, LaneState::Pending);
-        note_line(
+        self.log_offset = logged_before;
+        let started = start_child(
+            &mut self.service,
+            &mut host,
+            &name,
             &self.logs,
             &self.definition.name,
-            &format!(
-                "lane {} did not start and stays stopped: {error:#}",
-                self.lanes[index].directory.display()
-            ),
         )
+        .await;
+        match started {
+            Ok(ready) => {
+                ensure!(ready == "ready", "invalid Worker Host readiness signal");
+                Ok(())
+            }
+            Err(error) => {
+                // Say why, from the error it logged, such as a harness it can't start. The copy
+                // into the log may lag the exit by a moment.
+                time::sleep(Duration::from_millis(200)).await;
+                match last_error_since(&log, logged_before) {
+                    Some(reason) => bail!("{name} did not report readiness: {reason}"),
+                    None => Err(error),
+                }
+            }
+        }
     }
 
-    /// Run `concurrency` lanes per harness without a restart. Raised lanes start under the
-    /// Host's current registration. Lowered lanes are asked to stop once they hold no Attempt,
-    /// so a running Attempt finishes and the lane's journal is left empty; presence reports the
-    /// new capacity at once, so no new work is admitted beyond it.
-    async fn resize(&mut self, concurrency: u32, executable: &Path) -> Result<()> {
-        self.states
-            .capacity
-            .store(concurrency, std::sync::atomic::Ordering::SeqCst);
-        for harness in 0..self.definition.harnesses.len() {
-            for slot in 0..concurrency {
-                let existing = self
-                    .lanes
-                    .iter()
-                    .position(|lane| lane.harness == harness && lane.slot == slot);
-                match existing {
-                    Some(index) if self.lanes[index].retiring => {
-                        // Still stopping: start it again once it has.
-                        self.lanes[index].respawn = true;
-                    }
-                    Some(index) if self.lanes[index].service.is_none() => {
-                        self.states.harness_of.lock().expect("lane harnesses")[index] =
-                            Some(harness);
-                        self.raise_lane(index, executable).await?;
-                    }
-                    Some(_) => {}
-                    None => {
-                        let lane = ManagedLane::new(
-                            harness,
-                            slot,
-                            &self.directory,
-                            &self.definition.harnesses[harness],
-                        );
-                        self.lanes.push(lane);
-                        self.states
-                            .states
-                            .lock()
-                            .expect("lane states")
-                            .push(LaneState::Pending);
-                        self.states
-                            .harness_of
-                            .lock()
-                            .expect("lane harnesses")
-                            .push(Some(harness));
-                        let index = self.lanes.len() - 1;
-                        self.raise_lane(index, executable).await?;
-                    }
-                }
-            }
-        }
-        for lane in self
-            .lanes
-            .iter_mut()
-            .filter(|lane| lane.slot >= concurrency && lane.service.is_some())
+    /// Run `concurrency` Worker slots per harness without a restart: the Worklet starts raised
+    /// slots at once, and lets lowered ones finish their running Attempt before it retires them.
+    fn resize(&mut self, concurrency: u32) -> Result<()> {
+        write_private(
+            &self.directory,
+            crate::worker_host::CONCURRENCY_FILE,
+            concurrency.to_string().as_bytes(),
+        )?;
+        if let Some(pid) = self
+            .service
+            .as_ref()
+            .and_then(|service| service.process.id())
         {
-            lane.respawn = false;
-            if !lane.retiring {
-                lane.retiring = true;
-                if let Some(pid) = lane
-                    .service
-                    .as_ref()
-                    .and_then(|service| service.process.id())
-                {
-                    // SAFETY: the PID belongs to a child whose wait handle we hold.
-                    unsafe { libc::kill(pid as i32, libc::SIGUSR1) };
-                }
-            }
+            // SAFETY: the PID belongs to a child whose wait handle we hold.
+            unsafe { libc::kill(pid as i32, libc::SIGUSR1) };
         }
         self.definition.concurrency = concurrency;
-        self.states.changed.notify_one();
         Ok(())
     }
 }
 
-fn lane_name(kind: supertag_protocol::v2::HarnessKind) -> String {
+/// Environment variables a service is started with.
+type Variables = Vec<(String, OsString)>;
+
+/// The file in a host's state directory that names its harnesses for its Worklet.
+const HARNESS_SET: &str = "harness-set.json";
+
+fn harness_name(kind: supertag_protocol::v2::HarnessKind) -> String {
     match kind {
         supertag_protocol::v2::HarnessKind::Unspecified => "adapter".into(),
         kind => kind
@@ -1470,92 +1139,6 @@ fn loads_skills(kind: supertag_protocol::v2::HarnessKind) -> bool {
         kind,
         HarnessKind::OpenaiAgents | HarnessKind::Opencode | HarnessKind::Cursor
     )
-}
-
-/// The profile a configured lane claims with. Configured Hosts select no MCP catalog, shared
-/// execution, remote Workspace provider, or Volume mounts, so this matches the lane's own.
-fn configured_profile(
-    adapter: &crate::harness::AdapterOptions,
-) -> Result<supertag_protocol::v2::HarnessExecutionProfile> {
-    let mut profile = adapter.execution_profile()?;
-    profile.task_artifact_inputs = !adapter.workspace_mappings()?.is_empty()
-        && supertag_protocol::task_artifact_inputs::supports_harness(adapter.harness_kind());
-    Ok(profile)
-}
-
-/// Report the Host's presence whenever a lane changes state, and at least every five seconds.
-/// A replaced or revoked registration ends the task with an error.
-fn report_presence(
-    mut shared: supertag_worker_host::SharedHost,
-    mut slots: Vec<supertag_worker_host::HarnessSlots>,
-    workspaces: Vec<String>,
-    states: Arc<LaneStates>,
-) -> Presence {
-    let stop = tokio_util::sync::CancellationToken::new();
-    let cancelled = stop.clone();
-    let task = tokio::spawn(async move {
-        let mut ticker = time::interval(Duration::from_secs(5));
-        ticker.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
-        loop {
-            let stopping = tokio::select! {
-                biased;
-                _ = cancelled.cancelled() => true,
-                _ = states.changed.notified() => false,
-                _ = ticker.tick() => false,
-            };
-            let lanes = {
-                let current = states.states.lock().expect("lane states");
-                let harness_of = states.harness_of.lock().expect("lane harnesses");
-                harness_of
-                    .iter()
-                    .zip(current.iter())
-                    .filter_map(|(harness, state)| {
-                        Some((
-                            (*harness)?,
-                            if stopping {
-                                LaneState::Stopping
-                            } else {
-                                *state
-                            },
-                        ))
-                    })
-                    .collect::<Vec<_>>()
-            };
-            let capacity = states.capacity.load(std::sync::atomic::Ordering::SeqCst);
-            let profiles = states.profiles.lock().expect("lane profiles").clone();
-            for (index, slot) in slots.iter_mut().enumerate() {
-                slot.capacity = capacity;
-                if let Some(profile) = profiles.get(&index) {
-                    slot.profile = profile.clone();
-                }
-            }
-            let reported = shared.report(&slots, &lanes, &workspaces).await;
-            if stopping {
-                // Best effort: an unreported stop expires with the presence lease.
-                return Ok(());
-            }
-            match reported {
-                Ok(_) => {
-                    states
-                        .reports
-                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                }
-                Err(error) if supertag_worker_host::presence_retryable(&error) => {
-                    states
-                        .reports
-                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                }
-                Err(error) => {
-                    return Err(anyhow::anyhow!(
-                        "Worker Host registration generation {} is no longer current: {}",
-                        shared.generation(),
-                        error.message()
-                    ));
-                }
-            }
-        }
-    });
-    Presence { stop, task }
 }
 
 /// Supervise explicitly configured services. Each named Host owns one credential and journal.
@@ -1729,12 +1312,11 @@ pub async fn configured(
             services.push(ServiceStatus {
                 name: host.definition.name.clone(),
                 kind: lifecycle::HOST.into(),
-                // A Host runs one process per lane; report its first running lane.
-                pid: host.lanes.iter().find_map(|lane| {
-                    lane.service
-                        .as_ref()
-                        .and_then(|service| service.process.id())
-                }),
+                // The host's Worklet; its Workers are its children.
+                pid: host
+                    .service
+                    .as_ref()
+                    .and_then(|service| service.process.id()),
                 address: Some(host.endpoint.clone()),
                 host_id: Some(host.definition.name.clone()),
                 remote: host.definition.control_plane.is_some(),
@@ -1768,15 +1350,13 @@ pub async fn configured(
     let mut failures = Vec::new();
     let mut stops = tokio::task::JoinSet::new();
     for host in &mut hosts {
-        for (index, lane) in host.lanes.iter_mut().enumerate() {
-            if let Some(mut service) = lane.service.take() {
-                let name = host.definition.name.clone();
-                stops.spawn(async move {
-                    stop_child(&mut service.process)
-                        .await
-                        .with_context(|| format!("stop Worker Host {name} lane {index}"))
-                });
-            }
+        if let Some(mut service) = host.service.take() {
+            let name = host.definition.name.clone();
+            stops.spawn(async move {
+                stop_child(&mut service.process)
+                    .await
+                    .with_context(|| format!("stop Worker Host {name}"))
+            });
         }
     }
     while let Some(stopped) = stops.join_next().await {
@@ -1787,13 +1367,7 @@ pub async fn configured(
             failures.push(format!("{error:#}"));
         }
     }
-    // Lanes are stopped; report each Host as stopping under its own registration.
-    for host in &mut hosts {
-        if let Some(presence) = host.presence.take() {
-            presence.stop.cancel();
-            let _ = presence.task.await;
-        }
-    }
+    // Each Worklet reported its host as stopping under its own registration as it stopped.
     if let Err(error) = base.stop().await {
         failures.push(format!("{error:#}"));
     }
@@ -1944,8 +1518,7 @@ async fn wait_configured(
                             host.definition.concurrency
                         ),
                     )?;
-                    host.resize(concurrency, executable)
-                        .await
+                    host.resize(concurrency)
                         .with_context(|| format!("Worker Host {}", host.definition.name))?;
                 }
             }
@@ -1963,54 +1536,30 @@ async fn wait_configured(
             }
         }
         for host in hosts.iter_mut() {
-            if let Some(presence) = &mut host.presence
-                && presence.task.is_finished()
+            let Some(service) = host.service.as_mut() else {
+                continue;
+            };
+            let Some(status) = service.process.try_wait()? else {
+                continue;
+            };
+            host.service.take();
+            // A fenced or revoked registration stops the Worklet; say that, not that it exited.
+            time::sleep(Duration::from_millis(200)).await;
+            let log = lifecycle::log_path(&host.logs.state, &host.definition.name);
+            if let Some(reason) = last_error_since(&log, host.log_offset)
+                .filter(|reason| reason.contains("is no longer current"))
             {
-                let outcome = (&mut presence.task).await;
-                host.presence.take();
-                let error = match outcome {
-                    Ok(Err(error)) => error,
-                    Ok(Ok(())) => anyhow::anyhow!("presence reporting stopped"),
-                    Err(error) => anyhow::anyhow!("presence reporting failed: {error}"),
-                };
-                bail!("Worker Host {}: {error:#}", host.definition.name);
+                bail!("Worker Host {}: {reason}", host.definition.name);
             }
-            for index in 0..host.lanes.len() {
-                let Some(service) = host.lanes[index].service.as_mut() else {
-                    // A lane a lowered `concurrency` stopped.
-                    continue;
-                };
-                let Some(status) = service.process.try_wait()? else {
-                    continue;
-                };
-                host.lanes[index].service.take();
-                if host.lanes[index].retiring && status.success() {
-                    let lane = &mut host.lanes[index];
-                    lane.retiring = false;
-                    if std::mem::take(&mut lane.respawn) {
-                        host.restart_lane(index, executable).await?;
-                    } else {
-                        host.states.harness_of.lock().expect("lane harnesses")[index] = None;
-                        host.states.changed.notify_one();
-                    }
-                    restarted = true;
-                    continue;
-                }
-                // A fenced registration stops every lane; report that, not this lane's exit.
-                host.confirm_registration()
-                    .await
-                    .with_context(|| format!("Worker Host {}", host.definition.name))?;
-                // A lane runs one Attempt. Its exit leaves sibling lanes, their Attempts, and
-                // the Host's shared generation in place.
-                ensure!(
-                    host.definition.restart == crate::local_config::Restart::UnlessStopped,
-                    "Worker Host {} lane {index} exited unexpectedly with {status}",
-                    host.definition.name
-                );
-                time::sleep(Duration::from_secs(1)).await;
-                host.restart_lane(index, executable).await?;
-                restarted = true;
-            }
+            // The Worklet's Workers died with it; its next start recovers their Attempts.
+            ensure!(
+                host.definition.restart == crate::local_config::Restart::UnlessStopped,
+                "Worker Host {} exited unexpectedly with {status}",
+                host.definition.name
+            );
+            time::sleep(Duration::from_secs(1)).await;
+            host.start(executable).await?;
+            restarted = true;
         }
         if restarted {
             status(base, hosts, &fingerprint)?;

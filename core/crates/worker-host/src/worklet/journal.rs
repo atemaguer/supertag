@@ -193,6 +193,9 @@ pub(crate) enum Entry {
         /// The Task's path scope, which the delivery check applies after a restart too.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         file_scope: Option<supertag_protocol::file_scope::Rules>,
+        /// Why the Worker failed the turn, for operators: see `failures::take_detail`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        failure_detail: Vec<String>,
     },
     Finish {
         #[serde(flatten)]
@@ -272,24 +275,23 @@ impl Entry {
     }
 }
 
+/// The Worklet's journal. The host journal (`open`) holds the Worklet's lock, its incarnation,
+/// and its presence sequence; each slot of its Worker pool keeps one entry (`slot`): the stage of
+/// the one Attempt that slot holds, in `slots/NAME/` beside that Attempt's checkpoint, sandbox,
+/// shared-access, and process records. A Worker reads and writes its own Attempt's records
+/// through a `view` of its slot; only the Worklet writes the entry.
 pub(crate) struct Journal {
     directory: PathBuf,
-    _lock: ExclusiveLock,
+    _lock: Option<ExclusiveLock>,
 }
+
+/// The directory under the Worklet's state directory that holds one entry per slot.
+pub(crate) const SLOTS: &str = "slots";
 
 impl Journal {
     pub(crate) fn open(directory: &Path) -> Result<Self> {
-        DirBuilder::new()
-            .mode(0o700)
-            .recursive(true)
-            .create(directory)
-            .context("create Worker Host state directory")?;
-        let metadata = directory.symlink_metadata()?;
+        private_state_directory(directory)?;
         let owner = unsafe { libc::geteuid() };
-        ensure!(
-            metadata.is_dir() && metadata.uid() == owner && metadata.mode() & 0o022 == 0,
-            "Worker Host state directory must be writable only by its owner"
-        );
         let lock = OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -307,7 +309,68 @@ impl Journal {
             .context("another Worker Host owns this state directory")?;
         Ok(Self {
             directory: directory.to_owned(),
-            _lock: lock,
+            _lock: Some(lock),
+        })
+    }
+
+    /// The entry of the pool slot `name`, under this host journal's lock.
+    pub(crate) fn slot(&self, name: &str) -> Result<Self> {
+        ensure!(
+            self._lock.is_some(),
+            "only the Worklet's own journal has slots"
+        );
+        ensure!(
+            !name.is_empty()
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'),
+            "invalid Worker pool slot name"
+        );
+        let directory = self.directory.join(SLOTS).join(name);
+        private_state_directory(&self.directory.join(SLOTS))?;
+        private_state_directory(&directory)?;
+        Ok(Self {
+            directory,
+            _lock: None,
+        })
+    }
+
+    /// The names of the slots that hold an Attempt or a claim.
+    pub(crate) fn occupied_slots(&self) -> Result<Vec<String>> {
+        let mut names = Vec::new();
+        match fs::read_dir(self.directory.join(SLOTS)) {
+            Ok(entries) => {
+                for entry in entries {
+                    let entry = entry?;
+                    let path = entry.path();
+                    if (path.join("attempt.json").exists() || path.join("claim.json").exists())
+                        && let Some(name) = entry.file_name().to_str()
+                    {
+                        names.push(name.to_owned());
+                    }
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        names.sort();
+        Ok(names)
+    }
+
+    /// A Worker's view of its slot `directory`, which its Worklet created: it records the
+    /// Attempt's processes, sandbox, shared access, and staged checkpoint there, and reads the
+    /// entry its Worklet wrote.
+    pub(crate) fn view(directory: &Path) -> Result<Self> {
+        let metadata = directory.symlink_metadata()?;
+        ensure!(
+            metadata.is_dir()
+                && metadata.uid() == unsafe { libc::geteuid() }
+                && metadata.mode() & 0o077 == 0,
+            "Worker slot directory must be private"
+        );
+        Ok(Self {
+            directory: directory.to_owned(),
+            _lock: None,
         })
     }
 
@@ -337,11 +400,6 @@ impl Journal {
         Ok(value)
     }
 
-    /// Whether this directory holds an unresolved Attempt record.
-    pub(crate) fn has_attempt(directory: &Path) -> bool {
-        directory.join("attempt.json").exists()
-    }
-
     pub(crate) fn directory(&self) -> &Path {
         &self.directory
     }
@@ -367,7 +425,7 @@ impl Journal {
         self.directory.join("attempt.json")
     }
 
-    /// A claim sent and not yet answered is kept apart from the Attempt record: a lane waiting
+    /// A claim sent and not yet answered is kept apart from the Attempt record: a slot waiting
     /// for work holds one, and it names no Attempt, whose reservation would expire on its lease.
     fn claim_path(&self) -> PathBuf {
         self.directory.join("claim.json")
@@ -727,80 +785,28 @@ impl Journal {
     }
 }
 
-/// What a Worker captured when its harness turn ended: the checkout it ran in, a remote Workspace's tree, its Task outputs, and its path scope.
-pub(crate) struct Captured {
-    pub(crate) workspace: PreparedWorkspace,
-    pub(crate) remote_tree: Option<TransferArtifact>,
-    pub(crate) outputs: Option<Box<crate::worker::task_outputs::PendingOutputs>>,
-    pub(crate) file_scope: Option<supertag_protocol::file_scope::Rules>,
-}
-
-/// The Worker's view of the Worklet's journal for its one Attempt. It records the milestones
-/// the Worker reaches (preparing inputs, executing, finalizing with a staged checkpoint), the
-/// Attempt's harness processes, and its sandbox and shared-access records, which the Worklet
-/// reads to recover them. The Worklet's own transitions (Claim, Starting, Finish, Terminal, and
-/// clearing the Attempt) are not reachable through it.
+/// The Worker's view of its slot's journal for its one Attempt. It records the Attempt's
+/// harness processes, its sandbox and shared-access records, and its staged checkpoint, which the
+/// Worklet reads to recover them. The entry's stages are the Worklet's: the Worker reports the
+/// ones it reaches as milestones over the local contract, and the Worklet journals them.
 #[derive(Clone, Copy)]
 pub(crate) struct AttemptJournal<'a>(&'a Journal);
 
 impl Journal {
-    /// Lends the journal to a Worker, or to the Worklet's own recovery of a Worker's sandbox and
-    /// shared access, as the view a Worker writes through.
+    /// The view of this slot a Worker writes through, also used by the Worklet's own recovery of
+    /// a Worker's sandbox and shared access.
     pub(crate) fn for_attempt(&self) -> AttemptJournal<'_> {
         AttemptJournal(self)
     }
 }
 
 impl AttemptJournal<'_> {
-    /// The Worker is staging the Attempt's inputs into `prepared`.
-    pub(crate) fn preparing_inputs(
+    /// Stages the turn's checkpoint beside the entry, for the Worklet to record and upload.
+    pub(crate) fn stage_checkpoint(
         &self,
-        attempt: &Attempt,
-        prepared: &PreparedWorkspace,
-    ) -> Result<()> {
-        self.0.save(&Entry::PreparingInputs {
-            attempt: attempt.clone(),
-            prepared: Box::new(prepared.clone()),
-        })
-    }
-
-    /// The Worker is about to start the harness.
-    pub(crate) fn executing(
-        &self,
-        attempt: &Attempt,
-        prepared: Option<&PreparedWorkspace>,
-    ) -> Result<()> {
-        self.0.save(&Entry::Executing {
-            attempt: attempt.clone(),
-            prepared: prepared.map(|prepared| Box::new(prepared.clone())),
-        })
-    }
-
-    /// The harness turn ended with `outcome` and the Worker captured what it produced; stages
-    /// the turn's checkpoint, then leaves the Attempt for the Worklet to land and finish.
-    pub(crate) fn finalizing(
-        &self,
-        attempt: &Attempt,
-        outcome: supertag_protocol::v2::HarnessCompleteRequest,
-        captured: Captured,
-    ) -> Result<()> {
-        let checkpoint = outcome
-            .checkpoint
-            .map(|checkpoint| self.0.stage_checkpoint(checkpoint))
-            .transpose()?;
-        self.0.save(&Entry::Finalizing {
-            attempt: attempt.clone(),
-            result: outcome.result,
-            succeeded: outcome.succeeded,
-            objective_signal: outcome.objective_signal,
-            waiting_approval_ids: outcome.waiting_approval_ids,
-            quiet: outcome.quiet,
-            checkpoint,
-            workspace: Box::new(captured.workspace),
-            remote_tree: captured.remote_tree,
-            outputs: captured.outputs,
-            file_scope: captured.file_scope,
-        })
+        checkpoint: SessionCheckpoint,
+    ) -> Result<PendingCheckpoint> {
+        self.0.stage_checkpoint(checkpoint)
     }
 
     pub(crate) fn processes(&self, attempt: &Attempt) -> Processes {
@@ -858,6 +864,22 @@ impl AttemptJournal<'_> {
     pub(crate) fn retire_stopped_sandbox(&self, record: &RemoteSandbox) -> Result<()> {
         self.0.retire_stopped_sandbox(record)
     }
+}
+
+/// Creates `directory` owner-only, or checks that it is.
+fn private_state_directory(directory: &Path) -> Result<()> {
+    DirBuilder::new()
+        .mode(0o700)
+        .recursive(true)
+        .create(directory)
+        .context("create Worker Host state directory")?;
+    let metadata = directory.symlink_metadata()?;
+    let owner = unsafe { libc::geteuid() };
+    ensure!(
+        metadata.is_dir() && metadata.uid() == owner && metadata.mode() & 0o022 == 0,
+        "Worker Host state directory must be writable only by its owner"
+    );
+    Ok(())
 }
 
 /// Where the host records each process group it starts while an Attempt executes.
@@ -978,6 +1000,11 @@ impl Processes {
         };
         pending.write(&ProcessRecord::Pending)?;
         Ok(pending)
+    }
+
+    /// Whether a record of this Attempt's processes exists.
+    pub(crate) fn recorded(&self) -> bool {
+        self.directory.join("attempt").exists()
     }
 
     /// Whether every process this Attempt recorded is proven gone.

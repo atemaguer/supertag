@@ -1,9 +1,11 @@
 //! The Worker: one Task Attempt on this Worker Host. It runs the harness server (the adapter and
 //! its guardian), the Attempt's egress and provider proxies, its Context Items and MCP servers,
-//! the data relays its harness calls, and the capture of what the turn produced. It reaches the
-//! Control Plane's lease-bound actions only through the Worklet's `Authority` handle.
+//! the data relays its harness calls, and the capture of what the turn produced. It runs as a
+//! process of its own, which reaches the Control Plane's lease-bound actions only through its
+//! Worklet, over the local contract (`crate::local`).
 
 pub(crate) mod adapter;
+pub(crate) mod authority;
 pub(crate) mod capture_volumes;
 pub(crate) mod changed_paths;
 pub(crate) mod codex_exec;
@@ -15,6 +17,7 @@ pub(crate) mod milestones;
 pub(crate) mod native_memory;
 pub(crate) mod native_memory_volume;
 pub(crate) mod prepared;
+pub(crate) mod process;
 pub(crate) mod provider_proxy;
 pub(crate) mod remote;
 pub(crate) mod remote_provider;
@@ -35,8 +38,8 @@ use crate::{
 };
 
 /// What a Worker reads to run one Task Attempt: its harness and adapter, the execution profile
-/// it enforces, where its Workspace runs, and its Context Item catalog. The host's secrets and
-/// Volume mounts are the Worklet's (`WorkletOptions`), which lends them through `Settings`.
+/// it enforces, where its Workspace runs, and its Context Item catalog. The secrets its Attempt
+/// may use come in its `Assign`.
 pub struct WorkerOptions {
     pub adapter_guardian: PathBuf,
     pub adapter: PathBuf,

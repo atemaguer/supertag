@@ -24,12 +24,12 @@ use supertag_protocol::{
 };
 use supertag_workspaces::artifact_volumes::FileVolume;
 use tokio_util::sync::CancellationToken;
-use tonic::{service::interceptor::InterceptedService, transport::Channel};
+use tonic::transport::Channel;
 
 use crate::{
     ArtifactPeers, AttemptClients, HostHeaders, request, retryable, wait_for_work,
     worklet::{
-        HostStorage, HostToken, artifact_direct::SourceStorage, authority::AttemptClient,
+        HostSigner, HostStorage, artifact_direct::SourceStorage, authority::AttemptClient,
         checkpoints,
     },
 };
@@ -87,24 +87,20 @@ pub(crate) async fn register(
     }
 }
 
-/// The Attempt-scoped clients a registered host's Workers and finalization call, each call
-/// carrying its Attempt's credential, and the host storage the Worklet lends them, which holds
-/// the host credential.
-pub(crate) fn coordination(
+/// The host's own storage, signed by `signer`: the Worklet's, with the host credential, or a
+/// Worker's, whose host calls its Worklet makes. `git` is where a reviewed delivery is read.
+pub(crate) fn host_storage(
     channel: &Channel,
     headers: &HostHeaders,
-    acquisitions: AttemptArtifactsClient<InterceptedService<Channel, HostHeaders>>,
-    storage: &SourceStorage,
+    storage: Option<&SourceStorage>,
     artifact_peers: &ArtifactPeers,
     volumes: &BTreeMap<String, FileVolume>,
-    (state_directory, credential): (&Path, &HostToken),
-) -> (AttemptClients, HostStorage) {
-    let host_storage = HostStorage {
-        review_git: supertag_git_delivery::GitDelivery::for_host(
-            &state_directory.join("review-git"),
-        )
-        .ok(),
-        artifact_source: Some(storage.clone()),
+    (git, signer): (&Path, &HostSigner),
+) -> HostStorage {
+    let transfers = checkpoints::Transfers::new(channel.clone(), headers.clone(), signer.clone());
+    HostStorage {
+        review_git: supertag_git_delivery::GitDelivery::for_host(git).ok(),
+        artifact_source: storage.cloned(),
         held_transfers: crate::worklet::artifact_direct::HeldTransfers::new(
             supertag_protocol::v2::artifact_sources_client::ArtifactSourcesClient::with_interceptor(
                 channel.clone(),
@@ -112,7 +108,7 @@ pub(crate) fn coordination(
             )
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES),
-            credential.clone(),
+            signer.clone(),
         ),
         artifact_peers: artifact_peers.clone(),
         volumes: std::sync::Arc::new(volumes.clone()),
@@ -123,18 +119,27 @@ pub(crate) fn coordination(
             )
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES),
-            credential.clone(),
+            signer.clone(),
         ),
-        transfers: checkpoints::Transfers::new(channel.clone(), headers.clone(), credential.clone())
-            .with_storage(storage.clone()),
-    };
-    let clients = AttemptClients {
+        transfers: match storage {
+            Some(storage) => transfers.with_storage(storage.clone()),
+            None => transfers,
+        },
+    }
+}
+
+/// The Attempt-scoped clients a Worker's data calls go through, each call carrying its Attempt
+/// credential.
+pub(crate) fn attempt_clients(channel: &Channel, headers: &HostHeaders) -> AttemptClients {
+    AttemptClients {
         attempt: AttemptClient::new(
             WorkerHostClient::with_interceptor(channel.clone(), headers.clone())
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         ),
-        acquisitions,
+        acquisitions: AttemptArtifactsClient::with_interceptor(channel.clone(), headers.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES),
         workstreams: AttemptWorkstreamsClient::with_interceptor(channel.clone(), headers.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES),
@@ -177,6 +182,5 @@ pub(crate) fn coordination(
         )
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES),
-    };
-    (clients, host_storage)
+    }
 }

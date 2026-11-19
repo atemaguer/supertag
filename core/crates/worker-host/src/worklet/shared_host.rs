@@ -1,195 +1,37 @@
-//! Registration and presence shared by every execution lane of one supervised Worker Host.
-//!
-//! A Host that serves several harnesses, or several concurrent Attempts of one harness, runs one
-//! lane process per slot. The supervisor registers the Host's single incarnation once, and each
-//! lane replays that same incarnation, so the Control Plane keeps one generation for all of them.
-//! A different incarnation still replaces the generation and fences every lane at once.
+//! The presence report of a Worker Host whose Worklet runs several harnesses, or several
+//! concurrent Attempts of one: one report under the host's one registration, with each
+//! harness's capacity and free slots.
 
-use std::path::Path;
-
-use anyhow::{Result, ensure};
-use supertag_protocol::{
-    MAX_MESSAGE_BYTES,
-    negotiation::{self, NegotiationError},
-    v2::{
-        HarnessExecutionProfile, HarnessKind, HostHarnessCapacity, HostReadiness,
-        HostReadinessReason, RegisterHostRequest, ReportHostRequest, ServiceRole, WorkerHostStatus,
-        worker_host_client::WorkerHostClient,
-    },
-};
-use supertag_transport::Target;
-use tokio_util::sync::CancellationToken;
-use tonic::Status;
-
-use crate::{
-    HostHeaders, RegisteredHost,
-    environment::DiskSpaceSource,
-    request, retryable, wait_for_work,
-    worklet::enrollment,
-    worklet::journal::Journal,
-    worklet::readiness::{State, host_labels},
+use supertag_protocol::v2::{
+    HarnessExecutionProfile, HarnessKind, HostHarnessCapacity, HostReadiness, HostReadinessReason,
+    ReportHostRequest,
 };
 
-/// One harness profile a Host serves and the number of lanes that run it.
+use crate::worklet::readiness::State;
+
+/// One harness profile a Worklet serves and the number of slots that run it.
 #[derive(Clone, Debug)]
-pub struct HarnessSlots {
-    pub harness: HarnessKind,
-    pub profile: HarnessExecutionProfile,
-    pub capacity: u32,
+pub(crate) struct HarnessSlots {
+    pub(crate) harness: HarnessKind,
+    pub(crate) profile: HarnessExecutionProfile,
+    pub(crate) capacity: u32,
 }
 
-pub struct SharedHost {
-    journal: Journal,
-    client: RegisteredHost,
-    token: String,
-    incarnation_id: String,
-    generation: u64,
-    labels: Vec<String>,
-    disk_space: DiskSpaceSource,
-}
-
-impl SharedHost {
-    /// Register the Host's incarnation before any lane starts. Returns `None` on shutdown.
-    ///
-    /// `replace` starts a new incarnation instead of replaying the persisted one, so the
-    /// Control Plane fences every Attempt held under the previous generation. A supervisor
-    /// does this when Attempt journals exist that no configured lane will read.
-    ///
-    /// `labels` are the host service's declared placement labels. The Host adds its operating
-    /// system and architecture; the Control Plane derives harness and Workspace labels.
-    pub async fn register(
-        control_plane: Target,
-        state_directory: &Path,
-        labels: &[String],
-        replace: bool,
-        shutdown: &CancellationToken,
-    ) -> Result<Option<Self>> {
-        let labels = host_labels(labels)?;
-        let journal = Journal::open(state_directory)?;
-        let token = enrollment::host_token(&journal, &control_plane)?;
-        let incarnation_id = if replace {
-            journal.replace_incarnation()?
-        } else {
-            journal.incarnation()?
-        };
-        let channel = control_plane.connect_lazy();
-        let (record, protocol) = loop {
-            if shutdown.is_cancelled() {
-                return Ok(None);
-            }
-            // Refuse an incompatible Control Plane before registering the Host.
-            let protocol = match negotiation::negotiate(
-                channel.clone(),
-                ServiceRole::WorkerHost,
-                ServiceRole::ControlPlane,
-            )
-            .await
-            {
-                Ok(version) => version,
-                Err(NegotiationError::Unavailable(_)) => {
-                    wait_for_work(shutdown).await;
-                    continue;
-                }
-                Err(error) => return Err(error.at(control_plane.url()).into()),
-            };
-            let response = WorkerHostClient::new(negotiation::bind(channel.clone(), protocol))
-                .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                .max_encoding_message_size(MAX_MESSAGE_BYTES)
-                .register_host(request(
-                    RegisterHostRequest {
-                        incarnation_id: incarnation_id.clone(),
-                    },
-                    &token,
-                )?)
-                .await;
-            match response {
-                Ok(response) => break (response.into_inner(), protocol),
-                Err(error) if retryable(&error) => wait_for_work(shutdown).await,
-                Err(error) => return Err(error.into()),
-            }
-        };
-        ensure!(
-            !record.revoked && record.generation > 0,
-            "Worker Host registration is inactive"
-        );
-        let client = WorkerHostClient::with_interceptor(
-            channel,
-            HostHeaders::new(record.generation, protocol),
-        )
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
-        Ok(Some(Self {
-            journal,
-            client,
-            token,
-            incarnation_id,
-            generation: record.generation,
-            labels,
-            disk_space: DiskSpaceSource::Directory(state_directory.to_path_buf()),
-        }))
-    }
-
-    /// The Host credential each lane presents. It never reaches a harness process.
-    pub fn token(&self) -> &str {
-        &self.token
-    }
-
-    pub fn incarnation_id(&self) -> &str {
-        &self.incarnation_id
-    }
-
-    pub fn generation(&self) -> u64 {
-        self.generation
-    }
-
-    /// Report the Host's presence from each lane's latest state. `lanes` pairs an index into
-    /// `harnesses` with that lane's state. A fenced or revoked registration is an error.
-    pub async fn report(
-        &mut self,
-        harnesses: &[HarnessSlots],
-        lanes: &[(usize, State)],
-        workspaces: &[String],
-    ) -> Result<WorkerHostStatus, Status> {
-        let sequence = self.journal.next_report_sequence().map_err(|error| {
-            crate::failures::noted(
-                Status::internal("Host presence sequence is unavailable"),
-                &error,
-            )
-        })?;
-        let mut report = aggregate(sequence, harnesses, lanes, workspaces);
-        report.labels = self.labels.clone();
-        report.disk_space = self.disk_space.sample();
-        report.machine_id = crate::worklet::readiness::machine_id();
-        let request = request(report, &self.token).map_err(|error| {
-            crate::failures::noted(Status::internal("invalid Host presence request"), &error)
-        })?;
-        Ok(self.client.report_host(request).await?.into_inner())
-    }
-}
-
-/// Whether a Host or lane state directory holds an unresolved Attempt record.
-pub fn holds_attempt(directory: &Path) -> bool {
-    Journal::has_attempt(directory)
-}
-
-/// Whether a presence failure only delays the next report.
-pub fn transient(error: &Status) -> bool {
-    retryable(error)
-}
-
-fn aggregate(
+/// The host's report from each slot's latest state. `slots` pairs an index into `harnesses`
+/// with that slot's state.
+pub(crate) fn aggregate(
     sequence: u64,
     harnesses: &[HarnessSlots],
-    lanes: &[(usize, State)],
+    slots: &[(usize, State)],
     workspaces: &[String],
 ) -> ReportHostRequest {
     let ready = |index| {
-        lanes
+        slots
             .iter()
-            .filter(|(lane, state)| *lane == index && *state == State::Ready)
+            .filter(|(slot, state)| *slot == index && *state == State::Ready)
             .count() as u32
     };
-    let any = |wanted: State| lanes.iter().any(|(_, state)| *state == wanted);
+    let any = |wanted: State| slots.iter().any(|(_, state)| *state == wanted);
     let (readiness, reason) = if any(State::Ready) || any(State::Busy) {
         (HostReadiness::Ready, HostReadinessReason::Unspecified)
     } else if any(State::Recovery) {
@@ -197,7 +39,7 @@ fn aggregate(
             HostReadiness::Suppressed,
             HostReadinessReason::RecoveryRequired,
         )
-    } else if !lanes.is_empty() && lanes.iter().all(|(_, state)| *state == State::Stopping) {
+    } else if !slots.is_empty() && slots.iter().all(|(_, state)| *state == State::Stopping) {
         (HostReadiness::Suppressed, HostReadinessReason::Stopping)
     } else {
         (HostReadiness::Pending, HostReadinessReason::Starting)
@@ -247,7 +89,7 @@ mod tests {
     }
 
     #[test]
-    fn lanes_aggregate_into_one_consistent_host_report() {
+    fn slots_aggregate_into_one_consistent_host_report() {
         let harnesses = [
             slots(HarnessKind::Codex, 2),
             slots(HarnessKind::OpenaiAgents, 1),

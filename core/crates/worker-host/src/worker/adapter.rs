@@ -117,7 +117,13 @@ impl Bridge {
     /// authorization credentials, and the values of this host's credential variables, its own
     /// credential, and the adapter's bootstrap token, in any of their encodings.
     fn redact(&self, text: &str) -> String {
-        redact_text(text, &self.secrets, false)
+        let shaped = enrolled_credentials(text);
+        if shaped.is_empty() {
+            return redact_text(text, &self.secrets, false);
+        }
+        let mut secrets = self.secrets.as_ref().clone();
+        secrets.extend(shaped);
+        redact_text(text, &secrets, false)
     }
 
     /// Redacts `text` that the Control Plane accepts up to `limit` bytes. `[REDACTED]` can be
@@ -314,7 +320,7 @@ impl Harness for Bridge {
                 host.append_event(request).await
             })
             .await?;
-        supertag_protocol::crash_point("worker-host.append-event", "answered");
+        supertag_protocol::crash_point("worker.append-event", "answered");
         drop(state);
         if event.kind == TaskEventKind::Message as i32 {
             // The recorded message replaces the text written so far.
@@ -518,7 +524,7 @@ pub(crate) async fn execute(
     // The host credential stays redacted too: the harness runs as the OS account whose state
     // directory holds it, so it could read and repeat it.
     let mut secrets = host_secrets(&[attempt_token, &bootstrap_token]);
-    secrets.push(clients.1.redaction());
+    secrets.extend(clients.1.redaction());
     let secrets = Arc::new(unique_sensitive_values(secrets));
     let mcp_secrets = inputs
         .mcp
@@ -987,15 +993,22 @@ pub fn unsandboxed_caveat(name: &str) -> String {
 
 /// Why this unsandboxed host's model key can't go behind the provider proxy, so the commands its
 /// harness runs can reach it; `None` when it can, or when the host runs no command unsandboxed.
-pub(crate) fn unproxied_key_warning(options: &WorkerOptions) -> Option<String> {
+/// `credentials` are the harness's provider credentials, which its Workers are assigned.
+pub(crate) fn unproxied_key_warning(
+    options: &WorkerOptions,
+    credentials: &std::collections::BTreeMap<String, String>,
+) -> Option<String> {
     if !options.execution_profile.allow_unsandboxed_commands {
         return None;
     }
+    let held = |variable: &str| {
+        credentials
+            .get(variable)
+            .is_some_and(|value| !value.is_empty())
+            || environment_credential(variable).is_some()
+    };
     match options.harness {
-        HarnessKind::ClaudeCode
-            if !ANTHROPIC_CREDENTIALS
-                .iter()
-                .any(|&variable| environment_credential(variable).is_some()) =>
+        HarnessKind::ClaudeCode if !ANTHROPIC_CREDENTIALS.iter().any(|&variable| held(variable)) =>
         {
             Some("Claude Code uses its own sign-in on this host, which the commands it runs without a sandbox can read. Set ANTHROPIC_API_KEY in the host's env_file (default ~/.supertag/.env) to keep the key in the Worker Host.".to_owned())
         }
@@ -1006,8 +1019,7 @@ pub(crate) fn unproxied_key_warning(options: &WorkerOptions) -> Option<String> {
                 .ok()?
                 .first()?;
             let held = provider_origin(provider).is_some()
-                && (environment_credential(variable).is_some()
-                    || opencode_file_key(options, provider).is_some());
+                && (held(variable) || opencode_file_key(options, provider).is_some());
             (!held).then(|| format!("OpenCode's {provider} sign-in on this host can't be kept in the Worker Host, so the commands it runs without a sandbox can read it. SuperTag keeps an anthropic or openai API key there, from {variable} in the host's env_file or an api key in the OpenCode auth file."))
         }
         // The Cursor SDK takes its backend from CURSOR_BACKEND_URL, but trades the API key for an
@@ -1341,6 +1353,25 @@ fn not_launched(bridge: &Bridge, reason: &str) -> HarnessCompleteRequest {
 }
 
 /// The secrets of this Worker Host's environment, plus `credentials` it holds itself.
+/// Every value in `text` shaped like an enrolled credential (`stcr_` and 64 lowercase hex
+/// digits), such as the host's own, which a Worker does not hold but its harness, running as the
+/// host's OS account, could read from the state directory and repeat.
+pub(crate) fn enrolled_credentials(text: &str) -> Vec<SensitiveValue> {
+    let prefix = supertag_protocol::CREDENTIAL_SECRET_PREFIX;
+    let mut found = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(prefix) {
+        let candidate = rest[start..]
+            .get(..prefix.len() + 64)
+            .filter(|candidate| supertag_protocol::is_secret(prefix, candidate));
+        if let Some(candidate) = candidate {
+            found.push(SensitiveValue::High(candidate.to_owned()));
+        }
+        rest = &rest[start + prefix.len()..];
+    }
+    found
+}
+
 pub(crate) fn host_secrets(credentials: &[&str]) -> Vec<SensitiveValue> {
     let environment = std::env::vars_os()
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))

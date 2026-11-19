@@ -23,7 +23,11 @@ pub fn crash_point(scope: &str, boundary: &str) {
         .and_then(|target| target.strip_prefix(scope))
         .and_then(|rest| rest.strip_prefix('.'))
         == Some(boundary);
-    if selected {
+    // A crash point fires once per marker: a Worker inherits its Worklet's environment, and
+    // the Worklet that recovers from its Worker's crash starts another with the same one.
+    let fired = std::env::var_os(CRASH_MARKER_ENV)
+        .is_some_and(|marker| std::path::Path::new(&marker).exists());
+    if selected && !fired {
         crash_now(
             &format!("{scope}.{boundary}"),
             std::env::var_os(CRASH_MARKER_ENV).as_deref(),

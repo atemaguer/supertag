@@ -92,12 +92,6 @@ pub async fn endpoint_with_timeout(uri: String, timeout: Duration) -> Result<Tar
     configured_endpoint(uri, timeout, None, Proxy::from_env()).await
 }
 
-/// An endpoint reached through `proxy` instead of the one this process's
-/// environment names: a supervisor's Worker Host reads it from `env_file` too.
-pub async fn endpoint_through(uri: String, proxy: Option<Proxy>) -> Result<Target> {
-    configured_endpoint(uri, Duration::from_secs(15), None, proxy).await
-}
-
 /// `https://` and `http://` dial native gRPC. `wss://` and `ws://` carry the same gRPC
 /// connection through a WebSocket tunnel; `wss://` always runs SuperTag's TLS inside it,
 /// and `ws://` is cleartext and loopback-only, like `http://`. Either goes through the

@@ -6,13 +6,14 @@ mod artifact_snapshots;
 mod credentials;
 pub mod environment;
 mod failures;
+mod local;
 mod worker;
 mod worklet;
 mod workspace_mounts;
 
 pub use credentials::{
-    is_provider_secret, load_provider_credentials, provider_environment, provider_environment_for,
-    provider_variable, validate_opencode_model,
+    is_provider_secret, provider_environment, provider_environment_for, provider_variable,
+    read_provider_credentials, validate_opencode_model,
 };
 pub use worker::adapter::unsandboxed_caveat;
 pub use worker::codex_exec::run_bridge as run_codex_exec_bridge;
@@ -21,6 +22,7 @@ pub use worker::mcp::{
     McpCatalog, McpCatalogEntry, McpLogin, McpLoginOptions, McpLoginState, McpLoginStore,
     login_command as mcp_login_command, run_mcp_login,
 };
+pub use worker::process::{WorkerProcessOptions, run_worker};
 pub use worker::remote_provider::{ProviderAuthority, ProviderConfig};
 pub use worker::shared_execution::SharedExecutionConfig;
 pub use worker::{WorkerOptions, context, egress};
@@ -28,12 +30,9 @@ pub use worklet::artifact_direct::{ArtifactPeers, ArtifactSourceConfig};
 pub use worklet::enrollment::{
     EnrolledRole, credential, enroll, enrolled_control_plane, enrolled_host, rotate_own_credential,
 };
-pub use worklet::readiness::{LaneObserver, State as LaneState, host_labels};
-pub use worklet::shared_host::{
-    HarnessSlots, SharedHost, holds_attempt, transient as presence_retryable,
-};
+pub use worklet::readiness::host_labels;
 pub use worklet::workspaces::{WORKSPACE_DIRECTORY, WorkspaceMapping, WorkspaceSource};
-pub use worklet::{Lane, WorkletOptions};
+pub use worklet::{HarnessService, WorkerLaunch, WorkletOptions};
 pub use workspace_mounts::WorkspaceMounts;
 
 use std::time::Duration;
@@ -68,14 +67,14 @@ use tonic::{
 use worklet::journal::Attempt;
 
 /// Runs this Worker Host's Worklet until `shutdown`, calling `ready` once it can take work. The
-/// Worklet runs each Attempt it claims in a Worker made from `worker`.
+/// Worklet runs each Attempt it claims in a Worker process it starts with its harness's
+/// `WorkerLaunch`.
 pub async fn run(
     worklet: WorkletOptions,
-    worker: WorkerOptions,
     shutdown: CancellationToken,
-    ready: impl FnOnce(),
+    ready: impl FnOnce() + Send + 'static,
 ) -> Result<()> {
-    worklet::run::run(worklet, worker, shutdown, ready).await
+    worklet::run::run(worklet, shutdown, ready).await
 }
 
 #[derive(Clone)]
@@ -109,9 +108,8 @@ pub(crate) type RegisteredInputs = AttemptInputsClient<InterceptedService<Channe
 /// The Attempt-scoped data clients a Worker's harness bridge and setup relay its calls through:
 /// the data half of `WorkerHost`, Mailbox, Workstreams, Memory, Tag and Work Sessions,
 /// Schedules, Effects, Task files, artifact captures and acquisition, and Workspace mounts. The
-/// Worklet builds them on its channel; they hold no credential, and every call carries the
-/// Attempt credential. The Worklet's finalization records its Volume write-back and output
-/// captures through them with that credential too. The host's own storage is `HostStorage`.
+/// Worker builds them on its own channel to its data endpoint; they hold no credential, and
+/// every call carries the Attempt credential. The host's own storage is `HostStorage`.
 #[derive(Clone)]
 pub(crate) struct AttemptClients {
     attempt: worklet::authority::AttemptClient,

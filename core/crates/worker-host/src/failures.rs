@@ -8,9 +8,9 @@
 //!
 //! The reasons noted during an Attempt also become its failure detail: when the Attempt fails,
 //! the host sends them with its fixed result, and the Control Plane shows them to operators only,
-//! in the Task execution report. A Worker Host process runs one Attempt at a time, so the
-//! reasons noted since the Attempt began are that Attempt's. Errors from serving other hosts are
-//! logged without being recorded.
+//! in the Task execution report. A Worker process runs one Attempt, and each slot of the Worklet's
+//! pool keeps its own reasons, so the reasons noted since the Attempt began are that Attempt's.
+//! Errors from serving other hosts are logged without being recorded.
 use std::{
     fmt::Display,
     sync::{Mutex, OnceLock},
@@ -56,18 +56,46 @@ fn recorded() -> &'static Mutex<Vec<String>> {
     RECORDED.get_or_init(Mutex::default)
 }
 
+tokio::task_local! {
+    /// The reasons noted for the Attempt of the Worklet pool slot this task runs.
+    static SLOT: std::cell::RefCell<Vec<String>>;
+}
+
+/// Runs a Worklet pool slot, whose noted reasons are its own Attempt's: several slots run
+/// Attempts at once in one Worklet. A Worker runs one Attempt, so its reasons are the process's.
+pub(crate) async fn per_slot<F: std::future::Future>(slot: F) -> F::Output {
+    SLOT.scope(std::cell::RefCell::new(Vec::new()), slot).await
+}
+
+fn with_recorded<R>(use_lines: impl FnOnce(&mut Vec<String>) -> R) -> R {
+    let mut use_lines = Some(use_lines);
+    if let Ok(result) =
+        SLOT.try_with(|lines| (use_lines.take().expect("used once"))(&mut lines.borrow_mut()))
+    {
+        return result;
+    }
+    (use_lines.take().expect("used once"))(
+        &mut recorded().lock().unwrap_or_else(|error| error.into_inner()),
+    )
+}
+
 /// Forgets reasons noted before this Attempt began.
 pub(crate) fn begin_attempt() {
-    recorded()
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .clear();
+    with_recorded(Vec::clear);
 }
 
 /// The reasons noted since the Attempt began, as failure detail: the latest eight lines, each
 /// one line of at most 160 characters. Clears them.
 pub(crate) fn take_detail() -> Vec<String> {
-    let lines = std::mem::take(&mut *recorded().lock().unwrap_or_else(|error| error.into_inner()));
+    let lines = with_recorded(std::mem::take);
+    let skip = lines.len().saturating_sub(MAX_DETAIL);
+    lines.into_iter().skip(skip).collect()
+}
+
+/// The reasons this slot noted, then those its Worker noted, as one failure detail.
+pub(crate) fn merged_detail(worker: Vec<String>) -> Vec<String> {
+    let mut lines = take_detail();
+    lines.extend(worker);
     let skip = lines.len().saturating_sub(MAX_DETAIL);
     lines.into_iter().skip(skip).collect()
 }
@@ -98,13 +126,14 @@ pub(crate) fn note(what: &str, error: &dyn Display) {
     if line.is_empty() {
         return;
     }
-    let mut recorded = recorded().lock().unwrap_or_else(|error| error.into_inner());
-    if recorded.last() != Some(&line) {
-        recorded.push(line);
-    }
-    if recorded.len() > MAX_DETAIL {
-        recorded.remove(0);
-    }
+    with_recorded(|recorded| {
+        if recorded.last() != Some(&line) {
+            recorded.push(line);
+        }
+        if recorded.len() > MAX_DETAIL {
+            recorded.remove(0);
+        }
+    });
 }
 
 /// Logs like `note` without recording: for errors met while serving another host, which are not

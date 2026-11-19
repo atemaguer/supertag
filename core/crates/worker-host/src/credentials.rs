@@ -3,7 +3,8 @@ use anyhow::{Context, Result, ensure};
 use std::{collections::BTreeMap, ffi::OsString, path::Path, sync::OnceLock};
 use supertag_protocol::v2::HarnessKind;
 
-/// Provider credentials the Worker Host read from a file at start rather than its environment.
+/// Provider credentials this Worker's `Assign` carried, which its Worklet read from a file at
+/// start rather than its environment.
 static FILE_CREDENTIALS: OnceLock<BTreeMap<String, String>> = OnceLock::new();
 
 /// Whether a provider variable holds a secret (a key or token), as opposed to a path such as
@@ -12,12 +13,13 @@ pub fn is_provider_secret(name: &str) -> bool {
     name.ends_with("_KEY") || name.ends_with("_TOKEN")
 }
 
-/// Read the provider credentials a supervisor wrote for this Worker Host (a JSON object of
-/// variable to value) and delete the file. The values then stay out of the host's initial
-/// environment, where `ps eww`, `/proc/<pid>/environ`, and crash or debug dumps of the
-/// environment would show them. This closes accidental leaks only: a command running as the
-/// same user can still read the host's memory where the OS lets it.
-pub fn load_provider_credentials(path: &Path) -> Result<()> {
+/// Read the provider credentials a supervisor wrote for one harness of this Worker Host (a JSON
+/// object of variable to value) and delete the file. The values then stay out of the host's
+/// initial environment, where `ps eww`, `/proc/<pid>/environ`, and crash or debug dumps of the
+/// environment would show them. The Worklet keeps them and hands each Worker only its own
+/// harness's, in its `Assign`. This closes accidental leaks only: a command running as the same
+/// user can still read the host's memory where the OS lets it.
+pub fn read_provider_credentials(path: &Path) -> Result<BTreeMap<String, String>> {
     let bytes = std::fs::read(path).context("read the provider credentials file")?;
     std::fs::remove_file(path).context("remove the provider credentials file")?;
     let credentials: BTreeMap<String, String> =
@@ -26,6 +28,15 @@ pub fn load_provider_credentials(path: &Path) -> Result<()> {
         credentials.keys().all(|name| is_provider_secret(name)),
         "the provider credentials file names a variable that is not a key or token"
     );
+    Ok(credentials)
+}
+
+/// Installs the provider credentials a Worker's `Assign` carried, once per Worker process.
+pub(crate) fn set_provider_credentials(credentials: BTreeMap<String, String>) -> Result<()> {
+    ensure!(
+        credentials.keys().all(|name| is_provider_secret(name)),
+        "provider credentials name a variable that is not a key or token"
+    );
     ensure!(
         FILE_CREDENTIALS.set(credentials).is_ok(),
         "provider credentials are already loaded"
@@ -33,7 +44,7 @@ pub fn load_provider_credentials(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// A provider variable's value: from the credentials file when the host read one, else from the
+/// A provider variable's value: from the credentials the Worker was assigned, else from the
 /// host's environment.
 pub fn provider_variable(name: &str) -> Option<OsString> {
     FILE_CREDENTIALS
@@ -99,15 +110,18 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("provider-credentials.json");
         std::fs::write(&path, r#"{"FIXTURE_PROVIDER_API_KEY":"sk-from-file"}"#).unwrap();
-        load_provider_credentials(&path).unwrap();
+        let credentials = read_provider_credentials(&path).unwrap();
         assert!(!path.exists(), "the host deletes the file once read");
+        assert!(read_provider_credentials(&path).is_err());
+        std::fs::write(&path, r#"{"HOME":"/tmp"}"#).unwrap();
+        assert!(read_provider_credentials(&path).is_err());
+        set_provider_credentials(credentials).unwrap();
         assert_eq!(
             provider_variable("FIXTURE_PROVIDER_API_KEY"),
             Some(OsString::from("sk-from-file"))
         );
         assert_eq!(provider_variable("FIXTURE_PROVIDER_UNSET_KEY"), None);
-        std::fs::write(&path, "{}").unwrap();
-        assert!(load_provider_credentials(&path).is_err());
+        assert!(set_provider_credentials(BTreeMap::new()).is_err());
     }
     #[test]
     fn only_keys_and_tokens_are_secrets() {

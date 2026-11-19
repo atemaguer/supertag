@@ -223,15 +223,16 @@ pub(crate) struct Transfers {
     pub(crate) held: Option<Held>,
     /// The file Volumes this host maps, for checkpoints of Tags that name a Volume.
     pub(crate) volumes: crate::worklet::volume_objects::HostVolumes,
-    /// The host credential its checkpoint, delivery, and Volume object calls carry.
-    pub(in crate::worklet) credential: crate::worklet::HostToken,
+    /// Who signs its checkpoint, delivery, and Volume object calls: the host credential in the
+    /// Worklet; in a Worker, its Worklet, for the calls a Worker may ask it for.
+    pub(in crate::worklet) credential: crate::worklet::HostSigner,
 }
 
 impl Transfers {
     pub(crate) fn new(
         channel: Channel,
         headers: HostHeaders,
-        credential: crate::worklet::HostToken,
+        credential: crate::worklet::HostSigner,
     ) -> Self {
         Self {
             channel,
@@ -277,17 +278,32 @@ impl Transfers {
         self.volume_objects().grant(request).await
     }
 
+    /// The host credential, for the calls only the Worklet makes.
+    pub(in crate::worklet) fn secret(&self) -> Result<&str, Status> {
+        self.credential
+            .host()
+            .map(crate::worklet::HostToken::secret)
+    }
+
     /// A reviewed delivery the calling Attempt may read: its receipt and who holds it.
     pub(crate) async fn review_delivery(
         &self,
         request: supertag_protocol::v2::GetReviewArtifactRequest,
     ) -> Result<supertag_protocol::v2::HeldWorkspaceDelivery, Status> {
+        if let crate::worklet::HostSigner::Worklet(link) = &self.credential {
+            return link
+                .host_call(
+                    crate::local::HostCall::ReviewDelivery(crate::local::Proto(request)),
+                    crate::local::Answer::of(),
+                )
+                .await;
+        }
         Ok(
             supertag_protocol::v2::transfers_client::TransfersClient::with_interceptor(
                 self.channel.clone(),
                 self.headers.clone(),
             )
-            .get_review_delivery(authorized(request, self.credential.secret())?)
+            .get_review_delivery(authorized(request, self.secret()?)?)
             .await?
             .into_inner(),
         )
@@ -298,12 +314,20 @@ impl Transfers {
         &self,
         request: supertag_protocol::v2::MintWorkspaceGitAccessRequest,
     ) -> Result<supertag_protocol::v2::WorkspaceGitGrant, Status> {
+        if let crate::worklet::HostSigner::Worklet(link) = &self.credential {
+            return link
+                .host_call(
+                    crate::local::HostCall::MintGitAccess(crate::local::Proto(request)),
+                    crate::local::Answer::of(),
+                )
+                .await;
+        }
         Ok(
             supertag_protocol::v2::workspace_git_access_client::WorkspaceGitAccessClient::with_interceptor(
                 self.channel.clone(),
                 self.headers.clone(),
             )
-            .mint(authorized(request, self.credential.secret())?)
+            .mint(authorized(request, self.secret()?)?)
             .await?
             .into_inner(),
         )
@@ -352,7 +376,7 @@ impl Transfers {
         let on_volume = attempt.volume.is_some();
         let task = self
             .host()
-            .inspect_attempt(authorized(attempt.inspect(), self.credential.secret())?)
+            .inspect_attempt(authorized(attempt.inspect(), self.secret()?)?)
             .await?
             .into_inner();
         if !on_volume {
@@ -370,7 +394,7 @@ impl Transfers {
         };
         let reserved = self
             .host()
-            .reserve_checkpoint(authorized(record.clone(), self.credential.secret())?)
+            .reserve_checkpoint(authorized(record.clone(), self.secret()?)?)
             .await?
             .into_inner();
         // The reservation comes first: the Volume grant names the reserved checkpoint.
@@ -399,7 +423,7 @@ impl Transfers {
         }
         let committed = self
             .host()
-            .commit_checkpoint(authorized(record, self.credential.secret())?)
+            .commit_checkpoint(authorized(record, self.secret()?)?)
             .await?
             .into_inner();
         if reserved != reference || committed != reference {
@@ -421,7 +445,7 @@ impl Transfers {
         (tag, session): (&str, &str),
     ) -> Result<Option<SessionCheckpoint>, Status> {
         let held = self.held()?;
-        let mut upstream = authorized(attempt.inspect(), self.credential.secret())?;
+        let mut upstream = authorized(attempt.inspect(), self.secret()?)?;
         upstream.set_timeout(Duration::from_secs(20));
         let response = self.host().get_checkpoint(upstream).await?.into_inner();
         let Some(reference) = response.reference else {
@@ -512,7 +536,7 @@ impl Transfers {
                         after_sha256: after.clone(),
                         limit: 0,
                     },
-                    self.credential.secret(),
+                    self.secret()?,
                 )?)
                 .await?
                 .into_inner();

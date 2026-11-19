@@ -22,18 +22,18 @@ use tonic::{Status, service::interceptor::InterceptedService, transport::Channel
 /// The file Volumes this host maps, by Volume ID.
 pub type HostVolumes = Arc<BTreeMap<String, FileVolume>>;
 
-/// The Control Plane's Volume object grants, as this host: a Worklet handle that holds the host
-/// credential, which a Worker asks for its Attempt's objects through.
+/// The Control Plane's Volume object grants, as this host. In the Worklet it signs with the host
+/// credential; a Worker asks its Worklet for its own Attempt's objects through it.
 #[derive(Clone)]
 pub(crate) struct VolumeObjects {
     client: VolumeObjectsClient<InterceptedService<Channel, crate::HostHeaders>>,
-    credential: crate::worklet::HostToken,
+    credential: crate::worklet::HostSigner,
 }
 
 impl VolumeObjects {
-    pub(in crate::worklet) fn new(
+    pub(crate) fn new(
         client: VolumeObjectsClient<InterceptedService<Channel, crate::HostHeaders>>,
-        credential: crate::worklet::HostToken,
+        credential: crate::worklet::HostSigner,
     ) -> Self {
         Self { client, credential }
     }
@@ -44,8 +44,19 @@ impl VolumeObjects {
         &self,
         request: VolumeObjectGrantRequest,
     ) -> Result<VolumeObjectGrant, Status> {
-        let request = authenticated_request(request, self.credential.secret(), None)?;
-        Ok(self.client.clone().grant(request).await?.into_inner())
+        match &self.credential {
+            crate::worklet::HostSigner::Host(token) => {
+                let request = authenticated_request(request, token.secret(), None)?;
+                Ok(self.client.clone().grant(request).await?.into_inner())
+            }
+            crate::worklet::HostSigner::Worklet(link) => {
+                link.host_call(
+                    crate::local::HostCall::VolumeGrant(crate::local::Proto(request)),
+                    crate::local::Answer::of(),
+                )
+                .await
+            }
+        }
     }
 }
 
@@ -225,7 +236,7 @@ pub(crate) async fn collect_garbage(
     objects: &VolumeObjects,
     volumes: &HostVolumes,
 ) -> Result<usize, Status> {
-    let (client, token) = (&objects.client, objects.credential.secret());
+    let (client, token) = (&objects.client, objects.credential.host()?.secret());
     let mut deleted = 0;
     for (volume_id, mapping) in volumes.iter() {
         for _ in 0..GARBAGE_PAGES {
@@ -436,7 +447,8 @@ mod tests {
                 .unwrap();
             let client =
                 VolumeObjectsClient::with_interceptor(channel, crate::HostHeaders::new(1, 2));
-            let credential = crate::worklet::HostToken::new("token".into());
+            let credential =
+                crate::worklet::HostSigner::Host(crate::worklet::HostToken::new("token".into()));
             let read = acquired(
                 &VolumeObjects::new(client, credential.clone()),
                 &attempt,
@@ -517,7 +529,10 @@ mod tests {
             .await
             .unwrap();
         let client = VolumeObjectsClient::with_interceptor(channel, crate::HostHeaders::new(1, 2));
-        let objects = VolumeObjects::new(client, crate::worklet::HostToken::new("token".into()));
+        let objects = VolumeObjects::new(
+            client,
+            crate::worklet::HostSigner::Host(crate::worklet::HostToken::new("token".into())),
+        );
         assert_eq!(collect_garbage(&objects, &volumes).await.unwrap(), 1);
         assert!(!path.join(&key).exists());
         let forget = seen.recv().await.unwrap();

@@ -1,20 +1,22 @@
-//! One Task Attempt's run: start it under its lease, prepare its Workspace, inputs, Context
-//! Items, MCP servers, proxies, and sandbox, run the harness, and capture what it produced.
+//! One Task Attempt's run in its Worker: from the `Assign` its Worklet sent, check its Workspace
+//! copies, resolve its Context Items, stage its inputs, MCP servers, proxies, and sandbox, run the
+//! harness, capture what it produced, and hand the outcome to the Worklet, which finishes it.
 
 use std::{sync::Arc, time::Duration};
 
-use anyhow::{Context, Result, ensure};
-use supertag_protocol::v2::{Assignment, TaskState};
-use tokio::time::{self, Instant};
+use anyhow::{Context, Result};
+use supertag_protocol::v2::Assignment;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tonic::{Code, Status};
 
 use crate::worker::Settings;
+use crate::worker::authority::WorkerAuthority;
 use crate::worker::milestones::{WORKSPACE_READY, report_harness_finished, report_milestone};
 use crate::worker::setup::{prepare_context, workspace_mcp};
-use crate::worklet::authority::{AUTHORITY_EXPIRED, Authority};
 use crate::{
-    AttemptClients, ProviderConfig, RegisteredInputs, ensure_attempt, failures, lost_ownership,
+    AttemptClients, ProviderConfig, RegisteredInputs, failures,
+    local::{Assign, Completion, Milestone, Outcome, WorkerState},
     request, retryable, wait_for_work,
     worker::{
         adapter, changed_paths, egress, mcp, remote, remote_provider, shared_execution,
@@ -25,6 +27,7 @@ use crate::{
         journal::{self, Attempt, AttemptJournal},
         workspaces,
     },
+    workspace_mounts,
 };
 
 /// What a turn is told about its Task output directory. Changes to the repository belong in the
@@ -34,8 +37,8 @@ pub(crate) const OUTPUT_DIRECTORY_USE: &str = "Make every change to the reposito
 
 pub(crate) const DEVCONTAINER_REFUSAL: &str = "Remote Workspace devcontainer: ";
 
-/// One Task Attempt on this host: what it reads, the Worklet state it is lent, and the
-/// `Authority` it takes lease-bound actions through.
+/// One Task Attempt on this host: what it reads, the host storage it reads and writes through,
+/// and the `WorkerAuthority` its Worklet takes lease-bound actions through.
 pub(crate) struct Worker<'a> {
     pub(crate) options: Settings<'a>,
     pub(crate) journal: AttemptJournal<'a>,
@@ -45,13 +48,13 @@ pub(crate) struct Worker<'a> {
     pub(crate) storage: &'a HostStorage,
     pub(crate) transfers: &'a checkpoints::Transfers,
     pub(crate) shutdown: &'a CancellationToken,
-    pub(crate) authority: Authority<'a>,
+    pub(crate) authority: WorkerAuthority<'a>,
 }
 
 impl Worker<'_> {
-    /// Runs the journaled Attempt from Starting until its outcome is journaled for the Worklet.
-    /// `ready` is called once the host has answered for it.
-    pub(crate) async fn run(self, attempt: Attempt, ready: impl FnOnce()) -> Result<()> {
+    /// Runs the assigned Attempt until its outcome is with the Worklet and its processes and
+    /// sandbox are stopped.
+    pub(crate) async fn run(self, assign: Assign) -> Result<()> {
         let Worker {
             options,
             journal,
@@ -65,200 +68,26 @@ impl Worker<'_> {
         } = self;
         let options = &options;
         let registration = authority.registration();
-        let mut attempt = attempt;
-        // Starting is durable before requesting authority and never records a launch.
-        // A lost start response can therefore be retried using this exact Attempt.
-        let can_launch = attempt.can_launch(options)?;
-        let start = if can_launch {
-            authority.start(&attempt).await?
-        } else {
-            authority.inspect(&attempt).await?.map(|task| {
-                supertag_protocol::v2::StartTaskResponse {
-                    task: Some(task),
-                    attempt_credential: String::new(),
-                }
-            })
-        };
-        let task = match start {
-            Ok(started) => {
-                if can_launch {
-                    supertag_protocol::crash_point("worker-host.start", "answered");
-                }
-                // The Attempt credential is the only one the Worker's data calls carry. A replayed
-                // start returns a new one and ends the last.
-                attempt.attempt_credential = started.attempt_credential;
-                started
-                    .task
-                    .context("Control Plane started the Attempt without its Task")?
-            }
-            Err(error) if retryable(&error) => {
-                wait_for_work(shutdown).await;
-                return Ok(());
-            }
-            Err(error) if lost_ownership(&error) => {
-                match authority.inspect(&attempt).await? {
-                    Ok(task) => task,
-                    Err(error) if retryable(&error) => {
-                        wait_for_work(shutdown).await;
-                        return Ok(());
-                    }
-                    // No adapter was launched for Starting. The Control Plane can
-                    // safely retire a reservation that expired before start.
-                    Err(error) if lost_ownership(&error) => {
-                        return authority.discard_prelaunch(&attempt);
-                    }
-                    Err(error) => return Err(error.into()),
-                }
-            }
-            Err(error) => return Err(error.into()),
-        };
-        ensure_attempt(&task, &attempt)?;
-        if !can_launch {
-            ready();
-            if task.state() == TaskState::Claimed {
-                // Starting never launched an adapter.
-                return authority.release_unstarted();
-            }
-            return authority.finish(
-                attempt,
-                adapter::failed("Worker Host execution profile changed before launch"),
-            );
-        }
-        if task.state() == TaskState::Claimed {
-            // A pause can block Start after Claim. No adapter has launched, so
-            // retain the intent while the Control Plane retires the reservation.
-            ready();
-            wait_for_work(shutdown).await;
-            return Ok(());
-        }
-        if matches!(task.state(), TaskState::Cancelled | TaskState::Uncertain) {
-            ready();
-            return authority.finish(attempt, adapter::failed("Task Attempt ended before launch"));
-        }
-        ensure!(
-            task.state() == TaskState::Running,
-            "Control Plane did not authorize the Task Attempt to start"
-        );
-        if attempt.attempt_credential.is_empty() {
-            // Started, but its start answer was lost to a refusal: nothing launched, and no data
-            // call can be made for it.
-            return authority.finish(
-                attempt,
-                adapter::failed("Execution authority ended before launch"),
-            );
-        }
+        authority.link().state(WorkerState::Starting);
+        supertag_protocol::crash_point("worker.assign", "received");
+        let Assign {
+            attempt,
+            task,
+            workspace,
+            checkpoint,
+            valid_for_ms,
+            ..
+        } = assign;
+        let mut task = task.0;
+        let checkpoint = checkpoint.map(|checkpoint| checkpoint.0);
+        let mut valid_until = Instant::now() + Duration::from_millis(valid_for_ms);
         let credential = attempt.attempt_credential.clone();
         let token = credential.as_str();
-
-        let sent = Instant::now();
-        let renewed = authority.renew(&attempt).await?;
-        let granted = match renewed {
-            Ok(granted) => granted,
-            Err(error) if retryable(&error) => {
-                wait_for_work(shutdown).await;
-                return Ok(());
-            }
-            Err(error) if lost_ownership(&error) => {
-                return authority.discard_prelaunch(&attempt);
-            }
-            Err(error) => return Err(error.into()),
-        };
-        ready();
-        let mut task = granted.task.context("execution authority has no Task")?;
-        ensure_attempt(&task, &attempt)?;
-        if let Some(workspace) = task
-            .workspace
-            .as_ref()
-            .filter(|spec| !spec.base_ref.is_empty() && spec.base_commit.is_empty())
-        {
-            // A Tag that follows a branch: this Session's first Attempt resolves it here, and the
-            // Control Plane records the first resolution for every Task of the Session.
-            let branch = workspace.base_ref.clone();
-            let commit = match workspaces
-                .resolve_ref(&workspace.workspace_id, &branch, shutdown)
-                .await
-            {
-                workspaces::BranchResolution::Commit(commit) => commit,
-                // Shutdown keeps the Starting entry, so recovery retries this exact Attempt.
-                workspaces::BranchResolution::Interrupted => return Ok(()),
-                workspaces::BranchResolution::Failed(message) => {
-                    return authority.finish(attempt, adapter::failed(&message));
-                }
-            };
-            match authority.resolve_workspace_ref(&attempt, commit).await? {
-                Ok(resolved) => {
-                    task = resolved;
-                    ensure_attempt(&task, &attempt)?;
-                }
-                Err(error) if retryable(&error) => {
-                    wait_for_work(shutdown).await;
-                    return Ok(());
-                }
-                Err(error) if lost_ownership(&error) => {
-                    return authority.discard_prelaunch(&attempt);
-                }
-                Err(error) => return Err(error.into()),
-            }
-        }
-        let valid_until = sent
-            .checked_add(Duration::from_millis(granted.valid_for_ms))
-            .context("invalid execution authority duration")?;
-        if task.state() != TaskState::Running || valid_until <= Instant::now() {
-            return authority.finish(
-                attempt,
-                adapter::failed("Execution authority expired before launch"),
-            );
-        }
-        if !supertag_protocol::mcp::supports(&task, options.harness, &options.execution_profile) {
-            return authority.finish(
-                attempt,
-                adapter::failed("Worker Host cannot enforce accepted MCP grants"),
-            );
-        }
-        if !supertag_protocol::shared_execution::supports(
-            &task,
-            options.harness,
-            options.execution_profile.shared_execution.as_ref(),
-        ) {
-            return authority.finish(
-                attempt,
-                adapter::failed("Worker Host cannot enforce accepted shared execution placement"),
-            );
-        }
-        if !supertag_protocol::network_scope::supports(
-            &task,
-            options.harness,
-            &options.execution_profile,
-        ) {
-            return authority.finish(
-                attempt,
-                adapter::failed("Worker Host cannot enforce the Task's network scope"),
-            );
-        }
-        if !supertag_protocol::output_policy::supports(
-            &task,
-            options.harness,
-            &options.execution_profile,
-        ) {
-            return authority.finish(
-                attempt,
-                adapter::failed("Worker Host cannot enforce accepted Task output requirements"),
-            );
-        }
-        if !supertag_protocol::task_artifact_inputs::supports(
-            &task,
-            options.harness,
-            &options.execution_profile,
-        ) || (!task.input_artifacts.is_empty()
-            && !task
-                .attempt_execution
-                .as_ref()
-                .is_some_and(|execution| execution.task_artifact_inputs))
-        {
-            return authority.finish(
-                attempt,
-                adapter::failed("Worker Host cannot materialize accepted Task artifact inputs"),
-            );
+        let run = async {
+        // A local Attempt's Workspace is ready once its Worklet prepared it; a remote one once
+        // its sandbox is.
+        if workspace.is_some() && options.remote_provider.is_none() {
+            report_milestone(&coordination.attempt.clone(), token, WORKSPACE_READY);
         }
         let mount_pins = task
             .workspace
@@ -298,33 +127,6 @@ impl Worker<'_> {
                 );
             }
         }
-        let checkpoint = match time::timeout_at(
-            valid_until,
-            transfers.download(&attempt, (&task.tag_id, &task.session_id)),
-        )
-        .await
-        {
-            Ok(Ok(checkpoint)) => {
-                checkpoint.filter(|checkpoint| checkpoints::resumable(options.harness, checkpoint))
-            }
-            Ok(Err(error)) if retryable(&error) || error.code() == Code::ResourceExhausted => {
-                wait_for_work(shutdown).await;
-                return Ok(());
-            }
-            Ok(Err(error)) if lost_ownership(&error) || error.code() == Code::DataLoss => {
-                return authority.finish(
-                    attempt,
-                    adapter::failed("Session checkpoint could not be restored"),
-                );
-            }
-            Ok(Err(error)) => return Err(error.into()),
-            Err(_) => {
-                return authority.finish(
-                    attempt,
-                    adapter::failed("Execution authority expired during checkpoint transfer"),
-                );
-            }
-        };
         let resolved_skills = if task.policy_snapshot.as_ref().is_some_and(|snapshot| {
             snapshot
                 .context_sets
@@ -357,68 +159,15 @@ impl Worker<'_> {
         } else {
             vec![]
         };
-        let operation_cancel = shutdown.child_token();
-        let prepared = authority
-            .keep(&attempt, &operation_cancel, async {
-                workspaces
-                    .prepare(&task, &attempt, transfers, &operation_cancel)
-                    .await
-                    .map_err(|error| {
-                        error.downcast::<Status>().unwrap_or_else(|error| {
-                            failures::noted(
-                                Status::invalid_argument(
-                                    "Task workspace could not be prepared safely",
-                                ),
-                                &format!("{error:#}"),
-                            )
-                        })
-                    })
-            })
-            .await;
-        let (workspace, mut valid_until) = match prepared {
-            Ok(prepared) => {
-                if task.waiting_for_holder.is_some() {
-                    authority.report_waiting_for_holder(&attempt, false).await;
-                }
-                // A remote Attempt's Workspace is ready once its sandbox is.
-                if options.remote_provider.is_none() {
-                    report_milestone(&coordination.attempt.clone(), token, WORKSPACE_READY);
-                }
-                prepared
-            }
-            Err(error) if retryable(&error) && !shutdown.is_cancelled() => {
-                // The Session's last delivery is not readable here yet: its holder has not pushed it,
-                // or holds a local Workspace. Say so once, so the Task shows what it waits for, then
-                // keep trying.
-                if error.code() == Code::Unavailable
-                    && error
-                        .message()
-                        .contains(supertag_protocol::WAITS_FOR_HOLDER)
-                    && task.waiting_for_holder.is_none()
-                {
-                    authority.report_waiting_for_holder(&attempt, true).await;
-                }
-                wait_for_work(shutdown).await;
-                return Ok(());
-            }
-            Err(error) => {
-                // A failed setup names itself and keeps its untrusted output, as TypeScript's
-                // `workspace-setup` failure does.
-                let message = if error.message().starts_with("Workspace setup") {
-                    error.message()
-                } else if error.message() == AUTHORITY_EXPIRED {
-                    "Execution authority expired while the Task workspace was prepared"
-                } else {
-                    "Task workspace could not be prepared safely"
-                };
-                return authority.finish(attempt, adapter::failed(message));
-            }
-        };
         if !task.input_artifacts.is_empty() && options.remote_provider.is_none() {
             let prepared = workspace
                 .as_ref()
                 .context("Task artifact input Workspace is missing")?;
-            journal.preparing_inputs(&attempt, prepared)?;
+            authority
+                .milestone(Milestone::PreparingInputs {
+                    prepared: prepared.clone(),
+                })
+                .await?;
             let cancel = shutdown.child_token();
             let staged = Box::pin(authority.keep(
                 &attempt,
@@ -461,7 +210,11 @@ impl Worker<'_> {
             let checkout = workspace
                 .as_ref()
                 .context("Workspace mount checkout is missing")?;
-            journal.preparing_inputs(&attempt, checkout)?;
+            authority
+                .milestone(Milestone::PreparingInputs {
+                    prepared: checkout.clone(),
+                })
+                .await?;
             let state = options.state_directory.clone();
             let checkout = checkout.checkout.path.clone();
             let attempt_id = attempt.attempt_id.clone();
@@ -535,8 +288,13 @@ impl Worker<'_> {
         };
         let processes = journal.processes(&attempt);
         processes.begin(options.remote_provider.is_none() && options.shared_execution.is_none())?;
-        journal.executing(&attempt, workspace.as_ref())?;
-        supertag_protocol::crash_point("worker-host.execute", "journaled");
+        authority
+            .milestone(Milestone::Executing {
+                prepared: workspace.clone(),
+            })
+            .await?;
+        supertag_protocol::crash_point("worker.execute", "journaled");
+        authority.link().state(WorkerState::Executing);
         let workspace_mcp = if supertag_protocol::mcp::workspace_servers(&task).is_empty() {
             None
         } else {
@@ -1243,19 +1001,49 @@ impl Worker<'_> {
                 } else {
                     None
                 };
+            authority.link().state(WorkerState::Finalizing);
             if let Some(workspace) = workspace {
-                journal.finalizing(
+                let checkpoint = outcome
+                    .checkpoint
+                    .take()
+                    .map(|checkpoint| journal.stage_checkpoint(checkpoint))
+                    .transpose()?;
+                let kept = captures(
+                    &mut authority,
+                    options,
                     &attempt,
-                    outcome,
-                    journal::Captured {
-                        workspace,
-                        remote_tree,
-                        outputs,
-                        file_scope,
-                    },
+                    (&workspace, workspaces, transfers),
+                    (coordination, storage, token),
+                    (outcome.succeeded, remote_tree.is_some()),
+                    outputs,
+                    shutdown,
                 )
+                .await;
+                match kept {
+                    Captures::Kept(outputs) => {
+                        let failure_detail = if outcome.succeeded {
+                            vec![]
+                        } else {
+                            failures::take_detail()
+                        };
+                        authority
+                            .outcome(Outcome::Finalizing {
+                                completion: Completion::of(&outcome),
+                                checkpoint,
+                                workspace,
+                                remote_tree,
+                                outputs,
+                                file_scope,
+                                failure_detail,
+                            })
+                            .await
+                    }
+                    Captures::Failed(failed) => authority.finish_now(failed, false).await,
+                    // The Worklet stops; recovery resumes the Attempt from its journal.
+                    Captures::Stopped => Ok(()),
+                }
             } else {
-                authority.record_finish(attempt.clone(), outcome)
+                authority.finish_now(outcome, true).await
             }
         }
         .await;
@@ -1277,7 +1065,198 @@ impl Worker<'_> {
                 .await?;
         }
         saved
+        }
+        .await;
+        match run {
+            Ok(()) => authority.settle().await,
+            Err(error) => Err(error),
+        }
     }
+}
+
+/// What the Worker kept of a turn that ended in a Workspace before it hands the outcome over.
+enum Captures {
+    /// Task outputs frozen and published, and Volume copies written back.
+    Kept(Option<Box<task_outputs::PendingOutputs>>),
+    /// A capture failed: the Attempt finishes failed.
+    Failed(supertag_protocol::v2::HarnessCompleteRequest),
+    /// The Worker is stopping before it kept them.
+    Stopped,
+}
+
+/// After a successful turn, freezes the Task outputs (a remote Workspace's capture froze them
+/// already), writes the Attempt's Workspace Volume copies back to their Volumes, and publishes
+/// the outputs, each under the Attempt's lease and retried while the failure is transient. The
+/// writes and the outputs are the Attempt's own records, so its credential carries them.
+#[allow(clippy::too_many_arguments)]
+async fn captures(
+    authority: &mut WorkerAuthority<'_>,
+    options: &Settings<'_>,
+    attempt: &Attempt,
+    (workspace, workspaces, transfers): (
+        &workspaces::PreparedWorkspace,
+        &workspaces::Workspaces,
+        &checkpoints::Transfers,
+    ),
+    (coordination, storage, token): (&AttemptClients, &HostStorage, &str),
+    (succeeded, remote): (bool, bool),
+    mut outputs: Option<Box<task_outputs::PendingOutputs>>,
+    shutdown: &CancellationToken,
+) -> Captures {
+    if !succeeded {
+        return Captures::Kept(outputs);
+    }
+    if let Some(pending) = outputs.as_ref().filter(|output| !output.frozen).cloned() {
+        if remote {
+            return Captures::Failed(adapter::failed(
+                "Task output files could not be captured safely",
+            ));
+        }
+        loop {
+            let cancel = shutdown.child_token();
+            let frozen = authority
+                .keep(attempt, &cancel, async {
+                    pending
+                        .clone()
+                        .freeze(
+                            workspace,
+                            workspaces,
+                            options.state_directory,
+                            (transfers, attempt),
+                            &cancel,
+                        )
+                        .await
+                        .map(Box::new)
+                        .map_err(|error| {
+                            let required =
+                                supertag_protocol::output_policy::REQUIRED_OUTPUT_MISSING;
+                            let message = if error
+                                .downcast_ref::<Status>()
+                                .is_some_and(|status| status.message() == required)
+                            {
+                                required
+                            } else {
+                                "Task output files could not be captured safely"
+                            };
+                            Status::failed_precondition(message)
+                        })
+                })
+                .await;
+            match frozen {
+                Ok((frozen, _)) => {
+                    outputs = Some(frozen);
+                    break;
+                }
+                Err(_) if shutdown.is_cancelled() => return Captures::Stopped,
+                Err(error) if retryable(&error) => wait_for_work(shutdown).await,
+                Err(error) => {
+                    return Captures::Failed(adapter::failed(
+                        if error.message()
+                            == supertag_protocol::output_policy::REQUIRED_OUTPUT_MISSING
+                        {
+                            supertag_protocol::output_policy::REQUIRED_OUTPUT_MISSING
+                        } else {
+                            "Task output files could not be captured safely"
+                        },
+                    ));
+                }
+            }
+        }
+    }
+    if !options.workspace_mounts.is_empty() {
+        loop {
+            // Read-write copies are written back directly to their Volumes; the Control Plane
+            // records only the summary.
+            let cancel = shutdown.child_token();
+            let mounts = options.workspace_mounts.clone();
+            let state = options.state_directory.clone();
+            let attempt_id = attempt.attempt_id.clone();
+            let copy_cancel = cancel.clone();
+            let mut client = coordination.workspace_mounts.clone();
+            let reported = authority
+                .keep(attempt, &cancel, async {
+                    let writes = tokio::task::spawn_blocking(move || {
+                        workspace_mounts::write_back(&mounts, &state, &attempt_id, &copy_cancel)
+                    })
+                    .await
+                    .map_err(|error| {
+                        failures::noted(
+                            Status::internal("Workspace Volume write-back failed"),
+                            &error,
+                        )
+                    })?
+                    .map_err(|error| {
+                        supertag_protocol::terminal_text::warn(&format!(
+                            "Workspace Volume write-back failed: {error:#}"
+                        ));
+                        Status::failed_precondition("Workspace Volume write-back failed")
+                    })?;
+                    if writes.is_empty() {
+                        return Ok(true);
+                    }
+                    let complete = writes.iter().all(|write| {
+                        write.status
+                            == supertag_protocol::v2::WorkspaceMountWriteStatus::Complete as i32
+                    });
+                    let report =
+                        supertag_protocol::v2::RecordWorkspaceMountWritesRequest { writes };
+                    client
+                        .record_writes(request(report, token).map_err(|error| {
+                            failures::noted(
+                                Status::internal("Workspace Volume write-back failed"),
+                                &error,
+                            )
+                        })?)
+                        .await
+                        .map(|_| complete)
+                })
+                .await;
+            match reported {
+                Ok((true, _)) => break,
+                // A partial or refused write-back fails the Task; its summary is recorded for
+                // `describe task`.
+                Ok((false, _)) => {
+                    return Captures::Failed(adapter::failed(
+                        "Workspace Volume write-back was partial or refused",
+                    ));
+                }
+                Err(_) if shutdown.is_cancelled() => return Captures::Stopped,
+                Err(error) if retryable(&error) => wait_for_work(shutdown).await,
+                Err(error) => {
+                    failures::note("Workspace Volume write-back failed", &error);
+                    return Captures::Failed(adapter::failed("Workspace Volume write-back failed"));
+                }
+            }
+        }
+    }
+    if let Some(mut pending) = outputs.as_ref().filter(|output| output.pending()).cloned() {
+        loop {
+            let cancel = shutdown.child_token();
+            let published = authority
+                .keep(attempt, &cancel, async {
+                    tokio::select! {
+                        result = pending.publish(options.state_directory, attempt, (coordination, storage), token) => result,
+                        _ = cancel.cancelled() => Err(Status::cancelled("Task output transfer cancelled")),
+                    }
+                })
+                .await;
+            match published {
+                Ok(_) => {
+                    outputs = Some(pending);
+                    break;
+                }
+                Err(_) if shutdown.is_cancelled() => return Captures::Stopped,
+                Err(error) if retryable(&error) || error.code() == Code::ResourceExhausted => {
+                    wait_for_work(shutdown).await;
+                }
+                Err(error) => {
+                    failures::note("Task output could not be committed", &error);
+                    return Captures::Failed(adapter::failed("Task output could not be committed"));
+                }
+            }
+        }
+    }
+    Captures::Kept(outputs)
 }
 
 /// A Task's prompt followed by the messages joined into its Attempt, oldest first.

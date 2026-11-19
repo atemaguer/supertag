@@ -52,6 +52,7 @@ mod teams;
 mod tui;
 mod volumes;
 mod work_sessions;
+mod worker_host;
 mod workspace_landings;
 mod workspace_mounts;
 
@@ -86,8 +87,7 @@ use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     negotiation::{Negotiator, ProtocolChannel, connect, fence},
     v2::{
-        HarnessKind, LarkDomain, ServiceRole, Tag, Task,
-        artifact_directory_server::ArtifactDirectoryServer,
+        LarkDomain, ServiceRole, Tag, Task, artifact_directory_server::ArtifactDirectoryServer,
         artifact_publications_server::ArtifactPublicationsServer,
         artifact_volume_directory_server::ArtifactVolumeDirectoryServer,
         attempt_inputs_server::AttemptInputsServer, connector_server::ConnectorServer,
@@ -97,7 +97,6 @@ use supertag_protocol::{
         workspace_directory_server::WorkspaceDirectoryServer,
     },
 };
-use supertag_worker_host::{WorkerOptions, WorkletOptions};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tonic::Request;
@@ -461,152 +460,12 @@ enum Command {
         )]
         notify: Vec<String>,
     },
-    /// Connect a Worker Host and run accepted Tasks through an adapter.
-    WorkerHost {
-        /// Control Plane URL this Worker Host connects to.
-        #[arg(long)]
-        control_plane: String,
-        /// Private directory for this Worker Host's enrollment and execution journal.
-        #[arg(long)]
-        state_directory: PathBuf,
-        /// Placement label for this host, such as gpu. Repeat for more labels.
-        #[arg(long = "label")]
-        labels: Vec<String>,
-        /// Run as one execution lane of a supervised Host, replaying the Host's incarnation.
-        /// The lane reports its state on stdout; its supervisor reports the Host's presence.
-        #[arg(long, hide = true, value_name = "INCARNATION_ID")]
-        supervised_lane: Option<String>,
-        #[command(flatten)]
-        adapter: Box<AdapterOptions>,
-        /// Owner-controlled JSON mappings for Workspace Volume copies: each maps a Volume to a
-        /// destination root, and an S3 Volume's credential name to an endpoint, region, and key
-        /// variables.
-        #[arg(long)]
-        workspace_mount_mappings: Option<PathBuf>,
-        /// A file Volume this host maps, as VOLUME_ID=/absolute/private/directory. A Tag that
-        /// keeps its work on it runs only on hosts that map it, and they write there directly.
-        #[arg(long = "volume", value_name = "VOLUME_ID=DIRECTORY")]
-        host_volumes: Vec<String>,
-        /// Listen for authorized artifact reads from other Worker Hosts.
-        #[arg(long)]
-        artifact_transfer_listen: Option<SocketAddr>,
-        /// Owner-only absolute directory holding the artifacts and Workspace deliveries this
-        /// host produces (default: STATE_DIRECTORY/artifacts). The Control Plane stores neither.
-        #[arg(long)]
-        artifact_directory: Option<PathBuf>,
-        /// TLS certificate for the artifact transfer listener.
-        #[arg(long, requires_all = ["artifact_transfer_listen", "artifact_transfer_tls_key"])]
-        artifact_transfer_tls_cert: Option<PathBuf>,
-        /// TLS private key for the artifact transfer listener.
-        #[arg(long, requires_all = ["artifact_transfer_listen", "artifact_transfer_tls_cert"])]
-        artifact_transfer_tls_key: Option<PathBuf>,
-        /// Pin a producing Worker Host to an HTTPS origin or literal loopback HTTP.
-        #[arg(long = "artifact-peer", value_name = "HOST_ID=ORIGIN")]
-        artifact_peers: Vec<String>,
-        /// CA certificate for the configured artifact peer endpoints.
-        #[arg(long, requires = "artifact_peers")]
-        artifact_peer_ca_file: Option<PathBuf>,
-        /// Private JSON file of the harness's provider keys and tokens, read and deleted at
-        /// start, so they stay out of this process's environment. `supertag up` writes it.
-        #[arg(long, value_name = "PATH")]
-        provider_credentials_file: Option<PathBuf>,
-        /// Executable for a private E2B workspace provider used by Cursor.
-        #[arg(long)]
-        e2b_workspace_provider: Option<PathBuf>,
-        /// Argument to the E2B provider, such as the compiled helper entrypoint.
-        #[arg(long, requires = "e2b_workspace_provider", allow_hyphen_values = true)]
-        e2b_workspace_provider_arg: Vec<std::ffi::OsString>,
-        /// Executable for a private Modal Workspace provider used by Cursor.
-        #[arg(long, conflicts_with = "e2b_workspace_provider")]
-        modal_workspace_provider: Option<PathBuf>,
-        /// Argument to the Modal provider, such as the compiled helper entrypoint.
-        #[arg(
-            long,
-            requires = "modal_workspace_provider",
-            allow_hyphen_values = true
-        )]
-        modal_workspace_provider_arg: Vec<std::ffi::OsString>,
-        /// Executable for your own sandbox provider, which must pass the conformance suite in docs/reference/sandbox-providers.md.
-        #[arg(
-            long,
-            conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider"]
-        )]
-        workspace_provider: Option<PathBuf>,
-        /// Argument to your own sandbox provider, such as its entrypoint.
-        #[arg(long, requires = "workspace_provider", allow_hyphen_values = true)]
-        workspace_provider_arg: Vec<std::ffi::OsString>,
-        /// A Worker Host variable passed to your own sandbox provider, such as its API key. Repeat for more; no other variable reaches it.
-        #[arg(long, requires = "workspace_provider", value_name = "NAME")]
-        workspace_provider_env: Vec<String>,
-        /// Run each Task's commands and file tools in a container on this machine's Docker, through the installed local-vm provider.
-        #[arg(
-            long,
-            conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider", "workspace_provider"]
-        )]
-        local_vm: bool,
-        /// Executable for the local-vm provider instead of the installed one, such as Node from a source checkout.
-        #[arg(
-            long,
-            conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider", "workspace_provider", "local_vm"]
-        )]
-        local_vm_workspace_provider: Option<PathBuf>,
-        /// Argument to the local-vm provider executable, such as its entrypoint.
-        #[arg(
-            long,
-            requires = "local_vm_workspace_provider",
-            allow_hyphen_values = true
-        )]
-        local_vm_workspace_provider_arg: Vec<std::ffi::OsString>,
-        /// Owner-only JSON catalog of HTTP and stdio MCP tools for Claude Code Tasks.
-        #[arg(
-            long,
-            conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider", "workspace_provider", "local_vm", "local_vm_workspace_provider"],
-            long_help = r#"Owner-only JSON catalog of HTTP and stdio MCP tools for Claude Code Tasks.
-
-Use {"version":1,"servers":[{"name":"catalog","url":"https://example.com/mcp","headerEnv":{"Authorization":"CATALOG_AUTH"}}]}. Set CATALOG_AUTH to the full header value in the Worker Host environment, or use "headerFile":{"Authorization":"/PATH"} to read it from a file. An HTTP server with "oauth":true instead uses the login `supertag mcp login NAME --mcp-catalog PATH` stores on this host.
-
-An HTTP server may instead mint its credentials for each Task Attempt, with exactly one of: "oauth":{"refreshTokenEnv":"VAR"} (a refresh token, or the JSON `supertag mcp login NAME --export` prints); "clientCredentials":{"clientId":"ID","clientSecretEnv":"VAR"} or {"clientId":"ID","assertionKeyEnv":"VAR"} (a client secret, or an RSA or EC private key for a signed JWT client assertion; also "clientIdEnv", "scope", and "tokenUrl"); "githubApp":{"appId":1,"installationId":2,"privateKeyEnv":"VAR"} (a GitHub App installation token); or "helper":["/path/to/command","arg"] (a host command that prints a JSON object of header names to values). Each VAR names a Worker Host variable; each *Env field may instead be the matching *File field naming a file, such as "clientSecretFile" or "privateKeyFile". Without "tokenUrl", the token endpoint comes from the server's OAuth metadata and must share the server's origin.
-
-A stdio server has a command instead of a url, such as {"name":"db","command":["npx","-y","@acme/db-mcp"],"env":{"DB_TOKEN":"ACME_DB_TOKEN"}}. The Worker Host launches it for each Task Attempt with only its env, each value read from the named Worker Host variable or, for {"file":"/PATH"}, from that file, plus HOME, PATH, and a few locale variables, and stops its process group when the Attempt ends.
-
-The optional resources.tools object maps each tool name to a list of rules, for example [{"prefix":"repository:","separator":"/","components":[{"arguments":["owner"]},{"arguments":["repo"]}]}].
-
-A preset names an official HTTP server instead of a url, with its URL and resource mapping: {"name":"github","preset":"github","headerEnv":{"Authorization":"GITHUB_MCP_AUTH"}}. Presets are github, slack, linear, and teams; teams also needs "tenantId", the Microsoft Entra tenant ID or domain. The lark preset is a stdio server that runs lark-mcp, from the @larksuiteoapi/lark-mcp npm package, on the Worker Host's PATH: {"name":"lark","preset":"lark","env":{"APP_ID":"LARK_APP_ID","APP_SECRET":"LARK_APP_SECRET"}}.
-
-A file path is absolute or starts with ~/. The file must be a regular file, not a symbolic link, owned by the Worker Host's user and not readable or writable by group or others, holding one value (a private key or refresh token JSON may span lines). The Worker Host reads it at start, so a missing file stops it, and again at each use, so a replaced file takes effect without a restart.
-
-Catalog entries expose tools only when the Task's accepted Permission Sets grant them. Calls requiring approval appear in the operator Inbox. Endpoints must use HTTPS or literal loopback HTTP."#
-        )]
-        mcp_catalog: Option<PathBuf>,
-        /// gRPC origin of a standalone shared execution provider for Cursor.
-        #[arg(long, requires = "shared_execution_environment", conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider", "workspace_provider", "local_vm", "local_vm_workspace_provider", "mcp_catalog", "workspace_id", "remote_workspace", "allow_unsandboxed_commands"])]
-        shared_execution_endpoint: Option<String>,
-        /// Environment ID expected from the provider. Set SUPERTAG_EXECUTION_ADMIN_TOKEN separately.
-        #[arg(long, requires = "shared_execution_endpoint")]
-        shared_execution_environment: Option<String>,
-        /// CA certificate for the shared execution provider endpoint.
-        #[arg(long, requires = "shared_execution_endpoint")]
-        shared_execution_ca_file: Option<PathBuf>,
-        /// Enable lease-bound commands on an operator-trusted Linux shared execution provider.
-        #[arg(
-            long,
-            requires = "shared_execution_endpoint",
-            long_help = "Enable lease-bound commands on an operator-trusted Linux shared execution provider. Commands start in the fixed root with an empty credential environment and run with the provider's configured workload UID and GID. That identity's OS filesystem and network permissions also apply."
-        )]
-        shared_execution_commands: bool,
-        /// Private host allowlist of Skill packages.
-        #[arg(long, long_help = SKILL_CATALOG_HELP)]
-        skill_catalog: Option<PathBuf>,
-        /// Seconds a Task Attempt may run before this host stops it, from 1 through 86400.
-        #[arg(long, default_value_t = local_config::DEFAULT_ATTEMPT_TIMEOUT_SECONDS, value_parser = clap::value_parser!(u64).range(1..=local_config::MAX_ATTEMPT_TIMEOUT_SECONDS))]
-        attempt_timeout_seconds: u64,
-        /// Exit after running one Task Attempt.
-        #[arg(long)]
-        once: bool,
-        /// Stay connected while an interrupted Attempt waits for an operator decision, instead of exiting.
-        #[arg(long)]
-        wait_for_recovery: bool,
-    },
+    /// Connect a Worker Host and run accepted Tasks through an adapter: its Worklet registers
+    /// the host, claims Tasks, and runs each Task Attempt in a Worker process of its own.
+    WorkerHost(Box<worker_host::WorkerHostArgs>),
+    /// One Task Attempt, run by the Worklet that starts it.
+    #[command(name = "__worker", hide = true)]
+    Worker(Box<worker_host::WorkerHostArgs>),
     /// Revoke client devices and rotate their credentials.
     Client {
         #[command(subcommand)]
@@ -886,7 +745,8 @@ fn dispatch(cli: Cli) -> Result<()> {
                         command: None | Some(enrollments::GatewayCommand::Enroll { .. }),
                         ..
                     }
-                    | Command::WorkerHost { .. }
+                    | Command::WorkerHost(_)
+                    | Command::Worker(_)
                     | Command::Host {
                         command: host_status::HostCommand::Enroll { .. },
                         ..
@@ -912,8 +772,11 @@ fn dispatch(cli: Cli) -> Result<()> {
             .build()?
             .block_on(harness::run_codex(args)),
         Command::CodexExecBridge { socket } => supertag_worker_host::run_codex_exec_bridge(&socket),
+        // A Worklet runs its pool's slots, and a Worker its Attempt, as tasks on the runtime's
+        // threads, whose large futures need more than the default stack in debug builds.
         command => tokio::runtime::Builder::new_multi_thread()
             .enable_all()
+            .thread_stack_size(16 * 1024 * 1024)
             .build()?
             .block_on(run(command)),
     }
@@ -1169,359 +1032,8 @@ async fn run(command: Command) -> Result<()> {
             )
             .await?;
         }
-        Command::WorkerHost {
-            control_plane,
-            state_directory,
-            labels,
-            supervised_lane,
-            adapter,
-            e2b_workspace_provider,
-            e2b_workspace_provider_arg,
-            modal_workspace_provider,
-            modal_workspace_provider_arg,
-            workspace_provider,
-            workspace_provider_arg,
-            workspace_provider_env,
-            local_vm,
-            local_vm_workspace_provider,
-            local_vm_workspace_provider_arg,
-            mcp_catalog,
-            shared_execution_endpoint,
-            shared_execution_environment,
-            shared_execution_ca_file,
-            shared_execution_commands,
-            skill_catalog,
-            attempt_timeout_seconds,
-            once,
-            wait_for_recovery,
-            workspace_mount_mappings,
-            host_volumes,
-            artifact_transfer_listen,
-            artifact_directory,
-            artifact_transfer_tls_cert,
-            artifact_transfer_tls_key,
-            artifact_peers,
-            artifact_peer_ca_file,
-            provider_credentials_file,
-        } => {
-            // Keep provider keys out of this process's environment and, on Linux, keep other
-            // processes of the same user from reading its memory or environment through /proc
-            // or ptrace. Both close accidental leaks; neither is a boundary against commands
-            // run without a sandbox.
-            if let Some(path) = &provider_credentials_file {
-                supertag_worker_host::load_provider_credentials(path)?;
-            }
-            #[cfg(target_os = "linux")]
-            // SAFETY: prctl(PR_SET_DUMPABLE) takes integer arguments and changes only this
-            // process's dumpable flag.
-            if unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } != 0 {
-                return Err(std::io::Error::last_os_error())
-                    .context("mark the Worker Host non-dumpable");
-            }
-            let harness = adapter.harness_kind();
-            ensure!(
-                skill_catalog.is_none()
-                    || !matches!(
-                        harness,
-                        HarnessKind::OpenaiAgents | HarnessKind::Opencode | HarnessKind::Cursor
-                    ),
-                "this Worker Host's selected harness does not load Skills"
-            );
-            let provider_model = adapter.provider_model();
-            let mut execution_profile = adapter.execution_profile()?;
-            let network_credentials = adapter
-                .network_credentials()?
-                .into_iter()
-                .map(|(name, variable)| {
-                    let source = supertag_worker_host::egress::credential_source_variable(&name);
-                    let value = std::env::var(&source).with_context(|| {
-                        format!("set {source} to the value of network credential {name}")
-                    })?;
-                    supertag_worker_host::egress::HostCredential::new(&name, &variable, value)
-                })
-                .collect::<Result<Vec<_>>>()?;
-            ensure!(
-                network_credentials.is_empty()
-                    || harness == HarnessKind::Codex
-                    || e2b_workspace_provider.is_some()
-                    || modal_workspace_provider.is_some()
-                    || local_vm
-                    || local_vm_workspace_provider.is_some(),
-                "network credentials are injected only for Codex, or through an E2B, Modal, or local-vm Workspace's egress relay, in this release"
-            );
-            let workspaces = adapter.workspace_mappings()?;
-            use supertag_worker_host::{ProviderAuthority, ProviderConfig};
-            let mut remote_provider = if let Some(executable) = e2b_workspace_provider {
-                Some(ProviderConfig {
-                    executable,
-                    arguments: e2b_workspace_provider_arg,
-                    authority: ProviderAuthority::E2b {
-                        api_key: std::env::var("E2B_API_KEY").ok(),
-                        domain: std::env::var("E2B_DOMAIN").ok(),
-                        template: std::env::var("SUPERTAG_E2B_TEMPLATE").ok(),
-                    },
-                    codex_version: None,
-                })
-            } else if let Some(executable) = modal_workspace_provider {
-                let required = |name| {
-                    let value = std::env::var(name)
-                        .with_context(|| format!("set {name} for the Modal Workspace provider"))?;
-                    ensure!(
-                        !value.trim().is_empty(),
-                        "set {name} for the Modal Workspace provider"
-                    );
-                    Ok::<_, anyhow::Error>(value)
-                };
-                Some(ProviderConfig {
-                    executable,
-                    arguments: modal_workspace_provider_arg,
-                    authority: ProviderAuthority::Modal {
-                        token_id: required("MODAL_TOKEN_ID")?,
-                        token_secret: required("MODAL_TOKEN_SECRET")?,
-                        app: required("SUPERTAG_MODAL_WORKSPACE_APP")?,
-                        endpoint: std::env::var("MODAL_SERVER_URL")
-                            .unwrap_or_else(|_| "https://api.modal.com:443".into()),
-                        environment: std::env::var("SUPERTAG_MODAL_WORKSPACE_ENVIRONMENT")
-                            .unwrap_or_else(|_| "main".into()),
-                        image: std::env::var("SUPERTAG_MODAL_WORKSPACE_IMAGE").ok(),
-                    },
-                    codex_version: None,
-                })
-            } else if let Some(executable) = workspace_provider {
-                Some(ProviderConfig {
-                    executable,
-                    arguments: workspace_provider_arg,
-                    authority: ProviderAuthority::generic(&workspace_provider_env)?,
-                    codex_version: None,
-                })
-            } else if let Some(executable) = local_vm_workspace_provider {
-                Some(ProviderConfig {
-                    executable,
-                    arguments: local_vm_workspace_provider_arg,
-                    authority: ProviderAuthority::local_vm(),
-                    codex_version: None,
-                })
-            } else if local_vm {
-                let (executable, entry) = harness::local_vm_bridge()?;
-                Some(ProviderConfig {
-                    executable,
-                    arguments: vec![entry.into_os_string()],
-                    authority: ProviderAuthority::local_vm(),
-                    codex_version: None,
-                })
-            } else {
-                None
-            };
-            ensure!(
-                (remote_provider.is_none() && shared_execution_endpoint.is_none())
-                    || workspaces.iter().all(|mapping| mapping.setup.is_none()),
-                "Workspace setup prepares local checkouts; remote Workspaces and shared execution cannot use it"
-            );
-            if let Some(config) = remote_provider.as_mut() {
-                ensure!(
-                    matches!(
-                        harness,
-                        HarnessKind::Cursor
-                            | HarnessKind::ClaudeCode
-                            | HarnessKind::Opencode
-                            | HarnessKind::Codex
-                    ) && !workspaces.is_empty()
-                        && !execution_profile.allow_unsandboxed_commands,
-                    "remote Workspace placement requires Cursor, Claude Code, OpenCode, or Codex and a named Workspace without unsandboxed commands"
-                );
-                // Codex's exec-server in each sandbox must be exactly this host's Codex.
-                if harness == HarnessKind::Codex {
-                    let version = adapter.codex_version()?;
-                    // local-vm builds its images itself, so it installs that Codex in each.
-                    if let ProviderAuthority::LocalVm { settings, .. } = &mut config.authority {
-                        settings.retain(|(name, _)| name != "SUPERTAG_LOCAL_VM_CODEX_VERSION");
-                        settings.push(("SUPERTAG_LOCAL_VM_CODEX_VERSION".into(), version.clone()));
-                    }
-                    config.codex_version = Some(version);
-                }
-                execution_profile.remote_file_workspace = true;
-                execution_profile.declared_task_outputs = true;
-                execution_profile.unverified_workspace_provider = remote_provider
-                    .as_ref()
-                    .is_some_and(|provider| !provider.verified());
-                // E2B, Modal, and local-vm carry the egress relay over their exec stream while
-                // the sandbox has no network, DNS included. Modal and local-vm were verified
-                // live (2026-11-17). E2B's carrier, a background root command with standard
-                // input, was proven only against a test double that runs the real relay program
-                // (2026-11-18), not against live E2B: there are no E2B credentials to run it.
-                execution_profile.remote_egress_relay = matches!(
-                    remote_provider.as_ref().map(|config| &config.authority),
-                    Some(
-                        ProviderAuthority::E2b { .. }
-                            | ProviderAuthority::Modal { .. }
-                            | ProviderAuthority::LocalVm { .. }
-                    )
-                );
-            }
-            let (adapter, adapter_args) = adapter.launch(attempt_timeout_seconds)?;
-            let mcp_catalog = supertag_worker_host::McpCatalog::load(
-                mcp_catalog.as_deref(),
-                supertag_worker_host::McpLoginStore::default_location().ok(),
-            )?;
-            execution_profile.mcp_servers = mcp_catalog.capabilities();
-            let shared_execution = if let Some((endpoint, environment)) =
-                shared_execution_endpoint.zip(shared_execution_environment)
-            {
-                ensure!(
-                    harness == HarnessKind::Cursor,
-                    "shared execution currently requires --harness cursor"
-                );
-                let admin = std::env::var("SUPERTAG_EXECUTION_ADMIN_TOKEN")
-                    .context("set SUPERTAG_EXECUTION_ADMIN_TOKEN for shared execution")?;
-                let ca = if let Some(path) = shared_execution_ca_file {
-                    Some(tokio::fs::read(path).await?)
-                } else {
-                    None
-                };
-                let config = supertag_worker_host::SharedExecutionConfig::connect(
-                    endpoint,
-                    environment,
-                    admin,
-                    ca,
-                    shared_execution_commands,
-                )
-                .await?;
-                execution_profile.shared_execution = Some(config.capability().clone());
-                Some(config)
-            } else {
-                None
-            };
-            execution_profile.task_artifact_inputs = !workspaces.is_empty()
-                && shared_execution.is_none()
-                && supertag_protocol::task_artifact_inputs::supports_harness(harness);
-            let tls = match artifact_transfer_tls_cert.zip(artifact_transfer_tls_key) {
-                Some((cert, key)) => Some(tonic::transport::Identity::from_pem(
-                    tokio::fs::read(cert)
-                        .await
-                        .context("read artifact listener certificate")?,
-                    tokio::fs::read(key)
-                        .await
-                        .context("read artifact listener private key")?,
-                )),
-                None => None,
-            };
-            let artifact_directory_root =
-                artifact_directory.unwrap_or_else(|| state_directory.join("artifacts"));
-            let artifact_source = Some(supertag_worker_host::ArtifactSourceConfig {
-                directory: artifact_directory_root.clone(),
-                listen: artifact_transfer_listen,
-                tls,
-            });
-            let artifact_peer_ca = match artifact_peer_ca_file {
-                Some(path) => Some(
-                    tokio::fs::read(path)
-                        .await
-                        .context("read artifact peer CA")?,
-                ),
-                None => None,
-            };
-            let artifact_peers =
-                supertag_worker_host::ArtifactPeers::configure(artifact_peers, artifact_peer_ca)?;
-            let workspace_mounts = workspace_mount_mappings
-                .as_deref()
-                .map(supertag_worker_host::WorkspaceMounts::load)
-                .transpose()?
-                .unwrap_or_default();
-            execution_profile.workspace_mounts = workspace_mounts.capabilities();
-            let host_volumes = volumes::host_mappings(
-                host_volumes,
-                &[state_directory.as_path(), artifact_directory_root.as_path()],
-            )?;
-            execution_profile.volumes = host_volumes
-                .iter()
-                .map(
-                    |(volume_id, mapping)| supertag_protocol::v2::VolumeMapping {
-                        volume_id: volume_id.clone(),
-                        source: mapping.source.clone(),
-                    },
-                )
-                .collect();
-            // The supervisor reports the Host's presence for its lanes, so it reports the profile
-            // a lane claims with, not one rebuilt from the service's settings.
-            if supervised_lane.is_some() {
-                use base64::Engine as _;
-                use prost::Message as _;
-                outln!(
-                    "profile {}",
-                    base64::engine::general_purpose::STANDARD
-                        .encode(execution_profile.encode_to_vec())
-                );
-            }
-            let disk_space = supertag_worker_host::environment::DiskSpaceSource::Directory(
-                state_directory.clone(),
-            );
-            // Test builds never hold a real sleep assertion unless a test supplies a fake one.
-            #[cfg(not(feature = "test-fixtures"))]
-            let keep_awake = supertag_worker_host::environment::KeepAwakeCommand::for_platform(
-                std::env::consts::OS,
-                std::process::id(),
-            );
-            #[cfg(feature = "test-fixtures")]
-            let (keep_awake, disk_space) = test_host_environment(disk_space)?;
-            let retire = CancellationToken::new();
-            let worklet = WorkletOptions {
-                control_plane: network::endpoint(control_plane).await?,
-                token: std::env::var("SUPERTAG_HOST_TOKEN").ok(),
-                state_directory,
-                wait_for_recovery,
-                once,
-                workspaces,
-                artifact_source,
-                artifact_peers,
-                volumes: host_volumes,
-                workspace_mounts,
-                mcp_catalog,
-                network_credentials,
-                disk_space,
-                keep_awake,
-                labels,
-                lane: supervised_lane.map(|incarnation_id| supertag_worker_host::Lane {
-                    incarnation_id,
-                    observer: std::sync::Arc::new(|state: supertag_worker_host::LaneState| {
-                        outln!("state {}", state.as_str());
-                    }),
-                    retire: retire.clone(),
-                }),
-            };
-            let worker = WorkerOptions {
-                adapter_guardian: std::env::current_exe()?,
-                adapter,
-                adapter_args,
-                harness,
-                provider_model,
-                execution_profile,
-                attempt_timeout: Duration::from_secs(attempt_timeout_seconds),
-                remote_provider,
-                shared_execution,
-                context_catalog: supertag_worker_host::context::ContextCatalog::load(
-                    skill_catalog.as_deref(),
-                )?,
-            };
-            let token = CancellationToken::new();
-            let shutdown = token.clone();
-            let signal = tokio::spawn(async move {
-                termination_signal().await;
-                shutdown.cancel();
-            });
-            // A supervisor lowering the Host's concurrency retires a lane with SIGUSR1.
-            let mut retirement =
-                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1())?;
-            let retiring = tokio::spawn(async move {
-                if retirement.recv().await.is_some() {
-                    retire.cancel();
-                }
-            });
-            let result =
-                supertag_worker_host::run(worklet, worker, token, || outln!("ready")).await;
-            signal.abort();
-            retiring.abort();
-            result?;
-        }
+        Command::WorkerHost(args) => worker_host::run_worklet(*args).await?,
+        Command::Worker(args) => worker_host::run_worker(*args).await?,
         Command::AuthKey {
             connection,
             command,

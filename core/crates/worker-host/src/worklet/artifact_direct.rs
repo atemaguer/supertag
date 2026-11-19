@@ -54,19 +54,16 @@ const AUTHORIZATION_BUDGET: Duration = Duration::from_secs(4);
 
 type Authority = ArtifactSourcesClient<InterceptedService<Channel, HostHeaders>>;
 
-/// Redeems a direct artifact grant that names this host's own storage, as the host: the Worklet
-/// handle a Worker reads a held artifact's bytes through, which holds the host credential.
+/// Redeems a direct artifact grant that names this host's own storage, as the host. In a Worker,
+/// its Worklet redeems it.
 #[derive(Clone)]
 pub(crate) struct HeldTransfers {
     client: Authority,
-    credential: crate::worklet::HostToken,
+    credential: crate::worklet::HostSigner,
 }
 
 impl HeldTransfers {
-    pub(in crate::worklet) fn new(
-        client: Authority,
-        credential: crate::worklet::HostToken,
-    ) -> Self {
+    pub(crate) fn new(client: Authority, credential: crate::worklet::HostSigner) -> Self {
         Self { client, credential }
     }
 
@@ -75,13 +72,24 @@ impl HeldTransfers {
         &self,
         request: AuthorizeArtifactTransferRequest,
     ) -> Result<AuthorizedArtifactTransfer, Status> {
-        let request = authenticated_request(request, self.credential.secret(), None)?;
-        Ok(self
-            .client
-            .clone()
-            .authorize_artifact_transfer(request)
-            .await?
-            .into_inner())
+        match &self.credential {
+            crate::worklet::HostSigner::Host(token) => {
+                let request = authenticated_request(request, token.secret(), None)?;
+                Ok(self
+                    .client
+                    .clone()
+                    .authorize_artifact_transfer(request)
+                    .await?
+                    .into_inner())
+            }
+            crate::worklet::HostSigner::Worklet(link) => {
+                link.host_call(
+                    crate::local::HostCall::AuthorizeArtifactTransfer(crate::local::Proto(request)),
+                    crate::local::Answer::of(),
+                )
+                .await
+            }
+        }
     }
 }
 
@@ -329,7 +337,7 @@ impl SourceStorage {
         &self.root
     }
 
-    fn open(path: &Path) -> Result<Self> {
+    pub(crate) fn open(path: &Path) -> Result<Self> {
         ensure!(
             path.is_absolute(),
             "artifact source directory must be absolute"

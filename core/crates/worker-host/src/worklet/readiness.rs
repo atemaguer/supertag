@@ -1,11 +1,10 @@
-//! Presence runs independently of a Task's execution lease and native process.
+//! Presence runs independently of a Task's execution lease and native process: the Worklet
+//! reports its pool's slots per harness under the host's one registration.
 
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
-use supertag_protocol::v2::{
-    HarnessExecutionProfile, HostReadiness, HostReadinessReason, ReportHostRequest,
-};
+use supertag_protocol::v2::{HarnessExecutionProfile, ReportHostRequest};
 use tokio::{sync::watch, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
@@ -13,8 +12,7 @@ use crate::{
     RegisteredHost, environment::DiskSpaceSource, request, retryable, worklet::journal::Journal,
 };
 
-/// What one execution lane can do now. A supervised lane reports it to its supervisor, which
-/// reports the Host's aggregate presence under the Host's single registration.
+/// What one slot of the Worklet's Worker pool can do now. Presence aggregates them per harness.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
     Pending,
@@ -22,66 +20,6 @@ pub enum State {
     Busy,
     Recovery,
     Stopping,
-}
-
-impl State {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Ready => "ready",
-            Self::Busy => "busy",
-            Self::Recovery => "recovery",
-            Self::Stopping => "stopping",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        [
-            Self::Pending,
-            Self::Ready,
-            Self::Busy,
-            Self::Recovery,
-            Self::Stopping,
-        ]
-        .into_iter()
-        .find(|state| state.as_str() == value)
-    }
-
-    fn report(
-        self,
-        sequence: u64,
-        harness: i32,
-        workspaces: &[String],
-        profile: &HarnessExecutionProfile,
-        disk: &DiskSpaceSource,
-        labels: &[String],
-    ) -> ReportHostRequest {
-        let (readiness, reason, available_slots) = match self {
-            Self::Pending => (HostReadiness::Pending, HostReadinessReason::Starting, 0),
-            Self::Ready => (HostReadiness::Ready, HostReadinessReason::Unspecified, 1),
-            Self::Busy => (HostReadiness::Ready, HostReadinessReason::Unspecified, 0),
-            Self::Recovery => (
-                HostReadiness::Suppressed,
-                HostReadinessReason::RecoveryRequired,
-                0,
-            ),
-            Self::Stopping => (HostReadiness::Suppressed, HostReadinessReason::Stopping, 0),
-        };
-        ReportHostRequest {
-            sequence,
-            capacity: 1,
-            available_slots,
-            readiness: readiness as i32,
-            reason: reason as i32,
-            harness_kind: harness,
-            workspace_ids: workspaces.to_vec(),
-            execution_profile: Some(profile.clone()),
-            disk_space: disk.sample(),
-            labels: labels.to_vec(),
-            harnesses: vec![],
-            machine_id: machine_id(),
-        }
-    }
 }
 
 /// This machine and user's identifier, read once. Empty when it can't be read or created, so
@@ -92,70 +30,72 @@ pub(crate) fn machine_id() -> String {
         .clone()
 }
 
-/// Receives a supervised lane's state changes in place of a direct presence report.
-pub type LaneObserver = Arc<dyn Fn(State) + Send + Sync>;
-
-pub(crate) enum Reporter {
-    Host(Box<Presence>),
-    Lane {
-        observer: LaneObserver,
-        last: std::sync::Mutex<Option<State>>,
-    },
+/// The slots of the Worker pool and their states, which presence reports and `supertag ps`
+/// reads.
+#[derive(Default)]
+pub(crate) struct Slots {
+    states: std::sync::Mutex<std::collections::BTreeMap<String, (usize, State)>>,
+    changed: tokio::sync::Notify,
 }
 
-impl Reporter {
-    pub(crate) fn lane(observer: LaneObserver) -> Self {
-        observer(State::Pending);
-        Self::Lane {
-            observer,
-            last: std::sync::Mutex::new(Some(State::Pending)),
+impl Slots {
+    pub(crate) fn set(&self, slot: &str, harness: usize, state: State) {
+        let mut states = self
+            .states
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if states.get(slot) != Some(&(harness, state)) {
+            states.insert(slot.to_owned(), (harness, state));
+            drop(states);
+            self.changed.notify_one();
         }
     }
 
-    /// Waits briefly for the Host's first accepted report. A lane's supervisor
-    /// reports the Host's presence, including its labels, before it starts lanes.
-    pub(crate) async fn first_report(&self, wait: Duration) {
-        if let Self::Host(presence) = self {
-            presence.first_report(wait).await;
+    /// Forgets a slot a lowered pool size retired.
+    pub(crate) fn remove(&self, slot: &str) {
+        let removed = self
+            .states
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(slot)
+            .is_some();
+        if removed {
+            self.changed.notify_one();
         }
     }
 
-    pub(crate) fn set(&self, state: State) {
-        match self {
-            Self::Host(presence) => presence.set(state),
-            Self::Lane { observer, last } => {
-                let mut last = last.lock().expect("lane state lock");
-                if *last != Some(state) {
-                    *last = Some(state);
-                    observer(state);
-                }
-            }
-        }
+    pub(crate) fn snapshot(&self) -> Vec<(String, usize, State)> {
+        self.states
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .iter()
+            .map(|(name, (harness, state))| (name.clone(), *harness, *state))
+            .collect()
     }
 
-    pub(crate) async fn stop(self) -> Result<()> {
-        match self {
-            Self::Host(presence) => presence.stop().await,
-            Self::Lane { observer, .. } => {
-                observer(State::Stopping);
-                Ok(())
-            }
-        }
+    pub(crate) fn any_busy(&self) -> bool {
+        self.snapshot()
+            .iter()
+            .any(|(_, _, state)| *state == State::Busy)
     }
+
+    pub(crate) fn notify(&self) {
+        self.changed.notify_one();
+    }
+}
+
+/// One harness the pool runs: its kind, the execution profile it reports now, and its slots.
+pub(crate) struct Harness {
+    pub(crate) kind: supertag_protocol::v2::HarnessKind,
+    pub(crate) profile: Profile,
 }
 
 pub(crate) struct Presence {
-    state: watch::Sender<State>,
     cancel: CancellationToken,
     task: Option<JoinHandle<Result<()>>>,
-    journal: Arc<Journal>,
+    report: Arc<dyn Fn(bool) -> Result<ReportHostRequest> + Send + Sync>,
     client: RegisteredHost,
     token: String,
-    harness: i32,
-    workspaces: Vec<String>,
-    profile: Profile,
-    disk: DiskSpaceSource,
-    labels: Vec<String>,
     reported: watch::Receiver<bool>,
 }
 
@@ -213,34 +153,64 @@ const MAX_LABELS: usize = 64;
 pub(crate) type Profile = Arc<dyn Fn() -> HarnessExecutionProfile + Send + Sync>;
 
 impl Presence {
+    /// Reports the host's presence whenever a slot changes state or the pool size changes, and
+    /// at least every five seconds. A fenced or revoked registration cancels `shutdown`.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn start(
         journal: Arc<Journal>,
         disk: DiskSpaceSource,
         client: RegisteredHost,
         token: String,
-        harness: i32,
-        workspaces: Vec<String>,
-        (profile, labels): (Profile, Vec<String>),
+        (harnesses, capacity): (Vec<Harness>, watch::Receiver<u32>),
+        (workspaces, labels): (Vec<String>, Vec<String>),
+        slots: Arc<Slots>,
         shutdown: CancellationToken,
     ) -> Self {
         let cancel = shutdown.child_token();
-        let (state, mut receiver) = watch::channel(State::Pending);
         let (reported_sender, reported) = watch::channel(false);
+        let build = {
+            let slots = slots.clone();
+            let capacity = capacity.clone();
+            move |stopping: bool| -> Result<ReportHostRequest> {
+                let sequence = journal.next_report_sequence()?;
+                let capacity = *capacity.borrow();
+                let entries = harnesses
+                    .iter()
+                    .map(|harness| crate::worklet::shared_host::HarnessSlots {
+                        harness: harness.kind,
+                        profile: (harness.profile)(),
+                        capacity,
+                    })
+                    .collect::<Vec<_>>();
+                let states = slots
+                    .snapshot()
+                    .into_iter()
+                    .map(|(_, harness, state)| {
+                        (harness, if stopping { State::Stopping } else { state })
+                    })
+                    .collect::<Vec<_>>();
+                let mut report = crate::worklet::shared_host::aggregate(
+                    sequence,
+                    &entries,
+                    &states,
+                    &workspaces,
+                );
+                report.labels = labels.clone();
+                report.disk_space = disk.sample();
+                report.machine_id = machine_id();
+                Ok(report)
+            }
+        };
+        let build: Arc<dyn Fn(bool) -> Result<ReportHostRequest> + Send + Sync> = Arc::new(build);
         let mut reporter = Self {
-            state,
             cancel: cancel.clone(),
             task: None,
-            journal: journal.clone(),
+            report: build.clone(),
             client: client.clone(),
             token: token.clone(),
-            harness,
-            workspaces: workspaces.clone(),
-            profile: profile.clone(),
-            disk: disk.clone(),
-            labels: labels.clone(),
             reported,
         };
+        let mut capacity = capacity;
         reporter.task = Some(tokio::spawn(async move {
             let mut client = client;
             let mut ticker = tokio::time::interval(Duration::from_secs(5));
@@ -249,19 +219,17 @@ impl Presence {
                 tokio::select! {
                     biased;
                     _ = cancel.cancelled() => return Ok(()),
-                    changed = receiver.changed() => { if changed.is_err() { return Ok(()); } },
+                    () = slots.changed.notified() => {},
+                    changed = capacity.changed() => { if changed.is_err() { return Ok(()); } },
                     _ = ticker.tick() => {},
                 }
-                let state = *receiver.borrow_and_update();
-                let sequence = match journal.next_report_sequence() {
-                    Ok(sequence) => sequence,
+                let report = match build(false) {
+                    Ok(report) => report,
                     Err(error) => {
                         shutdown.cancel();
                         return Err(error);
                     }
                 };
-                let report =
-                    state.report(sequence, harness, &workspaces, &profile(), &disk, &labels);
                 let response = tokio::select! {
                     _ = cancel.cancelled() => return Ok(()),
                     response = client.report_host(request(report, &token)?) => response,
@@ -282,22 +250,10 @@ impl Presence {
         reporter
     }
 
-    /// Waits briefly for the first accepted report, so the Control Plane knows
-    /// this host's labels before it places work on it.
-    pub(crate) async fn first_report(&self, wait: Duration) {
-        let mut reported = self.reported.clone();
-        let _ = tokio::time::timeout(wait, reported.wait_for(|reported| *reported)).await;
-    }
-
-    pub(crate) fn set(&self, state: State) {
-        self.state.send_if_modified(|current| {
-            if *current == state {
-                false
-            } else {
-                *current = state;
-                true
-            }
-        });
+    /// Whether a report was accepted yet, so the Control Plane knows this host's labels before
+    /// it places work on it.
+    pub(crate) fn reported(&self) -> watch::Receiver<bool> {
+        self.reported.clone()
     }
 
     pub(crate) async fn stop(mut self) -> Result<()> {
@@ -306,14 +262,7 @@ impl Presence {
             Some(task) => task.await?,
             None => Ok(()),
         };
-        let report = State::Stopping.report(
-            self.journal.next_report_sequence()?,
-            self.harness,
-            &self.workspaces,
-            &(self.profile)(),
-            &self.disk,
-            &self.labels,
-        );
+        let report = (self.report)(true)?;
         // Best effort: on a partition the last observation naturally expires. Never
         // prevent journal cleanup or treat a presence reply as execution authority.
         let _ = self.client.report_host(request(report, &self.token)?).await;

@@ -813,19 +813,58 @@ fn read_blob(path: &Path, reference: &BlobReference) -> Result<Vec<u8>, Status> 
 }
 
 impl Transfers {
+    /// Verifies a Worker's output remote for it, as the host.
+    pub(crate) async fn verify_output_remote_request(
+        &self,
+        verify: VerifyWorkspaceOutputRemoteRequest,
+    ) -> Result<supertag_protocol::v2::VerifyWorkspaceOutputRemoteResponse, Status> {
+        let mut request = request(verify, self.secret()?).map_err(|error| {
+            crate::failures::noted(
+                Status::internal("cannot authenticate Git output verification"),
+                &error,
+            )
+        })?;
+        request.set_timeout(Duration::from_secs(32));
+        Ok(
+            TransfersClient::with_interceptor(self.channel.clone(), self.headers.clone())
+                .verify_workspace_output_remote(request)
+                .await?
+                .into_inner(),
+        )
+    }
+}
+
+/// The verified output remote, when it is an exact GitHub HTTPS URL.
+fn github_remote(remote: Option<String>) -> Option<String> {
+    remote.filter(|remote| {
+        supertag_protocol::git_outputs::remote_url(remote).is_some_and(|url| {
+            url.scheme() == "https"
+                && url.host_str() == Some("github.com")
+                && url.as_str() == remote
+        })
+    })
+}
+
+impl Transfers {
     async fn verify_output_remote(
         &self,
         attempt: &Attempt,
         commit: &str,
     ) -> Result<Option<String>, Status> {
-        let mut request = request(
-            VerifyWorkspaceOutputRemoteRequest {
-                attempt: Some(attempt.inspect()),
-                commit: commit.into(),
-            },
-            self.credential.secret(),
-        )
-        .map_err(|error| {
+        let verify = VerifyWorkspaceOutputRemoteRequest {
+            attempt: Some(attempt.inspect()),
+            commit: commit.into(),
+        };
+        if let crate::worklet::HostSigner::Worklet(link) = &self.credential {
+            let response: supertag_protocol::v2::VerifyWorkspaceOutputRemoteResponse = link
+                .host_call(
+                    crate::local::HostCall::VerifyOutputRemote(crate::local::Proto(verify)),
+                    crate::local::Answer::of(),
+                )
+                .await?;
+            return Ok(github_remote(response.remote));
+        }
+        let mut request = request(verify, self.secret()?).map_err(|error| {
             crate::failures::noted(
                 Status::internal("cannot authenticate Git output verification"),
                 &error,
@@ -837,13 +876,7 @@ impl Transfers {
                 .verify_workspace_output_remote(request)
                 .await?
                 .into_inner();
-        Ok(response.remote.filter(|remote| {
-            supertag_protocol::git_outputs::remote_url(remote).is_some_and(|url| {
-                url.scheme() == "https"
-                    && url.host_str() == Some("github.com")
-                    && url.as_str() == remote
-            })
-        }))
+        Ok(github_remote(response.remote))
     }
 
     /// A credential to read this Attempt's Workspace source, or with `merge` its merge commit,
@@ -860,7 +893,7 @@ impl Transfers {
                 permission: WorkspaceGitPermission::Read as i32,
                 ..Default::default()
             },
-            self.credential.secret(),
+            self.secret()?,
         )
         .map_err(|error| {
             crate::failures::noted(
@@ -931,7 +964,7 @@ impl Transfers {
                 attempt: Some(attempt.inspect()),
                 delivery: Some(reference.clone()),
             },
-            self.credential.secret(),
+            self.secret()?,
         )
         .map_err(|error| {
             crate::failures::noted(
@@ -961,13 +994,12 @@ impl Transfers {
         &self,
         attempt: &Attempt,
     ) -> Result<Option<(WorkspaceDeliveryReference, BlobHolder)>, Status> {
-        let mut upstream =
-            request(attempt.inspect(), self.credential.secret()).map_err(|error| {
-                crate::failures::noted(
-                    Status::internal("cannot authenticate the continuation lookup"),
-                    &error,
-                )
-            })?;
+        let mut upstream = request(attempt.inspect(), self.secret()?).map_err(|error| {
+            crate::failures::noted(
+                Status::internal("cannot authenticate the continuation lookup"),
+                &error,
+            )
+        })?;
         upstream.set_timeout(Duration::from_secs(30));
         let continuation =
             TransfersClient::with_interceptor(self.channel.clone(), self.headers.clone())
@@ -1162,6 +1194,7 @@ mod tests {
             remote_tree: None,
             outputs: None,
             file_scope: None,
+            failure_detail: vec![],
         })?;
         drop(journal);
         drop(workspaces);

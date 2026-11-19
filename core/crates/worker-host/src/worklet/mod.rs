@@ -13,6 +13,8 @@ pub(crate) mod enrollment;
 pub(crate) mod finish;
 pub(crate) mod journal;
 pub(crate) mod landing;
+pub(crate) mod launch;
+pub(crate) mod pool;
 pub(crate) mod readiness;
 pub(crate) mod recovery;
 pub(crate) mod registration;
@@ -24,20 +26,39 @@ pub(crate) mod workspaces;
 use std::{collections::BTreeMap, path::PathBuf};
 
 use supertag_workspaces::artifact_volumes::FileVolume;
-use tokio_util::sync::CancellationToken;
 
 use crate::{
-    ArtifactPeers, ArtifactSourceConfig, LaneObserver, McpCatalog, WorkspaceMapping,
+    ArtifactPeers, ArtifactSourceConfig, McpCatalog, WorkerOptions, WorkspaceMapping,
     WorkspaceMounts, environment, worker::egress,
 };
 
 /// This Worker Host's enrolled credential, which authenticates its lease operations. Only the
-/// Worklet reads it. The handles it lends a Worker (the lease, checkpoint and delivery transfers,
-/// held artifact transfers, Volume object grants) hold it privately and make host calls with it,
-/// so a Worker cannot read it but does make those host calls through them, until it runs as a
-/// process of its own. A Worker's data calls carry its Attempt credential instead.
+/// Worklet process holds it. A Worker's data calls carry its Attempt credential instead, and
+/// the host calls a Worker needs (lease checks, Volume grants, held transfers, review reads) go
+/// to its Worklet over the local contract: see `HostSigner`.
 #[derive(Clone)]
 pub(crate) struct HostToken(String);
+
+/// Who signs a host call a handle makes: the Worklet, with the host credential it holds, or, in
+/// a Worker, its Worklet over the local contract, which makes the call for the Worker's own
+/// Attempt only.
+#[derive(Clone)]
+pub(crate) enum HostSigner {
+    Host(HostToken),
+    Worklet(crate::local::WorkletLink),
+}
+
+impl HostSigner {
+    /// The host credential, which only the Worklet's own handles hold.
+    pub(crate) fn host(&self) -> Result<&HostToken, tonic::Status> {
+        match self {
+            Self::Host(token) => Ok(token),
+            Self::Worklet(_) => Err(tonic::Status::permission_denied(
+                "only the Worklet makes this host call",
+            )),
+        }
+    }
+}
 
 impl HostToken {
     pub(in crate::worklet) fn new(secret: String) -> Self {
@@ -73,7 +94,7 @@ impl HostStorage {
         channel: tonic::transport::Channel,
         headers: crate::HostHeaders,
     ) -> Self {
-        let credential = HostToken::new("host-token".into());
+        let credential = HostSigner::Host(HostToken::new("host-token".into()));
         Self {
             transfers: checkpoints::Transfers::new(
                 channel.clone(),
@@ -123,8 +144,6 @@ pub struct WorkletOptions {
     pub workspace_mounts: WorkspaceMounts,
     /// The MCP servers this host offers, with the logins it keeps for them.
     pub mcp_catalog: McpCatalog,
-    /// Credentials the egress proxy injects for Tasks whose network scope names them.
-    pub network_credentials: Vec<egress::HostCredential>,
     /// Where reports sample free disk space, normally the state directory's filesystem.
     pub disk_space: environment::DiskSpaceSource,
     /// The OS command that keeps the machine awake while an Attempt runs, if any.
@@ -132,18 +151,28 @@ pub struct WorkletOptions {
     /// Operator-declared placement labels. The host adds its operating system
     /// and architecture; the Control Plane derives harness and Workspace labels.
     pub labels: Vec<String>,
-    /// Set when a supervisor runs this process as one execution lane of a shared Host.
-    pub lane: Option<Lane>,
+    /// The harnesses this host runs, each in its own slots of the Worker pool.
+    pub harnesses: Vec<HarnessService>,
+    /// How many Attempts of each harness run at once: the pool's slots per harness. A change
+    /// takes effect without a restart; a lowered size lets running Attempts finish.
+    pub concurrency: tokio::sync::watch::Receiver<u32>,
 }
 
-/// One supervised execution lane. Every lane of a Host registers the Host's single
-/// incarnation, so sibling lanes never replace each other's generation. The supervisor
-/// owns the Host's presence report and receives this lane's state instead.
+/// One harness a Worklet runs: what its Workers run, how one is started, and the secrets the
+/// Worklet keeps for it and hands each of its Workers.
+pub struct HarnessService {
+    pub worker: WorkerOptions,
+    pub launch: WorkerLaunch,
+    /// This harness's provider keys and tokens, read from the file its supervisor wrote.
+    pub provider_credentials: BTreeMap<String, String>,
+    /// Credentials the egress proxy injects for Tasks whose network scope names them.
+    pub network_credentials: Vec<egress::HostCredential>,
+}
+
+/// How the Worklet starts a Worker: the program and its arguments. The Worker reads its
+/// options from them, as the Worklet read the harness's.
 #[derive(Clone)]
-pub struct Lane {
-    pub incarnation_id: String,
-    pub observer: LaneObserver,
-    /// Cancelled when the supervisor lowers the Host's concurrency below this lane: the lane
-    /// claims no more work and returns once it holds no Attempt, so its journal is left empty.
-    pub retire: CancellationToken,
+pub struct WorkerLaunch {
+    pub program: PathBuf,
+    pub args: Vec<std::ffi::OsString>,
 }

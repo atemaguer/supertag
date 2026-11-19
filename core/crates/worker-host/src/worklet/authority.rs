@@ -10,12 +10,12 @@ use supertag_protocol::redaction::SensitiveValue;
 use supertag_protocol::v2::{
     AppendEventRequest, AskQuestionRequest, AttemptAuthority, AttemptCapabilities, AttemptHistory,
     CommitContextResolutionRequest, ContextResolutionManifest, GetAttemptCapabilitiesRequest,
-    GetAttemptHistoryRequest, GetContextPinsRequest, HarnessCompleteRequest, HostRecord,
-    InspectAttemptRequest, ObjectiveQuestion, PublishTaskTextRequest, PublishTaskTextResponse,
-    ReportAppliedLimitsRequest, ReportAppliedLimitsResponse, ReportAttemptMilestoneRequest,
-    ReportAttemptMilestoneResponse, ReportAttemptUsageRequest, ReportAttemptUsageResponse,
-    ReportNetworkLogRequest, ReportNetworkLogResponse, ResolveWorkspaceRefRequest,
-    StartTaskRequest, StartTaskResponse, Task, TaskEvent, TaskState,
+    GetAttemptHistoryRequest, GetContextPinsRequest, HarnessCompleteRequest, InspectAttemptRequest,
+    ObjectiveQuestion, PublishTaskTextRequest, PublishTaskTextResponse, ReportAppliedLimitsRequest,
+    ReportAppliedLimitsResponse, ReportAttemptMilestoneRequest, ReportAttemptMilestoneResponse,
+    ReportAttemptUsageRequest, ReportAttemptUsageResponse, ReportNetworkLogRequest,
+    ReportNetworkLogResponse, ResolveWorkspaceRefRequest, StartTaskRequest, StartTaskResponse,
+    Task, TaskEvent, TaskState,
 };
 use tokio::time::{self, Instant};
 use tokio_util::sync::CancellationToken;
@@ -25,23 +25,19 @@ use crate::{
     RegisteredHost, ensure_attempt, request, retryable,
     worklet::{
         HostToken, cleanup_failure,
-        finish::{record_finish, save_finish},
+        finish::save_finish,
         journal::{Attempt, Journal},
         recovery::{cleanup_terminal, purge_discarded},
         workspaces::Workspaces,
     },
 };
 
-/// The lease-bound actions a Worker takes for its Attempt: start it, renew its lease, keep the
-/// lease while an operation or a cleanup runs, lend the harness bridge a `Lease`, report what it
-/// waits for, hand its outcome to the Worklet for Finish, and give the Attempt back before
-/// launch. The Worklet's registration, Control Plane client, host credential, journal, and
-/// checkouts stay behind this handle: a Worker's data calls carry only its Attempt credential,
-/// while the lease-bound actions here, and the host storage it lends, are host calls.
+/// The lease-bound actions the Worklet takes for a claimed Attempt before it assigns it to a
+/// Worker: start it, renew its lease, keep the lease while its checkout is prepared, report what
+/// it waits for, finish it with the Worklet's own verdict, and give it back before launch.
 pub(crate) struct Authority<'a> {
     host: &'a mut RegisteredHost,
     token: &'a HostToken,
-    registration: &'a HostRecord,
     shutdown: &'a CancellationToken,
     journal: &'a Journal,
     workspaces: &'a Workspaces,
@@ -51,7 +47,7 @@ pub(crate) struct Authority<'a> {
 
 impl<'a> Authority<'a> {
     pub(crate) fn new(
-        (host, token, registration): (&'a mut RegisteredHost, &'a HostToken, &'a HostRecord),
+        (host, token): (&'a mut RegisteredHost, &'a HostToken),
         shutdown: &'a CancellationToken,
         (journal, workspaces): (&'a Journal, &'a Workspaces),
         (state_directory, once): (&'a Path, bool),
@@ -59,27 +55,11 @@ impl<'a> Authority<'a> {
         Self {
             host,
             token,
-            registration,
             shutdown,
             journal,
             workspaces,
             state_directory,
             once,
-        }
-    }
-
-    /// This host's registration, which the Attempt's sandbox and shared-execution records name.
-    pub(crate) fn registration(&self) -> &'a HostRecord {
-        self.registration
-    }
-
-    /// The handle the Worker's harness bridge renews and checks the Attempt's lease through
-    /// while the harness runs.
-    pub(crate) fn lease(&self, attempt: &Attempt) -> Lease {
-        Lease {
-            host: self.host.clone(),
-            token: self.token.clone(),
-            attempt: attempt.inspect(),
         }
     }
 
@@ -165,39 +145,14 @@ impl<'a> Authority<'a> {
         .await
     }
 
-    /// Keeps the Attempt's lease while `cleanup` runs; see `with_cleanup_authority`.
-    pub(crate) async fn keep_for_cleanup(
-        &mut self,
-        attempt: &Attempt,
-        cleanup: impl std::future::Future<Output = Result<()>>,
-    ) -> Result<()> {
-        with_cleanup_authority(
-            self.host,
-            attempt,
-            self.token.secret(),
-            self.shutdown,
-            cleanup,
-        )
-        .await
-    }
-
     /// Records whether the Attempt waits for the Worker Host holding its Session's last delivery.
     pub(crate) async fn report_waiting_for_holder(&mut self, attempt: &Attempt, waiting: bool) {
         report_waiting_for_holder(self.host, attempt, self.token.secret(), waiting).await;
     }
 
-    /// Hands the Worker's own verdict to the Worklet, which reports it with Finish.
+    /// Records the Worklet's own verdict, which it reports with Finish.
     pub(crate) fn finish(&self, attempt: Attempt, outcome: HarnessCompleteRequest) -> Result<()> {
         save_finish(self.journal, attempt, outcome)
-    }
-
-    /// Hands the adapter's outcome to the Worklet, which reports it with Finish.
-    pub(crate) fn record_finish(
-        &self,
-        attempt: Attempt,
-        outcome: HarnessCompleteRequest,
-    ) -> Result<()> {
-        record_finish(self.journal, attempt, outcome)
     }
 
     /// Leaves an unstarted reservation, which never launched anything, for the Control Plane's
@@ -272,20 +227,34 @@ relay! {
 
 /// The lease-bound calls a Worker's harness bridge makes while the harness runs: renew the
 /// Attempt's lease, check it is still held, and report the execution limits the adapter
-/// applied. Cloneable and `Send`, so the bridge's services each hold one.
+/// applied. In a Worker its Worklet makes them, for the Worker's own Attempt only. Cloneable and
+/// `Send`, so the bridge's services each hold one.
 #[derive(Clone)]
 pub(crate) struct Lease {
     host: RegisteredHost,
-    token: HostToken,
+    token: crate::worklet::HostSigner,
     attempt: InspectAttemptRequest,
 }
 
 impl Lease {
+    /// The lease a Worker holds through its Worklet.
+    pub(crate) fn through(
+        host: RegisteredHost,
+        link: crate::local::WorkletLink,
+        attempt: InspectAttemptRequest,
+    ) -> Self {
+        Self {
+            host,
+            token: crate::worklet::HostSigner::Worklet(link),
+            attempt,
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn unconnected(host: RegisteredHost, attempt: InspectAttemptRequest) -> Self {
         Self {
             host,
-            token: HostToken::new("host-token".into()),
+            token: crate::worklet::HostSigner::Host(HostToken::new("host-token".into())),
             attempt,
         }
     }
@@ -293,27 +262,55 @@ impl Lease {
     fn request(&self, timeout: Duration) -> Result<Request<InspectAttemptRequest>, Status> {
         let mut request = supertag_protocol::authenticated_request(
             self.attempt.clone(),
-            self.token.secret(),
+            self.token.host()?.secret(),
             None,
         )?;
         request.set_timeout(timeout);
         Ok(request)
     }
 
-    /// The host credential, as a value the harness bridge redacts from what the harness says.
-    /// The harness never receives it, but runs as the OS account whose state directory holds it.
-    pub(crate) fn redaction(&self) -> SensitiveValue {
-        SensitiveValue::High(self.token.secret().to_owned())
+    /// The host credential, as a value the harness bridge redacts from what the harness says,
+    /// when this process holds it. A Worker does not: its bridge redacts every value shaped like
+    /// an enrolled credential instead.
+    pub(crate) fn redaction(&self) -> Option<SensitiveValue> {
+        match &self.token {
+            crate::worklet::HostSigner::Host(token) => {
+                Some(SensitiveValue::High(token.secret().to_owned()))
+            }
+            crate::worklet::HostSigner::Worklet(_) => None,
+        }
     }
 
     /// Renews the Attempt's lease once; the call carries `timeout`.
     pub(crate) async fn renew(&self, timeout: Duration) -> Result<AttemptAuthority, Status> {
+        if let crate::worklet::HostSigner::Worklet(link) = &self.token {
+            return time::timeout(
+                timeout,
+                link.host_call(
+                    crate::local::HostCall::Renew(crate::local::Proto(self.attempt.clone())),
+                    crate::local::Answer::of(),
+                ),
+            )
+            .await
+            .map_err(|_| Status::deadline_exceeded("lease renewal timed out"))?;
+        }
         let request = self.request(timeout)?;
         Ok(self.host.clone().renew_attempt(request).await?.into_inner())
     }
 
     /// Reads the Attempt's Task to check the lease is still held; the call carries `timeout`.
     pub(crate) async fn inspect(&self, timeout: Duration) -> Result<Task, Status> {
+        if let crate::worklet::HostSigner::Worklet(link) = &self.token {
+            return time::timeout(
+                timeout,
+                link.host_call(
+                    crate::local::HostCall::Inspect(crate::local::Proto(self.attempt.clone())),
+                    crate::local::Answer::of(),
+                ),
+            )
+            .await
+            .map_err(|_| Status::deadline_exceeded("lease inspection timed out"))?;
+        }
         let request = self.request(timeout)?;
         Ok(self
             .host
@@ -330,11 +327,22 @@ impl Lease {
         &self,
         mut request: Request<ReportAppliedLimitsRequest>,
     ) -> Result<Response<ReportAppliedLimitsResponse>, Status> {
-        let bearer = format!("Bearer {}", self.token.secret())
+        request.get_mut().attempt = Some(self.attempt.clone());
+        if let crate::worklet::HostSigner::Worklet(link) = &self.token {
+            return link
+                .host_call(
+                    crate::local::HostCall::ReportAppliedLimits(crate::local::Proto(
+                        request.into_inner(),
+                    )),
+                    crate::local::Answer::of(),
+                )
+                .await
+                .map(Response::new);
+        }
+        let bearer = format!("Bearer {}", self.token.host()?.secret())
             .parse::<tonic::metadata::MetadataValue<_>>()
             .map_err(|_| Status::internal("invalid host credential"))?;
         request.metadata_mut().insert("authorization", bearer);
-        request.get_mut().attempt = Some(self.attempt.clone());
         self.host.clone().report_applied_limits(request).await
     }
 }
@@ -351,6 +359,15 @@ pub(crate) async fn renew_running_attempt(
         })?)
         .await?
         .into_inner();
+    running_until(sent, &response, attempt)
+}
+
+/// How long the Attempt's lease lasts, from a renewal sent at `sent`, while its Task runs.
+pub(crate) fn running_until(
+    sent: Instant,
+    response: &AttemptAuthority,
+    attempt: &Attempt,
+) -> Result<Instant, Status> {
     let task = response
         .task
         .as_ref()
@@ -381,6 +398,28 @@ pub(crate) async fn with_cleanup_authority(
     shutdown: &CancellationToken,
     cleanup: impl std::future::Future<Output = Result<()>>,
 ) -> Result<()> {
+    let (host, attempt, token) = (host.clone(), attempt.clone(), token.to_owned());
+    keep_for_cleanup(
+        move || {
+            let (mut host, attempt, token) = (host.clone(), attempt.clone(), token.clone());
+            async move { renew_running_attempt(&mut host, &attempt, &token).await }
+        },
+        shutdown,
+        cleanup,
+    )
+    .await
+}
+
+/// Runs `cleanup` while `renew` keeps the lease, every two seconds, until the lease ends or
+/// `shutdown`; cleanup continues after either.
+pub(crate) async fn keep_for_cleanup<F>(
+    mut renew: impl FnMut() -> F,
+    shutdown: &CancellationToken,
+    cleanup: impl std::future::Future<Output = Result<()>>,
+) -> Result<()>
+where
+    F: std::future::Future<Output = Result<Instant, Status>>,
+{
     let keep_lease = async {
         let mut pulse = time::interval(Duration::from_secs(2));
         pulse.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
@@ -390,7 +429,7 @@ pub(crate) async fn with_cleanup_authority(
                 _ = shutdown.cancelled() => break,
                 _ = pulse.tick() => {},
             }
-            match renew_running_attempt(host, attempt, token).await {
+            match renew().await {
                 Ok(_) => {}
                 Err(error) if retryable(&error) => {}
                 Err(_) => break,
@@ -646,7 +685,9 @@ mod tests {
         assert_eq!(
             supertag_protocol::redaction::redact_text(
                 "read host-token from the state directory",
-                &[lease.redaction()],
+                &[lease
+                    .redaction()
+                    .expect("the Worklet's lease holds the credential")],
                 false
             ),
             "read [REDACTED] from the state directory"
