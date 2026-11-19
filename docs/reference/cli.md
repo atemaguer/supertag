@@ -49,7 +49,7 @@ Commands:
   config                Print the resolved supertag.yaml that supertag up runs
   control-plane         Run the Control Plane: the public API for operator clients, Worker Hosts, and Gateways, and the service that stores work and schedules execution
   gateway               Run a Gateway: the endpoint clients and operators connect to, which forwards their calls to the Control Plane, and collaboration surface webhooks and connections, reply delivery, and operator notifications as gateway:NAME. Or enroll, revoke, and rotate the credentials of Gateways
-  worker-host           Connect a Worker Host and run accepted Tasks through an adapter
+  worklet               Run this Worker Host's Worklet, which connects the host and runs accepted Tasks
   client                Revoke client devices and rotate their credentials
   auth-key              Create and revoke Auth Keys that enroll Worker Hosts, Gateways, and clients
   connect               Save a Gateway under a name for `--gateway NAME` and the terminal UI. Reads one secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a masked prompt in a terminal: an operator token is checked and saved; a client Auth Key (stak_...) enrolls this device as client:NAME and saves only the resulting credential
@@ -2276,14 +2276,14 @@ Options:
           Print help
 ```
 
-## `supertag worker-host`
+## `supertag worklet`
 
 ```text
-Connect a Worker Host and run accepted Tasks through an adapter.
+Run this Worker Host's Worklet, which connects the host and runs accepted Tasks.
 
-This is the host's Worklet: it registers the host, claims Tasks, and runs each Task Attempt in a Worker process of its own.
+The Worklet registers the host, claims Tasks, and runs each Task Attempt in a Worker process of its own, which runs the harness adapter.
 
-Usage: supertag worker-host [OPTIONS] --control-plane <CONTROL_PLANE> --state-directory <STATE_DIRECTORY>
+Usage: supertag worklet [OPTIONS] --control-plane <CONTROL_PLANE> --state-directory <STATE_DIRECTORY>
 
 Options:
       --control-plane <CONTROL_PLANE>

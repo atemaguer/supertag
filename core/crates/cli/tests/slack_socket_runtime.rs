@@ -622,7 +622,7 @@ async fn execute(
     database: &str,
 ) -> Result<()> {
     let mut command = credentials.command(&[
-        "worker-host",
+        "worklet",
         "--control-plane",
         control_plane,
         "--adapter",

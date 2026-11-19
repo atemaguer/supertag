@@ -65,7 +65,7 @@ impl Credentials {
 
     fn worker(&self, public: &str, state: &Path, source: Option<&Path>, modes: &[&str]) -> Command {
         let mut command = self.command(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             public,
             "--adapter",

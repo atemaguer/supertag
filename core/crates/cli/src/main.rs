@@ -462,11 +462,11 @@ enum Command {
         )]
         notify: Vec<String>,
     },
-    /// Connect a Worker Host and run accepted Tasks through an adapter.
+    /// Run this Worker Host's Worklet, which connects the host and runs accepted Tasks.
     ///
-    /// This is the host's Worklet: it registers the host, claims Tasks, and runs each Task
-    /// Attempt in a Worker process of its own.
-    WorkerHost(Box<worker_host::WorkerHostArgs>),
+    /// The Worklet registers the host, claims Tasks, and runs each Task Attempt in a Worker
+    /// process of its own, which runs the harness adapter.
+    Worklet(Box<worker_host::WorkerHostArgs>),
     /// One Task Attempt, run by the Worklet that starts it.
     #[command(name = "__worker", hide = true)]
     Worker(Box<worker_host::WorkerHostArgs>),
@@ -750,7 +750,7 @@ fn dispatch(cli: Cli) -> Result<()> {
                         command: None | Some(enrollments::GatewayCommand::Enroll { .. }),
                         ..
                     }
-                    | Command::WorkerHost(_)
+                    | Command::Worklet(_)
                     | Command::Worker(_)
                     | Command::Host {
                         command: host_status::HostCommand::Enroll { .. },
@@ -956,7 +956,7 @@ async fn run(command: Command) -> Result<()> {
         } => {
             if !removed_artifact_volumes.is_empty() {
                 anyhow::bail!(
-                    "--artifact-volume is removed: the Control Plane maps no Volume. Map a file Volume on each Worker Host that writes it with `supertag worker-host --volume ID=DIR` (or `volumes:` on its host service)"
+                    "--artifact-volume is removed: the Control Plane maps no Volume. Map a file Volume on each Worker Host that writes it with `supertag worklet --volume ID=DIR` (or `volumes:` on its host service)"
                 );
             }
             if removed_artifact_s3_volumes.is_some() {
@@ -1037,7 +1037,7 @@ async fn run(command: Command) -> Result<()> {
             )
             .await?;
         }
-        Command::WorkerHost(args) => worker_host::run_worklet(*args).await?,
+        Command::Worklet(args) => worker_host::run_worklet(*args).await?,
         Command::Worker(args) => worker_host::run_worker(*args).await?,
         Command::AuthKey {
             connection,
@@ -2894,7 +2894,7 @@ mod tests {
         "config",
         "control-plane",
         "tui",
-        "worker-host",
+        "worklet",
         "connect",
         "spend",
         "metrics",

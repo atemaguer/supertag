@@ -191,7 +191,7 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
     let artifacts = crate::holding_host::artifact_directory(root.path());
     let host = |endpoint: &str, state: &str| {
         let mut host = command(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             endpoint,
             "--harness",

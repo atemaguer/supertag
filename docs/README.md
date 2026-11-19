@@ -85,7 +85,7 @@ Once those ideas are clear, learn where the organization and its work run:
 
 - The [Control Plane](concepts/how-it-works.md) stores the organization, applies policy, and schedules work.
 - A [Worker Host](concepts/workers.md) is a machine or sandbox that provides execution capacity.
-  Its **Worklet**, the `supertag worker-host` program, connects it to the Control Plane and
+  Its **Worklet**, the `supertag worklet` program, connects it to the Control Plane and
   claims Tasks.
 - A **Worker** runs each Task Attempt: a harness adapter and the agent system it drives, such as
   Codex, Claude Code, or Cursor. The [execution overview](concepts/workers.md) explains how the

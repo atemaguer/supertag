@@ -32,7 +32,7 @@ use uuid::Uuid;
 const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
 const ADAPTER: &str = env!("CARGO_BIN_EXE_supertag-fixture-adapter");
 const WAIT: Duration = Duration::from_secs(20);
-/// A `worker-host --once` run is a whole Task turn: host start, claim, the adapter's runtime, the
+/// A `worklet --once` run is a whole Task turn: host start, claim, the adapter's runtime, the
 /// harness fixture, and finalization. Its time grows with the machine's load, unlike a single
 /// operator call, so it gets a longer deadline.
 const TURN_WAIT: Duration = Duration::from_secs(60);
@@ -108,7 +108,7 @@ async fn success(mut command: Command) -> Result<Vec<u8>> {
         "success {:?}",
         command.as_std().get_args().take(2).collect::<Vec<_>>()
     );
-    let turn = command.as_std().get_args().next() == Some(std::ffi::OsStr::new("worker-host"));
+    let turn = command.as_std().get_args().next() == Some(std::ffi::OsStr::new("worklet"));
     let output = timeout(if turn { TURN_WAIT } else { WAIT }, command.output())
         .await
         .map_err(|_| {
@@ -285,7 +285,7 @@ async fn language_profiles_route_tasks_and_limit_credentials_and_scratch(
     for (selected, harness) in [(1, "claude-code"), (0, "openai-agents")] {
         let host_state = directory.path().join(harness);
         let mut host = command(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             &public,
             "--once",
@@ -397,7 +397,7 @@ impl LanguageServices {
         entry: &Path,
     ) -> Command {
         let mut host = command(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             &self.public,
             "--harness",

@@ -1424,7 +1424,7 @@ impl SharedHost {
         let mut worklets = children(self.supervisor.child.id())?
             .into_iter()
             .filter(|(_, command)| {
-                command.contains(" worker-host ") && command.contains("/hosts/shared")
+                command.contains(" worklet ") && command.contains("/hosts/shared")
             })
             .collect::<Vec<_>>();
         ensure!(

@@ -3,7 +3,7 @@
 //! died before the Worker kept the turn's captures, which a new Worker then resumes; or the
 //! Worklet journaled the Worker's outcome, or the Worker handed it over and died before it
 //! exited) and Terminal (the Worklet journaled the settled Task, before
-//! its cleanup). Each case runs the shipped `supertag` Control Plane and Worker Host processes
+//! its cleanup). Each case runs the shipped `supertag` Control Plane and Worklet processes
 //! with a test-only crash point, restarts only the Worklet when it was the one killed, and
 //! asserts the Task succeeds once: one harness launch, its delivery committed, one Attempt, and
 //! the host's entry and checkout cleared. The earlier stages (Claim, Starting, Executing, and a
@@ -164,7 +164,7 @@ impl Services {
         crash: Option<(&str, &Path)>,
     ) -> Command {
         let mut command = bare(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             &self.public,
             "--adapter-arg=--workspace-fixture",

@@ -633,7 +633,7 @@ async fn exercise_replicas(database: &str, directory: &Path) -> Result<()> {
     let release = directory.join("release");
     let (adapter, launches) = recording_adapter(directory)?;
     let mut host = credentials.command();
-    host.args(["worker-host", "--control-plane", &endpoints[1], "--adapter"])
+    host.args(["worklet", "--control-plane", &endpoints[1], "--adapter"])
         .arg(&adapter)
         .arg("--adapter-arg=--objective-question")
         .arg(format!(
@@ -642,7 +642,7 @@ async fn exercise_replicas(database: &str, directory: &Path) -> Result<()> {
         ))
         .arg("--state-directory")
         .arg(directory.join("host"));
-    let mut host = Process::spawn(host, directory, "worker-host", false)?;
+    let mut host = Process::spawn(host, directory, "worklet", false)?;
     first_running(database).await?;
 
     // Kill replica 1 while its Worker Host holds a running Attempt. Work continues through
@@ -804,7 +804,7 @@ async fn exercise_replicas(database: &str, directory: &Path) -> Result<()> {
     let never = directory.join("never");
     let mut stranding = credentials.command();
     stranding
-        .args(["worker-host", "--control-plane", &endpoints[0], "--adapter"])
+        .args(["worklet", "--control-plane", &endpoints[0], "--adapter"])
         .arg(&adapter)
         .arg(format!("--adapter-arg=--wait-for-file={}", never.display()))
         .arg("--state-directory")

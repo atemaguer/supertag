@@ -102,7 +102,7 @@ protoc Go plugins pinned as tools in the `sdks/go` module, so it needs Go 1.26 o
 
 ## Rust runtime development
 
-The workspace in `core/` builds the Control Plane, Gateway, Worklet (`supertag worker-host`), and native CLI.
+The workspace in `core/` builds the Control Plane, Gateway, Worklet (`supertag worklet`), and native CLI.
 The `test-fixtures` Cargo feature builds a deterministic harness adapter for the process tests.
 Run the SQLite tests with the pinned Rust toolchain.
 

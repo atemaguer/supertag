@@ -591,7 +591,7 @@ impl Deployment {
     }
 
     fn worker_host(&self, url: &str, state: &Path, adapter: &Path) -> Command {
-        let mut command = binary(&["worker-host", "--control-plane", url, "--adapter"]);
+        let mut command = binary(&["worklet", "--control-plane", url, "--adapter"]);
         command.arg(adapter).arg("--state-directory").arg(state);
         client_tls(&mut command, &self.pki.ca(), Some(&self.host_leaf));
         command
@@ -1768,7 +1768,7 @@ async fn severed_tunnels_reconnect_and_the_attempt_completes_once(database: Stri
         "--adapter-arg=--wait-for-file={}",
         release.display()
     ));
-    let mut host = Service::spawn(command, root, "worker-host")?;
+    let mut host = Service::spawn(command, root, "worklet")?;
 
     let submitted = run_json(deployment.operator(&[
         "task",

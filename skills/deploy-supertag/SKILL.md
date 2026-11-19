@@ -80,7 +80,7 @@ supertag auth-key create build-1 --role host --tag lead --gateway team
 host service with `control-plane: https://supertag.example.com` and `auth-key: SECRET_NAME` to
 `~/.supertag/supertag.yaml`, then `supertag up`. Or run
 `supertag host enroll NAME --control-plane URL --state-directory DIR --auth-key file:KEY` and then
-`supertag worker-host --control-plane URL --state-directory DIR --harness codex`. See
+`supertag worklet --control-plane URL --state-directory DIR --harness codex`. See
 [Run Worker Hosts](../../docs/guides/workers.md).
 
 Teammates get a client Auth Key (`--role client`) or an Operator Token

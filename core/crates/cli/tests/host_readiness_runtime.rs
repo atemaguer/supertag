@@ -1,4 +1,4 @@
-//! Actual idle presence expiry and restart through separate Control Plane and Worker Host processes.
+//! Actual idle presence expiry and restart through separate Control Plane and Worklet processes.
 #[path = "support/children.rs"]
 mod children;
 use children::reaped;
@@ -152,13 +152,8 @@ async fn wait_phase(
 }
 
 fn host_command(credentials: &Credentials, gateway: &str, state: &Path) -> Command {
-    let mut command = credentials.command(&[
-        "worker-host",
-        "--control-plane",
-        gateway,
-        "--adapter",
-        ADAPTER,
-    ]);
+    let mut command =
+        credentials.command(&["worklet", "--control-plane", gateway, "--adapter", ADAPTER]);
     command.arg("--state-directory").arg(state);
     command
 }

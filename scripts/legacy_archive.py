@@ -960,7 +960,7 @@ GUIDANCE = {
     "hosts": "Worker Hosts connect to the Control Plane's one public endpoint",
     "operators": "issue named Operator Tokens with `supertag operator-token create`",
     "environment": "put harness variables in env_file (STATE_DIRECTORY/.env by default)",
-    "mcp": "write the servers to a JSON MCP catalog for `supertag worker-host --mcp-catalog`; "
+    "mcp": "write the servers to a JSON MCP catalog for `supertag worklet --mcp-catalog`; "
            "check it with `supertag mcp list --mcp-catalog PATH`",
     "credentials": "the local supervisor keeps credentials in files; a deployed Control Plane chooses "
                    "Vault with `supertag setup deployment` (SUPERTAG_CREDENTIAL_VAULT=vault)",

@@ -93,7 +93,7 @@ impl Services {
     /// A Worker Host on the Control Plane itself, which runs one Task Attempt and exits.
     fn worklet(&self, state: &std::path::Path, args: &[&str]) -> Command {
         let mut command = bare(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             &self.control_plane,
             "--adapter",

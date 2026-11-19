@@ -20,7 +20,7 @@ const maxHostPages = 10
 const hostPage = 500
 
 // ListWorkerHosts returns the organization's Worker Hosts, the earliest enrolled first, as
-// `supertag list worker-host` shows them.
+// `supertag get worker-hosts` shows them.
 func (c *Client) ListWorkerHosts(ctx context.Context) ([]*views.WorkerHost, error) {
 	hosts, _, err := c.ListWorkerHostReadiness(ctx)
 	return hosts, err

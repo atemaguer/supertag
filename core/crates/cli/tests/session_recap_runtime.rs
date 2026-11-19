@@ -53,7 +53,7 @@ async fn run_host(public: &str, token: &str, state: &Path) -> Result<()> {
     let output = timeout(
         WAIT,
         command(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             public,
             "--state-directory",

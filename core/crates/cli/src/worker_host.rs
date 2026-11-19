@@ -1,4 +1,4 @@
-//! `supertag worker-host` runs a Worker Host's Worklet; the hidden `supertag __worker` is the
+//! `supertag worklet` runs a Worker Host's Worklet; the hidden `supertag __worker` is the
 //! process the Worklet starts for each Task Attempt. Both read the same arguments for a harness,
 //! so a Worker runs exactly what its Worklet claimed for.
 
@@ -159,7 +159,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
     /// harness, from 1 through 16.
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..=16))]
     pub(crate) concurrency: u32,
-    /// A private JSON file naming each harness this host runs, as `supertag worker-host`
+    /// A private JSON file naming each harness this host runs, as `supertag worklet`
     /// arguments of its own: `{"harnesses": [[ARG, ...], ...]}`. `supertag up` writes it for a
     /// host service with several harnesses.
     #[arg(long, hide = true, value_name = "PATH")]
@@ -557,11 +557,11 @@ fn not_dumpable() -> Result<()> {
     Ok(())
 }
 
-/// This process's own arguments after its `worker-host` command, which its Workers read too.
+/// This process's own arguments after its `worklet` command, which its Workers read too.
 fn own_arguments() -> Vec<OsString> {
     let mut args = std::env::args_os().skip(1);
     for arg in args.by_ref() {
-        if arg == "worker-host" {
+        if arg == "worklet" {
             break;
         }
     }
@@ -577,7 +577,7 @@ fn configured_concurrency(state: &std::path::Path) -> Option<u32> {
         .filter(|size| (1..=local_config::MAX_CONCURRENCY).contains(size))
 }
 
-/// `supertag worker-host`: this Worker Host's Worklet, until a termination signal.
+/// `supertag worklet`: this Worker Host's Worklet, until a termination signal.
 pub(crate) async fn run_worklet(args: WorkerHostArgs) -> Result<()> {
     not_dumpable()?;
     let control_plane = network::endpoint(args.control_plane.clone()).await?;

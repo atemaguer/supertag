@@ -27,7 +27,7 @@ Worker Hosts, in the desktop app, or in the `supertag-ai` SDK.
 
 | Path | Owns |
 | --- | --- |
-| `core/crates/cli` | The `supertag` CLI, local supervisor (one Worklet per host service), `worker_host.rs` (`supertag worker-host` and the hidden `__worker`), and process tests |
+| `core/crates/cli` | The `supertag` CLI, local supervisor (one Worklet per host service), `worker_host.rs` (`supertag worklet` and the hidden `__worker`), and process tests |
 | `core/crates/control-plane` | Store, migrations, admission, scheduling, recovery, public API |
 | `core/crates/gateway` | Collaboration surfaces: ingress, rendering, reply delivery, notifications |
 | `core/crates/worker-host` | A Worker Host: `worklet/` registers, claims, holds leases, runs the Worker pool (`pool.rs`), keeps one journal with a directory per slot, recovers, and owns checkouts, checkpoints, held artifacts, and landings; `worker/` is the per-Task Attempt process: adapter, guardian, egress and provider proxies, Context Items, MCP, captures; `local.rs` is the Worklet-Worker channel. The host credential stays in the Worklet process; a Worker's calls carry only the Task Attempt credential, and it asks its Worklet for host calls |

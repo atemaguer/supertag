@@ -8,7 +8,7 @@ in four layers. The [glossary](../reference/glossary.md) lists other terms.
 | Layer | Plain-language meaning | Like, in Kubernetes | Like, in Ray |
 | --- | --- | --- | --- |
 | Worker Host | A machine, container, VM, or sandbox that provides capacity to run Tasks | A node | A node |
-| Worklet | The program on a Worker Host that connects it to the Control Plane: `supertag worker-host`. It claims Tasks, holds their leases, and starts and supervises Workers | The kubelet | The raylet |
+| Worklet | The program on a Worker Host that connects it to the Control Plane: `supertag worklet`. It claims Tasks, holds their leases, and starts and supervises Workers | The kubelet | The raylet |
 | Worker | A process the Worklet starts for one Task Attempt. It runs a harness adapter and the harness it drives, in their own process group | A pod | A worker process |
 | Harness | The agent system that does the work: Codex, Claude Code, Cursor, OpenCode, OpenAI Agents, or your own | The application in a container | The code a worker runs |
 
@@ -57,7 +57,7 @@ Worklet ── prepares a pinned checkout ── starts a Worker (harness adapte
 A Worker Host is the capacity side of SuperTag. It can be your laptop, a server, a CI runner, or
 a container. It enrolls once with an **Auth Key** and keeps its own credential.
 
-Its Worklet is the `supertag worker-host` program, which `supertag up` runs for each host service
+Its Worklet is the `supertag worklet` program, which `supertag up` runs for each host service
 in `supertag.yaml`. The Worklet reports the host's harnesses, models, labels, and concurrency,
 and claims only Tasks of the Tags the host may run. It runs up to `concurrency` Workers of each
 harness at once, and keeps one journal with an entry for each Task Attempt they run.

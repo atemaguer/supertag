@@ -261,7 +261,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     let output = timeout(
         WAIT,
         command(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             &public,
             "--adapter",
@@ -356,7 +356,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     let output = timeout(
         WAIT,
         command(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             &public,
             "--adapter",
@@ -737,7 +737,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     let output = timeout(
         WAIT,
         command(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             &public,
             "--adapter",

@@ -645,7 +645,7 @@ impl<'a> System<'a> {
     fn start_host(&mut self) -> Result<()> {
         let mut command = self.credentials.command();
         command
-            .args(["worker-host", "--control-plane"])
+            .args(["worklet", "--control-plane"])
             .arg(format!("http://{}", self.private))
             .args(["--once", "--state-directory"])
             .arg(self.directory.join("host"))
@@ -673,7 +673,7 @@ impl<'a> System<'a> {
                     self.marker.display()
                 ));
         }
-        let host = Process::spawn(command, self.directory, "worker-host", false)?;
+        let host = Process::spawn(command, self.directory, "worklet", false)?;
         if let Some(previous) = self.host.replace(host) {
             self.retired.push(previous);
         }

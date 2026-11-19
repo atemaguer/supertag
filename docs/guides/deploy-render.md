@@ -121,7 +121,7 @@ supertag auth-key create build-1 --role host --tag engineering \
 # SUPERTAG_CLIENT_CERT_FILE and SUPERTAG_CLIENT_KEY_FILE):
 supertag host enroll build-1 --control-plane wss://supertag-control-plane.onrender.com \
   --state-directory ~/.supertag-host --auth-key file:build-1.key
-supertag worker-host --control-plane wss://supertag-control-plane.onrender.com \
+supertag worklet --control-plane wss://supertag-control-plane.onrender.com \
   --state-directory ~/.supertag-host --harness codex
 ```
 

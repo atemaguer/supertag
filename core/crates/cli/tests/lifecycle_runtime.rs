@@ -988,7 +988,7 @@ impl SplitServices {
         let mut children = vec![plane];
         let endpoint = format!("http://{endpoint}");
         let mut worker = base(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             &endpoint,
             "--adapter",

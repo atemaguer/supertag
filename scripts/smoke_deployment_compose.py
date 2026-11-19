@@ -355,7 +355,7 @@ def rehearse(args):
 
             def start_host(host):
                 log = open(root / f"{host}.log", "w")
-                child = subprocess.Popen([cli, "worker-host", "--control-plane", url, "--state-directory", str(hosts[host]),
+                child = subprocess.Popen([cli, "worklet", "--control-plane", url, "--state-directory", str(hosts[host]),
                                           "--adapter", adapter], env={**base_env, **trust}, stdin=subprocess.DEVNULL,
                                          stdout=subprocess.DEVNULL, stderr=log)
                 children.append((child, log))

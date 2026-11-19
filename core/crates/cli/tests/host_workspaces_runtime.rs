@@ -79,7 +79,7 @@ impl Services {
     /// A Worker Host that runs one Task, if any, and exits.
     fn worker(&self, state: &Path, token: Option<&str>, workspaces: &[(&str, &Path)]) -> Command {
         let mut command = bare(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             &self.public,
             "--adapter",

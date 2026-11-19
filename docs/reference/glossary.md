@@ -106,7 +106,7 @@ whole system rather than another first-class resource.
   enrolled under a name, `host:NAME`. Its Worklet connects it outbound to the Control Plane. See
   [Run Worker Hosts](../guides/workers.md).
 - <a id="worklet"></a>**Worklet** — the program that runs on a Worker Host and connects it to the Control Plane:
-  `supertag worker-host`, or a host service under `supertag up`. It reports the host's capacity,
+  `supertag worklet`, or a host service under `supertag up`. It reports the host's capacity,
   claims Tasks, holds their leases, starts a Worker process for each Task Attempt, and reports
   the results. It keeps one execution journal for all of them. See [Worker Hosts, Worklets, Workers, and harnesses](../concepts/workers.md).
 - <a id="worker"></a>**Worker** — the process that runs one [Task Attempt](#task-attempt). The Worklet starts it once

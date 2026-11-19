@@ -1,4 +1,4 @@
-//! Real Control Plane and Worker Host processes with a provider-shaped OpenCode CLI.
+//! Real Control Plane and Worklet processes with a provider-shaped OpenCode CLI.
 #[path = "support/children.rs"]
 mod children;
 use children::reaped;
@@ -284,7 +284,7 @@ impl Runtime {
         std::fs::create_dir_all(&home)?;
         let mut host = self.credentials.command();
         host.args([
-            "worker-host",
+            "worklet",
             "--control-plane",
             &self.endpoint,
             "--once",
@@ -329,7 +329,7 @@ impl Runtime {
         std::fs::create_dir_all(&home)?;
         let mut host = self.credentials.command();
         host.args([
-            "worker-host",
+            "worklet",
             "--control-plane",
             &self.endpoint,
             "--once",
@@ -534,7 +534,7 @@ async fn opencode_runs_commands_in_a_local_vm_container(database: String) -> Res
         .find(|directory| directory.join("docker").is_file())
         .context("docker is not on PATH")?;
     host.args([
-        "worker-host",
+        "worklet",
         "--control-plane",
         &runtime.endpoint,
         "--once",

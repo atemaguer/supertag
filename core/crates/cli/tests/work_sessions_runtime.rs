@@ -26,7 +26,7 @@ use uuid::Uuid;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
 const ADAPTER: &str = env!("CARGO_BIN_EXE_supertag-fixture-adapter");
-/// Bounds one test wait for a service, a CLI command, or a whole `worker-host --once` run. Only the
+/// Bounds one test wait for a service, a CLI command, or a whole `worklet --once` run. Only the
 /// test waits this long; product deadlines are unchanged. Parallel PostgreSQL cases on a loaded
 /// machine stretched a Worker Host run past 15 seconds.
 const WAIT: Duration = Duration::from_secs(90);
@@ -90,7 +90,7 @@ async fn run_host(public: &str, token: &str, state: &Path, mode: &str) -> Result
     let output = timeout(
         WAIT,
         command(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             public,
             "--state-directory",

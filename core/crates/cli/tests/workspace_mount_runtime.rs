@@ -1,4 +1,4 @@
-//! Separate Control Plane and Worker Host processes stage a read-only
+//! Separate Control Plane and Worklet processes stage a read-only
 //! Workspace Volume copy for a real Codex Task, then remove it at cleanup, and
 //! write a read-write copy's changes back to its Volume.
 #[path = "support/children.rs"]
@@ -268,7 +268,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
 
     let worker = || {
         let mut command = credentials.command(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             &public,
             "--harness",
@@ -475,7 +475,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
                         "--decision",
                         "failed",
                         "--evidence",
-                        "Worker Host process was killed by the test",
+                        "Worklet process was killed by the test",
                         "--confirmed-stopped",
                         "--operation-id",
                         "crash-recovery",

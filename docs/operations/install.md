@@ -5,7 +5,7 @@ and permissions, on your repositories. One installation holds everything a machi
 
 | Part | What it is |
 | --- | --- |
-| `supertag` | The CLI. It also runs the **Control Plane** (the service that stores your organization and schedules work), the **Gateway** (the service clients connect to, which also connects collaboration surfaces such as Slack), and the **Worklet** (`supertag worker-host`, the program that connects a machine to the Control Plane as a **Worker Host** and runs its work) |
+| `supertag` | The CLI. It also runs the **Control Plane** (the service that stores your organization and schedules work), the **Gateway** (the service clients connect to, which also connects collaboration surfaces such as Slack), and the **Worklet** (`supertag worklet`, the program that connects a machine to the Control Plane as a **Worker Host** and runs its work) |
 | `supertag-tui` | The terminal UI that plain `supertag` opens |
 | `supertag-shared-execution` | An optional shared execution provider for Cursor Tasks |
 | Node bridges | The harness adapters for Claude Code, Cursor, and OpenCode, run with your Node.js |

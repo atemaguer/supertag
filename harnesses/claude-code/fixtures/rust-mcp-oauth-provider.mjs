@@ -1,4 +1,4 @@
-// An OAuth-protected HTTP MCP server for Rust Worker Host process tests.
+// An OAuth-protected HTTP MCP server for Rust Worklet process tests.
 // Usage: node rust-mcp-oauth-provider.mjs JOURNAL
 // It accepts only access tokens its own /token endpoint issued. A refresh_token grant rotates
 // the refresh token; while `${JOURNAL}.refuse` exists it refuses every grant with invalid_grant.

@@ -564,13 +564,13 @@ struct Host {
     release: PathBuf,
     launches: PathBuf,
     process: Service,
-    /// The `worker-host` arguments, so the same host can be started again.
+    /// The `worklet` arguments, so the same host can be started again.
     arguments: Vec<std::ffi::OsString>,
     directory: PathBuf,
 }
 
 impl Host {
-    /// Stops the Worker Host process and starts it again on the same state directory.
+    /// Stops the Worklet process and starts it again on the same state directory.
     async fn restart(&mut self) -> Result<()> {
         if let Some(pid) = self.process.pid() {
             // A Worker Host stops its adapter and exits on SIGTERM.
@@ -669,7 +669,7 @@ async fn start_host(
     let (adapter, launches) = recording_adapter(directory, &id)?;
     let release = directory.join(format!("{id}.release"));
     let mut arguments: Vec<std::ffi::OsString> = vec![
-        "worker-host".into(),
+        "worklet".into(),
         "--control-plane".into(),
         proxy.url().into(),
         "--state-directory".into(),
@@ -2704,7 +2704,7 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
     .await?;
     let task_id = submitted["task_id"].as_str().context("task_id")?.to_owned();
     let mut host = binary(&[
-        "worker-host",
+        "worklet",
         "--control-plane",
         &public,
         "--adapter",
@@ -2959,7 +2959,7 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
         ),
     ] {
         let mut host = binary(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             &format!("http://{target}"),
             "--adapter",
@@ -3346,7 +3346,7 @@ async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
     assert_eq!(run_json(enroll).await?["host_id"], "proxy-host");
 
     let (adapter, launches) = recording_adapter(root, "proxy-host")?;
-    let mut command = binary(&["worker-host", "--control-plane", &proxied]);
+    let mut command = binary(&["worklet", "--control-plane", &proxied]);
     command
         .arg("--state-directory")
         .arg(&state)

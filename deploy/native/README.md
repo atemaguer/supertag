@@ -99,7 +99,7 @@ operator token works. Readiness means at least one Worker Host is ready; `--requ
 that required. It registers no Worker Host and runs no Task.
 
 Worker Hosts are not part of setup. Create an Auth Key with `supertag auth-key create NAME --role
-host`, then run `supertag host enroll` and `supertag worker-host` on each host against the Control
+host`, then run `supertag host enroll` and `supertag worklet` on each host against the Control
 Plane's URL. Teammates' devices join with a client Auth Key (`--role client`) and
 `supertag connect`.
 
@@ -334,7 +334,7 @@ unchanged.
 
 Clients choose the tunnel by URL scheme: give a `wss://HOST[:PORT][/PATH]` URL instead of
 `https://` wherever a Control Plane URL is expected. That covers operator commands,
-`host enroll`, `worker-host`, a host's `control-plane` in `supertag.yaml`, `health`,
+`host enroll`, `worklet`, a host's `control-plane` in `supertag.yaml`, `health`,
 `verify deployment`, `connect` and the saved Control Planes it writes, the terminal UI, the
 desktop app, and the Gateway's `--control-plane`. Saved Control Planes keep the tunnel URL's path,
 which may not contain `.` or `..` segments or backslashes. The desktop app trusts only the system
@@ -375,7 +375,7 @@ retry as they do with native gRPC. Opening a tunnel may take up to 30 seconds, r
 
 A client on a network that allows outbound traffic only through an HTTP proxy names it in
 `HTTPS_PROXY` (or `https_proxy`) as `http://[USER:PASSWORD@]HOST[:PORT]`. Operator commands,
-`host enroll`, `worker-host`, `health`, and the Gateway's Control Plane connection then reach
+`host enroll`, `worklet`, `health`, and the Gateway's Control Plane connection then reach
 `https://` and `wss://` URLs through the proxy's `CONNECT`, so SuperTag's TLS, and the outer TLS
 of a tunnel, run end to end through it. `NO_PROXY` (or `no_proxy`) lists hosts reached directly:
 `*`, an IP address, or a domain, which also covers its subdomains. Loopback addresses never use

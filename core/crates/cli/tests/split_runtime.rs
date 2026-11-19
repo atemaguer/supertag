@@ -349,7 +349,7 @@ fn worker(
     let mut command = credentials.command();
     command
         .args([
-            "worker-host",
+            "worklet",
             "--control-plane",
             &services.endpoint,
             "--adapter",
@@ -361,7 +361,7 @@ fn worker(
     if cancel {
         command.arg("--adapter-arg=--wait-for-cancel");
     }
-    Process::spawn(command, directory, "worker-host", false)
+    Process::spawn(command, directory, "worklet", false)
 }
 
 async fn task(
@@ -869,7 +869,7 @@ async fn attempt_time_limit_stops_the_adapter_and_fails_the_task(database: Strin
     let mut command = credentials.command();
     command
         .args([
-            "worker-host",
+            "worklet",
             "--control-plane",
             &services.endpoint,
             "--once",
@@ -943,7 +943,7 @@ async fn killed_worker_host_stops_adapter_and_restart_reclaims_without_rerunning
     let host_command = |once: bool| {
         let mut command = credentials.command();
         command
-            .args(["worker-host", "--control-plane", &services.endpoint])
+            .args(["worklet", "--control-plane", &services.endpoint])
             .args(once.then_some("--once"))
             .arg("--state-directory")
             .arg(&state)
@@ -2175,7 +2175,7 @@ async fn exercise_slack_reply_streaming(database: &str, directory: &Path) -> Res
     let mut command = credentials.command();
     command
         .args([
-            "worker-host",
+            "worklet",
             "--control-plane",
             &services.endpoint,
             "--adapter",
@@ -2189,7 +2189,7 @@ async fn exercise_slack_reply_streaming(database: &str, directory: &Path) -> Res
         ))
         .arg("--state-directory")
         .arg(directory.join("progress-host"));
-    let mut host = Process::spawn(command, directory, "worker-host", false)?;
+    let mut host = Process::spawn(command, directory, "worklet", false)?;
     mock.wait_for_requests(2).await?;
     mock.responses.add_permits(1);
     std::fs::write(&release, b"")?;
@@ -2273,7 +2273,7 @@ async fn exercise_slack_reply_streaming(database: &str, directory: &Path) -> Res
     let mut command = credentials.command();
     command
         .args([
-            "worker-host",
+            "worklet",
             "--control-plane",
             &services.endpoint,
             "--adapter",
@@ -2283,7 +2283,7 @@ async fn exercise_slack_reply_streaming(database: &str, directory: &Path) -> Res
         ])
         .arg("--state-directory")
         .arg(directory.join("failing-host"));
-    let mut host = Process::spawn(command, directory, "worker-host", false)?;
+    let mut host = Process::spawn(command, directory, "worklet", false)?;
     mock.wait_for_requests(7).await?;
     mock.responses.add_permits(1);
     host.successful_exit().await?;
@@ -2714,7 +2714,7 @@ async fn control_plane_partition_expires_execution_and_requires_audited_retry_be
         let mut command = credentials.command();
         command
             .args([
-                "worker-host",
+                "worklet",
                 "--control-plane",
                 &public_endpoint,
                 "--once",
@@ -3104,7 +3104,7 @@ async fn operator_notifications_reach_slack_and_webhook_once(database: String) -
     .await?;
     let mut host = credentials.command();
     host.args([
-        "worker-host",
+        "worklet",
         "--control-plane",
         &services.endpoint,
         "--adapter",
@@ -3114,7 +3114,7 @@ async fn operator_notifications_reach_slack_and_webhook_once(database: String) -
     ])
     .arg("--state-directory")
     .arg(directory.join("host"));
-    Process::spawn(host, directory, "worker-host", false)?
+    Process::spawn(host, directory, "worklet", false)?
         .successful_exit()
         .await?;
     let message = "Objective release needs you: Objective release waits on your answer\n`supertag describe objective release`";
@@ -3188,7 +3188,7 @@ async fn operator_notifications_reach_slack_and_webhook_once(database: String) -
     cli(create, directory, &[]).await?;
     let mut host = credentials.command();
     host.args([
-        "worker-host",
+        "worklet",
         "--control-plane",
         &services.endpoint,
         "--adapter",
@@ -3302,12 +3302,7 @@ async fn native_codex_plan_replaces_the_slack_acknowledgement_in_place(
     mock.responses.add_permits(1);
     let mut command = credentials.command();
     command
-        .args([
-            "worker-host",
-            "--control-plane",
-            &services.endpoint,
-            "--once",
-        ])
+        .args(["worklet", "--control-plane", &services.endpoint, "--once"])
         .args(["--harness", "codex", "--codex-model", "fixture-model"])
         .arg("--codex-path")
         .arg(&fake)
@@ -3419,12 +3414,7 @@ async fn native_codex_takes_a_folded_slack_message_into_its_running_turn(
     mock.wait_for_requests(1).await?;
     let mut command = credentials.command();
     command
-        .args([
-            "worker-host",
-            "--control-plane",
-            &services.endpoint,
-            "--once",
-        ])
+        .args(["worklet", "--control-plane", &services.endpoint, "--once"])
         .args(["--harness", "codex", "--codex-model", "fixture-model"])
         .arg("--codex-path")
         .arg(&fake)

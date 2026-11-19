@@ -236,7 +236,7 @@ them.
 A Worklet runs your provider's helper with `--workspace-provider`:
 
 ```sh
-supertag worker-host --harness claude-code --workspace-id repository \
+supertag worklet --harness claude-code --workspace-id repository \
   --workspace-source ~/src/repository \
   --workspace-provider /usr/local/bin/node \
   --workspace-provider-arg /opt/fly-provider/main.js \

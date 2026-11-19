@@ -1,7 +1,7 @@
 # Run Worker Hosts
 
 A **Worker Host** is a machine or sandbox that runs Tasks for Tags, the persistent AI actors with
-their own responsibilities and permissions. Its **Worklet**, the `supertag worker-host` program,
+their own responsibilities and permissions. Its **Worklet**, the `supertag worklet` program,
 connects outbound to the **Control Plane**, the service that stores your organization and
 schedules its work, and claims Tasks its Tags may run. For each **Task Attempt**, one execution of
 a Task, the Worklet starts a **Worker**, a process of its own that runs a **harness adapter**, the
@@ -68,7 +68,7 @@ Otherwise a host does not run their Tasks that may run commands until you consen
     allow-unsandboxed-commands: [claude-code, cursor]
 ```
 
-`supertag worker-host --allow-unsandboxed-commands` consents for a host started without
+`supertag worklet --allow-unsandboxed-commands` consents for a host started without
 supertag.yaml. Commands then run as your user, with your files, network, and the environment the
 harness receives, which may include its provider key. Run such a host as a dedicated user
 or in a disposable machine when the work is untrusted.
@@ -80,7 +80,7 @@ or in a disposable machine when the work is untrusted.
 holds that harness for every Tag on the host. The host's Worklet runs each Task Attempt in a
 Worker process of its own, so `concurrency` is the size of its Worker pool for each harness, not a
 number of host processes. `supertag up` changes running hosts' concurrency without restarting
-them. A host started with `supertag worker-host` takes `--concurrency N`.
+them. A host started with `supertag worklet` takes `--concurrency N`.
 Teams can also cap how many of their Tasks run at once; see [Teams](teams.md).
 
 ### Limit how long a Task Attempt runs
@@ -128,19 +128,19 @@ On a server, CI runner, or container, enroll once and then run the host's Workle
 ```sh
 supertag host enroll build-1 --control-plane https://supertag.example.com \
   --state-directory /var/lib/supertag-host --auth-key file:build-1.key
-supertag worker-host --control-plane https://supertag.example.com \
+supertag worklet --control-plane https://supertag.example.com \
   --state-directory /var/lib/supertag-host --harness codex --label linux \
   --workspace-id app --workspace-source /srv/app
 ```
 
-`supertag worker-host` runs the Worklet. It reads the host's credential from the state directory
+`supertag worklet` runs the Worklet. It reads the host's credential from the state directory
 and stays connected until you stop it. Use the `wss://` URL for a Control Plane behind Render, Cloudflare, or Modal. The host needs
 no inbound port. `--once` exits after one Task Attempt, for a disposable runner.
 
 ## Keep a Tag's Tasks on the right hosts
 
 A host carries **labels**, such as `gpu` or `linux`, from the Auth Key it joined with, from
-`--label` on `supertag worker-host`, or from its host service's `labels` in supertag.yaml:
+`--label` on `supertag worklet`, or from its host service's `labels` in supertag.yaml:
 
 ```yaml
 services:
@@ -184,7 +184,7 @@ own provider credentials. See [Requirements](../operations/requirements.md#choos
 ### Choose models and effort
 
 A host advertises the models each harness serves: `models` in `supertag.yaml`, or
-`--harness-model` and `--harness-models` for `worker-host`. The first is the default. A Tag's or
+`--harness-model` and `--harness-models` for `worklet`. The first is the default. A Tag's or
 Role's `execution` then chooses a harness, models, and efforts within what hosts offer:
 
 ```yaml
@@ -281,7 +281,7 @@ A Task on another host reads a host's artifacts directly from that host's Workle
 Plane passes no files. Give the producing host's Worklet a transfer listener:
 
 ```sh
-supertag worker-host --control-plane https://supertag.example.com \
+supertag worklet --control-plane https://supertag.example.com \
   --state-directory /var/lib/supertag-host --harness codex \
   --artifact-directory /var/lib/supertag-artifacts \
   --artifact-transfer-listen 0.0.0.0:8443 \

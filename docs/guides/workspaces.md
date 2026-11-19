@@ -240,7 +240,7 @@ only while it holds the landing.
    ```
 
 4. Serve it on Worker Hosts: in `supertag.yaml`, `workspaces: { handbook: { remote: true } }` in
-   a host service, or `supertag worker-host --remote-workspace handbook`. Bind a Tag with
+   a host service, or `supertag worklet --remote-workspace handbook`. Bind a Tag with
    `--workspace-id handbook` and no base commit or branch.
 
 Each new Session starts from the commit `ref` names when the Session begins, and keeps that commit.
@@ -306,7 +306,7 @@ a fresh copy beside its checkout, never as a live mount. Three parties agree on 
    ```
 
 2. Each Worker Host owner maps the Volume in a file passed to
-   `supertag worker-host --workspace-mount-mappings FILE`. For `s3://`, only the host owner picks
+   `supertag worklet --workspace-mount-mappings FILE`. For `s3://`, only the host owner picks
    the endpoint, region, and the variables that hold the keys:
 
    ```json

@@ -58,6 +58,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- `supertag worker-host` is now `supertag worklet`, named after the Worklet it runs, with no
+  alias. Update systemd units, container commands, and scripts that start a standalone Worker
+  Host. `supertag up` starts the new command itself. See
+  [CLI reference](docs/reference/cli.md#supertag-worklet).
 - A Worker starts from an allowlist of its Worklet's environment: the process basics, the
   transport's proxy and TLS variables, `SUPERTAG_STATE_DIR`, and the variables its own harness's
   configuration reads. Other harnesses' variables, such as `CODEX_HOME`, and other harnesses' MCP
@@ -82,7 +86,7 @@ within the pre-1.0 compatibility policy described in
   few host calls its Task Attempt needs, and dies with its Worklet. The Worklet keeps one journal,
   with a directory per slot under `slots/` in the host's state directory; the old `lanes/`
   directories are not read, so let running Task Attempts finish before upgrading. `supertag
-  worker-host` takes `--concurrency`. See [Worker Host reference](docs/reference/worker.md#process-supervision).
+  worklet` takes `--concurrency`. See [Worker Host reference](docs/reference/worker.md#process-supervision).
 - A Worker sends its Task Attempt's events, streamed text, and other data calls to the data
   endpoint the Control Plane names, and nowhere else. Under `supertag up` that is the local
   Gateway. A hosted Control Plane names the Gateway in `SUPERTAG_DATA_ENDPOINT`, and every Worker

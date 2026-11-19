@@ -338,7 +338,7 @@ async fn a_remote_workspace_lands_through_git_delivery(database: String) -> Resu
         ),
     )?;
     std::fs::set_permissions(&adapter, std::fs::Permissions::from_mode(0o700))?;
-    let mut host = credentials.command(&["worker-host", "--control-plane", &public]);
+    let mut host = credentials.command(&["worklet", "--control-plane", &public]);
     host.arg("--adapter")
         .arg(&adapter)
         .arg("--adapter-arg=--workspace-fixture")
@@ -402,7 +402,7 @@ async fn a_remote_workspace_lands_through_git_delivery(database: String) -> Resu
     // The Session continues on a host that holds none of it: its own state and artifact storage.
     // It reads the Session's branch from the server, never through the Control Plane.
     host.kill().await?;
-    let mut fresh = credentials.command(&["worker-host", "--control-plane", &public]);
+    let mut fresh = credentials.command(&["worklet", "--control-plane", &public]);
     fresh
         .arg("--adapter")
         .arg(&adapter)
@@ -827,7 +827,7 @@ async fn a_review_workspace_opens_a_pull_request_that_closes_its_work_session(
     let webhooks = endpoints[1].clone();
 
     let host = |state: &str, mode: &str, once: bool| {
-        let mut host = credentials.command(&["worker-host", "--control-plane", &public]);
+        let mut host = credentials.command(&["worklet", "--control-plane", &public]);
         if once {
             host.arg("--once");
         }

@@ -1,5 +1,5 @@
 //! A Tag reads its other Sessions and Objectives, and creates an Objective on an explicit
-//! command, through separate Control Plane and Worker Host processes and the harness tools
+//! command, through separate Control Plane and Worklet processes and the harness tools
 //! (`HarnessTagSessions`) its adapter calls.
 #![cfg(feature = "test-fixtures")]
 #[path = "support/children.rs"]
@@ -55,7 +55,7 @@ async fn run_host(public: &str, token: &str, state: &Path) -> Result<()> {
     let output = timeout(
         WAIT,
         command(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             public,
             "--state-directory",

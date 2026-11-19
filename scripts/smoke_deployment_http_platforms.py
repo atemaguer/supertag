@@ -370,7 +370,7 @@ def rehearse(args):
                                            env=host_tls).stdout)
             require(enrolled["host_id"] == "edge-host", "unexpected host ID")
             task = operator("task", "submit", "--tag", "edge", "--session", "edge", "Cross the edge")
-            supertag("worker-host", "--control-plane", public, "--state-directory", str(host_state), "--adapter",
+            supertag("worklet", "--control-plane", public, "--state-directory", str(host_state), "--adapter",
                      adapter, "--once", env=host_tls)
             finished = operator("get", "task", task["task_id"])
             require(finished["state"] == "TASK_STATE_SUCCEEDED", f"Task did not finish: {finished}")

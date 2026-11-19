@@ -1,4 +1,4 @@
-//! Separate Control Plane and Worker Host processes run a Codex Task whose Permission Sets limit
+//! Separate Control Plane and Worklet processes run a Codex Task whose Permission Sets limit
 //! web:fetch to an origin with a host credential: the Worker Host starts the Attempt's egress
 //! proxy, hands Codex its URL, CA, and a placeholder but never the secret, and the proxy's log of
 //! a refused connection reaches `describe task`.
@@ -221,7 +221,7 @@ spec:
 
     let worker = |credential: bool| {
         let mut command = credentials.command(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             &public,
             "--harness",

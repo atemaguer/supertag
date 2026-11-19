@@ -1,5 +1,5 @@
 //! Two labelled Worker Hosts joined with one reusable Auth Key, through real
-//! Control Plane and Worker Host processes. Mirrors
+//! Control Plane and Worklet processes. Mirrors
 //! tests/label-placement.test.ts "places Session Tasks only on bound Worker
 //! Hosts that carry the Tag's runsOn labels". Host services in supertag.yaml declare labels
 //! the same way, through the local supervisor.
@@ -100,7 +100,7 @@ fn enroll(gateway: &str, state: &Path, host: &str, key: &str) -> Command {
 
 async fn run_once(gateway: &str, state: &Path, labels: &[&str]) -> Result<()> {
     let mut command = binary(&[
-        "worker-host",
+        "worklet",
         "--control-plane",
         gateway,
         "--adapter",
@@ -351,7 +351,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
 
     // Invalid declared labels fail before the host contacts the Control Plane.
     let mut invalid = binary(&[
-        "worker-host",
+        "worklet",
         "--control-plane",
         &public,
         "--adapter",
@@ -441,13 +441,7 @@ async fn ephemeral(database: &str, directory: &Path) -> Result<()> {
     let key = issued["auth_key"].as_str().context("missing Auth Key")?;
     let state = directory.join("runner");
     json(enroll(&public, &state, "runner", key)).await?;
-    let mut runner = binary(&[
-        "worker-host",
-        "--control-plane",
-        &public,
-        "--adapter",
-        ADAPTER,
-    ]);
+    let mut runner = binary(&["worklet", "--control-plane", &public, "--adapter", ADAPTER]);
     runner.arg("--state-directory").arg(&state);
     let mut runner = runner.stdout(Stdio::null()).stderr(Stdio::null()).spawn()?;
     let deadline = tokio::time::Instant::now() + WAIT;

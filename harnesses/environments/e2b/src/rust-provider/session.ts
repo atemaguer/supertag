@@ -38,7 +38,7 @@ export interface E2BWorkspaceSandbox {
   snapshot(signal: AbortSignal): Promise<string>;
   /**
    * Runs trusted provider code as root, for sealing before Capture: E2B's default `user` has
-   * sudo, so a Task process can outrank it. Never point it at a Worker Host process: the seal
+   * sudo, so a Task process can outrank it. Never point it at a Worklet process: the seal
    * program kills every process it did not record.
    */
   runPrivileged?(

@@ -481,7 +481,7 @@ async fn execute(
     task: &Task,
 ) -> Result<()> {
     let mut command = credentials.command(&[
-        "worker-host",
+        "worklet",
         "--control-plane",
         public,
         "--adapter",

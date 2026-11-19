@@ -35,7 +35,7 @@ python -m pip install 'supertag[codex,agents]==0.3.2'
 ## Run a Python harness adapter with a Worker Host
 
 A Worker Host is the machine or sandbox that provides execution. Its Worklet, the
-`supertag worker-host` program, launches a harness adapter to run one Task Attempt, which is a
+`supertag worklet` program, launches a harness adapter to run one Task Attempt, which is a
 single try at completing a unit of work. Install the SDK with its `runtime` extra. Pass the
 executable to the Worklet through its `--adapter` option.
 

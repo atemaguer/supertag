@@ -48,7 +48,7 @@ Never print the token or pass it to the agent. The messages are in
 On a Worker Host enrolled with `supertag host enroll` (see [run-a-worker](../run-a-worker/SKILL.md)):
 
 ```sh
-supertag worker-host --control-plane https://supertag.example.com \
+supertag worklet --control-plane https://supertag.example.com \
   --state-directory ~/.supertag-host --adapter /usr/local/bin/my-adapter
 supertag task submit --tag lead --session adapter-check "Say hello."
 supertag task events TASK_ID

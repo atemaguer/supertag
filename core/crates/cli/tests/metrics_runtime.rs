@@ -1,4 +1,4 @@
-//! `supertag metrics` through separate Control Plane and Worker Host processes
+//! `supertag metrics` through separate Control Plane and Worklet processes
 //! (`packages/store/coordination-metrics.test.ts`): every figure is an aggregate, so it counts
 //! past any list page limit, and a claimed Attempt is counted as `supertag spend` counts it.
 #[path = "support/children.rs"]
@@ -159,7 +159,7 @@ async fn metrics_count_every_record_beyond_list_pages(database: String) -> Resul
     ]))
     .await?;
     let mut worker = binary(&[
-        "worker-host",
+        "worklet",
         "--control-plane",
         &public,
         "--adapter",

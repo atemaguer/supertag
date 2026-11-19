@@ -11,7 +11,7 @@ use tokio::{
     process::{Child, Command},
 };
 
-/// The artifact directory every Worker Host process of a test shares. They all present the same
+/// The artifact directory every Worklet process of a test shares. They all present the same
 /// host credential, so, like the lanes of one supervised Host, they share one storage.
 pub fn artifact_directory(root: &Path) -> std::path::PathBuf {
     root.join("host-artifacts")

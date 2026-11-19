@@ -64,7 +64,7 @@ def smoke(control_image, gateway_image, fixture):
         override = root / "fixture.json"
         override.write_text(json.dumps({"services": {"worker": {
             "image": gateway_image, "profiles": ["fixture"], "env_file": str(worker_env),
-            "command": ["worker-host", "--control-plane", CONTROL_PLANE, "--state-directory", "/var/lib/supertag/worker",
+            "command": ["worklet", "--control-plane", CONTROL_PLANE, "--state-directory", "/var/lib/supertag/worker",
                         "--adapter", "/run/fixture-adapter", "--once"],
             "volumes": [f"{tls / 'worker'}:{TLS}:ro", f"{fixture}:/run/fixture-adapter:ro", "worker-state:/var/lib/supertag"],
             "read_only": True, "tmpfs": ["/tmp:uid=10001,gid=10001,mode=0700"],

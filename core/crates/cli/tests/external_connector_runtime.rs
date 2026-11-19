@@ -225,7 +225,7 @@ async fn an_external_connector_admits_an_event_and_delivers_its_reply_once(
     let mut host = command(
         BINARY,
         &[
-            "worker-host",
+            "worklet",
             "--control-plane",
             &url,
             "--adapter",

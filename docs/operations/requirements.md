@@ -6,7 +6,7 @@ of Tags make up an **autonomous organization**: Teams may pursue different goals
 of rules and one record of the work. For example, a laptop can run the **Control Plane**, which
 stores your organization and accepts work, and act as a **Worker Host**, which provides execution
 capacity. A Worker Host runs each **Task**, one turn of a Tag's work, on a **harness**: an agent
-system such as Codex, Claude Code, or Cursor. Its **Worklet**, `supertag worker-host`, claims the
+system such as Codex, Claude Code, or Cursor. Its **Worklet**, `supertag worklet`, claims the
 Tasks and starts a **Worker** for each Task Attempt.
 Check this page before [installing SuperTag](install.md).
 
@@ -264,7 +264,7 @@ passes each Worker only its own harness's keys, over their private channel rathe
 environment. On Linux the Worklet and each Worker also mark themselves non-dumpable, so other
 processes of the same user can't read their memory or environment through `/proc` or attach a
 debugger to them, and they write no core dump.
-A Worklet started directly with `supertag worker-host` reads keys from its environment, unless it is
+A Worklet started directly with `supertag worklet` reads keys from its environment, unless it is
 given the same kind of file, a JSON object of variable names to values, with
 `--provider-credentials-file`.
 

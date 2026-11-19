@@ -15,7 +15,7 @@ SuperTag has three kinds of services, all run by the one `supertag` program:
 - The **Control Plane** stores and coordinates the organization. Worker Hosts and Gateways
   connect to its API.
 - **Worker Hosts** are machines or sandboxes that provide execution capacity. On each, a
-  **Worklet** (`supertag worker-host`) connects the host to the Control Plane and claims Tasks.
+  **Worklet** (`supertag worklet`) connects the host to the Control Plane and claims Tasks.
   For each Task Attempt it starts a **Worker**, a process of its own that runs a **harness
   adapter**, the program that drives an agent system such as Codex or Claude Code, and that
   harness.

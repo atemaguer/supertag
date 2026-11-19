@@ -114,7 +114,7 @@ async fn redaction_keeps_harness_text_within_its_limit(database: String) -> Resu
     .await?;
     let task_id = submitted["task_id"].as_str().context("task_id")?.to_owned();
     let mut worker = binary(&[
-        "worker-host",
+        "worklet",
         "--control-plane",
         &public,
         "--adapter",
@@ -201,7 +201,7 @@ async fn harness_output_is_redacted_before_it_leaves_the_worker_host(
 
     let state = directory.path().join("worker");
     let mut worker = binary(&[
-        "worker-host",
+        "worklet",
         "--control-plane",
         &public,
         "--adapter",

@@ -205,7 +205,7 @@ async fn login_runs_pkce_with_registration_and_stores_only_the_login() -> Result
     let mut host = command(
         &state,
         &[
-            "worker-host",
+            "worklet",
             "--control-plane",
             "http://127.0.0.1:9",
             "--once",

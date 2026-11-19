@@ -229,7 +229,7 @@ For a new setup instead, run `supertag init` in the repository.
 | `x-` keys | Kept only at the top level. Rust refuses them inside services, and `x-` entries under `services` are removed. YAML anchors are expanded first |
 | Host `labels` | Unchanged. The host reports them with its presence, so a Tag's `runsOn` still selects it |
 | Host `environment` | Removed. Put harness variables in `env_file` |
-| Host `mcp` | Removed. Write the servers to a JSON MCP catalog for `supertag worker-host --mcp-catalog`, and check it with `supertag mcp list --mcp-catalog PATH` |
+| Host `mcp` | Removed. Write the servers to a JSON MCP catalog for `supertag worklet --mcp-catalog`, and check it with `supertag mcp list --mcp-catalog PATH` |
 | Host `volume-credentials`, `artifact-volume`, `local-mount-root` | Removed. Register Volumes with `supertag volume put` |
 | Host `allow-unsandboxed-commands` | Only `claude-code`, `opencode`, and `cursor` remain; Rust refuses other harnesses here |
 | Host `workspaces` | Unchanged. An entry may also be `{path, delivery, setup}` |
@@ -259,7 +259,7 @@ supertag auth-key create phone --role client --tag lead
 
 On each remote Worker Host, start from an empty state directory. Then run
 `supertag host enroll --control-plane URL --state-directory DIR --auth-key file:PATH HOST_ID`,
-followed by `supertag worker-host`. Or give the host service `control-plane` and `auth-key` in
+followed by `supertag worklet`. Or give the host service `control-plane` and `auth-key` in
 its `supertag.yaml` and run `supertag up`. Enroll Gateways with `supertag gateway enroll`, and
 operator devices with `supertag connect`.
 

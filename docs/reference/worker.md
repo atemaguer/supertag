@@ -1,6 +1,6 @@
 # Worker Host reference
 
-The exact behavior of a **Worker Host**'s **Worklet**, the `supertag worker-host` program that
+The exact behavior of a **Worker Host**'s **Worklet**, the `supertag worklet` program that
 connects a machine or sandbox to the **Control Plane** and runs **Task Attempts**, and of the
 **Workers** it starts: a **harness adapter** and its harness for each Task Attempt. Below, "the
 host" means the Worklet acting for its Worker Host. For the ideas, read
@@ -431,4 +431,4 @@ with `--artifact-transfer-listen` serves other hosts directly; they pin it with
 ## Next
 
 - [Write a harness adapter](../guides/harness-adapters.md)
-- [CLI reference: `supertag worker-host`](cli.md#supertag-worker-host)
+- [CLI reference: `supertag worklet`](cli.md#supertag-worklet)

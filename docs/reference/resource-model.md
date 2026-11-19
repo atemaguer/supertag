@@ -26,7 +26,7 @@ PascalCase names such as `PermissionSet`.
 The **Control Plane** and **Worker Hosts** are SuperTag's two top-level runtime components. The
 Control Plane stores the organization and schedules its work, and a Worker Host is a machine,
 container, VM, or sandbox that provides the capacity to run it. On each Worker Host a **Worklet**,
-the `supertag worker-host` program, connects the host to the Control Plane, claims Tasks, and
+the `supertag worklet` program, connects the host to the Control Plane, claims Tasks, and
 starts a **Worker** for each Task Attempt: a process of its own that runs a harness adapter and
 the harness it drives. The Worklet and the Worker are roles of running programs, not resources
 you create or apply. The Worklet holds the host's credential and every lease; a Worker never
@@ -315,7 +315,7 @@ language. A host carries three kinds of label:
 | Kind | Labels | Set by |
 | --- | --- | --- |
 | Automatic | `linux`, `macos`, or `windows`; `x64` or `arm64`; `harness:NAME` for each harness; `workspace:NAME` for each declared checkout; `mcp:NAME` for each [MCP server in the host's catalog](../surfaces/worker-tools.md) | The Worker Host |
-| Declared | Any label, such as `gpu` | A [host service's `labels`](supertag-yaml.md#host-labels) in supertag.yaml, or `supertag worker-host --label LABEL` |
+| Declared | Any label, such as `gpu` | A [host service's `labels`](supertag-yaml.md#host-labels) in supertag.yaml, or `supertag worklet --label LABEL` |
 | Granted | The Auth Key's `spec.labels` | The Auth Key the host joined with |
 
 `labels` in `supertag get host ID` lists all of a Worker Host's labels. `granted_labels` lists those its
@@ -405,7 +405,7 @@ checkout of the Workspace at an exact commit, and its changes come back as a bra
 or land on a git server. A Workspace has one of two sources:
 
 - **A local Git repository** that a Worker Host maps by name: a host service's `workspaces` in
-  `supertag.yaml`, or `--workspace-id ID --workspace-source PATH` on `supertag worker-host`.
+  `supertag.yaml`, or `--workspace-id ID --workspace-source PATH` on `supertag worklet`.
   Several hosts may map the same name to their own clones. The Control Plane stores no record of
   it.
 - **A remote Workspace**: a repository on any git server, declared as a `Workspace` resource.

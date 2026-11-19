@@ -342,7 +342,7 @@ asyncio.run(run())
         output = subprocess.run(
             [
                 os.environ["SUPERTAG_RUST_TEST_CLI"],
-                "worker-host",
+                "worklet",
                 "--control-plane",
                 deployment.control_plane,
                 "--state-directory",

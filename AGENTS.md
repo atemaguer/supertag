@@ -24,7 +24,7 @@ tunnel. The **Gateway** is the endpoint clients connect to (the CLI, the Go term
 `apps/tui`, the Electron desktop app in `apps/desktop`, and SDK bindings): it forwards their calls to
 the Control Plane, and carries collaboration surface traffic as a client of the Control Plane. A
 **Worker Host** is a machine or sandbox that provides execution capacity. Its **Worklet**
-(`supertag worker-host`) connects it to the Control Plane, claims Tasks, holds their leases, and
+(`supertag worklet`) connects it to the Control Plane, claims Tasks, holds their leases, and
 keeps one journal; for each Task Attempt it starts a **Worker**, a hidden `supertag __worker`
 process that runs a **harness adapter** and the **harness** it drives, such as Codex or Claude
 Code. The Worker never receives the host credential: it talks to its Worklet over an inherited

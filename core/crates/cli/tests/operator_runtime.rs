@@ -508,7 +508,7 @@ async fn conversation_scope_survives_api_forwards_and_task_reads(database: Strin
     assert_ne!(sent.session_id, received.session_id);
 
     let mut host = command(&[
-        "worker-host",
+        "worklet",
         "--once",
         "--control-plane",
         &alice_url,

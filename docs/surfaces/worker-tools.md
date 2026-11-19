@@ -34,7 +34,7 @@ shell never receive them.
 ```sh
 chmod 600 ~/mcp-catalog.json
 supertag mcp list --mcp-catalog ~/mcp-catalog.json
-supertag worker-host --control-plane https://supertag.example.com \
+supertag worklet --control-plane https://supertag.example.com \
   --state-directory ~/.supertag-host --harness claude-code --mcp-catalog ~/mcp-catalog.json
 ```
 
@@ -42,7 +42,7 @@ supertag worker-host --control-plane https://supertag.example.com \
 printing them. A server can also sign in with OAuth (`"oauth": true`, then
 `supertag mcp login NAME --mcp-catalog PATH`), or mint credentials per Task Attempt from a refresh
 token, client credentials, a GitHub App, or a helper command. See
-[`supertag worker-host`](../reference/cli.md#supertag-worker-host) for every catalog form.
+[`supertag worklet`](../reference/cli.md#supertag-worklet) for every catalog form.
 
 ## Grant the tools
 

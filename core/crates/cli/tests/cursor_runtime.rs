@@ -486,7 +486,7 @@ impl<'a> Runtime<'a> {
 
     fn host_command(&self, fixture: &Fixture, label: &str) -> Command {
         let mut command = self.credentials.command(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             &self.endpoint,
             "--harness",

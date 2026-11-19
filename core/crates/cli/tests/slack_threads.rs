@@ -432,7 +432,7 @@ async fn execute(
     database: &str,
 ) -> Result<()> {
     let mut command = credentials.command(&[
-        "worker-host",
+        "worklet",
         "--control-plane",
         gateway,
         "--adapter",
@@ -529,7 +529,7 @@ async fn a_schedule_set_in_a_slack_thread_replies_in_that_thread(database: Strin
     let first = receipt(&mut connector, &credentials, &mention).await?;
     let host = |name: &str| {
         let mut command = credentials.command(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             &public,
             "--adapter",
@@ -1409,7 +1409,7 @@ async fn run_host(
     // An Objective may queue its own owner turns ahead of this one; run them too.
     for _ in 0..4 {
         let mut command = credentials.command(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             gateway,
             "--adapter",

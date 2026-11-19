@@ -251,7 +251,7 @@ shell or `env_file`, change the container:
 
 A repository's `.devcontainer` settings add to the image; see
 [Devcontainer settings](devcontainer-subset.md). A host started without supertag.yaml takes
-`supertag worker-host --local-vm`.
+`supertag worklet --local-vm`.
 
 A Codex host can use local-vm too, for Tasks with `commands:execute` and no path scope. Codex
 stays on the host with its keys, and runs its commands and file edits in the container through
@@ -275,7 +275,7 @@ receives, which may include its provider key. Cursor also needs `files:write` to
     allow-unsandboxed-commands: [claude-code]
 ```
 
-A host started without supertag.yaml takes the same opt-in with `supertag worker-host
+A host started without supertag.yaml takes the same opt-in with `supertag worklet
 --allow-unsandboxed-commands`. A host with the opt-in prints what it allows each time it starts.
 SuperTag keeps model keys out of those commands' environment where it can (see
 [Credentials available during Tasks](../operations/requirements.md#credentials-available-during-tasks)),
@@ -344,7 +344,7 @@ lowercase letters, digits, and `-`. `environment` cannot be a proxy, certificate
 `HOME` variable, or start with `SUPERTAG_`, `CODEX_`, `GIT_`, or another harness's prefix.
 
 Only the Workers of the host's Codex harness receive the secrets, and the Control Plane learns
-only the names. A host started without supertag.yaml takes `supertag worker-host --network-credential
+only the names. A host started without supertag.yaml takes `supertag worklet --network-credential
 github=GITHUB_TOKEN` and reads the value from `SUPERTAG_NETWORK_CREDENTIAL_GITHUB`.
 
 ### Workspaces

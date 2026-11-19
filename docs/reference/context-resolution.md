@@ -79,7 +79,7 @@ for capture, retrieval, storage, and attachment limits.
 
 The Context Plan carries a Skill's stable identity, plus optional version and digest pins, never
 filesystem paths or package bytes. The Worker Host's Skill catalog resolves and allowlists the
-packages: a host service's `skills` path, or `supertag worker-host --skill-catalog PATH`. It names
+packages: a host service's `skills` path, or `supertag worklet --skill-catalog PATH`. It names
 a directory of Skill packages or a JSON catalog file:
 
 ```json

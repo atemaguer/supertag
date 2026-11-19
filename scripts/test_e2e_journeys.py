@@ -662,7 +662,7 @@ spec:
                        "PATH": f"{Path(node).parent}:{docker}:/usr/bin:/bin"}
         cls.host_log = open(cls.root / "host.log", "w")
         cls.host = subprocess.Popen(
-            [str(cls.binary), "worker-host", "--control-plane", control_plane,
+            [str(cls.binary), "worklet", "--control-plane", control_plane,
              "--state-directory", str(host_state), "--harness", "claude-code",
              "--harness-model", "fixture-model", "--harness-entrypoint", str(LOCAL_VM_ADAPTER),
              "--harness-runtime", node, "--claude-path", str(claude),
@@ -821,7 +821,7 @@ spec:
             environment["SUPERTAG_LOCAL_VM_IMAGE"] = cls.image
         cls.host_log = open(cls.root / "host.log", "w")
         cls.host = subprocess.Popen(
-            [str(cls.binary), "worker-host", "--control-plane", control_plane,
+            [str(cls.binary), "worklet", "--control-plane", control_plane,
              "--state-directory", str(cls.host_state), "--harness", "codex",
              "--harness-model", "gpt-6-sol",
              "--remote-workspace", "handbook-codex",
@@ -969,7 +969,7 @@ spec:
         })
         cls.host_log = (cls.root / "modal-host.log").open("w")
         host = subprocess.Popen(
-            [str(cls.binary), "worker-host", "--control-plane", control_plane,
+            [str(cls.binary), "worklet", "--control-plane", control_plane,
              "--state-directory", str(cls.host_state), "--harness", "claude-code",
              "--remote-workspace", "handbook-modal",
              "--modal-workspace-provider", node, "--modal-workspace-provider-arg", str(provider)],

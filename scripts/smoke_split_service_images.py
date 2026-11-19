@@ -134,7 +134,7 @@ def smoke(control_image, gateway_image, fixture):
             task = operator("task", "submit", "--tag", "container-fixture", "--session", "smoke", "split services")
             docker("run", "--name", worker, *network("worker"), "--env-file", worker_env,
                    "--mount", f"type=bind,src={fixture},dst=/run/fixture-adapter,readonly", gateway_image,
-                   "worker-host", "--control-plane", CONTROL_PLANE, "--state-directory", "/var/lib/supertag/worker",
+                   "worklet", "--control-plane", CONTROL_PLANE, "--state-directory", "/var/lib/supertag/worker",
                    "--adapter", "/run/fixture-adapter", "--once")
             finished = operator("get", "task", task["task_id"])
             require(finished["state"] == "TASK_STATE_SUCCEEDED" and "split services" in finished["result"],

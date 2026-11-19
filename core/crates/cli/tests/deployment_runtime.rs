@@ -643,7 +643,7 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
         let mut command = command(
             &home,
             &[
-                "worker-host",
+                "worklet",
                 "--control-plane",
                 &public_url,
                 "--state-directory",

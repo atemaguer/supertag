@@ -89,7 +89,7 @@ fn operator(args: &[&str], gateway: &str, token: &str) -> Command {
 
 fn worker(gateway: &str, state: &Path) -> Command {
     let mut command = binary(&[
-        "worker-host",
+        "worklet",
         "--control-plane",
         gateway,
         "--adapter",

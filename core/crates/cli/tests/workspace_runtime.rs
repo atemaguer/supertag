@@ -77,13 +77,8 @@ impl Credentials {
     }
 
     fn host(&self, public: &str, state: &Path, source: Option<&Path>, mode: &str) -> Command {
-        let mut command = self.command(&[
-            "worker-host",
-            "--control-plane",
-            public,
-            "--adapter",
-            ADAPTER,
-        ]);
+        let mut command =
+            self.command(&["worklet", "--control-plane", public, "--adapter", ADAPTER]);
         // Every host process of a test presents the same credential, so, like the lanes of one
         // Worker Host, they share one artifact directory: the Control Plane stores and relays no
         // delivery or artifact bytes, so each process reads what another produced from it.

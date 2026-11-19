@@ -112,13 +112,8 @@ async fn enrolled_worker_hosts_transfer_exact_artifacts_directly_across_producer
     let peer = format!("https://{listen}");
     let (cert, key) = peer_certificate(&root).await?;
     let producer = |once: bool| {
-        let mut command = credentials.command(&[
-            "worker-host",
-            "--control-plane",
-            &public,
-            "--adapter",
-            ADAPTER,
-        ]);
+        let mut command =
+            credentials.command(&["worklet", "--control-plane", &public, "--adapter", ADAPTER]);
         command
             .env_remove("SUPERTAG_HOST_TOKEN")
             .arg("--state-directory")

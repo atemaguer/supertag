@@ -340,7 +340,7 @@ async fn a_tag_volume_keeps_each_capture_written_by_the_host_that_maps_it(
     let refused = timeout(WAIT, old.output()).await??;
     let stderr = String::from_utf8_lossy(&refused.stderr);
     ensure!(
-        !refused.status.success() && stderr.contains("supertag worker-host --volume"),
+        !refused.status.success() && stderr.contains("supertag worklet --volume"),
         "{stderr}"
     );
     let (mut control, public) = service(plane(&credentials, &root, &database)).await?;

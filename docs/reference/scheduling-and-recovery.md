@@ -28,7 +28,7 @@ them and they survive a Control Plane restart.
 
 `supertag placement explain TASK_ID` reports which condition keeps a Task queued, and
 `supertag describe task TASK_ID` includes the same explanation as `waiting_for`. Its
-`requirement` is `worker-host`, `labels:NAMES`, or, when the Task's harness cannot run what the
+`requirement` is `worklet`, `labels:NAMES`, or, when the Task's harness cannot run what the
 Task accepted, `execution-limits`, `runtime-actions`, or `context` (a required Skill). It is
 `checkpoint-holder` while the Task waits, up to 10 minutes, for the Worker Host that holds its
 Session's checkpoint; see [Session checkpoints](control-plane.md#session-checkpoints). When the

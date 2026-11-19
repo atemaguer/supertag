@@ -121,7 +121,7 @@ refuse an endpoint that is not loopback, and send `authorization: Bearer TOKEN` 
 Point a Worker Host's Worklet at the executable:
 
 ```sh
-supertag worker-host --control-plane https://supertag.example.com \
+supertag worklet --control-plane https://supertag.example.com \
   --state-directory ~/.supertag-host --adapter /usr/local/bin/my-adapter --adapter-arg=--verbose
 ```
 

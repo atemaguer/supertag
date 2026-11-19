@@ -612,13 +612,9 @@ pub(crate) async fn exercise_delivery(
 
     // The Task finishes on a host that the crash never touches.
     let mut host = credentials.command();
-    host.args([
-        "worker-host",
-        "--control-plane",
-        &format!("http://{private}"),
-    ])
-    .args(["--adapter", ADAPTER, "--once", "--state-directory"])
-    .arg(directory.join("host"));
+    host.args(["worklet", "--control-plane", &format!("http://{private}")])
+        .args(["--adapter", ADAPTER, "--once", "--state-directory"])
+        .arg(directory.join("host"));
     let status = Process::spawn(host, directory, "provider-host", false)?
         .exited()
         .await?;

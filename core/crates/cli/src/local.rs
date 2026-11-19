@@ -495,7 +495,7 @@ impl Children {
                 true,
             )
             .await?;
-        let mut host = command(executable, "worker-host");
+        let mut host = command(executable, "worklet");
         host.envs(self.proxy.iter().cloned())
             .args(["--control-plane", &endpoint, "--state-directory"])
             .arg(directory.join("host"))
@@ -965,7 +965,7 @@ impl ManagedHost {
         }
     }
 
-    /// One harness's `supertag worker-host` arguments, and the variables its Workers need.
+    /// One harness's `supertag worklet` arguments, and the variables its Workers need.
     fn harness_arguments(
         &self,
         adapter: &crate::harness::AdapterOptions,
@@ -1068,7 +1068,7 @@ impl ManagedHost {
             crate::worker_host::CONCURRENCY_FILE,
             self.definition.concurrency.to_string().as_bytes(),
         )?;
-        let mut host = command(executable, "worker-host");
+        let mut host = command(executable, "worklet");
         host.envs(proxy_environment(&self.environment))
             .args(["--control-plane", &self.endpoint, "--state-directory"])
             .arg(&self.directory)

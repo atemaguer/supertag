@@ -673,7 +673,7 @@ try {
     await execute(
       binary,
       [
-        "worker-host",
+        "worklet",
         "--control-plane",
         controlPlane,
         "--state-directory",

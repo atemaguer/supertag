@@ -89,7 +89,7 @@ impl Credentials {
     /// share one artifact directory, as the processes of one Worker Host identity.
     fn holder(&self, public: &str, state: &Path, checkout: &Path) -> Command {
         let mut command = self.command(&[
-            "worker-host",
+            "worklet",
             "--control-plane",
             public,
             "--adapter",
