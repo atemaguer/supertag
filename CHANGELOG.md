@@ -36,6 +36,15 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- Conversation follows and operator Watches are pushed once a change commits. One reader per
+  Control Plane replica serves every open stream, in place of a poll per stream: 300 ms per Watch
+  and 2 seconds per follow. On PostgreSQL, replicas wake each other with a content-free
+  `NOTIFY`, and each replica holds one `LISTEN` connection outside its pool while it serves a
+  stream, so allow 9 connections per replica and connect directly or through a session-mode
+  pooler. A lost notification delays a stream by at most about a second. `supertag message`
+  resumes a dropped follow from what it showed instead of reloading the newest page. Streamed
+  reply text still reaches only the clients of the replica that received it. See
+  [How streams deliver](docs/reference/control-plane-api.md#how-streams-deliver).
 - A Worker Host runs one Worklet, which registers the host once and starts a Worker process of
   its own for each Task Attempt, up to `concurrency` per harness. `supertag up` supervises one
   Worklet per host service instead of one process per unit of concurrency, and resizes its pool
