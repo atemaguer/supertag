@@ -21,6 +21,7 @@
     "../../../sdks/typescript/src/tunnel.ts",
     "../../../harnesses/sdk/src/rust-harness/gen/**/*.ts",
     "../src/gateway.ts",
+    "../src/startup.ts",
     "../src/tag-admin.ts",
     "../src/desktop.ts"
   ]

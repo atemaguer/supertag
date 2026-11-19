@@ -24,6 +24,7 @@ import {
 } from "./gateway";
 import { useNotificationLevel } from "./lib/notifications";
 import { describe } from "./lib/polling";
+import { startup } from "./startup";
 import { type TagAdmin, tagAdminRefusal, tagAdminSession } from "./tag-admin";
 import "./shadcn.css";
 import "./style.css";
@@ -103,33 +104,20 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
     let live = true;
     async function restore() {
       try {
-        let saved = await nativeGateway.list();
+        const first = await startup(
+          {
+            list: nativeGateway.list,
+            localStartNeeded: nativeGateway.localStartNeeded,
+            startLocal: nativeGateway.startLocal,
+            select: nativeGateway.select,
+            connectLocal,
+            check: () => nativeSetup.check(),
+          },
+          { gateways: setGateways, starting: setStarting, live: () => live },
+        );
         if (!live) return;
-        setGateways(saved);
-        // SuperTag set up on this machine, its services stopped: start them, then connect.
-        if (!saved.active && !saved.local?.origin && (await nativeGateway.localStartNeeded())) {
-          setStarting(true);
-          try {
-            await nativeGateway.startLocal();
-          } finally {
-            if (live) setStarting(false);
-          }
-          saved = await nativeGateway.list();
-          if (!live) return;
-          setGateways(saved);
-        }
-        // The last saved Gateway used wins; with none, the local one when it runs.
-        const next = saved.active
-          ? await nativeGateway.select(saved.active)
-          : saved.local?.origin
-            ? await connectLocal()
-            : undefined;
-        if (live && next) activate(next);
-        // No Gateway at all, and no SuperTag set up here to start: set it up.
-        if (live && !next && saved.profiles.length === 0) {
-          const check = await nativeSetup.check();
-          if (live && !check.state?.configured) setSetup({ check });
-        }
+        if (first.activation) activate(first.activation);
+        else if (first.setup) setSetup({ check: first.setup });
       } catch (error) {
         if (live) setError(describe(error));
       } finally {
