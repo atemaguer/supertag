@@ -55,8 +55,14 @@ Tag's name; for OpenCode it also asks for a `provider/model`. Claude Code runs t
   of them, and runs up to three Task Attempts at once for each harness (`concurrency: 3`), so
   one stuck Task does not hold every Tag.
 
-Codex sandboxes its own commands. Claude Code, Cursor, and OpenCode don't, so for them `init`
-asks how the lead may run commands, defaulting to not at all:
+Codex sandboxes its own commands. A Claude Code lead runs its commands in Claude Code's own
+sandbox wherever that sandbox can start (macOS, or Linux with bubblewrap and socat) and the
+installed `claude` is 2.1.323 or later: `init` sets `sandbox-commands: [claude-code]` on the host
+and grants `commands:execute`, without asking. See
+[Sandboxed Claude Code commands](../reference/supertag-yaml.md#sandboxed-claude-code-commands).
+Where it can't, `init` says why. Cursor and OpenCode have no sandbox of their own, so for them,
+and for Claude Code without its sandbox, `init` asks how the lead may run commands, defaulting to
+not at all:
 
 - With Docker running, it offers to run the harness's Tasks in containers on it (`environment:
   local-vm`), defaulting to no. The first Task then builds the container image, which takes a few
@@ -186,7 +192,8 @@ your Tags and conversations behind.
 
 A Claude Code, Cursor, or OpenCode lead set up without commands reads and edits files but runs
 none. To let it run commands, first choose where they run on the host in
-`~/.supertag/supertag.yaml`: `environment: local-vm` with Docker running, or
+`~/.supertag/supertag.yaml`: for Claude Code, `sandbox-commands: [claude-code]` to run them in its
+own sandbox; `environment: local-vm` with Docker running; or
 `allow-unsandboxed-commands: [claude-code]` (or the harness's name) to run them on this machine as
 you. Then grant `commands:execute` in the lead's Permission Set and restart the services.
 `--force-conflicts` is needed because `init` created the set; the `&&` stops before `up` if the

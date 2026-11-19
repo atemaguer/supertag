@@ -2083,13 +2083,16 @@ services: {vm: {type: host, control-plane: https://example.com, environment: loc
             config.hosts[0]
                 .harnesses
                 .iter()
-                .map(|h| Ok(h.execution_profile()?.allow_unsandboxed_commands))
+                .map(|h| {
+                    let profile = h.execution_profile()?;
+                    Ok((profile.command_sandbox, profile.allow_unsandboxed_commands))
+                })
                 .collect::<Result<Vec<_>>>()
         };
-        // Sandboxed commands still run on this host, so the lane takes command Tasks.
+        // The Claude Code lane advertises its sandbox, never the unsandboxed opt-in.
         assert_eq!(
             profile(", sandbox-commands: [claude-code]").unwrap(),
-            [true, false]
+            [(true, false), (false, false)]
         );
         for (consent, reason) in [
             (

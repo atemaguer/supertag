@@ -32,13 +32,15 @@ pub struct TagOptions {
 }
 
 /// Whether a host whose harness reports `profile` runs that harness's commands. Codex sandboxes
-/// its own; Claude Code, Cursor, and OpenCode need the host's opt-in to run them unsandboxed, a
-/// local-vm container, or a remote sandbox. As the Control Plane places Tasks.
+/// its own; Claude Code runs them in its own sandbox on a host with `command_sandbox`; Claude Code,
+/// Cursor, and OpenCode otherwise need the host's opt-in to run them unsandboxed, a local-vm
+/// container, or a remote sandbox. As the Control Plane places Tasks.
 fn runs_commands(kind: v2::HarnessKind, profile: Option<&v2::HarnessExecutionProfile>) -> bool {
     match kind {
         v2::HarnessKind::ClaudeCode | v2::HarnessKind::Cursor | v2::HarnessKind::Opencode => {
             profile.is_some_and(|profile| {
                 profile.allow_unsandboxed_commands
+                    || (kind == v2::HarnessKind::ClaudeCode && profile.command_sandbox)
                     || profile.shared_execution.is_some()
                     || profile.remote_file_workspace
             })

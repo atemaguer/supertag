@@ -2330,6 +2330,11 @@ message HarnessExecutionProfile {
   // `volume:ID` for each; the host checks its mapping against the registered source before it
   // writes.
   repeated VolumeMapping volumes = 2100;
+  // This Claude Code lane runs commands in Claude Code's own operating-system sandbox
+  // (`sandbox-commands`), confined to the Task's Workspace and path scope with no network beyond
+  // its web:fetch grant. It runs Tasks with commands:execute without `allow_unsandboxed_commands`,
+  // keeps their hidden paths from commands, and is preferred over an unsandboxed lane.
+  bool command_sandbox = 2200;
 }
 
 message VolumeMapping {

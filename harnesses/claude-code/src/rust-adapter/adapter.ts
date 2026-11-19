@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { lstatSync, realpathSync } from "node:fs";
-import { lstat, realpath } from "node:fs/promises";
+import { lstat, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
@@ -649,6 +649,8 @@ export async function runAdapter(
   let completionProposed = false;
   let backgroundError: unknown;
   let phase = "configuration";
+  // A command sandbox's temporary directory, private to this Task Attempt.
+  let commandTemporary: string | undefined;
   const pendingSettlements: Promise<unknown>[] = [];
   try {
     const maxBudgetUsd = acceptedBudgetUsd(task.executionLimits);
@@ -687,7 +689,10 @@ export async function runAdapter(
         "A remote Workspace cannot carry web actions yet. Native execution did not start.",
       );
     const tools = remote ? [] : admitted;
-    const refusal = fileScopeRefusal(task, remote ? "claude-code-remote" : "claude-code");
+    const refusal = fileScopeRefusal(
+      task,
+      remote ? "claude-code-remote" : sandboxCommands ? "claude-code-sandboxed" : "claude-code",
+    );
     if (refusal) throw new SafeAdapterFailure(`${refusal}. Native execution did not start.`);
     const fileScope = fileScopeOf(task);
     const networkScope = networkScopeOf(task);
@@ -769,6 +774,10 @@ export async function runAdapter(
     // only to the Worker Host's egress proxy.
     let sandbox: ReturnType<typeof networkSandbox> | ReturnType<typeof commandSandbox> | undefined;
     if (sandboxCommands && tools.includes("Bash")) {
+      // Claude Code otherwise points sandboxed commands at /tmp/claude-UID, which every Claude
+      // Code session of this user shares. A short path keeps its sockets within AF_UNIX limits.
+      commandTemporary = await mkdtemp("/tmp/supertag-claude-");
+      env["CLAUDE_CODE_TMPDIR"] = commandTemporary;
       const proxy = environment["SUPERTAG_EGRESS_PROXY"];
       if (networkScope && !proxy)
         throw new SafeAdapterFailure(
@@ -1218,6 +1227,8 @@ export async function runAdapter(
     clearTimeout(timeout);
     signal.removeEventListener("abort", abort);
     tree?.close();
+    if (commandTemporary)
+      await rm(commandTemporary, { recursive: true, force: true }).catch(() => {});
   }
 }
 

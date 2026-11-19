@@ -502,6 +502,7 @@ async fn contract(url: &str) {
     let sandboxed = HarnessExecutionProfile {
         allow_unsandboxed_commands: true,
         network_sandbox: true,
+        command_sandbox: false,
         unverified_workspace_provider: false,
         volumes: vec![],
         remote_egress_relay: false,

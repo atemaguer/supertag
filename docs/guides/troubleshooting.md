@@ -104,7 +104,7 @@ and serves its harness and model. `placement explain` names which is missing:
 | `model`: no host lists the model the Task names | Add the model to a host's `models`, or choose a model a host lists |
 | Hosts are busy or draining | Wait, raise `concurrency`, or `supertag host resume HOST` |
 | An uncertain Task Attempt keeps a host's slot | Confirm it stopped, then run the `supertag task resolve-attempt` command it names |
-| `unsandboxed-commands`: no host lets the harness run commands | Set `environment: local-vm` on a host, add the harness to a host's `allow-unsandboxed-commands`, or remove `commands:execute` |
+| `unsandboxed-commands`: no host lets the harness run commands | For Claude Code, add `sandbox-commands: [claude-code]` to a host; or set `environment: local-vm` on a host, add the harness to a host's `allow-unsandboxed-commands`, or remove `commands:execute` |
 | `file-scope`: the harness cannot enforce the Task's path scope | Run the Tag on a harness that can, or change the scope; see [Path scopes](../reference/iam.md#path-scopes) |
 | `workspace-holder`: a Task waits for the Worker Host holding its Session's last delivery: a local Workspace continues only there, and a remote Workspace waits for that host to push the Session's branch | Start the host it names, or cancel the Task. To continue Sessions on any host, use a remote Workspace |
 | `checkpoint-holder`: a queued Task waits up to 10 minutes for the Worker Host holding its Session's checkpoint | Nothing: the holder resumes it, or after the wait another host starts it from the recap |
@@ -127,7 +127,9 @@ supertag sign-in claude-code
 If it reports not signed in, follow the sign-in instructions it prints, as the same user that
 runs the host, and run `supertag up`. Keys belong in `~/.supertag/.env`: a service unit does not
 inherit your shell. Claude Code, Cursor, and OpenCode Tasks that may run commands also need
-`environment: local-vm` or `allow-unsandboxed-commands` on the host; see
+`sandbox-commands` (Claude Code only), `environment: local-vm`, or `allow-unsandboxed-commands` on
+the host. A host with `sandbox-commands` that stops because Claude Code is too old needs
+`claude update`; see
 [Run Worker Hosts](workers.md#harnesses-without-a-sandbox). A local-vm host whose Tasks fail to
 start needs Docker running for the host's user. local-vm refuses Podman for now; switch the
 host to Docker.

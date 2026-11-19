@@ -37,16 +37,28 @@ shows the host, and `supertag logs -f studio` shows its log. See
 
 ### Harnesses without a sandbox
 
-Codex runs commands inside its own sandbox. Claude Code, OpenCode, and Cursor have no
-operating-system sandbox that SuperTag can enforce. Run their Tasks in containers on this
-machine's Docker instead:
+Codex runs commands inside its own sandbox. Claude Code runs them inside its own with
+`sandbox-commands`, which `supertag init` sets wherever that sandbox can start (macOS, or Linux
+with bubblewrap and socat; Claude Code 2.1.323 or later):
+
+```yaml
+    sandbox-commands: [claude-code]
+```
+
+Its commands then write only the Workspace, can't read hidden paths or your home's credential
+folders, and have no network unless the Task has `web:fetch`; see
+[Sandboxed Claude Code commands](../reference/supertag-yaml.md#sandboxed-claude-code-commands).
+
+OpenCode and Cursor have no operating-system sandbox that SuperTag can enforce. Run their Tasks,
+or Claude Code's where its sandbox can't start, in containers on this machine's Docker instead:
 
 ```yaml
     environment: local-vm
 ```
 
 Their file tools and commands then run in a container with no network, and the harness and its
-keys stay on the host. `supertag init` sets this up when Docker is running. Podman is not
+keys stay on the host. `supertag init` sets this up when Docker is running and the lead's
+harness has no sandbox of its own here. Podman is not
 supported yet. See
 [local-vm containers](../reference/supertag-yaml.md#local-vm-containers).
 
@@ -329,7 +341,8 @@ confirm a reply.
 
 - **A Task stays queued.** Run `supertag placement explain TASK_ID`.
 - **The host stops with a sign-in error.** Run `supertag sign-in HARNESS` as the host's user.
-- **A Claude Code, Cursor, or OpenCode Task that may run commands stays queued.** Set
+- **A Claude Code, Cursor, or OpenCode Task that may run commands stays queued.** For Claude
+  Code, add `sandbox-commands: [claude-code]` to the host. Otherwise set
   `environment: local-vm` on the host, add the harness to
   `allow-unsandboxed-commands`, or run Tasks that do not need commands.
 - **A Codex Task fails because its model needs Codex code mode to run commands.** Grant the Tag

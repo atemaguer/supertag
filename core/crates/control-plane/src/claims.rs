@@ -80,14 +80,17 @@ impl HeldClaims {
         waiting
     }
 
-    /// The waiting claims of lanes that run commands in a sandbox away from their Worker Host,
-    /// such as a local-vm lane: a lane that runs them unsandboxed leaves them those Tasks.
+    /// The waiting claims of lanes that run commands in a sandbox: away from their Worker Host,
+    /// such as a local-vm lane, or in Claude Code's own sandbox on it. A lane that runs them
+    /// unsandboxed leaves them those Tasks.
     pub(crate) fn sandboxed(&self) -> Vec<ClaimScope> {
         self.scopes
             .lock()
             .unwrap()
             .values()
-            .filter(|(_, scope)| scope.profile.remote_file_workspace)
+            .filter(|(_, scope)| {
+                scope.profile.remote_file_workspace || scope.profile.command_sandbox
+            })
             .map(|(_, scope)| scope.clone())
             .collect()
     }

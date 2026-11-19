@@ -104,7 +104,9 @@ the binding (an Auth Key's `--tag`), the labels (`supertag placement runs-on`), 
 harnesses, models, and `workspaces`.
 
 A host that stops with a sign-in error needs `supertag sign-in HARNESS` as the host's user.
-Claude Code, Cursor, and OpenCode Tasks that may run commands wait for a host with the harness in
+Claude Code, Cursor, and OpenCode Tasks that may run commands wait for a host that runs them:
+`sandbox-commands: [claude-code]` (Claude Code's own sandbox, which needs Claude Code 2.1.323 or
+later; run `claude update`), `environment: local-vm`, or the harness in
 `allow-unsandboxed-commands`. A Codex Task that may run commands but lacks `web:fetch` fails when
 its turn starts, naming the model; see
 [Codex commands and models](../../docs/operations/requirements.md#codex-commands-and-models).

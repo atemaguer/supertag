@@ -281,7 +281,7 @@ Runtime actions are captured separately from collaboration surface resources in 
 | `files:read` | enables `Read`, `Glob`, and `Grep` | read-only sandbox | read, grep, glob, ls, and MCP tools |
 | no write permission | removes `Write` and `Edit` | read-only sandbox | no edit tool |
 | `files:write` | enables `Write` and `Edit` | Workspace writes in the `supertag` permission profile | adds edit |
-| `commands:execute` | enables `Bash` only with `allow-unsandboxed-commands: [claude-code]`; with a local-vm, E2B, or Modal Workspace, adds the sandbox's command tool instead; otherwise a Claude Code host does not run the Task | enables shell and unified execution features, and lets commands use loopback sockets. A code-mode-only model, which is every current Codex model, runs commands only when the Task also has `web:fetch`; see [Codex commands and models](../operations/requirements.md#codex-commands-and-models) | adds shell only with `files:write`, and locally only with `allow-unsandboxed-commands: [cursor]`; with an E2B or Modal Workspace, commands run in the sandbox; otherwise the Task waits |
+| `commands:execute` | enables `Bash` in Claude Code's own sandbox with [`sandbox-commands: [claude-code]`](supertag-yaml.md#sandboxed-claude-code-commands), or unsandboxed with `allow-unsandboxed-commands: [claude-code]`; with a local-vm, E2B, or Modal Workspace, adds the sandbox's command tool instead; otherwise a Claude Code host does not run the Task | enables shell and unified execution features, and lets commands use loopback sockets. A code-mode-only model, which is every current Codex model, runs commands only when the Task also has `web:fetch`; see [Codex commands and models](../operations/requirements.md#codex-commands-and-models) | adds shell only with `files:write`, and locally only with `allow-unsandboxed-commands: [cursor]`; with an E2B or Modal Workspace, commands run in the sandbox; otherwise the Task waits |
 | `web:fetch` | enables `WebFetch` | requires `files:write`; enables outbound network in the `supertag` permission profile, for commands too, limited to the Task's [network scope](#network-scopes) | not supported: the Task waits |
 | `web:search` | enables `WebSearch` | enables live web search | adds `webSearch` |
 | `browser:use` | not supported | not supported | not supported: the Task waits |
@@ -448,14 +448,15 @@ A harness enforces a scope at one of three strengths:
 | Harness | File tools | Commands |
 | --- | --- | --- |
 | Codex | operating system: the `supertag` permission profile | operating system, with or without `web:fetch` |
-| Claude Code | tool: SuperTag's file-tool hook and Claude Code's own deny rules | write scope at delivery; hidden entries not enforced, so such a Task waits |
+| Claude Code | tool: SuperTag's file-tool hook and Claude Code's own deny rules | with `sandbox-commands`, operating system for read-only and hidden entries and write scope at delivery; otherwise write scope at delivery, and hidden entries not enforced, so such a Task waits |
 | OpenCode | tool: OpenCode's `edit` and `read` rules | write scope at delivery; hidden entries not enforced, so such a Task waits |
 | Cursor, remote or shared execution | tool: SuperTag's Workspace tools | write or hidden scope not enforced, so such a Task waits |
 | Cursor, local | not supported yet: a scoped Task waits | — |
 
 SuperTag works out the strength a Task needs. It never asks you to declare one:
 
-- Commands with hidden entries need the operating system. Only Codex qualifies today.
+- Commands with hidden entries need the operating system: Codex, or Claude Code on a host with
+  `sandbox-commands`.
 - Commands with `paths` or a `files:write` exclude need delivery, so the Task needs a Workspace.
 - Without `commands:execute`, every harness above except local Cursor applies the scope with its
   file tools.
@@ -465,7 +466,7 @@ A Task no host can run waits. `supertag placement explain TASK` names the `file-
 requirement and why, for example:
 
 ```text
-Claude Code cannot keep commands from reading hidden paths (**/.env); run the Tag on Codex, or
+OpenCode cannot keep commands from reading hidden paths (**/.env); run the Tag on Codex, or
 remove commands:execute from its Permission Sets
 ```
 

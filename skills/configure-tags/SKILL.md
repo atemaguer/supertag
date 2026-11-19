@@ -103,9 +103,11 @@ conversations. `supertag delete memory --native TAG` drops the harness memory al
 
 Two harness rules decide whether `commands:execute` works:
 
-- Claude Code, Cursor, and OpenCode run commands without a sandbox. Their Tasks that may run
-  commands run only on a host that lists the harness in `allow-unsandboxed-commands`, as the
-  `Builder` above needs `allow-unsandboxed-commands: [claude-code]`; otherwise they wait.
+- Claude Code runs commands in its own sandbox only on a host with `sandbox-commands:
+  [claude-code]`, which `supertag init` sets where that sandbox can start. Cursor and OpenCode run
+  commands without a sandbox. Otherwise these harnesses' Tasks that may run commands run only on a
+  host with `environment: local-vm` or the harness in `allow-unsandboxed-commands`; without one
+  of these, as the `Builder` above needs, they wait.
 - Current Codex models run commands only in Codex code mode, which SuperTag starts only for a Task
   that also has `web:fetch`. A Codex Tag that should run commands needs
   `{ target: runtime, action: web:fetch }` too, which also opens the network to its commands; see

@@ -195,7 +195,8 @@ fn validate(options: &WorkletOptions) -> Result<()> {
                             | HarnessKind::Opencode
                             | HarnessKind::Codex
                     ) && !options.workspaces.is_empty()
-                        && !worker.execution_profile.allow_unsandboxed_commands)),
+                        && !worker.execution_profile.allow_unsandboxed_commands
+                        && !worker.execution_profile.command_sandbox)),
             "invalid Worker Host remote Workspace profile"
         );
         ensure!(
@@ -209,7 +210,8 @@ fn validate(options: &WorkletOptions) -> Result<()> {
                         && options.workspaces.is_empty()
                         && worker.remote_provider.is_none()
                         && worker.execution_profile.mcp_servers.is_empty()
-                        && !worker.execution_profile.allow_unsandboxed_commands)),
+                        && !worker.execution_profile.allow_unsandboxed_commands
+                        && !worker.execution_profile.command_sandbox)),
             "shared execution requires a Cursor Worker Host with the exact provider profile"
         );
         ensure!(
@@ -430,12 +432,7 @@ pub(crate) async fn run(
     }
     for harness in &options.harnesses {
         let worker = &harness.worker;
-        // A Claude Code lane with sandbox-commands runs its commands in Claude Code's sandbox.
-        let sandboxed = worker
-            .adapter_args
-            .iter()
-            .any(|argument| argument == "--sandbox-commands");
-        if worker.execution_profile.allow_unsandboxed_commands && !sandboxed {
+        if worker.execution_profile.allow_unsandboxed_commands {
             let name = match worker.harness {
                 HarnessKind::ClaudeCode => "Claude Code",
                 HarnessKind::Opencode => "OpenCode",
@@ -445,9 +442,7 @@ pub(crate) async fn run(
             supertag_protocol::terminal_text::warn(&adapter::unsandboxed_caveat(name));
         }
         // A sign-in the provider proxy can't hold stays readable to commands run unsandboxed.
-        // Claude Code's sandbox keeps commands from the sign-in's files and Keychain.
         if let Some(warning) = adapter::unproxied_key_warning(worker, &harness.provider_credentials)
-            .filter(|_| !sandboxed)
         {
             supertag_protocol::terminal_text::warn(&warning);
         }

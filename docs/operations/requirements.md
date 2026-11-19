@@ -56,7 +56,7 @@ isn't; the desktop app's setup screen shows the same checks.
 
 | Harness | Command on PATH | Minimum version | Sign-in |
 | --- | --- | --- | --- |
-| [Claude Code](https://code.claude.com/docs/en/setup) | `claude` | 2.1.280. Install with `curl -fsSL https://claude.ai/install.sh \| bash`; upgrade with `claude update`. | Run `claude` and follow its sign-in prompt. |
+| [Claude Code](https://code.claude.com/docs/en/setup) | `claude` | 2.1.280; 2.1.323 for [`sandbox-commands`](#claude-code-commands-and-sandbox). Install with `curl -fsSL https://claude.ai/install.sh \| bash`; upgrade with `claude update`. | Run `claude` and follow its sign-in prompt. |
 | [Codex](https://developers.openai.com/codex/cli/) | `codex` | 0.163.0. Install or upgrade with `npm install -g @openai/codex`. | Run `codex -c 'cli_auth_credentials_store="file"' login` so Tasks can use the sign-in file. On macOS, a Keychain-only login is not copied to Tasks. |
 | [Cursor](https://cursor.com/docs/sdk/typescript.md) | None | None | Generate an API key and set `CURSOR_API_KEY` for the host service; see [Cursor setup](#cursor-setup-and-limits). Signing in to the Cursor app or `cursor-agent` is not enough. |
 | [OpenCode](https://opencode.ai/docs/) | `opencode` | None | Set your selected provider's API-key environment variable for the Worker Host, such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. |
@@ -88,6 +88,26 @@ Task's result. `allow-unsandboxed-commands` does not apply to Codex, which alway
 its own sandbox. `files:write` or `commands:execute` gives a Codex Task read access too; a Task
 with none of `files:read`, `files:write`, and `commands:execute` is refused, because Codex reads
 the Workspace in every sandbox mode.
+
+### Claude Code commands and sandbox
+
+Claude Code runs a Task's commands (`commands:execute`) only where the Worker Host lets it, in one
+of three ways:
+
+- **In Claude Code's own sandbox**, with `sandbox-commands: [claude-code]` on the host service.
+  `supertag init` sets this wherever the sandbox can start: on macOS, and on Linux with
+  bubblewrap (`bwrap`), `socat`, and unprivileged user namespaces. Commands write only the
+  Workspace, cannot read hidden paths or the credential folders in your home, and have no network
+  unless the Task has `web:fetch`. The host needs Claude Code 2.1.323 or later and refuses to
+  start with an older one; run `claude update`. See
+  [Sandboxed Claude Code commands](../reference/supertag-yaml.md#sandboxed-claude-code-commands)
+  for exactly what is kept from commands.
+- **In a container**, with `environment: local-vm`; see
+  [local-vm containers](../reference/supertag-yaml.md#local-vm-containers).
+- **Unsandboxed**, as your user, only with the explicit `allow-unsandboxed-commands: [claude-code]`.
+
+Without one of these, a Claude Code Task with `commands:execute` waits, and
+`supertag placement explain` names the `unsandboxed-commands` requirement.
 
 ### Cursor setup and limits
 
@@ -204,13 +224,15 @@ When using a file-backed Codex sign-in, a local Codex host's Worker copies `~/.c
 (or the file under the host's `CODEX_HOME`) into each Task's working area. That copy can contain
 a long-lived ChatGPT refresh token; its file permissions are restricted to the OS user.
 Local Claude Code Tasks can use that user's secure credential store, including macOS Keychain.
-Commands running as the same user may be able to access these credentials.
+Commands running as the same user may be able to access these credentials, unless Claude Code's
+sandbox runs them (`sandbox-commands`), which keeps them from the Keychain and from `~/.claude`
+and `~/.codex`.
 
 For shared or unattended Worker Hosts, prefer scoped `CODEX_API_KEY` or `ANTHROPIC_API_KEY`
 credentials with appropriate provider limits. `CODEX_API_KEY` takes precedence over copying
 the Codex sign-in file; `OPENAI_API_KEY` is only a fallback when that file is missing.
 
-On a Worker Host with `allow-unsandboxed-commands` for Claude Code, an `ANTHROPIC_API_KEY`,
+On a Worker Host with `allow-unsandboxed-commands` or `sandbox-commands` for Claude Code, an `ANTHROPIC_API_KEY`,
 `ANTHROPIC_AUTH_TOKEN`, or `CLAUDE_CODE_OAUTH_TOKEN` given to the host stays in the
 Task Attempt's Worker. Each Task's Claude Code gets a stand-in value and the address of a proxy on `127.0.0.1` that
 puts the real key on its requests to `api.anthropic.com`, and on nothing else. Claude Code also
@@ -249,11 +271,11 @@ given the same kind of file, a JSON object of variable names to values, with
 None of this is a boundary against a command set on stealing the key: such a command runs as the
 Worker Host's user and can read the host's `env_file` and the OpenCode auth file, and, where the
 OS allows it, the host's memory. These measures close accidental leaks only. Only a sandbox, such
-as `environment: local-vm`, keeps the key out of reach.
+as `environment: local-vm` or Claude Code's with `sandbox-commands`, keeps the key out of reach.
 
 A sign-in made with `/login` lives in the system's secure store (the macOS Keychain) and can't go
 behind the proxy, so commands Claude Code runs without a sandbox can reach it. The Worklet
-warns about this when it starts.
+warns about this when it starts. Commands in Claude Code's sandbox can't reach the Keychain.
 
 ## Telemetry and network traffic
 

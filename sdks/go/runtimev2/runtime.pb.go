@@ -16198,9 +16198,14 @@ type HarnessExecutionProfile struct {
 	// File Volumes this host maps and writes to directly. The Control Plane derives the label
 	// `volume:ID` for each; the host checks its mapping against the registered source before it
 	// writes.
-	Volumes       []*VolumeMapping `protobuf:"bytes,2100,rep,name=volumes,proto3" json:"volumes,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Volumes []*VolumeMapping `protobuf:"bytes,2100,rep,name=volumes,proto3" json:"volumes,omitempty"`
+	// This Claude Code lane runs commands in Claude Code's own operating-system sandbox
+	// (`sandbox-commands`), confined to the Task's Workspace and path scope with no network beyond
+	// its web:fetch grant. It runs Tasks with commands:execute without `allow_unsandboxed_commands`,
+	// keeps their hidden paths from commands, and is preferred over an unsandboxed lane.
+	CommandSandbox bool `protobuf:"varint,2200,opt,name=command_sandbox,json=commandSandbox,proto3" json:"command_sandbox,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *HarnessExecutionProfile) Reset() {
@@ -16336,6 +16341,13 @@ func (x *HarnessExecutionProfile) GetVolumes() []*VolumeMapping {
 		return x.Volumes
 	}
 	return nil
+}
+
+func (x *HarnessExecutionProfile) GetCommandSandbox() bool {
+	if x != nil {
+		return x.CommandSandbox
+	}
+	return false
 }
 
 type VolumeMapping struct {
@@ -27594,7 +27606,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x05model\x18\x01 \x01(\tH\x00R\x05model\x88\x01\x01\x12\x1b\n" +
 	"\x06effort\x18\x02 \x01(\tH\x01R\x06effort\x88\x01\x01B\b\n" +
 	"\x06_modelB\t\n" +
-	"\a_effort\"\x88\a\n" +
+	"\a_effort\"\xb2\a\n" +
 	"\x17HarnessExecutionProfile\x12\x1b\n" +
 	"\tmodel_ids\x18\x01 \x03(\tR\bmodelIds\x12(\n" +
 	"\rdefault_model\x18\x02 \x01(\tH\x00R\fdefaultModel\x88\x01\x01\x12<\n" +
@@ -27611,7 +27623,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x0fnetwork_sandbox\x18\xed\x0e \x01(\bR\x0enetworkSandbox\x12C\n" +
 	"\x1dunverified_workspace_provider\x18\xd0\x0f \x01(\bR\x1bunverifiedWorkspaceProvider\x12/\n" +
 	"\x13remote_egress_relay\x18\xee\x0e \x01(\bR\x11remoteEgressRelay\x12=\n" +
-	"\avolumes\x18\xb4\x10 \x03(\v2\".supertag.runtime.v2.VolumeMappingR\avolumesB\x10\n" +
+	"\avolumes\x18\xb4\x10 \x03(\v2\".supertag.runtime.v2.VolumeMappingR\avolumes\x12(\n" +
+	"\x0fcommand_sandbox\x18\x98\x11 \x01(\bR\x0ecommandSandboxB\x10\n" +
 	"\x0e_default_model\"D\n" +
 	"\rVolumeMapping\x12\x1b\n" +
 	"\tvolume_id\x18\x01 \x01(\tR\bvolumeId\x12\x16\n" +

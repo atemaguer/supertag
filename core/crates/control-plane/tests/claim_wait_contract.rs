@@ -261,6 +261,21 @@ fn lane(operation: &str, wait_ms: u32, profile: HarnessExecutionProfile) -> Clai
     }
 }
 
+/// Lanes that run commands in a sandbox: a local-vm one, and a Claude Code one with its own.
+fn sandboxed_lanes() -> [HarnessExecutionProfile; 2] {
+    [
+        HarnessExecutionProfile {
+            remote_file_workspace: true,
+            ..Default::default()
+        },
+        HarnessExecutionProfile {
+            command_sandbox: true,
+            network_sandbox: true,
+            ..Default::default()
+        },
+    ]
+}
+
 async fn submit(store: &Store, operation: &str) -> String {
     store
         .submit_task(
@@ -278,9 +293,10 @@ async fn submit(store: &Store, operation: &str) -> String {
         .task_id
 }
 
-/// A Task that runs commands goes to a sandboxed lane, such as a local-vm one, waiting to claim
+/// A Task that runs commands goes to a sandboxed lane, such as a local-vm one or one that runs
+/// commands in Claude Code's own sandbox (`command_sandbox`), waiting to claim
 /// rather than to a lane that runs commands unsandboxed; a busy sandboxed lane leaves it to them.
-async fn exercise_sandboxed(database: &str) {
+async fn exercise_sandboxed(database: &str, sandboxed: HarnessExecutionProfile) {
     let store = Store::open(database).await.unwrap();
     store
         .put_tag_spec(PutTagRequest {
@@ -301,26 +317,27 @@ async fn exercise_sandboxed(database: &str) {
         })
         .await
         .unwrap();
-    let sandboxed = HarnessExecutionProfile {
-        remote_file_workspace: true,
-        ..Default::default()
+    let kind = if sandboxed.command_sandbox {
+        "claude-sandbox"
+    } else {
+        "local-vm"
     };
     let unsandboxed = HarnessExecutionProfile {
         allow_unsandboxed_commands: true,
         ..Default::default()
     };
-    let vm = support::register_host(&store, "local-vm-host").await;
-    let laptop = support::register_host(&store, "unsandboxed-host").await;
+    let vm = support::register_host(&store, &format!("{kind}-host")).await;
+    let laptop = support::register_host(&store, &format!("{kind}-unsandboxed-host")).await;
 
-    let waiting = lane("vm-1", 6_000, sandboxed.clone());
+    let waiting = lane(&format!("{kind}-1"), 6_000, sandboxed.clone());
     let held = store.claim_task_waiting(&vm, &waiting, Duration::from_secs(6));
     let race = async {
         tokio::time::sleep(Duration::from_millis(300)).await;
-        let task = submit(&store, "first").await;
+        let task = submit(&store, &format!("{kind}-first")).await;
         let taken = store
             .claim_task_waiting(
                 &laptop,
-                &lane("laptop-1", 0, unsandboxed.clone()),
+                &lane(&format!("{kind}-laptop-1"), 0, unsandboxed.clone()),
                 Duration::ZERO,
             )
             .await
@@ -333,11 +350,11 @@ async fn exercise_sandboxed(database: &str) {
     assert_eq!(assignment.task.unwrap().task_id, task);
 
     // With no sandboxed lane waiting, the unsandboxed lane runs it at once.
-    let task = submit(&store, "second").await;
+    let task = submit(&store, &format!("{kind}-second")).await;
     let taken = store
         .claim_task_waiting(
             &laptop,
-            &lane("laptop-2", 0, unsandboxed.clone()),
+            &lane(&format!("{kind}-laptop-2"), 0, unsandboxed.clone()),
             Duration::ZERO,
         )
         .await
@@ -534,7 +551,11 @@ async fn sqlite_claim_wait_contract() {
     let local = tokio::task::LocalSet::new();
     local.run_until(exercise("sqlite::memory:")).await;
     local.run_until(exercise_sticky("sqlite::memory:")).await;
-    local.run_until(exercise_sandboxed("sqlite::memory:")).await;
+    for sandboxed in sandboxed_lanes() {
+        local
+            .run_until(exercise_sandboxed("sqlite::memory:", sandboxed))
+            .await;
+    }
     // Replicas share a file: an in-memory database is private to one Store.
     let directory = tempfile::tempdir().unwrap();
     let file = format!(
@@ -564,7 +585,9 @@ async fn postgres_claim_wait_contract() {
             tokio::task::spawn_local(async move {
                 exercise(url.as_str()).await;
                 exercise_sticky(url.as_str()).await;
-                exercise_sandboxed(url.as_str()).await;
+                for sandboxed in sandboxed_lanes() {
+                    exercise_sandboxed(url.as_str(), sandboxed).await;
+                }
                 exercise_replicas(url.as_str()).await;
             })
             .await

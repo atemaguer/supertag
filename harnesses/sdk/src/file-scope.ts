@@ -178,6 +178,7 @@ export function fileScopeOf(task: TaskLike): FileScopeLike | undefined {
 /** A harness adapter and, for Cursor, where its tools run. */
 export type ScopedHarness =
   | "claude-code"
+  | "claude-code-sandboxed"
   | "claude-code-remote"
   | "opencode"
   | "opencode-remote"
@@ -187,6 +188,7 @@ export type ScopedHarness =
 
 const HARNESS_NAMES: Record<ScopedHarness, string> = {
   "claude-code": "Claude Code",
+  "claude-code-sandboxed": "Claude Code",
   "claude-code-remote": "Claude Code",
   opencode: "OpenCode",
   "opencode-remote": "OpenCode",
@@ -228,7 +230,8 @@ export function fileScopeRefusal(task: TaskLike, harness: ScopedHarness): string
       return "Cursor's local tools cannot apply path scopes yet; run the Tag on a Worker Host with a remote Cursor Workspace or shared execution, or on Codex";
     return undefined;
   }
-  if (commands && scope.hidden.length)
+  // Claude Code's own sandbox keeps commands from hidden paths.
+  if (commands && scope.hidden.length && harness !== "claude-code-sandboxed")
     return `${name} cannot keep commands from reading hidden paths (${listed(scope.hidden)}); run the Tag on Codex, or remove commands:execute from its Permission Sets`;
   if (commands && restrictedWrite && task.workspace === undefined)
     return `${name} cannot keep commands inside the write paths without a Workspace whose changes it checks at delivery; run the Tag on Codex, give the Task a Workspace, or remove commands:execute`;

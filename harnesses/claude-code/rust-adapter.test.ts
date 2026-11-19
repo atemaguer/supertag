@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createServer, type ServerHttp2Session } from "node:http2";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -103,6 +103,7 @@ async function invoke({
   skill,
   sessionId = "session",
   allowUnsandboxedCommands = false,
+  sandboxCommands = false,
   history = [],
   hostRefusal,
   remoteWorkspace = false,
@@ -133,6 +134,7 @@ async function invoke({
   skill?: { markdown: string; tamper?: boolean };
   sessionId?: string;
   allowUnsandboxedCommands?: boolean;
+  sandboxCommands?: boolean;
   history?: AttemptHistoryEntry[];
   /** Fail the limit confirmation as a Worker Host that refuses the call would. */
   hostRefusal?: string;
@@ -512,6 +514,7 @@ async function invoke({
       "12",
       ...(model ? ["--model", model] : []),
       ...(allowUnsandboxedCommands ? ["--allow-unsandboxed-commands"] : []),
+      ...(sandboxCommands ? ["--sandbox-commands"] : []),
     ],
     {
       env: {
@@ -863,6 +866,37 @@ it("refuses before starting when commands could read paths the scope hides", asy
     "Claude Code cannot keep commands from reading hidden paths (**/.env); run the Tag on Codex, or remove commands:execute from its Permission Sets. Native execution did not start.",
   );
   await expect(readFile(join(refused.workspace, "command-output.txt"))).rejects.toThrow();
+}, 30000);
+
+it("runs commands in Claude Code's own sandbox, with hidden paths and a private temp folder", async () => {
+  const actions = ["files:read", "files:write", "commands:execute"];
+  const run = await invoke({
+    prompt: "sandbox-settings",
+    actions,
+    sandboxCommands: true,
+    policySnapshot: create(TaskPolicySnapshotSchema, {
+      version: 1,
+      runtimeAuthority: { actions, files: { hidden: ["**/.env"] } },
+    }),
+  });
+  expect(run.completions[0]?.succeeded, run.completions[0]?.result).toBe(true);
+  const reported = JSON.parse(run.completions[0]?.result ?? "{}");
+  expect(reported.tools).toContain("Bash");
+  const workspace = await realpath(run.workspace);
+  expect(reported.sandbox).toMatchObject({
+    enabled: true,
+    failIfUnavailable: true,
+    allowUnsandboxedCommands: false,
+    network: { allowedDomains: [], strictAllowlist: true },
+  });
+  expect(reported.sandbox.filesystem.allowWrite).toContain(workspace);
+  expect(reported.sandbox.filesystem.denyWrite).toContain(join(workspace, ".git"));
+  expect(reported.sandbox.filesystem.denyWrite).toContain(join(workspace, "**/.env"));
+  expect(reported.sandbox.filesystem.denyRead).toContain(join(workspace, "**/.env"));
+  // Its own temporary folder, private to the Attempt and removed when it ends.
+  expect(reported.temporary).toMatch(/^\/tmp\/supertag-claude-/u);
+  expect(reported.temporaryMode).toBe(0o700);
+  await expect(stat(reported.temporary)).rejects.toThrow();
 }, 30000);
 
 it("runs admitted commands unsandboxed only with the host's explicit opt-in", async () => {

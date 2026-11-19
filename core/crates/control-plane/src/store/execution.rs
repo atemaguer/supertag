@@ -44,6 +44,18 @@ pub(super) fn normalize_profile(
             "remote file workspace cannot run unsandboxed commands",
         ));
     }
+    // A command sandbox is Claude Code's own, on the Worker Host: it is the lane's one way to run
+    // commands, and it needs the sandbox Claude Code reports it can start.
+    if profile.command_sandbox
+        && (profile.remote_file_workspace
+            || profile.shared_execution.is_some()
+            || profile.allow_unsandboxed_commands
+            || !profile.network_sandbox)
+    {
+        return Err(invalid(
+            "a command sandbox runs on the Worker Host, alone, where Claude Code's sandbox can start",
+        ));
+    }
     if profile.model_ids.len() > 128
         || profile.model_ids.iter().any(|model| {
             model.is_empty()
@@ -271,8 +283,10 @@ pub(crate) fn lane_requirement(
         HarnessKind::Cursor => "cursor",
         _ => return None,
     };
-    // Shared execution and remote Workspace sandboxes run commands away from the Worker Host.
+    // Shared execution and remote Workspace sandboxes run commands away from the Worker Host, and
+    // a command sandbox runs them in Claude Code's own sandbox on it.
     (!profile.allow_unsandboxed_commands
+        && !profile.command_sandbox
         && profile.shared_execution.is_none()
         && !profile.remote_file_workspace
         && task
@@ -280,15 +294,18 @@ pub(crate) fn lane_requirement(
             .iter()
             .any(|action| action == "commands:execute"))
     .then(|| {
-        let label = match harness {
-            HarnessKind::ClaudeCode => "Claude Code",
-            HarnessKind::Opencode => "OpenCode",
-            _ => "Cursor",
+        let (label, sandbox) = match harness {
+            HarnessKind::ClaudeCode => (
+                "Claude Code",
+                "add claude-code to sandbox-commands on a Worker Host's supertag.yaml service to run them in Claude Code's own sandbox, or ",
+            ),
+            HarnessKind::Opencode => ("OpenCode", ""),
+            _ => ("Cursor", ""),
         };
         (
             "unsandboxed-commands".into(),
             format!(
-                "{label} runs commands without a sandbox, and no bound Worker Host runs them in one; set environment: local-vm on a Worker Host's supertag.yaml service to run them in a container, add {name} to its allow-unsandboxed-commands, or remove commands:execute"
+                "{label} runs commands without a sandbox, and no bound Worker Host runs them in one; {sandbox}set environment: local-vm on a Worker Host's supertag.yaml service to run them in a container, add {name} to its allow-unsandboxed-commands, or remove commands:execute"
             ),
         )
     })
@@ -316,6 +333,42 @@ pub(super) fn read_profile(bytes: Option<Vec<u8>>) -> Result<Option<HarnessExecu
 mod tests {
     use super::*;
     use supertag_protocol::v2::WorkspaceSpec;
+
+    #[test]
+    fn a_command_sandbox_lane_runs_claude_code_commands_without_the_unsandboxed_opt_in() {
+        let sandboxed = HarnessExecutionProfile {
+            command_sandbox: true,
+            network_sandbox: true,
+            ..Default::default()
+        };
+        let task = Task {
+            allowed_actions: vec!["files:write".into(), "commands:execute".into()],
+            ..Default::default()
+        };
+        assert!(lane_requirement(&task, HarnessKind::ClaudeCode, &sandboxed).is_none());
+        let (requirement, summary) =
+            lane_requirement(&task, HarnessKind::ClaudeCode, &Default::default()).unwrap();
+        assert_eq!(requirement, "unsandboxed-commands");
+        assert!(summary.contains("sandbox-commands"), "{summary}");
+        assert!(normalize_profile(Some(&sandboxed)).is_ok());
+        // It runs alone, on the Worker Host, where Claude Code's sandbox can start.
+        for invalid in [
+            HarnessExecutionProfile {
+                allow_unsandboxed_commands: true,
+                ..sandboxed.clone()
+            },
+            HarnessExecutionProfile {
+                remote_file_workspace: true,
+                ..sandboxed.clone()
+            },
+            HarnessExecutionProfile {
+                network_sandbox: false,
+                ..sandboxed.clone()
+            },
+        ] {
+            assert!(normalize_profile(Some(&invalid)).is_err(), "{invalid:?}");
+        }
+    }
 
     #[test]
     fn remote_file_host_reserves_split_harness_repository_work_with_sandboxed_commands() {

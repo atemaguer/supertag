@@ -98,6 +98,8 @@ impl Attempt {
                 .all(|server| options.execution_profile.mcp_servers.contains(server))
             && model.is_none_or(|model| options.execution_profile.model_ids.contains(model))
             && (!self.requires_unsandboxed_commands
-                || options.execution_profile.allow_unsandboxed_commands))
+                || options.execution_profile.allow_unsandboxed_commands
+                || (options.execution_profile.command_sandbox
+                    && options.harness == HarnessKind::ClaudeCode)))
     }
 }

@@ -11,6 +11,13 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- `sandbox-commands: [claude-code]` on a host service (`supertag worker-host --sandbox-commands`)
+  runs Claude Code's commands in Claude Code's own operating-system sandbox: they write only the
+  Workspace, never its `.git` or read-only and hidden paths, cannot read hidden paths or the home's
+  credential folders such as `~/.ssh`, and have no network unless the Task has `web:fetch`. Such a
+  host runs Claude Code Tasks with hidden paths and `commands:execute`, and is preferred over an
+  `allow-unsandboxed-commands` host. It needs Claude Code 2.1.323 or later. `supertag init` sets it
+  for a Claude Code lead wherever the sandbox can start and grants the lead `commands:execute`.
 - `supertag workspace add [PATH]` adds a Git repository on this machine as a Workspace of the
   local Worker Host in `supertag.yaml` and restarts the changed services as `supertag up` does.
   The desktop app's New Tag form, connected to the local services, offers **Choose a folder…**

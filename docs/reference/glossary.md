@@ -153,7 +153,8 @@ whole system rather than another first-class resource.
 - <a id="unsandboxed-harness"></a>**unsandboxed harness** — a harness that runs a Task's commands as the Worker Host's user,
   without an operating-system sandbox: Claude Code, Cursor, or OpenCode on a local host. A host runs their Tasks
   that may run commands only after `allow-unsandboxed-commands` opts in; a local-vm host runs
-  their commands in containers instead. See
+  their commands in containers instead, and a host with `sandbox-commands` runs Claude Code's in
+  Claude Code's own sandbox. See
   [Unsandboxed harnesses](supertag-yaml.md#unsandboxed-harnesses).
 - <a id="task-attempt"></a>**Task Attempt** — one execution of a Task on a Worker Host; a retry is another Task Attempt.
   See [Scheduling and interrupted execution](scheduling-and-recovery.md).

@@ -98,12 +98,39 @@ impl Found {
 /// Where a harness without its own sandbox runs commands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Commands {
+    /// In Claude Code's own sandbox on this machine (`sandbox-commands`).
+    Sandboxed,
     /// In a container on this machine's Docker (`environment: local-vm`).
     LocalVm,
     /// On this machine, as the operator (`allow-unsandboxed-commands`).
     Unsandboxed,
     /// Neither: Codex sandboxes its own, and another harness's lead gets no commands:execute.
     Unset,
+}
+
+/// Why Claude Code's own sandbox can't run the lead's commands on this machine, or `None` when it
+/// can: it must start here, and the `claude` on PATH must be recent enough for `sandbox-commands`.
+fn claude_sandbox_problem() -> Option<String> {
+    #[cfg(feature = "test-fixtures")]
+    if let Ok(state) = std::env::var("SUPERTAG_TEST_INIT_CLAUDE_SANDBOX") {
+        return (state != "ready").then_some(state);
+    }
+    if !supertag_worker_host::egress::claude_sandbox_available() {
+        return Some(if cfg!(target_os = "linux") {
+            "it needs bubblewrap (bwrap), socat, and unprivileged user namespaces, and this machine is missing one".to_owned()
+        } else {
+            "it does not run on this operating system".to_owned()
+        });
+    }
+    let output = Command::new("claude")
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok();
+    crate::harness::sandbox_version_problem(
+        output.and_then(|output| claude_version(&String::from_utf8_lossy(&output.stdout))),
+    )
 }
 
 /// The container runtime local-vm would use, when one answers and the local-vm provider is
@@ -168,7 +195,7 @@ fn claude_version_problem() -> Option<String> {
 }
 
 /// The version in `claude --version`'s output, such as "2.1.323 (Claude Code)".
-fn claude_version(output: &str) -> Option<(u64, u64, u64)> {
+pub(crate) fn claude_version(output: &str) -> Option<(u64, u64, u64)> {
     let word = output.split_whitespace().next()?;
     let mut parts = word.split('.').map(|part| part.parse::<u64>().ok());
     Some((parts.next()??, parts.next()??, parts.next()??))
@@ -1646,10 +1673,24 @@ fn answers(
         (Found::Opencode, None) => unreachable!("--yes never selects OpenCode"),
         _ => None,
     };
+    // Claude Code's own sandbox, where it can start, runs the lead's commands without asking.
+    let sandbox = match harness {
+        Found::ClaudeCode => Some(claude_sandbox_problem()),
+        _ => None,
+    };
+    if let Some(Some(problem)) = &sandbox {
+        outln!("  Claude Code's sandbox can't run the lead's commands on this machine: {problem}.");
+    }
     let runtime = matches!(harness, Found::ClaudeCode | Found::Cursor | Found::Opencode)
         .then(container_runtime)
         .flatten();
     let commands = match (runtime, ask.as_deref_mut()) {
+        _ if sandbox == Some(None) => {
+            outln!(
+                "  claude-code runs the lead's commands in its own sandbox (sandbox-commands): they write only the Workspace, can't read hidden paths or your credential folders such as ~/.ssh, and have no network unless a Permission Set grants web:fetch."
+            );
+            Commands::Sandboxed
+        }
         (Some(runtime), Some(prompter)) => {
             let name = harness.harness();
             outln!(
@@ -1767,6 +1808,7 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
         host["models"] = json!({ harness: model });
     }
     match answers.commands {
+        Commands::Sandboxed => host["sandbox-commands"] = json!([harness]),
         Commands::LocalVm => host["environment"] = json!("local-vm"),
         Commands::Unsandboxed => host["allow-unsandboxed-commands"] = json!([harness]),
         Commands::Unset => {}
@@ -2179,6 +2221,7 @@ mod tests {
         // Without commands, Claude Code reads the repository only with files:read.
         assert!(permissions(Found::ClaudeCode, Commands::Unset).contains("files:read"));
         for (harness, commands) in [
+            (Found::ClaudeCode, Commands::Sandboxed),
             (Found::ClaudeCode, Commands::LocalVm),
             (Found::ClaudeCode, Commands::Unsandboxed),
             (Found::Codex, Commands::Unset),
@@ -2217,6 +2260,60 @@ mod tests {
         )
         .unwrap();
         assert!(config.hosts[0].local_vm);
+    }
+
+    #[test]
+    fn a_sandboxed_claude_code_lead_runs_commands_in_claude_codes_sandbox() {
+        let repository = Repository {
+            root: PathBuf::from("/work/app"),
+            name: "app".into(),
+            start: Start::Branch("main".into()),
+        };
+        let answers = Answers {
+            port: DEFAULT_PORT,
+            harness: Found::ClaudeCode,
+            also: Vec::new(),
+            model: None,
+            commands: Commands::Sandboxed,
+            workspace: "app".into(),
+            tag: "lead".into(),
+        };
+        let document = document(&answers, &repository);
+        let host = &document["services"][machine_name()];
+        assert_eq!(host["sandbox-commands"], json!(["claude-code"]));
+        assert!(host.get("allow-unsandboxed-commands").is_none(), "{host}");
+        assert!(host.get("environment").is_none(), "{host}");
+        assert!(
+            document["services"]["control-plane"]["provision"][0]["spec"]["permissions"]
+                .to_string()
+                .contains("commands:execute")
+        );
+        let config = local_config::parse(
+            local_config::to_yaml(&document).as_bytes(),
+            Path::new("/work"),
+            |_| None,
+        )
+        .unwrap();
+        let profile = config.hosts[0].harnesses[0].execution_profile().unwrap();
+        assert!(profile.command_sandbox && !profile.allow_unsandboxed_commands);
+    }
+
+    #[test]
+    fn sandbox_commands_refuses_a_claude_code_older_than_its_sandbox_fixes() {
+        use crate::harness::{CLAUDE_SANDBOX_MINIMUM, sandbox_version_problem};
+        assert!(sandbox_version_problem(Some(CLAUDE_SANDBOX_MINIMUM)).is_none());
+        assert!(sandbox_version_problem(Some((2, 2, 0))).is_none());
+        let old = sandbox_version_problem(Some((2, 1, 322))).unwrap();
+        assert!(
+            old.contains("2.1.323") && old.contains("2.1.322") && old.contains("claude update"),
+            "{old}"
+        );
+        assert!(
+            sandbox_version_problem(None)
+                .unwrap()
+                .contains("claude update")
+        );
+        assert!(CLAUDE_SANDBOX_MINIMUM >= CLAUDE_CODE_MINIMUM);
     }
 
     #[test]

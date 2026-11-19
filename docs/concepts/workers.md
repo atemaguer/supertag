@@ -99,7 +99,9 @@ Workstream post.
 ## Execution environment
 
 By default a Task runs in a local checkout on the host. Codex runs commands inside its own
-sandbox. Claude Code, Cursor, and OpenCode Tasks run best in **local-vm** containers: the host keeps each
+sandbox, and Claude Code inside its own on a host with `sandbox-commands`, which `supertag init`
+sets where that sandbox can start. Claude Code, Cursor, and OpenCode Tasks also run well in
+**local-vm** containers: the host keeps each
 Workspace in a container on its own Docker, where their file tools and commands run with
 no network. Otherwise Claude Code, OpenCode, and Cursor run commands in a local checkout only when
 the host opts in with `allow-unsandboxed-commands`, because those commands run as the host's user

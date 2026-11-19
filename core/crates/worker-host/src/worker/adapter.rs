@@ -1050,11 +1050,14 @@ pub(crate) fn unproxied_key_warning(
 /// in this process: the harness talks to its provider through a proxy that holds it (see
 /// `provider_proxy`). `None` elsewhere, and when the host has no key it can hold (a sign-in kept
 /// in the macOS Keychain, an OpenCode OAuth sign-in, or a provider SuperTag doesn't proxy), which
-/// the harness then reads itself.
+/// the harness then reads itself. A Claude Code lane with a command sandbox keeps the key there
+/// too, as defense in depth beside the sandbox.
 async fn start_provider_proxy(
     options: &Settings<'_>,
 ) -> Result<Option<crate::worker::provider_proxy::ProviderProxy>> {
-    if !options.execution_profile.allow_unsandboxed_commands {
+    if !options.execution_profile.allow_unsandboxed_commands
+        && !options.execution_profile.command_sandbox
+    {
         return Ok(None);
     }
     let (origin, swaps) = match options.harness {

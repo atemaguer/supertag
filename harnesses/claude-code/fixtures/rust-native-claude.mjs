@@ -2,7 +2,7 @@
 // Protocol fixture for the REAL Anthropic Agent SDK. No model or provider is contacted.
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
@@ -945,6 +945,18 @@ async function turn(message) {
     const called = (await sdkMcp("tools/call", { name: "command", arguments: input }, "workspace"))
       .result;
     result = JSON.stringify({ text: called.content[0].text, isError: called.isError });
+  }
+  if (prompt === "sandbox-settings") {
+    // What Claude Code's sandbox would apply to Bash: its settings and its temporary directory.
+    const raw = arg("--settings") ?? "{}";
+    const settings = JSON.parse(raw.trim().startsWith("{") ? raw : await readFile(raw, "utf8"));
+    const temporary = process.env.CLAUDE_CODE_TMPDIR ?? null;
+    result = JSON.stringify({
+      tools: arg("--tools")?.split(",") ?? [],
+      sandbox: settings.sandbox ?? null,
+      temporary,
+      temporaryMode: temporary ? (await stat(temporary)).mode & 0o777 : null,
+    });
   }
   if (prompt === "run-command") {
     // Claude Code's Bash runs as the host user; the fixture runs the admitted command the same way.

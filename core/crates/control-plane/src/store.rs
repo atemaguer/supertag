@@ -1106,6 +1106,9 @@ impl Store {
         let _wake = self.hint_after_commit();
         name("operation ID", operation_id)?;
         let profile = execution::normalize_profile(execution_profile)?;
+        if profile.command_sandbox && harness != HarnessKind::ClaudeCode {
+            return Err(invalid("only a Claude Code lane runs a command sandbox"));
+        }
         let profile_bytes = profile.encode_to_vec();
         if workspace_ids.len() > 128 || workspace_ids.iter().any(|id| !valid_workspace_id(id)) {
             return Err(invalid("invalid Worker Host workspace capabilities"));

@@ -34,6 +34,7 @@ fn report(sequence: u64) -> ReportHostRequest {
             mcp_login_servers: vec![],
             network_credentials: vec![],
             network_sandbox: false,
+            command_sandbox: false,
             unverified_workspace_provider: false,
             volumes: vec![],
             remote_egress_relay: false,

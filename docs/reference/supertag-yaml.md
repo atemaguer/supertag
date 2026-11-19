@@ -33,7 +33,8 @@ repositories.
 `supertag init` writes a file like this for the repository you run it in. It provisions a
 `local-tools` Permission Set, a `Lead` Role, and the Control Plane's lead Tag, which follows the
 current branch. It grants `commands:execute` only when the host may run the lead's commands: always
-for Codex, and for Claude Code, Cursor, or OpenCode only with `environment: local-vm` or
+for Codex; for Claude Code with `sandbox-commands`, which `init` sets wherever Claude Code's
+sandbox can start; and for Cursor or OpenCode only with `environment: local-vm` or
 `allow-unsandboxed-commands`. For a Codex lead, `local-tools` also grants `web:fetch`, because current Codex
 models run commands only in Codex code mode; see
 [Codex commands and models](../operations/requirements.md#codex-commands-and-models). The host
@@ -208,10 +209,12 @@ The host `supertag init` writes sets `concurrency: 3`.
 
 ### local-vm containers
 
-Claude Code, Cursor, and OpenCode have no sandbox of their own that SuperTag can enforce. `environment:
+Cursor and OpenCode have no sandbox of their own that SuperTag can enforce, and Claude Code has
+one only with [`sandbox-commands`](#sandboxed-claude-code-commands). `environment:
 local-vm` gives them one: each Task Attempt's Workspace lives in a container on this machine's
 Docker, and every file and command tool runs there. The harness and its keys stay on the host.
-This is the setup `supertag init` writes when Docker is running. Docker is the supported runtime.
+This is the setup `supertag init` writes when Docker is running and the lead's harness is
+Cursor or OpenCode, or Claude Code where its own sandbox can't start. Docker is the supported runtime.
 A local-vm host refuses Podman for now: under Podman, a Task gets more privilege than local-vm
 promises, so its Task Attempts fail to start and name Docker instead.
 
@@ -259,7 +262,8 @@ image again.
 
 ### Unsandboxed harnesses
 
-Codex runs commands in its own sandbox. Claude Code, Cursor, and OpenCode have none that SuperTag
+Codex runs commands in its own sandbox, and Claude Code runs them in its own with
+[`sandbox-commands`](#sandboxed-claude-code-commands). Cursor and OpenCode have none that SuperTag
 can enforce. Prefer [local-vm containers](#local-vm-containers) for them.
 Otherwise a host does not run their Tasks that may run commands (`commands:execute`) unless
 the harness is listed in `allow-unsandboxed-commands`; such a Task waits for a host that allows
@@ -279,22 +283,45 @@ which stops accidental leaks but is not a boundary.
 
 ### Sandboxed Claude Code commands
 
-`sandbox-commands: [claude-code]` lets a host run Claude Code's commands in Claude Code's own
-operating-system sandbox (Seatbelt on macOS; bubblewrap, which needs `bwrap` and `socat`, on
-Linux) instead of unsandboxed. Commands write only the Task's Workspace and its writable
-directories, never its `.git` or harness configuration, read-only, or hidden paths. They cannot
-read hidden paths or the credential folders in your home, such as `~/.ssh`, `~/.aws`, and
-`~/.claude`. They have no network unless the Task has `web:fetch`; a
-[network scope](iam.md#network-scopes) limits it to the scope's hosts. Claude Code fails the Task
-Attempt rather than run a command outside its sandbox. Commands can still read your other files.
+`sandbox-commands: [claude-code]` runs Claude Code's commands (its Bash tool, and every process a
+command starts) in Claude Code's own operating-system sandbox: Seatbelt on macOS, and on Linux
+bubblewrap, which needs `bwrap`, `socat`, and unprivileged user namespaces. `supertag init` sets it
+for a Claude Code host wherever that sandbox can start, and says why when it can't.
 
 ```yaml
     harnesses: [codex, claude-code]
     sandbox-commands: [claude-code]
 ```
 
-A host names a harness in `sandbox-commands` or `allow-unsandboxed-commands`, not both. A host
-started without supertag.yaml takes `supertag worker-host --sandbox-commands`.
+Under it, a Task's commands:
+
+- write only the Task's Workspace, its read-write Workspace copies, and its `files:write`
+  `additionalDirectories`, plus a temporary folder of the Task Attempt's own. Without
+  `files:write`, they write only that temporary folder.
+- never write the Workspace's `.git`, `.codex`, `.agents`, `.aws`, `.claude`, `.cursor`,
+  `.opencode`, or `.supertag`, or its read-only and hidden paths. The host commits the Task's
+  changes after Claude Code finishes, so a command cannot commit itself.
+- cannot read hidden paths, or these credential locations in your home: `~/.ssh`, `~/.aws`,
+  `~/.gnupg`, `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.docker`, `~/.kube`, `~/.codex`,
+  `~/.claude`, `~/.claude.json`, `~/.config/gh`, `~/.config/opencode`, `~/.supertag`, and
+  `~/Library/Keychains`. They can read your other files.
+- have no network unless the Task has `web:fetch`. A [network scope](iam.md#network-scopes) limits
+  them to its hosts, through the Attempt's egress proxy. They may listen on loopback, so a test
+  suite can start a local server.
+
+Claude Code fails the Task Attempt rather than run a command outside its sandbox, and ignores a
+request to skip it. `paths` that narrow Workspace writes are still checked at delivery, as for an
+unsandboxed host. Hidden paths are kept from commands, so a Claude Code Task with hidden paths and
+`commands:execute` runs on such a host; see
+[Path scope enforcement](iam.md#path-scope-enforcement). When both a host with `sandbox-commands`
+and one with `allow-unsandboxed-commands` could run a Task with `commands:execute`, the sandboxed
+host gets it unless it is busy.
+
+The host needs Claude Code 2.1.323 or later, whose sandbox fixes cases where a command ran
+outside it; with an older `claude` the host refuses to start and asks you to run `claude update`.
+A host names a harness in `sandbox-commands` or `allow-unsandboxed-commands`, not both, and
+cannot combine it with `environment: local-vm`. A host started without supertag.yaml takes
+`supertag worker-host --sandbox-commands`.
 
 ### Network credentials
 

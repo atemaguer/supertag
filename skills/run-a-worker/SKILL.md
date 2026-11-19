@@ -38,10 +38,13 @@ A host in the same file as its Control Plane joins on its own and may run every 
 `harnesses` (up to five of `codex`, `claude-code`, `cursor`, `opencode`, `openai-agents`), or
 `adapter` and `adapter-args` for your own; `models` per harness, default first; `workspaces`, each
 a path or `{ path, land: local|patch|{merge: BRANCH, push: REMOTE}, setup: COMMAND }`; `concurrency` 1 to 16 per harness;
-`attempt-timeout-seconds`; `skills`; `labels`; `allow-unsandboxed-commands` for `claude-code`,
-`cursor`, or `opencode`; `restart: unless-stopped`. Claude Code, Cursor, and OpenCode run commands
-without a sandbox, so their Tasks that may run commands (`commands:execute`) run only on a host
-that lists the harness in `allow-unsandboxed-commands`. Cursor and Claude Code on a host with an
+`attempt-timeout-seconds`; `skills`; `labels`; `sandbox-commands` for `claude-code`;
+`allow-unsandboxed-commands` for `claude-code`, `cursor`, or `opencode`; `restart: unless-stopped`.
+`sandbox-commands: [claude-code]` runs Claude Code's commands in its own operating-system sandbox
+(Claude Code 2.1.323 or later; macOS, or Linux with bubblewrap and socat), and `supertag init` sets
+it where that sandbox can start. Cursor and OpenCode run commands without a sandbox, so their
+Tasks that may run commands (`commands:execute`) run only on a host with `environment: local-vm`
+or the harness in `allow-unsandboxed-commands`; so do Claude Code's without `sandbox-commands`. Cursor and Claude Code on a host with an
 E2B or Modal Workspace provider run commands in the Task's sandbox instead and need no opt-in.
 
 ## Join a shared Control Plane

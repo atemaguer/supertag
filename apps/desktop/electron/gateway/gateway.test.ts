@@ -452,9 +452,9 @@ it("follows the branch its Workspace's lead follows", () => {
 });
 
 it("offers every ready host's harnesses and Workspaces", () => {
-  const slot = (harnessKind: HarnessKind, unsandboxed: boolean) => ({
+  const slot = (harnessKind: HarnessKind, unsandboxed: boolean, commandSandbox = false) => ({
     harnessKind,
-    executionProfile: { allowUnsandboxedCommands: unsandboxed },
+    executionProfile: { allowUnsandboxedCommands: unsandboxed, commandSandbox },
   });
   const host = (
     phase: HostPhase,
@@ -490,6 +490,13 @@ it("offers every ready host's harnesses and Workspaces", () => {
     workspaces: ["site", "supertag"],
     noCommands: [],
   });
+  // A Claude Code lane that runs commands in Claude Code's own sandbox runs them too.
+  const sandboxed = host(
+    HostPhase.READY,
+    [slot(HarnessKind.CLAUDE_CODE, false, true)],
+    ["supertag"],
+  );
+  expect(optionsOf([sandboxed]).noCommands).toEqual([]);
   expect(optionsOf([])).toEqual({ harnesses: [], workspaces: [], noCommands: [] });
 });
 

@@ -287,9 +287,8 @@ impl AdapterOptions {
                 && supertag_worker_host::egress::claude_sandbox_available(),
             model_ids,
             default_model,
-            // Sandboxed commands still run on this host, so the host takes the Tasks an
-            // unsandboxed lane would.
-            allow_unsandboxed_commands: self.allow_unsandboxed_commands || self.sandbox_commands,
+            allow_unsandboxed_commands: self.allow_unsandboxed_commands,
+            command_sandbox: self.sandbox_commands,
             remote_file_workspace: false,
             unverified_workspace_provider: false,
             remote_egress_relay: false,
@@ -613,6 +612,14 @@ impl AdapterOptions {
                             None if packaged => Some(claude_on_path()?),
                             None => None,
                         };
+                        if self.sandbox_commands {
+                            let claude = claude.as_deref().context(
+                                "--sandbox-commands needs the Claude Code executable: name it with --claude-path",
+                            )?;
+                            if let Some(problem) = claude_sandbox_version_problem(claude) {
+                                anyhow::bail!(problem);
+                            }
+                        }
                         if let Some(claude) = claude {
                             args.extend(["--executable".into(), claude.into_os_string()]);
                         }
@@ -740,6 +747,39 @@ fn claude_on_path() -> Result<PathBuf> {
             crate::harness_checks::CLAUDE_CODE_INSTALL
         )
     })
+}
+
+/// The oldest Claude Code whose sandbox `--sandbox-commands` relies on. 2.1.281 lets sandboxed
+/// commands write the `CLAUDE_CODE_TMPDIR` temporary directory; 2.1.309 runs shell startup files
+/// inside the sandbox and applies `denyWrite` globs through symlinked folders; 2.1.319, 2.1.321,
+/// and 2.1.323 close cases where a command ran outside the sandbox (a worktree, a read-only
+/// command, a symlinked write grant).
+pub(crate) const CLAUDE_SANDBOX_MINIMUM: (u64, u64, u64) = (2, 1, 323);
+
+/// Why `claude` is too old to run commands in its sandbox for SuperTag, or `None` when it isn't.
+/// A version it doesn't report is a problem too: the sandbox's guarantees can't be checked.
+fn claude_sandbox_version_problem(claude: &std::path::Path) -> Option<String> {
+    let found = std::process::Command::new(claude)
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .and_then(|output| crate::init::claude_version(&String::from_utf8_lossy(&output.stdout)));
+    sandbox_version_problem(found)
+}
+
+pub(crate) fn sandbox_version_problem(found: Option<(u64, u64, u64)>) -> Option<String> {
+    let (major, minor, patch) = CLAUDE_SANDBOX_MINIMUM;
+    match found {
+        Some(found) if found >= CLAUDE_SANDBOX_MINIMUM => None,
+        Some((a, b, c)) => Some(format!(
+            "sandbox-commands needs Claude Code {major}.{minor}.{patch} or later, and this is {a}.{b}.{c}; run claude update, then start the host again"
+        )),
+        None => Some(format!(
+            "sandbox-commands needs Claude Code {major}.{minor}.{patch} or later, and claude --version did not report a version; run claude update, then start the host again"
+        )),
+    }
 }
 
 fn executable_path(path: PathBuf) -> Result<PathBuf> {

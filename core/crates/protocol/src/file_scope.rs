@@ -623,7 +623,9 @@ pub fn harness_reason(task: &Task, harness: HarnessKind) -> Option<String> {
         // profile, with or without web:fetch.
         HarnessKind::Codex => None,
         HarnessKind::ClaudeCode | HarnessKind::Opencode => {
-            if commands && !scope.hidden.is_empty() {
+            // Claude Code's own sandbox keeps commands from hidden paths on a lane with
+            // `command_sandbox`, so only `reason`, which knows the lane, refuses Claude Code.
+            if commands && !scope.hidden.is_empty() && harness == HarnessKind::Opencode {
                 Some(format!(
                     "{name} cannot keep commands from reading hidden paths ({}); run the Tag on Codex, or remove commands:execute from its Permission Sets",
                     listed(&scope.hidden)
@@ -674,6 +676,16 @@ pub fn reason(
     if profile.remote_file_workspace && has(task, "commands:execute") && !scope.hidden.is_empty() {
         return Some(format!(
             "commands in a remote Workspace sandbox can read hidden paths ({}); remove commands:execute or the hidden paths from the Tag's Permission Sets, or run the Tag on a local Codex Worker Host",
+            listed(&scope.hidden)
+        ));
+    }
+    if harness == HarnessKind::ClaudeCode
+        && has(task, "commands:execute")
+        && !scope.hidden.is_empty()
+        && !profile.command_sandbox
+    {
+        return Some(format!(
+            "Claude Code cannot keep commands from reading hidden paths ({}) without its sandbox; add claude-code to sandbox-commands on a Worker Host's supertag.yaml service, run the Tag on Codex, or remove commands:execute from its Permission Sets",
             listed(&scope.hidden)
         ));
     }
@@ -1088,6 +1100,10 @@ mod tests {
             shared_execution: Some(Default::default()),
             ..Default::default()
         };
+        let sandboxed = HarnessExecutionProfile {
+            command_sandbox: true,
+            ..Default::default()
+        };
         let hidden = FileScope {
             hidden: strings(&["**/.env"]),
             ..Default::default()
@@ -1130,9 +1146,17 @@ mod tests {
                 harness,
                 &local
             ));
-            // Commands could read hidden paths.
-            let reason = harness_reason(&task(&commands, hidden.clone(), true), harness).unwrap();
-            assert!(reason.contains("hidden paths (**/.env)"), "{reason}");
+            // Commands could read hidden paths, unless Claude Code's sandbox runs them.
+            let refused = reason(&task(&commands, hidden.clone(), true), harness, &local).unwrap();
+            assert!(refused.contains("hidden paths (**/.env)"), "{refused}");
+            assert_eq!(
+                supports(&task(&commands, hidden.clone(), true), harness, &sandboxed),
+                harness == HarnessKind::ClaudeCode
+            );
+            assert_eq!(
+                harness_reason(&task(&commands, hidden.clone(), true), harness).is_none(),
+                harness == HarnessKind::ClaudeCode
+            );
             // Delivery covers a write restriction, but only with a Workspace.
             assert!(supports(
                 &task(&commands, writes.clone(), true),
