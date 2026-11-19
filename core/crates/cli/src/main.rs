@@ -205,14 +205,14 @@ enum Command {
     Message(conversation_message::MessageArgs),
     /// Show Worker Hosts, Tags, unfinished Objectives, and the operator inbox.
     Status(status::StatusArgs),
-    /// List this machine's SuperTag services and the Workers each Worker Host runs.
+    /// List this machine's SuperTag services and the Workers each Worklet runs.
     Ps(lifecycle::PsArgs),
     /// Print this machine's service logs.
     Logs(lifecycle::LogsArgs),
     /// Stop this machine's SuperTag services, draining local Worker Hosts first.
     ///
     /// When the Control Plane cannot be reached or speaks another protocol, as after an
-    /// upgrade, down stops the services without draining. Worker Hosts still stop gracefully,
+    /// upgrade, down stops the services without draining. Worklets still stop gracefully,
     /// and their running Task Attempts follow the recovery rules.
     Down(lifecycle::DownArgs),
     /// Check a public or private gRPC service using the configured TLS trust.

@@ -211,7 +211,7 @@ async fn import_task(
     let branch = supertag_protocol::session_branch(&task.tag_id, &task.session_id);
     ensure!(
         holds(repository, &branch, &delivery.head_commit).await?,
-        "the Worker Host did not write {} to branch {branch} in {}",
+        "the Worklet did not write {} to branch {branch} in {}",
         delivery.head_commit,
         repository.display()
     );

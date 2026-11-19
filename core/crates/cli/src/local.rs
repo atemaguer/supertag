@@ -518,12 +518,12 @@ impl Children {
         let ready = start_child(
             &mut self.worker_host,
             &mut host,
-            "Worker Host",
+            "Worklet",
             &self.logs,
             FLAGS_HOST,
         )
         .await?;
-        ensure!(ready == "ready", "invalid Worker Host readiness signal");
+        ensure!(ready == "ready", "invalid Worklet readiness signal");
         Ok(endpoint)
     }
 
@@ -565,7 +565,7 @@ impl Children {
         let host = self
             .worker_host
             .as_mut()
-            .context("Worker Host was not started")?;
+            .context("Worklet was not started")?;
         let gateway = async {
             match self.gateway.as_mut() {
                 Some(gateway) => gateway.process.wait().await,
@@ -575,7 +575,7 @@ impl Children {
         let (name, exit) = tokio::select! {
             status = plane.process.wait() => ("Control Plane", status),
             status = gateway => ("Gateway", status),
-            status = host.process.wait() => ("Worker Host", status),
+            status = host.process.wait() => ("Worklet", status),
         };
         bail!(
             "{name} exited unexpectedly with {}",
@@ -585,9 +585,9 @@ impl Children {
 
     async fn stop(&mut self) -> Result<()> {
         let mut failures = Vec::new();
-        // The Worker Host needs the Control Plane while it stops execution.
+        // The Worklet needs the Control Plane while it stops execution.
         for (name, child) in [
-            ("Worker Host", self.worker_host.as_mut()),
+            ("Worklet", self.worker_host.as_mut()),
             ("Gateway", self.gateway.as_mut()),
             ("Control Plane", self.control_plane.as_mut()),
         ] {
@@ -1055,7 +1055,7 @@ impl ManagedHost {
                 args.into_iter()
                     .map(|arg| {
                         arg.into_string()
-                            .map_err(|_| anyhow::anyhow!("a Worker Host argument is not UTF-8"))
+                            .map_err(|_| anyhow::anyhow!("a Worklet argument is not UTF-8"))
                     })
                     .collect::<Result<Vec<_>>>()?,
             );
@@ -1091,7 +1091,7 @@ impl ManagedHost {
         );
         // The Worklet presents the host credential, which it reads from the host's enrollment;
         // its Workers never receive it.
-        let name = format!("Worker Host {}", self.definition.name);
+        let name = format!("Worklet {}", self.definition.name);
         let log = lifecycle::log_path(&self.logs.state, &self.definition.name);
         // Where this start's output begins in the host's log, so a failure names its own error.
         let logged_before = fs::metadata(&log).map_or(0, |metadata| metadata.len());
@@ -1106,7 +1106,7 @@ impl ManagedHost {
         .await;
         match started {
             Ok(ready) => {
-                ensure!(ready == "ready", "invalid Worker Host readiness signal");
+                ensure!(ready == "ready", "invalid Worklet readiness signal");
                 Ok(())
             }
             Err(error) => {
@@ -1383,13 +1383,13 @@ pub async fn configured(
             stops.spawn(async move {
                 stop_child(&mut service.process)
                     .await
-                    .with_context(|| format!("stop Worker Host {name}"))
+                    .with_context(|| format!("stop Worklet {name}"))
             });
         }
     }
     while let Some(stopped) = stops.join_next().await {
         if let Err(error) = stopped
-            .context("Worker Host shutdown task failed")
+            .context("Worklet shutdown task failed")
             .and_then(|r| r)
         {
             failures.push(format!("{error:#}"));
@@ -1615,7 +1615,7 @@ async fn wait_configured(
             // The Worklet's Workers died with it; its next start recovers their Attempts.
             ensure!(
                 host.definition.restart == crate::local_config::Restart::UnlessStopped,
-                "Worker Host {} exited unexpectedly with {status}",
+                "Worklet {} exited unexpectedly with {status}",
                 host.definition.name
             );
             time::sleep(Duration::from_secs(1)).await;

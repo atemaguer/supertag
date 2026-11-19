@@ -1759,7 +1759,7 @@ fn unsandboxed(harness: Found, ask: Option<&mut Prompter>, state: &Path) -> Resu
                 outln!("  {}", supertag_worker_host::unsandboxed_caveat(name));
                 if matches!(harness, Found::ClaudeCode) {
                     outln!(
-                        "  Those commands can read a Claude Code sign-in made with /login. With ANTHROPIC_API_KEY in {} instead, the key stays in the Worker Host and Claude Code gets a stand-in.",
+                        "  Those commands can read a Claude Code sign-in made with /login. With ANTHROPIC_API_KEY in {} instead, the key stays in the Worker and Claude Code gets a stand-in.",
                         state.join(".env").display()
                     );
                 }

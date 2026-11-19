@@ -162,7 +162,7 @@ impl ProviderAuthority {
             );
             ensure!(
                 !matches!(name.as_str(), "PATH" | "LANG" | "TMPDIR"),
-                "the Worker Host sets {name} for every provider; pass another variable"
+                "the Worker sets {name} for every provider; pass another variable"
             );
             ensure!(
                 variables.iter().all(|(seen, _)| seen != name),

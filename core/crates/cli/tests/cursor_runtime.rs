@@ -54,7 +54,7 @@ const RPC_DEADLINE: Duration = Duration::from_secs(15);
 const PROVIDER_KEY: &str = "synthetic-cursor-provider-key";
 const TAG: &str = "cursor-fixture";
 /// The start of the Worker Host's warning that Cursor's API key stays reachable.
-const CURSOR_KEY_WARNING: &str = "Cursor's API key can't be kept in the Worker Host";
+const CURSOR_KEY_WARNING: &str = "Cursor's API key can't be kept in the Worker";
 const SESSION: &str = "cursor-session";
 const WORKSPACE: &str = "cursor-project";
 

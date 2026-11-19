@@ -18,7 +18,7 @@ Commands:
   tui                   Open the terminal UI; plain supertag opens it for this machine's services
   message               Send a message to your conversation with a Tag and print its reply
   status                Show Worker Hosts, Tags, unfinished Objectives, and the operator inbox
-  ps                    List this machine's SuperTag services and the Workers each Worker Host runs
+  ps                    List this machine's SuperTag services and the Workers each Worklet runs
   logs                  Print this machine's service logs
   down                  Stop this machine's SuperTag services, draining local Worker Hosts first
   health                Check a public or private gRPC service using the configured TLS trust
@@ -288,7 +288,7 @@ Options:
 ## `supertag ps`
 
 ```text
-List this machine's SuperTag services and the Workers each Worker Host runs
+List this machine's SuperTag services and the Workers each Worklet runs
 
 Usage: supertag ps [OPTIONS]
 
@@ -329,7 +329,7 @@ Options:
 ```text
 Stop this machine's SuperTag services, draining local Worker Hosts first.
 
-When the Control Plane cannot be reached or speaks another protocol, as after an upgrade, down stops the services without draining. Worker Hosts still stop gracefully, and their running Task Attempts follow the recovery rules.
+When the Control Plane cannot be reached or speaks another protocol, as after an upgrade, down stops the services without draining. Worklets still stop gracefully, and their running Task Attempts follow the recovery rules.
 
 Usage: supertag down [OPTIONS]
 
@@ -1437,7 +1437,7 @@ Usage: supertag host [OPTIONS] <COMMAND>
 
 Commands:
   drain              Stop assigning new Tasks while the Worker Host finishes current work
-  resume             Allow the Worker Host to claim new Tasks again
+  resume             Assign new Tasks to the Worker Host again
   enroll             Enroll this installation with a host Auth Key. Its own --control-plane and --state-directory name the Control Plane to enroll with and the new Worker Host's state
   revoke             Revoke a Worker Host and its execution authority
   rotate-credential  Replace a Worker Host's credential: this machine's own stopped host with --host-state-directory, or any host as an operator with HOST and --out. The previous one stops working at once
@@ -1474,7 +1474,7 @@ Options:
 ## `supertag host resume`
 
 ```text
-Allow the Worker Host to claim new Tasks again
+Assign new Tasks to the Worker Host again
 
 Usage: supertag host resume [OPTIONS] <HOST_ID>
 
@@ -1735,7 +1735,7 @@ Usage: supertag mcp <COMMAND>
 
 Commands:
   list   Show each catalog server, its auth form, and whether its credentials are ready. Never prints a credential
-  login  Log in to an "oauth": true server in the browser (OAuth with PKCE). SuperTag stores the tokens in this host's MCP login store and the Worker Host refreshes them
+  login  Log in to an "oauth": true server in the browser (OAuth with PKCE). SuperTag stores the tokens in this host's MCP login store and each Worker refreshes them
   help   Print this message or the help of the given subcommand(s)
 
 Options:
@@ -1757,7 +1757,7 @@ Options:
 ## `supertag mcp login`
 
 ```text
-Log in to an "oauth": true server in the browser (OAuth with PKCE). SuperTag stores the tokens in this host's MCP login store and the Worker Host refreshes them
+Log in to an "oauth": true server in the browser (OAuth with PKCE). SuperTag stores the tokens in this host's MCP login store and each Worker refreshes them
 
 Usage: supertag mcp login [OPTIONS] --mcp-catalog <MCP_CATALOG> <NAME>
 
@@ -2436,13 +2436,13 @@ Options:
           
           An HTTP server may instead mint its credentials for each Task Attempt, with exactly one of: "oauth":{"refreshTokenEnv":"VAR"} (a refresh token, or the JSON `supertag mcp login NAME --export` prints); "clientCredentials":{"clientId":"ID","clientSecretEnv":"VAR"} or {"clientId":"ID","assertionKeyEnv":"VAR"} (a client secret, or an RSA or EC private key for a signed JWT client assertion; also "clientIdEnv", "scope", and "tokenUrl"); "githubApp":{"appId":1,"installationId":2,"privateKeyEnv":"VAR"} (a GitHub App installation token); or "helper":["/path/to/command","arg"] (a host command that prints a JSON object of header names to values). Each VAR names a Worker Host variable; each *Env field may instead be the matching *File field naming a file, such as "clientSecretFile" or "privateKeyFile". Without "tokenUrl", the token endpoint comes from the server's OAuth metadata and must share the server's origin.
           
-          A stdio server has a command instead of a url, such as {"name":"db","command":["npx","-y","@acme/db-mcp"],"env":{"DB_TOKEN":"ACME_DB_TOKEN"}}. The Worker Host launches it for each Task Attempt with only its env, each value read from the named Worker Host variable or, for {"file":"/PATH"}, from that file, plus HOME, PATH, and a few locale variables, and stops its process group when the Attempt ends.
+          A stdio server has a command instead of a url, such as {"name":"db","command":["npx","-y","@acme/db-mcp"],"env":{"DB_TOKEN":"ACME_DB_TOKEN"}}. The Worker launches it for each Task Attempt with only its env, each value read from the named Worker Host variable or, for {"file":"/PATH"}, from that file, plus HOME, PATH, and a few locale variables, and stops its process group when the Attempt ends.
           
           The optional resources.tools object maps each tool name to a list of rules, for example [{"prefix":"repository:","separator":"/","components":[{"arguments":["owner"]},{"arguments":["repo"]}]}].
           
           A preset names an official HTTP server instead of a url, with its URL and resource mapping: {"name":"github","preset":"github","headerEnv":{"Authorization":"GITHUB_MCP_AUTH"}}. Presets are github, slack, linear, and teams; teams also needs "tenantId", the Microsoft Entra tenant ID or domain. The lark preset is a stdio server that runs lark-mcp, from the @larksuiteoapi/lark-mcp npm package, on the Worker Host's PATH: {"name":"lark","preset":"lark","env":{"APP_ID":"LARK_APP_ID","APP_SECRET":"LARK_APP_SECRET"}}.
           
-          A file path is absolute or starts with ~/. The file must be a regular file, not a symbolic link, owned by the Worker Host's user and not readable or writable by group or others, holding one value (a private key or refresh token JSON may span lines). The Worker Host reads it at start, so a missing file stops it, and again at each use, so a replaced file takes effect without a restart.
+          A file path is absolute or starts with ~/. The file must be a regular file, not a symbolic link, owned by the Worker Host's user and not readable or writable by group or others, holding one value (a private key or refresh token JSON may span lines). The Worklet reads it at start, so a missing file stops it, and the Worker reads it again at each use, so a replaced file takes effect without a restart.
           
           Catalog entries expose tools only when the Task's accepted Permission Sets grant them. Calls requiring approval appear in the operator Inbox. Endpoints must use HTTPS or literal loopback HTTP.
 

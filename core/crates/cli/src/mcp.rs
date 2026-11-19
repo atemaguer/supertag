@@ -18,7 +18,7 @@ pub enum McpCommand {
         mcp_catalog: PathBuf,
     },
     /// Log in to an "oauth": true server in the browser (OAuth with PKCE). SuperTag stores the
-    /// tokens in this host's MCP login store and the Worker Host refreshes them.
+    /// tokens in this host's MCP login store and each Worker refreshes them.
     Login {
         /// Run the same browser login, store nothing, and print the refresh token once, for
         /// "oauth": {"refreshTokenEnv": VAR} or {"refreshTokenFile": PATH} on a remote Worker Host.
@@ -59,7 +59,7 @@ pub async fn run(command: McpCommand) -> Result<()> {
             };
             if entry.target.starts_with("stdio: ") {
                 bail!(
-                    "MCP server {name} is a stdio server, so it has no login; the Worker Host starts it with its env"
+                    "MCP server {name} is a stdio server, so it has no login; the Worker starts it with its env"
                 );
             }
             let url = match (&entry.login_url, export) {
@@ -103,9 +103,7 @@ pub async fn run(command: McpCommand) -> Result<()> {
                 return Ok(());
             }
             logins.store(&name, &login)?;
-            outln!(
-                "Logged in to MCP server {name}. The Worker Host refreshes the login on this host."
-            );
+            outln!("Logged in to MCP server {name}. Each Worker refreshes the login on this host.");
             Ok(())
         }
     }

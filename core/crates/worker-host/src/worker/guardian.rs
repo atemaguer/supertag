@@ -108,7 +108,7 @@ pub fn guard_adapter(adapter: &Path, args: &[OsString]) -> Result<()> {
             let _ = input.lock().read_exact(&mut [0_u8; 1]);
             let _ = notify.send(());
         })
-        .context("start Worker Host lifeline watcher")?;
+        .context("start Worklet lifeline watcher")?;
 
     let mut scratch = std::env::var_os(ADAPTER_SCRATCH_PARENT)
         .map(|parent| {

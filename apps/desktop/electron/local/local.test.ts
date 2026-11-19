@@ -174,7 +174,7 @@ it("says what a failed up printed and where the logs are", async () => {
     "failing",
     `test "$1 $2" = 'up --state-directory' || exit 9
 echo 'Starting SuperTag'
-echo 'Error: Worker Host laptop did not report readiness: no Node' >&2
+echo 'Error: Worklet laptop did not report readiness: no Node' >&2
 exit 1`,
   );
   const error = await up(failing, state, undefined).catch((e: unknown) => e);

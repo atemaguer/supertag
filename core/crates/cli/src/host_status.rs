@@ -12,7 +12,7 @@ use crate::{Connection, connect_operator, request};
 pub enum HostCommand {
     /// Stop assigning new Tasks while the Worker Host finishes current work.
     Drain { host_id: String },
-    /// Allow the Worker Host to claim new Tasks again.
+    /// Assign new Tasks to the Worker Host again.
     Resume { host_id: String },
     /// Enroll this installation with a host Auth Key. Its own --control-plane and
     /// --state-directory name the Control Plane to enroll with and the new Worker Host's state.

@@ -377,7 +377,7 @@ impl Journal {
             "Worker Host state lock must be private"
         );
         let lock = ExclusiveLock::try_acquire(lock)
-            .context("another Worker Host owns this state directory")?;
+            .context("another Worklet owns this state directory")?;
         Ok(Self {
             directory: directory.to_owned(),
             _lock: Some(lock),
@@ -1134,10 +1134,10 @@ impl Processes {
         }
         groups.sort_unstable();
         Ok(Some(if groups.is_empty() {
-            "The Worker Host restarted and found that this Attempt started no processes.".into()
+            "The Worklet restarted and found that this Attempt started no processes.".into()
         } else {
             format!(
-                "The Worker Host restarted and found every process group it recorded for this Attempt gone: {}.",
+                "The Worklet restarted and found every process group it recorded for this Attempt gone: {}.",
                 groups
                     .iter()
                     .map(i32::to_string)

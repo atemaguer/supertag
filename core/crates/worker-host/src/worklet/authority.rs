@@ -513,7 +513,7 @@ where
     let error = loop {
         tokio::select! {
             biased;
-            _ = shutdown.cancelled() => break Status::cancelled("Worker Host is shutting down"),
+            _ = shutdown.cancelled() => break Status::cancelled("the Worklet is shutting down"),
             _ = time::sleep_until(valid_until) => break Status::failed_precondition(AUTHORITY_EXPIRED),
             result = &mut operation => {
                 if let Ok(until) = &*renewals.borrow() {

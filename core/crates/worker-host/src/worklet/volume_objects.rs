@@ -142,7 +142,7 @@ pub(crate) async fn put(
             tokio::task::spawn_blocking(move || mapping.persist(&key, &blob, Some(&content), true))
                 .await
                 .map_err(|_| Status::internal("Volume write failed"))?
-                .map_err(|_| refused(grant, "this Worker Host could not write it"))
+                .map_err(|_| refused(grant, "this Worklet could not write it"))
         }
     }
 }

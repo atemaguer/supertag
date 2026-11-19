@@ -883,7 +883,7 @@ impl Undrained {
         let why = match (&self.peer, self.error.downcast_ref::<NegotiationError>()) {
             (Some((build, protocols)), _) => {
                 return format!(
-                    "Stopped SuperTag {} services ({}) without draining through the Control Plane, because this CLI speaks {}. Their Worker Hosts stopped gracefully; Task Attempts they were running follow the recovery rules.",
+                    "Stopped SuperTag {} services ({}) without draining through the Control Plane, because this CLI speaks {}. Their Worklets stopped gracefully; Task Attempts they were running follow the recovery rules.",
                     crate::terminal::text(build),
                     spoken(protocols),
                     spoken(PROTOCOL_VERSIONS)
@@ -895,7 +895,7 @@ impl Undrained {
             _ => "this CLI could not reach it".to_owned(),
         };
         format!(
-            "Stopped SuperTag {} services without draining through the Control Plane, because {why}: {}. Their Worker Hosts stopped gracefully; Task Attempts they were running follow the recovery rules.",
+            "Stopped SuperTag {} services without draining through the Control Plane, because {why}: {}. Their Worklets stopped gracefully; Task Attempts they were running follow the recovery rules.",
             release(&status.version, &status.protocols),
             crate::terminal::text(&format!("{:#}", self.error)).trim_end_matches('.')
         )

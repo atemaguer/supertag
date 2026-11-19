@@ -1025,7 +1025,7 @@ pub(crate) fn unproxied_key_warning(
     match options.harness {
         HarnessKind::ClaudeCode if !ANTHROPIC_CREDENTIALS.iter().any(|&variable| held(variable)) =>
         {
-            Some("Claude Code uses its own sign-in on this host, which the commands it runs without a sandbox can read. Set ANTHROPIC_API_KEY in the host's env_file (default ~/.supertag/.env) to keep the key in the Worker Host.".to_owned())
+            Some("Claude Code uses its own sign-in on this host, which the commands it runs without a sandbox can read. Set ANTHROPIC_API_KEY in the host's env_file (default ~/.supertag/.env) to keep the key in the Worker.".to_owned())
         }
         HarnessKind::Opencode => {
             let model = options.provider_model.as_deref()?;
@@ -1035,13 +1035,13 @@ pub(crate) fn unproxied_key_warning(
                 .first()?;
             let held = provider_origin(provider).is_some()
                 && (held(variable) || opencode_file_key(options, provider).is_some());
-            (!held).then(|| format!("OpenCode's {provider} sign-in on this host can't be kept in the Worker Host, so the commands it runs without a sandbox can read it. SuperTag keeps an anthropic or openai API key there, from {variable} in the host's env_file or an api key in the OpenCode auth file."))
+            (!held).then(|| format!("OpenCode's {provider} sign-in on this host can't be kept in the Worker, so the commands it runs without a sandbox can read it. SuperTag keeps an anthropic or openai API key there, from {variable} in the host's env_file or an api key in the OpenCode auth file."))
         }
         // The Cursor SDK takes its backend from CURSOR_BACKEND_URL, but trades the API key for an
         // access token it then sends itself, and the backend can switch it to HTTP/2
         // bidirectional streams, which the provider proxy doesn't carry. So the adapter holds
         // the key: never in an environment (see `CredentialHandoff`), but in its memory.
-        HarnessKind::Cursor => Some("Cursor's API key can't be kept in the Worker Host: the Cursor adapter holds CURSOR_API_KEY in memory, out of every process environment, and the commands it runs without a sandbox, as the same user, can still reach it there or in the host's env_file. Use environment: local-vm to keep the key out of their reach.".to_owned()),
+        HarnessKind::Cursor => Some("Cursor's API key can't be kept in the Worker: the Cursor adapter holds CURSOR_API_KEY in memory, out of every process environment, and the commands it runs without a sandbox, as the same user, can still reach it there or in the host's env_file. Use environment: local-vm to keep the key out of their reach.".to_owned()),
         _ => None,
     }
 }
@@ -1111,7 +1111,7 @@ async fn supervise(
     ),
 ) -> Result<HarnessCompleteRequest> {
     if shutdown.is_cancelled() {
-        return Ok(not_launched(bridge, "Worker Host is shutting down"));
+        return Ok(not_launched(bridge, "the Worklet is shutting down"));
     }
     if Instant::now() >= valid_until {
         return Ok(not_launched(
@@ -1233,7 +1233,7 @@ async fn supervise(
         };
         tokio::select! {
             biased;
-            _ = shutdown.cancelled() => return Err(anyhow!("Worker Host is shutting down")),
+            _ = shutdown.cancelled() => return Err(anyhow!("the Worklet is shutting down")),
             _ = time::sleep_until(valid_until) => return Err(anyhow!("execution authority expired during bootstrap")),
             written = write_bootstrap => written?,
         }
@@ -1486,14 +1486,14 @@ async fn monitor(
 ) -> Result<ExitStatus> {
     let status = tokio::select! {
         biased;
-        _ = shutdown.cancelled() => return Err(anyhow!("Worker Host is shutting down")),
+        _ = shutdown.cancelled() => return Err(anyhow!("the Worklet is shutting down")),
         result = monitor_authority(bridge, &mut valid_until) => {
             result?;
             unreachable!("authority monitoring ends only on rejection")
         },
         status = child.wait() => status?,
     };
-    ensure!(!shutdown.is_cancelled(), "Worker Host is shutting down");
+    ensure!(!shutdown.is_cancelled(), "the Worklet is shutting down");
     ensure!(
         Instant::now() < valid_until,
         "execution authority expired before adapter exit was observed"

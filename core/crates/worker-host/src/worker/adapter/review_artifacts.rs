@@ -111,7 +111,7 @@ impl Bridge {
             .map_err(unreadable)?
             .ok_or_else(|| {
                 Status::unavailable(
-                    "the reviewed Session branch does not hold the delivery yet: its Worker Host has not pushed it",
+                    "the reviewed Session branch does not hold the delivery yet: its Worklet has not pushed it",
                 )
             })?;
         let bytes = supertag_workspaces::source::delivery_patch(
