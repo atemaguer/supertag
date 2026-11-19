@@ -78,7 +78,7 @@ impl Store {
         self.retain_watch(RETAINED).await
     }
 
-    async fn retain_watch(&self, count: i64) -> StoreResult<()> {
+    pub(crate) async fn retain_watch(&self, count: i64) -> StoreResult<()> {
         let mut tx = self.pool.begin().await?;
         let floor: Option<i64> = sqlx::query_scalar(
             "UPDATE supertag_v2_watch_state SET floor=head-$1

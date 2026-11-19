@@ -76,6 +76,11 @@ Audited 2026-11-13 against `core/crates/control-plane`. "Fixed" rows changed in 
   has one replica record a message for an Inbox item that became due after another replica's
   claim started, and fails if that claim reads the Inbox before its lock;
   `sqlite_admits_one_control_plane_process_and_shares_its_lock_within_it`.
+- `control-plane/src/bus/tests.rs`:
+  `postgres_a_message_accepted_on_one_replica_reaches_a_follower_on_another` opens two Stores on
+  one database and checks that a message accepted on one reaches a follow on the other within a
+  second while that follow's poll is 30 seconds, then again by the poll with the listener
+  connection terminated and kept down, then again by the listener once it reconnects.
 - `control-plane/src/store/replica_tests.rs`: `postgres_frozen_replica_releases_the_write_lock`
   holds a write open and silent on one Store and checks that another Store's write proceeds
   after the idle-in-transaction limit.

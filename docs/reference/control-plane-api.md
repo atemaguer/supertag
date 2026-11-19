@@ -193,14 +193,10 @@ For an operator, a response also says why a queued turn still waits for a Worker
 uncertain Task Attempt that holds a host's only slot, once the turn has waited about two seconds.
 An empty reason says the earlier one no longer holds.
 
-After a dropped stream, follow again from the copy you kept: the stream replays what changed
-after it, then pushes. When that cannot be replayed, because the conversation was replaced or more
-than a page of messages arrived since, the first response is the newest page with `incremental`
-unset; replace your copy with it. `ListMessages` with `after` reads the same changes in one call.
-
-Streamed text comes only from the Control Plane replica that received it from the Worklet. A
-follow open on another replica of the same database shows each recorded message as it commits,
-without the text before it.
+After a dropped stream, follow again from the copy you kept (see
+[How streams deliver](#how-streams-deliver)). A copy cannot be replayed when the conversation was
+replaced or more than a page of messages arrived since. `ListMessages` with `after` reads the same
+changes in one call.
 
 A message carries its turn's messages and only its latest activity or plan. `Operator.ListEvents`
 returns every event of a turn, including the activity a conversation page leaves out.
@@ -210,9 +206,7 @@ returns every event of a turn, including the activity a conversation page leaves
 `OperatorEvents.Watch` streams change notices for Tags, Tasks, conversation messages and read
 marks, Objectives, Teams, Workstream posts, and a Tag's notes (`WATCH_KIND_MEMORY`: a note kept,
 rewritten, or deleted; a private note reaches only its person). Each notice carries a resume token; reconnect with the last one to
-continue without a gap. A token older than the notices the Control Plane keeps gets
-`WatchResync` first: read again what you show, then carry on from the token it carries. A notice
-says what changed, not its new contents: read the resource.
+continue without a gap. A notice says what changed, not its new contents: read the resource.
 A Watch request may name the kinds it follows. A kind the Control Plane does not know, such as one a
 newer client asks for, is ignored rather than refused.
 

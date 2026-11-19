@@ -690,6 +690,82 @@ async fn client_team_notices(url: &str) -> anyhow::Result<()> {
 /// A newer client may ask for a kind this Control Plane does not know: the Watch keeps the kinds
 /// both know instead of refusing, and asking only for unknown kinds follows nothing. Every kind,
 /// including Memory's (8), has its own bit.
+/// A Watch follows the replica's one tail: it drops what its own read of the store returned, an
+/// idle one reads nothing, and a change is pushed once the tail reads it.
+#[tokio::test]
+async fn watches_follow_the_tail_and_drop_what_their_read_returned() -> anyhow::Result<()> {
+    const SECRET: &str = "local-watch-test-secret";
+    let plane =
+        ControlPlane::open("sqlite::memory:", SECRET.into(), "operator:local".into()).await?;
+    let store = &plane.store;
+    // Far longer than any wait below, so what arrives in time came from a hint.
+    store.live.bus.set_poll(Duration::from_secs(30));
+    let watch = OperatorWatch {
+        plane: plane.clone(),
+        shutdown: CancellationToken::new(),
+    };
+    // A tail behind the feed: a change recorded without a hint waits for the poll.
+    let _other = store.follow_feed("other").await?;
+    let (mut tx, _) = store.write().await?;
+    sqlx::query("INSERT INTO supertag_v2_tags (tag_id,instructions,allowed_actions,revision) VALUES ('behind','x','[]',1)")
+        .execute(&mut *tx).await?;
+    tx.commit().await?;
+    let head = store.watch_page(i64::MAX).await?;
+    let mut stream = watch
+        .watch(authenticated_request(
+            WatchRequest {
+                resume_token: format!("v1.{}.{}", head.feed_id, head.head - 1),
+                kinds: vec![WatchKind::Tag as i32],
+            },
+            SECRET,
+            Some("operator:bob"),
+        )?)
+        .await?
+        .into_inner();
+    // The Watch reads the change from the store...
+    match stream
+        .next()
+        .await
+        .transpose()?
+        .and_then(|event| event.update)
+    {
+        Some(Update::Change(change)) => assert_eq!(change.id, "behind"),
+        other => anyhow::bail!("expected the Tag change, got {other:?}"),
+    }
+    let reads = store
+        .live
+        .bus
+        .stream_reads
+        .load(std::sync::atomic::Ordering::Relaxed);
+    // ...and drops it when the tail delivers it, reading nothing while idle.
+    store.live.bus.hint();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), stream.next())
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        store
+            .live
+            .bus
+            .stream_reads
+            .load(std::sync::atomic::Ordering::Relaxed),
+        reads
+    );
+    // A change no write hinted is pushed by the tail's next poll.
+    store.live.bus.set_poll(Duration::from_millis(250));
+    store.live.bus.hint();
+    store.put_tag("pushed", "Watch changes", vec![]).await?;
+    let event = tokio::time::timeout(Duration::from_secs(1), stream.next())
+        .await?
+        .transpose()?;
+    match event.and_then(|event| event.update) {
+        Some(Update::Change(change)) => assert_eq!(change.id, "pushed"),
+        other => anyhow::bail!("expected the pushed Tag change, got {other:?}"),
+    }
+    Ok(())
+}
+
 #[test]
 fn unknown_watch_kinds_are_ignored_not_refused() {
     let known = [WatchKind::Tag as i32, WatchKind::Memory as i32];

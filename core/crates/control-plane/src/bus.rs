@@ -177,6 +177,12 @@ impl Bus {
         Duration::from_millis(self.poll_ms.load(Ordering::Relaxed))
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_poll(&self, poll: Duration) {
+        self.poll_ms
+            .store(poll.as_millis() as u64, Ordering::Relaxed);
+    }
+
     /// The text a running turn of `tag_id` is writing changed: wakes the follows of that Tag's
     /// conversations on this replica. Text is an ephemeral signal: it never touches the store and
     /// reaches no other replica, where the recorded message arrives on commit instead.
@@ -466,3 +472,6 @@ impl Drop for HintAfterCommit {
         self.0.bus.hint();
     }
 }
+
+#[cfg(test)]
+mod tests;
