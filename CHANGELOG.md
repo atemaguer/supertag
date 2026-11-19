@@ -48,6 +48,14 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- A Worker starts from an allowlist of its Worklet's environment: the process basics, the
+  transport's proxy and TLS variables, `SUPERTAG_STATE_DIR`, and the variables its own harness's
+  configuration reads. Other harnesses' variables, such as `CODEX_HOME`, and other harnesses' MCP
+  and sandbox provider variables no longer reach it. A Worklet started with a provider key in its
+  environment now hands it to its Workers in their assignment. A Worker's stop deadlines follow
+  its Task Attempt: capture gets the harness's time limit again, from 5 to 30 minutes; a lost
+  lease gets the lease the Control Plane last granted; and a remote sandbox or shared execution
+  adds its provider's stop calls to the lost-lease and post-outcome deadlines.
 - Conversation follows and operator Watches are pushed once a change commits. One reader per
   Control Plane replica serves every open stream, in place of a poll per stream: 300 ms per Watch
   and 2 seconds per follow. On PostgreSQL, replicas wake each other with a content-free

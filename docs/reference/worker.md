@@ -147,24 +147,25 @@ sets it from the host service's `concurrency` and changes it without a restart. 
 takes effect as running Task Attempts finish. Background work that belongs to the host, such as
 presence, landings, cleanup, and the artifact transfer listener, runs once, in the Worklet.
 
-A Worker is never given the host credential, in its environment, its arguments, or any message.
-That is not a boundary within one OS user: the state directory's enrollment holds the credential,
-and on macOS `ps eww` shows the environment the Worklet started with, so a harness command that
-runs outside its sandbox as that user can read it. The harness's sandbox, or another OS user,
-keeps it out. The Worker hides any value shaped like an enrolled credential, in any of its
-encodings, from what the harness sends upstream.
-
 `supertag ps` lists each running Worker under its host's row: its process ID, harness, slot, state
 (starting, executing, or finalizing), how long it has run, and its Task, Task Attempt, and Tag.
 The Worklet keeps them in `workers.json` in the host's state directory, so `ps` asks the Control
 Plane nothing for them. It lists a Worker only while the Worklet that wrote the file is alive and
 is the Worker's parent process, so a Worklet that died leaves no Worker listed.
 
-A Worker exits when its Worklet does. The Worklet cancels a Worker that is still running 30
-minutes past its harness's time limit, 2 minutes after its lease ended, or 5 minutes after it
-handed over its outcome, or that does not stop when asked, and kills its process group 10
-seconds later. A Worker writes its log lines to its Worklet's standard error, so they appear in
-the host's log.
+A Worker exits when its Worklet does. The Worklet cancels a Worker that is still running past
+one of these deadlines, or that does not stop when asked, and kills its process group 10 seconds
+later:
+
+| From | Deadline |
+| --- | --- |
+| Its harness's launch | The harness's time limit, plus that time limit again for capture, at least 5 and at most 30 minutes |
+| The end of its lease | The lease the Control Plane last granted, at least 10 seconds, plus its provider's stop calls |
+| Its outcome | 5 minutes, plus its provider's stop calls |
+
+A Worker with a remote sandbox gets 50 seconds for its provider's stop calls, and one with shared
+execution 10 seconds. A Worker writes its log lines to its Worklet's standard error, so they
+appear in the host's log.
 
 The Worker starts each adapter in its own process group and stops the group when the Task Attempt
 is cancelled, times out, or ends. On Linux it is a child subreaper, so processes that leave the
@@ -172,6 +173,28 @@ adapter's group are still found and stopped. On macOS it finds such processes wi
 100 milliseconds; a process that detaches with a double fork within one scan interval can escape.
 Use an isolated Linux host, container, or VM when that matters. Work started through an
 already-running daemon, such as a tmux server or `ssh localhost`, also escapes supervision.
+
+### What a Worker inherits
+
+A Worker starts from an allowlist of its Worklet's environment, never the whole of it:
+
+| A Worker inherits | Variables |
+| --- | --- |
+| Process basics | `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `LANG`, `LC_*`, `TERM`, `TZ` |
+| Transport | `HTTPS_PROXY`, `NO_PROXY` (either case), `SUPERTAG_SERVER_CA_FILE`, `SUPERTAG_CLIENT_CERT_FILE`, `SUPERTAG_CLIENT_KEY_FILE` |
+| SuperTag state | `SUPERTAG_STATE_DIR` |
+| Its own harness | The non-secret provider variables of its harness, such as `CODEX_HOME` for Codex |
+| Its own harness's configuration | Its sandbox provider's variables, `SUPERTAG_EXECUTION_ADMIN_TOKEN` for shared execution, the variables its MCP catalog and Workspace mount mappings name, `SUPERTAG_MCP_*` for Claude Code and Cursor, `SUPERTAG_OPENCODE_AUTH_FILE` for OpenCode, and `GITHUB_TOKEN` and `GIT_CONFIG_GLOBAL` with a Skill catalog |
+
+Another harness's variables never reach it. Its harness's provider keys and tokens, and the
+network credentials its Task may use, arrive in its assignment instead, never in its environment.
+
+A Worker is never given the host credential, in its environment, its arguments, or any message.
+That is not a boundary within one OS user: the state directory's enrollment holds the credential,
+and on macOS `ps eww` shows the environment the Worklet started with, so a harness command that
+runs outside its sandbox as that user can read it. The harness's sandbox, or another OS user,
+keeps it out. The Worker hides any value shaped like an enrolled credential, in any of its
+encodings, from what the harness sends upstream.
 
 ### What a Worker holds
 

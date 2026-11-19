@@ -188,6 +188,8 @@ struct HarnessSet {
 /// One harness, built from its arguments, and what its Worklet shares with its Workers.
 struct Built {
     worker: WorkerOptions,
+    /// The Worklet variables this harness's Workers inherit besides the basics.
+    environment: Vec<String>,
     provider_credentials: BTreeMap<String, String>,
     network_credentials: Vec<supertag_worker_host::egress::HostCredential>,
     workspaces: Vec<supertag_worker_host::WorkspaceMapping>,
@@ -233,12 +235,24 @@ async fn build(args: WorkerHostArgs, worker: bool) -> Result<Built> {
         attempt_timeout_seconds,
         ..
     } = args;
-    // Keep provider keys out of the process environment: the Worklet reads them from a file and
-    // hands each Worker its own harness's. A Worker gets its harness's credentials from its Worklet, which read this file.
-    let provider_credentials = match &provider_credentials_file {
+    // Keep provider keys out of the process environment: the Worklet reads them from a file, or
+    // from its own environment when no file names them, and hands each Worker its own
+    // harness's in its Assign. A Worker inherits none of them.
+    let mut provider_credentials = match &provider_credentials_file {
         Some(path) if !worker => supertag_worker_host::read_provider_credentials(path)?,
         _ => Default::default(),
     };
+    let provider_variables = adapter.provider_environment()?;
+    if !worker {
+        for &name in provider_variables {
+            if supertag_worker_host::is_provider_secret(name)
+                && !provider_credentials.contains_key(name)
+                && let Some(value) = std::env::var(name).ok().filter(|value| !value.is_empty())
+            {
+                provider_credentials.insert(name.to_owned(), value);
+            }
+        }
+    }
     let harness = adapter.harness_kind();
     ensure!(
         skill_catalog.is_none()
@@ -383,8 +397,9 @@ async fn build(args: WorkerHostArgs, worker: bool) -> Result<Built> {
         );
     }
     let (adapter, adapter_args) = adapter.launch(attempt_timeout_seconds)?;
+    let mcp_catalog_path = mcp_catalog;
     let mcp_catalog = supertag_worker_host::McpCatalog::load(
-        mcp_catalog.as_deref(),
+        mcp_catalog_path.as_deref(),
         supertag_worker_host::McpLoginStore::default_location().ok(),
     )?;
     execution_profile.mcp_servers = mcp_catalog.capabilities();
@@ -465,6 +480,41 @@ async fn build(args: WorkerHostArgs, worker: bool) -> Result<Built> {
             },
         )
         .collect();
+    // The Worklet variables this harness's Workers inherit: what its own configuration reads.
+    let mut environment: Vec<String> = provider_variables
+        .iter()
+        .filter(|name| !supertag_worker_host::is_provider_secret(name))
+        .map(|&name| name.to_owned())
+        .collect();
+    if let Some(provider) = &remote_provider {
+        environment.extend(provider.authority.variables());
+    }
+    if shared_execution.is_some() {
+        environment.push("SUPERTAG_EXECUTION_ADMIN_TOKEN".into());
+    }
+    if harness == HarnessKind::Opencode {
+        environment.push("SUPERTAG_OPENCODE_AUTH_FILE".into());
+    }
+    // A GitHub-hosted Skill catalog is fetched with the host's GitHub token, or else the
+    // operator's own Git configuration.
+    if skill_catalog.is_some() {
+        environment.extend(["GITHUB_TOKEN".into(), "GIT_CONFIG_GLOBAL".into()]);
+    }
+    if let Some(path) = &mcp_catalog_path {
+        environment.extend(supertag_worker_host::McpCatalog::variables(path)?);
+    }
+    // A Workspace's own `.mcp.json` reads only `SUPERTAG_MCP_*` variables, and only the harnesses
+    // that run MCP servers read it.
+    if matches!(harness, HarnessKind::ClaudeCode | HarnessKind::Cursor) {
+        environment.extend(
+            std::env::vars_os()
+                .filter_map(|(name, _)| name.into_string().ok())
+                .filter(|name| name.starts_with(supertag_worker_host::MCP_VARIABLE_PREFIX)),
+        );
+    }
+    environment.extend(workspace_mounts.variables().iter().cloned());
+    environment.sort_unstable();
+    environment.dedup();
     let worker = WorkerOptions {
         adapter_guardian: std::env::current_exe()?,
         adapter,
@@ -481,6 +531,7 @@ async fn build(args: WorkerHostArgs, worker: bool) -> Result<Built> {
     };
     Ok(Built {
         worker,
+        environment,
         provider_credentials,
         network_credentials,
         workspaces,
@@ -589,6 +640,7 @@ pub(crate) async fn run_worklet(args: WorkerHostArgs) -> Result<()> {
             launch: WorkerLaunch {
                 program: program.clone(),
                 args: worker_args,
+                environment: built.environment,
             },
             provider_credentials: built.provider_credentials,
             network_credentials: built.network_credentials,

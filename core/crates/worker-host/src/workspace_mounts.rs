@@ -60,6 +60,8 @@ pub struct WorkspaceMounts {
     /// Device and inode of home, Host state, the repository, artifact storage
     /// and home configuration. A copy never descends into one of these.
     protected: Vec<Identity>,
+    /// The Worker Host variables the S3 mappings read their keys from.
+    variables: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -146,6 +148,7 @@ impl WorkspaceMounts {
         }
         normalize_capabilities(&mut capabilities)?;
         let mut mappings: BTreeMap<String, Mapping> = BTreeMap::new();
+        let mut variables = Vec::new();
         for capability in capabilities {
             let destination_root = PathBuf::from(&capability.destination_root);
             ensure!(
@@ -156,6 +159,10 @@ impl WorkspaceMounts {
                 Some((Some(endpoint), Some(region), Some(prefix)))
                     if capability.source.starts_with("s3://") =>
                 {
+                    variables.extend(
+                        ["ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "SESSION_TOKEN"]
+                            .map(|suffix| format!("{prefix}_{suffix}")),
+                    );
                     Source::S3(s3::S3Source::configure(
                         &capability.source,
                         &endpoint,
@@ -209,7 +216,13 @@ impl WorkspaceMounts {
         Ok(Self {
             mappings,
             protected: vec![],
+            variables,
         })
+    }
+
+    /// The Worker Host variables these mappings read: each S3 Volume's keys. Names only.
+    pub fn variables(&self) -> &[String] {
+        &self.variables
     }
 
     pub fn capabilities(&self) -> Vec<WorkspaceMountCapability> {

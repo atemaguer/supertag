@@ -20,7 +20,7 @@ pub use worker::codex_exec::run_bridge as run_codex_exec_bridge;
 pub use worker::guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
 pub use worker::mcp::{
     McpCatalog, McpCatalogEntry, McpLogin, McpLoginOptions, McpLoginState, McpLoginStore,
-    login_command as mcp_login_command, run_mcp_login,
+    VARIABLE_PREFIX as MCP_VARIABLE_PREFIX, login_command as mcp_login_command, run_mcp_login,
 };
 pub use worker::process::{DataDialer, WorkerProcessOptions, protect_worker_channel, run_worker};
 pub use worker::remote_provider::{ProviderAuthority, ProviderConfig};

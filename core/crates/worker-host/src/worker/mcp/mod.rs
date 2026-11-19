@@ -29,6 +29,7 @@ pub use oauth::{
     LoginOptions as McpLoginOptions, McpLogin, McpLoginState, McpLoginStore, login_command,
     run_login as run_mcp_login,
 };
+pub use workspace::VARIABLE_PREFIX;
 pub(crate) use workspace::{WorkspaceMcp, host_variable as workspace_mcp_variable};
 
 const SCHEMA_BYTES: usize = 16 * 1024;

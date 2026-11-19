@@ -43,6 +43,12 @@ const BUILD_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(120);
 const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const REAP_TIMEOUT: Duration = Duration::from_secs(5);
+/// The longest a Worker's sandbox cleanup after its outcome takes: closing its provider, starting
+/// one again, stopping the sandbox, and closing that one.
+pub(crate) const CLEANUP_BOUND: Duration = REAP_TIMEOUT
+    .saturating_add(START_TIMEOUT)
+    .saturating_add(STOP_TIMEOUT)
+    .saturating_add(REAP_TIMEOUT);
 const MAX_ENDPOINT_BYTES: usize = 512;
 /// The slowest Workspace copy transfer a remote Workspace waits for, in bytes per second.
 const MIN_COPY_RATE: u64 = 1024 * 1024;
@@ -111,6 +117,30 @@ const LOCAL_VM_RUNTIME_VARIABLES: [&str; 6] = [
 ];
 
 impl ProviderAuthority {
+    /// The Worker Host variables this provider's authority reads, which a Worker that runs it
+    /// reads again.
+    pub fn variables(&self) -> Vec<String> {
+        let names: Vec<&str> = match self {
+            Self::E2b { .. } => vec!["E2B_API_KEY", "E2B_DOMAIN", "SUPERTAG_E2B_TEMPLATE"],
+            Self::Modal { .. } => vec![
+                "MODAL_TOKEN_ID",
+                "MODAL_TOKEN_SECRET",
+                "SUPERTAG_MODAL_WORKSPACE_APP",
+                "MODAL_SERVER_URL",
+                "SUPERTAG_MODAL_WORKSPACE_ENVIRONMENT",
+                "SUPERTAG_MODAL_WORKSPACE_IMAGE",
+            ],
+            Self::Generic { variables } => {
+                return variables.iter().map(|(name, _)| name.clone()).collect();
+            }
+            Self::LocalVm { .. } => LOCAL_VM_SETTINGS
+                .into_iter()
+                .chain(LOCAL_VM_RUNTIME_VARIABLES)
+                .collect(),
+        };
+        names.into_iter().map(str::to_owned).collect()
+    }
+
     /// An operator's own provider, given exactly the Worker Host variables `names`, read now. A
     /// name the host sets for every provider (`PATH`, `LANG`, `TMPDIR`), a repeated name, or an
     /// unset variable is refused.

@@ -151,9 +151,14 @@ adapter's bootstrap token works only on its Worker's loopback endpoint.
 | A Worker, one per Task Attempt | Its Task Attempt credential, its own harness's provider credentials, the network credentials its Task may use, and the MCP credentials it resolves for its Task Attempt |
 | A harness adapter | Its own harness's provider credentials and a bootstrap token for its Worker's loopback endpoint |
 
-A Worker inherits its Worklet's environment, except the host credential and the
-`SUPERTAG_NETWORK_CREDENTIAL_*` values, and never receives the host credential in its arguments or
-any message. A Worker that needs a call only the host may make asks its Worklet, which makes
+A Worker inherits only an allowlist of its Worklet's environment: the process basics, the
+transport's proxy and TLS variables, and the variables its own harness's configuration reads. It
+never inherits another harness's variables, the host credential, a provider key or token, or a
+`SUPERTAG_NETWORK_CREDENTIAL_*` value; see
+[What a Worker inherits](worker.md#what-a-worker-inherits). The Worklet reads each harness's
+provider keys and tokens from the file its supervisor wrote, or else from its own environment,
+and hands a Worker its own harness's in its assignment. A Worker never receives the host
+credential in its arguments or any message. A Worker that needs a call only the host may make asks its Worklet, which makes
 it only for that Worker's own Task Attempt.
 
 These are boundaries between processes, not between OS users. The state directory's enrollment

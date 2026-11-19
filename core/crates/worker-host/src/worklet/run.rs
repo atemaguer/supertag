@@ -1683,7 +1683,7 @@ async fn run_worker(
         assign,
         &serving,
         &worklet.shutdown,
-        crate::worklet::pool::Limits::for_attempt(harness.worker.attempt_timeout),
+        crate::worklet::pool::Limits::for_attempt(&harness.worker),
     )
     .await;
     drop(listed);

@@ -21,6 +21,7 @@ pub(crate) mod registration;
 pub(crate) mod run;
 pub(crate) mod shared_host;
 pub(crate) mod volume_objects;
+pub(crate) mod worker_environment;
 pub(crate) mod workers;
 pub(crate) mod workspaces;
 
@@ -170,10 +171,14 @@ pub struct HarnessService {
     pub network_credentials: Vec<egress::HostCredential>,
 }
 
-/// How the Worklet starts a Worker: the program and its arguments. The Worker reads its
-/// options from them, as the Worklet read the harness's.
+/// How the Worklet starts a Worker: the program, its arguments, and the variables it inherits.
+/// The Worker reads its options from them, as the Worklet read the harness's.
 #[derive(Clone)]
 pub struct WorkerLaunch {
     pub program: PathBuf,
     pub args: Vec<std::ffi::OsString>,
+    /// The Worklet variables this harness's configuration reads, which its Workers inherit
+    /// besides the process basics every Worker gets. Never a provider secret or a network
+    /// credential: a Worker's `Assign` carries those.
+    pub environment: Vec<String>,
 }

@@ -24,50 +24,69 @@ use crate::{
         Assign, Bytes, CHANNEL_FD, FromWorker, HostCall, LeaseChange, Milestone, Outcome, ToWorker,
         WireStatus, WorkerState, read_frame, write_frame,
     },
-    worklet::WorkerLaunch,
+    worklet::{WorkerLaunch, worker_environment},
 };
 
 /// How long a Worker may take to stop after `Drain` before the Worklet sends `Cancel`, and after
 /// that before it kills the Worker.
 const DRAIN_GRACE: Duration = Duration::from_secs(5);
 const STOP_GRACE: Duration = Duration::from_secs(10);
-/// How long a Worker may run on after it handed over its outcome, stopping its harness and
-/// sandbox, before the Worklet stops it.
-const CLEANUP_GRACE: Duration = Duration::from_secs(300);
-/// How long a Worker may run on after the Control Plane ended its lease before the Worklet stops
-/// it: long enough to stop its harness and sandbox.
-const LOST_LEASE_GRACE: Duration = Duration::from_secs(120);
-/// How long past its harness's time limit a Worker may take to capture and hand over what the
-/// turn produced before the Worklet stops it.
-const CAPTURE_GRACE: Duration = Duration::from_secs(1800);
+/// How long any Worker may run on after it handed over its outcome, stopping its harness, before
+/// the Worklet stops it. A Worker with a sandbox or shared execution provider gets that
+/// provider's bounded stop calls on top.
+const CLEANUP_FLOOR: Duration = Duration::from_secs(300);
+/// The shortest and longest a Worker may take past its harness's time limit to capture and hand
+/// over what the turn produced: its time limit, within these bounds.
+const CAPTURE_FLOOR: Duration = Duration::from_secs(300);
+const CAPTURE_CEILING: Duration = Duration::from_secs(1800);
 
 /// How long a Worker may run on at each point before the Worklet stops it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Limits {
     /// From its harness's launch: the harness's time limit and the capture grace.
     pub(crate) executing: Duration,
     /// From its outcome.
     pub(crate) cleanup: Duration,
-    /// From the end of its lease.
-    pub(crate) lost_lease: Duration,
+    /// What its provider's stop calls may take, which the end of its lease adds to the lease.
+    pub(crate) provider_stop: Duration,
     /// From `Cancel` to the kill, and from the end of its channel to the kill.
     pub(crate) stop: Duration,
 }
 
 impl Limits {
-    pub(crate) fn for_attempt(time_limit: Duration) -> Self {
+    /// The limits of a Worker of `worker`'s harness: its time limit, and the bounded stop calls
+    /// of its sandbox or shared execution provider, if it has one.
+    pub(crate) fn for_attempt(worker: &crate::WorkerOptions) -> Self {
+        let mut provider_stop = Duration::ZERO;
+        if worker.remote_provider.is_some() {
+            provider_stop += crate::worker::remote_provider::CLEANUP_BOUND;
+        }
+        if worker.shared_execution.is_some() {
+            provider_stop += crate::worker::shared_execution::CLEANUP_BOUND;
+        }
+        Self::derived(worker.attempt_timeout, provider_stop)
+    }
+
+    /// From a harness's time limit and what its provider's stop calls may take.
+    fn derived(time_limit: Duration, provider_stop: Duration) -> Self {
         Self {
-            executing: time_limit.saturating_add(CAPTURE_GRACE),
-            cleanup: CLEANUP_GRACE,
-            lost_lease: LOST_LEASE_GRACE,
+            executing: time_limit.saturating_add(time_limit.clamp(CAPTURE_FLOOR, CAPTURE_CEILING)),
+            cleanup: CLEANUP_FLOOR.saturating_add(provider_stop),
+            provider_stop,
             stop: STOP_GRACE,
         }
     }
+
+    /// How long a Worker may run on after the Control Plane ended its lease, whose last grant was
+    /// `lease`: one more lease, as an unrenewed lease would have allowed, at least long enough
+    /// to stop its harness, and its provider's stop calls.
+    pub(crate) fn lost_lease(&self, lease: Duration) -> Duration {
+        lease.max(self.stop).saturating_add(self.provider_stop)
+    }
 }
+
 /// The most descriptors a Worker's start checks for ones it must not inherit.
 const MAX_CHECKED_DESCRIPTORS: libc::rlim_t = 65_536;
-
-/// The variable a supervisor's lifeline sets; a Worker's lifeline is its channel instead.
-const SERVICE_LIFELINE: &str = "SUPERTAG_LOCAL_SERVICE_LIFELINE";
 
 /// One running Worker: its process, in a process group of its own, and the Worklet's end of its
 /// channel.
@@ -104,35 +123,22 @@ fn descriptor_limit() -> libc::c_int {
     libc::c_int::try_from(soft).unwrap_or(libc::c_int::MAX)
 }
 
-/// The environment variables a Worker must not inherit: the host credential, by name and by
-/// value, and the sources of the network credentials, which its `Assign` carries instead.
-pub(crate) fn withheld_environment(host_token: &str) -> Vec<std::ffi::OsString> {
-    let mut withheld = vec![
-        std::ffi::OsString::from("SUPERTAG_HOST_TOKEN"),
-        SERVICE_LIFELINE.into(),
-    ];
-    for (name, value) in std::env::vars_os() {
-        let source = name
-            .to_str()
-            .is_some_and(|name| name.starts_with("SUPERTAG_NETWORK_CREDENTIAL_"));
-        if source || (!host_token.is_empty() && value.as_encoded_bytes() == host_token.as_bytes()) {
-            withheld.push(name);
-        }
-    }
-    withheld
-}
-
 impl WorkerProcess {
-    /// Starts a Worker with `launch`, its end of a new socket pair as descriptor 3, and none of
-    /// the host's credential.
+    /// Starts a Worker with `launch`, its end of a new socket pair as descriptor 3, and only the
+    /// variables `launch` and every Worker inherit, none of them the host's credential.
     pub(crate) fn spawn(launch: &WorkerLaunch, host_token: &str) -> Result<Self> {
         let (ours, theirs) =
             std::os::unix::net::UnixStream::pair().context("create the Worker's channel")?;
         let mut command = std::process::Command::new(&launch.program);
-        command.args(&launch.args).stdin(Stdio::null());
-        for name in withheld_environment(host_token) {
-            command.env_remove(name);
-        }
+        command
+            .args(&launch.args)
+            .stdin(Stdio::null())
+            .env_clear()
+            .envs(worker_environment::for_worker(
+                std::env::vars_os(),
+                &launch.environment,
+                host_token,
+            ));
         // A Worker writes nothing to the Worklet's standard output, which a supervisor reads for
         // readiness; its log lines join the Worklet's on standard error.
         // terminal-safe: the Worker's standard output is this standard error, not written here.
@@ -269,6 +275,12 @@ impl WorkerEnd {
     }
 }
 
+/// How a host call the Worklet made for a Worker changed its lease.
+enum Lease {
+    Renewed(Duration),
+    Lost,
+}
+
 /// When the Worklet stops a Worker that does not stop by itself: `Cancel` at `cancel`, and a
 /// kill of its process group at `kill`. The earliest deadline armed wins.
 #[derive(Default)]
@@ -315,6 +327,8 @@ pub(crate) async fn serve(
 ) -> WorkerEnd {
     // The one Attempt this Worker may ask host calls for.
     let own = assign.attempt.inspect();
+    // The lease the Control Plane last granted the Attempt, which a renewal replaces.
+    let mut lease = Duration::from_millis(assign.valid_for_ms);
     let mut outcome = None;
     if WorkerProcess::send(&process.writer, &ToWorker::Assign(Box::new(assign)))
         .await
@@ -392,22 +406,30 @@ pub(crate) async fn serve(
                         let answer = handler.call(call);
                         let writer = process.writer.clone();
                         calls.spawn(async move {
-                            let (result, lease) = answer.await;
-                            let lost = matches!(lease, Some(LeaseChange::Lost { .. }));
-                            if let Some(change) = lease {
+                            let (result, change) = answer.await;
+                            let lease = match &change {
+                                Some(LeaseChange::Renewed { valid_for_ms }) => {
+                                    Some(Lease::Renewed(Duration::from_millis(*valid_for_ms)))
+                                }
+                                Some(LeaseChange::Lost { .. }) => Some(Lease::Lost),
+                                None => None,
+                            };
+                            if let Some(change) = change {
                                 let _ = WorkerProcess::send(&writer, &ToWorker::Lease(change)).await;
                             }
                             let _ = reply(&writer, id, result).await;
-                            lost
+                            lease
                         });
                     }
                 }
             }
             Some(joined) = calls.join_next(), if !calls.is_empty() => {
-                if matches!(joined, Ok(true)) {
+                match joined {
+                    Ok(Some(Lease::Renewed(granted))) => lease = granted,
                     // The Control Plane ended the lease: the Attempt is over, whatever the
                     // Worker still does.
-                    deadlines.arm(limits.lost_lease, limits.stop);
+                    Ok(Some(Lease::Lost)) => deadlines.arm(limits.lost_lease(lease), limits.stop),
+                    _ => {}
                 }
             }
             () = stop.cancelled(), if !draining => {
@@ -530,7 +552,7 @@ mod tests {
         Limits {
             executing: Duration::from_secs(60),
             cleanup: Duration::from_secs(60),
-            lost_lease: Duration::from_secs(60),
+            provider_stop: Duration::ZERO,
             stop: Duration::from_millis(200),
         }
     }
@@ -559,9 +581,15 @@ mod tests {
     }
 
     fn stand_in(script: String) -> WorkerProcess {
+        stand_in_naming(script, vec![])
+    }
+
+    /// A stand-in Worker whose harness reads the Worklet variables `environment`.
+    fn stand_in_naming(script: String, environment: Vec<String>) -> WorkerProcess {
         let launch = WorkerLaunch {
             program: "/bin/sh".into(),
             args: vec!["-c".into(), script.into()],
+            environment,
         };
         WorkerProcess::spawn(&launch, "stcr_host-credential").unwrap()
     }
@@ -674,10 +702,8 @@ mod tests {
             assign(),
             &handler,
             &CancellationToken::new(),
-            Limits {
-                lost_lease: Duration::from_millis(200),
-                ..limits()
-            },
+            // The lease the Assign granted, one second, and the stop grace.
+            limits(),
         )
         .await;
         assert!(end.died());
@@ -748,21 +774,79 @@ mod tests {
         assert!(!text.contains("stcr_"));
     }
 
-    #[test]
-    fn a_worker_inherits_no_host_credential_variable() {
-        // SAFETY: this test's process sets a variable no other test reads.
+    #[tokio::test]
+    async fn a_worker_inherits_only_its_harness_variables_and_the_basics() {
+        // SAFETY: this test's process sets variables no other test reads.
         unsafe {
-            std::env::set_var("SUPERTAG_POOL_TEST_COPY", "stcr_pool-test-secret");
-            std::env::set_var("SUPERTAG_NETWORK_CREDENTIAL_POOL_TEST", "value");
+            std::env::set_var("POOL_TEST_OWN_HARNESS", "own");
+            std::env::set_var("POOL_TEST_OTHER_HARNESS", "other");
+            std::env::set_var("SUPERTAG_POOL_TEST_COPY", "stcr_host-credential");
+            std::env::set_var("SUPERTAG_NETWORK_CREDENTIAL_POOL_TEST", "network");
         }
-        let withheld = withheld_environment("stcr_pool-test-secret");
-        for name in [
-            "SUPERTAG_HOST_TOKEN",
-            "SUPERTAG_POOL_TEST_COPY",
-            "SUPERTAG_NETWORK_CREDENTIAL_POOL_TEST",
-            SERVICE_LIFELINE,
-        ] {
-            assert!(withheld.iter().any(|withheld| withheld == name), "{name}");
-        }
+        let (size, body) = frame(&FromWorker::Outcome {
+            id: 1,
+            outcome: Box::new(Outcome::Retry),
+        });
+        let mut bytes = size;
+        bytes.extend(body);
+        // The stand-in hands over an outcome only when its environment is the expected one.
+        let process = stand_in_naming(
+            format!(
+                "[ -n \"$PATH\" ] && [ \"$POOL_TEST_OWN_HARNESS\" = own ] \
+                 && [ -z \"${{POOL_TEST_OTHER_HARNESS+set}}\" ] \
+                 && [ -z \"${{SUPERTAG_POOL_TEST_COPY+set}}\" ] \
+                 && [ -z \"${{SUPERTAG_NETWORK_CREDENTIAL_POOL_TEST+set}}\" ] \
+                 && {}; sleep 1",
+                written(&bytes)
+            ),
+            vec![
+                "POOL_TEST_OWN_HARNESS".into(),
+                // Named, but withheld all the same.
+                "SUPERTAG_NETWORK_CREDENTIAL_POOL_TEST".into(),
+            ],
+        );
+        let end = serve(
+            process,
+            assign(),
+            &Counting::default(),
+            &CancellationToken::new(),
+            limits(),
+        )
+        .await;
+        assert_eq!(
+            end.outcome,
+            Some(OutcomeKind::Retry),
+            "the Worker's environment was not its own"
+        );
+    }
+
+    #[test]
+    fn a_workers_deadlines_follow_its_attempt() {
+        let hour = Duration::from_secs(3600);
+        // A local Worker of an hour-long Task Attempt: thirty minutes to capture, five to clean up.
+        let local = Limits::derived(hour, Duration::ZERO);
+        assert_eq!(local.executing, hour + CAPTURE_CEILING);
+        assert_eq!(local.cleanup, CLEANUP_FLOOR);
+        assert_eq!(local.stop, STOP_GRACE);
+        // A short Task Attempt captures for its own time limit, but never less than the floor.
+        let minutes = Duration::from_secs(600);
+        assert_eq!(
+            Limits::derived(minutes, Duration::ZERO).executing,
+            minutes * 2
+        );
+        let seconds = Duration::from_secs(60);
+        assert_eq!(
+            Limits::derived(seconds, Duration::ZERO).executing,
+            seconds + CAPTURE_FLOOR
+        );
+        // A provider's stop calls extend cleanup and the end of a lease.
+        let stop = Duration::from_secs(50);
+        let remote = Limits::derived(hour, stop);
+        assert_eq!(remote.cleanup, CLEANUP_FLOOR + stop);
+        let lease = Duration::from_secs(30);
+        assert_eq!(local.lost_lease(lease), lease);
+        assert_eq!(remote.lost_lease(lease), lease + stop);
+        // A lease shorter than the stop grace, as an Objective's deadline caps it, gets the grace.
+        assert_eq!(local.lost_lease(Duration::from_secs(1)), STOP_GRACE);
     }
 }

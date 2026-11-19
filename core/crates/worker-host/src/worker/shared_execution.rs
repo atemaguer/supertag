@@ -37,6 +37,9 @@ use crate::worker::WorkerOptions;
 use crate::worklet::journal::{Attempt, AttemptJournal};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+/// The longest a Worker's shared execution cleanup after its outcome takes: replaying its access
+/// issue, then revoking it.
+pub(crate) const CLEANUP_BOUND: Duration = REQUEST_TIMEOUT.saturating_add(REQUEST_TIMEOUT);
 const MAX_FILE_BYTES: usize = 256 * 1024;
 
 #[derive(Clone)]

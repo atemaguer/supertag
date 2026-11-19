@@ -405,6 +405,29 @@ pub struct McpCatalogEntry {
 }
 
 impl McpCatalog {
+    /// The Worker Host variables the catalog at `path` reads: its servers' request headers,
+    /// minted credentials, and stdio environments. Names only, never their values.
+    pub fn variables(path: &Path) -> Result<Vec<String>> {
+        let config = read_config(path)?;
+        Ok(config
+            .servers
+            .iter()
+            .flat_map(|server| {
+                let stdio = server.env.values().filter_map(|source| match source {
+                    EnvSource::Variable(variable) => Some(variable.clone()),
+                    EnvSource::File(_) => None,
+                });
+                server
+                    .header_env
+                    .values()
+                    .cloned()
+                    .chain(server.auth().variables())
+                    .chain(stdio)
+                    .collect::<Vec<_>>()
+            })
+            .collect())
+    }
+
     /// Each server of the catalog at `path`, resolving nothing.
     pub fn entries(path: &Path) -> Result<Vec<McpCatalogEntry>> {
         let config = read_config(path)?;
