@@ -75,9 +75,9 @@ Every client and service negotiates a protocol version when it connects: the CLI
 UI, the desktop app, applications, Worklets, and Gateways. A pair that shares a version works;
 a pair that shares none is refused before any other call, with both sides' releases and protocol
 versions in the error and which one to upgrade. Before 1.0, a release that changes the protocol
-speaks only its new version: SuperTag 0.3.0 speaks protocol 2, 0.3.1 speaks protocol 5, and the
-next release speaks protocol 6. Protocol 6 gives each running Task Attempt a credential of its own
-for its data calls, so a Worklet from 0.3.1 cannot connect to a newer Control Plane, and a newer
+speaks only its new version: SuperTag 0.3.0 speaks protocol 2, 0.3.1 speaks protocol 5, and
+0.3.2 speaks protocol 6. Protocol 6 gives each running Task Attempt a credential of its own
+for its data calls, so a Worklet from 0.3.1 cannot connect to a 0.3.2 Control Plane, and a 0.3.2
 Worklet, CLI, or app cannot connect to a 0.3.1 one: negotiation refuses the pair and says which
 side to upgrade. `supertag version` prints this CLI's version and the running local services' versions.
 Release the CLI and the Control Plane together, and upgrade them together.
