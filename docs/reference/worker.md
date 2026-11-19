@@ -91,18 +91,32 @@ REASON`. After three Workers stop that way before launching the harness, the Tas
 ## Placement
 
 A host reports its harnesses, its models per harness, its labels, its concurrency, and its
-Workspace mappings. The Control Plane offers a Task only to a host that:
+Workspace mappings. Its capacity is its pool: `concurrency` Task Attempts at once across its
+harnesses, or less when every harness has a limit and the limits add up to less. For each
+harness it also reports that harness's limit within the pool and how many more Task Attempts it
+can start now. `supertag ps` shows the pool's use, such as `1/3 Task Attempts`, and
+`supertag get host` shows its `capacity`. The Control Plane offers a Task only to a host that:
 
 - may run the Task's Tag, from its Auth Key's `--tag` list or `--all-tags`, or because it is a
   host in the same `supertag.yaml` as its local Control Plane;
 - carries every label in the Tag's `runsOn`;
 - serves the Task's harness and model, and the limits the Task requires;
 - maps the Tag's Workspace, and any Workspace Volume the Task copies;
-- is ready and not draining.
+- is ready and not draining, with a free slot its harness's limit leaves room for.
 
-`supertag placement explain TASK_ID` reports which of these keeps a Task queued.
+`supertag placement explain TASK_ID` reports which of these keeps a Task queued. A host whose
+pool is full says `Worker Host NAME is running 3 of 3 Attempts`; one whose harness is at its
+limit names the harness, such as `running 1 of 1 Claude Code Attempts`.
 
-## Claims and leases
+## Claims
+
+A slot of the pool with no Task Attempt claims work for one harness at a time. It takes a harness
+below its limit, the one the fewest free slots wait for, and takes turns among the rest. A claim
+it holds waits at the Control Plane for up to 6 seconds; when no Task comes, the slot claims for
+the next harness. With at least as many free slots as harnesses, every harness with room has a
+claim waiting. The host never holds more claims than it has free slots.
+
+## Leases
 
 A host claims a Task and holds a lease on its Task Attempt, renewed while the Task Attempt runs. The
 lease is fenced by the Task Attempt's generation: a host that lost its lease cannot record events,
@@ -127,20 +141,24 @@ when the Control Plane has it. The Control Plane shows a Task Attempt's reply on
 finish yet, such as one held until its cleanup is confirmed, still shows its reply, even when the
 Worker's report was lost or the Worklet restarted, instead of waiting until its lease runs out.
 
-The journal keeps one entry for each slot of the Worklet's pool, beside that slot's checkouts:
+The journal keeps one entry for each slot of the Worklet's pool, beside that slot's checkouts.
+Slots are numbered, and each records the harness its entry is for:
 
 ```text
 STATE_DIRECTORY/
   enrollment.json, incarnation, host.lock   the host's identity and the Worklet's lock
   artifacts/                                artifacts and Workspace deliveries this host holds
-  slots/codex-0/                            one slot: one Task Attempt of one harness at a time
+  slots/0/                                  one slot: one Task Attempt at a time, of any harness
+    harness                                 the harness the entry is for, such as codex
     attempt.json                            the journal entry; claim.json while a claim is held
     attempt-processes/, checkpoint.bin      what recovery reads: processes, staged checkpoint
     workspaces/                             the slot's checkouts
 ```
 
-A host service whose harness was removed leaves its slots stranded. The Worklet moves them to
-`STATE_DIRECTORY/retired/` and registers a new incarnation, which fences their Task Attempts.
+A slot whose recorded harness the host no longer runs, such as after the harness was removed
+from its host service, is stranded, as is a slot directory named after a harness by an earlier
+build. The Worklet moves them to `STATE_DIRECTORY/retired/` and registers a new incarnation,
+which fences their Task Attempts.
 
 When a Worker dies while its harness runs, or a Worklet restarts after it was killed then, the
 Worklet checks the processes recorded for the interrupted Task Attempt, the Worker's own included. When every one is gone, it
@@ -151,9 +169,10 @@ host stays connected while it waits. See [Scheduling and interrupted execution](
 ## Process supervision
 
 The Worklet runs each Task Attempt in a Worker, a `supertag` process of its own in its own process
-group. It runs up to `--concurrency` Workers of each harness at once, 1 by default; `supertag up`
-sets it from the host service's `concurrency` and changes it without a restart. A lowered size
-takes effect as running Task Attempts finish. Background work that belongs to the host, such as
+group. It runs up to `--concurrency` Workers at once across its harnesses, 1 by default, and at
+most a harness's `--harness-limit` of that harness's. `supertag up` sets them from the host
+service's `concurrency` and `harness-limits`, and changes `concurrency` without a restart. A
+lowered size takes effect as running Task Attempts finish. Background work that belongs to the host, such as
 presence, landings, cleanup, and the artifact transfer listener, runs once, in the Worklet.
 
 `supertag ps` lists each running Worker under its host's row: its process ID, harness, slot, state

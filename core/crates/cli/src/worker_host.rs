@@ -16,8 +16,8 @@ use crate::{
     local_config, network, termination_signal, volumes,
 };
 
-/// The file in a Worker Host's state directory that holds its pool size per harness, which its
-/// supervisor rewrites and signals with SIGUSR1 to resize the pool without a restart.
+/// The file in a Worker Host's state directory that holds its pool size, which its supervisor
+/// rewrites and signals with SIGUSR1 to resize the pool without a restart.
 pub(crate) const CONCURRENCY_FILE: &str = "concurrency";
 
 #[derive(Args)]
@@ -155,10 +155,14 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
     /// Seconds a Task Attempt may run before this host stops it, from 1 through 86400.
     #[arg(long, default_value_t = local_config::DEFAULT_ATTEMPT_TIMEOUT_SECONDS, value_parser = clap::value_parser!(u64).range(1..=local_config::MAX_ATTEMPT_TIMEOUT_SECONDS))]
     pub(crate) attempt_timeout_seconds: u64,
-    /// Task Attempts of each harness this host runs at once: the slots of its Worker pool per
-    /// harness, from 1 through 16.
+    /// Task Attempts this host runs at once across all its harnesses: the slots of its Worker
+    /// pool, from 1 through 16.
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..=16))]
     pub(crate) concurrency: u32,
+    /// At most this many of this harness's Task Attempts at once, within --concurrency, from 1
+    /// through 16. Without it, the harness may use every slot.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=16))]
+    pub(crate) harness_limit: Option<u32>,
     /// A private JSON file naming each harness this host runs, as `supertag worklet`
     /// arguments of its own: `{"harnesses": [[ARG, ...], ...]}`. `supertag up` writes it for a
     /// host service with several harnesses.
@@ -594,8 +598,8 @@ pub(crate) async fn run_worklet(args: WorkerHostArgs) -> Result<()> {
         None => sets.push((own_arguments(), args)),
         Some(path) => {
             ensure!(
-                !args.adapter.is_selected(),
-                "a Worker Host with a harness set takes its harnesses from that file"
+                !args.adapter.is_selected() && args.harness_limit.is_none(),
+                "a Worker Host with a harness set takes its harnesses, and their limits, from that file"
             );
             let set: HarnessSet = serde_json::from_slice(
                 &supertag_local_state::read_private(&path)
@@ -632,6 +636,7 @@ pub(crate) async fn run_worklet(args: WorkerHostArgs) -> Result<()> {
         supertag_worker_host::McpCatalog,
     )> = None;
     for (arguments, args) in sets {
+        let limit = args.harness_limit;
         let built = build(args, false).await?;
         let mut worker_args = vec![OsString::from("__worker")];
         worker_args.extend(arguments);
@@ -644,6 +649,7 @@ pub(crate) async fn run_worklet(args: WorkerHostArgs) -> Result<()> {
             },
             provider_credentials: built.provider_credentials,
             network_credentials: built.network_credentials,
+            limit,
         });
         match &shared {
             None => {

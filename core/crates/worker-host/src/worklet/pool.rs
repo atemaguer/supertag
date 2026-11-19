@@ -533,7 +533,7 @@ mod tests {
 
     fn assign() -> Assign {
         Assign {
-            slot: "adapter-0".into(),
+            slot: "0".into(),
             state_directory: "/nonexistent".into(),
             attempt: attempt(),
             task: Proto(Default::default()),
@@ -751,8 +751,8 @@ mod tests {
     #[test]
     fn an_assignment_carries_no_host_credential() {
         let assign = Assign {
-            slot: "adapter-0".into(),
-            state_directory: "/state/slots/adapter-0".into(),
+            slot: "0".into(),
+            state_directory: "/state/slots/0".into(),
             attempt: attempt(),
             task: Proto(Default::default()),
             workspace: None,

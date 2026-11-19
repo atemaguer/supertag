@@ -1046,8 +1046,11 @@ impl ManagedHost {
             .create(&self.directory)?;
         let mut harnesses = Vec::new();
         let mut environment = Vec::new();
-        for adapter in &self.definition.harnesses {
-            let (args, variables) = self.harness_arguments(adapter)?;
+        for (index, adapter) in self.definition.harnesses.iter().enumerate() {
+            let (mut args, variables) = self.harness_arguments(adapter)?;
+            if let Some(limit) = self.definition.harness_limits.get(index).copied().flatten() {
+                args.extend(["--harness-limit".into(), limit.to_string().into()]);
+            }
             harnesses.push(
                 args.into_iter()
                     .map(|arg| {
@@ -1118,8 +1121,9 @@ impl ManagedHost {
         }
     }
 
-    /// Run `concurrency` Worker slots per harness without a restart: the Worklet starts raised
-    /// slots at once, and lets lowered ones finish their running Attempt before it retires them.
+    /// Run `concurrency` Worker slots, shared by the host's harnesses, without a restart: the
+    /// Worklet starts raised slots at once, and lets lowered ones finish their running Attempt
+    /// before it retires them.
     fn resize(&mut self, concurrency: u32) -> Result<()> {
         write_private(
             &self.directory,

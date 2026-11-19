@@ -52,7 +52,7 @@ limited in three places:
 
 | Limit | Set by |
 | --- | --- |
-| Task Attempts per harness on a host | The host service's `concurrency`, 1 through 16 |
+| Task Attempts on a host, across its harnesses | The host service's `concurrency`, 1 through 16, and `harness-limits` for one harness within it |
 | Tasks a Team runs at once across its Objectives | `team create --max-concurrency`, or a Team manifest's `maxConcurrency` |
 | Native agents and work Sessions one turn may start | `task submit --max-native-agents` |
 

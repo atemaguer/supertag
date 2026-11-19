@@ -241,7 +241,7 @@ async fn scenario(database: &str, killed: Killed, point: &str, stage: &str) -> R
         std::fs::read_to_string(&marker)? == point,
         "crash point {point} was never reached"
     );
-    let entry = state.join("slots/adapter-0/attempt.json");
+    let entry = state.join("slots/0/attempt.json");
     match killed {
         Killed::Worklet => {
             ensure!(

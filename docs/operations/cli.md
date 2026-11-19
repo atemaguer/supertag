@@ -52,8 +52,8 @@ Tag's name; for OpenCode it also asks for a `provider/model`. Claude Code runs t
   when `init` ran; and
 - a `host` service named after this machine, which maps the repository as a Workspace, runs
   every harness `init` found signed in, the lead's first, so Tags you create later can use any
-  of them, and runs up to three Task Attempts at once for each harness (`concurrency: 3`), so
-  one stuck Task does not hold every Tag.
+  of them, and runs up to three Task Attempts at once across those harnesses (`concurrency: 3`),
+  so one stuck Task does not hold every Tag.
 
 Codex sandboxes its own commands. A Claude Code lead runs its commands in Claude Code's own
 sandbox wherever that sandbox can start (macOS, or Linux with bubblewrap and socat) and the

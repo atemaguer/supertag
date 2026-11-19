@@ -153,9 +153,9 @@ pub struct WorkletOptions {
     /// Operator-declared placement labels. The host adds its operating system
     /// and architecture; the Control Plane derives harness and Workspace labels.
     pub labels: Vec<String>,
-    /// The harnesses this host runs, each in its own slots of the Worker pool.
+    /// The harnesses this host runs, which share the slots of its Worker pool.
     pub harnesses: Vec<HarnessService>,
-    /// How many Attempts of each harness run at once: the pool's slots per harness. A change
+    /// How many Attempts the host runs at once across its harnesses: the pool's slots. A change
     /// takes effect without a restart; a lowered size lets running Attempts finish.
     pub concurrency: tokio::sync::watch::Receiver<u32>,
 }
@@ -169,6 +169,9 @@ pub struct HarnessService {
     pub provider_credentials: BTreeMap<String, String>,
     /// Credentials the egress proxy injects for Tasks whose network scope names them.
     pub network_credentials: Vec<egress::HostCredential>,
+    /// At most this many of this harness's Attempts run at once, within the pool; `None` lets it
+    /// use the whole pool.
+    pub limit: Option<u32>,
 }
 
 /// How the Worklet starts a Worker: the program, its arguments, and the variables it inherits.

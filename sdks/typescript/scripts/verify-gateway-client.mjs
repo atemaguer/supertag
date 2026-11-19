@@ -72,7 +72,7 @@ assert.throws(
   () => createGatewayClient({ url: loopback, token, buildVersion: "x".repeat(65) }),
   /Build version/,
 );
-assert.deepEqual([...PROTOCOL_VERSIONS], [6]);
+assert.deepEqual([...PROTOCOL_VERSIONS], [7]);
 assert.ok(Object.isFrozen(PROTOCOL_VERSIONS));
 
 /** A loopback server that accepts connections and never answers them. */
@@ -171,7 +171,7 @@ for (const [answer, expected] of [
     },
   ],
   [
-    "incompatible SuperTag protocol: this Gateway (SuperTag 9.0.0) speaks protocol versions [9, 10], but the connecting operator client (SuperTag supertag-ai) offered [6]; upgrade the connecting operator client",
+    "incompatible SuperTag protocol: this Gateway (SuperTag 9.0.0) speaks protocol versions [9, 10], but the connecting operator client (SuperTag supertag-ai) offered [7]; upgrade the connecting operator client",
     {
       peerBuild: "9.0.0",
       peerVersions: [9, 10],
@@ -199,11 +199,11 @@ for (const [answer, expected] of [
     assert.equal(error.code, Code.FailedPrecondition);
     assert.equal(error.peerBuild, expected.peerBuild);
     assert.deepEqual(error.peerVersions && [...error.peerVersions], expected.peerVersions);
-    assert.deepEqual([...error.ourVersions], [6]);
+    assert.deepEqual([...error.ourVersions], [7]);
     assert.equal(error.endpoint, fake.url);
     assert.ok(
       error.rawMessage.startsWith(
-        `This client speaks SuperTag protocol 6, but the Gateway at ${fake.url} `,
+        `This client speaks SuperTag protocol 7, but the Gateway at ${fake.url} `,
       ),
       error.rawMessage,
     );

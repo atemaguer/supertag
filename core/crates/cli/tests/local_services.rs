@@ -1622,8 +1622,13 @@ async fn shared_host_runs_harnesses_concurrently(database: String) -> Result<()>
     let central = Central::start(&database)?;
     let token = central.operator.clone();
     let mut operator = client(&central.public).await?;
-    let mut shared = SharedHost::start(&central, 2).await?;
-    // One registration advertises both harnesses, each with its own slots.
+    // Four slots the two harnesses share, with Codex limited to two of them.
+    let mut shared = SharedHost::start_with(
+        &central,
+        serde_json::json!({"concurrency": 4, "harness-limits": {"codex": 2}}),
+    )
+    .await?;
+    // One registration advertises the pool and both harnesses within it.
     let ready = host_until(&mut operator, &token, |status| {
         status.phase() == HostPhase::Ready && status.available_slots == 4
     })
@@ -1640,7 +1645,7 @@ async fn shared_host_runs_harnesses_concurrently(database: String) -> Result<()>
         advertised,
         [
             (HarnessKind::Codex, 2, 2),
-            (HarnessKind::OpenaiAgents, 2, 2)
+            (HarnessKind::OpenaiAgents, 4, 4)
         ]
     );
     assert_eq!(
@@ -1672,7 +1677,7 @@ async fn shared_host_runs_harnesses_concurrently(database: String) -> Result<()>
     for marker in ["Task-a1", "Task-a2"] {
         agents.push(submit(&mut operator, &token, "agent", marker).await?);
     }
-    // Two harnesses run at once, and each runs exactly its configured two Attempts.
+    // Two harnesses run at once in the pool's four slots, and Codex runs only its limit of two.
     let started = match shared.wait_started(2, 2).await {
         Ok(started) => started,
         Err(error) => {
@@ -1695,7 +1700,10 @@ async fn shared_host_runs_harnesses_concurrently(database: String) -> Result<()>
             queued += 1;
         }
     }
-    assert_eq!(queued, 1, "the third Codex Task must wait for a free slot");
+    assert_eq!(
+        queued, 1,
+        "the third Codex Task must wait below the Codex limit"
+    );
     let busy = host_until(&mut operator, &token, |status| {
         status.phase() == HostPhase::Busy && status.active_attempts == 4
     })
@@ -1817,15 +1825,16 @@ async fn shared_host_runs_harnesses_concurrently(database: String) -> Result<()>
     Ok(())
 }
 
-/// A lead on OpenAI Agents starts a Work Session that names Codex: the Work Session runs in the
-/// shared host's Codex slots, and its report returns to the lead's Session on OpenAI Agents.
+/// A lead on OpenAI Agents starts a Work Session that names Codex: the Work Session runs as Codex
+/// in the shared host's one slot, and its report returns to the lead's Session on OpenAI Agents.
 async fn shared_host_runs_a_work_session_on_another_harness(database: String) -> Result<()> {
     let central = Central::start(&database)?;
     let token = central.operator.clone();
     let mut operator = client(&central.public).await?;
+    // One slot, which the lead's harness and the Work Session's take in turn.
     let mut shared = SharedHost::start(&central, 1).await?;
     host_until(&mut operator, &token, |status| {
-        status.phase() == HostPhase::Ready && status.available_slots == 2
+        status.phase() == HostPhase::Ready && status.available_slots == 1
     })
     .await?;
     fs::write(
@@ -1879,8 +1888,8 @@ async fn replaced_shared_host_fences_every_slot(database: String) -> Result<()> 
     let central = Central::start(&database)?;
     let token = central.operator.clone();
     let mut operator = client(&central.public).await?;
-    // One busy and one idle slot per harness: idle slots meet the fence in their claim loop.
-    let mut shared = SharedHost::start(&central, 2).await?;
+    // Two busy and two idle slots: idle slots meet the fence in their claim loop.
+    let mut shared = SharedHost::start(&central, 4).await?;
     let ready = host_until(&mut operator, &token, |status| {
         status.phase() == HostPhase::Ready && status.available_slots == 4
     })
@@ -1969,7 +1978,7 @@ async fn shared_host_slots_use_separate_workspace_checkouts(database: String) ->
     )
     .await?;
     let ready = host_until(&mut operator, &token, |status| {
-        status.phase() == HostPhase::Ready && status.available_slots == 4
+        status.phase() == HostPhase::Ready && status.available_slots == 2
     })
     .await?;
     assert_eq!(ready.workspace_ids, ["repo"]);
@@ -2001,7 +2010,8 @@ async fn shared_host_slots_use_separate_workspace_checkouts(database: String) ->
         .await?;
     let first = submit(&mut operator, &token, "coder", "Task-w1").await?;
     let second = submit(&mut operator, &token, "coder", "Task-w2").await?;
-    // Both Attempts run at once from the one configured source, each in its own checkout.
+    // Both Attempts run at once from the one configured source, each in its own checkout: Codex
+    // takes both slots of the pool while OpenAI Agents has no work.
     let started = shared.wait_started(2, 0).await?;
     let mut checkouts = Vec::new();
     for (_, pid) in &started {
@@ -2020,7 +2030,11 @@ async fn shared_host_slots_use_separate_workspace_checkouts(database: String) ->
             .as_os_str()
             .to_string_lossy()
             .into_owned();
-        assert!(slot.starts_with("codex-"), "{slot}");
+        assert!(slot.parse::<u32>().is_ok(), "{slot}");
+        assert_eq!(
+            fs::read_to_string(slots.join(&slot).join("harness"))?,
+            "codex"
+        );
         owners.push(slot);
         assert_eq!(fs::read_to_string(checkout.join("README.md"))?, "base\n");
         let others = ["Task-w1", "Task-w2"]
@@ -2076,7 +2090,7 @@ async fn stranded_slot_attempts_are_fenced_on_restart(database: String) -> Resul
     let mut operator = client(&central.public).await?;
     let mut shared = SharedHost::start(&central, 1).await?;
     host_until(&mut operator, &token, |status| {
-        status.phase() == HostPhase::Ready && status.available_slots == 2
+        status.phase() == HostPhase::Ready && status.available_slots == 1
     })
     .await?;
     tag(&mut operator, &token, "coder", HarnessKind::Codex).await?;
@@ -2084,7 +2098,7 @@ async fn stranded_slot_attempts_are_fenced_on_restart(database: String) -> Resul
     settled(&mut operator, &token, &id, TaskState::Running).await?;
     let started = shared.wait_started(1, 0).await?;
     let generation = host(&mut operator, &token, "shared").await?.generation;
-    // The machine stops abruptly: the Codex slot's journal entry still holds its running Attempt.
+    // The machine stops abruptly: the slot's journal entry still holds its running Codex Attempt.
     let mut killed = shared
         .workers()?
         .into_iter()
@@ -2100,14 +2114,15 @@ async fn stranded_slot_attempts_are_fenced_on_restart(database: String) -> Resul
     }
     let _ = shared.supervisor.child.wait();
     gone(&killed).await?;
-    let slot = shared.state.join("hosts/shared/slots/codex-0");
+    let slot = shared.state.join("hosts/shared/slots/0");
     assert!(slot.join("attempt.json").exists());
+    assert_eq!(fs::read_to_string(slot.join("harness"))?, "codex");
     assert_eq!(
         task(&mut operator, &token, &id).await?.state(),
         TaskState::Running
     );
 
-    // The Host comes back without Codex. No slot will read that entry, so the Worklet retires
+    // The Host comes back without Codex. No harness will read that entry, so the Worklet retires
     // it, registers a new incarnation, and its Attempt is fenced now, not at lease expiry.
     let agents_only = serde_json::json!({
         "harnesses": ["openai-agents"],
@@ -2142,12 +2157,17 @@ async fn stranded_slot_attempts_are_fenced_on_restart(database: String) -> Resul
         status.phase() == HostPhase::Ready && status.available_slots == 1
     })
     .await?;
-    assert!(!slot.exists());
+    // The new pool's slot 0 started afresh, and the stranded one keeps its Codex entry.
+    assert_ne!(
+        fs::read_to_string(slot.join("harness")).ok().as_deref(),
+        Some("codex")
+    );
     let retired = fs::read_dir(shared.state.join("hosts/shared/retired"))?
-        .map(|entry| Ok(entry?.path().join("codex-0").join("attempt.json")))
+        .map(|entry| Ok(entry?.path().join("0")))
         .collect::<Result<Vec<_>>>()?;
     assert_eq!(retired.len(), 1);
-    assert!(retired[0].exists());
+    assert!(retired[0].join("attempt.json").exists());
+    assert_eq!(fs::read_to_string(retired[0].join("harness"))?, "codex");
 
     // With nothing stranded, a restart replays the incarnation and keeps the generation.
     shared.supervisor.stop().await?;
@@ -2170,7 +2190,7 @@ async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
     let mut operator = client(&central.public).await?;
     let shared = SharedHost::start(&central, 1).await?;
     let ready = host_until(&mut operator, &token, |status| {
-        status.phase() == HostPhase::Ready && status.capacity == 2
+        status.phase() == HostPhase::Ready && status.capacity == 1
     })
     .await?;
     tag(&mut operator, &token, "coder", HarnessKind::Codex).await?;
@@ -2182,23 +2202,23 @@ async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
     assert_eq!(
         task(&mut operator, &token, &second).await?.state(),
         TaskState::Queued,
-        "one Codex slot runs one Attempt"
+        "the pool's one slot runs one Attempt"
     );
     let supervisor = shared.supervisor.child.id();
     let (worklet, _) = shared.worklet()?;
 
-    // Raised: a second Codex slot starts under the same registration and takes the queued Task
-    // while the first keeps running.
+    // Raised: a second slot starts under the same registration and takes the queued Task while
+    // the first keeps running.
     let printed = shared.up(&serde_json::json!({"concurrency": 2}))?;
     ensure!(
         printed.contains(
-            "Worker Host shared runs up to 2 Task Attempts per harness at once, changed from 1 without a restart."
+            "Worker Host shared runs up to 2 Task Attempts at once, changed from 1 without a restart."
         ),
         "{printed}"
     );
     settled(&mut operator, &token, &second, TaskState::Running).await?;
     shared.wait_started(2, 0).await?;
-    let raised = host_until(&mut operator, &token, |status| status.capacity == 4).await?;
+    let raised = host_until(&mut operator, &token, |status| status.capacity == 2).await?;
     assert_eq!(raised.generation, ready.generation);
     assert_eq!(
         task(&mut operator, &token, &first).await?.state(),
@@ -2214,7 +2234,7 @@ async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
         printed.contains("changed from 2 without a restart"),
         "{printed}"
     );
-    host_until(&mut operator, &token, |status| status.capacity == 2).await?;
+    host_until(&mut operator, &token, |status| status.capacity == 1).await?;
     assert_eq!(
         task(&mut operator, &token, &second).await?.state(),
         TaskState::Running,
@@ -2228,7 +2248,7 @@ async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
             let entry = ["attempt.json", "claim.json"].iter().any(|name| {
                 shared
                     .state
-                    .join("hosts/shared/slots/codex-1")
+                    .join("hosts/shared/slots/1")
                     .join(name)
                     .exists()
             });
@@ -2239,7 +2259,7 @@ async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
         }
     })
     .await
-    .context("the lowered Codex slot did not retire")??;
+    .context("the lowered slot did not retire")??;
     assert_eq!(shared.worklet()?.0, worklet, "a resize keeps the Worklet");
     let third = submit(&mut operator, &token, "coder", "Task-c3").await?;
     settled(&mut operator, &token, &third, TaskState::Succeeded).await?;
@@ -2252,7 +2272,7 @@ async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
     assert_eq!(status["services"][0]["concurrency"], 1);
 
     // A raised slot that cannot start stays stopped; the Worklet and its other slots go on.
-    let blocked = shared.state.join("hosts/shared/slots/codex-2");
+    let blocked = shared.state.join("hosts/shared/slots/2");
     fs::write(&blocked, "not a directory")?;
     let printed = shared.up(&serde_json::json!({"concurrency": 3}))?;
     ensure!(
@@ -2265,7 +2285,7 @@ async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
         loop {
             let log =
                 fs::read_to_string(shared.state.join("logs/hosts/shared.log")).unwrap_or_default();
-            if log.contains("codex-2 did not start and stays stopped") {
+            if log.contains("slot 2 did not start and stays stopped") {
                 break log;
             }
             sleep(Duration::from_millis(100)).await;
@@ -2284,7 +2304,7 @@ async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
     assert_eq!(shared.worklet()?.0, worklet);
     // The slot that ran it clears its journal entry after the Task settles.
     timeout(WAIT, async {
-        while ["codex-0", "codex-1"].iter().any(|slot| {
+        while ["0", "1"].iter().any(|slot| {
             shared
                 .state
                 .join(format!("hosts/shared/slots/{slot}/attempt.json"))
@@ -2309,13 +2329,13 @@ async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
     // Nothing was stranded: a restart keeps the registration.
     shared.relaunch(&serde_json::json!({"concurrency": 1}))?;
     let again = host_until(&mut operator, &token, |status| {
-        status.phase() == HostPhase::Ready && status.capacity == 2
+        status.phase() == HostPhase::Ready && status.capacity == 1
     })
     .await?;
     assert_eq!(again.generation, ready.generation);
     assert!(!shared.state.join("concurrency-request.json").exists());
     sleep(Duration::from_millis(500)).await;
-    assert_eq!(host(&mut operator, &token, "shared").await?.capacity, 2);
+    assert_eq!(host(&mut operator, &token, "shared").await?.capacity, 1);
     let status: Value = serde_json::from_slice(&fs::read(shared.state.join("supervisor.json"))?)?;
     assert_eq!(status["services"][0]["concurrency"], 1);
     assert_ne!(status["fingerprint"], "stale");

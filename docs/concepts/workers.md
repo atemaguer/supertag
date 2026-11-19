@@ -59,8 +59,8 @@ a container. It enrolls once with an **Auth Key** and keeps its own credential.
 
 Its Worklet is the `supertag worklet` program, which `supertag up` runs for each host service
 in `supertag.yaml`. The Worklet reports the host's harnesses, models, labels, and concurrency,
-and claims only Tasks of the Tags the host may run. It runs up to `concurrency` Workers of each
-harness at once, and keeps one journal with an entry for each Task Attempt they run.
+and claims only Tasks of the Tags the host may run. It runs up to `concurrency` Workers at once,
+which its harnesses share, and keeps one journal with an entry for each Task Attempt they run.
 
 A host never receives other hosts' credentials or the Control Plane's database credential. It
 holds the harness sign-ins and MCP credentials its Tasks use, and the Worklet passes each Worker

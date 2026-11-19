@@ -20,8 +20,8 @@ use crate::{harness_checks, lifecycle, local_config};
 const DEFAULT_PORT: u16 = 3434;
 const PERMISSION_SET: &str = "local-tools";
 const ROLE: &str = "Lead";
-/// Task Attempts the local Worker Host runs at once per harness, so one stuck Task does not hold
-/// every Tag on that harness.
+/// Task Attempts the local Worker Host runs at once across its harnesses, so one stuck Task does
+/// not hold every Tag.
 const CONCURRENCY: u32 = 3;
 
 #[derive(Args)]
@@ -2159,7 +2159,7 @@ mod tests {
                 document["services"][machine_name()]["harnesses"],
                 json!(["codex", "claude-code"])
             );
-            // The local host runs three Task Attempts per harness at once.
+            // The local host runs three Task Attempts at once across its harnesses.
             assert_eq!(document["services"][machine_name()]["concurrency"], 3);
             let sources = provision
                 .into_iter()

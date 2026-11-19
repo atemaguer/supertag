@@ -928,8 +928,9 @@ message ReportHostRequest {
   HostDiskSpace disk_space = 2000;
   // Operating system, architecture and operator-declared placement labels.
   repeated string labels = 1400;
-  // Per-harness execution slots on a Host that serves several harnesses or Attempts at once.
-  // When present, capacity and available_slots above are the sums of these entries.
+  // Each harness of a Host that serves several harnesses or Attempts at once. capacity and
+  // available_slots above are then the Host's whole pool, which its harnesses share: each
+  // entry is at most what one harness may run within it, and none exceeds the pool.
   repeated HostHarnessCapacity harnesses = 1500;
   // A random identifier of the machine and user the host runs as, from ~/.supertag/machine-id.
   // A client presenting the same identifier is on that machine and may read its Task files there.
@@ -941,7 +942,9 @@ message HostDiskSpace {
   uint64 total_bytes = 2;
 }
 
-// One harness profile a Worker Host serves, with its own concurrent Attempt slots.
+// One harness profile a Worker Host serves. capacity is how many of its Attempts may run at once
+// within the Host's pool: the harness's own limit, or the whole pool when it has none.
+// available_slots is how many more it can start now, at most the Host's free slots.
 message HostHarnessCapacity {
   HarnessKind harness_kind = 1;
   HarnessExecutionProfile execution_profile = 2;

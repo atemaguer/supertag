@@ -7228,8 +7228,9 @@ type ReportHostRequest struct {
 	DiskSpace *HostDiskSpace `protobuf:"bytes,2000,opt,name=disk_space,json=diskSpace,proto3" json:"disk_space,omitempty"`
 	// Operating system, architecture and operator-declared placement labels.
 	Labels []string `protobuf:"bytes,1400,rep,name=labels,proto3" json:"labels,omitempty"`
-	// Per-harness execution slots on a Host that serves several harnesses or Attempts at once.
-	// When present, capacity and available_slots above are the sums of these entries.
+	// Each harness of a Host that serves several harnesses or Attempts at once. capacity and
+	// available_slots above are then the Host's whole pool, which its harnesses share: each
+	// entry is at most what one harness may run within it, and none exceeds the pool.
 	Harnesses []*HostHarnessCapacity `protobuf:"bytes,1500,rep,name=harnesses,proto3" json:"harnesses,omitempty"`
 	// A random identifier of the machine and user the host runs as, from ~/.supertag/machine-id.
 	// A client presenting the same identifier is on that machine and may read its Task files there.
@@ -7404,7 +7405,9 @@ func (x *HostDiskSpace) GetTotalBytes() uint64 {
 	return 0
 }
 
-// One harness profile a Worker Host serves, with its own concurrent Attempt slots.
+// One harness profile a Worker Host serves. capacity is how many of its Attempts may run at once
+// within the Host's pool: the harness's own limit, or the whole pool when it has none.
+// available_slots is how many more it can start now, at most the Host's free slots.
 type HostHarnessCapacity struct {
 	state            protoimpl.MessageState   `protogen:"open.v1"`
 	HarnessKind      HarnessKind              `protobuf:"varint,1,opt,name=harness_kind,json=harnessKind,proto3,enum=supertag.runtime.v2.HarnessKind" json:"harness_kind,omitempty"`

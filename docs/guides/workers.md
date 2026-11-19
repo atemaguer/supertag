@@ -75,12 +75,24 @@ or in a disposable machine when the work is untrusted.
 
 ### Run several Tasks at once
 
-`concurrency` sets how many Task Attempts each harness on the host runs at once, from 1 through
-16; the default is 1, and the host `supertag init` writes sets 3. With 1, one stuck Task Attempt
-holds that harness for every Tag on the host. The host's Worklet runs each Task Attempt in a
-Worker process of its own, so `concurrency` is the size of its Worker pool for each harness, not a
-number of host processes. `supertag up` changes running hosts' concurrency without restarting
-them. A host started with `supertag worklet` takes `--concurrency N`.
+`concurrency` sets how many Task Attempts the host runs at once in all, from 1 through 16,
+whichever harness each one uses. The default is 1, and the host `supertag init` writes sets 3.
+With 1, one stuck Task Attempt holds the machine for every Tag on the host. The host's Worklet
+runs each Task Attempt in a Worker process of its own, so `concurrency` is the size of its Worker
+pool, not a number of host processes. Its harnesses share the pool: when Claude Code has no
+work, Codex may use every slot.
+
+To keep one harness from taking the whole pool, give it a limit within it:
+
+```yaml
+    concurrency: 3
+    harness-limits:
+      claude-code: 1
+```
+
+`supertag up` changes running hosts' concurrency without restarting them; a changed
+`harness-limits` restarts the host. A host started with `supertag worklet` takes
+`--concurrency N`.
 Teams can also cap how many of their Tasks run at once; see [Teams](teams.md).
 
 ### Limit how long a Task Attempt runs

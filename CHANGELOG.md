@@ -58,6 +58,19 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- A host's `concurrency` is now the machine's total: how many Task Attempts it runs at once
+  across all its harnesses, instead of that many for each harness. Its harnesses share the
+  slots, so one harness with no work leaves them to the others. A host service's
+  `harness-limits` caps one harness within the total, such as `{claude-code: 1}`, and
+  `supertag worklet` takes `--harness-limit N` among a harness's arguments; by default a harness
+  may use every slot. `supertag init` still writes `concurrency: 3`, now three Task Attempts in
+  all, so raise it if you relied on three for each harness. A Worker Host reports its pool as its
+  capacity, so `supertag ps` shows `1/3 Task Attempts` where a host with two harnesses showed
+  `1/6`. This changes the protocol to 7: a Worklet or Control Plane from 0.3.2 cannot connect, so
+  upgrade them together. Slot directories are numbered, `slots/0/`, each with a `harness` file; a
+  Worklet moves a slot named after its harness to `retired/` and fences its Task Attempt, so let
+  running Task Attempts finish before upgrading. See
+  [Host concurrency](docs/reference/supertag-yaml.md#host-concurrency).
 - `supertag worker-host` is now `supertag worklet`, named after the Worklet it runs, with no
   alias. Update systemd units, container commands, and scripts that start a standalone Worker
   Host. `supertag up` starts the new command itself. See
@@ -80,7 +93,7 @@ within the pre-1.0 compatibility policy described in
   reply text still reaches only the clients of the replica that received it. See
   [How streams deliver](docs/reference/control-plane-api.md#how-streams-deliver).
 - A Worker Host runs one Worklet, which registers the host once and starts a Worker process of
-  its own for each Task Attempt, up to `concurrency` per harness. `supertag up` supervises one
+  its own for each Task Attempt, up to `concurrency` at once. `supertag up` supervises one
   Worklet per host service instead of one process per unit of concurrency, and resizes its pool
   without a restart. The Worker never receives the host credential: it asks its Worklet for the
   few host calls its Task Attempt needs, and dies with its Worklet. The Worklet keeps one journal,

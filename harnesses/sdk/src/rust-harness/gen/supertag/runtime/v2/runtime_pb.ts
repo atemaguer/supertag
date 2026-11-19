@@ -2442,8 +2442,9 @@ export type ReportHostRequest = Message<"supertag.runtime.v2.ReportHostRequest">
   labels: string[];
 
   /**
-   * Per-harness execution slots on a Host that serves several harnesses or Attempts at once.
-   * When present, capacity and available_slots above are the sums of these entries.
+   * Each harness of a Host that serves several harnesses or Attempts at once. capacity and
+   * available_slots above are then the Host's whole pool, which its harnesses share: each
+   * entry is at most what one harness may run within it, and none exceeds the pool.
    *
    * @generated from field: repeated supertag.runtime.v2.HostHarnessCapacity harnesses = 1500;
    */
@@ -2488,7 +2489,9 @@ export const HostDiskSpaceSchema: GenMessage<HostDiskSpace> = /*@__PURE__*/
   messageDesc(file_supertag_runtime_v2_runtime, 70);
 
 /**
- * One harness profile a Worker Host serves, with its own concurrent Attempt slots.
+ * One harness profile a Worker Host serves. capacity is how many of its Attempts may run at once
+ * within the Host's pool: the harness's own limit, or the whole pool when it has none.
+ * available_slots is how many more it can start now, at most the Host's free slots.
  *
  * @generated from message supertag.runtime.v2.HostHarnessCapacity
  */

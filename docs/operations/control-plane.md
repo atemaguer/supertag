@@ -240,8 +240,8 @@ message when it is recorded.
 6. Run `supertag verify deployment URL --env-file operator.env --require-ready`.
 
 Clients and Worklets negotiate a protocol version on every connection and refuse a Control Plane
-that speaks none of theirs, so upgrade them and the Control Plane together. A Worklet from 0.3.1
-speaks protocol 5 and cannot connect to a Control Plane that speaks protocol 6, so drain those
+that speaks none of theirs, so upgrade them and the Control Plane together. A Worklet from 0.3.2
+speaks protocol 6 and cannot connect to a Control Plane that speaks protocol 7, so drain those
 Worker Hosts before the upgrade.
 
 ## Network and secret boundaries

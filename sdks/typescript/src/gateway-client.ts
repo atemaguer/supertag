@@ -72,7 +72,7 @@ export interface GatewayClientOptions {
 /** Names, on every call, the protocol version this client negotiated with the Gateway. */
 const PROTOCOL_HEADER = "x-supertag-protocol";
 /** The SuperTag protocol versions this client speaks. */
-const PROTOCOL_VERSIONS = [6];
+const PROTOCOL_VERSIONS = [7];
 const protocolVersions: readonly number[] = Object.freeze(PROTOCOL_VERSIONS);
 
 export { protocolVersions as PROTOCOL_VERSIONS };

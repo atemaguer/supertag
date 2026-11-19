@@ -51,7 +51,7 @@ class _OldGateway(negotiation_pb2_grpc.ProtocolNegotiationServicer):
     def Negotiate(self, request, context):  # noqa: N802
         self.calls.append(dict(context.invocation_metadata()).get("authorization", ""))
         assert request.role == negotiation_pb2.SERVICE_ROLE_CLIENT
-        assert list(request.protocol_versions) == [6]
+        assert list(request.protocol_versions) == [7]
         context.abort(
             grpc.StatusCode.FAILED_PRECONDITION,
             "incompatible SuperTag protocol: this Gateway (SuperTag 0.3.0) speaks protocol "
@@ -112,8 +112,8 @@ class _ReplacedGateway(
         self.negotiations += 1
         return negotiation_pb2.NegotiateProtocolResponse(
             role=negotiation_pb2.SERVICE_ROLE_GATEWAY,
-            protocol_version=6,
-            protocol_versions=[6],
+            protocol_version=7,
+            protocol_versions=[7],
             build_version="fixture",
         )
 

@@ -410,7 +410,7 @@ async fn a_sessions_next_task_reuses_its_checkout_on_the_same_host(database: Str
     let state = root.join("host-state");
     // The checkout the host kept for the Session, and its unchanged file's inode.
     let parked = || -> Result<u64> {
-        let slots = std::fs::read_dir(state.join("slots/adapter-0/workspaces"))?
+        let slots = std::fs::read_dir(state.join("slots/0/workspaces"))?
             .flatten()
             .map(|entry| entry.path().join("parked"))
             .filter(|parked| parked.is_dir())

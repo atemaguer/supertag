@@ -987,7 +987,7 @@ async fn killed_worker_host_stops_adapter_and_restart_reclaims_without_rerunning
         "fixture must run beneath its dedicated guardian, in its Worker"
     );
     let mut cleanup = DescendantCleanup(descendants);
-    let journal_path = state.join("slots/adapter-0/attempt.json");
+    let journal_path = state.join("slots/0/attempt.json");
     let journal = std::fs::read(&journal_path)?;
     let entry: Value = serde_json::from_slice(&journal)?;
     assert_eq!(entry["stage"], "executing");
@@ -1019,7 +1019,7 @@ async fn killed_worker_host_stops_adapter_and_restart_reclaims_without_rerunning
     // A process the host may have started without recording its group is no proof: the
     // restart fails closed and waits for an operator.
     let pending = state
-        .join("slots/adapter-0/attempt-processes")
+        .join("slots/0/attempt-processes")
         .join("process-unrecorded.json");
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -1288,9 +1288,8 @@ async fn local_shutdown_replays_finish_before_next_session_task_without_rerunnin
         assert!(!process_exists(pid)?, "shutdown did not reap process {pid}");
     }
     assert!(!state.join("endpoint").exists());
-    let journal: Value = serde_json::from_slice(&std::fs::read(
-        state.join("host/slots/adapter-0/attempt.json"),
-    )?)?;
+    let journal: Value =
+        serde_json::from_slice(&std::fs::read(state.join("host/slots/0/attempt.json"))?)?;
     assert_eq!(
         journal["stage"], "finish",
         "shutdown must durably record the stopped execution"
@@ -2759,7 +2758,7 @@ async fn control_plane_partition_expires_execution_and_requires_audited_retry_be
     let mut cleanup = DescendantCleanup(descendants(host.child.id())?);
     assert!(cleanup.0.contains(&launched[0]));
     let journal: Value =
-        serde_json::from_slice(&std::fs::read(state.join("slots/adapter-0/attempt.json"))?)?;
+        serde_json::from_slice(&std::fs::read(state.join("slots/0/attempt.json"))?)?;
     assert_eq!(journal["stage"], "executing");
     let old_attempt = InspectAttemptRequest {
         task_id: accepted.task_id.clone(),

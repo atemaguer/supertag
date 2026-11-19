@@ -101,6 +101,10 @@ enum Service {
         depends_on: Vec<String>,
         #[serde(default)]
         concurrency: Option<u32>,
+        /// At most this many Task Attempts of a harness at once, by harness, within
+        /// `concurrency`. A harness it doesn't name may use the whole pool.
+        #[serde(default, rename = "harness-limits")]
+        harness_limits: BTreeMap<String, u32>,
         #[serde(default, rename = "attempt-timeout-seconds")]
         attempt_timeout_seconds: Option<u64>,
         /// Placement labels a Tag's `runsOn` can select, such as `gpu`.
@@ -306,7 +310,9 @@ pub struct Host {
     pub key: Option<Secret>,
     /// One entry per configured harness, or the single protocol adapter.
     pub harnesses: Vec<AdapterOptions>,
-    /// Attempts each harness runs at once; each is a separate execution lane.
+    /// Each harness's own limit within `concurrency`, in the order of `harnesses`.
+    pub harness_limits: Vec<Option<u32>>,
+    /// Task Attempts the host runs at once across its harnesses: the size of its Worker pool.
     pub concurrency: u32,
     /// Seconds each Task Attempt may run before the host stops it.
     pub attempt_timeout_seconds: u64,
@@ -328,7 +334,7 @@ pub struct Host {
     /// `environment: local-vm`: every lane runs Tasks in a container on this machine.
     pub local_vm: bool,
 }
-/// The largest per-harness concurrency a Worker Host may declare.
+/// The largest concurrency a Worker Host may declare: Task Attempts at once across its harnesses.
 pub const MAX_CONCURRENCY: u32 = 16;
 /// A Task Attempt may run for 60 minutes unless its host service says otherwise.
 pub const DEFAULT_ATTEMPT_TIMEOUT_SECONDS: u64 = 60 * 60;
@@ -649,6 +655,7 @@ pub(crate) fn parse(
             restart,
             depends_on,
             concurrency,
+            harness_limits,
             attempt_timeout_seconds,
             labels,
             network_credentials,
@@ -705,10 +712,20 @@ pub(crate) fn parse(
                 );
                 n
             }
-            // Each slot is a lane process with its own claim loop, so extra lanes cost Control
-            // Plane polling even when idle. More than one Attempt per harness is opt-in.
+            // Each free slot of the pool holds a claim, so extra slots cost Control Plane
+            // polling even when idle. More than one Attempt at once is opt-in.
             None => 1,
         };
+        ensure!(
+            harness_limits.keys().all(|name| harnesses.contains(name)),
+            "host {name}: harness-limits must name a selected harness"
+        );
+        ensure!(
+            harness_limits
+                .values()
+                .all(|limit| (1..=MAX_CONCURRENCY).contains(limit)),
+            "host {name}: each harness limit must be a whole number from 1 through {MAX_CONCURRENCY}"
+        );
         let attempt_timeout_seconds =
             attempt_timeout_seconds.unwrap_or(DEFAULT_ATTEMPT_TIMEOUT_SECONDS);
         ensure!(
@@ -944,6 +961,14 @@ pub(crate) fn parse(
         }
         let skills = skills.map(|p| resolve_path(base, &p)).transpose()?;
         hosts.push(Host {
+            // A protocol adapter is the host's one harness, without a limit of its own.
+            harness_limits: (0..selected.len())
+                .map(|index| {
+                    harnesses
+                        .get(index)
+                        .and_then(|harness| harness_limits.get(harness).copied())
+                })
+                .collect(),
             name,
             control_plane: remote,
             key,
@@ -1507,6 +1532,7 @@ secrets:
     type: host
     harnesses: [codex, cursor, openai-agents]
     concurrency: 3
+    harness-limits: {cursor: 1}
     attempt-timeout-seconds: 5400
     models: {codex: [model-a], cursor: cursor-model}
     allow-unsandboxed-commands: [cursor]
@@ -1518,7 +1544,9 @@ secrets:
         )
         .unwrap();
         let shared = c.hosts.iter().find(|h| h.name == "shared").unwrap();
+        // Three Task Attempts at once across the harnesses, at most one of them Cursor's.
         assert_eq!(shared.concurrency, 3);
+        assert_eq!(shared.harness_limits, [None, Some(1), None]);
         let kinds = shared
             .harnesses
             .iter()
@@ -1549,12 +1577,13 @@ secrets:
                 .iter()
                 .all(|h| h.worker_args().iter().any(|v| v == "/trusted/./source"))
         );
-        // An unset concurrency runs one Attempt per harness, each for up to 60 minutes.
+        // An unset concurrency runs one Attempt at a time, for up to 60 minutes.
         let default = c.hosts.iter().find(|h| h.name == "default").unwrap();
         assert_eq!(default.concurrency, 1);
         assert_eq!(default.attempt_timeout_seconds, 3600);
         assert_eq!(shared.attempt_timeout_seconds, 5400);
         assert_eq!(default.harnesses.len(), 1);
+        assert_eq!(default.harness_limits, [None]);
     }
     #[test]
     fn host_labels_are_declared_per_host_and_validated_at_load() {
@@ -1991,6 +2020,9 @@ secrets:
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex, codex]}}",
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], concurrency: 0}}",
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], concurrency: 17}}",
+            "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], harness-limits: {cursor: 1}}}",
+            "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], harness-limits: {codex: 0}}}",
+            "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], harness-limits: {codex: 17}}}",
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], attempt-timeout-seconds: 0}}",
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], attempt-timeout-seconds: 86401}}",
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], models: {cursor: [m]}}}",

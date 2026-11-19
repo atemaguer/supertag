@@ -56,7 +56,13 @@ fn report(sequence: u64) -> ReportHostRequest {
     }
 }
 
-fn shared_report(sequence: u64, codex_ready: u32, agents_ready: u32) -> ReportHostRequest {
+/// A pool of four slots that Codex and OpenAI Agents share, with Codex limited to two.
+fn shared_report(
+    sequence: u64,
+    available: u32,
+    codex_ready: u32,
+    agents_ready: u32,
+) -> ReportHostRequest {
     let profile = |model: &str| HarnessExecutionProfile {
         model_ids: vec![model.into()],
         default_model: Some(model.into()),
@@ -65,7 +71,7 @@ fn shared_report(sequence: u64, codex_ready: u32, agents_ready: u32) -> ReportHo
     ReportHostRequest {
         sequence,
         capacity: 4,
-        available_slots: codex_ready + agents_ready,
+        available_slots: available,
         readiness: HostReadiness::Ready as i32,
         reason: HostReadinessReason::Unspecified as i32,
         harness_kind: HarnessKind::Unspecified as i32,
@@ -76,7 +82,7 @@ fn shared_report(sequence: u64, codex_ready: u32, agents_ready: u32) -> ReportHo
             HostHarnessCapacity {
                 harness_kind: HarnessKind::OpenaiAgents as i32,
                 execution_profile: Some(profile("agents-model")),
-                capacity: 2,
+                capacity: 4,
                 available_slots: agents_ready,
             },
             HostHarnessCapacity {
@@ -90,17 +96,18 @@ fn shared_report(sequence: u64, codex_ready: u32, agents_ready: u32) -> ReportHo
     }
 }
 
-/// One registration advertises several harnesses, each with its own slots, and the totals and
-/// summary fields stay consistent with them.
+/// One registration advertises several harnesses sharing one pool, each with what it may run
+/// within it, and the totals and summary fields stay consistent with them.
 async fn shared_contract(url: &str) {
     let clock = Arc::new(AtomicI64::new(NOW));
     let store = open(url, &clock).await;
     let registered = support::register_host(&store, "shared").await;
     let ready = store
-        .report_host(&registered, &shared_report(1, 2, 1))
+        .report_host(&registered, &shared_report(1, 3, 2, 3))
         .await
         .unwrap();
     assert_eq!(ready.phase(), HostPhase::Ready);
+    // The host's figures are its pool, not the sum of its harnesses'.
     assert_eq!((ready.capacity, ready.available_slots), (4, 3));
     assert_eq!(ready.harness_kind(), HarnessKind::Unspecified);
     let slots = ready
@@ -112,47 +119,50 @@ async fn shared_contract(url: &str) {
         slots,
         [
             (HarnessKind::Codex, 2, 2),
-            (HarnessKind::OpenaiAgents, 2, 1)
+            (HarnessKind::OpenaiAgents, 4, 3)
         ]
     );
     // An exact replay is idempotent; the same sequence with other slots conflicts.
     assert_eq!(
         store
-            .report_host(&registered, &shared_report(1, 2, 1))
+            .report_host(&registered, &shared_report(1, 3, 2, 3))
             .await
             .unwrap(),
         ready
     );
     assert!(matches!(
         store
-            .report_host(&registered, &shared_report(1, 1, 1))
+            .report_host(&registered, &shared_report(1, 3, 1, 3))
             .await,
         Err(StoreError::Conflict(_))
     ));
     for invalid in [
-        // Totals differ from the harness entries.
-        ReportHostRequest {
-            capacity: 5,
-            ..shared_report(2, 2, 1)
+        // A harness may run more than the pool, or start more than it has free.
+        {
+            let mut beyond = shared_report(2, 3, 2, 3);
+            beyond.harnesses[0].capacity = 5;
+            beyond
         },
+        shared_report(2, 2, 2, 3),
+        // The pool holds more than its harnesses together may run, or have free.
         ReportHostRequest {
-            available_slots: 2,
-            ..shared_report(2, 2, 1)
+            capacity: 7,
+            ..shared_report(2, 3, 2, 3)
         },
+        shared_report(2, 3, 1, 1),
         // Several harnesses never claim one summary harness or profile.
         ReportHostRequest {
             harness_kind: HarnessKind::Codex as i32,
-            ..shared_report(2, 2, 1)
+            ..shared_report(2, 3, 2, 3)
         },
         {
-            let mut duplicate = shared_report(2, 2, 1);
+            let mut duplicate = shared_report(2, 3, 2, 3);
             duplicate.harnesses[0].harness_kind = HarnessKind::Codex as i32;
             duplicate
         },
         {
-            let mut overfull = shared_report(2, 2, 1);
-            overfull.harnesses[0].available_slots = 3;
-            overfull.available_slots = 4;
+            let mut overfull = shared_report(2, 4, 2, 4);
+            overfull.harnesses[1].available_slots = 3;
             overfull
         },
     ] {
@@ -171,7 +181,15 @@ async fn shared_contract(url: &str) {
     let drained = store.get_host("shared").await.unwrap();
     assert_eq!(drained.phase(), HostPhase::Draining);
     assert!(drained.harnesses.iter().all(|h| h.available_slots == 0));
-    assert_eq!(drained.harnesses.iter().map(|h| h.capacity).sum::<u32>(), 4);
+    assert_eq!(drained.capacity, 4);
+    assert_eq!(
+        drained
+            .harnesses
+            .iter()
+            .map(|h| h.capacity)
+            .collect::<Vec<_>>(),
+        [2, 4]
+    );
     // A single-harness Host may also report its slots, with a matching summary.
     let single = support::register_host(&store, "single").await;
     let mut one = report(1);
@@ -199,8 +217,8 @@ async fn shared_contract(url: &str) {
         Err(StoreError::InvalidArgument(_))
     ));
 
-    // An occupying Attempt holds its own harness's slot even when a lane still reports it
-    // free, so per-harness slots never exceed the Host's clamped total.
+    // An occupying Attempt holds its own harness's slot even when the host still reports it
+    // free, and no harness shows more than the Host's clamped free slots.
     store.set_host_draining("shared", false).await.unwrap();
     store
         .put_tag_spec(PutTagRequest {
@@ -230,7 +248,7 @@ async fn shared_contract(url: &str) {
         .unwrap();
     assert!(claimed.is_some());
     let stale = store
-        .report_host(&registered, &shared_report(2, 2, 2))
+        .report_host(&registered, &shared_report(2, 4, 2, 4))
         .await
         .unwrap();
     assert_eq!(stale.phase(), HostPhase::Ready);
@@ -242,15 +260,7 @@ async fn shared_contract(url: &str) {
         .collect::<Vec<_>>();
     assert_eq!(
         slots,
-        [(HarnessKind::Codex, 1), (HarnessKind::OpenaiAgents, 2)]
-    );
-    assert_eq!(
-        stale
-            .harnesses
-            .iter()
-            .map(|h| h.available_slots)
-            .sum::<u32>(),
-        stale.available_slots
+        [(HarnessKind::Codex, 1), (HarnessKind::OpenaiAgents, 3)]
     );
     store.close().await;
 }

@@ -330,11 +330,20 @@ fn waiting_for_capacity(
                     )
                 }
                 HostPhase::Suppressed => format!("Worker Host {id} is not claiming work"),
-                _ => format!(
-                    "Worker Host {id} is running {} of {} {kind}Attempts",
-                    capacity.capacity - capacity.available_slots.min(capacity.capacity),
-                    capacity.capacity
-                ),
+                _ => {
+                    // The harnesses share the host's pool: it is full, or this harness is at its
+                    // own limit within it.
+                    let (capacity, kind) = if host.available_slots == 0 {
+                        (total(host), "")
+                    } else {
+                        (capacity.clone(), kind.as_str())
+                    };
+                    format!(
+                        "Worker Host {id} is running {} of {} {kind}Attempts",
+                        capacity.capacity - capacity.available_slots.min(capacity.capacity),
+                        capacity.capacity
+                    )
+                }
             }
         })
         .collect();
@@ -849,6 +858,52 @@ impl auth_keys_server::AuthKeys for ControlPlane {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_waiting_task_names_the_full_pool_or_its_harness_limit() {
+        let host = |available: u32, codex: (u32, u32)| WorkerHostStatus {
+            host_id: "laptop".into(),
+            phase: if available > 0 {
+                HostPhase::Ready
+            } else {
+                HostPhase::Busy
+            } as i32,
+            capacity: 3,
+            available_slots: available,
+            active_attempts: 3 - available,
+            harnesses: vec![
+                HostHarnessCapacity {
+                    harness_kind: HarnessKind::Codex as i32,
+                    capacity: codex.0,
+                    available_slots: codex.1,
+                    ..Default::default()
+                },
+                HostHarnessCapacity {
+                    harness_kind: HarnessKind::ClaudeCode as i32,
+                    capacity: 3,
+                    available_slots: available,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        // Claude Code runs all three slots of the pool, which Codex shares.
+        let full = waiting_for_capacity(HarnessKind::Codex, &[host(0, (3, 0))]);
+        assert_eq!(
+            full.map(|(_, summary)| summary).as_deref(),
+            Some("Waiting: Worker Host laptop is running 3 of 3 Attempts")
+        );
+        // A slot is free, but Codex runs its limit of one.
+        let limited = waiting_for_capacity(HarnessKind::Codex, &[host(1, (1, 0))]);
+        assert_eq!(
+            limited.map(|(_, summary)| summary).as_deref(),
+            Some("Waiting: Worker Host laptop is running 1 of 1 Codex Attempts")
+        );
+        assert_eq!(
+            waiting_for_capacity(HarnessKind::ClaudeCode, &[host(1, (1, 0))]),
+            None
+        );
+    }
 
     fn labels(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()

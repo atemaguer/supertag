@@ -169,7 +169,7 @@ pub struct ServiceStatus {
     pub host_id: Option<String>,
     /// A host connected to a Control Plane this supervisor does not run.
     pub remote: bool,
-    /// A host's Attempts per harness at once.
+    /// A host's Task Attempts at once, across its harnesses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub concurrency: Option<u32>,
     /// A host's state directory, where its Worklet lists the Workers it runs.
@@ -682,7 +682,7 @@ async fn change_concurrency(
         {
             changed = true;
             outln!(
-                "Worker Host {} runs up to {} Task Attempts per harness at once, changed from {before} without a restart.",
+                "Worker Host {} runs up to {} Task Attempts at once, changed from {before} without a restart.",
                 host.name,
                 host.concurrency
             );
@@ -2029,7 +2029,7 @@ mod tests {
         let worker = supertag_worker_host::RunningWorker {
             pid: 4242,
             harness: "claude-code".into(),
-            slot: "claude-code-0".into(),
+            slot: "0".into(),
             task_id: "task_1".into(),
             attempt_id: "attempt_1".into(),
             tag_id: "tag_1".into(),
@@ -2059,7 +2059,7 @@ mod tests {
         let text = format_ps(&report, &Supervisor::Stopped);
         assert!(
             text.ends_with(
-                "7  connected, 1/6 Task Attempts\n  Worker 4242  claude-code  slot claude-code-0  executing for 12m 34s  Task task_1 Attempt attempt_1 of Tag tag_1\n"
+                "7  connected, 1/6 Task Attempts\n  Worker 4242  claude-code  slot 0  executing for 12m 34s  Task task_1 Attempt attempt_1 of Tag tag_1\n"
             ),
             "{text}"
         );

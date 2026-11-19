@@ -130,7 +130,7 @@ async fn frozen_outputs_survive_worker_restart(
     let snapshot = fixture
         .root
         .join(format!("host-{mode}"))
-        .join("slots/cursor-0/artifact-snapshots");
+        .join("slots/0/artifact-snapshots");
     assert!(
         std::fs::read_dir(snapshot)?
             .filter_map(Result::ok)

@@ -434,9 +434,8 @@ pub(crate) async fn status_in(
 }
 
 /// Per-harness slots never show more than the Host's occupancy leaves: each harness loses the
-/// slots its own occupying Attempts hold, and the entries never sum past the Host's total.
+/// slots its own occupying Attempts hold, and none shows more than the Host has free in all.
 fn clamp_harness_slots(harnesses: &mut [HostHarnessCapacity], occupied: &[(i64, i64)], total: u32) {
-    let mut remaining = total;
     for harness in harnesses {
         let held = occupied
             .iter()
@@ -446,13 +445,13 @@ fn clamp_harness_slots(harnesses: &mut [HostHarnessCapacity], occupied: &[(i64, 
         harness.available_slots = harness
             .available_slots
             .min(harness.capacity.saturating_sub(held))
-            .min(remaining);
-        remaining -= harness.available_slots;
+            .min(total);
     }
 }
 
-/// A Host that runs several harnesses or concurrent Attempts reports one slot entry per harness.
-/// The totals above must equal their sum, and a single summary harness is never ambiguous.
+/// A Host that runs several harnesses or concurrent Attempts reports one entry per harness. The
+/// totals above are the Host's whole pool, which its harnesses share: each entry is at most
+/// what one harness may run within it, and a single summary harness is never ambiguous.
 fn harness_capacities(input: &ReportHostRequest) -> Result<Option<Vec<u8>>> {
     if input.harnesses.is_empty() {
         return Ok(None);
@@ -461,7 +460,6 @@ fn harness_capacities(input: &ReportHostRequest) -> Result<Option<Vec<u8>>> {
         return Err(invalid("host must report at most 16 harnesses"));
     }
     let mut harnesses = Vec::with_capacity(input.harnesses.len());
-    let (mut capacity, mut available) = (0_u32, 0_u32);
     for harness in &input.harnesses {
         HarnessKind::try_from(harness.harness_kind).map_err(|_| invalid("unknown host harness"))?;
         if harness.capacity == 0 || harness.available_slots > harness.capacity {
@@ -469,8 +467,11 @@ fn harness_capacities(input: &ReportHostRequest) -> Result<Option<Vec<u8>>> {
                 "each host harness needs capacity and cannot exceed it",
             ));
         }
-        capacity = capacity.saturating_add(harness.capacity);
-        available = available.saturating_add(harness.available_slots);
+        if harness.capacity > input.capacity || harness.available_slots > input.available_slots {
+            return Err(invalid(
+                "a host harness's capacity and available slots cannot exceed the host's",
+            ));
+        }
         harnesses.push(HostHarnessCapacity {
             harness_kind: harness.harness_kind,
             execution_profile: Some(execution::normalize_profile(
@@ -480,17 +481,23 @@ fn harness_capacities(input: &ReportHostRequest) -> Result<Option<Vec<u8>>> {
             available_slots: harness.available_slots,
         });
     }
+    // The pool never holds more than its harnesses together may run.
+    let sum = |slots: fn(&HostHarnessCapacity) -> u32| {
+        harnesses.iter().map(slots).fold(0_u32, u32::saturating_add)
+    };
+    if input.capacity > sum(|harness| harness.capacity)
+        || input.available_slots > sum(|harness| harness.available_slots)
+    {
+        return Err(invalid(
+            "host capacity and available slots cannot exceed what its harnesses together run",
+        ));
+    }
     harnesses.sort_by_key(|harness| harness.harness_kind);
     if harnesses
         .windows(2)
         .any(|pair| pair[0].harness_kind == pair[1].harness_kind)
     {
         return Err(invalid("host harnesses must be distinct"));
-    }
-    if capacity != input.capacity || available != input.available_slots {
-        return Err(invalid(
-            "host capacity and available slots must equal their harness totals",
-        ));
     }
     let summary = match harnesses.as_slice() {
         [single] => {

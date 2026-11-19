@@ -79,7 +79,9 @@ speaks only its new version: SuperTag 0.3.0 speaks protocol 2, 0.3.1 speaks prot
 0.3.2 speaks protocol 6. Protocol 6 gives each running Task Attempt a credential of its own
 for its data calls, so a Worklet from 0.3.1 cannot connect to a 0.3.2 Control Plane, and a 0.3.2
 Worklet, CLI, or app cannot connect to a 0.3.1 one: negotiation refuses the pair and says which
-side to upgrade. `supertag version` prints this CLI's version and the running local services' versions.
+side to upgrade. The next release speaks protocol 7, where a Worker Host reports its capacity as
+the one pool its harnesses share instead of a sum of slots per harness, so it cannot connect to
+0.3.2. `supertag version` prints this CLI's version and the running local services' versions.
 Release the CLI and the Control Plane together, and upgrade them together.
 
 ## Contract changes

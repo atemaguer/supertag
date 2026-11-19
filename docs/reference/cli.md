@@ -2469,9 +2469,12 @@ Options:
           [default: 3600]
 
       --concurrency <CONCURRENCY>
-          Task Attempts of each harness this host runs at once: the slots of its Worker pool per harness, from 1 through 16
+          Task Attempts this host runs at once across all its harnesses: the slots of its Worker pool, from 1 through 16
           
           [default: 1]
+
+      --harness-limit <HARNESS_LIMIT>
+          At most this many of this harness's Task Attempts at once, within --concurrency, from 1 through 16. Without it, the harness may use every slot
 
       --once
           Exit after running one Task Attempt

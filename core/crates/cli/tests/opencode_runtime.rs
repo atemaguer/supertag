@@ -1164,8 +1164,8 @@ async fn opencode_claims_and_runs_the_accepted_role_model(database: String) -> R
         }),
         ..Default::default()
     };
-    // The stale claim is the entry of the host's one OpenCode slot.
-    let slot = wrong_state.join("slots/opencode-0");
+    // The stale claim is the entry of the host's one slot, which records it as OpenCode's.
+    let slot = wrong_state.join("slots/0");
     std::fs::create_dir_all(&slot)?;
     std::fs::set_permissions(
         wrong_state.join("slots"),
@@ -1182,6 +1182,8 @@ async fn opencode_claims_and_runs_the_accepted_role_model(database: String) -> R
         }))?,
     )?;
     std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o600))?;
+    std::fs::write(slot.join("harness"), "opencode")?;
+    std::fs::set_permissions(slot.join("harness"), std::fs::Permissions::from_mode(0o600))?;
     let mut wrong = runtime.host_with_models(&wrong_directory, None, default_model, &[])?;
     wrong.success().await?;
     assert!(!journal.try_exists()?);

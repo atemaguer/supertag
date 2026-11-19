@@ -345,8 +345,8 @@ impl Entry {
 
 /// The Worklet's journal. The host journal (`open`) holds the Worklet's lock, its incarnation,
 /// and its presence sequence; each slot of its Worker pool keeps one entry (`slot`): the stage of
-/// the one Attempt that slot holds, in `slots/NAME/` beside that Attempt's checkpoint, sandbox,
-/// shared-access, and process records. A Worker reads and writes its own Attempt's records
+/// the one Attempt that slot holds, in `slots/NUMBER/` beside the harness it is for and that
+/// Attempt's checkpoint, sandbox, shared-access, and process records. A Worker reads and writes its own Attempt's records
 /// through a `view` of its slot; only the Worklet writes the entry.
 pub(crate) struct Journal {
     directory: PathBuf,
@@ -355,6 +355,9 @@ pub(crate) struct Journal {
 
 /// The directory under the Worklet's state directory that holds one entry per slot.
 pub(crate) const SLOTS: &str = "slots";
+
+/// The file in a slot's directory that names the harness its entry is for.
+const HARNESS: &str = "harness";
 
 impl Journal {
     pub(crate) fn open(directory: &Path) -> Result<Self> {
@@ -497,6 +500,27 @@ impl Journal {
     /// for work holds one, and it names no Attempt, whose reservation would expire on its lease.
     fn claim_path(&self) -> PathBuf {
         self.directory.join("claim.json")
+    }
+
+    /// The harness the slot's entry is for: the Worklet records it before the slot's claim, and
+    /// it holds until the slot next claims for a harness. A slot directory without one, such as
+    /// one an earlier release named after its harness, is no configured slot's.
+    pub(crate) fn harness(&self) -> Result<Option<String>> {
+        match fs::read_to_string(self.directory.join(HARNESS)) {
+            Ok(harness) => Ok(Some(harness)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Records the harness the slot claims for next, before its claim is journaled.
+    pub(crate) fn save_harness(&self, harness: &str) -> Result<()> {
+        if self.harness()?.as_deref() == Some(harness) {
+            return Ok(());
+        }
+        self.write(&self.directory.join(HARNESS), |file| {
+            Ok(file.write_all(harness.as_bytes())?)
+        })
     }
 
     pub(crate) fn load(&self) -> Result<Option<Entry>> {
@@ -1187,6 +1211,29 @@ fn sync(directory: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_slot_records_the_harness_its_entry_is_for() -> Result<()> {
+        let state = tempfile::tempdir()?;
+        let journal = Journal::open(state.path())?;
+        let slot = journal.slot("0")?;
+        assert_eq!(slot.harness()?, None);
+        slot.save_harness("codex")?;
+        slot.save(&Entry::Claim {
+            operation_id: "claim".into(),
+            request: vec![],
+        })?;
+        assert_eq!(slot.harness()?.as_deref(), Some("codex"));
+        // A cleared slot keeps the record until it claims for another harness.
+        slot.clear()?;
+        assert_eq!(slot.harness()?.as_deref(), Some("codex"));
+        slot.save_harness("claude-code")?;
+        assert_eq!(
+            journal.slot("0")?.harness()?.as_deref(),
+            Some("claude-code")
+        );
+        Ok(())
+    }
 
     #[test]
     fn only_recorded_gone_process_groups_prove_an_attempt_stopped() -> Result<()> {

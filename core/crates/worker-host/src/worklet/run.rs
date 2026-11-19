@@ -1,12 +1,15 @@
-//! The Worklet: register the host once, report its presence, and run a pool of slots, each
-//! pinned to one harness. A slot claims an Attempt, starts it, runs it in a Worker process, and
-//! carries the outcome the Worker hands over through finalization, delivery, Finish, and cleanup,
-//! resuming from its journal entry after a restart.
+//! The Worklet: register the host once, report its presence, and run a pool of slots that the
+//! host's harnesses share. A free slot claims an Attempt for any harness below its own limit,
+//! starts it, runs it in a Worker process, and carries the outcome the Worker hands over through
+//! finalization, delivery, Finish, and cleanup, resuming from its journal entry after a restart.
 
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 
@@ -119,16 +122,18 @@ impl Worklet {
     }
 
     fn set(&self, slot: &Slot, state: readiness::State) {
-        self.slots.set(&slot.name, slot.harness, state);
+        self.slots.set(&slot.name, state);
         self.keep_awake.update(self.slots.any_busy());
     }
 }
 
-/// One slot of the Worker pool: one Attempt of one harness at a time, with its own journal entry
-/// and checkouts.
+/// One slot of the Worker pool: one Attempt at a time, of whichever harness it claimed for, with
+/// its own journal entry and checkouts.
 struct Slot {
     name: String,
-    harness: usize,
+    /// The index of the harness its journal entry is for, as the journal records it; `NO_HARNESS`
+    /// before the slot first claims.
+    harness: AtomicUsize,
     directory: PathBuf,
     journal: Journal,
     workspaces: workspaces::Workspaces,
@@ -137,7 +142,10 @@ struct Slot {
     retire: CancellationToken,
 }
 
-/// The name of a harness's slots.
+/// A slot that has not claimed for any harness yet.
+const NO_HARNESS: usize = usize::MAX;
+
+/// A harness's name, as slots record it and `supertag ps` shows it.
 fn harness_name(kind: HarnessKind) -> String {
     match kind {
         HarnessKind::Unspecified => "adapter".into(),
@@ -149,19 +157,21 @@ fn harness_name(kind: HarnessKind) -> String {
     }
 }
 
-fn slot_name(kind: HarnessKind, number: u32) -> String {
-    format!("{}-{number}", harness_name(kind))
+/// The slot number a slot directory's name is, if it is one.
+fn slot_number(name: &str) -> Option<u32> {
+    name.parse()
+        .ok()
+        .filter(|number: &u32| number.to_string() == name)
 }
 
-/// Which configured harness and slot number a slot name names.
-fn parse_slot(options: &WorkletOptions, name: &str) -> Option<(usize, u32)> {
-    let (prefix, number) = name.rsplit_once('-')?;
-    let number = number.parse().ok()?;
-    let harness = options
-        .harnesses
-        .iter()
-        .position(|harness| harness_name(harness.worker.harness) == prefix)?;
-    Some((harness, number))
+/// Which configured harness a slot's journal entry is for.
+fn recorded_harness(options: &WorkletOptions, journal: &Journal) -> Result<Option<usize>> {
+    Ok(journal.harness()?.and_then(|recorded| {
+        options
+            .harnesses
+            .iter()
+            .position(|harness| harness_name(harness.worker.harness) == recorded)
+    }))
 }
 
 fn validate(options: &WorkletOptions) -> Result<()> {
@@ -175,6 +185,10 @@ fn validate(options: &WorkletOptions) -> Result<()> {
         ensure!(
             kinds.insert(harness_name(worker.harness)),
             "a Worker Host runs each harness once"
+        );
+        ensure!(
+            harness.limit.is_none_or(|limit| limit > 0),
+            "a harness's limit is at least one Task Attempt"
         );
         remote::validate_time_limit(worker.attempt_timeout, worker.remote_provider.is_some())?;
         ensure!(
@@ -225,14 +239,19 @@ fn validate(options: &WorkletOptions) -> Result<()> {
     Ok(())
 }
 
-/// Moves the slots no configured harness runs out of the way, keeping them for inspection.
-/// Their Attempts are fenced when the new incarnation, durable before any slot moves, registers.
+/// Moves the slots no configured harness runs out of the way, keeping them for inspection: a
+/// slot whose recorded harness this host no longer runs, or a directory that is no numbered
+/// slot. Their Attempts are fenced when the new incarnation, durable before any slot moves,
+/// registers.
 fn retire_stranded(options: &WorkletOptions, journal: &Journal) -> Result<()> {
-    let stranded = journal
-        .occupied_slots()?
-        .into_iter()
-        .filter(|name| parse_slot(options, name).is_none())
-        .collect::<Vec<_>>();
+    let mut stranded = Vec::new();
+    for name in journal.occupied_slots()? {
+        if slot_number(&name).is_none()
+            || recorded_harness(options, &journal.slot(&name)?)?.is_none()
+        {
+            stranded.push(name);
+        }
+    }
     if stranded.is_empty() {
         return Ok(());
     }
@@ -259,23 +278,30 @@ fn retire_stranded(options: &WorkletOptions, journal: &Journal) -> Result<()> {
 use std::os::unix::fs::DirBuilderExt as _;
 
 impl Slot {
-    fn open(
-        options: &WorkletOptions,
-        journal: &Journal,
-        harness: usize,
-        number: u32,
-    ) -> Result<Self> {
-        let name = slot_name(options.harnesses[harness].worker.harness, number);
+    fn open(options: &WorkletOptions, journal: &Journal, number: u32) -> Result<Self> {
+        let name = number.to_string();
         let entry = journal.slot(&name)?;
         let directory = options.state_directory.join(SLOTS).join(&name);
+        let harness = recorded_harness(options, &entry)?.unwrap_or(NO_HARNESS);
         Ok(Self {
             workspaces: workspaces::Workspaces::new(&directory, options.workspaces.clone())?,
             name,
-            harness,
+            harness: AtomicUsize::new(harness),
             directory,
             journal: entry,
             retire: CancellationToken::new(),
         })
+    }
+
+    /// The index of the harness the slot's journal entry is for.
+    fn harness(&self) -> Result<usize> {
+        let harness = self.harness.load(Ordering::Acquire);
+        ensure!(
+            harness != NO_HARNESS,
+            "Worker pool slot {} records no harness for its entry",
+            self.name
+        );
+        Ok(harness)
     }
 }
 
@@ -325,10 +351,10 @@ pub(crate) async fn run(
     // repository nor a new network registration.
     let mut cleaned = false;
     for name in journal.occupied_slots()? {
-        let Some((harness, number)) = parse_slot(&options, &name) else {
+        let Some(number) = slot_number(&name) else {
             continue;
         };
-        let slot = Slot::open(&options, &journal, harness, number)?;
+        let slot = Slot::open(&options, &journal, number)?;
         if !options.once {
             slot.workspaces.purge_all_discarded_in_background();
         }
@@ -451,7 +477,14 @@ pub(crate) async fn run(
         options.keep_awake.clone(),
         shutdown.clone(),
     ));
-    let slots = Arc::new(readiness::Slots::default());
+    let slots = Arc::new(readiness::Slots::new(
+        options
+            .harnesses
+            .iter()
+            .map(|harness| harness.limit)
+            .collect(),
+        pool_size(&options, *options.concurrency.borrow()),
+    ));
     let workspace_ids = {
         let workspaces =
             workspaces::Workspaces::new(&options.state_directory, options.workspaces.clone())?;
@@ -464,25 +497,22 @@ pub(crate) async fn run(
     let presence = readiness::Presence::start(
         journal.clone(),
         options.disk_space.clone(),
-        host.clone(),
-        token.clone(),
-        (
-            options
-                .harnesses
-                .iter()
-                .map(|harness| {
-                    let profile = harness.worker.execution_profile.clone();
-                    let catalog = options.mcp_catalog.clone();
-                    readiness::Harness {
-                        kind: harness.worker.harness,
-                        profile: Arc::new(move || {
-                            McpCatalog::advertised(&profile, &catalog.lapsed_logins())
-                        }),
-                    }
-                })
-                .collect(),
-            options.concurrency.clone(),
-        ),
+        (host.clone(), token.clone()),
+        options
+            .harnesses
+            .iter()
+            .map(|harness| {
+                let profile = harness.worker.execution_profile.clone();
+                let catalog = options.mcp_catalog.clone();
+                readiness::Harness {
+                    kind: harness.worker.harness,
+                    profile: Arc::new(move || {
+                        McpCatalog::advertised(&profile, &catalog.lapsed_logins())
+                    }),
+                    limit: harness.limit,
+                }
+            })
+            .collect(),
         (workspace_ids, labels),
         slots.clone(),
         shutdown.clone(),
@@ -536,9 +566,15 @@ pub(crate) async fn run(
 /// A slot's failure, with the Attempt it left unsettled.
 type SlotFailure = (anyhow::Error, Option<Attempt>);
 
-/// Runs the pool: one slot per harness per unit of concurrency, plus any slot that still holds an
-/// Attempt beyond it. Raising the size starts slots; lowering it retires the highest ones once they
-/// hold no Attempt. With `--once`, one slot runs and the Worklet returns after its Attempt.
+/// The pool's size for a `concurrency`: with `--once`, one slot.
+fn pool_size(options: &WorkletOptions, concurrency: u32) -> u32 {
+    if options.once { 1 } else { concurrency.max(1) }
+}
+
+/// Runs the pool: `concurrency` slots, which the host's harnesses share, plus any slot that still
+/// holds an Attempt beyond them. Raising the size starts slots; lowering it retires the highest
+/// ones once they hold no Attempt. With `--once`, one slot runs and the Worklet returns after its
+/// Attempt.
 async fn pool(worklet: Arc<Worklet>) -> Result<(), SlotFailure> {
     let options = &worklet.options;
     let mut concurrency = options.concurrency.clone();
@@ -546,31 +582,19 @@ async fn pool(worklet: Arc<Worklet>) -> Result<(), SlotFailure> {
         HashMap::new();
     let mut tasks = tokio::task::JoinSet::new();
     let mut resizable = !options.once;
-    let occupied: Vec<(usize, u32)> = worklet
+    let occupied: Vec<u32> = worklet
         .journal
         .occupied_slots()
         .map_err(|error| (error, None))?
         .iter()
-        .filter_map(|name| parse_slot(options, name))
+        .filter_map(|name| slot_number(name))
         .collect();
-    let wanted = |size: u32| -> Vec<(usize, u32)> {
-        let size = if options.once { 1 } else { size.max(1) };
-        let mut slots = Vec::new();
-        for harness in 0..options.harnesses.len() {
-            for number in 0..size {
-                if !options.once || harness == 0 {
-                    slots.push((harness, number));
-                }
-            }
-        }
-        slots
-    };
+    let wanted = |size: u32| -> Vec<u32> { (0..pool_size(options, size)).collect() };
     let start = |tasks: &mut tokio::task::JoinSet<(String, Result<(), SlotFailure>)>,
                  running: &mut HashMap<String, (CancellationToken, tokio::task::AbortHandle)>,
-                 (harness, number): (usize, u32)|
+                 number: u32|
      -> Result<(), SlotFailure> {
-        let slot = Slot::open(options, &worklet.journal, harness, number)
-            .map_err(|error| (error, None))?;
+        let slot = Slot::open(options, &worklet.journal, number).map_err(|error| (error, None))?;
         let (name, retire) = (slot.name.clone(), slot.retire.clone());
         worklet.set(&slot, readiness::State::Pending);
         let worklet = worklet.clone();
@@ -583,6 +607,7 @@ async fn pool(worklet: Arc<Worklet>) -> Result<(), SlotFailure> {
         Ok(())
     };
     let mut size = *concurrency.borrow_and_update();
+    worklet.slots.resize(pool_size(options, size));
     let mut initial = wanted(size);
     if !options.once || occupied.is_empty() {
         initial.extend(occupied.iter().copied());
@@ -603,7 +628,7 @@ async fn pool(worklet: Arc<Worklet>) -> Result<(), SlotFailure> {
     // A slot beyond the pool size resumes the Attempt it holds, then retires.
     let sized = wanted(size);
     for (name, (retire, _)) in &running {
-        if parse_slot(options, name).is_some_and(|slot| !sized.contains(&slot)) {
+        if slot_number(name).is_some_and(|slot| !sized.contains(&slot)) {
             retire.cancel();
         }
     }
@@ -616,16 +641,15 @@ async fn pool(worklet: Arc<Worklet>) -> Result<(), SlotFailure> {
                     continue;
                 }
                 size = *concurrency.borrow_and_update();
+                worklet.slots.resize(pool_size(options, size));
                 let wanted = wanted(size);
                 for (name, (retire, _)) in &running {
-                    if let Some((harness, number)) = parse_slot(options, name)
-                        && !wanted.contains(&(harness, number))
-                    {
+                    if slot_number(name).is_some_and(|number| !wanted.contains(&number)) {
                         retire.cancel();
                     }
                 }
                 for slot in wanted {
-                    let name = slot_name(options.harnesses[slot.0].worker.harness, slot.1);
+                    let name = slot.to_string();
                     if !running.contains_key(&name)
                         && let Err((error, _)) = start(&mut tasks, &mut running, slot)
                     {
@@ -670,7 +694,7 @@ async fn pool(worklet: Arc<Worklet>) -> Result<(), SlotFailure> {
                     }
                     Ok(()) => {
                         // A retired slot left; one the pool size wants again starts afresh.
-                        let slot = parse_slot(options, &name);
+                        let slot = slot_number(&name);
                         if let Some(slot) = slot.filter(|slot| wanted(size).contains(slot)) {
                             if let Err((error, _)) = start(&mut tasks, &mut running, slot) {
                                 failures::note_unrecorded(
@@ -683,8 +707,8 @@ async fn pool(worklet: Arc<Worklet>) -> Result<(), SlotFailure> {
                             worklet.slots.remove(&name);
                         }
                     }
-                    // One slot's failure is the host's when it is the only slot, as a host with
-                    // one harness and one slot always was.
+                    // One slot's failure is the host's when it is the only slot of a host with
+                    // one harness.
                     Err(failure)
                         if options.once
                             || (options.harnesses.len() == 1 && size == 1 && running.is_empty())
@@ -717,7 +741,7 @@ async fn pool(worklet: Arc<Worklet>) -> Result<(), SlotFailure> {
                             () = tokio::time::sleep(Duration::from_secs(1)) => {}
                             () = worklet.shutdown.cancelled() => {}
                         }
-                        if let Some(slot) = parse_slot(options, &name)
+                        if let Some(slot) = slot_number(&name)
                             && !worklet.shutdown.is_cancelled()
                             && let Err((error, _)) = start(&mut tasks, &mut running, slot)
                         {
@@ -751,7 +775,6 @@ async fn run_slot(worklet: Arc<Worklet>, slot: Slot) -> Result<(), SlotFailure> 
 #[allow(clippy::too_many_lines)]
 async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
     let options = &worklet.options;
-    let worker = worklet.worker(slot.harness);
     let journal = &slot.journal;
     let workspaces = &slot.workspaces;
     let shutdown = &worklet.shutdown;
@@ -768,14 +791,37 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
     while !shutdown.is_cancelled() {
         let entry = match journal.load()? {
             Some(entry) => entry,
-            // A retired slot leaves before it records a new Claim.
-            None if retire.is_cancelled() => {
-                worklet.set(slot, readiness::State::Stopping);
-                return Ok(());
-            }
             None => {
+                // An empty slot holds no harness; it takes whichever has room next.
+                worklet.slots.release(&slot.name);
+                // A retired slot leaves before it records a new Claim.
+                if retire.is_cancelled() {
+                    worklet.set(slot, readiness::State::Stopping);
+                    return Ok(());
+                }
+                let room = worklet.slots.room();
+                let Some(harness) = worklet.slots.choose(&slot.name) else {
+                    // The pool is full or every harness is at its own limit: wait until a slot
+                    // lets one go.
+                    worklet.set(slot, readiness::State::Ready);
+                    tokio::select! {
+                        () = room => {}
+                        () = shutdown.cancelled() => {}
+                        () = retire.cancelled() => {}
+                    }
+                    continue;
+                };
+                // The harness is recorded before the Claim, so a restart resumes the Claim as
+                // that harness's.
+                journal.save_harness(&harness_name(worklet.worker(harness).harness))?;
+                slot.harness.store(harness, Ordering::Release);
                 let operation_id = Uuid::new_v4().to_string();
-                let claim = claim_request(options, worker, workspaces, operation_id.clone());
+                let claim = claim_request(
+                    options,
+                    worklet.worker(harness),
+                    workspaces,
+                    operation_id.clone(),
+                );
                 let entry = Entry::Claim {
                     operation_id,
                     request: claim.encode_to_vec(),
@@ -784,11 +830,14 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                 entry
             }
         };
-        let state = match &entry {
-            Entry::Claim { .. } => readiness::State::Ready,
-            Entry::Executing { .. } => readiness::State::Recovery,
-            _ => readiness::State::Busy,
+        let harness = slot.harness()?;
+        let worker = worklet.worker(harness);
+        let (state, hold) = match &entry {
+            Entry::Claim { .. } => (readiness::State::Ready, readiness::Hold::Claim),
+            Entry::Executing { .. } => (readiness::State::Recovery, readiness::Hold::Attempt),
+            _ => (readiness::State::Busy, readiness::Hold::Attempt),
         };
+        worklet.slots.hold(&slot.name, harness, hold);
         worklet.set(slot, state);
         // The turn's reply, which only the Worker's one report carried: made durable here before
         // the Attempt goes on, since an Attempt that cannot finish would otherwise lose it.
@@ -1623,7 +1672,7 @@ async fn run_worker(
         checkpoint,
         valid_until,
     } = launched;
-    let harness = &worklet.options.harnesses[slot.harness];
+    let harness = &worklet.options.harnesses[slot.harness()?];
     // The delivery check applies the started Task's path scope to what the turn changed.
     let file_scope = supertag_protocol::file_scope::of_task(&task)
         .map(supertag_protocol::file_scope::Rules::from);
@@ -2040,6 +2089,15 @@ impl<T: Message> EncodeMessage for T {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slots_are_numbered_and_harness_named_directories_are_not_slots() {
+        assert_eq!(slot_number("0"), Some(0));
+        assert_eq!(slot_number("12"), Some(12));
+        for name in ["codex-0", "claude-code-1", "007", "", "-1"] {
+            assert_eq!(slot_number(name), None, "{name}");
+        }
+    }
 
     #[test]
     fn repeated_retries_back_off_to_a_ceiling() {

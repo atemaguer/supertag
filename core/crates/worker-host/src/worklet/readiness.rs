@@ -1,5 +1,5 @@
 //! Presence runs independently of a Task's execution lease and native process: the Worklet
-//! reports its pool's slots per harness under the host's one registration.
+//! reports its pool, which its harnesses share, under the host's one registration.
 
 use std::{sync::Arc, time::Duration};
 
@@ -12,7 +12,8 @@ use crate::{
     RegisteredHost, environment::DiskSpaceSource, request, retryable, worklet::journal::Journal,
 };
 
-/// What one slot of the Worklet's Worker pool can do now. Presence aggregates them per harness.
+/// What one slot of the Worklet's Worker pool can do now. Presence aggregates them for the host
+/// and each harness.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
     Pending,
@@ -30,53 +31,191 @@ pub(crate) fn machine_id() -> String {
         .clone()
 }
 
-/// The slots of the Worker pool and their states, which presence reports and `supertag ps`
-/// reads.
-#[derive(Default)]
+/// The slots of the Worker pool: which harness each holds and what it can do now, which presence
+/// reports and `supertag ps` reads. It also shares the pool among the host's harnesses: a slot
+/// with no Attempt or claim takes any harness below its limit, while the slots holding one never
+/// outnumber the pool.
 pub(crate) struct Slots {
-    states: std::sync::Mutex<std::collections::BTreeMap<String, (usize, State)>>,
+    pool: std::sync::Mutex<Pool>,
     changed: tokio::sync::Notify,
+    /// Notified when a slot lets go of its harness or the pool grows, so a slot waiting for room
+    /// tries again.
+    room: tokio::sync::Notify,
+}
+
+/// What a slot of the pool holds for its harness.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Hold {
+    /// A claim journaled or held, which names no Attempt yet.
+    Claim,
+    /// An Attempt, from Starting until its local cleanup ends.
+    Attempt,
+}
+
+/// One slot as presence sees it: the harness it holds, if any, and its state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SlotState {
+    pub(crate) held: Option<(usize, Hold)>,
+    pub(crate) state: State,
+}
+
+struct Pool {
+    /// The pool's size: how many Task Attempts the host runs at once across its harnesses.
+    total: u32,
+    /// Each harness's own limit within the pool, by its index in the host's harnesses.
+    limits: Vec<Option<u32>>,
+    slots: std::collections::BTreeMap<String, SlotState>,
+    /// The harness a tie goes to next, so slots that wait for work take turns.
+    next: usize,
+}
+
+impl Pool {
+    /// The harness a free `slot` claims for now: one below its own limit while the slots
+    /// holding a harness are fewer than the pool, preferring the harness the fewest slots claim
+    /// for, and taking turns among equals.
+    fn choose(&mut self, slot: &str) -> Option<usize> {
+        let others = || {
+            self.slots
+                .iter()
+                .filter(move |(name, _)| name.as_str() != slot)
+                .filter_map(|(_, state)| state.held)
+        };
+        if others().count() >= self.total as usize {
+            return None;
+        }
+        let harnesses = self.limits.len();
+        let chosen = (0..harnesses)
+            .map(|offset| (self.next + offset) % harnesses)
+            .filter(|&harness| {
+                let held = others().filter(|(held, _)| *held == harness).count();
+                self.limits[harness].is_none_or(|limit| held < limit as usize)
+            })
+            .min_by_key(|&harness| {
+                others()
+                    .filter(|held| *held == (harness, Hold::Claim))
+                    .count()
+            })?;
+        self.next = (chosen + 1) % harnesses;
+        Some(chosen)
+    }
 }
 
 impl Slots {
-    pub(crate) fn set(&self, slot: &str, harness: usize, state: State) {
-        let mut states = self
-            .states
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if states.get(slot) != Some(&(harness, state)) {
-            states.insert(slot.to_owned(), (harness, state));
-            drop(states);
+    pub(crate) fn new(limits: Vec<Option<u32>>, total: u32) -> Self {
+        Self {
+            pool: std::sync::Mutex::new(Pool {
+                total,
+                limits,
+                slots: std::collections::BTreeMap::new(),
+                next: 0,
+            }),
+            changed: tokio::sync::Notify::new(),
+            room: tokio::sync::Notify::new(),
+        }
+    }
+
+    fn pool(&self) -> std::sync::MutexGuard<'_, Pool> {
+        self.pool.lock().unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// Changes the pool's size; a larger pool lets waiting slots claim.
+    pub(crate) fn resize(&self, total: u32) {
+        let mut pool = self.pool();
+        if pool.total != total {
+            pool.total = total;
+            drop(pool);
+            self.room.notify_waiters();
             self.changed.notify_one();
         }
+    }
+
+    pub(crate) fn set(&self, slot: &str, state: State) {
+        let mut pool = self.pool();
+        let entry = pool
+            .slots
+            .entry(slot.to_owned())
+            .or_insert(SlotState { held: None, state });
+        if entry.state != state {
+            entry.state = state;
+            drop(pool);
+            self.changed.notify_one();
+        }
+    }
+
+    /// Records that `slot`'s journal holds a claim or an Attempt of `harness`, whatever the
+    /// limits: it was claimed already.
+    pub(crate) fn hold(&self, slot: &str, harness: usize, hold: Hold) {
+        let mut pool = self.pool();
+        let entry = pool.slots.entry(slot.to_owned()).or_insert(SlotState {
+            held: None,
+            state: State::Pending,
+        });
+        if entry.held != Some((harness, hold)) {
+            entry.held = Some((harness, hold));
+            drop(pool);
+            self.changed.notify_one();
+        }
+    }
+
+    /// The harness `slot`, which holds nothing, claims for next, recorded as its claim; `None`
+    /// when the pool is full or every harness is at its own limit.
+    pub(crate) fn choose(&self, slot: &str) -> Option<usize> {
+        let mut pool = self.pool();
+        let chosen = pool.choose(slot)?;
+        pool.slots
+            .entry(slot.to_owned())
+            .or_insert(SlotState {
+                held: None,
+                state: State::Pending,
+            })
+            .held = Some((chosen, Hold::Claim));
+        drop(pool);
+        self.changed.notify_one();
+        Some(chosen)
+    }
+
+    /// Records that `slot` holds nothing now, so another slot may claim for its harness.
+    pub(crate) fn release(&self, slot: &str) {
+        let released = self
+            .pool()
+            .slots
+            .get_mut(slot)
+            .and_then(|state| state.held.take())
+            .is_some();
+        if released {
+            self.room.notify_waiters();
+            self.changed.notify_one();
+        }
+    }
+
+    /// Waits until a slot lets go of its harness or the pool grows. Create it before
+    /// [`Self::choose`] finds no room, so a release in between is not missed.
+    pub(crate) fn room(&self) -> tokio::sync::futures::Notified<'_> {
+        self.room.notified()
     }
 
     /// Forgets a slot a lowered pool size retired.
     pub(crate) fn remove(&self, slot: &str) {
-        let removed = self
-            .states
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .remove(slot)
-            .is_some();
-        if removed {
+        let removed = self.pool().slots.remove(slot);
+        if let Some(removed) = removed {
+            if removed.held.is_some() {
+                self.room.notify_waiters();
+            }
             self.changed.notify_one();
         }
     }
 
-    pub(crate) fn snapshot(&self) -> Vec<(String, usize, State)> {
-        self.states
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .iter()
-            .map(|(name, (harness, state))| (name.clone(), *harness, *state))
-            .collect()
+    /// The pool's size and each slot's state.
+    pub(crate) fn snapshot(&self) -> (u32, Vec<SlotState>) {
+        let pool = self.pool();
+        (pool.total, pool.slots.values().copied().collect())
     }
 
     pub(crate) fn any_busy(&self) -> bool {
         self.snapshot()
+            .1
             .iter()
-            .any(|(_, _, state)| *state == State::Busy)
+            .any(|slot| slot.state == State::Busy)
     }
 
     pub(crate) fn notify(&self) {
@@ -84,10 +223,12 @@ impl Slots {
     }
 }
 
-/// One harness the pool runs: its kind, the execution profile it reports now, and its slots.
+/// One harness the pool runs: its kind, the execution profile it reports now, and its own limit
+/// within the pool, if any.
 pub(crate) struct Harness {
     pub(crate) kind: supertag_protocol::v2::HarnessKind,
     pub(crate) profile: Profile,
+    pub(crate) limit: Option<u32>,
 }
 
 pub(crate) struct Presence {
@@ -155,13 +296,11 @@ pub(crate) type Profile = Arc<dyn Fn() -> HarnessExecutionProfile + Send + Sync>
 impl Presence {
     /// Reports the host's presence whenever a slot changes state or the pool size changes, and
     /// at least every five seconds. A fenced or revoked registration cancels `shutdown`.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn start(
         journal: Arc<Journal>,
         disk: DiskSpaceSource,
-        client: RegisteredHost,
-        token: String,
-        (harnesses, capacity): (Vec<Harness>, watch::Receiver<u32>),
+        (client, token): (RegisteredHost, String),
+        harnesses: Vec<Harness>,
         (workspaces, labels): (Vec<String>, Vec<String>),
         slots: Arc<Slots>,
         shutdown: CancellationToken,
@@ -170,28 +309,25 @@ impl Presence {
         let (reported_sender, reported) = watch::channel(false);
         let build = {
             let slots = slots.clone();
-            let capacity = capacity.clone();
             move |stopping: bool| -> Result<ReportHostRequest> {
                 let sequence = journal.next_report_sequence()?;
-                let capacity = *capacity.borrow();
                 let entries = harnesses
                     .iter()
                     .map(|harness| crate::worklet::shared_host::HarnessSlots {
                         harness: harness.kind,
                         profile: (harness.profile)(),
-                        capacity,
+                        limit: harness.limit,
                     })
                     .collect::<Vec<_>>();
-                let states = slots
-                    .snapshot()
-                    .into_iter()
-                    .map(|(_, harness, state)| {
-                        (harness, if stopping { State::Stopping } else { state })
-                    })
-                    .collect::<Vec<_>>();
+                let (total, mut states) = slots.snapshot();
+                if stopping {
+                    for slot in &mut states {
+                        slot.state = State::Stopping;
+                    }
+                }
                 let mut report = crate::worklet::shared_host::aggregate(
                     sequence,
-                    &entries,
+                    (total, &entries),
                     &states,
                     &workspaces,
                 );
@@ -210,7 +346,6 @@ impl Presence {
             token: token.clone(),
             reported,
         };
-        let mut capacity = capacity;
         reporter.task = Some(tokio::spawn(async move {
             let mut client = client;
             let mut ticker = tokio::time::interval(Duration::from_secs(5));
@@ -220,7 +355,6 @@ impl Presence {
                     biased;
                     _ = cancel.cancelled() => return Ok(()),
                     () = slots.changed.notified() => {},
-                    changed = capacity.changed() => { if changed.is_err() { return Ok(()); } },
                     _ = ticker.tick() => {},
                 }
                 let report = match build(false) {
@@ -307,5 +441,111 @@ mod label_tests {
         assert!(host_labels(&many).is_err());
         let fits: Vec<String> = (0..62).map(|index| format!("label-{index}")).collect();
         assert!(host_labels(&fits).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod pool_tests {
+    use super::{Hold, Slots, State};
+
+    /// How many slots hold each harness, for `harnesses` harnesses.
+    fn held(slots: &Slots, harnesses: usize) -> Vec<usize> {
+        let (_, states) = slots.snapshot();
+        (0..harnesses)
+            .map(|harness| {
+                states
+                    .iter()
+                    .filter(|slot| slot.held.is_some_and(|(held, _)| held == harness))
+                    .count()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_pool_and_each_harness_limit_are_never_exceeded() {
+        // Three slots; the second harness may run one Attempt at most.
+        let slots = Slots::new(vec![None, Some(1)], 3);
+        let chosen: Vec<_> = ["0", "1", "2"]
+            .iter()
+            .map(|slot| slots.choose(slot))
+            .collect();
+        assert_eq!(chosen, [Some(0), Some(1), Some(0)]);
+        assert_eq!(held(&slots, 2), [2, 1]);
+        // A fourth slot, left over from a larger pool, gets nothing: the pool is full.
+        assert_eq!(slots.choose("3"), None);
+        // A Claim that became an Attempt still counts against both.
+        slots.hold("1", 1, Hold::Attempt);
+        slots.release("0");
+        // Only the first harness has room; the second is at its limit.
+        assert_eq!(slots.choose("0"), Some(0));
+        assert_eq!(slots.choose("3"), None);
+        // Choosing again for a slot replaces its own hold rather than adding to it.
+        slots.release("2");
+        assert_eq!(slots.choose("2"), Some(0));
+        assert_eq!(held(&slots, 2), [2, 1]);
+    }
+
+    #[test]
+    fn an_idle_harness_leaves_its_share_to_the_others() {
+        let slots = Slots::new(vec![None, None], 3);
+        // Every slot runs the first harness while the second has no work.
+        for slot in ["0", "1", "2"] {
+            slots.hold(slot, 0, Hold::Attempt);
+        }
+        assert_eq!(held(&slots, 2), [3, 0]);
+        assert_eq!(slots.choose("3"), None);
+        // One finishes: its slot claims for each harness in turn until one has work.
+        slots.release("2");
+        let first = slots.choose("2").unwrap();
+        slots.release("2");
+        assert_ne!(slots.choose("2"), Some(first));
+    }
+
+    #[test]
+    fn a_free_slot_takes_turns_among_harnesses_waiting_for_work() {
+        let slots = Slots::new(vec![None, None, None], 1);
+        let mut chosen = Vec::new();
+        for _ in 0..4 {
+            chosen.push(slots.choose("0").unwrap());
+            // Its claim found no work.
+            slots.release("0");
+        }
+        assert_eq!(chosen, [0, 1, 2, 0]);
+        // With more slots than harnesses, every harness holds a claim before any holds two.
+        let slots = Slots::new(vec![None, None], 3);
+        slots.hold("0", 0, Hold::Claim);
+        assert_eq!(slots.choose("1"), Some(1));
+        assert_eq!(slots.choose("2"), Some(0));
+    }
+
+    #[test]
+    fn resizing_changes_what_free_slots_may_claim() {
+        let slots = Slots::new(vec![None], 2);
+        slots.hold("0", 0, Hold::Attempt);
+        slots.hold("1", 0, Hold::Attempt);
+        // Lowered while both run: neither the retiring slot nor slot 0 claims until one ends.
+        slots.resize(1);
+        slots.release("0");
+        assert_eq!(slots.choose("0"), None);
+        slots.remove("1");
+        assert_eq!(slots.choose("0"), Some(0));
+        slots.resize(3);
+        assert_eq!(slots.choose("1"), Some(0));
+        assert_eq!(slots.choose("2"), Some(0));
+        assert_eq!(slots.snapshot().0, 3);
+    }
+
+    #[tokio::test]
+    async fn a_released_harness_wakes_a_slot_waiting_for_room() {
+        let slots = std::sync::Arc::new(Slots::new(vec![Some(1)], 2));
+        assert_eq!(slots.choose("0"), Some(0));
+        let room = slots.room();
+        assert_eq!(slots.choose("1"), None);
+        slots.set("1", State::Ready);
+        slots.release("0");
+        tokio::time::timeout(std::time::Duration::from_secs(1), room)
+            .await
+            .expect("the release wakes the waiting slot");
+        assert_eq!(slots.choose("1"), Some(0));
     }
 }

@@ -163,7 +163,8 @@ echoing secret values.
 | `sandbox-commands` | none | `claude-code` from `harnesses`. See [Sandboxed Claude Code commands](#sandboxed-claude-code-commands) |
 | `network-credentials` | none | Credential name to `{ secret, environment }`, added to a Task's requests by the egress proxy. Codex, or every harness on a local-vm host. See [Network credentials](#network-credentials) |
 | `volumes` | none | Volume ID to an absolute, owner-only directory: a file Volume this host maps and writes directly, such as the copies of a Tag's captures. Tags on that Volume run only on hosts that map it. See [Keep every capture on a Volume](artifacts.md#keep-every-capture-on-a-volume) |
-| `concurrency` | `1` | Task Attempts each harness runs at once, from 1 through 16. See [Host concurrency](#host-concurrency) |
+| `concurrency` | `1` | Task Attempts the host runs at once across all its harnesses, from 1 through 16. See [Host concurrency](#host-concurrency) |
+| `harness-limits` | none | Harness to the most Task Attempts it runs at once, from 1 through 16, within `concurrency`. See [Host concurrency](#host-concurrency) |
 | `attempt-timeout-seconds` | `3600` | Seconds a Task Attempt may run, from 1 through 86400 |
 | `depends_on` | none | The file's `control-plane` service, to bring up first. Only a host of the local Control Plane takes it |
 | `restart` | `no` | `unless-stopped` installs a service unit |
@@ -201,11 +202,26 @@ most 64. Changing a host's labels restarts that host on the next `supertag up`.
 
 ### Host concurrency
 
-`concurrency` is per harness: `harnesses: [codex, claude-code]` with `concurrency: 2` runs up to
-two Codex and two Claude Code Task Attempts at once. The host's Worklet runs each in a
-[Worker](glossary.md#worker) process of its own. When only `concurrency` changes, `supertag up` changes the running host
-without restarting it: running Task Attempts finish, and a lowered size takes effect as they do.
-The host `supertag init` writes sets `concurrency: 3`.
+`concurrency` is the machine's total: how many Task Attempts the host runs at once, whichever
+harness each one uses. The host's Worklet runs each in a [Worker](glossary.md#worker) process of
+its own, and its harnesses share these slots. A harness with no work leaves its share to the
+others:
+
+```yaml
+    harnesses: [codex, claude-code]
+    concurrency: 3
+    harness-limits:
+      claude-code: 1
+```
+
+This host runs up to three Task Attempts at once. All three can be Codex, but at most one is
+Claude Code. A harness that `harness-limits` doesn't name may use every slot. A free slot waits
+for work of one harness at a time and takes the next harness in turn when none comes, so with
+fewer slots than harnesses a queued Task can wait a few seconds before the host claims it.
+
+When only `concurrency` changes, `supertag up` changes the running host without restarting it:
+running Task Attempts finish, and a lowered size takes effect as they do. Changing
+`harness-limits` restarts the host. The host `supertag init` writes sets `concurrency: 3`.
 
 ### local-vm containers
 

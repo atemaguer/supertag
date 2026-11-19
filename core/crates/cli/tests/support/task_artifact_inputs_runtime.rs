@@ -68,7 +68,7 @@ async fn interrupt_input_receipt(
             .spawn()?;
         timeout(WAIT, response.notified()).await?;
         let journal: Value = serde_json::from_slice(&std::fs::read(
-            root.join("claude-producer/slots/claude-code-0/attempt.json"),
+            root.join("claude-producer/slots/0/attempt.json"),
         )?)?;
         assert_eq!(journal["stage"], "preparing_inputs");
         let checkout = journal["prepared"]["checkout"]["path"]
@@ -117,7 +117,7 @@ async fn interrupt_input_receipt(
             "the Worklet survives its Worker"
         );
         let again: Value = serde_json::from_slice(&std::fs::read(
-            root.join("claude-producer/slots/claude-code-0/attempt.json"),
+            root.join("claude-producer/slots/0/attempt.json"),
         )?)?;
         assert_eq!(again["stage"], "preparing_inputs");
         assert_eq!(again["attempt_id"].as_str(), Some(attempt.as_str()));

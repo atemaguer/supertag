@@ -602,7 +602,7 @@ fn restart_unless_stopped_installs_a_launchd_unit_that_down_stops_and_removes() 
     let version = env!("CARGO_PKG_VERSION");
     assert!(
         upgraded.contains(&format!(
-            "Restarted SuperTag: {version} (protocol 2) → {version} (protocol 6)."
+            "Restarted SuperTag: {version} (protocol 2) → {version} (protocol 7)."
         )) && upgraded.contains("under its service unit"),
         "{upgraded}"
     );
@@ -1388,7 +1388,7 @@ fn down_and_up_replace_services_from_an_older_release() -> Result<()> {
     machine.ok(&up)?;
     let mut status: Value =
         serde_json::from_str(&fs::read_to_string(machine.state.join("supervisor.json"))?)?;
-    assert_eq!(status["protocols"], json!([6]), "{status}");
+    assert_eq!(status["protocols"], json!([7]), "{status}");
     assert!(status["executable"]["path"].is_string(), "{status}");
     assert_eq!(machine.ps()?["supervisor"]["matches_cli"], true);
     machine.ok(&["down", "--force"])?;
@@ -1411,7 +1411,7 @@ fn down_and_up_replace_services_from_an_older_release() -> Result<()> {
     let down = machine.ok(&["down"])?;
     let version = env!("CARGO_PKG_VERSION");
     assert!(
-        down.contains(&format!("Stopped SuperTag {version} services (protocol 2) without draining through the Control Plane, because this CLI speaks protocol 6.")),
+        down.contains(&format!("Stopped SuperTag {version} services (protocol 2) without draining through the Control Plane, because this CLI speaks protocol 7.")),
         "{down}"
     );
     ensure!(
@@ -1449,7 +1449,7 @@ fn down_and_up_replace_services_from_an_older_release() -> Result<()> {
         format!("SuperTag {version} runs in"),
         "a different build than this CLI, so it restarts with this one.".to_owned(),
         format!("Stopped SuperTag {version} services (protocol 2) without draining"),
-        format!("Restarted SuperTag: {version} (protocol 2) → {version} (protocol 6)."),
+        format!("Restarted SuperTag: {version} (protocol 2) → {version} (protocol 7)."),
         "Started SuperTag in the background".to_owned(),
         format!(
             "Migrated the database schema from version {} to {latest}.",
