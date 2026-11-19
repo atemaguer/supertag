@@ -59,3 +59,26 @@ pnpm --filter @supertag/desktop electron:dev   # in another: Electron against it
 
 `electron:dev` loads `SUPERTAG_DESKTOP_DEV_URL`, by default `http://127.0.0.1:1420`; set it to
 `http://127.0.0.1:1420/?preview` for the sample Tags.
+
+### Package the Electron app
+
+Releases ship the Electron app (`.github/workflows/release.yml`). electron-builder
+(`electron-builder.config.ts`) bundles only `dist/`, `dist-electron/` and `package.json`, and
+flips the fuses in `electron/fuses.ts` after packing:
+
+```sh
+pnpm --filter @supertag/desktop package:mac     # release/mac-arm64/SuperTag.app, unsigned
+pnpm --filter @supertag/desktop package:linux   # release/SuperTag-VERSION-linux-ARCH.deb
+```
+
+On macOS, `scripts/package-desktop-macos.sh APP CLI_DIRECTORY IMAGE` puts an extracted release
+archive in the app, then builds the disk image; without `SIGNED=true` it skips signing and
+notarization, which is enough for a local check. The Debian package installs the AppArmor profile
+in `build/linux/` so Chromium's sandbox can start under Ubuntu's restriction on unprivileged user
+namespaces, and keeps `chrome-sandbox` setuid root as its fallback. `scripts/check-desktop-deb.sh
+DEB` installs a package, launches it sandboxed, and removes it.
+
+`pnpm --filter @supertag/desktop smoke EXECUTABLE` launches a built app with a throwaway home and
+checks that its window renders, has no Node globals, and sees exactly the channel table's
+`window.supertag`; on Linux, that its renderers run sandboxed. It drives the app over Chromium's
+DevTools protocol, since the packaged app's fuses turn off the Node inspector.

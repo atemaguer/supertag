@@ -410,7 +410,9 @@ release without its archives:
 1. Push the release tag, for example `git push origin v0.3.0`. **Release SuperTag**
    (`release.yml`) builds and verifies the three archives with `native-release-check.yml`, checks
    the pinned installer against them, builds the desktop app's Apple silicon disk image
-   (`SuperTag-VERSION-darwin-arm64.dmg`), and attaches them with their `SHA256SUMS` and an
+   (`SuperTag-VERSION-darwin-arm64.dmg`) and Debian packages
+   (`SuperTag-VERSION-linux-amd64.deb`, `SuperTag-VERSION-linux-arm64.deb`), and attaches them
+   with their `SHA256SUMS` and an
    `install.sh` pinned to the release to a draft GitHub Release for the tag. It never changes a
    published release.
 2. Review the draft's notes and assets, then publish it as the latest release, for example with
@@ -457,14 +459,22 @@ Set these GitHub Actions secrets on the release repository:
 | `APPLE_NOTARY_KEY_ID` | Key ID shown in App Store Connect |
 | `APPLE_NOTARY_ISSUER_ID` | Issuer ID shown on the App Store Connect Team Keys page |
 
-The same secrets sign the desktop app. `scripts/package-desktop-macos.sh` puts the macOS archive's
-contents in `SuperTag.app`, signs every executable in it and then the app with the hardened
-runtime, builds and signs the disk image, and notarizes and staples only the disk image. Apple
-notarizes the outermost container, and its ticket covers the app and everything nested in it, so
-the app is not submitted on its own; the script checks that Gatekeeper accepts the app inside the
-mounted image. The app is built for Apple silicon only. For now a failed desktop build or
-notarization leaves the disk image out of the draft release with a warning, and the SDK publish
-workflows only warn when it is missing, so it never holds back the CLI release.
+The same secrets sign the desktop app. electron-builder packages an unsigned `SuperTag.app`
+(`pnpm --filter @supertag/desktop package:mac`) with its Electron fuses flipped; then
+`scripts/package-desktop-macos.sh` puts the macOS archive's contents in it with `ditto`, which
+keeps the bridges' relative symlinks, signs every executable of the CLI (only Claude Code's gets
+entitlements), then the Electron frameworks, helpers, and the app with `@electron/osx-sign`
+(`apps/desktop/build/sign-mac.mjs`; the app and its helpers get only `allow-jit`), all with the
+hardened runtime, builds and signs the disk image, and notarizes and staples only the disk image.
+Apple notarizes the outermost container, and its ticket covers the app and everything nested in
+it, so the app is not submitted on its own; the script checks that Gatekeeper accepts the app
+inside the mounted image, and the release job then launches it from there
+(`pnpm --filter @supertag/desktop smoke`). The app is built for Apple silicon only and needs macOS
+13 or later. The Debian packages need no signing; each release job installs its package, launches
+it with Chromium's sandbox under Ubuntu's user-namespace restriction, and removes it
+(`scripts/check-desktop-deb.sh`). For now a failed desktop build or notarization leaves that file
+out of the draft release with a warning, and the SDK publish workflows only warn when it is
+missing, so it never holds back the CLI release.
 
 Create the certificate and Team key under the same Apple Developer team. When all five
 secrets are absent, the workflow warns and produces unsigned builds. An incomplete

@@ -70,8 +70,9 @@ reads the same `SUPERTAG_INSTALL_ROOT` and `SUPERTAG_BIN_DIR`.
 ## Install the desktop app
 
 The desktop app gives your conversations with Tags a window of their own, on an Apple silicon Mac
-or on Linux (amd64 or arm64). Intel Macs have no desktop app; use the terminal UI there. Get the
-files from the [latest release](https://github.com/atemaguer/supertag/releases/latest).
+with macOS 13 or later, or on Linux (amd64 or arm64) with `apt`, such as Ubuntu or Debian. Intel
+Macs have no desktop app; use the terminal UI there. Get the files from the
+[latest release](https://github.com/atemaguer/supertag/releases/latest).
 
 On a Mac:
 
@@ -90,12 +91,13 @@ On Linux:
 1. Install the `supertag` command with the install script above. The Linux app uses it, and only
    a `supertag` of its own version: when it finds none or another version, its setup screen
    shows the install command for its release.
-2. Install `SuperTag-VERSION-linux-ARCH.deb` with `sudo apt install ./SuperTag-VERSION-linux-ARCH.deb`,
-   or make `SuperTag-VERSION-linux-ARCH.AppImage` executable (`chmod +x`) and run it.
-3. Open SuperTag from your applications menu, or run the AppImage.
+2. Install `SuperTag-VERSION-linux-ARCH.deb` with `sudo apt install ./SuperTag-VERSION-linux-ARCH.deb`.
+3. Open SuperTag from your applications menu, or run `supertag-desktop`.
 
-The Debian package needs WebKitGTK 4.1 and GTK 3, which `apt` installs with it; the AppImage
-carries them.
+The app runs its pages in Chromium's sandbox. Ubuntu 23.10 and later allow that sandbox only to
+programs with an AppArmor profile, so the package installs one for the app,
+`/etc/apparmor.d/supertag-desktop`, and removes it when you uninstall. There is no AppImage: its
+sandbox can't start under that restriction. Without `apt`, use the terminal UI.
 
 On first launch the app's setup screen asks for your project folder and coding agent, then sets
 SuperTag up and opens your conversation with `lead`. On later launches it connects to your local

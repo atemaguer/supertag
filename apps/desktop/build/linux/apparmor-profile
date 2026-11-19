@@ -1,0 +1,12 @@
+abi <abi/4.0>,
+include <tunables/global>
+
+# Ubuntu 23.10 and later refuse unprivileged user namespaces to programs without a profile that
+# allows them, and Chromium's sandbox needs one. This lets only the app's own executable create
+# them; it confines nothing else, as Ubuntu's own profiles for Chrome and VS Code.
+profile ${executable} /opt/${sanitizedProductName}/${executable} flags=(unconfined) {
+  userns,
+
+  # Site-specific additions and overrides. See local/README for details.
+  include if exists <local/${executable}>
+}

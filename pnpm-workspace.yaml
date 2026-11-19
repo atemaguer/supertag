@@ -8,5 +8,6 @@ allowBuilds:
   better-sqlite3: set this to true or false
   cbor-extract: false
   electron: true
+  electron-winstaller: false
   esbuild: true
   protobufjs: true

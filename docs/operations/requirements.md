@@ -26,8 +26,9 @@ Check this page before [installing SuperTag](install.md).
   Allow about 1 GB for the container image and Workspace copies.
 - **macOS on Apple silicon, or Linux on arm64 or amd64.** Linux needs glibc 2.36 or newer, as in
   Debian 12 or Ubuntu 24.04. Intel Macs have no release; [build the CLI](install.md#build-only-the-cli)
-  there instead. Restarting background services uses launchd on macOS and systemd user services on
-  Linux. Native Windows is not supported; use a Linux host.
+  there instead. The [desktop app](install.md#install-the-desktop-app) needs macOS 13 or later.
+  Restarting background services uses launchd on macOS and systemd user services on Linux. Native
+  Windows is not supported; use a Linux host.
 - **Disk space for the release and your work.** Allow about 1 GB for each installed release, plus
   space for repositories, Task checkouts, captured artifacts, and logs. The
   [installer script](install.md#install-a-release-archive) keeps earlier releases under
