@@ -42,6 +42,8 @@ const CONTROL_PLANE_ADDRESS: &str = "control-plane-address";
 /// The local Gateway's last address, kept across `supertag down` so it comes back on the same
 /// port and a terminal UI left open reconnects.
 const GATEWAY_ADDRESS: &str = "gateway-address";
+/// Where the Control Plane tells Worker Hosts their Workers send Task Attempts' data calls.
+const DATA_ENDPOINT: &str = "SUPERTAG_DATA_ENDPOINT";
 /// Non-secret variables every local service inherits from the supervisor.
 const BASE_ENVIRONMENT: [&str; 8] = [
     "PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
@@ -333,6 +335,12 @@ impl Children {
         bootstrap_host: bool,
     ) -> Result<String> {
         let Extras { vault, surfaces } = extras;
+        // The Gateway's address is chosen first: the Control Plane names it to Worker Hosts as
+        // their Workers' data endpoint.
+        let gateway_listen = match previous_gateway(directory) {
+            Some(address) => address,
+            None => free_loopback_port()?,
+        };
         let mut plane = command(executable, "control-plane");
         plane
             .envs(self.proxy.iter().cloned())
@@ -371,6 +379,10 @@ impl Children {
         if let Some(zone) = &self.time_zone {
             plane.env("SUPERTAG_TIME_ZONE", zone);
         }
+        let gateway_url = format!("http://{gateway_listen}");
+        if let Some(endpoint) = data_endpoint(vault, Some(&gateway_url)) {
+            plane.env(DATA_ENDPOINT, endpoint);
+        }
         let address = start_child(
             &mut self.control_plane,
             &mut plane,
@@ -382,11 +394,14 @@ impl Children {
         let endpoint = format!("http://{}", loopback_address(&address)?);
 
         let mut gateway = command(executable, "gateway");
-        let listen = previous_gateway(directory)
-            .map_or_else(|| "127.0.0.1:0".to_owned(), |address| address.to_string());
         gateway
             .envs(self.proxy.iter().cloned())
-            .args(["--control-plane", &endpoint, "--listen", &listen])
+            .args([
+                "--control-plane",
+                &endpoint,
+                "--listen",
+                &gateway_listen.to_string(),
+            ])
             .env("SUPERTAG_GATEWAY_CREDENTIAL", &credentials.gateway);
         for destination in &self.notify.0 {
             gateway.arg("--notify").arg(destination);
@@ -443,6 +458,10 @@ impl Children {
         )
         .await?;
         let gateway_address = loopback_address(&address)?;
+        ensure!(
+            gateway_address == gateway_listen,
+            "the local Gateway listens on {gateway_address}, not on {gateway_listen}, which the Control Plane names as the data endpoint"
+        );
         let gateway_endpoint = format!("http://{gateway_address}");
         write_private(
             directory,
@@ -1389,6 +1408,23 @@ pub async fn configured(
     }
     result
 }
+/// The Control Plane's `SUPERTAG_DATA_ENDPOINT`: the operator's own value (the process
+/// environment, then `env_file`) when set, otherwise the URL of the local Gateway the same
+/// supervisor runs, so local Workers send their data calls through it. Neither leaves it unset:
+/// the Control Plane then names itself.
+fn data_endpoint(environment: &Environment, gateway: Option<&str>) -> Option<OsString> {
+    environment
+        .variable(DATA_ENDPOINT)
+        .or_else(|| gateway.map(OsString::from))
+}
+
+/// A loopback address whose port is free now, for a service started with it right after.
+fn free_loopback_port() -> Result<SocketAddr> {
+    let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .context("choose the local Gateway's port")?;
+    Ok(listener.local_addr()?)
+}
+
 /// The local Gateway's last loopback address, when its port is free again.
 fn previous_gateway(directory: &Path) -> Option<SocketAddr> {
     let address =
@@ -1669,6 +1705,44 @@ mod tests {
         assert_eq!(previous_gateway(temp.path()), Some(address));
         write_private(temp.path(), GATEWAY_ADDRESS, b"10.0.0.1:80").unwrap();
         assert_eq!(previous_gateway(temp.path()), None);
+    }
+
+    #[test]
+    fn local_workers_send_data_through_the_local_gateway_unless_the_operator_names_another() {
+        // The process environment would override `env_file`; this test needs it unset.
+        assert!(std::env::var_os(DATA_ENDPOINT).is_none());
+        let gateway = "http://127.0.0.1:3434";
+        let unset = Environment::default();
+        assert_eq!(
+            data_endpoint(&unset, Some(gateway)),
+            Some(OsString::from(gateway))
+        );
+        // No local Gateway: the Control Plane names itself.
+        assert_eq!(data_endpoint(&unset, None), None);
+        let named = Environment::from_file(BTreeMap::from([(
+            DATA_ENDPOINT.to_owned(),
+            "https://gateway.example:3434".to_owned(),
+        )]));
+        for gateway in [Some(gateway), None] {
+            assert_eq!(
+                data_endpoint(&named, gateway),
+                Some(OsString::from("https://gateway.example:3434"))
+            );
+        }
+        // Blank counts as unset.
+        let blank =
+            Environment::from_file(BTreeMap::from([(DATA_ENDPOINT.to_owned(), " ".to_owned())]));
+        assert_eq!(
+            data_endpoint(&blank, Some(gateway)),
+            Some(OsString::from(gateway))
+        );
+    }
+
+    #[test]
+    fn a_free_loopback_port_can_be_listened_on() {
+        let address = free_loopback_port().unwrap();
+        assert!(address.ip().is_loopback() && address.port() != 0);
+        std::net::TcpListener::bind(address).unwrap();
     }
 
     #[test]

@@ -32,7 +32,7 @@ pub struct Environment {
 
 impl Environment {
     #[cfg(test)]
-    pub(super) fn from_file(file: BTreeMap<String, String>) -> Self {
+    pub(crate) fn from_file(file: BTreeMap<String, String>) -> Self {
         Self { file }
     }
 

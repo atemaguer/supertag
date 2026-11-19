@@ -977,6 +977,8 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
                 "PGPASSWORD",
                 "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
                 "SUPERTAG_DATABASE_URL",
+                // The local Gateway, which local Workers send their data calls through.
+                "SUPERTAG_DATA_ENDPOINT",
                 "SUPERTAG_OPERATOR_TOKEN",
                 // Git delivery's state and the credential vault holding Workspace Credentials.
                 "SUPERTAG_STATE_DIR",
@@ -985,10 +987,15 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
             &[
                 "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
                 "SUPERTAG_DATABASE_URL",
+                "SUPERTAG_DATA_ENDPOINT",
                 "SUPERTAG_OPERATOR_TOKEN",
                 "SUPERTAG_STATE_DIR",
             ]
         })
+    );
+    assert_eq!(
+        roles["control-plane"]["SUPERTAG_DATA_ENDPOINT"],
+        fs::read_to_string(state.join("gateway-endpoint"))?.trim()
     );
     if postgres {
         assert_eq!(roles["control-plane"]["PGPASSWORD"], password);
