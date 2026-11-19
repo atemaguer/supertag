@@ -31,8 +31,8 @@ The image builder verifies every archive entry and its checksum before copying o
 CLI into the two service images. It records the archive digest, source commit, and version
 as image labels. Harness helpers and the shared execution provider stay
 out of these images. They remain in the complete archive for their respective deployments.
-The small fixture archive, which holds only `supertag`, is accepted explicitly with
-`--archive-format cli`.
+The small fixture archive, which holds `supertag` and `supertag-tui`, is accepted explicitly
+with `--archive-format cli-tui`.
 
 The rehearsal verifies private mutual TLS, public TLS, operator authentication, service
 UID 10001, real gRPC health, Task completion, recorded events, request deduplication, and

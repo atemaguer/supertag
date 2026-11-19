@@ -51,6 +51,7 @@ mod tags;
 mod task_artifact_inputs;
 mod tasks;
 mod teams;
+mod tui;
 mod volumes;
 mod work_sessions;
 mod worker_host;
@@ -103,14 +104,14 @@ use tokio_util::sync::CancellationToken;
 use tonic::Request;
 
 #[derive(Parser)]
-#[command(name = "supertag", version, arg_required_else_help = true)]
+#[command(name = "supertag", version)]
 struct Cli {
     /// Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app,
-    /// for the operator command that follows.
+    /// for the operator command that follows, or for the terminal UI when no command follows.
     #[arg(long = "gateway", id = "root_gateway", value_name = "URL|NAME")]
     gateway: Option<String>,
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 /// The Gateway selected before the command name, if any.
@@ -182,9 +183,27 @@ enum Command {
         #[arg(long, default_value = "127.0.0.1:0")]
         control_plane_listen: SocketAddr,
     },
+    /// Open the terminal UI; plain supertag opens it too.
+    ///
+    /// Starts supertag-tui from the directory this command is installed in, after checking that
+    /// it is from the same release. The terminal UI connects on its own: to the Gateway named
+    /// here, else to the one it used last, else to this machine's local services.
+    Tui {
+        /// Gateway URL or the name of a saved Gateway. A URL reads the operator token from
+        /// SUPERTAG_OPERATOR_TOKEN.
+        #[arg(long, value_name = "URL|NAME", conflicts_with = "state_directory")]
+        gateway: Option<String>,
+        /// Use the local services `supertag up` runs from this state directory.
+        #[arg(long)]
+        state_directory: Option<PathBuf>,
+        /// Terminal UI executable, instead of supertag-tui beside this command. Also reads
+        /// SUPERTAG_TUI_BINARY.
+        #[arg(long)]
+        binary: Option<PathBuf>,
+    },
     /// Send a message to your conversation with a Tag and print its reply.
     ///
-    /// The conversation is the one the desktop app shows, so a message sent
+    /// The conversation is the one the terminal UI and the desktop app show, so a message sent
     /// here appears there, and a message sent there continues here. The command waits for the
     /// reply, printing the Tag's messages as they arrive, and fails when the turn fails.
     Message(conversation_message::MessageArgs),
@@ -637,8 +656,24 @@ fn main() -> std::process::ExitCode {
         Ok(cli) => cli,
         Err(error) => usage_error(error),
     };
-    match dispatch(cli) {
-        Ok(()) => std::process::ExitCode::SUCCESS,
+    let result = match cli.command {
+        // Plain `supertag` opens the terminal UI in a terminal; otherwise it prints the help.
+        None => tui::bare(cli.gateway, || {
+            let _ = <Cli as clap::CommandFactory>::command().print_help();
+        }),
+        Some(Command::Tui {
+            gateway,
+            state_directory,
+            binary,
+        }) => tui::launch(tui::Launch {
+            gateway: gateway.or(cli.gateway),
+            state_directory,
+            binary,
+        }),
+        Some(command) => dispatch(cli.gateway, command).map(|()| std::process::ExitCode::SUCCESS),
+    };
+    match result {
+        Ok(code) => code,
         Err(error) => {
             // Errors carry text from services, surfaces and files; filter it for the terminal.
             errln!("Error: {}", error_text(&error));
@@ -710,9 +745,8 @@ fn usage_error_text(error: &clap::Error, filtered: impl IntoIterator<Item = Stri
     }
 }
 
-fn dispatch(cli: Cli) -> Result<()> {
-    let command = cli.command;
-    if let Some(gateway) = cli.gateway {
+fn dispatch(gateway: Option<String>, command: Command) -> Result<()> {
+    if let Some(gateway) = gateway {
         ensure!(
             !matches!(
                 command,
@@ -1030,6 +1064,7 @@ async fn run(command: Command) -> Result<()> {
         }
         Command::AdapterGuardian { .. } => unreachable!("guardian runs outside Tokio"),
         Command::LocalGateway => unreachable!("local discovery runs outside Tokio"),
+        Command::Tui { .. } => unreachable!("the terminal UI replaces this process before Tokio"),
         Command::CodexAdapter(_) => unreachable!("Codex adapter uses a dedicated runtime"),
         Command::CodexExecBridge { .. } => unreachable!("the Codex bridge runs outside Tokio"),
         Command::Tag {
@@ -2842,7 +2877,7 @@ mod tests {
 
     /// Top-level commands that act on this machine, a deployment, or a report rather than on one
     /// resource kind. `connect` is the one verb: it saves a Control Plane on this machine.
-    const OPERATIONS: [&str; 17] = [
+    const OPERATIONS: [&str; 18] = [
         "message",
         "health",
         "init",
@@ -2855,6 +2890,7 @@ mod tests {
         "version",
         "config",
         "control-plane",
+        "tui",
         "worklet",
         "connect",
         "spend",
@@ -3313,7 +3349,7 @@ mod tests {
         ])
         .expect("host enroll parses");
         match enroll.command {
-            super::Command::Host {
+            Some(super::Command::Host {
                 command:
                     crate::host_status::HostCommand::Enroll {
                         control_plane,
@@ -3321,7 +3357,7 @@ mod tests {
                         ..
                     },
                 ..
-            } => {
+            }) => {
                 assert_eq!(control_plane, "https://control-plane.example");
                 assert_eq!(state_directory, std::path::Path::new("/tmp/host"));
             }

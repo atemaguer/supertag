@@ -40,5 +40,9 @@ done
 env -i HOME="$fresh_home" PATH="$PATH" sh "$installer"
 cli="$fresh_home/.local/bin/supertag"
 test "$(env -i HOME="$fresh_home" PATH="$PATH" "$cli" --version)" = "supertag $version"
+package=$(dirname "$(readlink "$cli")")
+if [ -e "$package/supertag-tui" ]; then
+  test "$("$package/supertag-tui" --version)" = "$version"
+fi
 env -i HOME="$fresh_home" PATH="$PATH" bash "$(dirname "$0")/smoke-installed-supertag.sh" "$cli"
 printf 'Verified SuperTag %s from %s\n' "$version" "$installer_url"

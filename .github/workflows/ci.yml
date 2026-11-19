@@ -201,3 +201,43 @@ jobs:
           harnesses/sdk/process-seal.container.test.ts
       - if: steps.cache.outputs.cache-hit != 'true'
         run: ${{ matrix.runtime }} save -o "$RUNNER_TEMP/local-vm-base.tar" "${{ steps.base.outputs.tag }}"
+
+  # The terminal UI, compiled by the Bun in .bun-version as the release builds it: it must report
+  # the version, load its embedded OpenTUI library, need no glibc newer than 2.17 on Linux, and
+  # draw and quit in a pseudo-terminal. The release (native-release-check.yml) repeats this
+  # through the packaged CLI.
+  tui:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pnpm install --frozen-lockfile
+      - name: Screen tests
+        working-directory: apps/tui
+        run: bun test .test.tsx
+      - name: Performance budgets
+        working-directory: apps/tui
+        run: bun run bench/perf.tsx
+      - name: Compile and check supertag-tui
+        run: python scripts/native_archive.py tui --output "$RUNNER_TEMP/tui/supertag-tui"
+      - name: Draw and quit in a pseudo-terminal
+        working-directory: scripts
+        run: python smoke_native_archive.py --terminal-ui "$RUNNER_TEMP/tui/supertag-tui"

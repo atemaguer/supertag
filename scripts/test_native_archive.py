@@ -25,7 +25,9 @@ class ArchiveContract(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.cli = self.root / "cli"
+        self.tui = self.root / "tui"
         self.cli.write_bytes(elf() + b"cli")
+        self.tui.write_bytes(elf() + b"tui")
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -34,7 +36,7 @@ class ArchiveContract(unittest.TestCase):
         output = output or f"out-{len(list(self.root.iterdir()))}"
         with patch.object(archive, "check_versions"):
             return archive.create_archive(
-                self.cli, self.root / output,
+                self.cli, self.tui if archive.SHIP_TUI else None, self.root / output,
                 version="0.1.0", platform="linux-arm64", profile="dev",
                 features=["test-fixtures"], source={"commit": "a" * 40, "dirty": True},
             )
@@ -53,7 +55,7 @@ class ArchiveContract(unittest.TestCase):
         archive.write_checksum(path)
         return path
 
-    def test_deterministic_checksum_manifest_and_private_extraction(self):
+    def test_deterministic_pair_checksum_manifest_and_private_extraction(self):
         first = self.package()
         second = self.package("second")
         self.assertEqual(first.read_bytes(), second.read_bytes())
@@ -65,15 +67,27 @@ class ArchiveContract(unittest.TestCase):
         self.assertTrue(manifest["source"]["dirty"])
         destination = archive.extract_archive(first, self.root / "fresh")
         self.assertEqual((destination / "supertag").read_bytes(), self.cli.read_bytes())
+        if archive.SHIP_TUI:
+            self.assertEqual((destination / "supertag-tui").read_bytes(), self.tui.read_bytes())
+        else:
+            self.assertFalse((destination / "supertag-tui").exists())
+            self.assertEqual(manifest["files"].keys(), {"supertag"})
         self.assertEqual((destination / "supertag").stat().st_mode & 0o777, 0o755)
         self.assertEqual((self.root / "fresh").stat().st_mode & 0o777, 0o700)
 
     def test_mismatched_versions_fail_before_emitting_archive(self):
         with patch.object(archive, "check_versions", side_effect=archive.ArchiveError("version mismatch")):
             with self.assertRaises(archive.ArchiveError):
-                archive.create_archive(self.cli, self.root / "out", version="0.1.0",
+                archive.create_archive(self.cli, self.tui if archive.SHIP_TUI else None, self.root / "out", version="0.1.0",
                     platform="linux-arm64", profile="release", features=[], source={"commit": None, "dirty": True})
         self.assertFalse(list((self.root / "out").glob("*.tar.gz")))
+
+    def test_the_terminal_ui_goes_in_exactly_when_it_ships(self):
+        wrong = None if archive.SHIP_TUI else self.tui
+        with patch.object(archive, "check_versions"), self.assertRaisesRegex(archive.ArchiveError, "exactly when it ships"):
+            archive.create_archive(self.cli, wrong, self.root / "out", version="0.1.0", platform="linux-arm64",
+                                   profile="dev", features=[], source={"commit": None, "dirty": True})
+        self.assertEqual(archive.BINARIES, ("supertag", "supertag-tui") if archive.SHIP_TUI else ("supertag",))
 
     def test_checksum_or_binary_digest_tampering_is_refused(self):
         path = self.package()
@@ -239,6 +253,122 @@ class ArchiveContract(unittest.TestCase):
             with self.assertRaises(archive.ArchiveError):
                 archive.copy_bounded(source, target, 80)
         self.assertLessEqual(target.stat().st_size, 80)
+
+
+class TerminalUIBuild(unittest.TestCase):
+    """The terminal UI build, without Bun: the commands it runs and what it refuses."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.repo = Path(temporary.name) / "repo"
+        (self.repo / "core").mkdir(parents=True)
+        (self.repo / "core/Cargo.toml").write_text('[workspace.package]\nversion = "1.2.3"\n')
+        (self.repo / ".bun-version").write_text("1.4.5\n")
+        package = self.repo / Path(archive.TUI_ENTRY).parents[1]
+        (self.repo / archive.TUI_ENTRY).parent.mkdir(parents=True)
+        (self.repo / archive.TUI_ENTRY).write_text("console.log('fixture')\n")
+        (package / "package.json").write_text('{"name": "@fixture/tui"}')
+        # pnpm's layout: the platform package sits beside the real @opentui/core directory.
+        store = self.repo / "node_modules/.pnpm/core/node_modules/@opentui"
+        (store / "core").mkdir(parents=True)
+        (store / "core-linux-arm64").mkdir()
+        self.library = store / "core-linux-arm64/libopentui.so"
+        self.library.write_bytes(b"library")
+        (package / "node_modules/@opentui").mkdir(parents=True)
+        (package / "node_modules/@opentui/core").symlink_to(store / "core")
+        self.bun = Path(temporary.name) / "bin/bun"
+        self.bun.parent.mkdir()
+        self.bun.write_text("#!/bin/sh\n")
+        self.bun.chmod(0o755)
+        self.commands = []
+
+    def build(self, bun_version="1.4.5", **options):
+        def run(command, **kwargs):
+            self.commands.append(command)
+            if command[:2] == [str(self.bun), "build"]:
+                Path(command[command.index("--outfile") + 1]).write_bytes(b"compiled")
+        with patch.object(archive, "native_platform", return_value="linux-arm64"), \
+             patch.object(archive.subprocess, "check_output", return_value=bun_version + "\n"), \
+             patch.object(archive.subprocess, "run", side_effect=run):
+            return archive.build_tui(self.repo.parent / "out/supertag-tui", self.repo,
+                                     {"PATH": str(self.bun.parent)}, **options)
+
+    def test_compiles_the_entry_for_this_platform_only_with_the_release_version(self):
+        output = self.build()
+        self.assertEqual(output.read_bytes(), b"compiled")
+        install, compile_ = self.commands
+        self.assertEqual(install[:3], ["pnpm", "install", "--frozen-lockfile"])
+        self.assertNotIn("--filter", install)
+        self.assertEqual(compile_[:6], [str(self.bun), "build", "--compile", "--minify", "--bytecode", "--format=esm"])
+        self.assertNotIn("--target", " ".join(compile_))
+        externals = {compile_[index + 1] for index, value in enumerate(compile_) if value == "--external"}
+        self.assertEqual(len(externals), len(archive.OPENTUI_PLATFORMS) - 1)
+        self.assertNotIn("@opentui/core-linux-arm64", externals)
+        self.assertIn('process.env.SUPERTAG_TUI_VERSION="1.2.3"', compile_)
+        self.assertEqual(compile_[-1], str(self.repo / archive.TUI_ENTRY))
+        with self.assertRaisesRegex(archive.ArchiveError, "already exists"):
+            self.build()
+
+    def test_a_bun_other_than_the_pin_is_refused(self):
+        with self.assertRaisesRegex(archive.ArchiveError, "pinned 1.4.5"):
+            self.build("1.3.6")
+        self.assertEqual(self.commands, [])
+
+    def test_the_library_is_signed_as_a_private_copy_before_compiling(self):
+        signed = []
+        def sign(path):
+            signed.append(path)
+            self.assertEqual(len(self.commands), 1, "signed before Bun compiles")
+            path.write_bytes(b"signed library")
+        with self.assertRaisesRegex(archive.ArchiveError, "only macOS"):
+            self.build(sign_library=sign)
+        # The same layout with macOS's package; a second link stands for pnpm's store.
+        self.commands.clear()
+        (self.library.parent.parent / "core-darwin-arm64").mkdir()
+        mac = self.library.parent.parent / "core-darwin-arm64/libopentui.dylib"
+        os.link(self.library, mac)
+        os.link(mac, self.repo.parent / "mac-store-file")
+        def run(command, **kwargs):
+            self.commands.append(command)
+            if command[:2] == [str(self.bun), "build"]:
+                Path(command[command.index("--outfile") + 1]).write_bytes(b"compiled")
+        with patch.object(archive, "native_platform", return_value="darwin-arm64"), \
+             patch.object(archive.subprocess, "check_output", return_value="1.4.5\n"), \
+             patch.object(archive.subprocess, "run", side_effect=run):
+            archive.build_tui(self.repo.parent / "mac/supertag-tui", self.repo,
+                              {"PATH": str(self.bun.parent)}, sign_library=sign)
+        self.assertEqual(signed, [mac.resolve()])
+        self.assertEqual(mac.read_bytes(), b"signed library")
+        self.assertEqual((self.repo.parent / "mac-store-file").read_bytes(), b"library", "the store's file is untouched")
+
+    def test_glibc_requirement_is_the_newest_symbol_version(self):
+        binary = self.repo.parent / "elf"
+        binary.write_bytes(b"\0GLIBC_2.2.5\0GLIBC_2.17\0GLIBC_PRIVATE\0GLIBC_2.3.4\0")
+        self.assertEqual(archive.glibc_requirement(binary), (2, 17))
+        binary.write_bytes(b"\0GLIBC_2.17\0GLIBC_2.34\0")
+        self.assertEqual(archive.glibc_requirement(binary), (2, 34))
+        with patch.object(archive.subprocess, "run",
+                          return_value=archive.subprocess.CompletedProcess([], 0, "ok\n", "")):
+            with self.assertRaisesRegex(archive.ArchiveError, "GLIBC_2.34, newer than GLIBC_2.17"):
+                archive.check_tui(binary, "linux-arm64")
+            self.assertEqual(archive.check_tui(binary, "darwin-arm64"), {"headless_check": True, "glibc": None})
+
+    def test_a_terminal_ui_that_cannot_load_its_library_is_refused(self):
+        with patch.object(archive.subprocess, "run",
+                          return_value=archive.subprocess.CompletedProcess([], 1, "", "dlopen failed")):
+            with self.assertRaisesRegex(archive.ArchiveError, "dlopen failed"):
+                archive.check_tui(self.repo / "missing", "darwin-arm64")
+
+    def test_the_embedded_library_licenses_are_copied_and_required(self):
+        target = self.repo.parent / "licenses"
+        with self.assertRaisesRegex(archive.ArchiveError, "expected license files"):
+            archive.copy_tui_notices(self.repo, "linux-arm64", target)
+        for name in ("LICENSE", "LICENSE-FFMPEG", "FFMPEG-SOURCE.md", "PATENTS-LIBWEBP", "index.js"):
+            (self.library.parent / name).write_text(name)
+        copied = archive.copy_tui_notices(self.repo, "linux-arm64", self.repo.parent / "licenses-2")
+        self.assertEqual(copied, ["FFMPEG-SOURCE.md", "LICENSE", "LICENSE-FFMPEG", "PATENTS-LIBWEBP"])
+        self.assertEqual((self.repo.parent / "licenses-2/LICENSE-FFMPEG").read_text(), "LICENSE-FFMPEG")
 
 
 if __name__ == "__main__":

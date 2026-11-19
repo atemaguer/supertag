@@ -31,6 +31,12 @@ After `supertag-ai` changes, run `pnpm --filter supertag-ai typecheck` and, with
 `SUPERTAG_RUST_TEST_CLI` naming a built `supertag`, `pnpm --filter supertag-ai test:package`.
 After Python SDK changes, install it with `python -m pip install "./sdks/python[dev]"` in a virtual
 environment, then run `ruff check sdks/python` and `pytest sdks/python/tests`.
+After terminal UI, `.bun-version`, or release packaging changes, run
+`python3 scripts/native_archive.py tui --output DIR/supertag-tui` (Bun from `.bun-version` on
+`PATH`) and `python3 scripts/smoke_native_archive.py --terminal-ui DIR/supertag-tui`. CI runs
+them, with `bun test .test.tsx` and `bun run bench/perf.tsx` in `apps/tui`, in the `tui` job of
+`.github/workflows/ci.yml`.
+
 After desktop or `apps/client` changes, run `pnpm --filter @supertag/desktop build` and
 `pnpm vitest run apps/client apps/desktop`. CI runs them, and the integration suites against a built CLI, in `.github/workflows/desktop.yml`.
 After terminal UI or `apps/client` changes, also run `pnpm vitest run apps/tui`, then, in `apps/tui`

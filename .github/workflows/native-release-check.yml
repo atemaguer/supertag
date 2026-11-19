@@ -69,7 +69,10 @@ jobs:
           python-version: '3.13.9'
       - run: python -m pip install PyYAML==6.0.3
       - name: Check archive, installation, and platform boundaries
-        run: python -m unittest discover -s scripts -p 'test_*.py'
+        run: |
+          python -m unittest discover -s scripts -p 'test_*.py'
+          # Again with the terminal UI switched on, so turning SHIP_TUI on cannot break them.
+          SUPERTAG_RELEASE_TUI=1 python -m unittest discover -s scripts -p 'test_*.py'
 
   package:
     if: inputs.mode == 'package' || (github.event_name == 'pull_request' && github.event.label.name == 'release-check')
@@ -109,6 +112,12 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           npm install --global --ignore-scripts --no-audit --no-fund pnpm@11.18.0
+      # The terminal UI is compiled by the Bun pinned in .bun-version; the Linux builder image
+      # installs the same version from a checksummed download.
+      - uses: oven-sh/setup-bun@v2
+        if: runner.os == 'macOS'
+        with:
+          bun-version-file: .bun-version
       # Release builds restore Cargo's registry and third-party dependency builds from a cache
       # with its own key prefix, kept under the checkout but outside the tracked files the build
       # snapshots. rust-cache never saves workspace crates, and --cargo-cache stamps every
@@ -130,7 +139,7 @@ jobs:
           cache-bin: false
           # Pull requests labelled release-check reuse the cache without adding their own.
           save-if: ${{ github.event_name != 'pull_request' }}
-      # The Linux builder image (Rust, Node, Python and pnpm on Debian 12) comes from the
+      # The Linux builder image (Rust, Node, Bun, Python and pnpm on Debian 12) comes from the
       # GitHub Actions cache through buildx, one scope per platform. Its layers are keyed by
       # content: the digest-pinned base image and each Dockerfile step, so a changed Dockerfile or
       # entrypoint misses only from the changed step on. Release-builder-cache.yml fills the cache

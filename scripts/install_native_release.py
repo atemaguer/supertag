@@ -23,7 +23,7 @@ import sys
 import tempfile
 import uuid
 
-from native_archive import ArchiveError, check_versions, copy_bounded, digest, native_platform, require
+from native_archive import ArchiveError, SHIP_TUI, check_versions, copy_bounded, digest, native_platform, require
 from node_bridges import PACKAGES, smoke_entry, verify_node
 from release_archive import (check_provider_version, MAX_ARCHIVE_BYTES, MAX_ENTRIES, MAX_MANIFEST_BYTES, extract_release,
                              unique_object, validate_manifest, validate_release)
@@ -200,7 +200,7 @@ def verify_installed(package, manifest, archive_hash):
 
 
 def probe(package, manifest, node):
-    check_versions(package / "supertag", manifest["version"])
+    check_versions(package / "supertag", package / "supertag-tui" if SHIP_TUI else None, manifest["version"])
     check_provider_version(package / "supertag-shared-execution", manifest["version"])
     for kind, name in PACKAGES.items():
         smoke_entry(node, kind, package / "node-bridges/node_modules" / name)

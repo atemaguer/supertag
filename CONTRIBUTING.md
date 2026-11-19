@@ -29,8 +29,9 @@ TypeScript. The terminal UI runs on Bun, pinned in its README; nothing else does
 language, each with its SDK and generated bindings, and `scripts/` holds the repository checks and
 the release, packaging, and install scripts. Install the tools listed in
 [Requirements](docs/operations/requirements.md), the Rust toolchain pinned by
-`core/rust-toolchain.toml`, Go 1.26 or later, Python 3.13 with `uv`, and the pnpm version pinned by
-`packageManager` in the root `package.json`:
+`core/rust-toolchain.toml`, Go 1.26 or later, Python 3.13 with `uv`, the pnpm version pinned by
+`packageManager` in the root `package.json`, and, to build the terminal UI, the Bun version in
+`.bun-version`:
 
 ```sh
 git clone https://github.com/atemaguer/supertag.git
@@ -79,6 +80,30 @@ uv run scripts/node_bridges.py --output core/target/debug/node-bridges --bridge 
 
 Leave out `--bridge` to stage every bridge. Stage them again after a version change.
 
+### Terminal UI
+
+`supertag-tui` is compiled with Bun, at the version in `.bun-version`, from `apps/tui/src/main.tsx`
+(`TUI_ENTRY` in `scripts/native_archive.py`). Compile it for this machine and check that it loads
+its native library, then put it beside the CLI that `pnpm supertag` runs:
+
+```sh
+python3 scripts/native_archive.py tui --output core/target/debug/supertag-tui
+pnpm supertag tui
+```
+
+`pnpm supertag tui --binary PATH` runs another build instead. The CLI checks that the binary's
+`--version` prints the CLI's version, then replaces itself with it, passing only `--gateway` and
+`--state-directory` and setting `SUPERTAG_CLI` to its own path; the terminal UI finds its
+connection itself, and the local Gateway with `$SUPERTAG_CLI __local-gateway`. The contract is
+in `core/crates/cli/src/tui.rs`. `python3 scripts/smoke_native_archive.py --terminal-ui PATH`
+starts a build in a pseudo-terminal and quits it, as the release smoke does.
+
+Releases don't ship the terminal UI yet. `SHIP_TUI = False` in `scripts/native_archive.py` is the
+one switch: set it to `True` to put `supertag-tui` and `licenses/opentui/` in the release archives
+and the Mac app, and to make the installer and release smoke check them. CI builds and tests the
+terminal UI either way. To try a release archive with it before then, set
+`SUPERTAG_RELEASE_TUI=1` for one `native_release.py package` run.
+
 ### Protobuf contracts
 
 The protobuf contract lives in `proto`; see [binding generation](sdks/README.md).
@@ -117,7 +142,8 @@ and milliseconds, and a run that misses its deadline is marked `TIMEOUT`.
 Set `SUPERTAG_RUST_TEST_REQUIRE` to a comma-separated list of the prerequisites a run must have,
 or `all`; a listed prerequisite that is missing then fails the test. The prerequisites are
 `postgres` (`SUPERTAG_RUST_TEST_POSTGRES_URL_FILE`), `node` (`SUPERTAG_RUST_TEST_NODE`),
-`agents-python` (`SUPERTAG_RUST_TEST_AGENTS_PYTHON`),
+`agents-python` (`SUPERTAG_RUST_TEST_AGENTS_PYTHON`), `tui` (`SUPERTAG_RUST_TEST_TUI`, a
+compiled `supertag-tui`),
 `docker` (`SUPERTAG_RUST_TEST_DOCKER`, the `docker` executable; the WebSocket tunnel's nginx case
 pulls `nginx:1.27-alpine`), `codex-sandbox` (on Linux, Codex's bubblewrap sandbox: the `bwrap`
 package and unprivileged user namespaces, with `SUPERTAG_TEST_CODEX_BINARY` set to a native

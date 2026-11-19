@@ -5,7 +5,8 @@
 #
 # APP is the unsigned SuperTag.app from `pnpm --filter @supertag/desktop package:mac`
 # (apps/desktop/release/mac-arm64/SuperTag.app), its fuses already flipped. CLI_DIRECTORY is an extracted
-# complete release archive: supertag, supertag-shared-execution, and node-bridges/
+# complete release archive: supertag, supertag-shared-execution, node-bridges/, and supertag-tui when
+# the release ships it (SHIP_TUI in scripts/native_archive.py).
 # The CLI goes to SuperTag.app/Contents/Resources/supertag/, where the app looks for it first.
 # IMAGE is the disk image to write.
 #
@@ -19,7 +20,9 @@ cli=${2:?Usage: package-desktop-macos.sh APP CLI_DIRECTORY IMAGE}
 image=${3:?Usage: package-desktop-macos.sh APP CLI_DIRECTORY IMAGE}
 signed=${SIGNED:-false}
 
-for name in supertag supertag-shared-execution; do
+binaries=(supertag supertag-shared-execution)
+[[ -e "$cli/supertag-tui" ]] && binaries+=(supertag-tui)
+for name in "${binaries[@]}"; do
   [[ -f "$cli/$name" && -x "$cli/$name" ]] || { echo "$cli has no executable $name" >&2; exit 1; }
 done
 [[ -f "$cli/node-bridges/manifest.json" ]] || { echo "$cli has no node-bridges/manifest.json" >&2; exit 1; }
@@ -113,9 +116,20 @@ for path in "${machos[@]}"; do
   fi
 done
 # The CLI binaries arrive already signed and notarized by the release's package job; signing them
-# again keeps one identity throughout and fails here, not later, if one is missing.
-for name in supertag supertag-shared-execution; do
-  sign "$resources/$name"
+# again keeps one identity throughout and fails here, not later, if one is missing. supertag-tui
+# keeps its one entitlement, allow-jit, for Bun's JavaScript engine; the OpenTUI library inside it
+# was signed with this identity before it was embedded. Each is signed as a fresh copy moved into
+# place, because macOS can kill a signed binary rewritten in place.
+for name in "${binaries[@]}"; do
+  fresh="$work/fresh-$name"
+  cp "$resources/$name" "$fresh"
+  if [[ "$name" == supertag-tui ]]; then
+    sign --entitlements "$(dirname "$0")/supertag-tui.entitlements" "$fresh"
+  else
+    sign "$fresh"
+  fi
+  rm -f "$resources/$name"
+  mv "$fresh" "$resources/$name"
 done
 # The Electron parts and the app last, inside out: frameworks, helper apps, then SuperTag.app, each
 # with the hardened runtime; the helpers and the app get only allow-jit. The CLI tree above keeps

@@ -37,7 +37,7 @@ class InstallScript(unittest.TestCase):
         self.assets.mkdir()
         self.platform = native_platform()
 
-    def release(self, version="1.2.3", *, cli=None, extra=(), root=None, sums=None, indent=None):
+    def release(self, version="1.2.3", *, cli=None, tui=None, extra=(), root=None, sums=None, indent=None):
         root = root or f"supertag-{version}-{self.platform}-complete"
         manifest = {"source": {"archive_sha256": "b" * 64, "commit": COMMIT}}
         files = {
@@ -46,6 +46,9 @@ class InstallScript(unittest.TestCase):
             "supertag": (script(cli or f'[ "$1" = --version ] && echo "supertag {version}"'), 0o755),
             "node-bridges/manifest.json": (b"{}\n", 0o644),
         }
+        # A release carries the terminal UI only when it ships it.
+        if tui is not None:
+            files["supertag-tui"] = (script(tui), 0o755)
         archive = self.assets / f"supertag-{version}-{self.platform}-complete.tar.gz"
         with tarfile.open(archive, "w:gz") as target:
             for name in [root, f"{root}/node-bridges"]:
@@ -130,6 +133,16 @@ class InstallScript(unittest.TestCase):
     def test_refuses_binaries_that_report_another_version(self):
         self.release(cli='echo "supertag 0.0.1"')
         self.assert_refused("reports supertag 0.0.1, not 1.2.3")
+
+    def test_installs_a_release_with_its_terminal_ui(self):
+        self.release(tui='[ "$1" = --version ] && echo "1.2.3"')
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((Path(os.readlink(self.installed())).parent / "supertag-tui").is_file())
+
+    def test_refuses_a_terminal_ui_from_another_release(self):
+        self.release(tui="echo 0.0.1")
+        self.assert_refused("supertag-tui binary reports 0.0.1")
 
     def test_refuses_a_missing_platform_build(self):
         (self.assets / "SHA256SUMS").write_text(f"{'1' * 64}  supertag-1.2.3-plan9-amd64-complete.tar.gz\n")

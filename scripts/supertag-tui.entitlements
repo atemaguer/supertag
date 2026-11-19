@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- supertag-tui under the hardened runtime: Bun's JavaScript engine needs only allow-jit. The
+     OpenTUI library it loads is signed with the same identity before it is embedded, so library
+     validation passes without disable-library-validation. -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key><true/>
+</dict>
+</plist>

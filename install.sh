@@ -1,8 +1,10 @@
 #!/bin/sh
 # Installs SuperTag's native release for macOS on Apple silicon or Linux on arm64 or amd64: the
-# supertag CLI, the shared execution provider, and the Node.js bridges for Claude Code, Cursor,
-# OpenCode, E2B, and Modal. The archive must match the release's SHA256SUMS before it is unpacked,
-# and the CLI must report the release's version before the command is linked. The installer never starts services or reads SuperTag state.
+# supertag CLI, the shared execution provider, the Node.js bridges for Claude Code, Cursor, OpenCode,
+# E2B, and Modal, and, in a release that ships it, the supertag-tui terminal UI. The archive must
+# match the release's SHA256SUMS before it is unpacked, and the CLI and any terminal UI must report
+# the release's version before the command is linked. The installer never starts services or reads
+# SuperTag state.
 set -eu
 umask 022
 
@@ -158,6 +160,10 @@ fi
 
 cli_version=$("$PACKAGE/supertag" --version 2>/dev/null || true)
 [ "$cli_version" = "supertag $VERSION" ] || fail "the supertag binary reports ${cli_version:-no version}, not $VERSION"
+if [ -e "$PACKAGE/supertag-tui" ]; then
+  tui_version=$("$PACKAGE/supertag-tui" --version 2>/dev/null || true)
+  [ "$tui_version" = "$VERSION" ] || fail "the supertag-tui binary reports ${tui_version:-no version}, not $VERSION"
+fi
 
 # The layout and receipt of scripts/install_native_release.py, so either can replace the other.
 commit=$(grep -o '"commit"[[:space:]]*:[[:space:]]*"[0-9a-f]\{40\}"' "$PACKAGE/manifest.json" |

@@ -9,6 +9,8 @@ on:
       - 'harnesses/**'
       - 'scripts/**'
       - 'docs/reference/cli.md'
+      - 'apps/tui/**'
+      - '.bun-version'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
@@ -23,6 +25,8 @@ on:
       - 'harnesses/**'
       - 'scripts/**'
       - 'docs/reference/cli.md'
+      - 'apps/tui/**'
+      - '.bun-version'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
@@ -62,13 +66,13 @@ jobs:
         working-directory: core
     env:
       SUPERTAG_RUST_TEST_DATABASE_URL: postgresql://supertag:rust-port-ci-database@localhost:5432/supertag_test
-      # Required lane: a missing PostgreSQL, Node, Python agents, or Codex sandbox
+      # Required lane: a missing PostgreSQL, Node, Python agents, terminal UI, or Codex sandbox
       # fixture fails the gated test instead of skipping it. Linux-root cases run in the
       # linux-root job below. Claude Code's sandbox (`claude-sandbox`) is not required here: on
       # the hosted runner its seccomp helper cannot write setgroups in the nested user namespace
       # it makes inside bubblewrap's ("nested userns is capability-restricted"), so its test runs
       # only where the sandbox starts and otherwise reports the skip.
-      SUPERTAG_RUST_TEST_REQUIRE: postgres,node,agents-python,codex-sandbox
+      SUPERTAG_RUST_TEST_REQUIRE: postgres,node,agents-python,tui,codex-sandbox
     steps:
       - uses: actions/checkout@v4
       # Restores the registry and third-party dependency builds; workspace crates are never cached.
@@ -89,6 +93,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - name: Install fixture runtime dependencies
         working-directory: .
         run: |
@@ -108,9 +115,11 @@ jobs:
           test -x "$native_codex"
           env -i PATH=/usr/bin:/bin "$native_codex" --version
           printf 'SUPERTAG_TEST_CODEX_BINARY=%s\n' "$native_codex" >> "$GITHUB_ENV"
-      - name: Build native harness bridges
+      - name: Build native harness bridges and the terminal UI
         working-directory: .
         run: |
+          python scripts/native_archive.py tui --output "$RUNNER_TEMP/tui/supertag-tui"
+          printf 'SUPERTAG_RUST_TEST_TUI=%s\n' "$RUNNER_TEMP/tui/supertag-tui" >> "$GITHUB_ENV"
           pnpm --filter @supertag/worker-claude-code build
           pnpm --filter @supertag/worker-opencode build
           pnpm --filter @supertag/worker-cursor build

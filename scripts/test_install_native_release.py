@@ -26,7 +26,7 @@ class NativeInstallContracts(unittest.TestCase):
         self.node.chmod(0o755)
         self.stage = self.root / "stage"
         self.stage.mkdir()
-        for name in ("supertag", "supertag-shared-execution"):
+        for name in ("supertag", "supertag-tui", "supertag-shared-execution"):
             (self.stage / name).write_bytes(elf() + name.encode())
             (self.stage / name).chmod(0o755)
         for kind, package in PACKAGES.items():

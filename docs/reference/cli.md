@@ -10,11 +10,12 @@ edit by hand: change the command's help, then rerun that test with
 ## `supertag`
 
 ```text
-Usage: supertag [OPTIONS] <COMMAND>
+Usage: supertag [OPTIONS] [COMMAND]
 
 Commands:
   init                  Set up SuperTag on this machine for the git repository in the current directory
   up                    Start local services or configured Worker Hosts in the background and return when ready
+  tui                   Open the terminal UI; plain supertag opens it too
   message               Send a message to your conversation with a Tag and print its reply
   status                Show Worker Hosts, Tags, unfinished Objectives, and the operator inbox
   ps                    List this machine's SuperTag services and the Workers each Worklet runs
@@ -72,7 +73,7 @@ Commands:
   help                  Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>  Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app, for the operator command that follows
+      --gateway <URL|NAME>  Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app, for the operator command that follows, or for the terminal UI when no command follows
   -h, --help                Print help
   -V, --version             Print version
 ```
@@ -216,12 +217,35 @@ Options:
           Print help (see a summary with '-h')
 ```
 
+## `supertag tui`
+
+```text
+Open the terminal UI; plain supertag opens it too.
+
+Starts supertag-tui from the directory this command is installed in, after checking that it is from the same release. The terminal UI connects on its own: to the Gateway named here, else to the one it used last, else to this machine's local services.
+
+Usage: supertag tui [OPTIONS]
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a saved Gateway. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory
+
+      --binary <BINARY>
+          Terminal UI executable, instead of supertag-tui beside this command. Also reads SUPERTAG_TUI_BINARY
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
 ## `supertag message`
 
 ```text
 Send a message to your conversation with a Tag and print its reply.
 
-The conversation is the one the desktop app shows, so a message sent here appears there, and a message sent there continues here. The command waits for the reply, printing the Tag's messages as they arrive, and fails when the turn fails.
+The conversation is the one the terminal UI and the desktop app show, so a message sent here appears there, and a message sent there continues here. The command waits for the reply, printing the Tag's messages as they arrive, and fails when the turn fails.
 
 Usage: supertag message [OPTIONS] <TAG> [TEXT]
 

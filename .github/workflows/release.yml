@@ -3,8 +3,8 @@ name: Release SuperTag
 # Pushing a release tag builds the native archives for macOS on Apple silicon and Linux (arm64,
 # amd64), the desktop app's macOS disk image and Linux Debian packages, and attaches them, their
 # SHA256SUMS, and an install.sh pinned to the release to a draft GitHub Release. The archives hold
-# the supertag CLI, the shared execution provider, and the Node.js bridges; the Mac app carries
-# the macOS archive's contents, so it needs no separate install. A maintainer publishes the draft
+# the supertag CLI, the supertag-tui terminal UI, the shared execution provider, and the Node.js
+# bridges; the Mac app carries the macOS archive's contents, so it needs no separate install. A maintainer publishes the draft
 # once every asset is attached; publishing runs the installer check and the SDK publish
 # workflows, so the README's latest installer URL never points at a release without its archives.
 on:
@@ -74,7 +74,8 @@ jobs:
   # SuperTag-VERSION-darwin-arm64.dmg. Intel Macs get no build: releases ship no Intel Mac CLI.
   # electron-builder packages an unsigned SuperTag.app with its fuses flipped; the app carries the
   # package job's signed macOS archive under Contents/Resources/supertag/, so it needs no separate
-  # install. scripts/package-desktop-macos.sh signs the bridges' executables and the CLI, then the
+  # install. scripts/package-desktop-macos.sh signs the bridges' executables, the CLI and the
+  # terminal UI (allow-jit only), then the
   # Electron frameworks, helpers and the app, with the Developer ID certificate and the hardened
   # runtime, builds and signs the disk image, and notarizes and staples only the disk image, which
   # covers the app inside it; Gatekeeper then accepts the app inside the mounted image. Without

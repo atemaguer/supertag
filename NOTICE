@@ -2,3 +2,15 @@ SuperTag
 Copyright 2026 SuperTag contributors
 
 This product is licensed under the Apache License, Version 2.0.
+
+In a release that includes it, the terminal UI, supertag-tui, embeds OpenTUI's native library
+(libopentui, from the @opentui/core-PLATFORM 0.9.4 packages, https://github.com/anomalyco/opentui;
+MIT). That library statically links a decode-only build of FFmpeg 9.0.2 (https://ffmpeg.org),
+licensed under the GNU Lesser General Public License, version 2.1 or later, and zlib. OpenTUI's
+package also carries the licenses of the other components it names (Ghostty, Yoga, libwebp,
+lcms2, stb, wuffs, gdtoa, Zig, LLVM, and others). Those licenses, and FFMPEG-SOURCE.md, which
+names the exact FFmpeg source and its SHA-256, are in licenses/opentui/ of such a release archive.
+FFmpeg's source is available from https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz, and OpenTUI's
+source and build scripts, which rebuild and relink libopentui with a modified FFmpeg, from
+https://github.com/anomalyco/opentui. supertag-tui loads a replacement library from the file that
+OPENTUI_LIB_PATH names.

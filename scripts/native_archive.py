@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Build and verify an unpublished native CLI archive. Requires Python 3.11+.
+"""Build and verify an unpublished native CLI and terminal UI archive. Requires Python 3.11+.
 
 This is a local packaging tool, not an installer or a signed release channel.
-Default builds use release Rust code. Prebuilt inputs require an explicit profile and record supplied Cargo features.
+Default builds use release Rust code and compile the terminal UI with the pinned Bun (.bun-version).
+Prebuilt inputs require an explicit profile and record supplied Cargo features.
 Source metadata describes the packaging checkout, not an attestation that supplied
 binaries were built from it. Binary versions and architecture are verified.
 """
@@ -17,6 +18,7 @@ import os
 from pathlib import Path
 import platform as host_platform
 import re
+import shutil
 import stat
 import subprocess
 import tarfile
@@ -29,8 +31,25 @@ MAX_BINARY_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024
 MAX_MANIFEST_BYTES = 16 * 1024
 PLATFORMS = {"linux-arm64", "linux-amd64", "darwin-arm64"}
-BINARIES = ("supertag",)
+# The release switch for the terminal UI. While it is False, release archives, the installer
+# checks, the release smoke, and the desktop app carry only the CLI; CI still builds and tests the
+# terminal UI (`native_archive.py tui`). Set it to True to ship supertag-tui. For a local check,
+# SUPERTAG_RELEASE_TUI=1 (or 0) overrides it for every script of one run.
+SHIP_TUI = False
+SHIP_TUI = {"1": True, "0": False}.get(os.environ.get("SUPERTAG_RELEASE_TUI", ""), SHIP_TUI)
+BINARIES = ("supertag", "supertag-tui") if SHIP_TUI else ("supertag",)
 REPO = Path(__file__).resolve().parents[1]
+# The terminal UI's entry point. Its package (the nearest directory with a package.json) is
+# installed through the pnpm workspace, and Bun compiles the entry into supertag-tui.
+TUI_ENTRY = "apps/tui/src/main.tsx"
+# OpenTUI's native library for each platform, in the package Bun embeds for that platform.
+OPENTUI_PACKAGES = {"darwin-arm64": ("core-darwin-arm64", "libopentui.dylib"),
+                    "linux-arm64": ("core-linux-arm64", "libopentui.so"),
+                    "linux-amd64": ("core-linux-x64", "libopentui.so")}
+OPENTUI_PLATFORMS = ("darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64", "linux-x64-musl",
+                     "linux-arm64-musl", "win32-x64", "win32-arm64")
+# Release binaries must run on glibc 2.17 and later, like Bun's own Linux builds.
+MAX_GLIBC = (2, 17)
 
 
 class ArchiveError(ValueError):
@@ -88,12 +107,42 @@ def check_architecture(header, platform):
     require(len(header) >= 32 and valid, "binary architecture does not match the package platform")
 
 
-def check_versions(cli, version):
+def check_versions(cli, tui, version):
+    """CLI and, unless TUI is None, terminal UI versions."""
     with tempfile.TemporaryDirectory(prefix="supertag-version-") as home:
-        result = subprocess.run([str(cli), "--version"], env={"PATH": os.defpath, "HOME": home},
-                                capture_output=True, text=True, timeout=10, check=False)
-        require(result.returncode == 0 and result.stdout.strip() == f"supertag {version}",
-                f"{Path(cli).name} does not report the package version")
+        env = {"PATH": os.defpath, "HOME": home}
+        checks = [(cli, f"supertag {version}")] + ([] if tui is None else [(tui, version)])
+        # macOS scans a new executable on its first run; a 100 MB terminal UI takes seconds.
+        for binary, expected in checks:
+            result = subprocess.run([str(binary), "--version"], env=env, capture_output=True,
+                                    text=True, timeout=60, check=False)
+            require(result.returncode == 0 and result.stdout.strip() == expected,
+                    f"{Path(binary).name} does not report the package version")
+
+
+def check_tui(tui, platform):
+    """Load the terminal UI's embedded native library without a terminal, and on Linux check
+    that neither the binary nor the library it embeds needs a glibc newer than MAX_GLIBC."""
+    with tempfile.TemporaryDirectory(prefix="supertag-tui-check-") as home:
+        result = subprocess.run([str(tui), "--headless-check"], env={"PATH": os.defpath, "HOME": home, "TMPDIR": home},
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60, check=False)
+    require(result.returncode == 0 and result.stdout.strip() == "ok",
+            "supertag-tui could not load its native library: " + result.stderr[-800:])
+    glibc = None
+    if platform.startswith("linux-"):
+        newest = glibc_requirement(tui)
+        require(newest is not None, "supertag-tui names no glibc symbol version")
+        glibc = "GLIBC_" + ".".join(map(str, newest))
+        require(newest <= MAX_GLIBC, f"supertag-tui needs {glibc}, newer than GLIBC_{'.'.join(map(str, MAX_GLIBC))}")
+    return {"headless_check": True, "glibc": glibc}
+
+
+def glibc_requirement(binary):
+    """The newest GLIBC_x.y symbol version named anywhere in the file: the executable's own
+    version needs and those of the shared library embedded in it."""
+    pattern = re.compile(rb"GLIBC_([0-9]+)\.([0-9]+)(?:\.[0-9]+)?\x00")
+    versions = {(int(major), int(minor)) for major, minor in pattern.findall(Path(binary).read_bytes())}
+    return max(versions) if versions else None
 
 
 def source_metadata(repo=REPO):
@@ -176,7 +225,7 @@ def validate_tar_footer(raw, offset):
             and not any(padding), "invalid tar footer or trailing archive data")
 
 
-def create_archive(cli, output, *, version, platform, profile, features, source):
+def create_archive(cli, tui, output, *, version, platform, profile, features, source):
     features = sorted(set(features))
     validate_metadata(version, platform, profile, features, source)
     output = Path(output).resolve()
@@ -188,7 +237,8 @@ def create_archive(cli, output, *, version, platform, profile, features, source)
     with tempfile.TemporaryDirectory(prefix=".supertag-native-stage-", dir=output) as temporary:
         stage = Path(temporary)
         files = {}
-        for name, source_path in zip(BINARIES, (cli,), strict=True):
+        require((tui is not None) == SHIP_TUI, "the terminal UI must be supplied exactly when it ships")
+        for name, source_path in zip(BINARIES, (cli, tui)[:len(BINARIES)], strict=True):
             source_path = Path(source_path)
             require(source_path.is_file(), "native binary is unavailable")
             require(0 < source_path.stat().st_size <= MAX_BINARY_BYTES, "native binary exceeds size limit")
@@ -198,7 +248,7 @@ def create_archive(cli, output, *, version, platform, profile, features, source)
             with target.open("rb") as handle:
                 check_architecture(handle.read(32), platform)
             files[name] = {"sha256": digest(target), "bytes": target.stat().st_size, "mode": 0o755}
-        check_versions(stage / "supertag", version)
+        check_versions(stage / "supertag", stage / "supertag-tui" if SHIP_TUI else None, version)
         manifest = {"format": FORMAT, "version": version, "platform": platform, "profile": profile,
                     "features": features, "source": source, "files": files}
         payload = json.dumps(manifest, sort_keys=True, indent=2).encode() + b"\n"
@@ -337,14 +387,105 @@ def build_cli(profile, features, repo=REPO, env=None):
     return Path(metadata["target_directory"]) / ("release" if profile == "release" else "debug") / "supertag"
 
 
+def bun_version(repo=REPO):
+    return (repo / ".bun-version").read_text().strip()
+
+
+def tui_package(repo=REPO):
+    entry = repo / TUI_ENTRY
+    package = next(parent for parent in entry.parents if (parent / "package.json").is_file())
+    require(package != repo, "the terminal UI entry has no package of its own")
+    return package, entry
+
+
+def opentui_library(repo, platform):
+    """OpenTUI's native library for PLATFORM, as installed for the terminal UI's package."""
+    package, _entry = tui_package(repo)
+    folder, library = OPENTUI_PACKAGES[platform]
+    # pnpm links an optional platform package beside the package that depends on it.
+    native = (package / "node_modules/@opentui/core").resolve().parent / folder / library
+    require(native.is_file(), f"OpenTUI's native library for {platform} is not installed")
+    return native
+
+
+def copy_tui_notices(repo, platform, target):
+    """Copy the license files of the native library supertag-tui embeds into TARGET.
+
+    libopentui statically links FFmpeg (LGPL-2.1-or-later) and other components; its platform
+    package carries their licenses and FFMPEG-SOURCE.md, which names the exact FFmpeg source.
+    """
+    target.mkdir(parents=True)
+    copied = []
+    for path in sorted(opentui_library(repo, platform).parent.iterdir()):
+        if path.is_file() and (path.name.startswith(("LICENSE", "PATENTS", "AUTHORS")) or path.name == "FFMPEG-SOURCE.md"):
+            copy_bounded(path, target / path.name, 1024 * 1024)
+            (target / path.name).chmod(0o644)
+            copied.append(path.name)
+    require("LICENSE-FFMPEG" in copied and "FFMPEG-SOURCE.md" in copied and "LICENSE" in copied,
+            "OpenTUI's native package no longer carries the expected license files")
+    return copied
+
+
+def build_tui(output, repo=REPO, env=None, *, sign_library=None):
+    """Compile the terminal UI for this platform into OUTPUT, a path that must not exist yet.
+
+    The pinned Bun compiles for the platform it runs on, so the embedded runtime is the builder's
+    own (the baseline x64 build on linux-amd64) and nothing is downloaded. Only this platform's
+    OpenTUI package is embedded. SIGN_LIBRARY, given on macOS, is called with the path of
+    OpenTUI's native library to sign it before Bun embeds it: Bun extracts
+    it byte for byte at run time, so a library signed with the release identity passes the
+    hardened runtime's library validation without disable-library-validation.
+    """
+    output = Path(output)
+    require(not output.exists() and not output.is_symlink(), "terminal UI output already exists")
+    env = dict(os.environ if env is None else env)
+    platform = native_platform()
+    bun = shutil.which("bun", path=env.get("PATH", os.defpath))
+    require(bun is not None, "Bun is required to build the terminal UI; install the version in .bun-version")
+    pinned = bun_version(repo)
+    actual = subprocess.check_output([bun, "--version"], env=env, text=True, timeout=30).strip()
+    require(actual == pinned, f"Bun {actual} differs from the pinned {pinned} in .bun-version")
+    package, entry = tui_package(repo)
+    # The whole workspace: the terminal UI bundles workspace sources (@supertag/client and the
+    # SDK's) by path, whose dependencies a filtered install leaves out.
+    subprocess.run(["pnpm", "install", "--frozen-lockfile", "--prefer-offline"],
+                   cwd=repo, env={**env, "CI": "true"}, check=True)
+    native = opentui_library(repo, platform)
+    if sign_library is not None:
+        require(platform.startswith("darwin-"), "only macOS libraries are signed")
+        # pnpm hard-links package files from its store. Sign a private copy, never the store's.
+        real = native.resolve(strict=True)
+        private = real.with_name(f".{real.name}.signing")
+        shutil.copyfile(real, private)
+        os.replace(private, real)
+        sign_library(real)
+    own = {"darwin-arm64": "darwin-arm64", "linux-arm64": "linux-arm64", "linux-amd64": "linux-x64"}[platform]
+    externals = [argument for other in OPENTUI_PLATFORMS if other != own
+                 for argument in ("--external", f"@opentui/core-{other}")]
+    version = version_from_repo(repo)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    # A fresh directory, never an existing file: macOS kills a signed binary rewritten in place.
+    with tempfile.TemporaryDirectory(prefix=".supertag-tui-build-", dir=output.parent) as temporary:
+        compiled = Path(temporary) / "supertag-tui"
+        subprocess.run([bun, "build", "--compile", "--minify", "--bytecode", "--format=esm", *externals,
+                        "--define", f"process.env.SUPERTAG_TUI_VERSION={json.dumps(version)}",
+                        "--outfile", str(compiled), str(entry)], cwd=package, env=env, check=True)
+        compiled.chmod(0o755)
+        os.link(compiled, output)
+    return output
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     package = commands.add_parser("package", help="build or package supplied native binaries")
     package.add_argument("--output", type=Path, required=True)
     package.add_argument("--cli", type=Path)
+    package.add_argument("--tui", type=Path)
     package.add_argument("--profile", choices=("dev", "release"))
     package.add_argument("--feature", action="append", default=[], help="compiled Cargo feature, recorded in manifest")
+    tui_only = commands.add_parser("tui", help="compile only the terminal UI for this platform and check it")
+    tui_only.add_argument("--output", type=Path, required=True, help="new file to write")
     verify = commands.add_parser("verify", help="validate checksum, members, architecture, and binary hashes")
     verify.add_argument("archive", type=Path)
     verify.add_argument("--checksum", type=Path)
@@ -353,11 +494,20 @@ def main():
         if args.command == "verify":
             print(json.dumps(validate_archive(args.archive, args.checksum), sort_keys=True))
             return
+        if args.command == "tui":
+            path = build_tui(args.output.resolve())
+            print(json.dumps({"path": str(path), "bytes": path.stat().st_size,
+                              **check_tui(path, native_platform())}, sort_keys=True))
+            return
+        require(not args.tui or SHIP_TUI, "the terminal UI does not ship (SHIP_TUI)")
+        require(not args.cli or bool(args.tui) == SHIP_TUI, "supply --tui with --cli exactly when the terminal UI ships")
         require(not args.cli or args.profile is not None, "prebuilt binaries require an explicit --profile")
         profile = args.profile or "release"
-        cli = args.cli or build_cli(profile, args.feature)
-        path = create_archive(cli, args.output, version=version_from_repo(), platform=native_platform(),
-                              profile=profile, features=args.feature, source=source_metadata())
+        with tempfile.TemporaryDirectory(prefix="supertag-native-build-") as temporary:
+            cli = args.cli or build_cli(profile, args.feature)
+            tui = args.tui or (build_tui(Path(temporary) / "supertag-tui") if SHIP_TUI else None)
+            path = create_archive(cli, tui, args.output, version=version_from_repo(), platform=native_platform(),
+                                  profile=profile, features=args.feature, source=source_metadata())
         print(path)
     except (ArchiveError, OSError, subprocess.SubprocessError) as error:
         parser.exit(1, f"native archive: {error}\n")

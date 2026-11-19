@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from native_archive import ArchiveError, create_archive
+from native_archive import SHIP_TUI, ArchiveError, create_archive
 from node_bridges import PACKAGES, entry_for
 from release_archive import create_release
 from test_native_archive import elf
@@ -18,7 +18,7 @@ class SplitImagesContracts(unittest.TestCase):
         self.root = Path(temporary.name)
         self.stage = self.root / "stage"
         self.stage.mkdir()
-        for name in ("supertag", "supertag-shared-execution"):
+        for name in ("supertag", "supertag-tui", "supertag-shared-execution"):
             path = self.stage / name
             path.write_bytes(elf() + name.encode())
             path.chmod(0o755)
@@ -61,9 +61,10 @@ class SplitImagesContracts(unittest.TestCase):
                 images.build_images(archive, "fixture")
         run.assert_not_called()
 
-    def test_cli_fixture_requires_explicit_format_and_preserves_dirty_label(self):
+    def test_older_cli_tui_fixture_requires_explicit_format_and_preserves_dirty_label(self):
         with patch("native_archive.check_versions"):
-            archive = create_archive(self.stage / "supertag", self.root / "thin",
+            archive = create_archive(self.stage / "supertag", self.stage / "supertag-tui" if SHIP_TUI else None,
+                                     self.root / "thin",
                                      version="0.1.0", platform="linux-arm64", profile="dev", features=[],
                                      source={"commit": "a" * 40, "dirty": True})
         with patch.object(images.subprocess, "run") as run:
@@ -72,7 +73,7 @@ class SplitImagesContracts(unittest.TestCase):
             run.assert_not_called()
         with patch.object(images.subprocess, "run") as run, \
              patch.object(images.subprocess, "check_output", return_value="supertag 0.1.0\n"):
-            images.build_images(archive, "fixture", archive_format="cli")
+            images.build_images(archive, "fixture", archive_format="cli-tui")
         self.assertIn("org.supertag.source.dirty=true", run.call_args_list[0].args[0])
 
 

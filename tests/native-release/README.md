@@ -1,12 +1,17 @@
 # Verify native release platforms
 
-The native archive includes the Rust CLI, the shared execution provider, and all five private Node
-helpers. These contributor commands build and execute local archives without publishing them or changing an installed command.
+The native archive includes the Rust CLI, the shared execution provider, all five private Node
+helpers, and, once releases ship it, the terminal UI (`supertag-tui`, compiled by the Bun version in
+`.bun-version`). `SHIP_TUI` in `scripts/native_archive.py` is that switch, off for now: with it off,
+the archive, the installer checks, the smoke, and the desktop app carry no `supertag-tui` and no
+`licenses/opentui/`, and the smoke checks that plain `supertag` says the terminal UI isn't
+installed. Set `SUPERTAG_RELEASE_TUI=1` (or `0`) to override it for one local build; CI builds and
+tests the terminal UI either way. These contributor commands build and execute local archives without publishing them or changing an installed command.
 Optional model credentials remain external and are not used by these checks.
 
 The supported archive platforms are `linux-amd64`, `linux-arm64`, and `darwin-arm64`. Intel
 Macs have no archive. Each build records its exact source commit and lockfile digests. A separate
-build receipt records the Rust, Cargo, Node, pnpm, and Python versions. The CLI,
+build receipt records the Rust, Cargo, Node, pnpm, Bun, and Python versions. The CLI, terminal UI,
 provider, and native helper assets must match the selected platform. A cross-compiled
 binary alone is not a completed platform verification.
 
@@ -14,7 +19,8 @@ binary alone is not a completed platform verification.
 
 Use a clean checkout and its full commit SHA. The Docker entry point builds in Debian 12,
 matching the base distribution of the native service images. It uses a digest-pinned Rust
-image, checksum-pinned Node archives, and the repository's pinned pnpm version.
+image, checksum-pinned Node and Bun archives (Bun's baseline build on amd64, which needs no
+AVX2), and the repository's pinned pnpm version.
 Docker must support the requested architecture, natively or through emulation.
 
 ```sh
@@ -32,7 +38,7 @@ remains as a reusable cache. Its identity is recorded in the builder receipt.
 ## macOS
 
 Use native tools on an Apple silicon Mac. Select Node 22.13 or later in the 22.x line, pnpm
-11.18.0, Python 3.13, and the Rust toolchain pinned in
+11.18.0, Bun at the version in `.bun-version`, Python 3.13, and the Rust toolchain pinned in
 `core/rust-toolchain.toml`.
 
 ```sh
@@ -57,7 +63,10 @@ build receipt records `cargo_cache`. The release workflow restores and saves `DI
 
 `--install-smoke` includes the extracted smoke and verifies a fresh installation and an
 idempotent reinstall through the normal managed command symlink. It tests a
-packaged `supertag message` round trip, a synthetic OpenCode Task, the shared provider's file
+packaged `supertag message` round trip; when the terminal UI ships, its version, its embedded OpenTUI library
+loading without a terminal, and, on Linux, that it needs no glibc newer than 2.17; plain
+`supertag` starting the terminal UI beside it in a pseudo-terminal, which must draw and quit on
+Ctrl-C; a synthetic OpenCode Task, the shared provider's file
 access and restart receipts, and all five helpers' bootstrap boundaries. It checks that an old-state sentinel is preserved.
 It does not use model services, test shared-provider command containment, import legacy
 state, sign binaries, notarize applications, or publish a release.

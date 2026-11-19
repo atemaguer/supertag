@@ -19,8 +19,9 @@ class ReleasePlatformContracts(unittest.TestCase):
         (self.root / 'package.json').write_text('{"packageManager":"pnpm@11.18.0"}')
         (self.root / 'core').mkdir()
         (self.root / 'core/rust-toolchain.toml').write_text('[toolchain]\nchannel="1.93.1"\n')
+        (self.root / '.bun-version').write_text('1.4.5\n')
 
-    def tools(self, node_arch='arm64', rust_host='aarch64-apple-darwin'):
+    def tools(self, node_arch='arm64', rust_host='aarch64-apple-darwin', bun_arch='arm64'):
         def output(command, **kwargs):
             if command[0] == 'rustc':
                 return f'rustc 1.93.1 (fixture)\nhost: {rust_host}\nrelease: 1.93.1\n'
@@ -30,8 +31,10 @@ class ReleasePlatformContracts(unittest.TestCase):
                 return json.dumps({'version': 'v22.13.0', 'platform': 'darwin', 'arch': node_arch})
             if command[0] == 'pnpm':
                 return '11.18.0\n'
-            if command[0] == 'go':
-                return json.dumps({'GOVERSION': 'go1.26.1', 'GOHOSTOS': 'darwin', 'GOHOSTARCH': 'arm64'})
+            if command[:2] == ['bun', '--version']:
+                return '1.4.5\n'
+            if command[0] == 'bun':
+                return json.dumps({'platform': 'darwin', 'arch': bun_arch})
             self.fail(f'unexpected tool probe: {command}')
         return output
 
@@ -40,8 +43,10 @@ class ReleasePlatformContracts(unittest.TestCase):
             result = release.tool_versions(self.root, {'PATH': '/fixture'}, 'darwin-arm64')
         self.assertEqual(result['rust']['host'], 'aarch64-apple-darwin')
         self.assertEqual(result['node']['arch'], 'arm64')
+        self.assertEqual(result['bun'], '1.4.5')
         # Rosetta tools on Apple silicon report x64; they must not build the arm64 archive.
-        for output in (self.tools(node_arch='x64'), self.tools(rust_host='x86_64-apple-darwin')):
+        for output in (self.tools(node_arch='x64'), self.tools(rust_host='x86_64-apple-darwin'),
+                       self.tools(bun_arch='x64')):
             with self.subTest(), patch.object(release.subprocess, 'check_output', side_effect=output):
                 with self.assertRaisesRegex(ArchiveError, 'platform'):
                     release.tool_versions(self.root, {'PATH': '/fixture'}, 'darwin-arm64')
@@ -86,6 +91,20 @@ class ReleasePlatformContracts(unittest.TestCase):
             docker_release.build_command('linux/amd64', 'builder:x', context, None, True)
         with self.assertRaisesRegex(ArchiveError, 'invalid builder cache scope'):
             docker_release.build_command('linux/amd64', 'builder:x', context, 'scope,mode=max')
+
+    def test_every_builder_uses_the_pinned_bun(self):
+        pin = (native_archive.REPO / '.bun-version').read_text().strip()
+        dockerfile = (native_archive.REPO / 'deploy/docker/rust-release.Dockerfile').read_text()
+        self.assertIn(f'/bun-v{pin}/', dockerfile)
+        self.assertEqual(dockerfile.count('bun_sha='), 2, 'both Linux builders verify their download')
+        for workflow in ('ci.yml', 'core.yml', 'native-release-check.yml'):
+            text = (native_archive.REPO / '.github/workflows' / workflow).read_text()
+            self.assertIn('bun-version-file: .bun-version', text, workflow)
+
+    def test_the_terminal_ui_gets_only_allow_jit(self):
+        import plistlib
+        entitlements = plistlib.loads((native_archive.REPO / 'scripts/supertag-tui.entitlements').read_bytes())
+        self.assertEqual(entitlements, {'com.apple.security.cs.allow-jit': True})
 
 
 if __name__ == '__main__':

@@ -92,6 +92,7 @@ def smoke_release(archive, fixture, node, opencode_fixture=None, provider_proto=
             "installed_opencode_task": True, "synthetic_native_fixture_sha256": digest(opencode_fixture),
             "fixture_adapter_sha256": round_trip["fixture_adapter_sha256"],
             "real_cli_task_round_trip": round_trip["real_cli_task_round_trip"],
+            "terminal_ui": round_trip["terminal_ui"],
             "clean_service_shutdown": round_trip["clean_service_shutdown"], "isolated_home_and_state": True}
 
 

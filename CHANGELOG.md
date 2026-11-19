@@ -29,6 +29,13 @@ within the pre-1.0 compatibility policy described in
   messages, Workstream posts, the inbox turns they start, and a person's read mark now reach open
   Watches and waiting Worker Hosts as soon as they commit, on every Control Plane replica, instead
   of at the next poll.
+- `supertag tui [--gateway URL|NAME] [--state-directory DIR]`, and plain `supertag` in a terminal,
+  start the terminal UI `supertag-tui` installed beside the CLI, after checking it is from the same
+  release, and pass it no credential: it finds its connection itself, from the same saved Gateways
+  and variables as the CLI, and the local services through `supertag __local-gateway`. The terminal
+  UI, rebuilt on OpenTUI and React and compiled with Bun to replace the removed Go one, ships in a
+  later release; until then plain `supertag` prints the help and says the terminal UI isn't
+  installed.
 - `sandbox-commands: [claude-code]` on a host service (`supertag worker-host --sandbox-commands`)
   runs Claude Code's commands in Claude Code's own operating-system sandbox: they write only the
   Workspace, never its `.git` or read-only and hidden paths, cannot read hidden paths or the home's

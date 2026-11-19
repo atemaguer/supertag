@@ -18,7 +18,7 @@ from native_archive import (ArchiveError, BINARIES as CLI_BINARIES, MAX_BINARY_B
                             write_checksum)
 
 FORMAT = "supertag-native-release-v1"
-# The small CLI fixture archive holds only the CLI.
+# The small fixture archive holds the CLI and the terminal UI.
 BINARIES = (*CLI_BINARIES, "supertag-shared-execution")
 
 

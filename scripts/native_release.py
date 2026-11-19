@@ -7,9 +7,10 @@
 Builds happen in disposable source, HOME, and Cargo target directories. With
 --cargo-cache, Cargo's registry and target directory live in that directory instead, so CI can
 restore third-party dependency builds; every workspace crate is still rebuilt from the snapshot.
-The output includes the CLI, the shared execution provider, and all five private Node runtime helpers.
+The output includes the CLI, the terminal UI (compiled by the Bun pinned in .bun-version), the shared
+execution provider, and all five private Node runtime helpers.
 Node 22.13+ (22.x), Git, and optional provider credentials remain external.
-macOS binaries are signed only with --sign-command. No upload, registry publication, or state migration is performed.
+macOS binaries, and the native library the terminal UI embeds, are signed only with --sign-command. No upload, registry publication, or state migration is performed.
 """
 import argparse
 import json
@@ -24,8 +25,9 @@ import tempfile
 import time
 import tomllib
 
-from native_archive import (ArchiveError, REPO, build_cli, check_versions, copy_bounded,
-                            digest, native_platform, publish_files, require, version_from_repo, MAX_BINARY_BYTES, PLATFORMS)
+from native_archive import (ArchiveError, REPO, SHIP_TUI, build_cli, build_tui, bun_version, check_tui, check_versions,
+                            copy_bounded, copy_tui_notices, digest, native_platform, publish_files, require, version_from_repo,
+                            MAX_BINARY_BYTES, PLATFORMS)
 from node_bridges import PACKAGES, stage_workspace
 from release_archive import BINARIES, check_provider_version, create_release, extract_release, validate_release
 
@@ -103,21 +105,33 @@ def tool_versions(source, env, platform):
     pnpm = probe(["pnpm", "--version"])
     require(json.loads((source / "package.json").read_text())["packageManager"] == f"pnpm@{pnpm}",
             "pnpm version differs from the source pin")
-    return {"rust": rust, "cargo": cargo, "node": node, "pnpm": pnpm, "python": sys.version.split()[0]}
+    bun = probe(["bun", "--version"])
+    require(bun == bun_version(source), "Bun version differs from the source pin")
+    bun_target = json.loads(probe(["bun", "-e", "console.log(JSON.stringify({platform:process.platform,arch:process.arch}))"]))
+    require(bun_target == {"platform": system, "arch": {"amd64": "x64", "arm64": "arm64"}[arch]},
+            "Bun does not match the expected platform")
+    return {"rust": rust, "cargo": cargo, "node": node, "pnpm": pnpm, "bun": bun, "python": sys.version.split()[0]}
 
 
 SIGNING_VARIABLES = ("APPLE_DEVELOPER_ID_P12", "APPLE_DEVELOPER_ID_P12_PASSWORD", "APPLE_NOTARY_KEY",
                      "APPLE_NOTARY_KEY_ID", "APPLE_NOTARY_ISSUER_ID")
 
 
+def signing_environment():
+    # Only the signing credentials and the runner's tool locations pass through.
+    return {name: os.environ[name] for name in ("PATH", "HOME", "TMPDIR", "RUNNER_TEMP", *SIGNING_VARIABLES)
+            if name in os.environ}
+
+
 def sign_binaries(command, stage, version):
     """Sign and notarize the staged macOS binaries before the archive records their digests."""
-    # Only the signing credentials and the runner's tool locations pass through.
-    env = {name: os.environ[name] for name in ("PATH", "HOME", "TMPDIR", "RUNNER_TEMP", *SIGNING_VARIABLES)
-           if name in os.environ}
+    env = signing_environment()
     subprocess.run([str(command), str(stage), *BINARIES], env=env, check=True)
-    check_versions(stage / "supertag", version)
+    check_versions(stage / "supertag", stage / "supertag-tui" if SHIP_TUI else None, version)
+    if SHIP_TUI:
+        check_tui(stage / "supertag-tui", native_platform())
     check_provider_version(stage / "supertag-shared-execution", version)
+
 
 
 def mark_sources_changed(source):
@@ -153,10 +167,20 @@ def assemble(repo, commit, output, profile="release", *, smoke=False, install_sm
         stage.mkdir()
         cli = build_cli(profile, [], source, env)
         provider = build_shared_provider(source, env, profile)
+        # The terminal UI's native library is signed with the release identity before Bun embeds it.
+        sign_library = None if sign_command is None else (lambda library: subprocess.run(
+            [str(sign_command), "--library", str(library)], env=signing_environment(), check=True))
+        # The terminal UI ships only with SHIP_TUI (native_archive.py).
+        tui = build_tui(scratch / "tui" / "supertag-tui", source, env, sign_library=sign_library) if SHIP_TUI else None
         version = version_from_repo(source)
-        check_versions(cli, version)
+        check_versions(cli, tui, version)
+        if tui is not None:
+            check_tui(tui, platform)
         check_provider_version(provider, version)
-        for name, path in (("supertag", cli), ("supertag-shared-execution", provider)):
+        binaries = [("supertag", cli), ("supertag-shared-execution", provider)]
+        if tui is not None:
+            binaries.insert(1, ("supertag-tui", tui))
+        for name, path in binaries:
             copy_bounded(path, stage / name, MAX_BINARY_BYTES)
             (stage / name).chmod(0o755)
         if sign_command is not None:
@@ -164,6 +188,9 @@ def assemble(repo, commit, output, profile="release", *, smoke=False, install_sm
         for name in ("LICENSE", "NOTICE"):
             copy_bounded(source / name, stage / name, 1024 * 1024)
             (stage / name).chmod(0o644)
+        # The terminal UI embeds OpenTUI's native library; NOTICE points to these.
+        if tui is not None:
+            copy_tui_notices(source, platform, stage / "licenses/opentui")
         _helpers, node = stage_workspace(stage / "node-bridges", PACKAGES, source, env)
         # Stage on the destination filesystem so publication can use atomic,
         # no-overwrite links, but expose nothing final until smoke has passed.
@@ -180,7 +207,7 @@ def assemble(repo, commit, output, profile="release", *, smoke=False, install_sm
             receipt = Path(str(archive) + ".build.json")
             receipt.write_text(json.dumps({"format": "supertag-native-build-v1", "source": identity,
                 "archive_sha256": digest(archive), "platform": platform, "profile": profile,
-                "tools": tools, "cargo_cache": cargo_cache is not None, "extracted_smoke": smoke or install_smoke,
+                "tools": tools, "terminal_ui": SHIP_TUI, "cargo_cache": cargo_cache is not None, "extracted_smoke": smoke or install_smoke,
                 "installed_smoke": install_smoke}, indent=2, sort_keys=True) + "\n")
             files.append(receipt)
             final_archive = output / archive.name
@@ -192,7 +219,7 @@ def prune_build_scratch(scratch):
     """Release disposable build inputs before smoke extracts another full copy."""
     require(scratch.name.startswith("supertag-release-build-") and scratch.is_dir()
             and not scratch.is_symlink(), "cleanup requires owned build scratch")
-    for name in ("source", "release", "cargo-target", "home"):
+    for name in ("source", "release", "tui", "cargo-target", "home"):
         path = scratch / name
         if path.is_symlink():
             path.unlink()
@@ -263,9 +290,9 @@ def main():
     package.add_argument("--profile", choices=("dev", "release"), default="release")
     package.add_argument("--expect-platform", choices=sorted(PLATFORMS), help="require the builder and runtime tools to match this platform")
     package.add_argument("--install-smoke", action="store_true", help="also verify fresh install/reinstall before publishing local output; implies --smoke")
-    package.add_argument("--smoke", action="store_true", help="also build test equipment and verify the extracted CLI and helpers")
+    package.add_argument("--smoke", action="store_true", help="also build test equipment and verify the extracted CLI, terminal UI, and helpers")
     package.add_argument("--cargo-cache", type=Path, help="keep Cargo's registry and target directory in DIR (home/, target/) so third-party dependency builds can be reused; workspace crates are always rebuilt")
-    package.add_argument("--sign-command", type=Path, help="macOS only: run COMMAND STAGE BINARY... to sign and notarize the binaries before archiving")
+    package.add_argument("--sign-command", type=Path, help="macOS only: run COMMAND --library PATH to sign the terminal UI's native library before it is embedded, and COMMAND STAGE BINARY... to sign and notarize the binaries before archiving")
     verify = commands.add_parser("verify")
     verify.add_argument("archive", type=Path)
     extract = commands.add_parser("extract")

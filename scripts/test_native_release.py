@@ -26,7 +26,7 @@ class NativeReleaseContracts(unittest.TestCase):
         self.root = Path(temporary.name)
         self.stage = self.root / "stage"
         self.stage.mkdir()
-        for name in ("supertag", "supertag-shared-execution"):
+        for name in ("supertag", "supertag-tui", "supertag-shared-execution"):
             (self.stage / name).write_bytes(elf() + name.encode())
             (self.stage / name).chmod(0o755)
         for kind, package in PACKAGES.items():
@@ -174,6 +174,9 @@ class NativeReleaseContracts(unittest.TestCase):
             return target, Path("/verified/node")
         with patch.object(assembly, "snapshot", return_value=(source, self.source)), \
              patch.object(assembly, "build_cli", return_value=self.stage / "supertag"), \
+             patch.object(assembly, "build_tui", return_value=self.stage / "supertag-tui"), \
+             patch.object(assembly, "check_tui"), \
+             patch.object(assembly, "copy_tui_notices"), \
              patch.object(assembly, "build_shared_provider", return_value=self.stage / "supertag-shared-execution"), \
              patch.object(assembly, "tool_versions", return_value={}), \
              patch.object(assembly, "check_provider_version"), \
@@ -226,7 +229,7 @@ class NativeReleaseContracts(unittest.TestCase):
             outside = self.root / "outside"
             outside.mkdir()
             (outside / "sentinel").write_text("preserved")
-            for name in ("source", "release", "cargo-target", "home"):
+            for name in ("source", "release", "tui", "cargo-target", "home"):
                 root = scratch / name
                 root.mkdir()
                 (root / "payload").write_text("discard")

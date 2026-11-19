@@ -1,14 +1,29 @@
 #!/bin/bash
 # Sign and notarize standalone macOS binaries before the release archive records their digests.
+#
+#   notarize-macos-binaries.sh DIRECTORY BINARY...   sign, notarize, and check each ticket
+#   notarize-macos-binaries.sh --library FILE        only sign FILE (hardened runtime, timestamp)
+#
+# The --library form signs OpenTUI's native library before Bun embeds it in supertag-tui, so the
+# library carries the release identity's Team ID when Bun extracts and loads it. supertag-tui is
+# signed with supertag-tui.entitlements (allow-jit only); every other binary gets none.
 set -euo pipefail
 
-dist=${1:?Usage: notarize-macos-binaries.sh DIRECTORY BINARY...}
-shift
-binaries=("$@")
-if [[ ${#binaries[@]} == 0 ]]; then
-  echo "Usage: notarize-macos-binaries.sh DIRECTORY BINARY..." >&2
-  exit 1
+usage="Usage: notarize-macos-binaries.sh DIRECTORY BINARY... | --library FILE"
+library=
+if [[ ${1:-} == --library ]]; then
+  library=${2:?$usage}
+  [[ -f $library && $# == 2 ]] || { echo "$usage" >&2; exit 1; }
+else
+  dist=${1:?$usage}
+  shift
+  binaries=("$@")
+  if [[ ${#binaries[@]} == 0 ]]; then
+    echo "$usage" >&2
+    exit 1
+  fi
 fi
+entitlements="$(cd "$(dirname "$0")" && pwd)/supertag-tui.entitlements"
 credentials=(
   APPLE_DEVELOPER_ID_P12
   APPLE_DEVELOPER_ID_P12_PASSWORD
@@ -75,11 +90,33 @@ if [[ ! $identity =~ ^[[:xdigit:]]{40}$ ]]; then
   exit 1
 fi
 
+# Sign a fresh copy and move it into place: macOS can kill a signed binary rewritten in place.
+sign_fresh() {
+  local target=$1 fresh
+  shift
+  fresh="$work/fresh/$(basename "$target")"
+  mkdir -p "$work/fresh"
+  rm -f "$fresh"
+  cp "$target" "$fresh"
+  codesign --force --options runtime --timestamp --keychain "$keychain" --sign "$identity" "$@" "$fresh"
+  codesign --verify --strict "$fresh"
+  rm -f "$target"
+  mv "$fresh" "$target"
+}
+
+if [[ -n $library ]]; then
+  sign_fresh "$library"
+  echo "Signed $(basename "$library") for embedding."
+  exit 0
+fi
+
 mkdir "$work/submission"
 for binary in "${binaries[@]}"; do
-  codesign --force --options runtime --timestamp --keychain "$keychain" --sign "$identity" \
-    "$dist/$binary"
-  codesign --verify --strict "$dist/$binary"
+  if [[ $binary == supertag-tui ]]; then
+    sign_fresh "$dist/$binary" --entitlements "$entitlements"
+  else
+    sign_fresh "$dist/$binary"
+  fi
   cp "$dist/$binary" "$work/submission/"
 done
 ditto -c -k "$work/submission" "$work/supertag-macos.zip"

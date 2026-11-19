@@ -233,6 +233,26 @@ place to run the commands makes every Task of the lead wait, with `unsandboxed-c
 [Talk to a Tag from your terminal](../guides/talk-to-a-tag.md). The desktop app gives your
 conversations a window of their own.
 
+### Open the terminal UI
+
+`supertag tui`, and plain `supertag` in a terminal, open `supertag-tui`, a full-screen terminal
+UI for your conversations with Tags, when it is installed beside `supertag`. Releases don't
+include it yet, so plain `supertag` prints the help, ending with a line that says the terminal UI
+isn't installed; it ships in a later release.
+
+```sh
+supertag
+supertag tui --gateway team
+```
+
+`supertag` starts the `supertag-tui` installed beside it, after checking that it is from the same
+release, and refuses one from another release. `--binary PATH` or `SUPERTAG_TUI_BINARY` names
+another executable. The terminal UI connects on its own: to the Gateway `--gateway` names (a saved
+name, or a URL with the Operator Token in `SUPERTAG_OPERATOR_TOKEN`), else to the services
+`supertag up` runs from `--state-directory`, `SUPERTAG_STATE_DIR`, or `~/.supertag`. The CLI
+passes it no credential. Outside a terminal, plain `supertag` prints the help instead; when the
+terminal UI isn't installed, the help ends with a line that says so.
+
 The desktop app finds the local Control Plane on its own. While `supertag up` runs one from
 `SUPERTAG_STATE_DIR` or `~/.supertag`, it lists it as **Local** and connects with the local
 operator token, with nothing to enter. With no saved Control Plane last used, it opens Local at

@@ -50,6 +50,7 @@ def smoke_install(archive, fixture, node, opencode_fixture=None, provider_proto=
                 "shared_execution_provider": provider,
                 "old_state_preserved": True, "installed_opencode_task": True,
                 "installed_cli_task": round_trip["real_cli_task_round_trip"],
+                "installed_terminal_ui": round_trip["terminal_ui"],
                 "clean_service_shutdown": round_trip["clean_service_shutdown"],
                 "fixture_adapter_sha256": digest(fixture), "synthetic_native_fixture_sha256": digest(opencode_fixture),
                 "real_provider_calls": False}
