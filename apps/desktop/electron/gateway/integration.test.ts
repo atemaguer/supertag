@@ -425,6 +425,7 @@ describe.skipIf(CLI === undefined)(
           harnesses: [],
           workspaces: [],
           noCommands: [],
+          noWeb: [],
         });
         const newTag = { tagId: "reviewer", name: "Reviewer", harness: "claude_code" };
         const created = await client.createTag(id, newTag);
@@ -434,7 +435,13 @@ describe.skipIf(CLI === undefined)(
           harnessKind: "claude_code",
           revision: 1,
           lead: false,
-          allowedActions: ["commands:execute", "files:read", "files:write", "schedule:create"],
+          allowedActions: [
+            "commands:execute",
+            "files:read",
+            "files:write",
+            "schedule:create",
+            "web:fetch",
+          ],
         });
         await expect(client.createTag(id, newTag)).rejects.toBe(
           "A Tag with that ID or name already exists.",

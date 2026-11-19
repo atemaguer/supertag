@@ -35,6 +35,7 @@ import {
   TaskState,
   TURN_GUIDANCE,
   tagPortfolio,
+  webAccessNote,
   withObjectiveReport,
   workerHostFailure,
 } from "@supertag/worker-sdk/internal/rust-harness";
@@ -882,6 +883,7 @@ export async function runAdapter(
       systemPrompt: [
         task.instructions,
         TURN_GUIDANCE,
+        webAccessNote(task.allowedActions),
         tagPortfolio(run),
         remote
           ? `The Task workspace is in a sandbox. Use the mcp__workspace tools, with paths relative to the workspace, for every file and command in it.${memory ? " Your memory folder is not in the sandbox: it is on this Worker Host, so keep your memories there with Read, Write, and Edit." : ""}`

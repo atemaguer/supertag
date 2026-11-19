@@ -47,7 +47,8 @@ run; [Let the lead run commands](../../docs/operations/cli.md#let-the-lead-run-c
 on later. `--yes` accepts every default and needs no terminal. It writes `~/.supertag/supertag.yaml` and starts, in the background:
 
 - a `control-plane` service, which creates the Permission Set `local-tools` (`files:read`,
-  `files:write`, and `schedule:create`, and for Codex also `commands:execute` and `web:fetch`), the Role `Lead`, and the Tag `lead`, bound to this repository's Workspace and
+  `files:write`, `schedule:create`, and, except for Cursor, `web:fetch`, and for Codex also
+`commands:execute`), the Role `Lead`, and the Tag `lead`, bound to this repository's Workspace and
   following the branch checked out when `init` ran;
 - a Gateway; and
 - a `host` service named after the machine, which maps this repository as the Workspace,
@@ -65,11 +66,17 @@ output. To follow another branch or pin a commit, apply a Tag manifest; see [Wor
 Operator commands use these local services without a flag; `--gateway NAME` targets
 another Control Plane.
 
-If `lead` runs on Codex, `local-tools` also grants `web:fetch`, and `init` says so. Current Codex
-models run commands only in Codex code mode, which SuperTag starts only for a Task that also has
-`web:fetch`. `web:fetch` also opens the network to its commands; to keep them offline, remove it
-from `supertag.yaml` and select a Codex model that is not code-mode-only. See
+`local-tools` grants `web:fetch` on every harness but Cursor, which has no tool for reading web
+pages, and `init` says so: the lead can read web pages,
+and its commands can reach the network. Web pages can carry instructions, so for a lead that
+handles secrets, remove it from `supertag.yaml` and run `supertag up`. A lead whose commands run in
+local-vm containers gets none, because the containers have no network. Current Codex models run
+commands only in Codex code mode, which SuperTag starts only for a Task that also has `web:fetch`;
+to keep a Codex lead offline, also select a Codex model that is not code-mode-only. See
 [Codex commands and models](../../docs/operations/requirements.md#codex-commands-and-models).
+
+A Tag without `web:fetch` hears so at the start of each turn, so it tells the person it has no web
+access and that an operator can grant `web:fetch`, instead of refusing vaguely.
 
 ## 3. Create the first Objective
 

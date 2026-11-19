@@ -58,6 +58,11 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- New Tags get web access (`web:fetch`) by default: they can read web pages, and their commands
+  can reach the network. `supertag init` grants it to the lead on every harness but Cursor, except
+  on a local-vm host, and says how to remove it. The desktop app's New Tag form has a **Web
+  access** switch, on by default. A Tag without `web:fetch` hears so at the start of each turn, so
+  it names the missing permission instead of refusing vaguely.
 - A host's `concurrency` is now the machine's total: how many Task Attempts it runs at once
   across all its harnesses, instead of that many for each harness. Its harnesses share the
   slots, so one harness with no work leaves them to the others. A host service's
@@ -139,6 +144,12 @@ within the pre-1.0 compatibility policy described in
   what the CLI printed. A remote Gateway from another release still gets the error alone.
 
 ### Changed
+
+- New Tags get web access (`web:fetch`) by default: they can read web pages, and their commands
+  can reach the network. `supertag init` grants it to the lead on every harness but Cursor, except
+  on a local-vm host, and says how to remove it. The desktop app's New Tag form has a **Web
+  access** switch, on by default. A Tag without `web:fetch` hears so at the start of each turn, so
+  it names the missing permission instead of refusing vaguely.
 
 - SuperTag now speaks protocol 6; 0.3.1 spoke protocol 5. Upgrade the Control Plane, Gateways,
   Worker Hosts, and clients together: a 0.3.1 Worker Host, CLI, terminal UI, or desktop app is
@@ -392,6 +403,12 @@ within the pre-1.0 compatibility policy described in
   `HarnessMemory` services, `AttemptCapabilities.may_remember`, and `Tag.memory` are new.
 
 ### Changed
+
+- New Tags get web access (`web:fetch`) by default: they can read web pages, and their commands
+  can reach the network. `supertag init` grants it to the lead on every harness but Cursor, except
+  on a local-vm host, and says how to remove it. The desktop app's New Tag form has a **Web
+  access** switch, on by default. A Tag without `web:fetch` hears so at the start of each turn, so
+  it names the missing permission instead of refusing vaguely.
 
 - A Codex Tag's daily review turn runs Codex's own memory consolidation and waits up to 3 minutes
   for it, so the notes the Tag's turns kept reach the summary Codex reads at the start of every
@@ -734,6 +751,12 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- New Tags get web access (`web:fetch`) by default: they can read web pages, and their commands
+  can reach the network. `supertag init` grants it to the lead on every harness but Cursor, except
+  on a local-vm host, and says how to remove it. The desktop app's New Tag form has a **Web
+  access** switch, on by default. A Tag without `web:fetch` hears so at the start of each turn, so
+  it names the missing permission instead of refusing vaguely.
+
 - The Control Plane stores no artifact or Workspace delivery bytes. Worker Hosts keep them in
   their artifact directory (`--artifact-directory`, which replaces `--artifact-source-directory`)
   and the Control Plane relays them to readers. Reading them needs the holding Worker Host to be
@@ -795,6 +818,12 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- New Tags get web access (`web:fetch`) by default: they can read web pages, and their commands
+  can reach the network. `supertag init` grants it to the lead on every harness but Cursor, except
+  on a local-vm host, and says how to remove it. The desktop app's New Tag form has a **Web
+  access** switch, on by default. A Tag without `web:fetch` hears so at the start of each turn, so
+  it names the missing permission instead of refusing vaguely.
+
 - Setup and the quickstart now guide your first conversation through the terminal UI. If there
   are no Tags, SuperTag shows how to get started with `supertag init`.
 - The terminal UI can send follow-up messages to an Objective's owner.
@@ -847,6 +876,12 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- New Tags get web access (`web:fetch`) by default: they can read web pages, and their commands
+  can reach the network. `supertag init` grants it to the lead on every harness but Cursor, except
+  on a local-vm host, and says how to remove it. The desktop app's New Tag form has a **Web
+  access** switch, on by default. A Tag without `web:fetch` hears so at the start of each turn, so
+  it names the missing permission instead of refusing vaguely.
+
 - `supertag get objective`, and `--output json` of `supertag create objective`, `update objective`, `complete objective`, `approve objective`, `describe objective`, `list approval`, `list inbox`, and `watch inbox`, print the RPC's message in proto3 JSON: lowerCamelCase fields, enum value names such as `OBJECTIVE_STATUS_WORKING` and `INBOX_ITEM_KIND_QUESTION`, 64-bit numbers as strings, and empty fields left out. Inbox items no longer carry `permittedActions`, `redaction`, `ageSeconds`, or `projectionVersion`, and the Objective overview no longer carries `pageUsage` or each Task's budget accounting; its `budget` covers the whole Objective. Text output is unchanged.
 - `supertag get task`, `events task`, `watch task`, `cancel task --output json`, `get session`, `watch session`, `get artifact`, and `get team`, and `list task`, `list session`, `list artifact`, `list team`, `list message`, `list mailbox-grant`, and `list workstream-post` with `--output json` or `yaml`, print the RPC's message in proto3 JSON. A Task, Session, or artifact is its own message rather than an `apiVersion`, `kind`, `metadata`, `spec`, and `status` envelope, and a list is the response message, such as `{"tasks": [...]}`. A Team lists `members` with each Tag's ID and name instead of `memberTagIds`. Text output is unchanged.
 - Another operator's CLI conversation Session, the work Sessions its turns started, and their Tasks, events, native archives, and artifacts are hidden: lists leave them out and reads fail as not found. The admin token is the operator `admin`, so it no longer sees Operator Token holders' conversations either. Before, every operator could read them.
@@ -892,6 +927,12 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- New Tags get web access (`web:fetch`) by default: they can read web pages, and their commands
+  can reach the network. `supertag init` grants it to the lead on every harness but Cursor, except
+  on a local-vm host, and says how to remove it. The desktop app's New Tag form has a **Web
+  access** switch, on by default. A Tag without `web:fetch` hears so at the start of each turn, so
+  it names the missing permission instead of refusing vaguely.
+
 - Claude Code and Codex Tasks run the `claude` and `codex` CLIs you install instead of copies bundled with the vendor SDKs. `supertag init` and host startup check that each is installed and at least the version SuperTag's SDK targets, and name the upgrade command when it isn't.
 - The installer script (`install.sh`) installs the npm package with your Node.js 22.13 or newer and npm, and removes the bundled Claude Code and Codex CLI copies; releases no longer attach per-platform archives with their own Node.js.
 - Document the installer script alongside npm, including version selection, installation paths, upgrades, and removal.
@@ -899,6 +940,12 @@ within the pre-1.0 compatibility policy described in
 ## [0.2.0-alpha.5] - 2026-11-03
 
 ### Changed
+
+- New Tags get web access (`web:fetch`) by default: they can read web pages, and their commands
+  can reach the network. `supertag init` grants it to the lead on every harness but Cursor, except
+  on a local-vm host, and says how to remove it. The desktop app's New Tag form has a **Web
+  access** switch, on by default. A Tag without `web:fetch` hears so at the start of each turn, so
+  it names the missing permission instead of refusing vaguely.
 
 - Rewrite the npm package page around Objectives and teams, with a runnable first result, current integrations and SDK entry points, and direct documentation links.
 - Install the CLI and TypeScript SDK from npm and the Python SDK from PyPI; setup guides and operator skills no longer require a SuperTag checkout.
@@ -939,6 +986,12 @@ within the pre-1.0 compatibility policy described in
 - Show Volume write manifests in Task descriptions and Objective overviews.
 
 ### Changed
+
+- New Tags get web access (`web:fetch`) by default: they can read web pages, and their commands
+  can reach the network. `supertag init` grants it to the lead on every harness but Cursor, except
+  on a local-vm host, and says how to remove it. The desktop app's New Tag form has a **Web
+  access** switch, on by default. A Tag without `web:fetch` hears so at the start of each turn, so
+  it names the missing permission instead of refusing vaguely.
 
 - The coding-agent skill is now the operator skill, `skills/operate-supertag`, with its guide at `docs/guides/coding-agent-operator.md`. Reinstall it under the new name.
 - Split long artifact, credential storage, harness runtime, and contributor documentation sections into shorter subsections.
@@ -1031,6 +1084,12 @@ within the pre-1.0 compatibility policy described in
   it, and its owner is woken once automatically. Delegated work still in flight isn't a stall.
 
 ### Changed
+
+- New Tags get web access (`web:fetch`) by default: they can read web pages, and their commands
+  can reach the network. `supertag init` grants it to the lead on every harness but Cursor, except
+  on a local-vm host, and says how to remove it. The desktop app's New Tag form has a **Web
+  access** switch, on by default. A Tag without `web:fetch` hears so at the start of each turn, so
+  it names the missing permission instead of refusing vaguely.
 
 - Custom Worker authors must replace `GitWorktreeWorkspaceResolver` with
   `WorkspaceEnvironmentResolver` and use the `WorkspaceEnvironment` contract
@@ -1186,6 +1245,12 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- New Tags get web access (`web:fetch`) by default: they can read web pages, and their commands
+  can reach the network. `supertag init` grants it to the lead on every harness but Cursor, except
+  on a local-vm host, and says how to remove it. The desktop app's New Tag form has a **Web
+  access** switch, on by default. A Tag without `web:fetch` hears so at the start of each turn, so
+  it names the missing permission instead of refusing vaguely.
+
 - **Unsandboxed harnesses need an opt-in to run commands.** Claude Code and OpenCode on a host
   service run commands as you, without a sandbox. A host now runs Tasks granted
   `commands:execute` on them only when its service lists them in `allow-unsandboxed-commands`;
@@ -1244,6 +1309,12 @@ within the pre-1.0 compatibility policy described in
 ## [0.1.2] - 2026-08-11
 
 ### Changed
+
+- New Tags get web access (`web:fetch`) by default: they can read web pages, and their commands
+  can reach the network. `supertag init` grants it to the lead on every harness but Cursor, except
+  on a local-vm host, and says how to remove it. The desktop app's New Tag form has a **Web
+  access** switch, on by default. A Tag without `web:fetch` hears so at the start of each turn, so
+  it names the missing permission instead of refusing vaguely.
 
 - Lowered the Node.js requirement for the npm-installed CLI and SDK to Node.js
   20.18.1 or newer.

@@ -22,6 +22,7 @@ import {
   WorkSessionCloseReason,
   WorkSessionQuestionSchema,
   WorkSessionSchema,
+  webAccessNote,
   withObjectiveReport,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import { expect, it, vi } from "vitest";
@@ -367,6 +368,11 @@ it("reads the Tag's Sessions and Objectives, refuses an unasked Objective, and c
     "SuperTag context:\nTag portfolio: this Tag owns no open Objectives you can see.",
   );
   expect(tagPortfolio(create(HarnessRunSchema, { coordination: {} }))).toBe("");
+  // A Task without web:fetch hears so; the line grants nothing.
+  expect(webAccessNote(["files:read", "web:fetch"])).toBe("");
+  expect(webAccessNote(["files:read"])).toMatch(
+    /^This Tag has no web access: .* grant web:fetch\.$/u,
+  );
   const abort = new AbortController();
   const service = await startCoordination(bridge, run, {
     taskId,

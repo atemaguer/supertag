@@ -20,8 +20,12 @@ import { harnessName } from "./convert";
 const NEW_TAG_ACTIONS = ["files:read", "files:write", "schedule:create"];
 /** Running commands, which `supertag init` also gives a lead whose host can run them. */
 const COMMANDS = "commands:execute";
-/** Current Codex models run commands only in code mode, which needs web fetches. */
-const CODEX_ACTIONS = ["web:fetch"];
+/**
+ * Web access, which a new Tag gets unless the form switched it off: reading web pages, and
+ * network access for its commands. Current Codex models run commands only in code mode, which
+ * needs it. Cursor has no web fetch tool and runs no Task that may use one.
+ */
+const WEB = "web:fetch";
 
 /**
  * Whether a host whose harness reports `profile` runs that harness's commands. Codex sandboxes
@@ -46,6 +50,12 @@ function runsCommands(kind: HarnessKind, profile: HarnessExecutionProfile | unde
   return true;
 }
 
+/**
+ * Whether a host lane runs a Task with an unscoped `web:fetch`. A remote sandbox or local-vm
+ * container has no network, and the web tools would run on the host, so it does not.
+ */
+const runsWeb = (profile: HarnessExecutionProfile | undefined) => !profile?.remoteFileWorkspace;
+
 const sortedUnique = (values: string[]) => [...new Set(values)].sort();
 
 /**
@@ -55,6 +65,7 @@ const sortedUnique = (values: string[]) => [...new Set(values)].sort();
 export function optionsOf(hosts: readonly WorkerHostStatus[]): TagOptions {
   const harnesses: string[] = [];
   const commands: string[] = [];
+  const web: string[] = [];
   const workspaces: string[] = [];
   for (const host of hosts) {
     if (
@@ -79,6 +90,7 @@ export function optionsOf(hosts: readonly WorkerHostStatus[]): TagOptions {
       if (kind === HarnessKind.UNSPECIFIED) continue;
       harnesses.push(harnessName(kind));
       if (runsCommands(kind, profile)) commands.push(harnessName(kind));
+      if (runsWeb(profile)) web.push(harnessName(kind));
     }
     workspaces.push(...host.workspaceIds);
   }
@@ -87,6 +99,7 @@ export function optionsOf(hosts: readonly WorkerHostStatus[]): TagOptions {
     harnesses: offered,
     workspaces: sortedUnique(workspaces),
     noCommands: offered.filter((harness) => !commands.includes(harness)),
+    noWeb: offered.filter((harness) => !web.includes(harness)),
   };
 }
 
@@ -105,7 +118,7 @@ export function putTagRequest(tag: NewTag, commands: boolean) {
     allowedActions: [
       ...(commands ? [COMMANDS] : []),
       ...NEW_TAG_ACTIONS,
-      ...(kind === HarnessKind.CODEX ? CODEX_ACTIONS : []),
+      ...(tag.webAccess === false || kind === HarnessKind.CURSOR ? [] : [WEB]),
     ],
     ...(workspaceId !== undefined && workspaceId !== ""
       ? {

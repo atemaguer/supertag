@@ -135,6 +135,9 @@ start needs Docker running for the host's user. local-vm refuses Podman for now;
 host to Docker.
 A Codex Tag on a code-mode-only model needs `web:fetch` as well as `commands:execute` to run
 commands; see [Codex commands and models](../operations/requirements.md#codex-commands-and-models).
+A Tag that says it has no web access lacks `web:fetch`. Add
+`{ target: runtime, action: web:fetch }` to one of its Permission Sets to let it read web pages
+and its commands reach the network; see [Current action vocabulary](../reference/iam.md#current-action-vocabulary).
 
 ## 7. Check the run and the reply
 

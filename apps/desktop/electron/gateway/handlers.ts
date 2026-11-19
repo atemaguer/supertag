@@ -63,6 +63,9 @@ function newTag(value: unknown): NewTag {
     if (sessions > 0xffff_ffff) throw INVALID_REQUEST;
     checked.maxWorkSessions = sessions;
   }
+  const web = tag["webAccess"];
+  if (web !== undefined && typeof web !== "boolean") throw INVALID_REQUEST;
+  if (web !== undefined) checked.webAccess = web;
   return checked;
 }
 

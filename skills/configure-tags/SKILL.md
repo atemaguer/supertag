@@ -42,7 +42,11 @@ makes a Tag the lead; the Control Plane refuses a second lead and names the curr
 it first with `--lead false`. `tag put` without `--lead` keeps the Tag's current value. An
 operator can also create a Tag from the desktop app's New Tag dialog, which offers every harness
 and Workspace the connected Worker Hosts serve and, on the local services, can add a folder as a
-new Workspace (`supertag workspace add PATH` does the same from the CLI).
+new Workspace (`supertag workspace add PATH` does the same from the CLI). Its **Web access**
+switch, on by default, grants `web:fetch`: the Tag can read web pages and its commands can reach
+the network. Switch it off for a Tag that handles secrets. It starts off for a harness whose hosts
+run Tasks only in sandboxes without network, where a Tag with an unscoped `web:fetch` can't run,
+and stays off for Cursor, which has no tool for reading web pages.
 
 A Tag may have 8 [work Sessions](../../docs/reference/coordination.md#open-work-sessions) open at
 once by default. Raise or lower it, from 1 to 64, with `tag put TAG --max-work-sessions N` or a

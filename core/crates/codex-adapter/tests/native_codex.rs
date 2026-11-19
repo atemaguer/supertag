@@ -2016,9 +2016,13 @@ async fn native_app_server_uses_exact_model_read_only_sandbox_scoped_env_and_red
             .iter()
             .any(|value| value.contains(KEY) || value.contains(TOKEN))
     );
+    // A Task without web:fetch hears so, rather than finding out from a failed fetch.
     assert_eq!(
         fixture.read("prompt")?,
-        "Tag instructions:\nReview carefully\n\nTask:\nInspect this fixture\n"
+        format!(
+            "Tag instructions:\nReview carefully\n\n{}\n\nTask:\nInspect this fixture\n",
+            supertag_protocol::NO_WEB_ACCESS
+        )
     );
     let environment = fixture.read("env")?;
     // `codex app-server` reads only auth.json, so the key is staged there, never in the env.

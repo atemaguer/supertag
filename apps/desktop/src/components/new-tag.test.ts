@@ -82,6 +82,7 @@ it("creates a Tag from a name, an offered harness, and the only Workspace", asyn
     harness: "opencode",
     workspaceId: "supertag",
     maxWorkSessions: 3,
+    webAccess: true,
   });
   expect(onCreated).toHaveBeenCalledWith(created);
   expect(onOpenChange).toHaveBeenCalledWith(false);
@@ -111,6 +112,7 @@ it("offers every harness when no Worker Host is connected, and shows a refusal",
     harness: "codex",
     workspaceId: undefined,
     maxWorkSessions: 8,
+    webAccess: true,
   });
   expect(field('[role="alert"]').textContent).toBe("A Tag with that ID or name already exists.");
   expect(onCreated).not.toHaveBeenCalled();
@@ -137,6 +139,63 @@ it("offers no folder outside the local Gateway, and says when a harness runs no 
   expect(document.body.textContent).toContain(
     "Claude Code has no sandbox of its own, and no host here lets it run commands",
   );
+});
+
+it("gives web access by default, and warns when Codex is left without it", async () => {
+  const admin: TagAdmin = {
+    options: async () => ({ harnesses: ["claude_code", "codex"], workspaces: [] }),
+    create: vi.fn(async () => created),
+  };
+  await open(admin);
+  const web = field<HTMLInputElement>("#tag-web-access");
+  expect(web.checked).toBe(true);
+  expect(document.body.textContent).toContain("its commands can reach the network");
+  const warning = "Current Codex models may not run commands without web access.";
+  act(() => web.click());
+  expect(web.checked).toBe(false);
+  expect(document.body.textContent).toContain(warning);
+  act(() => choose(field<HTMLSelectElement>("#tag-harness"), "claude_code"));
+  expect(document.body.textContent).not.toContain(warning);
+  expect(document.body.textContent).not.toContain("sandboxes without network");
+
+  act(() => type(field<HTMLInputElement>("#tag-name"), "Vault"));
+  await act(async () => {
+    field<HTMLFormElement>(".workspace-dialog form").requestSubmit();
+  });
+  expect(admin.create).toHaveBeenCalledWith(
+    expect.objectContaining({ tagId: "vault", harness: "claude_code", webAccess: false }),
+  );
+});
+
+it("leaves web access off where the harness's hosts have no network", async () => {
+  const admin: TagAdmin = {
+    options: async () => ({
+      harnesses: ["claude_code", "codex"],
+      workspaces: [],
+      noWeb: ["claude_code"],
+    }),
+    create: vi.fn(async () => created),
+  };
+  await open(admin);
+  const web = field<HTMLInputElement>("#tag-web-access");
+  expect(web.checked).toBe(true);
+  act(() => choose(field<HTMLSelectElement>("#tag-harness"), "claude_code"));
+  expect(web.checked).toBe(false);
+  expect(document.body.textContent).toContain(
+    "Claude Code runs here only in sandboxes without network",
+  );
+});
+
+it("offers Cursor no web access", async () => {
+  const admin: TagAdmin = {
+    options: async () => ({ harnesses: ["cursor"], workspaces: [] }),
+    create: vi.fn(async () => created),
+  };
+  await open(admin);
+  const web = field<HTMLInputElement>("#tag-web-access");
+  expect(web.checked).toBe(false);
+  expect(web.disabled).toBe(true);
+  expect(document.body.textContent).toContain("Cursor has no tool for reading web pages.");
 });
 
 it("adds a chosen folder as a Workspace and starts the Tag on its branch", async () => {
@@ -183,6 +242,7 @@ it("adds a chosen folder as a Workspace and starts the Tag on its branch", async
     workspaceRef: "trunk",
     workspaceCommit: undefined,
     maxWorkSessions: 8,
+    webAccess: true,
   });
 });
 

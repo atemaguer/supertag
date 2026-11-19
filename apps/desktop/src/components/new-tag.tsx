@@ -25,8 +25,9 @@ const CHOOSE_FOLDER = " choose-folder";
 
 /**
  * Creates a Tag from a name and a harness, and optionally a Workspace. The rest matches the lead
- * Tag `supertag init` creates: it may edit files and, where its host can, run commands. On the
- * local Gateway, a folder of this machine can be added as a new Workspace.
+ * Tag `supertag init` creates: it may edit files, read web pages unless Web access is switched
+ * off, and, where its host can, run commands. On the local Gateway, a folder of this machine can
+ * be added as a new Workspace.
  */
 export function NewTagDialog({
   admin,
@@ -45,7 +46,8 @@ export function NewTagDialog({
         <DialogHeader>
           <DialogTitle>New Tag</DialogTitle>
           <DialogDescription>
-            A Tag can edit files and run commands, like the lead Tag supertag init creates.
+            A Tag can edit files, run commands, and read web pages, like the lead Tag supertag init
+            creates.
           </DialogDescription>
         </DialogHeader>
         {open && (
@@ -71,6 +73,8 @@ function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag)
   const [added, setAdded] = useState<Record<string, AddedWorkspace>>({});
   const [adding, setAdding] = useState(false);
   const [maxWorkSessions, setMaxWorkSessions] = useState(8);
+  /** The person's choice; until they make one, on unless the harness's hosts have no network. */
+  const [webChoice, setWebChoice] = useState<boolean>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -109,6 +113,10 @@ function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag)
     ? [...new Set([...options.workspaces, ...Object.keys(added)])].sort()
     : [];
   const noCommands = options?.noCommands?.includes(harness) ?? false;
+  const noWeb = options?.noWeb?.includes(harness) ?? false;
+  /** Cursor has no web fetch tool, and runs no Tag that may use one. */
+  const webless = harness === "cursor";
+  const webAccess = !webless && (webChoice ?? !noWeb);
 
   /** Asks for a folder, adds it as a Workspace of this machine, and selects it. */
   async function addFolder() {
@@ -143,6 +151,7 @@ function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag)
           workspaceRef: start?.workspaceRef,
           workspaceCommit: start?.workspaceCommit,
           maxWorkSessions,
+          webAccess,
         }),
       );
     } catch (error) {
@@ -242,6 +251,36 @@ function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag)
       <small id="tag-work-sessions-hint" className="field-hint">
         Longer work the Tag may have open across all its conversations.
       </small>
+      <label htmlFor="tag-web-access" className="field-switch">
+        <input
+          id="tag-web-access"
+          name="webAccess"
+          type="checkbox"
+          role="switch"
+          checked={webAccess}
+          aria-checked={webAccess}
+          disabled={webless}
+          aria-describedby="tag-web-access-hint"
+          onChange={(event) => setWebChoice(event.target.checked)}
+        />
+        Web access
+      </label>
+      <small id="tag-web-access-hint" className="field-hint">
+        The Tag can read web pages, and its commands can reach the network. Web pages can carry
+        instructions, so leave this off for a Tag that handles secrets.
+      </small>
+      {webless && <small className="field-hint">Cursor has no tool for reading web pages.</small>}
+      {noWeb && !webless && (
+        <small className="field-hint">
+          {harnessLabel(harness) ?? harness} runs here only in sandboxes without network, which run
+          no Tag with web access.
+        </small>
+      )}
+      {!webAccess && harness === "codex" && (
+        <small className="field-hint">
+          Current Codex models may not run commands without web access.
+        </small>
+      )}
       {error && (
         <p className="field-error" role="alert">
           {error}

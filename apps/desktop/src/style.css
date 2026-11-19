@@ -1554,6 +1554,44 @@ button.identity-pill[aria-expanded="true"] {
   color: var(--muted);
   font-size: 12px;
 }
+/* A checkbox drawn as a switch, its label beside it. */
+.workspace-dialog .field-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.workspace-dialog .field-switch input {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 16px;
+  padding: 0;
+  border-radius: 8px;
+  background: var(--line);
+  cursor: pointer;
+  transition: background 120ms;
+}
+.workspace-dialog .field-switch input::before {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text);
+  transition: transform 120ms;
+}
+.workspace-dialog .field-switch input:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.workspace-dialog .field-switch input:checked::before {
+  transform: translateX(12px);
+  background: #251b17;
+}
 .dialog-actions {
   display: flex;
   flex-direction: row;

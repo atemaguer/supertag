@@ -193,6 +193,17 @@ type Tool = keyof typeof schemas;
 export const TURN_GUIDANCE =
   "When a turn will take more than a moment, open it with one short sentence saying what you are about to do, as its own message, then do it. Answer a quick question directly.";
 
+/**
+ * What SuperTag tells a Tag whose Task may not fetch from the web, so it names the missing
+ * permission instead of refusing vaguely; empty when it may. State, not instructions: it grants
+ * nothing. Matches Rust `supertag_protocol::NO_WEB_ACCESS`.
+ */
+export function webAccessNote(allowedActions: readonly string[]): string {
+  return allowedActions.includes("web:fetch")
+    ? ""
+    : "This Tag has no web access: its Permission Sets do not grant web:fetch, so it cannot read web pages and its commands cannot reach the network. That is its configuration, not an outage; an operator can grant web:fetch.";
+}
+
 export function tagPortfolio(run: Pick<HarnessRun, "coordination">): string {
   const portfolio = run.coordination?.mayReadTagSessions ? run.coordination.tagPortfolio : "";
   return portfolio ? `SuperTag context:\n${portfolio}` : "";

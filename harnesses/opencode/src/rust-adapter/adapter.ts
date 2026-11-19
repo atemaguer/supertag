@@ -21,6 +21,7 @@ import {
   TaskState,
   TURN_GUIDANCE,
   tagPortfolio,
+  webAccessNote,
   withObjectiveReport,
   workerHostFailure,
 } from "@supertag/worker-sdk/internal/rust-harness";
@@ -351,6 +352,7 @@ export async function nativeRequest(
   const prompt = [
     redact(task.instructions, secrets),
     TURN_GUIDANCE,
+    webAccessNote(task.allowedActions),
     redact(context, secrets),
     sessionRecap(history, task.sessionId, secrets, reread),
     redact(task.prompt, secrets),

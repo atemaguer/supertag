@@ -397,7 +397,13 @@ it("gives a new Tag the lead Tag defaults and never replaces another", () => {
     name: "Reviewer",
     maxWorkSessions: 3,
     harnessKind: HarnessKind.CLAUDE_CODE,
-    allowedActions: ["commands:execute", "files:read", "files:write", "schedule:create"],
+    allowedActions: [
+      "commands:execute",
+      "files:read",
+      "files:write",
+      "schedule:create",
+      "web:fetch",
+    ],
     workspace: { workspaceId: "supertag", baseRef: "" },
     expectedRevision: 0n,
   });
@@ -421,7 +427,21 @@ it("gives a new Tag the lead Tag defaults and never replaces another", () => {
     "files:read",
     "files:write",
     "schedule:create",
+    "web:fetch",
   ]);
+  // Cursor has no web fetch tool, and runs no Task that may use one.
+  expect(putTagRequest({ ...base, harness: "cursor" }, true).allowedActions).not.toContain(
+    "web:fetch",
+  );
+  // Web access is on unless the form switched it off.
+  for (const harness of ["claude_code", "codex"]) {
+    expect(putTagRequest({ ...base, harness, webAccess: false }, true).allowedActions).toEqual([
+      "commands:execute",
+      "files:read",
+      "files:write",
+      "schedule:create",
+    ]);
+  }
   // A folder just added names where Sessions start.
   expect(
     putTagRequest({ ...base, harness: "codex", workspaceId: "site", workspaceRef: "trunk" }, true)
@@ -451,9 +471,18 @@ it("follows the branch its Workspace's lead follows", () => {
 });
 
 it("offers every ready host's harnesses and Workspaces", () => {
-  const slot = (harnessKind: HarnessKind, unsandboxed: boolean, commandSandbox = false) => ({
+  const slot = (
+    harnessKind: HarnessKind,
+    unsandboxed: boolean,
+    commandSandbox = false,
+    remoteFileWorkspace = false,
+  ) => ({
     harnessKind,
-    executionProfile: { allowUnsandboxedCommands: unsandboxed, commandSandbox },
+    executionProfile: {
+      allowUnsandboxedCommands: unsandboxed,
+      commandSandbox,
+      remoteFileWorkspace,
+    },
   });
   const host = (
     phase: HostPhase,
@@ -476,6 +505,7 @@ it("offers every ready host's harnesses and Workspaces", () => {
     harnesses: ["claude_code", "codex"],
     workspaces: ["site", "supertag"],
     noCommands: ["claude_code"],
+    noWeb: [],
   });
   expect(
     optionsOf([
@@ -488,6 +518,7 @@ it("offers every ready host's harnesses and Workspaces", () => {
     harnesses: ["claude_code", "codex"],
     workspaces: ["site", "supertag"],
     noCommands: [],
+    noWeb: [],
   });
   // A Claude Code lane that runs commands in Claude Code's own sandbox runs them too.
   const sandboxed = host(
@@ -496,7 +527,15 @@ it("offers every ready host's harnesses and Workspaces", () => {
     ["supertag"],
   );
   expect(optionsOf([sandboxed]).noCommands).toEqual([]);
-  expect(optionsOf([])).toEqual({ harnesses: [], workspaces: [], noCommands: [] });
+  // A lane that runs Tasks in a remote sandbox or local-vm container has no network.
+  const vm = host(
+    HostPhase.READY,
+    [slot(HarnessKind.CLAUDE_CODE, false, false, true)],
+    ["supertag"],
+  );
+  expect(optionsOf([vm])).toMatchObject({ noCommands: [], noWeb: ["claude_code"] });
+  expect(optionsOf([vm, sandboxed]).noWeb).toEqual([]);
+  expect(optionsOf([])).toEqual({ harnesses: [], workspaces: [], noCommands: [], noWeb: [] });
 });
 
 it("shows a Tag's activity, notes, network log and Schedules as the window reads them", () => {

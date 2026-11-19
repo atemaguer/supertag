@@ -97,8 +97,10 @@ of three ways:
 - **In Claude Code's own sandbox**, with `sandbox-commands: [claude-code]` on the host service.
   `supertag init` sets this wherever the sandbox can start: on macOS, and on Linux with
   bubblewrap (`bwrap`), `socat`, and unprivileged user namespaces. Commands write only the
-  Workspace, cannot read hidden paths or the credential folders in your home, and have no network
-  unless the Task has `web:fetch`. The host needs Claude Code 2.1.323 or later and refuses to
+  Workspace, cannot read hidden paths or the credential folders in your home, and reach the
+  network only when the Task has `web:fetch`. The lead Tag `supertag init` creates and Tags from
+  the desktop app's New Tag form have it by default; remove it for a Tag that handles secrets. The
+  host needs Claude Code 2.1.323 or later and refuses to
   start with an older one; run `claude update`. See
   [Sandboxed Claude Code commands](../reference/supertag-yaml.md#sandboxed-claude-code-commands)
   for exactly what is kept from commands.

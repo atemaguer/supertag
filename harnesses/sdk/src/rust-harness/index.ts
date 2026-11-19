@@ -31,6 +31,7 @@ export {
   tagPortfolio,
   validCoordinationArguments,
   WORKSTREAM_POST_ACTION,
+  webAccessNote,
   withObjectiveReport,
 } from "./coordination.js";
 export { startCoordinationHttp } from "./coordination-http.js";

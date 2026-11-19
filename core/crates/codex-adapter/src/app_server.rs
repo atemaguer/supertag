@@ -940,6 +940,9 @@ pub(crate) async fn execute(
     if memory {
         prompt.push_str(&format!("{}\n\n", crate::native_memory::NUDGE));
     }
+    if let Some(note) = supertag_protocol::web_access_note(&task.allowed_actions) {
+        prompt.push_str(&format!("{note}\n\n"));
+    }
     if !portfolio.is_empty() {
         prompt.push_str(&format!("SuperTag context:\n{portfolio}\n\n"));
     }

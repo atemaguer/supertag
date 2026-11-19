@@ -37,6 +37,17 @@ pub const FILE_DESCRIPTOR_SET: &[u8] =
 /// do not open a longer turn with a message on their own: Claude Code, Cursor and OpenCode, not
 /// Codex. The sentence it asks for reaches the person at once as its own message, before the work.
 pub const TURN_GUIDANCE: &str = "When a turn will take more than a moment, open it with one short sentence saying what you are about to do, as its own message, then do it. Answer a quick question directly.";
+/// What SuperTag tells a Tag whose Task may not fetch from the web, so it names the missing
+/// permission instead of refusing vaguely. State, not instructions: it grants nothing.
+pub const NO_WEB_ACCESS: &str = "This Tag has no web access: its Permission Sets do not grant web:fetch, so it cannot read web pages and its commands cannot reach the network. That is its configuration, not an outage; an operator can grant web:fetch.";
+
+/// [`NO_WEB_ACCESS`] when a Task's allowed actions lack `web:fetch`, for its turn's context.
+pub fn web_access_note(allowed_actions: &[String]) -> Option<&'static str> {
+    (!allowed_actions
+        .iter()
+        .any(|action| action == network_scope::WEB_FETCH))
+    .then_some(NO_WEB_ACCESS)
+}
 pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 /// The variable naming a Codex Attempt's executor socket on a remote Workspace: Codex runs its
 /// commands and file operations in the sandbox through it.

@@ -163,6 +163,14 @@ Runtime permissions use the same Permission Set but have a different target:
 a Tag schedule; Tags created by `supertag init` or the desktop app have it. A
 Tag without it cannot schedule. It offers only SuperTag's own tools, never a harness tool.
 
+`web:fetch` lets a Tag read web pages, and opens the network to its commands. Tags created by
+`supertag init` or the desktop app have it by default, except on Cursor, which has no tool for
+reading web pages, and on a local-vm host, whose containers have no network. Web pages can carry
+instructions, so remove it from a Tag that handles secrets. On Claude Code, Codex, and OpenCode, a
+Task without `web:fetch` starts its turn with a line saying so, so the Tag can tell the person that
+it has no web access and that an operator can grant `web:fetch`. The line states the Task's
+allowed actions and grants nothing.
+
 Other `namespace:action` names can be stored but enable nothing in the built-in harnesses. Published actions should describe authority, not a particular harness API.
 
 ### Runtime actions in an Objective

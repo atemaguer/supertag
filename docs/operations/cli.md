@@ -80,12 +80,16 @@ see [local-vm containers](../reference/supertag-yaml.md#local-vm-containers).
 
 The `local-tools` Permission Set grants `files:read`, `files:write`, and `schedule:create`, which lets
 the lead set [Schedules](../reference/coordination.md#schedules), wake-ups for itself, plus `commands:execute` when the host may run
-the lead's commands, which it always may on Codex. For a Codex `lead`, it also grants `web:fetch`,
-and `init` says so: current Codex models run commands only in Codex
-code mode, which SuperTag starts only for Tasks that may also fetch from the web. Code-mode
-commands can reach the network. To keep them offline, remove `web:fetch` from `supertag.yaml`,
-select a Codex model that is not code-mode-only, and run `supertag up`. See
-[Codex commands and models](requirements.md#codex-commands-and-models).
+the lead's commands, which it always may on Codex. It also grants `web:fetch` on every harness but
+Cursor, which has no tool for reading web pages, and `init` says so: the lead can read web pages, and its commands can reach the network. Web pages
+can carry instructions, so for a lead that handles secrets, remove `web:fetch` from
+`supertag.yaml` and run `supertag up`. Current Codex models also need it: they run commands only in
+Codex code mode, which SuperTag starts only for Tasks that may also fetch from the web. To keep a
+Codex lead offline, also select a Codex model that is not code-mode-only; see
+[Codex commands and models](requirements.md#codex-commands-and-models). A lead whose commands run in
+local-vm containers gets no `web:fetch`: the containers have no network, and run no Task that may
+fetch from any site. A `web:fetch` with a
+[network scope](../reference/iam.md#network-scopes) lets its commands reach the sites it names.
 
 Each new Session of `lead` starts from that branch's current commit (`workspace.ref`), so commits
 you make there reach the next Session. When HEAD is detached, `init` pins the checked-out commit
@@ -170,7 +174,9 @@ the same command when you choose **Choose a folder…** as the Workspace.
 
 A Tag keeps the harness it was created with, so `lead` can't switch from Claude Code to Codex.
 To try another harness, create a second Tag on it, for example with **+** in the desktop app,
-whose New Tag form offers every harness this machine's Worker Hosts run. `init` gives the host
+whose New Tag form offers every harness this machine's Worker Hosts run. Its **Web access**
+switch, on by default, grants the new Tag `web:fetch`. It starts off for a harness whose hosts run
+Tasks only in sandboxes without network, and stays off for Cursor. `init` gives the host
 every harness it found signed in. Run `supertag init` again to add one you signed in to later:
 on a machine that is already set up, it offers, defaulting to yes, to add each signed-in harness
 the host does not run yet. To do it by hand, add the harness to the host's `harnesses` in

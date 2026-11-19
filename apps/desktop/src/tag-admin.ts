@@ -7,6 +7,8 @@ export interface TagOptions {
   workspaces: string[];
   /** Offered harnesses no host runs commands for: a Tag on one reads and edits files only. */
   noCommands?: string[];
+  /** Offered harnesses whose every host runs Tasks in a sandbox without network: web access off. */
+  noWeb?: string[];
 }
 
 /** A folder of this machine just added as a Workspace, and where its Sessions start. */
@@ -29,6 +31,8 @@ export interface NewTag {
   workspaceCommit?: string;
   /** How many Work Sessions it may have open at once, 1 to 64. */
   maxWorkSessions?: number;
+  /** Whether it may read web pages and its commands reach the network (`web:fetch`); default on. */
+  webAccess?: boolean;
 }
 
 /** Creating Tags, which only an operator may do. */

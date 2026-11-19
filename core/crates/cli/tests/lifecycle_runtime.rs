@@ -820,7 +820,8 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
     );
     assert_eq!(stdout.matches("  codex: signed in").count(), 1, "{stdout}");
     assert!(
-        stdout.contains("Gave the Codex lead web:fetch, which current Codex models need"),
+        stdout.contains("Gave the lead web:fetch")
+            && stdout.contains("Current Codex models need it"),
         "{stdout}"
     );
     let file = machine.state.join("supertag.yaml");

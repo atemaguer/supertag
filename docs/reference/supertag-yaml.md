@@ -35,9 +35,10 @@ repositories.
 current branch. It grants `commands:execute` only when the host may run the lead's commands: always
 for Codex; for Claude Code with `sandbox-commands`, which `init` sets wherever Claude Code's
 sandbox can start; and for Cursor or OpenCode only with `environment: local-vm` or
-`allow-unsandboxed-commands`. For a Codex lead, `local-tools` also grants `web:fetch`, because current Codex
-models run commands only in Codex code mode; see
-[Codex commands and models](../operations/requirements.md#codex-commands-and-models). The host
+`allow-unsandboxed-commands`. `local-tools` also grants `web:fetch`, so the lead can read web pages
+and its commands can reach the network, except on a local-vm host, whose containers have no
+network, and for Cursor, which has no tool for reading web pages. Remove it for a lead that handles secrets. Current Codex models need it to run commands;
+see [Codex commands and models](../operations/requirements.md#codex-commands-and-models). The host
 service is named after the machine:
 
 ```yaml
@@ -321,7 +322,8 @@ Under it, a Task's commands:
   `~/.gnupg`, `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.docker`, `~/.kube`, `~/.codex`,
   `~/.claude`, `~/.claude.json`, `~/.config/gh`, `~/.config/opencode`, `~/.supertag`, and
   `~/Library/Keychains`. They can read your other files.
-- have no network unless the Task has `web:fetch`. A [network scope](iam.md#network-scopes) limits
+- have no network unless the Task has `web:fetch`, which the lead `init` creates has by default.
+  A [network scope](iam.md#network-scopes) limits
   them to its hosts, through the Attempt's egress proxy. They may listen on loopback, so a test
   suite can start a local server.
 

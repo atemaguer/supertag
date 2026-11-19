@@ -1687,7 +1687,7 @@ fn answers(
     let commands = match (runtime, ask.as_deref_mut()) {
         _ if sandbox == Some(None) => {
             outln!(
-                "  claude-code runs the lead's commands in its own sandbox (sandbox-commands): they write only the Workspace, can't read hidden paths or your credential folders such as ~/.ssh, and have no network unless a Permission Set grants web:fetch."
+                "  claude-code runs the lead's commands in its own sandbox (sandbox-commands): they write only the Workspace, can't read hidden paths or your credential folders such as ~/.ssh, and reach the network only through the lead's web:fetch."
             );
             Commands::Sandboxed
         }
@@ -1727,6 +1727,7 @@ fn answers(
             }
         },
     };
+    outln!("  {}", web_access_line(harness, commands));
     Ok(Answers {
         port,
         harness,
@@ -1776,13 +1777,33 @@ fn unsandboxed(harness: Found, ask: Option<&mut Prompter>, state: &Path) -> Resu
             );
             Commands::Unset
         }
-        (Found::Codex, _) => {
-            outln!(
-                "  Gave the Codex lead web:fetch, which current Codex models need to run commands, so its commands can reach the network. To keep them offline, remove web:fetch from supertag.yaml and select a Codex model that isn't code-mode-only."
-            );
-            Commands::Unset
-        }
+        (Found::Codex, _) => Commands::Unset,
     })
+}
+
+/// Whether init gives the lead `web:fetch`: every lead but a Cursor one, which has no web fetch
+/// tool and runs no Task that may use one, and one in local-vm containers, which have no network
+/// and run no Task that may fetch from the web without a network scope.
+fn web_access(harness: Found, commands: Commands) -> bool {
+    harness != Found::Cursor && commands != Commands::LocalVm
+}
+
+/// What init says about the lead's web access.
+fn web_access_line(harness: Found, commands: Commands) -> String {
+    if harness == Found::Cursor {
+        return "The lead has no web:fetch: Cursor has no tool for reading web pages.".to_owned();
+    }
+    if !web_access(harness, commands) {
+        return "The lead has no web:fetch: local-vm containers have no network, and run no Task that may fetch from any site. To let its commands reach named sites, grant web:fetch with a network scope: https://github.com/atemaguer/supertag/blob/main/docs/reference/iam.md#network-scopes".to_owned();
+    }
+    let codex = if harness == Found::Codex {
+        " Current Codex models need it to run commands; without it, select a Codex model that isn't code-mode-only."
+    } else {
+        ""
+    };
+    format!(
+        "Gave the lead web:fetch: it can read web pages, and its commands can reach the network. Web pages can carry instructions, so for a Tag that handles secrets, remove web:fetch from supertag.yaml.{codex}"
+    )
 }
 
 fn document(answers: &Answers, repository: &Repository) -> Value {
@@ -1828,9 +1849,10 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
             json!({ "target": "runtime", "action": "commands:execute" }),
         );
     }
-    // Current Codex models run commands only in code mode, which SuperTag starts only for a Task
-    // that may also fetch from the web: without it the lead could not run commands at all.
-    if answers.harness == Found::Codex {
+    // Every lead may read web pages, and its commands reach the network. Current Codex models
+    // also need it: they run commands only in code mode, which SuperTag starts only for a Task
+    // that may fetch from the web.
+    if web_access(answers.harness, answers.commands) {
         permissions.push(json!({ "target": "runtime", "action": "web:fetch" }));
     }
     let mut document = json!({
@@ -2170,7 +2192,7 @@ mod tests {
     }
 
     #[test]
-    fn grants_web_fetch_only_to_a_codex_lead() {
+    fn grants_web_fetch_to_every_lead_that_can_use_it() {
         let repository = Repository {
             root: PathBuf::from("/work/app"),
             name: "app".into(),
@@ -2188,11 +2210,39 @@ mod tests {
         let document = document(&answers, &repository);
         let permissions =
             &document["services"]["control-plane"]["provision"][0]["spec"]["permissions"];
-        assert_eq!(permissions.as_array().unwrap().len(), 4, "{permissions}");
+        assert_eq!(permissions.as_array().unwrap().len(), 5, "{permissions}");
         assert!(
-            !permissions.to_string().contains("web:fetch"),
+            permissions.to_string().contains("web:fetch"),
             "{permissions}"
         );
+        // Init says how to take it away, and why Codex needs it.
+        let line = web_access_line(Found::ClaudeCode, Commands::Sandboxed);
+        assert!(
+            line.contains("remove web:fetch from supertag.yaml"),
+            "{line}"
+        );
+        assert!(!line.contains("Codex"), "{line}");
+        assert!(web_access_line(Found::Codex, Commands::Unset).contains("need it to run commands"));
+        // A local-vm container has no network, and runs no Task with an unscoped web:fetch.
+        let answers = Answers {
+            commands: Commands::LocalVm,
+            ..answers
+        };
+        let permissions = super::document(&answers, &repository)["services"]["control-plane"]
+            ["provision"][0]["spec"]["permissions"]
+            .to_string();
+        assert!(!permissions.contains("web:fetch"), "{permissions}");
+        assert!(web_access_line(Found::ClaudeCode, Commands::LocalVm).contains("no web:fetch"));
+        // Cursor has no web fetch tool, and runs no Task that may use one.
+        let answers = Answers {
+            harness: Found::Cursor,
+            commands: Commands::Unsandboxed,
+            ..answers
+        };
+        let permissions = super::document(&answers, &repository)["services"]["control-plane"]
+            ["provision"][0]["spec"]["permissions"]
+            .to_string();
+        assert!(!permissions.contains("web:fetch"), "{permissions}");
     }
 
     #[test]
