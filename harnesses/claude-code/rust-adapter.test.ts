@@ -54,6 +54,7 @@ import {
 } from "@supertag/worker-sdk/internal/rust-harness";
 import { afterEach, expect, it } from "vitest";
 import {
+  commandSandbox,
   egressCertificateEnvironment,
   mountRoots,
   NO_SCOPE,
@@ -835,7 +836,7 @@ it("rejects a damaged checkpoint instead of silently resetting the native Sessio
 it("refuses commands without the host's unsandboxed opt-in and failed session mirroring", async () => {
   const refused = await invoke({ prompt: "run-command", actions: ["commands:execute"] });
   expect(refused.completions[0]?.result).toBe(
-    "Claude Code runs commands without a sandbox; add claude-code to allow-unsandboxed-commands in the Worker Host's supertag.yaml service to let it run commands. Native execution did not start.",
+    "Claude Code runs commands only with the Worker Host's consent; add claude-code to sandbox-commands (Claude Code's own sandbox) or allow-unsandboxed-commands in the Worker Host's supertag.yaml service to let it run commands. Native execution did not start.",
   );
   expect(refused.completions[0]?.succeeded).toBe(false);
   await expect(readFile(join(refused.workspace, "command-output.txt"))).rejects.toThrow();
@@ -1697,6 +1698,70 @@ it("keeps WebFetch and sandboxed commands inside the Task's network scope", asyn
     }),
   ).toMatchObject({ SSL_CERT_FILE: "/s/bundle.pem", NODE_EXTRA_CA_CERTS: "/s/ca.pem" });
   expect(() => egressCertificateEnvironment({})).toThrow("egress proxy");
+});
+
+it("confines sandboxed commands to the Task's Workspace, scope, and network", () => {
+  const input = {
+    cwd: "/w",
+    write: true,
+    scope: {
+      write: [],
+      readOnly: ["docs/"],
+      hidden: ["secrets/", "**/.env"],
+      outsideWrite: ["/cache"],
+      outsideRead: [],
+    },
+    mounts: { read: ["/copy-ro"], write: ["/copy-rw"] },
+    outside: { write: ["/cache"], read: [] },
+    home: "/home/u",
+    network: undefined,
+  } as const;
+  const sandbox = commandSandbox(input);
+  expect(sandbox).toMatchObject({
+    enabled: true,
+    failIfUnavailable: true,
+    allowUnsandboxedCommands: false,
+    network: { allowedDomains: [], strictAllowlist: true, allowLocalBinding: true },
+  });
+  expect(sandbox.filesystem.allowWrite).toEqual(["/w", "/copy-rw", "/cache"]);
+  for (const path of [
+    "/w/.git",
+    "/copy-rw/.git",
+    "/w/.claude",
+    "/w/docs",
+    "/w/secrets",
+    "/w/**/.env",
+  ])
+    expect(sandbox.filesystem.denyWrite).toContain(path);
+  expect(sandbox.filesystem.denyWrite).not.toContain("/w");
+  for (const path of [
+    "/w/secrets",
+    "/w/**/.env",
+    "/home/u/.ssh",
+    "/home/u/.claude",
+    "/home/u/.codex",
+  ])
+    expect(sandbox.filesystem.denyRead).toContain(path);
+  // Without files:write, commands write only temporary files.
+  const readOnly = commandSandbox({ ...input, write: false });
+  expect(readOnly.filesystem.allowWrite).toEqual([]);
+  expect(readOnly.filesystem.denyWrite).toContain("/w");
+  // web:fetch without a scope opens the network; a scope goes through the egress proxy.
+  expect(commandSandbox({ ...input, network: "open" }).network).toMatchObject({
+    allowedDomains: ["*"],
+  });
+  expect(
+    commandSandbox({
+      ...input,
+      network: {
+        scope: {
+          anyOrigin: false,
+          rules: [{ origins: ["https://pypi.org"], methods: [], credential: "", paths: [] }],
+        },
+        proxy: "http://127.0.0.1:4100",
+      },
+    }).network,
+  ).toMatchObject({ allowedDomains: ["pypi.org"], httpProxyPort: 4100, allowLocalBinding: true });
 });
 
 it("names a failed Worker Host call in the result, redacted with the Attempt's values", async () => {

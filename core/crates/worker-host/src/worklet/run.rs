@@ -430,7 +430,12 @@ pub(crate) async fn run(
     }
     for harness in &options.harnesses {
         let worker = &harness.worker;
-        if worker.execution_profile.allow_unsandboxed_commands {
+        // A Claude Code lane with sandbox-commands runs its commands in Claude Code's sandbox.
+        let sandboxed = worker
+            .adapter_args
+            .iter()
+            .any(|argument| argument == "--sandbox-commands");
+        if worker.execution_profile.allow_unsandboxed_commands && !sandboxed {
             let name = match worker.harness {
                 HarnessKind::ClaudeCode => "Claude Code",
                 HarnessKind::Opencode => "OpenCode",
@@ -440,7 +445,9 @@ pub(crate) async fn run(
             supertag_protocol::terminal_text::warn(&adapter::unsandboxed_caveat(name));
         }
         // A sign-in the provider proxy can't hold stays readable to commands run unsandboxed.
+        // Claude Code's sandbox keeps commands from the sign-in's files and Keychain.
         if let Some(warning) = adapter::unproxied_key_warning(worker, &harness.provider_credentials)
+            .filter(|_| !sandboxed)
         {
             supertag_protocol::terminal_text::warn(&warning);
         }

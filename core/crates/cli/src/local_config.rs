@@ -93,6 +93,8 @@ enum Service {
         skills: Option<PathBuf>,
         #[serde(default, rename = "allow-unsandboxed-commands")]
         unsandboxed: Vec<String>,
+        #[serde(default, rename = "sandbox-commands")]
+        sandboxed: Vec<String>,
         #[serde(default)]
         restart: Restart,
         #[serde(default)]
@@ -643,6 +645,7 @@ pub(crate) fn parse(
             workspaces,
             skills,
             unsandboxed,
+            sandboxed,
             restart,
             depends_on,
             concurrency,
@@ -675,8 +678,8 @@ pub(crate) fn parse(
                 "host {name}: environment local-vm runs Claude Code, Cursor, OpenCode, and Codex"
             );
             ensure!(
-                unsandboxed.is_empty(),
-                "host {name}: environment local-vm runs commands in a container; remove allow-unsandboxed-commands"
+                unsandboxed.is_empty() && sandboxed.is_empty(),
+                "host {name}: environment local-vm runs commands in a container; remove allow-unsandboxed-commands and sandbox-commands"
             );
             ensure!(
                 !workspaces.is_empty(),
@@ -839,7 +842,7 @@ pub(crate) fn parse(
         let mut selections = Vec::new();
         if let Some(adapter) = adapter {
             ensure!(
-                models.is_empty() && unsandboxed.is_empty(),
+                models.is_empty() && unsandboxed.is_empty() && sandboxed.is_empty(),
                 "protocol adapters cannot configure native models or unsandboxed commands"
             );
             let mut args = vec![
@@ -864,6 +867,10 @@ pub(crate) fn parse(
                 unsandboxed.iter().all(|h| harnesses.contains(h)),
                 "unsandboxed command consent must name a selected harness"
             );
+            ensure!(
+                sandboxed.iter().all(|h| harnesses.contains(h)),
+                "sandbox-commands must name a selected harness"
+            );
             for harness in &harnesses {
                 let mut args = vec![OsString::from("host"), "--harness".into(), harness.into()];
                 if let Some(models) = models.get(harness) {
@@ -883,6 +890,17 @@ pub(crate) fn parse(
                         "only Claude Code, OpenCode, and Cursor accept unsandboxed command consent"
                     );
                     args.push("--allow-unsandboxed-commands".into());
+                }
+                if sandboxed.contains(harness) {
+                    ensure!(
+                        harness == "claude-code",
+                        "only Claude Code accepts sandbox-commands"
+                    );
+                    ensure!(
+                        !unsandboxed.contains(harness),
+                        "host {name}: name {harness} in sandbox-commands or allow-unsandboxed-commands, not both"
+                    );
+                    args.push("--sandbox-commands".into());
                 }
                 selections.push(args);
             }
@@ -2054,6 +2072,42 @@ services: {vm: {type: host, control-plane: https://example.com, environment: loc
             format!("{refused:#}").contains("only Claude Code, OpenCode, and Cursor"),
             "{refused:#}"
         );
+    }
+    #[test]
+    fn claude_code_alone_accepts_sandboxed_commands() {
+        let profile = |consent: &str| {
+            let input = format!(
+                "services: {{host: {{type: host, control-plane: https://example.com, harnesses: [claude-code, cursor]{consent}}}}}"
+            );
+            let config = parse(input.as_bytes(), Path::new("/trusted"), |_| None)?;
+            config.hosts[0]
+                .harnesses
+                .iter()
+                .map(|h| Ok(h.execution_profile()?.allow_unsandboxed_commands))
+                .collect::<Result<Vec<_>>>()
+        };
+        // Sandboxed commands still run on this host, so the lane takes command Tasks.
+        assert_eq!(
+            profile(", sandbox-commands: [claude-code]").unwrap(),
+            [true, false]
+        );
+        for (consent, reason) in [
+            (
+                ", sandbox-commands: [cursor]",
+                "only Claude Code accepts sandbox-commands",
+            ),
+            (
+                ", sandbox-commands: [codex]",
+                "must name a selected harness",
+            ),
+            (
+                ", sandbox-commands: [claude-code], allow-unsandboxed-commands: [claude-code]",
+                "not both",
+            ),
+        ] {
+            let refused = profile(consent).unwrap_err();
+            assert!(format!("{refused:#}").contains(reason), "{refused:#}");
+        }
     }
     #[test]
     fn provisioning_configuration_requires_owner_control() {

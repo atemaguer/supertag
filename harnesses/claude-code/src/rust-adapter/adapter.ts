@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { lstatSync, realpathSync } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   type HookCallback,
@@ -111,7 +111,7 @@ export function admittedTools(
   const commands = actions.includes("commands:execute");
   if (commands && !allowUnsandboxedCommands)
     throw new UnsupportedPermissionError(
-      "Claude Code runs commands without a sandbox; add claude-code to allow-unsandboxed-commands in the Worker Host's supertag.yaml service to let it run commands. Native execution did not start.",
+      "Claude Code runs commands only with the Worker Host's consent; add claude-code to sandbox-commands (Claude Code's own sandbox) or allow-unsandboxed-commands in the Worker Host's supertag.yaml service to let it run commands. Native execution did not start.",
     );
   if (actions.some((action) => action !== "commands:execute" && !Object.hasOwn(ACTIONS, action)))
     throw new UnsupportedPermissionError(
@@ -243,6 +243,103 @@ export function networkSandbox(scope: NetworkScopeLike, proxy: string) {
       socksProxyPort: port,
     },
     filesystem: { disabled: true },
+  };
+}
+
+/**
+ * Workspace entries no sandboxed command may change, whatever the Task's write grant: Git
+ * metadata (the Worker Host commits after the harness finishes) and harness configuration.
+ */
+const PROTECTED_ENTRIES = [
+  ".git",
+  ".codex",
+  ".agents",
+  ".aws",
+  ".claude",
+  ".cursor",
+  ".opencode",
+  ".supertag",
+] as const;
+
+/** Credential locations in the Worker Host user's home that sandboxed commands may not read. */
+const HOME_SECRETS = [
+  ".ssh",
+  ".aws",
+  ".gnupg",
+  ".netrc",
+  ".npmrc",
+  ".pypirc",
+  ".docker",
+  ".kube",
+  ".codex",
+  ".claude",
+  ".claude.json",
+  ".config/gh",
+  ".config/opencode",
+  ".supertag",
+  "Library/Keychains",
+] as const;
+
+/** What a Task's commands may reach under Claude Code's sandbox. */
+export interface CommandSandboxInput {
+  readonly cwd: string;
+  /** Whether the Task has `files:write`. Without it, commands write only temporary files. */
+  readonly write: boolean;
+  readonly scope: FileScopeLike | undefined;
+  readonly mounts: MountRoots;
+  readonly outside: OutsideDirectories;
+  /** The Worker Host user's real home, whose credential locations stay unreadable. */
+  readonly home: string;
+  /** `undefined`: no network; `"open"`: any origin (`web:fetch` without a network scope). */
+  readonly network:
+    | undefined
+    | "open"
+    | { readonly scope: NetworkScopeLike; readonly proxy: string };
+}
+
+/**
+ * Claude Code's own sandbox, with filesystem isolation on, for a Worker Host that opted into
+ * sandboxed commands. Commands write only the Workspace (and its read-write copies and outside
+ * write directories), never its protected entries, read-only or hidden paths; they cannot read
+ * hidden paths or the home's credential locations; their network is off unless the Task has
+ * `web:fetch`, and a network scope routes it through the egress proxy. Claude Code fails the
+ * run rather than run a command unsandboxed, and ignores the model's request to skip it.
+ *
+ * `paths` that narrow Workspace writes stay enforced at delivery: Claude Code's sandbox lets a
+ * deny outrank an allow, so it cannot grant `src/` inside an otherwise read-only Workspace.
+ */
+export function commandSandbox(input: CommandSandboxInput) {
+  const { cwd, scope } = input;
+  const inside = (root: string, entry: string) => join(root, entry.replace(/\/+$/u, ""));
+  const writeRoots = input.write ? [cwd, ...input.mounts.write, ...input.outside.write] : [];
+  const denyWrite = [
+    ...(input.write ? [] : [cwd]),
+    ...[cwd, ...input.mounts.write].flatMap((root) =>
+      PROTECTED_ENTRIES.map((entry) => inside(root, entry)),
+    ),
+    ...(scope?.readOnly ?? []).map((entry) => inside(cwd, entry)),
+    ...(scope?.hidden ?? []).map((entry) => inside(cwd, entry)),
+  ];
+  const denyRead = [
+    ...(scope?.hidden ?? []).map((entry) => inside(cwd, entry)),
+    ...HOME_SECRETS.map((entry) => join(input.home, entry)),
+  ];
+  // Commands may listen on loopback, as Codex's do, so a test suite can start a local server.
+  const network: Record<string, unknown> = {
+    ...(input.network === undefined
+      ? { allowedDomains: [], strictAllowlist: true }
+      : input.network === "open"
+        ? { allowedDomains: ["*"], strictAllowlist: true }
+        : networkSandbox(input.network.scope, input.network.proxy).network),
+    allowLocalBinding: true,
+  };
+  return {
+    enabled: true,
+    failIfUnavailable: true,
+    autoAllowBashIfSandboxed: true,
+    allowUnsandboxedCommands: false,
+    network,
+    filesystem: { allowWrite: writeRoots, denyWrite, denyRead },
   };
 }
 
@@ -464,6 +561,11 @@ export interface AdapterOptions {
   readonly timeoutMs?: number;
   /** The Worker Host's allow-unsandboxed-commands opt-in for `commands:execute`. */
   readonly allowUnsandboxedCommands?: boolean;
+  /**
+   * The Worker Host's sandbox-commands opt-in: `commands:execute` runs `Bash` under Claude
+   * Code's own sandbox, confined to the Task's Workspace and permissions.
+   */
+  readonly sandboxCommands?: boolean;
   readonly environment?: NodeJS.ProcessEnv;
 }
 
@@ -561,9 +663,10 @@ export async function runAdapter(
     // In a remote Workspace (E2B or Modal), Claude Code keeps no built-in file or command tool:
     // its Workspace tools run in the sandbox, so commands need no unsandboxed opt-in.
     const remote = run.remoteWorkspace;
+    const sandboxCommands = !remote && (configuration.sandboxCommands ?? false);
     const admitted = admittedTools(
       task.allowedActions,
-      remote || (configuration.allowUnsandboxedCommands ?? false),
+      remote || sandboxCommands || (configuration.allowUnsandboxedCommands ?? false),
     );
     // WebFetch and WebSearch would run here, on the Worker Host and its network, so a remote
     // Workspace offers none; placement keeps web actions off remote lanes.
@@ -664,8 +767,29 @@ export async function runAdapter(
     };
     // Commands under a network scope run in Claude Code's sandbox, which sends their traffic
     // only to the Worker Host's egress proxy.
-    let sandbox: ReturnType<typeof networkSandbox> | undefined;
-    if (networkScope && tools.includes("Bash")) {
+    let sandbox: ReturnType<typeof networkSandbox> | ReturnType<typeof commandSandbox> | undefined;
+    if (sandboxCommands && tools.includes("Bash")) {
+      const proxy = environment["SUPERTAG_EGRESS_PROXY"];
+      if (networkScope && !proxy)
+        throw new SafeAdapterFailure(
+          "Claude Code cannot apply this Task's network scope without the Worker Host's egress proxy. Native execution did not start.",
+        );
+      sandbox = commandSandbox({
+        cwd,
+        write: task.allowedActions.includes("files:write"),
+        scope: fileScope,
+        mounts,
+        outside,
+        home: userInfo().homedir,
+        network:
+          networkScope && proxy
+            ? { scope: networkScope, proxy }
+            : task.allowedActions.includes("web:fetch")
+              ? "open"
+              : undefined,
+      });
+      if (networkScope) Object.assign(env, egressCertificateEnvironment(environment));
+    } else if (networkScope && tools.includes("Bash")) {
       const proxy = environment["SUPERTAG_EGRESS_PROXY"];
       if (!proxy)
         throw new SafeAdapterFailure(

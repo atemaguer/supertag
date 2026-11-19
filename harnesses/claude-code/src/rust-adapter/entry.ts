@@ -13,6 +13,7 @@ try {
       model: { type: "string" },
       "timeout-seconds": { type: "string" },
       "allow-unsandboxed-commands": { type: "boolean", default: false },
+      "sandbox-commands": { type: "boolean", default: false },
     },
   });
   const seconds = Number(values["timeout-seconds"] ?? "600");
@@ -23,6 +24,7 @@ try {
     ...(values.executable ? { executable: values.executable } : {}),
     ...(values.model ? { model: values.model } : {}),
     allowUnsandboxedCommands: values["allow-unsandboxed-commands"] === true,
+    sandboxCommands: values["sandbox-commands"] === true,
     timeoutMs: seconds * 1000,
   });
 } catch {

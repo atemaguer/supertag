@@ -89,6 +89,14 @@ pub struct AdapterOptions {
     /// Allow Claude Code, OpenCode, or Cursor commands without an operating-system sandbox.
     #[arg(long, requires = "harness")]
     allow_unsandboxed_commands: bool,
+    /// Run Claude Code's commands under Claude Code's own operating-system sandbox, confined to
+    /// the Task's Workspace and permissions, with no network unless the Task has web:fetch.
+    #[arg(
+        long,
+        requires = "harness",
+        conflicts_with = "allow_unsandboxed_commands"
+    )]
+    sandbox_commands: bool,
     /// NAME=VARIABLE: a network credential the egress proxy injects for Tasks whose network
     /// scope names NAME. The sandbox sees VARIABLE holding a placeholder; the value comes from
     /// this host's SUPERTAG_NETWORK_CREDENTIAL_NAME variable. Repeat for more credentials.
@@ -279,7 +287,9 @@ impl AdapterOptions {
                 && supertag_worker_host::egress::claude_sandbox_available(),
             model_ids,
             default_model,
-            allow_unsandboxed_commands: self.allow_unsandboxed_commands,
+            // Sandboxed commands still run on this host, so the host takes the Tasks an
+            // unsandboxed lane would.
+            allow_unsandboxed_commands: self.allow_unsandboxed_commands || self.sandbox_commands,
             remote_file_workspace: false,
             unverified_workspace_provider: false,
             remote_egress_relay: false,
@@ -382,6 +392,9 @@ impl AdapterOptions {
         if self.allow_unsandboxed_commands {
             args.push("--allow-unsandboxed-commands".into());
         }
+        if self.sandbox_commands {
+            args.push("--sandbox-commands".into());
+        }
         for credential in &self.network_credential {
             args.extend(["--network-credential".into(), credential.into()]);
         }
@@ -458,6 +471,14 @@ impl AdapterOptions {
                     Some(Harness::ClaudeCode | Harness::Opencode | Harness::Cursor)
                 ),
             "--allow-unsandboxed-commands requires --harness claude-code, opencode, or cursor"
+        );
+        ensure!(
+            !self.sandbox_commands || matches!(self.harness, Some(Harness::ClaudeCode)),
+            "--sandbox-commands requires --harness claude-code"
+        );
+        ensure!(
+            !self.sandbox_commands || supertag_worker_host::egress::claude_sandbox_available(),
+            "--sandbox-commands needs Claude Code's sandbox, which this machine cannot start; on Linux install bubblewrap and socat"
         );
         if let Some(path) = self.adapter {
             return Ok((interpreter_path(path)?, self.adapter_arg));
@@ -626,6 +647,9 @@ impl AdapterOptions {
                 ]);
                 if self.allow_unsandboxed_commands {
                     args.push("--allow-unsandboxed-commands".into());
+                }
+                if self.sandbox_commands {
+                    args.push("--sandbox-commands".into());
                 }
                 Ok((runtime, args))
             }

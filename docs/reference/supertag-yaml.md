@@ -159,6 +159,7 @@ echoing secret values.
 | `labels` | none | Placement labels the host carries, such as `[gpu]`, for a Tag's `runsOn`. See [Worker Host labels](resource-model.md#worker-host-labels) |
 | `environment` | none | `local-vm` runs Claude Code, Cursor, OpenCode, and Codex Tasks' commands and file tools in containers on this machine. See [local-vm containers](#local-vm-containers) |
 | `allow-unsandboxed-commands` | none | `claude-code`, `cursor`, or `opencode` from `harnesses`. See [Unsandboxed harnesses](#unsandboxed-harnesses) |
+| `sandbox-commands` | none | `claude-code` from `harnesses`. See [Sandboxed Claude Code commands](#sandboxed-claude-code-commands) |
 | `network-credentials` | none | Credential name to `{ secret, environment }`, added to a Task's requests by the egress proxy. Codex, or every harness on a local-vm host. See [Network credentials](#network-credentials) |
 | `volumes` | none | Volume ID to an absolute, owner-only directory: a file Volume this host maps and writes directly, such as the copies of a Tag's captures. Tags on that Volume run only on hosts that map it. See [Keep every capture on a Volume](artifacts.md#keep-every-capture-on-a-volume) |
 | `concurrency` | `1` | Task Attempts each harness runs at once, from 1 through 16. See [Host concurrency](#host-concurrency) |
@@ -275,6 +276,25 @@ A host started without supertag.yaml takes the same opt-in with `supertag worker
 SuperTag keeps model keys out of those commands' environment where it can (see
 [Credentials available during Tasks](../operations/requirements.md#credentials-available-during-tasks)),
 which stops accidental leaks but is not a boundary.
+
+### Sandboxed Claude Code commands
+
+`sandbox-commands: [claude-code]` lets a host run Claude Code's commands in Claude Code's own
+operating-system sandbox (Seatbelt on macOS; bubblewrap, which needs `bwrap` and `socat`, on
+Linux) instead of unsandboxed. Commands write only the Task's Workspace and its writable
+directories, never its `.git` or harness configuration, read-only, or hidden paths. They cannot
+read hidden paths or the credential folders in your home, such as `~/.ssh`, `~/.aws`, and
+`~/.claude`. They have no network unless the Task has `web:fetch`; a
+[network scope](iam.md#network-scopes) limits it to the scope's hosts. Claude Code fails the Task
+Attempt rather than run a command outside its sandbox. Commands can still read your other files.
+
+```yaml
+    harnesses: [codex, claude-code]
+    sandbox-commands: [claude-code]
+```
+
+A host names a harness in `sandbox-commands` or `allow-unsandboxed-commands`, not both. A host
+started without supertag.yaml takes `supertag worker-host --sandbox-commands`.
 
 ### Network credentials
 

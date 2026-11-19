@@ -170,6 +170,9 @@ Options:
       --allow-unsandboxed-commands
           Allow Claude Code, OpenCode, or Cursor commands without an operating-system sandbox
 
+      --sandbox-commands
+          Run Claude Code's commands under Claude Code's own operating-system sandbox, confined to the Task's Workspace and permissions, with no network unless the Task has web:fetch
+
       --network-credential <NAME=VARIABLE>
           NAME=VARIABLE: a network credential the egress proxy injects for Tasks whose network scope names NAME. The sandbox sees VARIABLE holding a placeholder; the value comes from this host's SUPERTAG_NETWORK_CREDENTIAL_NAME variable. Repeat for more credentials
 
@@ -2335,6 +2338,9 @@ Options:
 
       --allow-unsandboxed-commands
           Allow Claude Code, OpenCode, or Cursor commands without an operating-system sandbox
+
+      --sandbox-commands
+          Run Claude Code's commands under Claude Code's own operating-system sandbox, confined to the Task's Workspace and permissions, with no network unless the Task has web:fetch
 
       --network-credential <NAME=VARIABLE>
           NAME=VARIABLE: a network credential the egress proxy injects for Tasks whose network scope names NAME. The sandbox sees VARIABLE holding a placeholder; the value comes from this host's SUPERTAG_NETWORK_CREDENTIAL_NAME variable. Repeat for more credentials
