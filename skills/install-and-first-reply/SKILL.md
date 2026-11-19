@@ -153,7 +153,14 @@ supertag get surface-location
 ```
 
 `status` lists Worker Hosts, Tags, unfinished Objectives, and the inbox; the local host should
-be connected. In the configured channel, send `@SuperTag Reply with hello.` A threaded reply checks
+be connected. Without a channel, check execution and the reply from the terminal:
+
+```sh
+supertag message lead "Reply with hello."
+```
+
+It sends to your conversation with `lead`, the one the terminal UI and the desktop app show, waits
+for the reply, and prints it. In the configured channel, send `@SuperTag Reply with hello.` A threaded reply checks
 delivery, routing, execution, and the return path together. It uses the configured model and may
 incur charges.
 

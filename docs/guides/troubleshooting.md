@@ -8,8 +8,8 @@ Commands talk to a **Gateway**, which forwards them to the **Control Plane**, th
 stores your organization. Without `--gateway NAME`, they use this machine's local services, as
 shown.
 
-If you asked in the terminal UI or desktop app, skip steps 2 and 3: they cover Slack, GitHub and
-other surfaces. Start with step 1, then find the Task with `supertag watch task` while you send the
+If you asked in the terminal UI, the desktop app, or with `supertag message`, skip steps 2 and 3:
+they cover Slack, GitHub and other surfaces. Start with step 1, then find the Task with `supertag watch task` while you send the
 message again, and continue at step 5.
 
 ## 1. Check the services

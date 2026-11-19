@@ -137,8 +137,16 @@ with the text read from a private file in the same way:
 supertag task submit --tag OWNER_TAG --session OBJECTIVE_SESSION_ID "$(cat "$message_file")"
 ```
 
-To ask a Tag something outside an Objective, use a new Session name. Follow the reply with
-`supertag task events TASK_ID` or `supertag describe task TASK_ID`.
+To ask a Tag something outside an Objective, send it to the user's conversation with the Tag. The
+message and the reply show in the terminal UI and the desktop app, and the command waits for the
+reply and prints it:
+
+```sh
+supertag message TAG < "$message_file"
+```
+
+To keep the exchange out of that conversation, use `task submit` with a new Session name instead.
+Follow its reply with `supertag task events TASK_ID` or `supertag describe task TASK_ID`.
 
 A work Session that waits on an approval shows it under **Needs you** in `describe objective`, and
 in `get inbox-item --kind approval`. Read it with `supertag get approval APPROVAL_ID`, ask the
