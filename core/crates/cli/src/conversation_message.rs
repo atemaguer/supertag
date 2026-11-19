@@ -3,7 +3,8 @@
 //!
 //! It calls the Conversations service as those clients do: `SendMessage` sends, then
 //! `FollowConversation` follows the turn until it finishes. When the stream drops, `GetMessage`
-//! reads the turn until it opens again. A Gateway that cannot push the conversation is read with
+//! reads the turn until it opens again, and the stream reopens from the conversation and message
+//! order it last showed, so only what changed since is sent again. A Gateway that cannot push the conversation is read with
 //! `GetMessage` alone. Once the reply is printed, `MarkConversationRead` records that the caller
 //! read it, so the other clients do not count it as unread.
 //!
@@ -12,7 +13,7 @@
 //! finished turn asked, read with `Inbox.GetQuestion`. So does a lost connection to the Gateway.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     io::{IsTerminal as _, Read as _},
     time::Duration,
 };
@@ -23,8 +24,8 @@ use supertag_protocol::{
     negotiation::ProtocolChannel,
     v2::{
         ApprovalState, ConversationMessage, FollowConversationRequest, GetMessageRequest,
-        GetQuestionRequest, ListApprovalsRequest, LiveInputState, MarkConversationReadRequest,
-        SendMessageRequest, TaskEventKind, TaskState, TurnText,
+        GetQuestionRequest, ListApprovalsRequest, ListMessagesResponse, LiveInputState,
+        MarkConversationReadRequest, SendMessageRequest, TaskEventKind, TaskState, TurnText,
         conversations_client::ConversationsClient, inbox_client::InboxClient,
     },
 };
@@ -172,10 +173,11 @@ async fn follow(rpc: &mut Rpc, reply: &mut Reply) -> Result<()> {
         return Ok(());
     }
     let mut link = Link::default();
+    let mut resume = Resume::default();
     let mut push = true;
     loop {
         if push {
-            match stream(rpc, reply, &mut link).await {
+            match stream(rpc, reply, &mut link, &mut resume).await {
                 Ok(true) => return Ok(()),
                 Ok(false) => {}
                 // The turn failed or the Gateway stayed out of reach, rather than the stream.
@@ -222,17 +224,73 @@ async fn read(rpc: &mut Rpc, reply: &mut Reply, link: &mut Link) -> Result<()> {
     Ok(())
 }
 
+/// Where a reopened follow stream resumes: the conversation, the latest message order taken from
+/// it, and the turns it showed unfinished, as the terminal UI and the desktop app keep. The first
+/// stream has none and opens on the newest page. A reopened one replays only what changed after
+/// it; when that cannot be replayed, its first page is the newest, not incremental, and the cursor
+/// starts again from that page.
+#[derive(Default)]
+struct Resume {
+    conversation_id: String,
+    after: u64,
+    unfinished: BTreeSet<String>,
+}
+
+impl Resume {
+    fn request(&self, reply: &Reply) -> FollowConversationRequest {
+        let mut refresh_task_ids = reply.followed();
+        for id in &self.unfinished {
+            if !refresh_task_ids.contains(id) {
+                refresh_task_ids.push(id.clone());
+            }
+        }
+        refresh_task_ids.truncate(128);
+        FollowConversationRequest {
+            tag_id: reply.tag.clone(),
+            conversation_id: self.conversation_id.clone(),
+            after: if self.conversation_id.is_empty() {
+                0
+            } else {
+                self.after
+            },
+            refresh_task_ids,
+        }
+    }
+
+    fn advance(&mut self, page: &ListMessagesResponse) {
+        if !page.incremental {
+            self.conversation_id.clone_from(&page.conversation_id);
+            self.after = 0;
+            self.unfinished.clear();
+        }
+        for message in &page.messages {
+            let Some(task) = &message.task else { continue };
+            self.after = self.after.max(message.order);
+            if matches!(
+                task.state(),
+                TaskState::Succeeded | TaskState::Failed | TaskState::Cancelled
+            ) {
+                self.unfinished.remove(&task.task_id);
+            } else {
+                self.unfinished.insert(task.task_id.clone());
+            }
+        }
+    }
+}
+
 /// Reads one follow stream until the turn finishes (true) or the stream ends or goes idle
 /// (false). The turns are also read every [`READ_EVERY`]: the stream pushes changes to turns, and
 /// a message delivered into a running turn changes only its own delivery.
-async fn stream(rpc: &mut Rpc, reply: &mut Reply, link: &mut Link) -> Result<bool> {
+async fn stream(
+    rpc: &mut Rpc,
+    reply: &mut Reply,
+    link: &mut Link,
+    resume: &mut Resume,
+) -> Result<bool> {
     let mut stream = rpc
         .conversations
         .follow_conversation(authenticated_request(
-            FollowConversationRequest {
-                tag_id: reply.tag.clone(),
-                ..Default::default()
-            },
+            resume.request(reply),
             &rpc.token,
             None,
         )?)
@@ -249,6 +307,9 @@ async fn stream(rpc: &mut Rpc, reply: &mut Reply, link: &mut Link) -> Result<boo
                     return Ok(false);
                 };
                 idle = tokio::time::Instant::now() + STREAM_IDLE;
+                if let Some(page) = &response.messages {
+                    resume.advance(page);
+                }
                 for message in response.messages.into_iter().flat_map(|page| page.messages) {
                     reply.take(message);
                 }
@@ -724,6 +785,52 @@ mod tests {
             after_sequence,
             text: text.into(),
         }
+    }
+
+    #[test]
+    fn a_reopened_stream_resumes_from_what_the_last_one_showed() {
+        let reply = Reply::new("lead".into(), message("t2", TaskState::Queued, None), false);
+        let mut resume = Resume::default();
+        // The first stream has no copy and opens on the newest page.
+        let first = resume.request(&reply);
+        assert_eq!((first.conversation_id.as_str(), first.after), ("", 0));
+        assert_eq!(first.refresh_task_ids, ["t2"]);
+        let ordered = |task_id: &str, state, order| ConversationMessage {
+            order,
+            ..message(task_id, state, None)
+        };
+        resume.advance(&ListMessagesResponse {
+            messages: vec![
+                ordered("t2", TaskState::Queued, 7),
+                ordered("t1", TaskState::Running, 6),
+                ordered("t0", TaskState::Succeeded, 5),
+            ],
+            conversation_id: "conversation/lead/alice".into(),
+            incremental: false,
+            ..Default::default()
+        });
+        resume.advance(&ListMessagesResponse {
+            messages: vec![ordered("t1", TaskState::Succeeded, 6)],
+            conversation_id: "conversation/lead/alice".into(),
+            incremental: true,
+            ..Default::default()
+        });
+        // A reopened stream sends the conversation, its latest order, and the unfinished turns.
+        let again = resume.request(&reply);
+        assert_eq!(again.conversation_id, "conversation/lead/alice");
+        assert_eq!(again.after, 7);
+        assert_eq!(again.refresh_task_ids, ["t2"]);
+        // A page that is not incremental replaces the copy, so the cursor starts again from it.
+        resume.advance(&ListMessagesResponse {
+            messages: vec![ordered("t9", TaskState::Running, 3)],
+            conversation_id: "conversation/lead/alice-2".into(),
+            incremental: false,
+            ..Default::default()
+        });
+        let resynced = resume.request(&reply);
+        assert_eq!(resynced.conversation_id, "conversation/lead/alice-2");
+        assert_eq!(resynced.after, 3);
+        assert_eq!(resynced.refresh_task_ids, ["t2", "t9"]);
     }
 
     #[test]

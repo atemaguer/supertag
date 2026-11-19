@@ -5563,7 +5563,10 @@ export const SendMessageRequestSchema: GenMessage<SendMessageRequest> = /*@__PUR
 /**
  * As ListMessagesRequest with `after`: the conversation the client's copy came from, the latest
  * message order it holds, and the turns it holds unfinished. A client without a copy sends none,
- * and the first response is the newest page.
+ * and the first response is the newest page. A client that reconnects sends what it holds: the
+ * stream replays what changed after it, then pushes. When that cannot be replayed, because the
+ * conversation was replaced or more than a page arrived since, the first response is the newest
+ * page, not incremental, and the client replaces its copy with it.
  *
  * @generated from message supertag.runtime.v2.FollowConversationRequest
  */

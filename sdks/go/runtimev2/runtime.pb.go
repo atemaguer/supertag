@@ -13744,7 +13744,10 @@ func (x *SendMessageRequest) GetOutputPolicy() *TaskOutputPolicy {
 
 // As ListMessagesRequest with `after`: the conversation the client's copy came from, the latest
 // message order it holds, and the turns it holds unfinished. A client without a copy sends none,
-// and the first response is the newest page.
+// and the first response is the newest page. A client that reconnects sends what it holds: the
+// stream replays what changed after it, then pushes. When that cannot be replayed, because the
+// conversation was replaced or more than a page arrived since, the first response is the newest
+// page, not incremental, and the client replaces its copy with it.
 type FollowConversationRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	TagId          string                 `protobuf:"bytes,1,opt,name=tag_id,json=tagId,proto3" json:"tag_id,omitempty"`

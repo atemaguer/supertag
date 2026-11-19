@@ -263,6 +263,10 @@ loses its network during a write stalls every write for up to 15 seconds, until 
 session; connect replicas to PostgreSQL directly or through a session-mode pooler, because a
 transaction-mode pooler drops those session limits. Operators, Worker Hosts, and Gateways connect
 to one Control Plane address, so put the replicas behind a TCP load balancer or private DNS name.
+Each replica keeps one more PostgreSQL connection of its own, outside its pool, to `LISTEN` for
+the other replicas' commits, so a conversation or Watch open on one replica shows a change made
+through another at once; the pooler must pass `LISTEN` through, as a session-mode one does. While
+that connection is down, streams catch up within about a second.
 A Worker Host's relay stream reaches one replica,
 so only that replica relays the host's artifacts and Workspace deliveries; a read through another
 replica fails as if the host were offline. A SQLite
