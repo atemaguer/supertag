@@ -100,6 +100,11 @@ path = "tests/two_gateways.rs"
 required-features = ["test-fixtures"]
 
 [[test]]
+name = "data_endpoint_runtime"
+path = "tests/data_endpoint_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
 name = "client_forwarding"
 path = "tests/client_forwarding.rs"
 required-features = ["test-fixtures"]
