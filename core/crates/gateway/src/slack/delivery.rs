@@ -118,10 +118,7 @@ impl Connector {
                 if let Some(result) = result {
                     return Ok(result);
                 }
-                self.journal.save(&Entry::Settle {
-                    target,
-                    outcome: Outcome::Uncertain,
-                })?;
+                return self.journal.lapsed(target);
             }
             Entry::Sending { target } => {
                 self.journal.save(&Entry::Settle {
@@ -418,6 +415,50 @@ mod tests {
             reopened.0.journal.load()?,
             Some(Entry::Settle { target, outcome: Outcome::Uncertain }) if target.reply_id == "reply"
         ));
+        Ok(())
+    }
+
+    /// A Control Plane that dies between answering a claim and proving its lease must not strand
+    /// a reply that was never sent: the replayed claim resumes the same lease and delivers it.
+    #[tokio::test]
+    async fn a_claim_whose_lease_cannot_be_proven_is_replayed_and_delivered_once() -> Result<()> {
+        use crate::delivery_journal::tests::{Fixture, Mode};
+        let fixture = Fixture::new(Mode::Restarted).claiming(
+            "fixture-gateway-token",
+            "slack-fixture",
+            reply("Done", None, None),
+        );
+        let (channel, _server) = fixture.serve().await?;
+        let (endpoint, recorded) = mock(vec![ok(TS)]).await?;
+        let temporary = tempfile::tempdir()?;
+        let slack = super::super::Slack::new(
+            crate::slack::tests::config(&temporary.path().join("slack")),
+            supertag_protocol::negotiation::bind_current(channel),
+            "fixture-gateway-token".into(),
+        )?
+        .with_test_reply_url(&endpoint)?;
+
+        // The claim is answered but its first renewal fails: nothing is sent or settled.
+        assert!(!slack.0.advance_delivery("owner").await?);
+        assert!(recorded.lock().unwrap().is_empty());
+        assert!(fixture.settled.lock().unwrap().is_empty());
+        let Some(Entry::Claim { operation_id }) = slack.0.journal.load()? else {
+            panic!("the unsent claim was not kept");
+        };
+
+        // The next round replays the same claim operation, proves the lease, and posts once.
+        assert!(slack.0.advance_delivery("owner").await?);
+        assert_eq!(
+            *fixture.claims.lock().unwrap(),
+            [operation_id.clone(), operation_id]
+        );
+        assert_eq!(recorded.lock().unwrap().len(), 1);
+        assert!(!slack.0.advance_delivery("owner").await?);
+        let settled = fixture.settled.lock().unwrap().clone();
+        assert_eq!(settled.len(), 1);
+        assert_eq!(settled[0].state(), ReplyState::Delivered);
+        assert_eq!(settled[0].provider_receipt.as_deref(), Some(TS));
+        assert!(slack.0.journal.load()?.is_none());
         Ok(())
     }
 

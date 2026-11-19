@@ -1,30 +1,39 @@
 use super::*;
 use axum::{Router, body::Body, routing::post};
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicBool, AtomicUsize, Ordering},
 };
-use supertag_protocol::v2::ReplyLease;
+use supertag_protocol::v2::{ClaimReplyResponse, Reply, ReplyLease, SettleReplyRequest};
 use tokio::{net::TcpListener, sync::Notify};
-use tonic::transport::{Endpoint, Server};
+use tonic::transport::{Channel, Endpoint, Server};
 
 #[derive(Clone, Copy)]
-enum Mode {
+pub(crate) enum Mode {
     Transient,
     Revoke,
     Hold,
+    /// The first renewal finds the Control Plane gone; every later one is granted.
+    Restarted,
 }
 #[derive(Clone)]
-struct Fixture {
-    calls: Arc<AtomicUsize>,
+pub(crate) struct Fixture {
+    pub(crate) calls: Arc<AtomicUsize>,
     renewal_started: Arc<Notify>,
     provider_progress: Arc<Notify>,
     renewed: Arc<Notify>,
     mode: Mode,
     initial_error: Option<tonic::Code>,
+    gateway_token: &'static str,
+    account: &'static str,
+    /// The reply every claim hands out, with the lease `lease`.
+    claimed: Option<Reply>,
+    /// Operation IDs of the claims received, in order.
+    pub(crate) claims: Arc<Mutex<Vec<String>>>,
+    pub(crate) settled: Arc<Mutex<Vec<SettleReplyRequest>>>,
 }
 impl Fixture {
-    fn new(mode: Mode) -> Self {
+    pub(crate) fn new(mode: Mode) -> Self {
         Self {
             calls: Arc::new(AtomicUsize::new(0)),
             renewal_started: Arc::new(Notify::new()),
@@ -32,9 +41,26 @@ impl Fixture {
             renewed: Arc::new(Notify::new()),
             mode,
             initial_error: None,
+            gateway_token: "private-gateway-token",
+            account: "account",
+            claimed: None,
+            claims: Arc::default(),
+            settled: Arc::default(),
         }
     }
-    async fn client(&self) -> Result<(ConnectorClient<ProtocolChannel>, AbortOnDrop)> {
+    /// A Control Plane that hands `reply` to a connector authenticated as `account`.
+    pub(crate) fn claiming(
+        mut self,
+        gateway_token: &'static str,
+        account: &'static str,
+        reply: Reply,
+    ) -> Self {
+        self.gateway_token = gateway_token;
+        self.account = account;
+        self.claimed = Some(reply);
+        self
+    }
+    pub(crate) async fn serve(&self) -> Result<(Channel, AbortOnDrop)> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
         let fixture = self.clone();
@@ -48,13 +74,17 @@ impl Fixture {
         let channel = Endpoint::from_shared(format!("http://{address}"))?
             .connect()
             .await?;
+        Ok((channel, AbortOnDrop(server)))
+    }
+    async fn client(&self) -> Result<(ConnectorClient<ProtocolChannel>, AbortOnDrop)> {
+        let (channel, server) = self.serve().await?;
         Ok((
             ConnectorClient::new(supertag_protocol::negotiation::bind_current(channel)),
-            AbortOnDrop(server),
+            server,
         ))
     }
 }
-struct AbortOnDrop(tokio::task::JoinHandle<()>);
+pub(crate) struct AbortOnDrop(tokio::task::JoinHandle<()>);
 impl Drop for AbortOnDrop {
     fn drop(&mut self) {
         self.0.abort();
@@ -65,6 +95,29 @@ fn target() -> Claim {
         reply_id: "reply".into(),
         lease_token: "lease".into(),
     }
+}
+
+#[test]
+fn a_lapsed_claim_settles_uncertain_only_after_the_send_intent() -> Result<()> {
+    let temporary = tempfile::tempdir()?;
+    let journal = Journal::open(&temporary.path().join("state"), "account", "slack")?;
+    // Nothing reached the provider: keep the claim so its operation can be replayed.
+    journal.save(&Entry::Claim {
+        operation_id: "claim".into(),
+    })?;
+    assert!(!journal.lapsed(target())?);
+    assert!(matches!(
+        journal.load()?,
+        Some(Entry::Claim { operation_id }) if operation_id == "claim"
+    ));
+    // The request may have been sent: it is never sent again.
+    journal.save(&Entry::Sending { target: target() })?;
+    assert!(journal.lapsed(target())?);
+    assert!(matches!(
+        journal.load()?,
+        Some(Entry::Settle { target, outcome: Outcome::Uncertain }) if target.reply_id == "reply"
+    ));
+    Ok(())
 }
 
 #[tokio::test]
@@ -276,9 +329,19 @@ impl supertag_protocol::v2::connector_server::Connector for Fixture {
     }
     async fn claim_reply(
         &self,
-        _request: tonic::Request<supertag_protocol::v2::ClaimReplyRequest>,
-    ) -> Result<tonic::Response<supertag_protocol::v2::ClaimReplyResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented("lease fixture only"))
+        request: tonic::Request<supertag_protocol::v2::ClaimReplyRequest>,
+    ) -> Result<tonic::Response<ClaimReplyResponse>, tonic::Status> {
+        let Some(reply) = self.claimed.clone() else {
+            return Err(tonic::Status::unimplemented("lease fixture only"));
+        };
+        self.claims
+            .lock()
+            .unwrap()
+            .push(request.into_inner().operation_id);
+        Ok(tonic::Response::new(ClaimReplyResponse {
+            reply: Some(reply),
+            lease_token: "lease".into(),
+        }))
     }
     async fn renew_reply(
         &self,
@@ -286,20 +349,28 @@ impl supertag_protocol::v2::connector_server::Connector for Fixture {
     ) -> Result<tonic::Response<ReplyLease>, tonic::Status> {
         assert_eq!(
             request.metadata().get("authorization").unwrap(),
-            "Bearer private-gateway-token"
+            format!("Bearer {}", self.gateway_token).as_str()
         );
         assert_eq!(
             request
                 .metadata()
                 .get(supertag_protocol::CONNECTOR_ACCOUNT_HEADER)
                 .unwrap(),
-            "account"
+            self.account
         );
         assert_eq!(request.get_ref().reply_id, "reply");
         assert_eq!(request.get_ref().lease_token, "lease");
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         if let Some(code) = self.initial_error {
             return Err(tonic::Status::new(code, "fixture"));
+        }
+        if matches!(self.mode, Mode::Restarted) {
+            if call == 0 {
+                return Err(tonic::Status::unavailable("fixture restarting"));
+            }
+            return Ok(tonic::Response::new(ReplyLease {
+                valid_for_ms: 10_000,
+            }));
         }
         if call == 0 {
             return Ok(tonic::Response::new(ReplyLease {
@@ -328,13 +399,21 @@ impl supertag_protocol::v2::connector_server::Connector for Fixture {
             }
             Mode::Revoke => Err(tonic::Status::failed_precondition("expired")),
             Mode::Hold => std::future::pending().await,
+            Mode::Restarted => unreachable!("answered above"),
         }
     }
     async fn settle_reply(
         &self,
-        _request: tonic::Request<supertag_protocol::v2::SettleReplyRequest>,
-    ) -> Result<tonic::Response<supertag_protocol::v2::Reply>, tonic::Status> {
-        Err(tonic::Status::unimplemented("lease fixture only"))
+        request: tonic::Request<SettleReplyRequest>,
+    ) -> Result<tonic::Response<Reply>, tonic::Status> {
+        let Some(mut reply) = self.claimed.clone() else {
+            return Err(tonic::Status::unimplemented("lease fixture only"));
+        };
+        let request = request.into_inner();
+        reply.state = request.state;
+        reply.provider_receipt = request.provider_receipt.clone();
+        self.settled.lock().unwrap().push(request);
+        Ok(tonic::Response::new(reply))
     }
     async fn claim_connector(
         &self,

@@ -137,6 +137,22 @@ impl Journal {
         Ok(())
     }
 
+    /// The claim lease lapsed and dropped the provider work. Until the send intent is
+    /// journaled nothing has reached the provider, so the journal keeps the claim: replaying
+    /// its operation hands back the same lease once the Control Plane answers again, or the
+    /// reply's settled state if the lease expired meanwhile. After the intent the request may
+    /// have been sent, so the reply settles uncertain. Returns whether the journal advanced.
+    pub(crate) fn lapsed(&self, target: Claim) -> Result<bool> {
+        if matches!(self.load()?, Some(Entry::Claim { .. })) {
+            return Ok(false);
+        }
+        self.save(&Entry::Settle {
+            target,
+            outcome: Outcome::Uncertain,
+        })?;
+        Ok(true)
+    }
+
     pub(crate) fn clear(&self) -> Result<()> {
         fs::remove_file(self.directory.join(REPLY_FILE))?;
         File::open(&self.directory)?.sync_all()?;
@@ -347,4 +363,4 @@ pub(crate) async fn with_claim_lease<T>(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

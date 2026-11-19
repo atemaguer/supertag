@@ -132,7 +132,9 @@ the answer to a refused message, has an empty `task_id`; deliver it the same way
 Delivery is at least once. A connector that crashes after posting and before settling sees the
 reply again once its lease lapses. To post exactly once, record each claimed reply durably before
 posting, and settle a reply you might have posted as `REPLY_STATE_UNCERTAIN`. An operator then
-resolves it with evidence from the surface.
+resolves it with evidence from the surface. A reply you never started posting is not uncertain,
+for example when the Control Plane restarted before `RenewReply` could confirm a new claim:
+repeat `ClaimReply` with the same `operation_id` to get the same claim back and post it then.
 
 ## Example
 

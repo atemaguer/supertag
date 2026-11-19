@@ -127,10 +127,7 @@ impl Connector {
                 if let Some(result) = result {
                     return Ok(result);
                 }
-                self.journal.save(&Entry::Settle {
-                    target,
-                    outcome: Outcome::Uncertain,
-                })?;
+                return self.journal.lapsed(target);
             }
             Entry::Sending { target } => {
                 self.journal.save(&Entry::Settle {

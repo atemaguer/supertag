@@ -148,11 +148,7 @@ impl Connector {
         if let Some(result) = result {
             return Ok(result);
         }
-        self.journal.save(&Entry::Settle {
-            target,
-            outcome: Outcome::Uncertain,
-        })?;
-        Ok(true)
+        self.journal.lapsed(target)
     }
 
     async fn post(&self, reply: &Reply, token: &super::auth::AccessToken) -> Outcome {
