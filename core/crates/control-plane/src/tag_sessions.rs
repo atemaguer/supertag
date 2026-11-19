@@ -157,7 +157,7 @@ async fn audience_at(
     }
     if crate::conversations::private_session(&session) {
         let principal: Option<String> = sqlx::query_scalar(
-            "SELECT principal FROM supertag_v2_conversations WHERE session_id=$1 AND tag_id=$2",
+            "SELECT principal FROM supertag_v2_conversation_sessions WHERE session_id=$1 AND tag_id=$2",
         )
         .bind(&session)
         .bind(&tag)
@@ -433,7 +433,7 @@ async fn summary_in(
 /// Leaves out, in SQL, the conversations private to someone other than the viewer's requester
 /// (`$5`, empty when it has none), so a read does not derive their audience one by one. The rest
 /// of the rule is [`Viewer::sees`].
-const HIDDEN_CONVERSATIONS: &str = "NOT EXISTS (SELECT 1 FROM supertag_v2_conversations c WHERE c.session_id=supertag_v2_tasks.session_id AND c.tag_id=$1 AND (c.principal IS NULL OR c.principal<>$5))";
+const HIDDEN_CONVERSATIONS: &str = "NOT EXISTS (SELECT 1 FROM supertag_v2_conversation_sessions c WHERE c.session_id=supertag_v2_tasks.session_id AND c.tag_id=$1 AND (c.principal IS NULL OR c.principal<>$5))";
 
 const SESSION_GROUP: &str = "SELECT session_id,MIN(accepted_order) AS first_order,MAX(accepted_order) AS last_order,MAX(accepted_at_ms) AS accepted_ms,MAX(completed_at_ms) AS completed_ms FROM supertag_v2_tasks";
 

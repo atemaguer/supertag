@@ -215,7 +215,7 @@ impl Store {
         .await?;
         objective_link_task_in(&mut tx, &task).await?;
         if previous.is_none() {
-            sqlx::query("INSERT INTO supertag_v2_conversations (session_id,principal,tag_id,created_order) VALUES ($1,$2,$3,$4)")
+            sqlx::query("INSERT INTO supertag_v2_conversation_sessions (session_id,principal,tag_id,created_order) VALUES ($1,$2,$3,$4)")
                 .bind(&session).bind(principal).bind(&input.tag_id)
                 .bind(order).execute(&mut *tx).await?;
         }
@@ -274,7 +274,7 @@ impl Store {
         let allowed = self.client_tags(principal).await?;
         let mut tx = self.pool.begin().await?;
         let sessions = sqlx::query(
-            "SELECT tag_id,session_id,created_order FROM supertag_v2_conversations
+            "SELECT tag_id,session_id,created_order FROM supertag_v2_conversation_sessions
              WHERE principal=$1 ORDER BY created_order",
         )
         .bind(principal)
@@ -310,7 +310,7 @@ impl Store {
                              AND h.accepted_order>COALESCE(r.read_order,0)
                         THEN 1 ELSE 0 END) AS unread,
                     COALESCE(MAX(r.read_order),0) AS read_order
-             FROM supertag_v2_conversations c
+             FROM supertag_v2_conversation_sessions c
              JOIN supertag_v2_conversation_history h ON h.session_id=c.session_id
              JOIN supertag_v2_tasks t ON t.task_id=h.task_id AND t.quiet=0
              LEFT JOIN supertag_v2_conversation_reads r ON r.principal=c.principal AND r.tag_id=c.tag_id
@@ -574,7 +574,7 @@ pub(crate) async fn task_access_in(
 /// conditions from `$3`.
 const HISTORY: &str = "SELECT h.task_id,h.accepted_order,h.work_session_report_id
      FROM supertag_v2_conversation_history h
-     WHERE h.session_id IN (SELECT c.session_id FROM supertag_v2_conversations c
+     WHERE h.session_id IN (SELECT c.session_id FROM supertag_v2_conversation_sessions c
                             WHERE c.principal=$1 AND c.tag_id=$2)
        AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks q WHERE q.task_id=h.task_id AND q.quiet=1)
        AND NOT EXISTS (SELECT 1 FROM supertag_v2_proactive_posts hp WHERE hp.task_id=h.task_id
@@ -584,7 +584,7 @@ const HISTORY: &str = "SELECT h.task_id,h.accepted_order,h.work_session_report_i
 /// delivered, when it arrives as the newest message.
 const HISTORY_WITH_QUIET: &str = "SELECT h.task_id,h.accepted_order,h.work_session_report_id
      FROM supertag_v2_conversation_history h
-     WHERE h.session_id IN (SELECT c.session_id FROM supertag_v2_conversations c
+     WHERE h.session_id IN (SELECT c.session_id FROM supertag_v2_conversation_sessions c
                             WHERE c.principal=$1 AND c.tag_id=$2)
        AND NOT EXISTS (SELECT 1 FROM supertag_v2_proactive_posts hp WHERE hp.task_id=h.task_id
                        AND hp.held_until_ms IS NOT NULL AND hp.released_at_ms IS NULL)";
@@ -721,7 +721,7 @@ pub(crate) async fn session_in(
     tag: &str,
 ) -> Result<Option<String>> {
     Ok(sqlx::query_scalar(
-        "SELECT c.session_id FROM supertag_v2_conversations c
+        "SELECT c.session_id FROM supertag_v2_conversation_sessions c
          LEFT JOIN supertag_v2_conversation_messages m ON m.session_id=c.session_id
          WHERE c.principal=$1 AND c.tag_id=$2
          ORDER BY COALESCE(m.accepted_order,c.created_order) DESC LIMIT 1",
@@ -739,7 +739,7 @@ async fn conversation_id_in(
     tag: &str,
 ) -> Result<Option<String>> {
     Ok(sqlx::query_scalar(
-        "SELECT session_id FROM supertag_v2_conversations WHERE principal=$1 AND tag_id=$2
+        "SELECT session_id FROM supertag_v2_conversation_sessions WHERE principal=$1 AND tag_id=$2
          ORDER BY created_order LIMIT 1",
     )
     .bind(principal)

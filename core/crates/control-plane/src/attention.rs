@@ -393,7 +393,7 @@ pub(crate) async fn read_in(
     order: i64,
     now: i64,
 ) -> Result<()> {
-    sqlx::query("UPDATE supertag_v2_proactive_posts SET read_at_ms=$1 WHERE tag_id=$2 AND quiet=0 AND read_at_ms IS NULL AND conversation_order<=$3 AND session_id IN (SELECT session_id FROM supertag_v2_conversations WHERE principal=$4 AND tag_id=$2)")
+    sqlx::query("UPDATE supertag_v2_proactive_posts SET read_at_ms=$1 WHERE tag_id=$2 AND quiet=0 AND read_at_ms IS NULL AND conversation_order<=$3 AND session_id IN (SELECT session_id FROM supertag_v2_conversation_sessions WHERE principal=$4 AND tag_id=$2)")
         .bind(now).bind(tag).bind(order).bind(principal)
         .execute(&mut **tx).await?;
     Ok(())

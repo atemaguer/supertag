@@ -444,7 +444,7 @@ async fn audience_in(
         return Ok(None);
     }
     Ok(sqlx::query_scalar(
-        "SELECT principal FROM supertag_v2_conversations WHERE session_id=$1 AND tag_id=$2",
+        "SELECT principal FROM supertag_v2_conversation_sessions WHERE session_id=$1 AND tag_id=$2",
     )
     .bind(session)
     .bind(tag)
@@ -1110,7 +1110,7 @@ async fn queue_turn_in(
                 Some(session) => session,
                 None => {
                     let order = next_order(tx).await?;
-                    sqlx::query("INSERT INTO supertag_v2_conversations (session_id,principal,tag_id,created_order) VALUES ($1,$2,$3,$4)")
+                    sqlx::query("INSERT INTO supertag_v2_conversation_sessions (session_id,principal,tag_id,created_order) VALUES ($1,$2,$3,$4)")
                         .bind(&schedule.session_id).bind(principal).bind(&schedule.tag_id).bind(order)
                         .execute(&mut **tx).await?;
                     schedule.session_id.clone()

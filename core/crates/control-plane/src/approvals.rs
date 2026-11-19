@@ -739,7 +739,7 @@ async fn continue_in(tx: &mut Transaction<'_, Any>, task_id: &str, now: i64) -> 
     // A continuation of a private Conversation remains private and visible in
     // that owner's conversation history, regardless of the decision transport.
     let owner: Option<String> = sqlx::query_scalar(
-        "SELECT principal FROM supertag_v2_conversations WHERE session_id=$1 AND tag_id=$2",
+        "SELECT principal FROM supertag_v2_conversation_sessions WHERE session_id=$1 AND tag_id=$2",
     )
     .bind(&source.session_id)
     .bind(&source.tag_id)
@@ -789,7 +789,7 @@ async fn budget_stop_in(
     let route_digest = format!("{:x}", Sha256::digest(event.as_bytes()));
     sqlx::query("INSERT INTO supertag_v2_inbound_events (account_id,event_id,request_digest,task_id,conversation_id,thread_id) SELECT account_id,$1,$2,$3,conversation_id,thread_id FROM supertag_v2_inbound_events WHERE task_id=$4").bind(&event).bind(&route_digest).bind(&notice.task_id).bind(&source.task_id).execute(&mut **tx).await?;
     if scope.is_none() {
-        sqlx::query("INSERT INTO supertag_v2_conversation_messages (task_id,session_id,principal,operation_id,request_digest,accepted_order) SELECT $1,session_id,principal,$2,$3,$4 FROM supertag_v2_conversations WHERE session_id=$5 AND tag_id=$6").bind(&notice.task_id).bind(event).bind(route_digest).bind(order).bind(&source.session_id).bind(&source.tag_id).execute(&mut **tx).await?;
+        sqlx::query("INSERT INTO supertag_v2_conversation_messages (task_id,session_id,principal,operation_id,request_digest,accepted_order) SELECT $1,session_id,principal,$2,$3,$4 FROM supertag_v2_conversation_sessions WHERE session_id=$5 AND tag_id=$6").bind(&notice.task_id).bind(event).bind(route_digest).bind(order).bind(&source.session_id).bind(&source.tag_id).execute(&mut **tx).await?;
     }
     sqlx::query("INSERT INTO supertag_v2_approval_continuation_stops (task_id,reason,notice_task_id) VALUES ($1,'budget',$2)").bind(&source.task_id).bind(&notice.task_id).execute(&mut **tx).await?;
     Ok(())

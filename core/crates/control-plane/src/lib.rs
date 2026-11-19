@@ -30,6 +30,7 @@ mod manifest_fields;
 mod manifest_relationships;
 mod mcp_effects;
 mod memories;
+mod messages;
 mod metrics;
 mod native_memory;
 mod network_logs;
