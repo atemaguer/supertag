@@ -216,6 +216,30 @@ says what changed, not its new contents: read the resource.
 A Watch request may name the kinds it follows. A kind the Control Plane does not know, such as one a
 newer client asks for, is ignored rather than refused.
 
+## How streams deliver
+
+`FollowConversation` and `Watch` share these rules:
+
+- **Pushed after commit.** A stream sends a change only once the write that made it has
+  committed, so it never shows what the database could still lose. It sends nothing it has not
+  read back from the database.
+- **Any replica.** A stream may run on any Control Plane replica sharing the database. A change
+  made through another replica reaches it at once on PostgreSQL, by a notification without
+  content, and at the latest about a second later when a notification is lost. See
+  [Replicas](../operations/control-plane.md#replicas).
+- **Resume, don't restart.** Reconnect with what you hold: a conversation's `conversation_id`,
+  latest `order`, and unfinished turns, or a Watch's last resume token. The stream replays what
+  changed after it, then pushes. When it cannot, the first response says so: a
+  `FollowConversation` page with `incremental` unset, or a `WatchResync`. Read again what you
+  show and carry on from there. A Watch that falls behind the notices the Control Plane keeps
+  while it is open also gets `WatchResync`.
+- **Subscribe, then read.** A stream registers for changes before it reads what you missed, so
+  a change that commits in between is neither lost nor sent twice.
+- **Heartbeats.** An idle stream sends a heartbeat at least every 15 seconds.
+- **Streamed text is ephemeral.** A follow's `texts` are best-effort. They come only from the
+  replica that received them, are never stored, and are never replayed on resume. The recorded
+  message replaces them.
+
 ## Stability
 
 The API is versioned by protocol negotiation and the package name. See

@@ -3,7 +3,8 @@
 //! A Worker Host sends the redacted text so far of the message its Attempt's Tag is writing. It
 //! is shown to the turn's conversation until the message is recorded as an event or the turn
 //! finishes, and is never stored: a restarted Control Plane loses it, and the recorded message
-//! still lands.
+//! still lands. It reaches the follows of the turn's Tag on this replica over the bus; a follow on
+//! another replica sees only the recorded message, as it commits.
 use std::{
     collections::HashMap,
     sync::Mutex,
@@ -27,6 +28,8 @@ pub(crate) struct Texts {
 
 /// One running turn's text.
 struct Turn {
+    /// The Tag whose conversation the turn is in, whose follows the text reaches.
+    tag_id: String,
     /// The latest message event recorded for the turn: text written before it is that message.
     recorded_through: u64,
     after_sequence: u64,
@@ -52,7 +55,7 @@ impl Texts {
     }
 
     /// Records text; it says whether what a follow shows changed.
-    fn set(&self, task_id: &str, input: &PublishTaskTextRequest) -> bool {
+    fn set(&self, tag_id: &str, task_id: &str, input: &PublishTaskTextRequest) -> bool {
         let version = self.version();
         let mut text = input.text.clone();
         if text.len() > MAX_TEXT_BYTES {
@@ -65,6 +68,7 @@ impl Texts {
         let mut turns = self.turns.lock().unwrap();
         turns.retain(|_, turn| turn.updated.elapsed() < ABANDONED);
         let turn = turns.entry(task_id.to_owned()).or_insert(Turn {
+            tag_id: tag_id.to_owned(),
             recorded_through: 0,
             after_sequence: input.after_sequence,
             revision: 0,
@@ -92,29 +96,29 @@ impl Texts {
         true
     }
 
-    /// The turn recorded message event `sequence`: text written before it is that message.
-    fn recorded(&self, task_id: &str, sequence: u64) -> bool {
+    /// The turn recorded message event `sequence`: text written before it is that message. The
+    /// Tag whose follows see the text cleared, if it was.
+    fn recorded(&self, task_id: &str, sequence: u64) -> Option<String> {
         let version = self.version();
         let mut turns = self.turns.lock().unwrap();
-        let Some(turn) = turns.get_mut(task_id) else {
-            return false;
-        };
+        let turn = turns.get_mut(task_id)?;
         turn.recorded_through = turn.recorded_through.max(sequence);
         if turn.after_sequence >= sequence || turn.text.is_empty() {
-            return false;
+            return None;
         }
         turn.text.clear();
         turn.version = version;
-        true
+        Some(turn.tag_id.clone())
     }
 
-    /// The turn finished; its result replaces any text.
-    fn forget(&self, task_id: &str) -> bool {
+    /// The turn finished; its result replaces any text. The Tag whose follows saw text, if any.
+    fn forget(&self, task_id: &str) -> Option<String> {
         self.turns
             .lock()
             .unwrap()
             .remove(task_id)
-            .is_some_and(|turn| !turn.text.is_empty())
+            .filter(|turn| !turn.text.is_empty())
+            .map(|turn| turn.tag_id)
     }
 
     pub(crate) fn shown(&self, task_id: &str) -> Option<Shown> {
@@ -150,23 +154,23 @@ impl Store {
                 "the Task Attempt is not running".into(),
             ));
         }
-        if self.live.texts.set(&attempt.task_id, input) {
-            self.live.texts_changed();
+        if self.live.texts.set(&task.tag_id, &attempt.task_id, input) {
+            self.live.bus.text(&task.tag_id);
         }
         Ok(())
     }
 
     /// A message event was recorded for the turn after commit.
     pub(crate) fn text_recorded(&self, task_id: &str, sequence: u64) {
-        if self.live.texts.recorded(task_id, sequence) {
-            self.live.texts_changed();
+        if let Some(tag_id) = self.live.texts.recorded(task_id, sequence) {
+            self.live.bus.text(&tag_id);
         }
     }
 
     /// The turn finished after commit.
     pub(crate) fn text_finished(&self, task_id: &str) {
-        if self.live.texts.forget(task_id) {
-            self.live.texts_changed();
+        if let Some(tag_id) = self.live.texts.forget(task_id) {
+            self.live.bus.text(&tag_id);
         }
     }
 }

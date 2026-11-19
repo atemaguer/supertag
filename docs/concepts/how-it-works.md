@@ -95,6 +95,24 @@ carries the reply back to the thread.
 The Gateway does not decide organizational policy, create Tasks or Teams on its own, or schedule
 work. It holds the surface credentials, and nothing else does.
 
+## How clients see changes
+
+A client that shows a conversation or a list of Tags follows it with one stream through the
+Gateway. The Control Plane pushes a change once the write that made it has committed, so a client
+never shows a message the database could still lose. A client keeps what it last showed. After a
+dropped connection it resumes from there and receives only what changed since. When the Control
+Plane can no longer replay that, the client gets a fresh copy instead.
+
+While a Tag writes a reply, the Control Plane also pushes the text so far. That text is never
+stored and arrives best-effort: a reconnecting client sees the recorded message, not the text
+before it.
+
+Several Control Plane processes, called replicas, can share one PostgreSQL database. A write
+through one replica reaches clients connected to another at once, by a PostgreSQL notification
+that carries no content. If that notification is lost, clients still catch up within about a
+second. Streamed reply text reaches only the clients of the replica that received it; clients of
+other replicas see the reply when it is recorded.
+
 ## How identity and access are decided
 
 A Tag is a non-human identity in SuperTag's access model. Its configured locations determine where

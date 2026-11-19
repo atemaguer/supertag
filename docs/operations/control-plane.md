@@ -194,6 +194,30 @@ deliveries. Every replica signs S3 Volume URLs with the same
 vault credential, so give the replicas one credential vault. A SQLite database serves one process. See
 [Control Plane replicas](../../deploy/native/README.md#control-plane-replicas).
 
+Clients follow conversations and changes with streams, and any replica may serve them. While a
+replica serves at least one stream, it keeps one PostgreSQL connection of its own, outside its
+pool of 8, and listens there with `LISTEN` for the commits of other replicas. Every committed write
+that changes what streams show sends a `NOTIFY` that carries no content; each listening replica
+then reads the change from the database. So a message written through one replica reaches a
+client of another at once.
+
+The listener needs a direct connection, or a pooler that keeps one server connection per client
+connection:
+
+| The database URL points at | Session limits | Changes from other replicas |
+| --- | --- | --- |
+| PostgreSQL directly | Kept | Pushed at once |
+| A session-mode pooler, such as PgBouncer with `pool_mode = session` | Kept | Pushed at once |
+| A transaction-mode pooler, such as PgBouncer with `pool_mode = transaction` | Dropped | Up to a second late: notifications don't arrive |
+
+Allow each replica 9 connections: its pool and the listener, which names itself `supertag-hints`
+in `pg_stat_activity`. A lost notification costs no data. Each replica reads the feed every second
+anyway, and reconnects a dropped listener with backoff, so streams catch up within about a second.
+
+Streamed reply text, shown while a Tag writes, is held only in the memory of the replica that
+received it, and reaches only the clients of that replica. Clients of other replicas see the
+message when it is recorded.
+
 ## Back up
 
 - **PostgreSQL**: back it up with your provider's backups or `pg_dump`. Back up each Worker Host's

@@ -185,6 +185,30 @@ read the new URL when they register again; restart them so later Workers use it.
 example a cleartext `http://` URL outside loopback. Use `https://` or `wss://`. See
 [Data endpoint](../reference/worker.md#data-endpoint).
 
+## Replies show up late or all at once
+
+This applies to a shared deployment with several Control Plane processes, called replicas, on one
+PostgreSQL database. Two symptoms are expected there:
+
+- A reply appears whole, without its text streaming in first. Streamed text reaches only the
+  clients of the replica the Worker's report reached; clients of other replicas see the recorded
+  message.
+- A change appears up to a second late, but never later. Each replica reads the database every
+  second, whether or not a notification arrived.
+
+Changes that arrive about a second late every time mean the replicas' notifications don't arrive.
+Each replica serving a stream holds one listening connection named `supertag-hints`. Check for it:
+
+```sql
+SELECT client_addr, state FROM pg_stat_activity WHERE application_name = 'supertag-hints';
+```
+
+No row while a client is open means the replica cannot open that connection, for example because
+the database is at its connection limit, or that the URL goes through a pooler. Connect the replicas directly or through a
+session-mode pooler, and allow each 9 connections. A transaction-mode pooler, such as PgBouncer
+with `pool_mode = transaction`, accepts the connection but delivers no notifications. See
+[Replicas](../operations/control-plane.md#replicas).
+
 ## A Task failed because the repository changed
 
 A Task Attempt fails when the repository's Git configuration, hooks, or attributes changed while

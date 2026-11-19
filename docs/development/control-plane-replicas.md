@@ -44,6 +44,7 @@ Audited 2026-11-13 against `core/crates/control-plane`. "Fixed" rows changed in 
 | Operator Token last-use time | Conditional `UPDATE`; advisory only | Safe |
 | Audit call tracking | Per-call task-local state; entries commit with each write | Safe |
 | Read-only RPCs on unlocked transactions | No writes | Safe |
+| Stream push (`bus.rs`): conversation follows and operator Watches | One tail per replica reads `supertag_v2_watch_notices` and fans notices out to its streams; a trigger on that table sends `NOTIFY supertag_v2_hints` with no content once per committing transaction, and each replica's tail holds one `LISTEN` connection outside its pool while it serves a stream; the tail also reads every second on PostgreSQL (250 ms on SQLite) | Safe. A notification only wakes a read from the replica's own position, so a lost or duplicate one costs latency, not data; streamed reply text stays in the memory of the replica that received it |
 
 ## Known limits
 
@@ -61,6 +62,10 @@ Audited 2026-11-13 against `core/crates/control-plane`. "Fixed" rows changed in 
 - No replica stores or relays artifact or Workspace delivery bytes. They stay on the Worker Host
   that produced them, a Volume, or the Workspace's git remote, and readers fetch them from there,
   so no replica holds per-host streams.
+- Each replica needs one PostgreSQL connection beyond its pool of 8 for its `LISTEN` connection.
+  A transaction-mode pooler does not deliver notifications; streams then lag up to the 1-second
+  poll.
+- Streamed reply text reaches only the follows on the replica that received it.
 - Gateway replicas are not covered here: a Gateway keeps its file credential vault on its own
   volume.
 

@@ -32,7 +32,6 @@ const TRACKED: usize = 128;
 /// In-process signals for open follows, and the text of the messages running turns write.
 pub(crate) struct Live {
     pub(crate) bus: crate::bus::Bus,
-    text_changes: tokio::sync::watch::Sender<u64>,
     pub(crate) texts: super::texts::Texts,
     /// Worker Host claims held while they wait for a Task.
     pub(crate) claims: crate::claims::HeldClaims,
@@ -45,19 +44,11 @@ impl Live {
     pub(crate) fn new(bus: crate::bus::Bus) -> Self {
         Self {
             bus,
-            text_changes: tokio::sync::watch::Sender::new(0),
             texts: Default::default(),
             claims: Default::default(),
             claim_sweep: Default::default(),
             closing: CancellationToken::new(),
         }
-    }
-}
-
-impl Live {
-    pub(crate) fn texts_changed(&self) {
-        self.text_changes
-            .send_modify(|version| *version = version.wrapping_add(1));
     }
 }
 
@@ -101,7 +92,6 @@ impl Store {
         let store = self.clone();
         let operator = principal.starts_with("operator:");
         let principal = principal.to_owned();
-        let mut text_changes = self.live.text_changes.subscribe();
         let closing = self.live.closing.clone();
         let output = async_stream::try_stream! {
             let mut copy = Copy::default();
@@ -138,20 +128,20 @@ impl Store {
                     biased;
                     _ = closing.cancelled() => Wake::Draining,
                     wake = feed.wait() => Wake::Stored(wake),
-                    _ = text_changes.changed() => Wake::Text,
                     _ = tokio::time::sleep_until(deadline) => Wake::Timer,
                 };
                 let changed = match wake {
                     Wake::Draining => Err(draining())?,
                     Wake::Stored(wake) => {
-                        // A notice at or below what the last read started from is in it.
-                        let changed = wake.gap || wake.through > seen;
+                        // A notice at or below what the last read started from is in it. Text
+                        // the Tag is writing needs no read, unless its message was recorded: then
+                        // the message and the cleared text go out together.
+                        let changed = wake.gap
+                            || wake.through > seen
+                            || (wake.text && texts.cleared(&store.live.texts));
                         seen = seen.max(wake.through);
                         changed
                     }
-                    // Text the Tag is writing needs no read, unless its message was recorded:
-                    // then the message and the cleared text go out together.
-                    Wake::Text => texts.cleared(&store.live.texts),
                     Wake::Timer => false,
                 };
                 if changed || wait_check.is_some_and(|at| at <= Instant::now()) {
@@ -168,7 +158,6 @@ impl Store {
 enum Wake {
     Draining,
     Stored(crate::bus::Wake),
-    Text,
     Timer,
 }
 

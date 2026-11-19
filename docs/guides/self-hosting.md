@@ -31,7 +31,9 @@ directories.
   [Issue certificates from your own CA](../../deploy/native/README.md#issue-certificates-from-your-own-ca)
   shows.
 - PostgreSQL for every platform except Compose, which runs its own, and Render, whose Blueprint
-  creates one.
+  creates one. Connect directly or through a session-mode pooler, with room for 9 connections
+  per Control Plane process; a transaction-mode pooler drops the settings and notifications the
+  Control Plane relies on. See [Replicas](../operations/control-plane.md#replicas).
 - The container images: the `hosted` image for every platform except Compose, and the
   `control-plane` and `gateway` images for Compose. See
   [Build the hosted image](../../deploy/native/README.md#build-the-hosted-image).

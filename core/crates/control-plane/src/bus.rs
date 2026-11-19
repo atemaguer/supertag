@@ -16,6 +16,9 @@
 //! dropping anything at or below what its read returned. A subscription registered while the
 //! tail stood at position P receives every notice after P, and the stream's own read, made later,
 //! sees at least through P, so nothing falls between them.
+//!
+//! The text a running turn's Tag is writing travels the same bus as an ephemeral signal, to the
+//! follows of that Tag on the replica that received it; it is never stored.
 use std::{
     collections::HashMap,
     sync::{
@@ -103,12 +106,15 @@ pub(crate) struct Signal {
     through: AtomicI64,
     /// The tail skipped notices the feed no longer holds.
     gap: AtomicBool,
+    /// The text the Tag's running turns are writing changed.
+    text: AtomicBool,
     notify: Notify,
 }
 
 pub(crate) struct Wake {
     pub(crate) through: i64,
     pub(crate) gap: bool,
+    pub(crate) text: bool,
 }
 
 impl Signal {
@@ -122,12 +128,18 @@ impl Signal {
         self.notify.notify_one();
     }
 
+    fn text(&self) {
+        self.text.store(true, Ordering::SeqCst);
+        self.notify.notify_one();
+    }
+
     fn take(&self) -> Option<Wake> {
         let wake = Wake {
             through: self.through.swap(0, Ordering::SeqCst),
             gap: self.gap.swap(false, Ordering::SeqCst),
+            text: self.text.swap(false, Ordering::SeqCst),
         };
-        (wake.through > 0 || wake.gap).then_some(wake)
+        (wake.through > 0 || wake.gap || wake.text).then_some(wake)
     }
 }
 
@@ -163,6 +175,21 @@ impl Bus {
     /// How long the tail waits for a hint before it reads anyway.
     pub(crate) fn poll(&self) -> Duration {
         Duration::from_millis(self.poll_ms.load(Ordering::Relaxed))
+    }
+
+    /// The text a running turn of `tag_id` is writing changed: wakes the follows of that Tag's
+    /// conversations on this replica. Text is an ephemeral signal: it never touches the store and
+    /// reaches no other replica, where the recorded message arrives on commit instead.
+    pub(crate) fn text(&self, tag_id: &str) {
+        let state = self.state.lock().unwrap();
+        for signal in state
+            .follows
+            .get(tag_id)
+            .into_iter()
+            .flat_map(HashMap::values)
+        {
+            signal.text();
+        }
     }
 
     fn unsubscribe(&self, remove: impl FnOnce(&mut State)) {
@@ -217,7 +244,7 @@ impl State {
     }
 }
 
-/// A conversation follow's subscription to its Tag's notices.
+/// A conversation follow's subscription to its Tag's notices and the text its turns write.
 pub(crate) struct FollowFeed {
     live: Arc<Live>,
     tag_id: String,
@@ -301,7 +328,7 @@ impl Drop for WatchFeed {
 }
 
 impl Store {
-    /// Subscribes to the notices about `tag_id`'s conversations.
+    /// Subscribes to the notices about `tag_id`'s conversations and the text its turns write.
     pub(crate) async fn follow_feed(&self, tag_id: &str) -> Result<FollowFeed> {
         let signal = Arc::new(Signal::default());
         let id = self
