@@ -1,13 +1,24 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer as createHttp2Server } from "node:http2";
+import { createServer, connect as tcpConnect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
+import { createServer as createTlsServer } from "node:tls";
 import { promisify } from "node:util";
-import { Code, createGatewayClient } from "supertag-ai/gateway-client";
+import {
+  Code,
+  ConnectError,
+  createGatewayClient,
+  PROTOCOL_VERSIONS,
+  PrincipalRole,
+  ProtocolMismatchError,
+} from "supertag-ai/gateway-client";
 import { openHarness, TaskState } from "supertag-ai/harness";
 
 const token = "fixture-operator-token";
@@ -32,6 +43,430 @@ await assert.rejects(async () => closed.operator.listTags({}), /closed/);
 await assert.rejects(openHarness((async function* () {})()), /bootstrap/);
 console.log("Gateway client public package import passed.");
 
+// Tunnel URLs, token and build rules, and connect timeouts, without a Gateway.
+for (const url of ["ws://127.0.0.1:9/supertag", "wss://gateway.invalid/a/b", "wss://[::1]:9"]) {
+  createGatewayClient({ url, token }).close();
+}
+for (const url of [
+  "ws://user@127.0.0.1:9/tunnel",
+  "wss://gateway.invalid/tunnel?query",
+  "wss://gateway.invalid/tunnel#fragment",
+  "ftp://gateway.invalid",
+]) {
+  assert.throws(() => createGatewayClient({ url, token }), /origin/);
+}
+assert.throws(() => createGatewayClient({ url: "ws://gateway.invalid/t", token }), /loopback/);
+assert.throws(() => createGatewayClient({ url: "ws://127.0.0.1:0/t", token }), /valid port/);
+assert.throws(
+  () => createGatewayClient({ url: "ws://127.0.0.1:9", token, ca: "pem" }),
+  /require HTTPS or WSS/,
+);
+// The Rust clients' bearer rule: 1 to 8192 ASCII graphic characters.
+for (const accepted of ["x".repeat(8192), `stak_${"ab".repeat(32)}`, "a:b;c,d=e!"]) {
+  createGatewayClient({ url: loopback, token: accepted }).close();
+}
+for (const refused of ["", "x".repeat(8193), "two words", "töken", "tab\t"]) {
+  assert.throws(() => createGatewayClient({ url: loopback, token: refused }), /operator token/);
+}
+assert.throws(
+  () => createGatewayClient({ url: loopback, token, buildVersion: "x".repeat(65) }),
+  /Build version/,
+);
+assert.deepEqual([...PROTOCOL_VERSIONS], [6]);
+assert.ok(Object.isFrozen(PROTOCOL_VERSIONS));
+
+/** A loopback server that accepts connections and never answers them. */
+async function silentServer() {
+  const sockets = new Set();
+  const server = createServer((socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  return {
+    port: server.address().port,
+    close() {
+      for (const socket of sockets) socket.destroy();
+      server.close();
+    },
+  };
+}
+const silent = await silentServer();
+try {
+  for (const url of [
+    `https://127.0.0.1:${silent.port}`,
+    `ws://127.0.0.1:${silent.port}/tunnel`,
+    `wss://127.0.0.1:${silent.port}/tunnel`,
+  ]) {
+    const started = Date.now();
+    const client = createGatewayClient({ url, token, connectTimeoutMs: 300 });
+    try {
+      await assert.rejects(client.negotiate(), { code: Code.Unavailable });
+    } finally {
+      client.close();
+    }
+    assert.ok(Date.now() - started < 4000, `${url} waited past its connect timeout`);
+  }
+} finally {
+  silent.close();
+}
+
+/**
+ * A cleartext HTTP/2 server that answers protocol negotiation as another SuperTag release:
+ * `answer` is a NegotiateProtocolResponse, or a refusal message.
+ */
+async function negotiationServer(answer) {
+  const server = createHttp2Server();
+  server.on("stream", (stream) => {
+    stream.on("error", () => {});
+    stream.resume();
+    stream.on("end", () => {
+      if (typeof answer === "string") {
+        stream.respond(
+          {
+            ":status": 200,
+            "content-type": "application/grpc",
+            "grpc-status": String(Code.FailedPrecondition),
+            "grpc-message": encodeURIComponent(answer),
+          },
+          { endStream: true },
+        );
+        return;
+      }
+      const build = Buffer.from(answer.build);
+      const message = Buffer.from([
+        0x08,
+        2, // role: Gateway
+        0x10,
+        answer.version,
+        0x1a,
+        answer.versions.length,
+        ...answer.versions,
+        0x22,
+        build.length,
+        ...build,
+      ]);
+      const frame = Buffer.alloc(5);
+      frame.writeUInt32BE(message.length, 1);
+      stream.respond(
+        { ":status": 200, "content-type": "application/grpc" },
+        { waitForTrailers: true },
+      );
+      stream.on("wantTrailers", () => stream.sendTrailers({ "grpc-status": "0" }));
+      stream.end(Buffer.concat([frame, message]));
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  return { url: `http://127.0.0.1:${server.address().port}`, close: () => server.close() };
+}
+for (const [answer, expected] of [
+  [
+    { version: 2, versions: [2], build: "0.3.1" },
+    {
+      peerBuild: "0.3.1",
+      peerVersions: [2],
+      text: "runs SuperTag 0.3.1 (protocol 2). Upgrade the Gateway.",
+    },
+  ],
+  [
+    "incompatible SuperTag protocol: this Gateway (SuperTag 9.0.0) speaks protocol versions [9, 10], but the connecting operator client (SuperTag supertag-ai) offered [6]; upgrade the connecting operator client",
+    {
+      peerBuild: "9.0.0",
+      peerVersions: [9, 10],
+      text: "runs SuperTag 9.0.0 (protocols 9, 10). Upgrade this client.",
+    },
+  ],
+  [
+    "incompatible SuperTag protocol: no\u0007pe.",
+    {
+      peerBuild: undefined,
+      peerVersions: undefined,
+      text: "refused it: incompatible SuperTag protocol: nope.",
+    },
+  ],
+]) {
+  const fake = await negotiationServer(answer);
+  const client = createGatewayClient({ url: fake.url, token, buildVersion: "0.4.0" });
+  try {
+    const error = await client.negotiate().then(
+      () => assert.fail("a Gateway from another release was accepted"),
+      (error) => error,
+    );
+    assert.ok(error instanceof ProtocolMismatchError, String(error));
+    assert.ok(error instanceof ConnectError);
+    assert.equal(error.code, Code.FailedPrecondition);
+    assert.equal(error.peerBuild, expected.peerBuild);
+    assert.deepEqual(error.peerVersions && [...error.peerVersions], expected.peerVersions);
+    assert.deepEqual([...error.ourVersions], [6]);
+    assert.equal(error.endpoint, fake.url);
+    assert.ok(
+      error.rawMessage.startsWith(
+        `This client speaks SuperTag protocol 6, but the Gateway at ${fake.url} `,
+      ),
+      error.rawMessage,
+    );
+    assert.ok(error.rawMessage.includes(expected.text), error.rawMessage);
+    // Calls report the same mismatch, before sending any credential.
+    await assert.rejects(client.operator.listTags({}), ProtocolMismatchError);
+  } finally {
+    client.close();
+    fake.close();
+  }
+}
+console.log("Gateway client URL, token, connect timeout, and protocol mismatch checks passed.");
+
+/** A private certificate authority and a certificate it issued for 127.0.0.1, or none. */
+async function privateCertificates(directory) {
+  const openssl = (args) => execute("openssl", args, { cwd: directory, timeout: 30_000 });
+  try {
+    await openssl([
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-keyout",
+      "ca.key",
+      "-out",
+      "ca.pem",
+      "-subj",
+      "/CN=SuperTag SDK test CA",
+      "-days",
+      "2",
+      "-addext",
+      "basicConstraints=critical,CA:TRUE",
+      "-addext",
+      "keyUsage=critical,keyCertSign",
+    ]);
+    await openssl([
+      "req",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-keyout",
+      "server.key",
+      "-out",
+      "server.csr",
+      "-subj",
+      "/CN=127.0.0.1",
+    ]);
+    await writeFile(
+      join(directory, "server.ext"),
+      "subjectAltName=IP:127.0.0.1\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\n",
+    );
+    await openssl([
+      "x509",
+      "-req",
+      "-in",
+      "server.csr",
+      "-CA",
+      "ca.pem",
+      "-CAkey",
+      "ca.key",
+      "-CAcreateserial",
+      "-out",
+      "server.pem",
+      "-days",
+      "2",
+      "-extfile",
+      "server.ext",
+    ]);
+  } catch (error) {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  }
+  return {
+    ca: await readFile(join(directory, "ca.pem")),
+    cert: join(directory, "server.pem"),
+    key: join(directory, "server.key"),
+  };
+}
+
+/**
+ * A platform-style edge: it terminates the outer `wss://` TLS and forwards the plain WebSocket
+ * connection, so the Gateway's own TLS runs inside the tunnel.
+ */
+async function tlsEdge(certificates, target) {
+  const server = createTlsServer(
+    {
+      cert: await readFile(certificates.cert),
+      key: await readFile(certificates.key),
+      ALPNProtocols: ["http/1.1"],
+    },
+    (socket) => {
+      const upstream = tcpConnect({ host: "127.0.0.1", port: target });
+      socket.pipe(upstream).pipe(socket);
+      socket.on("error", () => upstream.destroy());
+      upstream.on("error", () => socket.destroy());
+    },
+  );
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  return server;
+}
+
+/** Every service the SDK added for the desktop app, through `client`. */
+async function verifyServices(client, taskId) {
+  const options = { timeoutMs: 10_000 };
+  const me = await client.enrollments.whoAmI({}, options);
+  assert.equal(me.role, PrincipalRole.OPERATOR);
+  assert.match(me.principal, /^operator:/u);
+  assert.deepEqual((await client.memories.list({ tagId: "node-sdk" }, options)).memories, []);
+  assert.ok(Array.isArray((await client.networkLogs.list({ tagId: "node-sdk" }, options)).logs));
+  const located = await client.taskFiles.locate({ taskId, machineId: "" }, options);
+  assert.ok(Array.isArray(located.locations));
+  const scheduleId = `sdk-${randomBytes(4).toString("hex")}`;
+  const schedule = await client.schedules.put(
+    { scheduleId, tagId: "node-sdk", note: "Summarize the week.", every: "@weekly" },
+    options,
+  );
+  assert.equal(schedule.scheduleId, scheduleId);
+  const listed = await client.schedules.list({ tagId: "node-sdk" }, options);
+  assert.ok(listed.schedules.some((entry) => entry.scheduleId === scheduleId));
+  const paused = await client.schedules.pause({ scheduleId }, options);
+  assert.notEqual(paused.state, schedule.state);
+  await client.schedules.delete({ scheduleId }, options);
+}
+
+async function verifyTunnels(binary, root, start, controlPlane, nativeUrl, tunnelAddress, taskId) {
+  const tunnelUrl = `ws://${tunnelAddress}/supertag/tunnel`;
+  const tunnel = createGatewayClient({ url: tunnelUrl, token });
+  try {
+    assert.deepEqual(await tunnel.negotiate(), 6);
+    const watch = tunnel.events.watch({}, { timeoutMs: 10_000 })[Symbol.asyncIterator]();
+    assert.equal((await watch.next()).value.update.case, "heartbeat");
+    await watch.return?.();
+    // Larger than one WebSocket message both ways. A request split into 256 KiB messages
+    // reaches the Control Plane whole, which refuses instructions this long.
+    await assert.rejects(
+      tunnel.operator.putTag(
+        { tagId: "tunnel-sdk", instructions: "x".repeat(600 * 1024) },
+        { timeoutMs: 10_000 },
+      ),
+      { code: Code.InvalidArgument, rawMessage: /instructions exceeds its size limit/u },
+    );
+    // A reply of several messages arrives whole.
+    const instructions = "Write release notes. ".repeat(3_000);
+    for (let index = 0; index < 6; index++) {
+      await tunnel.operator.putTag(
+        { tagId: `tunnel-sdk-${index}`, instructions },
+        { timeoutMs: 10_000 },
+      );
+    }
+    const { tags } = await tunnel.operator.listTags({ limit: 100 }, { timeoutMs: 10_000 });
+    const large = tags.filter((entry) => entry.tagId.startsWith("tunnel-sdk-"));
+    assert.equal(large.length, 6);
+    assert.ok(large.every((entry) => entry.instructions === instructions));
+    await verifyServices(tunnel, taskId);
+  } finally {
+    tunnel.close();
+  }
+  // The native listener is not a tunnel: the upgrade is refused, not retried as cleartext.
+  const mismatched = createGatewayClient({ url: `ws://${new URL(nativeUrl).host}/t`, token });
+  try {
+    await assert.rejects(mismatched.negotiate(), { code: Code.Unavailable });
+  } finally {
+    mismatched.close();
+  }
+
+  // A client Auth Key enrolls this device through the tunnel; the credential it chose works.
+  const { stdout } = await execute(
+    binary,
+    [
+      "auth-key",
+      "create",
+      "--role",
+      "client",
+      "--tag",
+      "node-sdk",
+      "--gateway",
+      nativeUrl,
+      "sdk-device",
+    ],
+    {
+      env: { SUPERTAG_OPERATOR_TOKEN: token, HOME: root, PATH: "/usr/bin:/bin" },
+      timeout: 30_000,
+    },
+  );
+  const key = JSON.parse(stdout).auth_key;
+  assert.match(key, /^stak_/u);
+  const credential = `stcr_${randomBytes(32).toString("hex")}`;
+  const enrolling = createGatewayClient({ url: tunnelUrl, token: key });
+  try {
+    const enrollment = await enrolling.enrollments.enroll(
+      {
+        role: PrincipalRole.CLIENT,
+        name: "sdk-device",
+        operationId: randomBytes(16).toString("hex"),
+        tokenDigest: createHash("sha256").update(credential).digest(),
+      },
+      { timeoutMs: 10_000 },
+    );
+    assert.equal(enrollment.principal, "client:sdk-device");
+  } finally {
+    enrolling.close();
+  }
+  const enrolled = createGatewayClient({ url: tunnelUrl, token: credential });
+  try {
+    const me = await enrolled.enrollments.whoAmI({}, { timeoutMs: 10_000 });
+    assert.equal(me.principal, "client:sdk-device");
+  } finally {
+    enrolled.close();
+  }
+  console.log("ws:// tunnel, Auth Key enrollment, and every added service passed.");
+
+  const certificates = await privateCertificates(await mkdtemp(join(root, "tls-")));
+  if (certificates === undefined) {
+    console.log("Skipped the wss:// tunnel: openssl is not installed.");
+    return;
+  }
+  // A second Gateway serving TLS, natively and inside its tunnel, behind a TLS edge.
+  const [secureNative, secureTunnel] = await start(
+    [
+      "gateway",
+      "--control-plane",
+      controlPlane,
+      "--listen",
+      "127.0.0.1:0",
+      "--websocket-listen",
+      "127.0.0.1:0",
+    ],
+    {
+      SUPERTAG_GATEWAY_CREDENTIAL: gatewayCredential,
+      SUPERTAG_TLS_CERT_FILE: certificates.cert,
+      SUPERTAG_TLS_KEY_FILE: certificates.key,
+    },
+    2,
+  );
+  const edge = await tlsEdge(certificates, Number(secureTunnel.split(":")[1]));
+  try {
+    for (const url of [
+      `https://${secureNative}`,
+      `wss://127.0.0.1:${edge.address().port}/edge/supertag`,
+    ]) {
+      // Without the private authority, neither the native TLS nor the tunnel's is trusted.
+      const untrusted = createGatewayClient({ url, token });
+      try {
+        await assert.rejects(untrusted.negotiate(), { rawMessage: /certificate/u });
+      } finally {
+        untrusted.close();
+      }
+      const secure = createGatewayClient({ url, token, ca: certificates.ca });
+      try {
+        assert.equal(await secure.negotiate(), 6);
+        await verifyServices(secure, taskId);
+      } finally {
+        secure.close();
+      }
+    }
+  } finally {
+    edge.close();
+  }
+  console.log("wss:// tunnel and native TLS with a private certificate authority passed.");
+}
+
 async function verifyRuntime(binary) {
   const root = await mkdtemp(join(tmpdir(), "supertag-gateway-client-"));
   const children = [];
@@ -44,20 +479,41 @@ async function verifyRuntime(binary) {
   const abort = new AbortController();
   let client;
   try {
-    async function start(args, environment = env) {
+    /** Starts a service and reads the `count` addresses it reports, in order. */
+    async function start(args, environment = env, count = 1) {
       const child = spawn(binary, args, { env: environment, stdio: ["ignore", "pipe", "inherit"] });
       children.push(child);
-      const lines = createInterface({ input: child.stdout });
-      const [endpoint] = await once(lines, "line", { signal: AbortSignal.timeout(10_000) });
-      assert.match(endpoint, /^127\.0\.0\.1:[1-9][0-9]*$/u);
-      return `http://${endpoint}`;
+      const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
+      const addresses = [];
+      while (addresses.length < count) {
+        const { value: endpoint } = await Promise.race([
+          lines.next(),
+          delay(10_000, undefined, { ref: false }).then(() => {
+            throw new Error(`${args[0]} did not report its addresses`);
+          }),
+        ]);
+        assert.match(endpoint, /^127\.0\.0\.1:[1-9][0-9]*$/u);
+        addresses.push(endpoint);
+      }
+      return count === 1 ? `http://${addresses[0]}` : addresses;
     }
     const controlPlane = await start(["control-plane"]);
-    // Clients connect to the Gateway, which forwards their calls to the Control Plane.
-    const url = await start(
-      ["gateway", "--control-plane", controlPlane, "--listen", "127.0.0.1:0"],
+    // Clients connect to the Gateway, which forwards their calls to the Control Plane, natively
+    // or through its WebSocket tunnel listener.
+    const [native, tunnelAddress] = await start(
+      [
+        "gateway",
+        "--control-plane",
+        controlPlane,
+        "--listen",
+        "127.0.0.1:0",
+        "--websocket-listen",
+        "127.0.0.1:0",
+      ],
       { SUPERTAG_GATEWAY_CREDENTIAL: gatewayCredential },
+      2,
     );
+    const url = `http://${native}`;
     const wrong = createGatewayClient({ url, token: "invalid-fixture-token" });
     try {
       await assert.rejects(wrong.operator.listTags({}, { timeoutMs: 3000 }), {
@@ -155,6 +611,7 @@ try {
     console.log(
       "Installed Node harness executed one Task with an exact event replay and effect receipts.",
     );
+    await verifyTunnels(binary, root, start, controlPlane, url, tunnelAddress, accepted.taskId);
   } finally {
     abort.abort();
     client?.close();

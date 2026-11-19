@@ -37,6 +37,22 @@ try {
 }
 ```
 
+The URL is an `https://` origin, a loopback `http://` origin, or a WebSocket tunnel URL: `wss://`,
+or loopback `ws://`, with an optional path. A tunnel carries the same gRPC connection for hosts
+whose proxy forwards only HTTP/1.1, and the Gateway's own TLS runs end to end inside a `wss://`
+tunnel. The token is an operator token, Operator Token, enrolled credential, or Auth Key. Where
+Node.js can read them (`tls.getCACertificates`), the client trusts the operating system's
+certificate authorities as well as Node.js's own; pass `ca` for a Gateway with a private
+certificate. Connecting times out after 5 seconds, or 30 through a tunnel; `connectTimeoutMs`
+changes it.
+
+Besides the operator services, the client has `enrollments` (`whoAmI`, and `enroll` with an
+Auth Key), `memories`, `networkLogs`, `schedules`, and `taskFiles`. A Gateway from a SuperTag
+release that speaks none of this client's protocol versions (`PROTOCOL_VERSIONS`) rejects every
+call with `ProtocolMismatchError`, whose `peerVersions` and `peerBuild` name the Gateway's
+release when it gave them. `client.negotiate()` checks this without sending the token, and
+`buildVersion` names your application's release to the Gateway.
+
 Use Node.js 22.13.0 or newer. SuperTag is below version 1.0; the
 [API stability policy](https://github.com/atemaguer/supertag/blob/main/docs/reference/api-stability.md)
 describes compatibility.

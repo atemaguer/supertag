@@ -15,6 +15,14 @@ within the pre-1.0 compatibility policy described in
   local Worker Host in `supertag.yaml` and restarts the changed services as `supertag up` does.
   The desktop app's New Tag form, connected to the local services, offers **Choose a folder…**
   as its Workspace, which runs it and starts the new Tag on the folder's branch.
+- `supertag-ai/gateway-client` connects through a Gateway's WebSocket tunnel with a `wss://` or
+  loopback `ws://` URL, and adds the `enrollments`, `memories`, `networkLogs`, `schedules`, and
+  `taskFiles` clients. A Gateway from another release rejects with `ProtocolMismatchError`,
+  which carries the Gateway's protocol versions and release; `negotiate()` checks before any call.
+  Clients trust the operating system's certificate authorities where Node.js can read them, send
+  HTTP/2 keepalive pings, time out connecting after 5 seconds (30 through a tunnel, or
+  `connectTimeoutMs`), name their release with `buildVersion`, and accept any token of up to 8192
+  ASCII characters without spaces, as the CLI does.
 
 ### Fixed
 
