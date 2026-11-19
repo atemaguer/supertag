@@ -89,10 +89,10 @@ Audited 2026-11-13 against `core/crates/control-plane`. "Fixed" rows changed in 
   `replicas_share_one_postgresql_database_and_survive_killed_replicas` runs three Control Plane
   processes on one PostgreSQL database, each with a Gateway delivering
   operator notifications, submits Tasks and creates Objectives through every replica, kills one
-  replica while its Worker Host holds a running Attempt and another while Attempts finish and
+  replica while a Worklet holds a running Attempt and another while Attempts finish and
   notifications are claimed, and asserts one adapter launch per Task, gap-free events, one
   delivery per operator notification, and identical gap-free Watch positions on every stream, each
-  resuming on another replica after its own was killed. It then kills a Worker Host during an
+  resuming on another replica after its own was killed. It then kills a Worklet during an
   Attempt and two of the three replicas; only the periodic maintenance pass expires that Attempt,
   so the survivor must run it. `sqlite_refuses_a_second_control_plane_process` covers SQLite.
 

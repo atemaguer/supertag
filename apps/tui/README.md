@@ -138,7 +138,7 @@ group under one name, and a time divider (`Today 10:16 PM`, `Yesterday 9:02 AM`)
 history and marks each pause of more than fifteen minutes. Each message the Tag writes while it
 works, starting with its sentence of intent, is its own message, and its result follows, rendered
 as markdown. Under your last message the TUI shows `Sending…` until the Gateway accepts it,
-then `Sent`, and `Seen` once a Worker Host took its turn up. While its turn runs, an animated
+then `Sent`, and `Seen` once a Worklet, the program on a Worker Host, claimed its turn. While its turn runs, an animated
 `···` stays as the turn's last line, after its intent and any messages it writes, until the
 result arrives. A sent message
 shows at once and waits in an outbox, kept on disk, until the Gateway accepts it; the next
