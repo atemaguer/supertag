@@ -11,8 +11,8 @@ Before a Task runs, SuperTag decides which reusable knowledge may be added and w
 allowed. Other terms on this page (see the [glossary](../reference/glossary.md)): a **Session**
 groups Tasks from the same thread of work; an **Objective** is an outcome a Tag owns; a **Team**
 is a flat list of member Tags; a **Skill** is a reusable package of instructions and supporting files; a
-**Worker Host** is the machine that runs a Task, and a **harness** is the agent system it runs the
-Task on; the **Control Plane** stores the **autonomous organization**, all your Teams of Tags with
+**Worker Host** is the machine where a Task runs, and a **harness** is the agent system the Task
+runs on; the **Control Plane** stores the **autonomous organization**, all your Teams of Tags with
 their shared rules and record of the work, and applies its policy; a **collaboration surface**
 links SuperTag to an external work tool.
 
@@ -66,8 +66,8 @@ Artifact selectors use exact collaboration-surface sources and same-Tag work. Th
 available on an Objective's own Tasks through Roles; those Tasks use the catalog's Objective
 visibility rules instead.
 
-A **Context Item** is one entry in a Context Set. Two types exist: `supertag/skill`, a Skill the
-Worker Host resolves from its own catalog, and `supertag/artifacts`, artifact selections the Control
+A **Context Item** is one entry in a Context Set. Two types exist: `supertag/skill`, a Skill that the
+**Worklet**, the program on each Worker Host, resolves from its host's catalog, and `supertag/artifacts`, artifact selections the Control
 Plane resolves. A Task with a required Item runs only on a Worker Host that can resolve it. See
 the [context resolution reference](../reference/context-resolution.md).
 

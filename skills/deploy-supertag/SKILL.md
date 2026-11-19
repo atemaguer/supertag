@@ -62,8 +62,8 @@ supertag verify deployment https://supertag.example.com \
 - **Data endpoint.** To carry Task Attempts' events and streamed text through the Gateway, set
   `SUPERTAG_DATA_ENDPOINT` on the Control Plane to the Gateway's `https://` or `wss://` URL, and
   make that URL reachable from every Worker Host. Workers then use only the Gateway for those
-  calls, with no fallback; an unreachable one logs `the data endpoint URL is unreachable` on the
-  host. Unset, Workers send them to the Control Plane.
+  calls, with no fallback; when that URL is unreachable, each Worker logs `the data endpoint URL is
+  unreachable`. Unset, Workers send them to the Control Plane.
 - **Verification.** `verify deployment` checks gRPC health, that anonymous calls and invalid
   credentials are refused, and the operator token. `--require-ready` also requires a ready
   Worker Host. Use the `wss://` URL on Render, Cloudflare, and Modal.
@@ -95,8 +95,8 @@ with the deployment's owner.
 - A persistent volume for the Gateway's state, or Vault for the Gateway's credentials where the
   platform has no persistent disk.
 - Persistent state directories for Worker Hosts. The Control Plane stores no artifact or
-  Workspace delivery bytes and relays none: each Worker Host keeps what its Tasks produce, writes
-  it to a shared Volume, or pushes deliveries to the Workspace's git remote. Files on an
+  Workspace delivery bytes and relays none: each Worker Host keeps what its Tasks produce, or its
+  Worklet writes it to a shared Volume or pushes deliveries to the Workspace's git remote. Files on an
   ephemeral host without a Volume or a remote Workspace are lost with it.
 
 ## Health

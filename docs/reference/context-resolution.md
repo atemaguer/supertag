@@ -98,7 +98,7 @@ In a directory catalog, each immediate child directory is a Skill named after th
 contains `SKILL.md`. A `github` entry names Skill directories in a GitHub repository. A new Task
 pins the revision's current commit, and its retries keep it on any host. Resolution rejects
 unregistered identities, pin mismatches, symbolic links, duplicate identities, and oversized
-packages. The host delivers each Skill read-only: Codex receives it in its disposable native home,
+packages. The Worklet delivers each Skill read-only: Codex receives it in its disposable native home,
 and Claude Code receives it as an isolated plugin.
 
 ## Context Item types

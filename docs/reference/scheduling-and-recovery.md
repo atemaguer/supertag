@@ -7,7 +7,7 @@ in the [glossary](glossary.md); the host's side is in the [Worker Host reference
 
 ## Worker Host selection
 
-Worker Hosts claim work: each connected host's Worklet asks for a Task it can run. The Control Plane offers
+Each connected host's Worklet claims work: it asks for a Task it can run. The Control Plane offers
 a queued Task only to a host that:
 
 1. may run the Task's Tag: a local host in the same `supertag.yaml` as its Control Plane runs
@@ -37,7 +37,7 @@ each host's state: busy, offline, draining, or a slot kept by an uncertain Task 
 `supertag task resolve-attempt` command that frees it. It is `harness` when no eligible host runs
 the Task's harness. A Task waiting for the Session's last delivery reports `workspace-holder` with
 the name of the Worker Host holding it: a local Workspace's Session continues only on that host,
-and a remote Workspace's waits until that host has pushed the Session's branch. The desktop app and the terminal UI show this summary under a waiting message.
+and a remote Workspace's waits until that host's Worklet has pushed the Session's branch. The desktop app and the terminal UI show this summary under a waiting message.
 
 ## Placement by harness and model
 
@@ -145,8 +145,8 @@ Attempts return to the queue.
 
 ## Reclaiming capacity
 
-A Task Attempt that ends, is cancelled, or is resolved frees its host slot. A draining host
-(`supertag host drain`) finishes its running Task Attempts and claims no new ones.
+A Task Attempt that ends, is cancelled, or is resolved frees its host slot. On a draining host
+(`supertag host drain`), the Worklet finishes its running Task Attempts and claims no new ones.
 
 ## Automatic retries
 

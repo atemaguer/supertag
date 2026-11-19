@@ -162,7 +162,7 @@ each one uses.
 ## See what a Tag fetched
 
 When a Tag's Permission Sets limit `web:fetch` to named hosts, each Task Attempt's web requests go
-through an egress proxy on the Worker Host, which keeps a log of what it allowed and refused. Operators see it in the
+through the egress proxy of its **Worker**, the process that runs it, which keeps a log of what it allowed and refused. Operators see it in the
 desktop app's Tag details, under **Network**, and in the terminal UI by choosing **Network** in the
 command palette. See [Network log](../reference/iam.md#network-log).
 
@@ -298,8 +298,8 @@ lists them, and `supertag describe session ID` shows one with its latest Task an
 - **A work Session sees only its own work.** It can't read your conversation, the Tag's other
   Sessions, or its Objectives, so the Tag gives it everything it needs when it starts it.
 - **A work Session commits its edits to its own branch.** When the Tag is bound to a Workspace,
-  the work Session edits that Workspace, the same one as the turn that started it, and the Worker
-  Host commits to the Session's own branch under `supertag/session/`, such as
+  the work Session edits that Workspace, the same one as the turn that started it, and the Worklet
+  delivers its commits to the Session's own branch under `supertag/session/`, such as
   `supertag/session/0f3c2a9e…`. Your checkout stays on its branch. The report names the branch,
   and a continued work Session commits on top of it, on the same branch. See
   [where a work Session's edits go](../concepts/tasks.md#where-a-work-sessions-edits-go).

@@ -195,10 +195,10 @@ host that lists it. OpenCode requires a `provider/model`.
     labels: [gpu, team:infra]
 ```
 
-The host reports these labels when it connects, in addition to its automatic ones. `supertag up`
+The Worklet reports these labels when it connects, in addition to its automatic ones. `supertag up`
 checks them before starting any service: each must be a valid label, outside the reserved
 `mcp:`, `mcp-login:`, `volume-credential:`, and `volume:` prefixes, and a host takes at
-most 64. Changing a host's labels restarts that host on the next `supertag up`.
+most 64. Changing a host's labels restarts its Worklet on the next `supertag up`.
 
 ### Host concurrency
 
@@ -217,11 +217,11 @@ others:
 This host runs up to three Task Attempts at once. All three can be Codex, but at most one is
 Claude Code. A harness that `harness-limits` doesn't name may use every slot. A free slot waits
 for work of one harness at a time and takes the next harness in turn when none comes, so with
-fewer slots than harnesses a queued Task can wait a few seconds before the host claims it.
+fewer slots than harnesses a queued Task can wait a few seconds before the Worklet claims it.
 
-When only `concurrency` changes, `supertag up` changes the running host without restarting it:
+When only `concurrency` changes, `supertag up` changes the running Worklet without restarting it:
 running Task Attempts finish, and a lowered size takes effect as they do. Changing
-`harness-limits` restarts the host. The host `supertag init` writes sets `concurrency: 3`.
+`harness-limits` restarts the Worklet. The host `supertag init` writes sets `concurrency: 3`.
 
 ### local-vm containers
 
@@ -247,7 +247,7 @@ Task whose commands have a scoped `web:fetch` reaches only the hosts its
 the host; names do not resolve otherwise. Such a host can also take `network-credentials`. Its
 commands run as an unprivileged user without sudo or any capability. Before the Workspace returns, SuperTag stops
 every process the Task left running; the Task cannot hide a process from that step. The first
-Task Attempt on a machine builds the container image, which takes a few minutes; the host's log
+Task Attempt on a machine builds the container image, which takes a few minutes; the Worklet's log
 shows the progress.
 
 Package managers' downloads persist across a Tag's Task Attempts on a Workspace: npm, pnpm, yarn,
@@ -292,7 +292,7 @@ receives, which may include its provider key. Cursor also needs `files:write` to
 ```
 
 A host started without supertag.yaml takes the same opt-in with `supertag worklet
---allow-unsandboxed-commands`. A host with the opt-in prints what it allows each time it starts.
+--allow-unsandboxed-commands`. Its Worklet prints what the opt-in allows each time it starts.
 SuperTag keeps model keys out of those commands' environment where it can (see
 [Credentials available during Tasks](../operations/requirements.md#credentials-available-during-tasks)),
 which stops accidental leaks but is not a boundary.
@@ -315,7 +315,7 @@ Under it, a Task's commands:
   `additionalDirectories`, plus a temporary folder of the Task Attempt's own. Without
   `files:write`, they write only that temporary folder.
 - never write the Workspace's `.git`, `.codex`, `.agents`, `.aws`, `.claude`, `.cursor`,
-  `.opencode`, or `.supertag`, or its read-only and hidden paths. The host commits the Task's
+  `.opencode`, or `.supertag`, or its read-only and hidden paths. The Worklet commits the Task's
   changes after Claude Code finishes, so a command cannot commit itself.
 - cannot read hidden paths, or these credential locations in your home: `~/.ssh`, `~/.aws`,
   `~/.gnupg`, `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.docker`, `~/.kube`, `~/.codex`,
@@ -334,7 +334,7 @@ and one with `allow-unsandboxed-commands` could run a Task with `commands:execut
 host gets it unless it is busy.
 
 The host needs Claude Code 2.1.323 or later, whose sandbox fixes cases where a command ran
-outside it; with an older `claude` the host refuses to start and asks you to run `claude update`.
+outside it; with an older `claude` the Worklet refuses to start and asks you to run `claude update`.
 A host names a harness in `sandbox-commands` or `allow-unsandboxed-commands`, not both, and
 cannot combine it with `environment: local-vm`. A host started without supertag.yaml takes
 `supertag worklet --sandbox-commands`.
@@ -354,7 +354,7 @@ services:
 
 A Permission Set's `web:fetch` grant names a credential by its name, here `github`; see
 [Network scopes](iam.md#network-scopes). `secret` names an entry in `secrets`. `environment` is
-the variable a Task's commands see, holding a placeholder instead of the secret. The host's
+the variable a Task's commands see, holding a placeholder instead of the secret. The Worker's
 egress proxy swaps the placeholder for the secret only in requests the grant allows. Names are
 lowercase letters, digits, and `-`. `environment` cannot be a proxy, certificate, `PATH`, or
 `HOME` variable, or start with `SUPERTAG_`, `CODEX_`, `GIT_`, or another harness's prefix.
@@ -377,7 +377,7 @@ github=GITHUB_TOKEN` and reads the value from `SUPERTAG_NETWORK_CREDENTIAL_GITHU
 (or `--host NAME`), and applies the change as `supertag up` does.
 
 `{ remote: true }` serves a remote Workspace: a `Workspace` resource on a git server, which the
-host reads and pushes itself with a credential the Control Plane grants for each operation. It
+Worklet reads and pushes itself with a credential the Control Plane grants for each operation. It
 takes no `path`, `land`, or `setup`: the resource's own `land` applies. `supertag up` warns when its
 Control Plane defines no such Workspace yet; create it with `supertag workspace put`. The rest of
 this section is about local repositories.
@@ -385,13 +385,13 @@ this section is about local repositories.
 Each Task Attempt runs in its own checkout of the repository, pinned to an exact commit; a
 Session's next Attempt on the same host reuses its previous checkout when it starts from that
 Attempt's delivery. `setup` runs in each new checkout, not a reused one, before the harness starts, on the host and outside any harness sandbox,
-with a 10-minute limit. `land` says where a Session's changes go. The host writes each Session branch into the repository
+with a 10-minute limit. `land` says where a Session's changes go. The Worklet writes each Session branch into the repository
 itself; `supertag up` runs `push` and `merge` only for a host of the file's own Control Plane.
 
 | `land` | What `supertag up` does |
 | --- | --- |
-| `local` (default) | The host writes each delivered Task into the repository as the branch `supertag/session/HASH` |
-| `patch` | Leaves the repository alone (the host's `--workspace-patch`) |
+| `local` (default) | The Worklet writes each delivered Task into the repository as the branch `supertag/session/HASH` |
+| `patch` | Leaves the repository alone (the Worklet's `--workspace-patch`) |
 | `{ push: REMOTE }` | As `local`, then pushes each Session branch to `REMOTE`, one of the repository's git remotes |
 | `{ merge: BRANCH }` | As `local`, then merges a Session into the local branch `BRANCH` once its work is reported done |
 | `{ merge: BRANCH, push: REMOTE }` | Merges as above, then pushes the Session branch and `BRANCH` to `REMOTE` |

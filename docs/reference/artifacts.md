@@ -7,8 +7,8 @@ read it after the first agent's sandbox has been removed.
 The artifact catalog records which **Tag** (a persistent AI actor with its own responsibilities
 and permissions), **Task** (an accepted assignment), and **Task Attempt** (one execution of that
 Task) captured each artifact. The **Control Plane** keeps that catalog and decides which Tasks may
-use an artifact. A [**Worker Host**](glossary.md#worker-host) runs the Task through a **harness**
-such as Codex or Claude Code, and its [**Worklet**](glossary.md#worklet) captures the files.
+use an artifact. A Task runs on a [**Worker Host**](glossary.md#worker-host) through a **harness**
+such as Codex or Claude Code, and the host's [**Worklet**](glossary.md#worklet) captures the files.
 
 Other terms on this page are defined in the glossary: [Role](glossary.md#role),
 [Objective](glossary.md#objective), [Team](glossary.md#team), [Session](glossary.md#session),
@@ -25,9 +25,9 @@ can keep a copy of every capture on its Volume.
 
 ```mermaid
 sequenceDiagram
-    participant Producer as Producing Worker Host
+    participant Producer as Producing Worklet
     participant Control as Control Plane
-    participant Consumer as Consuming Worker Host
+    participant Consumer as Consuming Worklet
 
     Producer->>Producer: Freeze, verify, and keep the bytes
     Producer->>Control: Register the manifest and holding storage
@@ -328,7 +328,7 @@ bytes live in up to two places:
 | Copy | Where | Made by |
 | --- | --- | --- |
 | Worker Host copy | The producing Worker Host's artifact storage: `STATE_DIRECTORY/artifacts`, or the directory named by `--artifact-directory` | Every capture |
-| Volume copy | The Tag's Volume, under `tags/<SHA-256 of the Tag ID>/attempts/…` | Every capture of a Tag that names a Volume, written by the capturing host itself |
+| Volume copy | The Tag's Volume, under `tags/<SHA-256 of the Tag ID>/attempts/…` | Every capture of a Tag that names a Volume, written by the capturing Worklet itself |
 
 A Worker Host's artifact storage is an owner-only directory, one file per Task Attempt and
 SHA-256 digest. For a Worker Host that `supertag up` starts, it is an `artifacts` directory in
@@ -354,7 +354,7 @@ it starts again.
 ### Direct transfer between Worker Hosts
 
 A Worklet run with `--artifact-transfer-listen ADDRESS` also serves the files in its host's
-artifact storage directly to other Worker Hosts. Its TLS certificate and key come from
+artifact storage directly to Worklets on other Worker Hosts. Its TLS certificate and key come from
 `--artifact-transfer-tls-cert` and `--artifact-transfer-tls-key`. A consuming Worklet pins each
 producer's origin with `--artifact-peer HOST_ID=ORIGIN`, and its CA with `--artifact-peer-ca-file`.
 The consumer asks the Control Plane for a short-lived transfer grant scoped to one file, producer,
@@ -375,7 +375,7 @@ supertag tag put builder --instructions "..." --volume archive
 
 A Tag manifest sets it with `spec.volume`; `--volume none` or `""` removes it.
 
-The capturing host writes each file to the Volume itself, so the bytes never pass through
+The capturing Worklet writes each file to the Volume itself, so the bytes never pass through
 the Control Plane:
 
 - **S3 Volume.** On the Control Plane's machine, store the credential it signs with:
@@ -387,7 +387,7 @@ the Control Plane:
   ```
 
   It goes to the Control Plane's credential vault, and Worklets never receive it. It needs
-  only `PutObject`, `GetObject`, `HeadObject`, and `DeleteObject` on the Volume's prefix. When a host reserves a
+  only `PutObject`, `GetObject`, `HeadObject`, and `DeleteObject` on the Volume's prefix. When a Worklet reserves a
   capture, the Control Plane presigns one PUT per file, valid for 15 minutes; the file's length and
   SHA-256 checksum are signed headers and the PUT cannot overwrite, so the store refuses any other
   bytes. When the capture commits, the Control Plane checks each object with a HEAD request: its
@@ -397,7 +397,7 @@ the Control Plane:
   `--volume VOLUME_ID=/absolute/private/directory`, or `volumes` on its host service in
   `supertag.yaml`. Such a host carries the label `volume:VOLUME_ID`, and a Tag that names a file
   Volume runs only on hosts with it; `supertag placement explain` names the label when none is
-  connected. The host writes the file, reopens it, and checks its length and SHA-256; the Control
+  connected. The host's Worklet writes the file, reopens it, and checks its length and SHA-256; the Control
   Plane records that check as the host's attestation (`host_attested`), since it never opens the
   directory.
 
@@ -407,8 +407,8 @@ Task sees the error. The capture's copies are listed by `supertag get volume-cop
 who may read the capture. Hosts and people that mount the Volume read them; the Control Plane
 serves no Volume file.
 
-A Task that acquires a capture reads it from the producing host's Worklet first. When that host
-can't serve it, for example because it is gone, the consumer reads the file from a verified
+A Task that acquires a capture reads it from the producing host's Worklet first. When that Worklet
+can't serve it, for example because its host is gone, the consumer reads the file from a verified
 Volume copy: through a presigned GET, valid for 15 minutes, for an S3 Volume, or through its own
 `--volume` mapping for a file Volume. It checks the length and SHA-256 itself.
 

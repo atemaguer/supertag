@@ -34,7 +34,8 @@ supertag down --remove-services
 supertag ps            # every service reports stopped
 ```
 
-Stop every remote Worker Host and Gateway that connects to this Control Plane too. If the old
+Stop every remote Worker Host's **Worklet**, its `supertag worklet` or host service, and every Gateway
+that connects to this Control Plane too. If the old
 Control Plane runs elsewhere, such as Docker Compose or a VM, stop that deployment. Writes made
 after this point are not in the archive.
 
@@ -227,7 +228,7 @@ For a new setup instead, run `supertag init` in the repository.
 | Control Plane `database` | Unchanged form. Point `url` at a new, empty database, never the old one |
 | Control Plane `credentials: vault://...` | Removed. The local supervisor keeps credentials in files. A deployed Control Plane chooses Vault with `supertag setup deployment` |
 | `x-` keys | Kept only at the top level. Rust refuses them inside services, and `x-` entries under `services` are removed. YAML anchors are expanded first |
-| Host `labels` | Unchanged. The host reports them with its presence, so a Tag's `runsOn` still selects it |
+| Host `labels` | Unchanged. The Worklet reports them with its host's presence, so a Tag's `runsOn` still selects it |
 | Host `environment` | Removed. Put harness variables in `env_file` |
 | Host `mcp` | Removed. Write the servers to a JSON MCP catalog for `supertag worklet --mcp-catalog`, and check it with `supertag mcp list --mcp-catalog PATH` |
 | Host `volume-credentials`, `artifact-volume`, `local-mount-root` | Removed. Register Volumes with `supertag volume put` |
@@ -330,14 +331,14 @@ After this, rolling back means restoring from the archive and its secrets bundle
 Roll back until you delete the snapshot. Work done in Rust does not move back. External effects
 stay where they happened, such as delivered replies, pushed branches, and pull requests.
 
-1. With the Rust CLI: `supertag down --remove-services`. Stop remote Rust Worker Hosts and
+1. With the Rust CLI: `supertag down --remove-services`. Stop remote Rust Worklets and
    Gateways too.
 2. Move the Rust state aside: `mv ~/.supertag ~/.supertag-rust-20261113`.
 3. Restore the snapshot: `mv ~/.supertag-legacy-20261113 ~/.supertag`.
 4. Install the TypeScript CLI version that last ran this state.
 5. With the TypeScript CLI: `supertag up`. PostgreSQL users point it at the old database, which
    Rust never opened.
-6. Start the old remote Worker Hosts and Gateways. Their old credentials still work.
+6. Start the old services on remote Worker Hosts, and the old Gateways. Their old credentials still work.
 
 If the snapshot is gone, restore one from the archive. Extract `state/` into a new directory,
 then decrypt the secrets bundle into it:

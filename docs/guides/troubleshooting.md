@@ -1,7 +1,7 @@
 # Troubleshoot the first reply
 
 Trace a request from where someone asked a **Tag**, a persistent AI actor with its own
-responsibilities and permissions, to the **Worker Host** that runs it and back. Work through the
+responsibilities and permissions, to the **Worker Host** where it runs and back. Work through the
 steps in order; each checks one layer. Terms are defined in the [glossary](../reference/glossary.md).
 
 Commands talk to a **Gateway**, which forwards them to the **Control Plane**, the service that
@@ -116,8 +116,8 @@ harness, or `model`, `unsandboxed-commands`, or `file-scope` as above. Use them 
 
 ## 6. Check the harness
 
-A host that cannot sign in to its harness stops with the reason in its log. Check it the way the
-host does:
+A **Worklet**, the program that connects a Worker Host and runs its work, stops with the reason in
+its log when it cannot sign in to its harness. Check sign-in the way the Worklet does:
 
 ```sh
 supertag sign-in codex
@@ -125,10 +125,10 @@ supertag sign-in claude-code
 ```
 
 If it reports not signed in, follow the sign-in instructions it prints, as the same user that
-runs the host, and run `supertag up`. Keys belong in `~/.supertag/.env`: a service unit does not
+runs the Worklet, and run `supertag up`. Keys belong in `~/.supertag/.env`: a service unit does not
 inherit your shell. Claude Code, Cursor, and OpenCode Tasks that may run commands also need
 `sandbox-commands` (Claude Code only), `environment: local-vm`, or `allow-unsandboxed-commands` on
-the host. A host with `sandbox-commands` that stops because Claude Code is too old needs
+the host. A host with `sandbox-commands` whose Worklet stops because Claude Code is too old needs
 `claude update`; see
 [Run Worker Hosts](workers.md#harnesses-without-a-sandbox). A local-vm host whose Tasks fail to
 start needs Docker running for the host's user. local-vm refuses Podman for now; switch the
@@ -157,7 +157,7 @@ to operators only and never in a reply, conversation, or client's view of the Ta
 
 A Worklet that was killed or lost its execution lease while running a **Task Attempt**, one
 execution of a Task, may not know whether the work finished. It shows in the inbox as
-`task-attention`, in `supertag metrics` under recovery, and in `supertag ps`. The Worker Host's log
+`task-attention`, in `supertag metrics` under recovery, and in `supertag ps`. The Worklet's log
 names it, and one of the host's slots stays taken until you decide, so later messages to Tags on
 that host may wait. Check what the Task Attempt did, then record a decision:
 
@@ -185,8 +185,8 @@ a data call will be retried: the data endpoint https://gateway.example:3434 is u
 address, for example a firewall dropping the connection. The Worker keeps retrying while the Task Attempt's lease lasts. Locally, check that `supertag ps`
 shows `gateway` running, and run `supertag up` if it stopped. For a shared deployment, make the
 Gateway's listener reachable from every Worker Host at that exact URL, with a certificate the
-hosts trust, or correct `SUPERTAG_DATA_ENDPOINT` and restart the Control Plane. Worker Hosts
-read the new URL when they register again; restart them so later Workers use it.
+hosts trust, or correct `SUPERTAG_DATA_ENDPOINT` and restart the Control Plane. Worklets
+read the new URL when they register their hosts again; restart them so later Workers use it.
 
 `the data endpoint URL is not usable: REASON` means the Worker could not even dial the URL, for
 example a cleartext `http://` URL outside loopback. Use `https://` or `wss://`. See

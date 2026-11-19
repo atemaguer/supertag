@@ -5,8 +5,8 @@ its own responsibilities and permissions, and Tags work in Teams. Together, your
 of Tags make up an **autonomous organization**: Teams may pursue different goals but share one set
 of rules and one record of the work. For example, a laptop can run the **Control Plane**, which
 stores your organization and accepts work, and act as a **Worker Host**, which provides execution
-capacity. A Worker Host runs each **Task**, one turn of a Tag's work, on a **harness**: an agent
-system such as Codex, Claude Code, or Cursor. Its **Worklet**, `supertag worklet`, claims the
+capacity. Each **Task**, one turn of a Tag's work, runs on a Worker Host through a **harness**: an
+agent system such as Codex, Claude Code, or Cursor. Its **Worklet**, `supertag worklet`, claims the
 Tasks and starts a **Worker** for each Task Attempt.
 Check this page before [installing SuperTag](install.md).
 
@@ -42,12 +42,12 @@ Check this page before [installing SuperTag](install.md).
 Prepare at least one harness on the Worker Host. Start with Claude Code or Codex: `supertag init`
 finds them by their `claude` and `codex` CLIs on `PATH`. Cursor and OpenCode also work (OpenCode
 needs its CLI on `PATH`; Cursor uses its bundled SDK and does not need `cursor-agent`). Sign in as
-the same OS user that runs the host.
+the same OS user that runs the Worklet.
 
 SuperTag runs the Codex CLI you install, so keep it current: `supertag init` and `supertag up`
 check its version and stop with the upgrade command when it is older than the minimum. A newer
 Codex may send notifications SuperTag doesn't know yet: one that only reports progress is logged
-on the Worker Host and ignored, and any other fails the turn with `Codex emitted an unsupported
+by the Worker and ignored, and any other fails the turn with `Codex emitted an unsupported
 event type: NAME`. Claude Code
 Tasks run the Claude Code you installed: the `claude` on the Worker Host's `PATH`, or the one
 `--claude-path` names. SuperTag ships no Claude Code of its own. `supertag init` checks that
@@ -64,7 +64,7 @@ isn't; the desktop app's setup screen shows the same checks.
 For provider API credentials, use provider environment variables or SuperTag's masked prompts;
 never put lasting credentials in command flags. Sign-in detection is local and best effort; a
 missing credential file does not prove you are signed out. `supertag sign-in HARNESS` checks a
-harness the way a Worker Host uses it. OpenCode receives only provider environment credentials, or
+harness the way a Worker uses it. OpenCode receives only provider environment credentials, or
 the file `--opencode-auth-file` names, and needs an explicit `provider/model`. See
 [Run Worker Hosts](../guides/workers.md) for
 remote hosts and [credential storage](../reference/credential-storage.md) for secret handling.
@@ -128,15 +128,15 @@ not sign in the Worker Host, so every host that serves Cursor needs a key:
    also works, but a service unit does not inherit the shell.
 3. Run `supertag init`, or `supertag up` for an existing setup. `init` offers Cursor only when
    `CURSOR_API_KEY` is set in the environment it runs in, so export the key in that shell too.
-   SuperTag checks the key by listing Cursor's models, which uses no model turn. A missing key stops the host with the reason.
+   SuperTag checks the key by listing Cursor's models, which uses no model turn. A missing key stops the Worklet with the reason.
    A rejected key reports `Cursor rejected CURSOR_API_KEY`.
 
 SuperTag passes the key only to the Cursor adapter. Tasks never receive it, and redaction removes
-it from events and logs. To rotate the key, replace the line and restart the host with
+it from events and logs. To rotate the key, replace the line and restart the Worklet with
 `supertag down` and `supertag up`.
 
 On Linux, a process running as the Worker Host's OS user may read the Cursor key from the
-Worker Host's memory. It may also read the SDK runner's memory when `ptrace_scope=0` permits
+Worklet's or the Worker's memory. It may also read the SDK runner's memory when `ptrace_scope=0` permits
 same-user tracing. The runner receives the key over a private stdin channel, but Node does
 not expose Linux's `prctl(PR_SET_DUMPABLE, 0)` call. Adding that call only to the runner
 would still leave the key in the adapter's memory. Keep untrusted processes under a different
@@ -258,7 +258,7 @@ memory. The Worklet warns about this when it starts. Use `environment: local-vm`
 key out of their reach.
 
 `supertag up` hands each Worker Host's Worklet its harness's provider keys and tokens in a private file
-that the host reads and deletes as it starts, rather than in its environment, so `ps eww`,
+that the Worklet reads and deletes as it starts, rather than in its environment, so `ps eww`,
 `/proc/<pid>/environ`, and tools that dump a process's environment don't show them. The Worklet
 passes each Worker only its own harness's keys, over their private channel rather than in its
 environment. On Linux the Worklet and each Worker also mark themselves non-dumpable, so other
@@ -270,7 +270,7 @@ given the same kind of file, a JSON object of variable names to values, with
 
 None of this is a boundary against a command set on stealing the key: such a command runs as the
 Worker Host's user and can read the host's `env_file` and the OpenCode auth file, and, where the
-OS allows it, the host's memory. These measures close accidental leaks only. Only a sandbox, such
+OS allows it, the Worklet's memory. These measures close accidental leaks only. Only a sandbox, such
 as `environment: local-vm` or Claude Code's with `sandbox-commands`, keeps the key out of reach.
 
 A sign-in made with `/login` lives in the system's secure store (the macOS Keychain) and can't go

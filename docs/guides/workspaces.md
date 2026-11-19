@@ -110,10 +110,10 @@ The Worklet that starts a Session's first Task looks the branch up in its host's
 Workspace and records the commit it names. Every later Task of that Session works from the same
 commit, even after the branch moves; the next new Session looks the branch up again.
 `supertag get task ID` shows the branch as `ref` and the recorded commit as `base_commit`, which
-stays empty until the host has looked it up. When the host's checkout has no such branch, the
+stays empty until the Worklet has looked it up. When the host's checkout has no such branch, the
 Task fails before the harness starts, with `Workspace branch BRANCH does not name a commit on
 this Worker Host`; if Git itself fails during the lookup, it fails with `Workspace branch BRANCH
-could not be resolved on this Worker Host`. A host that stops during the lookup leaves the Task
+could not be resolved on this Worker Host`. A Worklet that stops during the lookup leaves the Task
 for recovery instead. SuperTag never fetches: update the host's checkout to move the branch.
 
 ### Prepare each checkout with setup
@@ -135,7 +135,7 @@ git -C ~/code/app diff main...supertag/session/HASH
 ```
 
 Your checkout stays on its own branch; SuperTag never switches it or changes its files. A branch
-someone moved outside SuperTag is left as it is. With `land: patch`, the host writes no branch. A
+someone moved outside SuperTag is left as it is. With `land: patch`, the Worklet writes no branch. A
 Task with no commits delivers nothing. The Control Plane stores no delivery: the branch comes from
 the Worker Host that ran the Task, which maps the repository. Fetch it into another clone with
 `git fetch ~/code/app supertag/session/HASH`.
@@ -174,7 +174,7 @@ A **remote Workspace** keeps its repository on a git server: GitHub, GitLab, Git
 Bitbucket, any server you reach over SSH or HTTPS, or a bare repository on the Control Plane's
 machine. The Worklet on each Worker Host that serves it reads the Session's source from the server itself, so it
 needs no clone and stores no credential: the Control Plane grants a credential for each read or push,
-and the host keeps it only in memory, never in a harness or sandbox. A GitHub App credential is
+and the Worklet keeps it only in memory, never in a harness or sandbox. A GitHub App credential is
 narrowed to a token for the one repository, which expires within an hour; an HTTPS token or SSH
 key is handed over as it is. A credential helper runs only on the Control Plane's machine, so a
 Workspace whose read credential is a helper can't run Tasks. A `file://` remote is a path on the
@@ -361,7 +361,7 @@ supertag tag put builder --instructions "Implement bounded changes with tests." 
   --workspace-id app --workspace-base COMMIT --workspace-mcp docs-search
 ```
 
-The host reads `.mcp.json` from the Task's base commit, not from a Task's changes.
+The Worker reads `.mcp.json` from the Task's base commit, not from a Task's changes.
 
 ## Run in E2B or Modal sandboxes
 
@@ -370,7 +370,7 @@ harness stays on the host. A repository's `.devcontainer` settings choose the sa
 [Run a harness in a sandbox](workers.md#run-a-harness-in-a-sandbox).
 
 If a sandbox stops in the middle of a turn, for example because the provider evicted it, the Worker
-Host replaces it with a new sandbox that starts from the turn's starting files, and the tool call
+replaces it with a new sandbox that starts from the turn's starting files, and the tool call
 that found it stopped tells the harness that its changes from earlier in the turn are gone. A turn
 gets at most two replacements; after a third stop, the turn fails.
 
@@ -389,7 +389,7 @@ gets at most two replacements; after a third stop, the turn fails.
 
 - A local Workspace follows a branch only as far as each host's checkout: SuperTag never fetches,
   so update the checkout, or put a newer `baseCommit`, to move new Sessions forward.
-- The host's own Git commands ignore repository hooks, filters, and configuration, and a Task
+- The Worklet's own Git commands ignore repository hooks, filters, and configuration, and a Task
   Attempt fails when the repository's Git configuration changes while it runs.
 - Workspace Volumes arrive as copies only; a Tag with copies may not run commands or fetch from
   the web.
