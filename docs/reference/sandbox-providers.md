@@ -43,7 +43,8 @@ implements these calls:
 
 ## The helper process
 
-The Worklet starts one helper process per Task Attempt:
+The [Worker](glossary.md#worker), the process that runs one Task Attempt, starts one helper
+process for it:
 
 1. It runs the helper's executable with a cleared environment: `PATH`, `LANG=C`, a private
    `TMPDIR`, and the provider's own credentials, nothing else.
@@ -188,7 +189,7 @@ an outside caller can observe.
 5. **Capture rules.** Capture returns exactly what [Capture](#capture) lists, within the size
    limit, with a receipt. It never follows a link out of the checkout.
 6. **Network rules.** The sandbox has no network access, DNS included. Egress, if offered, must
-   go only to the Worklet's egress proxy, with no other egress, DNS included. SuperTag's own
+   go only to the Worker's egress proxy, with no other egress, DNS included. SuperTag's own
    E2B, Modal, and local-vm providers offer it through an egress relay in the sandbox, carried
    over the provider's own command channel. A Task with `web:search`, `browser:use`, or a
    `web:fetch` without a [network scope](iam.md#network-scopes) never runs on such a host,
@@ -224,7 +225,7 @@ These will become requirements when they ship. A provider written now should lea
 them.
 
 - **Egress relay.** A sandbox will reach the network only through a relay that carries its
-  traffic over the provider's exec stream to the Worklet's egress proxy, while the sandbox's
+  traffic over the provider's exec stream to the Worker's egress proxy, while the sandbox's
   own network stays fully blocked. The proxy applies the Task's
   [network scope](iam.md#network-scopes). Egress, if offered, must go only to the host's proxy,
   with no other egress, DNS included. A tunnel that leaves the sandbox's resolver working does

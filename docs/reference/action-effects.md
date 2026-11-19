@@ -34,7 +34,7 @@ TypeScript adapters get this client as the `effects` of the connection `openHarn
 `supertag-ai/harness` returns, and Python adapters as `HarnessConnection.effects`. See
 [Write a harness adapter](../guides/harness-adapters.md).
 
-In **harness-managed mode**, the harness calls an MCP server through the Worklet's policy
+In **harness-managed mode**, the harness calls an MCP server through its Worker's policy
 proxy. Before it forwards a call that needs approval, the proxy records a durable dispatch, and it
 records the result when the call returns. A dispatch that never recorded a result is unconfirmed:
 the provider may already have changed. The proxy refuses to send the same tool call with the same

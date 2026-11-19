@@ -27,11 +27,11 @@ The **Control Plane** and **Worker Hosts** are SuperTag's two top-level runtime 
 Control Plane stores the organization and schedules its work, and a Worker Host is a machine,
 container, VM, or sandbox that provides the capacity to run it. On each Worker Host a **Worklet**,
 the `supertag worker-host` program, connects the host to the Control Plane, claims Tasks, and
-starts a **Worker** for each Task Attempt: a harness adapter and the harness it drives. The
-Worklet and the Worker are roles of running programs, not resources you create or apply. The
-Worklet holds the host's credential; a Worker's calls carry a Task Attempt credential that
-names its one Task Attempt and ends with its lease. A
-separate **Gateway** is the service clients connect to: it forwards their calls to the Control
+starts a **Worker** for each Task Attempt: a process of its own that runs a harness adapter and
+the harness it drives. The Worklet and the Worker are roles of running programs, not resources
+you create or apply. The Worklet holds the host's credential and every lease; a Worker never
+receives that credential, and its calls carry a Task Attempt credential that names its one Task
+Attempt and ends with its lease. A separate **Gateway** is the service clients connect to: it forwards their calls to the Control
 Plane, can forward a running Task Attempt's data calls under its Task Attempt credential, and carries **collaboration surface** traffic as a client of the Control Plane. A collaboration surface is how SuperTag meets people in an external work tool, such as
 Slack, GitHub, Lark/Feishu, Linear, or Microsoft Teams: it receives events at a [Tag](#configuration-resources)'s locations and
 replies there. A location is a place on a collaboration surface, such as a channel or repository. The Control
@@ -163,7 +163,7 @@ More Tag fields declare where its Tasks run, where the Tag works, and who may me
 | `spec.lead` | `true` or `false` | Whether this is the Control Plane's **lead Tag**. Omitted keeps the current value. |
 | `spec.maxWorkSessions` | 1 to 64 | How many work Sessions the Tag may have open at once, 8 by default. Omitted keeps the current value. See [Open work Sessions](coordination.md#open-work-sessions). |
 | `spec.memory` | `true` or `false` | Whether the Tag keeps [Memory](coordination.md#memory): notes it writes and a daily review. Omitted keeps the current value; a new Tag keeps memory. |
-| `spec.volume` | A Volume ID, or `""` | Keeps the Tag's work beyond any one Worker Host: the capturing host's Worklet writes a copy of every capture there, and a capture fails when its copy cannot be written. Its Sessions' checkpoints live there too, so any host that reaches the Volume resumes them; see [Session checkpoints](control-plane.md#session-checkpoints). A file Volume places the Tag only on hosts that map it. Omitted keeps the current value. See [Keep every capture on a Volume](artifacts.md#keep-every-capture-on-a-volume). |
+| `spec.volume` | A Volume ID, or `""` | Keeps the Tag's work beyond any one Worker Host: the capturing host writes a copy of every capture there, and a capture fails when its copy cannot be written. Its Sessions' checkpoints live there too, so any host that reaches the Volume resumes them; see [Session checkpoints](control-plane.md#session-checkpoints). A file Volume places the Tag only on hosts that map it. Omitted keeps the current value. See [Keep every capture on a Volume](artifacts.md#keep-every-capture-on-a-volume). |
 | `spec.startRate` | `starts` (1 to 10,000) and `per` (`1m` to `7d`) | At most how many of the Tag's Task Attempts start per period; `starts: 0` removes it. Omitted keeps the current value; a new Tag has none. See [Start rates](scheduling-and-recovery.md#start-rates). |
 
 Where a Tag answers is a separate `SurfaceLocation` resource, a Tag **location**. It names the

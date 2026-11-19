@@ -22,7 +22,7 @@ data, or local state.
 ## Development setup
 
 SuperTag's services and CLI are written in Rust, in the `core/` workspace, from the protobuf
-contract in `proto/`. The Node.js harness bridges and Workspace providers that Worklets start
+contract in `proto/`. The Node.js harness bridges and Workspace providers that Workers start
 (`harnesses/`), the TypeScript SDK (`sdks/typescript`), the desktop app's frontend, and the
 repository checks are TypeScript; the terminal UI is Go. `sdks/` holds one directory per language,
 each with its SDK and generated bindings, and `scripts/` holds the repository checks and the
@@ -38,7 +38,7 @@ npm install -g pnpm@11.18.0
 pnpm install
 ```
 
-`pnpm build` compiles the TypeScript packages. The Rust Worklet starts the built bridges from
+`pnpm build` compiles the TypeScript packages. Each Rust Worker starts the built bridges from
 `harnesses/*/dist` and `harnesses/environments/*/dist`.
 
 ## Write documentation

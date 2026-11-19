@@ -1,12 +1,13 @@
 ---
 name: build-a-harness-adapter
-description: Bring another agent system to SuperTag by writing a harness adapter that a Worker Host's Worklet starts for each Task Attempt. Read only when the built-in harnesses do not fit.
+description: Bring another agent system to SuperTag by writing a harness adapter that a Worker Host starts for each Task Attempt. Read only when the built-in harnesses do not fit.
 ---
 
 # Build a harness adapter
 
-A harness adapter is an executable that a Worker Host's Worklet starts for each Task Attempt. It
-reads a bootstrap from standard input, connects to the Worklet's loopback Harness service, receives the
+A harness adapter is an executable that the Worker of each Task Attempt starts; the Worker is the
+process a Worker Host's Worklet starts for that Task Attempt. The adapter reads a bootstrap from
+standard input, connects to the Worker's loopback Harness service, receives the
 Task, drives the agent, and completes the Task Attempt with a result and a Session checkpoint.
 The full guide is [Write a harness adapter](../../docs/guides/harness-adapters.md).
 

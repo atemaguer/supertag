@@ -230,12 +230,12 @@ progress. For example, you could forward Sentry errors to a `reliability` Tag an
 results in your own review interface. Generated Go, TypeScript, and Python
 bindings come with the repository. [Explore the API](docs/reference/control-plane-api.md)
 
-To bring your own execution system, write a **harness adapter**: a program that a Worker Host's
-**Worklet** starts for each Task Attempt and that drives your agent through the harness protocol.
+To bring your own execution system, write a **harness adapter**: a program that a Worker Host
+starts for each Task Attempt and that drives your agent through the harness protocol.
 The built-in Python and TypeScript adapters are working examples to read.
 
 The TypeScript SDK, `supertag-ai` on npm, and the Python SDK, `supertag` on PyPI, connect an
-application to SuperTag and a harness adapter to the Worklet that started it:
+application to SuperTag and a harness adapter to the **Worker**, the process that started it for its Task Attempt:
 
 ```sh
 npm install supertag-ai

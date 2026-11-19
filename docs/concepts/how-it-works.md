@@ -16,8 +16,9 @@ SuperTag has three kinds of services, all run by the one `supertag` program:
   connect to its API.
 - **Worker Hosts** are machines or sandboxes that provide execution capacity. On each, a
   **Worklet** (`supertag worker-host`) connects the host to the Control Plane and claims Tasks.
-  For each Task Attempt it starts a **Worker**: a **harness adapter**, the process that drives an
-  agent system such as Codex or Claude Code, and that harness.
+  For each Task Attempt it starts a **Worker**, a process of its own that runs a **harness
+  adapter**, the program that drives an agent system such as Codex or Claude Code, and that
+  harness.
 - A **Gateway** is the endpoint clients connect to: the CLI, the terminal UI, the desktop app,
   and applications built on the SDKs. It forwards their calls to the Control Plane, and it
   connects collaboration surfaces, such as Slack or GitHub.
@@ -113,8 +114,9 @@ labels the Tag requires. A Task stays queued when none is available, and
 cannot enforce is refused when it is submitted, instead of waiting forever.
 
 On the Worker Host, each **Task Attempt**, one execution of a Task, runs in its own pinned
-checkout of the Tag's Workspace. The Worklet resolves the Task's Skills, starts a Worker, and
-supervises its processes. The Worker's harness adapter drives the agent and reports progress,
+checkout of the Tag's Workspace. The Worklet prepares the checkout and starts a Worker, a process
+of its own for that Task Attempt. The Worker resolves the Task's Skills and supervises the
+harness. Its harness adapter drives the agent and reports progress,
 usage, and the result through the harness protocol. When the Task changes the Workspace, the
 Worklet verifies the commits and delivers them as a `supertag/session/...` branch: it writes the
 branch into the repository a local Workspace maps, or pushes it to a remote Workspace's git

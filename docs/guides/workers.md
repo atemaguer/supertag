@@ -4,8 +4,8 @@ A **Worker Host** is a machine or sandbox that runs Tasks for Tags, the persiste
 their own responsibilities and permissions. Its **Worklet**, the `supertag worker-host` program,
 connects outbound to the **Control Plane**, the service that stores your organization and
 schedules its work, and claims Tasks its Tags may run. For each **Task Attempt**, one execution of
-a Task, the Worklet starts a **Worker**: a **harness adapter**, the process that drives an agent
-system such as Codex or Claude Code, and that harness. See the
+a Task, the Worklet starts a **Worker**, a process of its own that runs a **harness adapter**, the
+program that drives an agent system such as Codex or Claude Code, and that harness. See the
 [glossary](../reference/glossary.md) for other terms.
 
 `supertag init` already connects your own computer. Use this guide to add machines, choose
@@ -65,8 +65,10 @@ or in a disposable machine when the work is untrusted.
 
 `concurrency` sets how many Task Attempts each harness on the host runs at once, from 1 through
 16; the default is 1, and the host `supertag init` writes sets 3. With 1, one stuck Task Attempt
-holds that harness for every Tag on the host. `supertag up` changes running hosts' concurrency
-without restarting them.
+holds that harness for every Tag on the host. The host's Worklet runs each Task Attempt in a
+Worker process of its own, so `concurrency` is the size of its Worker pool for each harness, not a
+number of host processes. `supertag up` changes running hosts' concurrency without restarting
+them. A host started with `supertag worker-host` takes `--concurrency N`.
 Teams can also cap how many of their Tasks run at once; see [Teams](teams.md).
 
 ### Limit how long a Task Attempt runs

@@ -27,10 +27,10 @@ Worker Hosts, in the desktop app, or in the `supertag-ai` SDK.
 
 | Path | Owns |
 | --- | --- |
-| `core/crates/cli` | The `supertag` CLI, local supervisor, and process tests |
+| `core/crates/cli` | The `supertag` CLI, local supervisor (one Worklet per host service), `worker_host.rs` (`supertag worker-host` and the hidden `__worker`), and process tests |
 | `core/crates/control-plane` | Store, migrations, admission, scheduling, recovery, public API |
 | `core/crates/gateway` | Collaboration surfaces: ingress, rendering, reply delivery, notifications |
-| `core/crates/worker-host` | A Worker Host: `worklet/` registers, claims, holds leases, journals, recovers, and owns checkouts, checkpoints, held artifacts, and landings; `worker/` runs one Task Attempt: adapter, guardian, egress and provider proxies, Context Items, MCP, captures. The host credential stays in `worklet/`; `worker/` calls carry only the Task Attempt credential |
+| `core/crates/worker-host` | A Worker Host: `worklet/` registers, claims, holds leases, runs the Worker pool (`pool.rs`), keeps one journal with a directory per slot, recovers, and owns checkouts, checkpoints, held artifacts, and landings; `worker/` is the per-Task Attempt process: adapter, guardian, egress and provider proxies, Context Items, MCP, captures; `local.rs` is the Worklet-Worker channel. The host credential stays in the Worklet process; a Worker's calls carry only the Task Attempt credential, and it asks its Worklet for host calls |
 | `core/crates/{protocol,api,transport}` | Wire types, gRPC services, tunnel and TLS transport |
 | `core/crates/local-state` | The local state directory and local Control Plane discovery, shared by the CLI and the desktop app |
 | `core/crates/{workspaces,github,shared-execution,credential-vault,codex-adapter}` | Workspaces, GitHub, shared execution, credential vault, native Codex adapter |

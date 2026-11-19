@@ -2,8 +2,9 @@
 
 An MCP server gives a **Task**, one request accepted for a **Tag** (a persistent AI actor with
 its own responsibilities and permissions), tools to read or change an external service. The
-**Worklet** on the **Worker Host**, the machine that runs the Task, offers MCP servers from the
-host's catalog and holds their credentials. A **Permission Set**, a set of allowed actions, selects which tools and
+**Worker Host**, the machine that runs the Task, offers MCP servers from its catalog and holds
+their credentials. Each Task Attempt's **Worker**, the process that runs it, starts or connects
+to them. A **Permission Set**, a set of allowed actions, selects which tools and
 resources a Task may use. The **Surface Account**, the connected account the Gateway uses for
 incoming messages and thread replies, is separate. See the [glossary](../reference/glossary.md)
 for other terms.
@@ -96,7 +97,7 @@ Lark's server runs only over stdio. The `lark` preset runs `lark-mcp`, from the
 { "name": "lark", "preset": "lark", "env": { "APP_ID": "LARK_APP_ID", "APP_SECRET": "LARK_APP_SECRET" } }
 ```
 
-The Worklet starts the server for each Task Attempt with only the variables its `env` names, and
+The Worker starts the server for its Task Attempt with only the variables its `env` names, and
 stops it when the Task Attempt ends. A chat-scoped grant names `chat:ID`.
 
 ## Other servers

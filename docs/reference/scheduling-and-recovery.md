@@ -114,7 +114,8 @@ When a host or its Worklet stops or loses contact while a Task Attempt runs, the
 whether the work finished or changed anything outside SuperTag. It does not run the Task again on
 its own:
 
-- A Worklet restarted after it was killed checks the processes it recorded for the Task Attempt. When
+- A [Worker](glossary.md#worker), the process that runs one Task Attempt, dies with its Worklet. A Worklet restarted after it was killed, or one whose Worker
+  died, checks the processes it recorded for the Task Attempt, the Worker's own included. When
   every one is gone, it records the Task Attempt as failed with an unknown outcome and takes new
   work.
 - Otherwise, and always for a Task Attempt that used a remote sandbox or shared execution, the

@@ -123,7 +123,7 @@ spec:
 Which harnesses can enforce each part, and when a Task waits instead, is in
 [Path scopes](../reference/iam.md#path-scopes).
 
-A `web:fetch` grant can name the origins and methods it covers, and a credential the Worklet
+A `web:fetch` grant can name the origins and methods it covers, and a credential the Worker Host
 adds. This set lets a Task read packages from PyPI and read the GitHub API with the host's
 `github` credential, and reach nothing else:
 

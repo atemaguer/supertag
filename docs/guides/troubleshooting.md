@@ -107,8 +107,8 @@ and serves its harness and model. `placement explain` names which is missing:
 | `network-scope`: the harness or host cannot enforce the Task's network scope, or no host offers its credential | Run the Tag on Codex, or on a Claude Code host that can run its sandbox (on Linux, install bubblewrap and socat); add the credential to a host's `network-credentials`; or change the scope; see [Network scopes](../reference/iam.md#network-scopes) |
 
 Each entry under `hosts` also gives that Worker Host's own `requirement` and `reason` when none
-of its Workers for the Task's harness could run the Task: `harness` when it runs no such harness, or
-`model`, `unsandboxed-commands`, or `file-scope` as above. Use them to find the host to change.
+of its Workers for the Task's harness could run the Task: `harness` when it runs no such
+harness, or `model`, `unsandboxed-commands`, or `file-scope` as above. Use them to find the host to change.
 
 ## 6. Check the harness
 

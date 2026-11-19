@@ -114,7 +114,7 @@ approvers, and a gated runtime action whose approvers name none is not admitted.
 
 | Action | Check |
 | --- | --- |
-| MCP server tool (`target: mcp`), including collaboration surface tools | The Worklet's policy proxy asks the Control Plane before forwarding each call; see [MCP server tools](#mcp-server-tools) |
+| MCP server tool (`target: mcp`), including collaboration surface tools | The Worker's policy proxy asks the Control Plane before forwarding each call; see [MCP server tools](#mcp-server-tools) |
 | Posting to a Workstream or sending a Mailbox message (`workstream:post`, `mailbox:send`) | The harness's coordination tool asks the Control Plane before each post or message |
 | Other runtime actions, such as shell commands and file writes | Not checked per call; only through Task admission. A Task never receives one of these that requires approval |
 
@@ -217,9 +217,9 @@ Matching is exact and case-sensitive. `sentry/get_*` covers `get_issue` and `get
 digits, `_`, `-`, and `.` never match any grant, so a look-alike name cannot stand in for a
 granted tool.
 
-### How the Worklet enforces grants
+### How the Worker enforces grants
 
-When a Task Attempt starts, the Worklet lists the tools of each granted server and keeps the
+When a Task Attempt starts, its Worker lists the tools of each granted server and keeps the
 granted ones. The harness reaches the server only through the per-Task policy proxy on the Worker
 Host. The harness's own MCP configuration is never read. For every call, the proxy checks in
 order:
@@ -504,7 +504,7 @@ outside the Workspace.
 
 A network scope narrows a Permission Set's `web:fetch` grant to named origins, HTTP methods, and
 URL paths.
-It can also name a credential that the Worklet adds to those requests. The Task's commands
+It can also name a credential that the Worker Host adds to those requests. The Task's commands
 never see the secret, only a placeholder. Network scopes live only in Permission Sets. A Tag's
 own `allowedActions` `web:fetch` reaches every origin.
 
@@ -579,7 +579,7 @@ name.
 For each Task Attempt, the host makes a placeholder such as
 `supertag-credential-github-4f2c0d1e9b8a7c6d5e4f3a2b`. The Task's commands see it in the
 variable the host names, such as `GITHUB_TOKEN`. When a command sends a request that a grant
-naming the credential allows, the Worklet's egress proxy replaces the placeholder with the
+naming the credential allows, the Worker's egress proxy replaces the placeholder with the
 secret. It replaces it in any header, including inside `Authorization: Basic`, so `git` over
 HTTPS works with `x-access-token:$GITHUB_TOKEN`. It never replaces it in a URL or a body.
 
@@ -588,12 +588,12 @@ resource. Keep `methods` and origins as narrow as the work needs.
 
 ### Network scope enforcement
 
-The Worklet runs an egress proxy for each Task Attempt whose Task has a network scope. The
+The Worker runs an egress proxy for each Task Attempt whose Task has a network scope. The
 proxy listens on loopback and accepts only that Task Attempt's harness. It refuses an origin
 outside the scope before any TLS. For an allowed origin, it ends TLS with a certificate from a
 certificate authority made for that Task Attempt. It then checks each request's method and
 `Host`, adds credentials, and forwards the request over a verified TLS connection. The
-authority's key never leaves the Worklet's memory. The proxy also refuses an origin whose
+authority's key never leaves the Worker's memory. The proxy also refuses an origin whose
 address is loopback, private, link-local, or otherwise not public, such as a cloud metadata
 service.
 
@@ -691,7 +691,7 @@ boundary.
   credential instead, which reaches only that Task Attempt's data and ends with its lease. See
   [Callers and roles](control-plane.md#callers-and-roles).
 - Authorization snapshots contain identifiers and policy, never credentials.
-- collaboration surface MCP traffic stays outside the collaboration Gateway. Hosted HTTP calls pass through a Task-scoped policy proxy in the Worklet before reaching the official provider server.
+- collaboration surface MCP traffic stays outside the collaboration Gateway. Hosted HTTP calls pass through a Task-scoped policy proxy in the Task Attempt's Worker before reaching the official provider server.
 
 Tool allowlists constrain operations; provider-owned resource policies constrain call arguments. When an operation cannot expose a verifiable resource, the built-in harnesses reject it rather than trusting prompt instructions. Native installations and tokens should still be no broader than the permitted repository, channel, or team envelope.
 

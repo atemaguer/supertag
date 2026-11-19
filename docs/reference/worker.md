@@ -14,7 +14,7 @@ host" means the Worklet acting for its Worker Host. For the ideas, read
 | Harness sign-ins, MCP credentials, network credentials, and Volume keys on this machine | Tags, policy, admission, and the accepted Task |
 | Workspace checkouts and the Task Attempt's files | Scheduling, leases, and recovery decisions |
 | The execution journal and captured artifact bytes | The artifact catalog, events, results, and audit |
-| Starting and supervising Workers, the adapter processes | Which hosts may run which Tags |
+| Starting and supervising Workers, which supervise the adapter processes | Which hosts may run which Tags |
 
 A Worklet never receives the database credential, a Gateway's surface credentials, or another
 host's credential. A Worker's own calls never carry the host's credential. A harness adapter receives only
@@ -30,10 +30,11 @@ the credential; `host revoke` refuses it at once.
 
 The Worklet alone holds the host credential, `host:NAME`. With it, the Worklet registers the host,
 claims Tasks, starts, renews, reclaims, and finishes Task Attempts, and moves checkpoints,
-deliveries, Volume objects, and artifacts between hosts. A Worker runs in its Worklet's process
-and takes the lease renewals and transfers it needs through the Worklet, under the host
-credential. The Task Attempt credential limits what the Worker's own calls reach, not what that
-process can reach.
+deliveries, Volume objects, and artifacts between hosts. A Worker is a separate process that never
+receives the host credential. When its Task Attempt needs a call only the host may make, such as a
+Volume object grant or a git access token, the Worker asks its Worklet over their
+[local channel](#the-local-channel), and the Worklet makes the call only for that Worker's own Task
+Attempt.
 
 When the Control Plane starts a Task Attempt, it returns a Task Attempt credential bound to that
 Task Attempt, its lease, and the host's current registration. The Worker's calls carry only this
@@ -51,8 +52,9 @@ lease, revoking the host, or a new registration of the host ends it. Cancelling 
 data calls, but the Task Attempt's usage, milestones, and network log are still recorded until
 the Worklet reports that its execution stopped. A Worklet that starts the
 same Task Attempt again after a restart receives a new credential, and the old one stops working.
-The Worklet's own finalization for a Task Attempt, such as writing back a Workspace Volume or
-committing captured artifacts, also uses that Task Attempt's credential.
+The Worklet passes the credential to the Worker in its assignment and keeps no copy, in memory or
+in its journal. The Worker records the Task Attempt's captures and writes back its Workspace
+Volume copies before it hands over its outcome, so the Worklet never needs the credential.
 
 A Gateway can carry a Task Attempt's data calls to the Control Plane. It forwards only calls a
 Task Attempt credential may make, and passes the credential through unchanged. It never forwards
@@ -106,8 +108,8 @@ A host service whose harness was removed leaves its slots stranded. The Worklet 
 `STATE_DIRECTORY/retired/` and registers a new incarnation, which fences their Task Attempts.
 
 When a Worker dies, or a Worklet restarts after it was killed, the Worklet checks the processes
-recorded for the interrupted Task Attempt, the Worker's own included. When every one is gone, it records the Task Attempt as failed with an unknown outcome and
-does not run it again. Otherwise, and always for a Task Attempt that used a remote sandbox or
+recorded for the interrupted Task Attempt, the Worker's own included. When every one is gone, it
+records the Task Attempt as failed with an unknown outcome and does not run it again. Otherwise, and always for a Task Attempt that used a remote sandbox or
 shared execution, it waits for `supertag task resolve-attempt`. With `--wait-for-recovery`, the
 host stays connected while it waits. See [Scheduling and interrupted execution](scheduling-and-recovery.md).
 
@@ -115,10 +117,13 @@ host stays connected while it waits. See [Scheduling and interrupted execution](
 
 The Worklet runs each Task Attempt in a Worker, a `supertag` process of its own in its own process
 group. It runs up to `--concurrency` Workers of each harness at once, 1 by default; `supertag up`
-sets it from the host service's `concurrency` and changes it without a restart. A Worker inherits
-one end of a socket pair from its Worklet, and nothing else connects to it. It never receives the
-host credential, in its environment, its arguments, or any message. It exits when its Worklet
-does, and the Worklet kills a Worker that does not stop when asked.
+sets it from the host service's `concurrency` and changes it without a restart. A lowered size
+takes effect as running Task Attempts finish. Background work that belongs to the host, such as
+presence, landings, cleanup, and the artifact transfer listener, runs once, in the Worklet.
+
+A Worker never receives the host credential, in its environment, its arguments, or any message.
+It exits when its Worklet does, and the Worklet kills a Worker that does not stop when asked. A
+Worker writes its log lines to its Worklet's standard error, so they appear in the host's log.
 
 The Worker starts each adapter in its own process group and stops the group when the Task Attempt
 is cancelled, times out, or ends. On Linux it is a child subreaper, so processes that leave the
@@ -126,6 +131,32 @@ adapter's group are still found and stopped. On macOS it finds such processes wi
 100 milliseconds; a process that detaches with a double fork within one scan interval can escape.
 Use an isolated Linux host, container, or VM when that matters. Work started through an
 already-running daemon, such as a tmux server or `ssh localhost`, also escapes supervision.
+
+### What a Worker holds
+
+| A Worker holds, for its one Task Attempt | Only the Worklet holds |
+| --- | --- |
+| The Task Attempt credential | The host credential |
+| Its harness's provider credentials, and the network credentials its egress proxy may add | The journal, the claims, and every lease |
+| The adapter's bootstrap token, its egress and provider proxies, and its MCP servers | Host-wide work: presence, landings, cleanup, and the artifact transfer listener |
+| Its scratch directory and the checkout its Worklet prepared | The host's other checkouts, and the checkpoints and deliveries it holds |
+
+### The local channel
+
+A Worker inherits one end of a socket pair from its Worklet as file descriptor 3. The channel
+has no name in the filesystem or on the network, so nothing else can connect to it. It is also
+the Worker's lifeline: when the Worklet dies, the Worker reads end-of-file, stops its harness,
+and exits.
+
+| Direction | Messages |
+| --- | --- |
+| Worklet to Worker | The assignment (the started Task, its prepared checkout, its Session checkpoint, its Task Attempt credential, and the secrets it may use), cancel, drain, lease renewed or lost, and replies |
+| Worker to Worklet | Its state (starting, executing, finalizing), the journal steps it reaches, its outcome, and requests for host calls |
+
+The Worklet records each step and the outcome in its journal before it answers, and the Worker
+does not go on until it has. A host call names the Task Attempt it is for, and the Worklet refuses
+one that names another. After the Worker exits, the Worklet lands any Workspace delivery and
+finishes the Task Attempt.
 
 ## Execution limits
 

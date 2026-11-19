@@ -4,7 +4,7 @@ A few terms first:
 
 - A **Task** is one unit of work an agent runs, such as a code change or a review.
 - A **Worker Host** is a machine that runs Tasks: a laptop, a server, or a cloud machine. A remote
-  sandbox (Modal, e2b) is a short-lived machine a Worker Host's Worklet starts for a Cursor Task.
+  sandbox (Modal, e2b) is a short-lived machine a Worker Host starts for a Cursor Task.
 - A **harness** is the agent system a Task runs on, such as Codex, Claude Code, or Cursor. On
   the Worker Host, a **Worker** drives it through a harness adapter for one Task Attempt, and
   the host's **Worklet** keeps what outlasts that Worker.
@@ -51,8 +51,8 @@ A **Workspace** names a git repository. A Task can also receive data from a **Vo
 directory or an S3 bucket and prefix, outside its checkout. For example, an analysis Task can read
 a dataset from a bucket without adding it to git.
 
-A Task always receives a copy. The Worklet makes it fresh for each Task Attempt, after the
-checkout and `setup`, so prepared images and snapshots never contain the data. The Worklet
+A Task always receives a copy. The Task Attempt's Worker makes it fresh, after the
+checkout and `setup`, so prepared images and snapshots never contain the data. The Worker
 reads the source with the Worker Host's own credential, and the Task and its harness see only the files. In a
 remote E2B or Modal Workspace, only the files enter the sandbox.
 
@@ -77,7 +77,7 @@ publication is the exception: it keeps the delivery in private scratch until it 
 So an artifact is readable only while its Worker Host is running and connected, unless it also has
 a Volume copy. For example, a laptop's artifacts are unreachable while the laptop sleeps, and the
 error names the laptop's Worker Host. A Tag whose `volume` names a Volume gets a copy of every
-capture there, such as in a bucket prefix, written by the capturing host's Worklet itself before the
+capture there, such as in a bucket prefix, written by the capturing host itself before the
 capture succeeds; it outlives the host, for the hosts and people that use the Volume. For
 details, see [Run the Control Plane](../operations/control-plane.md#artifact-storage) and
 [Artifacts](../reference/artifacts.md).

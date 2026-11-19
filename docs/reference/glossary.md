@@ -107,13 +107,14 @@ whole system rather than another first-class resource.
   [Run Worker Hosts](../guides/workers.md).
 - <a id="worklet"></a>**Worklet** — the program that runs on a Worker Host and connects it to the Control Plane:
   `supertag worker-host`, or a host service under `supertag up`. It reports the host's capacity,
-  claims Tasks, holds their leases, starts a Worker for each Task Attempt, and reports the
-  results. See [Worker Hosts, Worklets, Workers, and harnesses](../concepts/workers.md).
-- <a id="worker"></a>**Worker** — what runs one [Task Attempt](#task-attempt): a harness adapter and the harness it
-  drives, started by the Worklet in their own process group, with a scratch directory and a
-  token that last only for that Task Attempt. A Worker's own calls never carry its Worker Host's
-  credential: they carry a [Task Attempt credential](#task-attempt-credential), and its Worklet takes
-  every lease action for it.
+  claims Tasks, holds their leases, starts a Worker process for each Task Attempt, and reports
+  the results. It keeps one execution journal for all of them. See [Worker Hosts, Worklets, Workers, and harnesses](../concepts/workers.md).
+- <a id="worker"></a>**Worker** — the process that runs one [Task Attempt](#task-attempt). The Worklet starts it once
+  the Task Attempt has started, and it runs a harness adapter and the harness it drives in their
+  own process group, with a scratch directory and a token that last only for that Task Attempt.
+  A Worker never holds its Worker Host's credential: its calls carry a
+  [Task Attempt credential](#task-attempt-credential), and its Worklet takes every lease action
+  for it. It dies with its Worklet.
 - <a id="task-attempt-credential"></a>**Task Attempt credential** — the secret (`stat_…`) the Control Plane returns when a Task
   Attempt starts. It authorizes only that Task Attempt's data calls, such as its events, questions,
   and Mailbox messages, and only while its Worklet holds the lease. It never claims, starts, renews,
@@ -142,7 +143,7 @@ whole system rather than another first-class resource.
   [Work in a repository with Workspaces](../guides/workspaces.md).
 - <a id="harness"></a>**harness** — the agent system a Task runs on, such as Codex, Claude Code, Cursor, OpenCode, or
   OpenAI Agents. See [Worker Hosts, Worklets, Workers, and harnesses](../concepts/workers.md).
-- <a id="harness-adapter"></a>**harness adapter** — the process a Worklet starts for each Task Attempt to drive a
+- <a id="harness-adapter"></a>**harness adapter** — the process a Worker starts for its Task Attempt to drive a
   harness through the harness protocol. See [Write a harness adapter](../guides/harness-adapters.md).
 - <a id="execution-environment"></a>**execution environment** — where a Task's files and commands live: a local checkout, a
   local-vm container, an E2B or Modal sandbox, or a shared execution environment.

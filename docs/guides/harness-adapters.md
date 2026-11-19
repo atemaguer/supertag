@@ -1,9 +1,9 @@
 # Write a harness adapter
 
-Bring your own agent system to SuperTag by writing a **harness adapter**: a program that a
-**Worklet**, the program that connects a **Worker Host** to SuperTag, starts for each **Task
-Attempt**, one execution of a Task, and that drives your agent through the harness protocol. The
-adapter and your agent together are that Task Attempt's **Worker**. A Tag, a persistent AI actor with
+Bring your own agent system to SuperTag by writing a **harness adapter**: a program that runs for
+each **Task Attempt**, one execution of a Task, and drives your agent through the harness protocol.
+The **Worklet**, the program that connects a **Worker Host** to SuperTag, starts a **Worker**
+process for each Task Attempt, and the Worker starts your adapter. A Tag, a persistent AI actor with
 its own responsibilities and permissions, then runs on your agent exactly as it runs on Codex or
 Claude Code. See the [glossary](../reference/glossary.md) for other terms.
 
@@ -19,13 +19,14 @@ The built-in harnesses are adapters too. Read one before you start:
 ## How an adapter runs
 
 ```text
-Worklet ── claims Task ── starts adapter ── writes bootstrap to its stdin
-   ▲                                            │
-   └── Harness service on loopback ◄──── Attach, Publish, Complete
+Worklet ── claims Task ── starts Worker ── starts adapter ── writes bootstrap to its stdin
+                                 ▲                                   │
+                                 └── Harness service on loopback ◄── Attach, Publish, Complete
 ```
 
-1. The Worklet claims a Task, prepares its Workspace checkout, and starts your executable
-   with the arguments you configured. The working directory is the Task's checkout.
+1. The Worklet claims a Task, prepares its Workspace checkout, and starts a Worker for it. The
+   Worker starts your executable with the arguments you configured. The working directory is
+   the Task's checkout.
 2. It writes one `AdapterBootstrap` message to the adapter's standard input and closes it: a
    loopback `endpoint` and a `token`, at most 4096 bytes.
 3. The adapter connects to that endpoint with gRPC and sends the token as a bearer credential
@@ -48,7 +49,7 @@ Worklet ── claims Task ── starts adapter ── writes bootstrap to its 
 
    If your agent streams its reply, also send each piece of text as it arrives with
    `PublishText`, naming the sequence of the last event you published as `after_sequence`. People
-   watch it appear in the message's place; the Worklet batches it and hides credentials, and
+   watch it appear in the message's place; the Worker batches it and hides credentials, and
    it is never stored. Publish the whole message afterwards as usual; it replaces the streamed
    text. Text is shown only, so a failed `PublishText` need not fail the turn.
 6. A message that arrives while the Task runs can be taken with `TakeLiveInput` and settled with
@@ -61,7 +62,7 @@ Worklet ── claims Task ── starts adapter ── writes bootstrap to its 
    `progress` otherwise. When the run's capabilities set `objective_ongoing`, only an operator
    ends the Objective, and the Control Plane refuses `completed`.
 
-The Worklet supervises the adapter's process group. It stops the adapter when the Task is
+The Worker supervises the adapter's process group. It stops the adapter when the Task is
 cancelled or reaches its time limit, and it cleans up processes the adapter leaves behind.
 
 Further services on the same endpoint let an adapter ask the operator a question
@@ -70,7 +71,7 @@ Further services on the same endpoint let an adapter ask the operator a question
 read the Tag's other Sessions and Objectives or create an Objective a person asked for
 (`HarnessTagSessions`), set and cancel the Tag's [Schedules](../reference/coordination.md#schedules)
 (`HarnessSchedules`), keep the Tag's [notes](../reference/coordination.md#memory)
-(`HarnessMemory`, when `may_remember`), capture artifacts (`HarnessArtifacts`), use MCP servers the Worklet offers
+(`HarnessMemory`, when `may_remember`), capture artifacts (`HarnessArtifacts`), use MCP servers the Worker Host offers
 (`HarnessMcp`), and record external effects so a retry does not repeat them (`HarnessEffects`).
 The run's capabilities say which of these the Task may use. When the Task reads the Tag's
 Sessions, its capabilities also carry `tag_portfolio`, the Tag's open Objectives, which an adapter

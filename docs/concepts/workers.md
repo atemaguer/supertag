@@ -9,7 +9,7 @@ in four layers. The [glossary](../reference/glossary.md) lists other terms.
 | --- | --- | --- | --- |
 | Worker Host | A machine, container, VM, or sandbox that provides capacity to run Tasks | A node | A node |
 | Worklet | The program on a Worker Host that connects it to the Control Plane: `supertag worker-host`. It claims Tasks, holds their leases, and starts and supervises Workers | The kubelet | The raylet |
-| Worker | What runs one Task Attempt: a harness adapter and the harness it drives, in their own process group | A pod | A worker process |
+| Worker | A process the Worklet starts for one Task Attempt. It runs a harness adapter and the harness it drives, in their own process group | A pod | A worker process |
 | Harness | The agent system that does the work: Codex, Claude Code, Cursor, OpenCode, OpenAI Agents, or your own | The application in a container | The code a worker runs |
 
 Two more terms come up below:
@@ -17,7 +17,7 @@ Two more terms come up below:
 | Term | Plain-language meaning |
 | --- | --- |
 | Task Attempt | One execution of a Task on a Worker Host. A retry is another Task Attempt |
-| Harness adapter | The process a Worklet starts for each Task Attempt to drive the harness |
+| Harness adapter | The process a Worker starts for its Task Attempt to drive the harness |
 | Execution environment | Where the Task's files and commands live: a local checkout, an E2B or Modal sandbox, or a shared execution environment |
 
 The Worklet handles control: what to run, and whether it is still allowed to. The Worker handles
@@ -85,7 +85,7 @@ them to the Control Plane directly. A Workspace checkout, a Session checkpoint, 
 artifacts outlast the Worker; the Worklet keeps them.
 
 The harness is the agent system that does the work. The harness adapter connects one Task Attempt
-to it: it receives the Task, its Session checkpoint, and its allowed capabilities from the Worklet,
+to it: it receives the Task, its Session checkpoint, and its allowed capabilities from its Worker,
 drives the agent, and reports back. Codex's adapter is built into `supertag`. Claude Code, Cursor,
 and OpenCode use Node bridges, and OpenAI Agents uses the `supertag` Python package. You can write
 your own; see [Write a harness adapter](../guides/harness-adapters.md).

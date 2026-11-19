@@ -24,13 +24,16 @@ tunnel. The **Gateway** is the endpoint clients connect to (the CLI, the Go term
 `apps/tui`, the Tauri desktop app in `apps/desktop`, and SDK bindings): it forwards their calls to
 the Control Plane, and carries collaboration surface traffic as a client of the Control Plane. A
 **Worker Host** is a machine or sandbox that provides execution capacity. Its **Worklet**
-(`supertag worker-host`) connects it to the Control Plane, claims Tasks, and holds their leases;
-for each Task Attempt it starts a **Worker**: a **harness adapter** and the **harness** it drives,
-such as Codex or Claude Code. Keep the four layers apart in code and docs. Auth Keys enroll
-principals in one role: `host`, `gateway`, or `client`; operators use Operator Tokens.
+(`supertag worker-host`) connects it to the Control Plane, claims Tasks, holds their leases, and
+keeps one journal; for each Task Attempt it starts a **Worker**, a hidden `supertag __worker`
+process that runs a **harness adapter** and the **harness** it drives, such as Codex or Claude
+Code. The Worker never receives the host credential: it talks to its Worklet over an inherited
+socket pair (`core/crates/worker-host/src/local.rs`) and dies with it. Keep the four layers apart
+in code and docs. Auth Keys enroll principals in one role: `host`, `gateway`, or `client`;
+operators use Operator Tokens.
 
 The services and CLI are Rust (`core/`), built from the protobuf contract in `proto/`. The
-TypeScript that remains is the Node harness bridges and Workspace providers that Worklets
+TypeScript that remains is the Node harness bridges and Workspace providers that Workers
 start, with the Worker SDK they share (`harnesses/`), the `supertag-ai` SDK (`sdks/typescript`),
 and the desktop app's frontend (`apps/desktop`). `sdks/` holds one directory per language, each
 with its hand-written SDK and generated bindings. The terminal UI is Go (`apps/tui`). The

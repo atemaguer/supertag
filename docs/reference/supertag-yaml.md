@@ -200,10 +200,10 @@ most 64. Changing a host's labels restarts that host on the next `supertag up`.
 ### Host concurrency
 
 `concurrency` is per harness: `harnesses: [codex, claude-code]` with `concurrency: 2` runs up to
-two Codex and two Claude Code Task Attempts at once. The host's Worklet runs each in a Worker
-process of its own. When only `concurrency` changes, `supertag up` changes the running host
-without restarting it: running Task Attempts finish, and a lowered size takes effect as they do. The host `supertag init` writes
-sets `concurrency: 3`.
+two Codex and two Claude Code Task Attempts at once. The host's Worklet runs each in a
+[Worker](glossary.md#worker) process of its own. When only `concurrency` changes, `supertag up` changes the running host
+without restarting it: running Task Attempts finish, and a lowered size takes effect as they do.
+The host `supertag init` writes sets `concurrency: 3`.
 
 ### local-vm containers
 
@@ -296,8 +296,8 @@ egress proxy swaps the placeholder for the secret only in requests the grant all
 lowercase letters, digits, and `-`. `environment` cannot be a proxy, certificate, `PATH`, or
 `HOME` variable, or start with `SUPERTAG_`, `CODEX_`, `GIT_`, or another harness's prefix.
 
-Only the Workers of the host's Codex harness receive the secrets, and the Control Plane learns only the names. A
-host started without supertag.yaml takes `supertag worker-host --network-credential
+Only the Workers of the host's Codex harness receive the secrets, and the Control Plane learns
+only the names. A host started without supertag.yaml takes `supertag worker-host --network-credential
 github=GITHUB_TOKEN` and reads the value from `SUPERTAG_NETWORK_CREDENTIAL_GITHUB`.
 
 ### Workspaces
@@ -400,7 +400,8 @@ hosts/NAME/            each host service's own state directory
 
 Each host service keeps its credential, execution journal, checkouts, and the artifacts,
 Workspace deliveries, and Session checkpoints its Tasks produce in its own state directory,
-`hosts/NAME/`. The Control Plane stores none of those bytes. See [Credential storage](credential-storage.md).
+`hosts/NAME/`. Its Worklet keeps one journal there, with a directory for each slot of its Worker
+pool; see [The execution journal](worker.md#the-execution-journal). The Control Plane stores none of those bytes. See [Credential storage](credential-storage.md).
 
 ## Credentials
 

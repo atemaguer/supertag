@@ -9,6 +9,17 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Changed
+
+- A Worker Host runs one Worklet, which registers the host once and starts a Worker process of
+  its own for each Task Attempt, up to `concurrency` per harness. `supertag up` supervises one
+  Worklet per host service instead of one process per unit of concurrency, and resizes its pool
+  without a restart. The Worker never receives the host credential: it asks its Worklet for the
+  few host calls its Task Attempt needs, and dies with its Worklet. The Worklet keeps one journal,
+  with a directory per slot under `slots/` in the host's state directory; the old `lanes/`
+  directories are not read, so let running Task Attempts finish before upgrading. `supertag
+  worker-host` takes `--concurrency`. See [Worker Host reference](docs/reference/worker.md#process-supervision).
+
 ## [0.3.2] - 2026-11-18
 
 ### Added

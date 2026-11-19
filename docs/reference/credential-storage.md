@@ -116,8 +116,8 @@ stores only a SHA-256 digest of each `stak_` secret and of each enrolled `stcr_`
 compares them in constant time. Operator Tokens (`stop_`) are stored the same way.
 
 A Worker Host enrolls from its own side and keeps its credential in its owner-only state
-directory, outside any checkout a harness can read. Its Worklet uses that credential, and no Worker receives
-it:
+directory, outside any checkout a harness can read. Its Worklet uses that credential, and no
+[Worker](glossary.md#worker), the process that runs one Task Attempt, receives it:
 
 ```bash
 supertag host enroll build-east-1 --control-plane https://supertag.example.com \
@@ -133,14 +133,28 @@ revocation refuses it at once. `supertag get host` never shows the token or its 
 ### Task Attempt credential
 
 When a Task Attempt starts, the Control Plane returns a Task Attempt credential (`stat_` and 64
-hex digits) for that Task Attempt alone, again storing only its digest. The Worker running the Task
-Attempt makes its data calls with it, and the Worklet keeps it in the Task Attempt's journal entry
-in the owner-only state directory. It works only while the Worklet holds the lease. Renewing the
+hex digits) for that Task Attempt alone, again storing only its digest. The Worklet passes it to
+the Worker it starts for the Task Attempt over their private channel and keeps no copy; it is never
+written to the state directory. The Worker makes its data calls with it. It works only while the
+Worklet holds the lease. Renewing the
 lease extends it. Finishing or reclaiming the Task Attempt, a lapsed lease, revoking the host, the
 host registering again, or a repeated start ends it. After a cancellation it still records the
 Task Attempt's usage, milestones, and network log until the Worklet reports that execution
 stopped. A harness adapter never receives it: the
 adapter's bootstrap token works only on its Worker's loopback endpoint.
+
+### Which process holds which credential
+
+| Process | Holds |
+| --- | --- |
+| The Worklet, one per Worker Host | The host credential, and the provider and network credentials of every harness it runs |
+| A Worker, one per Task Attempt | Its Task Attempt credential, its own harness's provider credentials, the network credentials its Task may use, and the MCP credentials it resolves for its Task Attempt |
+| A harness adapter | Its own harness's provider credentials and a bootstrap token for its Worker's loopback endpoint |
+
+A Worker inherits its Worklet's environment, except the host credential and the
+`SUPERTAG_NETWORK_CREDENTIAL_*` values, and never receives the host credential in its arguments or
+any message. A Worker that needs a call only the host may make asks its Worklet, which makes
+it only for that Worker's own Task Attempt.
 
 A host credential is never a CLI flag. The Worker's own calls never carry it, and the built-in
 supervisor removes the exact host credential, Task Attempt credential, and bootstrap token values
@@ -151,7 +165,7 @@ outside the Task Attempt sandbox or run the harness under a separately confined 
 ## MCP and git credentials
 
 MCP tool credentials, including those for the GitHub, Slack, Linear, Teams, and Lark presets, come
-from references in the Worker Host's MCP catalog, which its Worklet resolves for each Task Attempt.
+from references in the Worker Host's MCP catalog, which the Worker of each Task Attempt resolves.
 `supertag mcp login` keeps OAuth tokens in `mcp-logins/` in the state directory
 (`SUPERTAG_STATE_DIR`, else `~/.supertag`). They never enter the Surface Account vault. Git repository
 source and pull-request delivery use a separate host-local `GITHUB_TOKEN`. See
@@ -187,9 +201,9 @@ Gateway that serves it, never a secret. Its credentials reach that Gateway's vau
   or physical locations.
 - Tags, Permission Sets, Tasks, Worker Hosts, and harness prompts never contain Gateway
   collaboration surface credentials.
-- A Worklet resolves MCP and git credential references itself. A Workspace `.mcp.json` can
-  reach only `SUPERTAG_MCP_*` variables. The Worklet holds the process-level secret boundary for
-  the harness adapters of its Workers.
+- A Worker Host resolves MCP and git credential references itself. A Workspace `.mcp.json` can
+  reach only `SUPERTAG_MCP_*` variables. Each Worker holds the process-level secret boundary for
+  its harness adapter.
 - A shared backend must enforce distinct workload identities and policies; namespace names alone
   are not a security boundary.
 

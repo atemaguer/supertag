@@ -328,7 +328,7 @@ bytes live in up to two places:
 | Copy | Where | Made by |
 | --- | --- | --- |
 | Worker Host copy | The producing Worker Host's artifact storage: `STATE_DIRECTORY/artifacts`, or the directory named by `--artifact-directory` | Every capture |
-| Volume copy | The Tag's Volume, under `tags/<SHA-256 of the Tag ID>/attempts/…` | Every capture of a Tag that names a Volume, written by the capturing host's Worklet itself |
+| Volume copy | The Tag's Volume, under `tags/<SHA-256 of the Tag ID>/attempts/…` | Every capture of a Tag that names a Volume, written by the capturing host itself |
 
 A Worker Host's artifact storage is an owner-only directory, one file per Task Attempt and
 SHA-256 digest. For a Worker Host that `supertag up` starts, it is an `artifacts` directory in
@@ -375,7 +375,7 @@ supertag tag put builder --instructions "..." --volume archive
 
 A Tag manifest sets it with `spec.volume`; `--volume none` or `""` removes it.
 
-The capturing host's Worklet writes each file to the Volume itself, so the bytes never pass through
+The capturing host writes each file to the Volume itself, so the bytes never pass through
 the Control Plane:
 
 - **S3 Volume.** On the Control Plane's machine, store the credential it signs with:

@@ -141,7 +141,7 @@ your CLI:
 python -m pip install 'supertag==0.3.2'
 ```
 
-Each SDK connects to SuperTag and lets a custom harness adapter talk to the Worklet that started it;
+Each SDK connects to SuperTag and lets a custom harness adapter talk to the [Worker](../reference/glossary.md#worker) that started it;
 see [API stability](../reference/api-stability.md#package-entry-points). Generated Go,
 TypeScript, and Python bindings live beside the SDKs in [`sdks/`](../../sdks/README.md). See
 [Control Plane API](../reference/control-plane-api.md) for how to connect.

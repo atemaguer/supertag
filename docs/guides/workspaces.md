@@ -327,14 +327,14 @@ be at most 20 GiB. Copies require the Tag's `files:read` action, and a `read-wri
 Cursor, and OpenCode Tasks take copies. The Control Plane freezes each Volume's revision when it
 accepts the Task; `supertag get workspace-volume datasets` shows the source and revision.
 
-The Worklet makes each copy after the checkout and `setup`, so prepared images and snapshots
-never contain the data. The Volume credential never leaves the Worklet's process. A copy is
+The Task Attempt's [Worker](../reference/glossary.md#worker), the process that runs it, makes each copy after the checkout and `setup`, so prepared images and
+snapshots never contain the data. The Volume credential never leaves the Worker's process. A copy is
 refused when it passes its `maxBytes`, when one Task Attempt's copies together pass 20 GiB, or when
 it holds more than 10,000 files, symbolic links, or files with another hard link. A Cursor Task in
 an E2B or Modal Workspace receives only the files, uploaded to `volumes/<digest>/<name>` inside
 its checkout; the sandbox image needs `python3`.
 
-After a successful Task Attempt, the Worklet writes a read-write copy's changed and created
+After a successful Task Attempt, its Worker writes a read-write copy's changed and created
 files back to the Volume, never deletions or links. A failed or cancelled Task Attempt writes
 nothing. `supertag describe task ID` shows what was written: `complete`, `partial`, or `refused`.
 A Workspace Volume must stay outside artifact storage. See [Worker Host reference](../reference/worker.md#workspace-volumes).

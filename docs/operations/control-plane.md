@@ -175,7 +175,7 @@ catalog in the database and never stores its files. The Worklet on the Worker Ho
 keeps them. A Task on the same host, or on a host sharing its artifact storage, reads them there; a Task
 on another host reads them directly from a host run with `--artifact-transfer-listen`. Clients
 can't download artifacts. For copies that outlive the host, give a
-Tag a `volume`: the capturing host's Worklet writes each copy there itself. The Control Plane maps no
+Tag a `volume`: the capturing host writes each copy there itself. The Control Plane maps no
 Volume; for an S3 Volume it only signs, with the credential `supertag volume credential set`
 stores in its credential vault on this machine. See
 [Keep every capture on a Volume](../reference/artifacts.md#keep-every-capture-on-a-volume).
