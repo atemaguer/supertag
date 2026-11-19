@@ -44,6 +44,20 @@ pub(crate) fn set_provider_credentials(credentials: BTreeMap<String, String>) ->
     Ok(())
 }
 
+/// Values the Worker's `Assign` named only so its redaction hides them.
+static REDACTIONS: std::sync::OnceLock<Vec<supertag_protocol::redaction::SensitiveValue>> =
+    std::sync::OnceLock::new();
+
+/// Records the values this Worker hides without using: see `AttemptSecrets::redact`.
+pub(crate) fn set_redactions(values: Vec<supertag_protocol::redaction::SensitiveValue>) {
+    let _ = REDACTIONS.set(values);
+}
+
+/// The values recorded by [`set_redactions`]; none outside a Worker.
+pub(crate) fn redactions() -> Vec<supertag_protocol::redaction::SensitiveValue> {
+    REDACTIONS.get().cloned().unwrap_or_default()
+}
+
 /// The values of the provider credentials this Worker was assigned, which its redaction hides.
 pub(crate) fn assigned_values() -> Vec<String> {
     FILE_CREDENTIALS

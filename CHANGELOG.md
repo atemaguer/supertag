@@ -30,6 +30,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- A Worker hides a secret from its Worklet's environment again when a harness repeats it, such as
+  a provider key it does not inherit. It had stopped doing so once Workers no longer inherited the
+  Worklet's whole environment.
 - The desktop app's New Tag form offered only the lead's harness, because `supertag init` set up
   the local host with that harness alone. `init` now gives the host every installed harness that
   is signed in, and on a machine already set up offers to add the ones it lacks. A Tag created in

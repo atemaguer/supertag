@@ -764,6 +764,7 @@ mod tests {
             secrets: crate::local::AttemptSecrets {
                 provider: [("OPENAI_API_KEY".to_owned(), "sk-harness".to_owned())].into(),
                 network: vec![],
+                redact: vec![],
             },
             resume_captures: None,
         };

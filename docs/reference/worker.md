@@ -197,6 +197,9 @@ A Worker starts from an allowlist of its Worklet's environment, never the whole 
 
 Another harness's variables never reach it. Its harness's provider keys and tokens, and the
 network credentials its Task may use, arrive in its assignment instead, never in its environment.
+The assignment also names the other secrets in the Worklet's environment, such as another
+harness's keys, so the Worker can hide them if a harness repeats them. The Worker never uses those
+values, and the list never includes the host credential.
 
 A Worker is never given the host credential, in its environment, its arguments, or any message.
 That is not a boundary within one OS user: the state directory's enrollment holds the credential,

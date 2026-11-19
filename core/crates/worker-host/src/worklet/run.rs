@@ -1678,6 +1678,15 @@ async fn run_worker(
         secrets: AttemptSecrets {
             provider: harness.provider_credentials.clone(),
             network,
+            redact: {
+                let environment = std::env::vars().collect::<Vec<_>>();
+                crate::local::environment_redactions(
+                    environment
+                        .iter()
+                        .map(|(name, value)| (name.as_str(), value.as_str())),
+                    worklet.credential.secret(),
+                )
+            },
         },
         resume_captures,
     };

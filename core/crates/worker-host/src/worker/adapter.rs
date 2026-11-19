@@ -1455,6 +1455,7 @@ pub(crate) fn host_secrets(credentials: &[&str]) -> Vec<SensitiveValue> {
             .iter()
             .map(|(name, value)| (name.as_str(), value.as_str())),
     );
+    secrets.extend(crate::credentials::redactions());
     secrets.extend(
         credentials
             .iter()

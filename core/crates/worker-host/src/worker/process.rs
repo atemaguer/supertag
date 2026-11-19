@@ -83,6 +83,14 @@ pub async fn run_worker(options: WorkerProcessOptions) -> Result<()> {
     .await?;
     failures_remember(&assign.attempt.attempt_credential);
     crate::credentials::set_provider_credentials(assign.secrets.provider.clone())?;
+    crate::credentials::set_redactions(
+        assign
+            .secrets
+            .redact
+            .iter()
+            .map(crate::local::Redaction::sensitive)
+            .collect(),
+    );
     let network = assign
         .secrets
         .network

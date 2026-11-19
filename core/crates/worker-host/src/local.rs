@@ -126,6 +126,53 @@ impl From<WireStatus> for Status {
 pub(crate) struct AttemptSecrets {
     pub(crate) provider: BTreeMap<String, String>,
     pub(crate) network: Vec<NetworkCredential>,
+    /// Values the Worker only hides, never uses: the secrets of the Worklet's own environment
+    /// that a Worker no longer inherits, so its redaction still covers them. The host credential
+    /// is never among them; the Worker redacts it by its shape.
+    #[serde(default)]
+    pub(crate) redact: Vec<Redaction>,
+}
+
+/// One value a Worker's redaction hides, with how confidently it is a secret.
+#[derive(Clone, Deserialize, Serialize)]
+pub(crate) struct Redaction {
+    pub(crate) value: String,
+    pub(crate) high: bool,
+}
+
+impl Redaction {
+    pub(crate) fn sensitive(&self) -> supertag_protocol::redaction::SensitiveValue {
+        use supertag_protocol::redaction::SensitiveValue;
+        if self.high {
+            SensitiveValue::High(self.value.clone())
+        } else {
+            SensitiveValue::Low(self.value.clone())
+        }
+    }
+}
+
+/// The secrets of `environment` a Worker hides but does not inherit: every credential-named or
+/// URL-credential value except `host_credential` and the network credentials, which the Worker
+/// receives only when its Task's network scope names them.
+pub(crate) fn environment_redactions<'a>(
+    environment: impl IntoIterator<Item = (&'a str, &'a str)>,
+    host_credential: &str,
+) -> Vec<Redaction> {
+    use supertag_protocol::redaction::{SensitiveValue, sensitive_environment_values};
+    sensitive_environment_values(environment.into_iter().filter(|(name, _)| {
+        *name != "SUPERTAG_HOST_TOKEN" && !name.starts_with("SUPERTAG_NETWORK_CREDENTIAL_")
+    }))
+    .into_iter()
+    .filter_map(|value| match value {
+        SensitiveValue::High(value) if value != host_credential => {
+            Some(Redaction { value, high: true })
+        }
+        SensitiveValue::Low(value) if value != host_credential => {
+            Some(Redaction { value, high: false })
+        }
+        _ => None,
+    })
+    .collect()
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -571,6 +618,23 @@ impl<R> Answer<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_worker_hides_the_worklets_environment_secrets_but_never_gets_the_host_credential() {
+        let redactions = environment_redactions(
+            [
+                ("FIXTURE_PROVIDER_API_KEY", "sk-host-only-credential-4242"),
+                ("SUPERTAG_HOST_TOKEN", "stcr_host"),
+                ("OTHER_TOKEN", "stcr_host"),
+                ("SUPERTAG_NETWORK_CREDENTIAL_GITHUB", "ghp_unscoped"),
+                ("PATH", "/usr/bin"),
+            ],
+            "stcr_host",
+        );
+        let values: Vec<_> = redactions.iter().map(|r| r.value.as_str()).collect();
+        assert_eq!(values, ["sk-host-only-credential-4242"]);
+        assert!(redactions[0].high);
+    }
 
     #[test]
     fn a_host_call_names_only_the_workers_own_attempt() {
