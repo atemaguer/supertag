@@ -5,8 +5,7 @@ name: Desktop
 # the repository's Node.js and again under Electron's own, which is newer and has caught bugs the
 # other didn't. `package` builds the Debian package the release ships, installs it, launches it
 # with Chromium's sandbox under Ubuntu's restriction on unprivileged user namespaces, and removes
-# it. `tauri` checks the Tauri shell, which the app is leaving, with fmt, clippy, and cargo test.
-# The integration suites and the Tauri backend use core crates, so core changes run this too.
+# it. The integration suites run a CLI built from core crates, so core changes run this too.
 # It is its own workflow so that a desktop break shows as its own check rather than as one more
 # failed job in Core.
 on:
@@ -114,32 +113,3 @@ jobs:
           [ "${#debs[@]}" = 1 ] && [ -f "${debs[0]}" ] || { echo "::error::expected one Debian package"; exit 1; }
           scripts/check-desktop-deb.sh "${debs[0]}"
 
-  tauri:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      # Restores the registry and third-party dependency builds; workspace crates are never cached.
-      # Only main saves, so pull requests reuse main's cache without evicting it.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: desktop
-          workspaces: apps/desktop/src-tauri -> target
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.18.0
-          run_install: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - name: Install Tauri system libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev
-      - run: pnpm install --frozen-lockfile
-      # The Tauri build script embeds the built frontend, so it must exist before cargo runs.
-      - run: pnpm --filter @supertag/desktop build
-      - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
-      - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --all-targets -- -D warnings
-      - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked

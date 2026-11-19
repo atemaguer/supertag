@@ -89,6 +89,15 @@ within the pre-1.0 compatibility policy described in
   Host must reach that URL; unset, Workers use the Control Plane. An unreachable data endpoint is
   retried while the lease lasts and logged as `the data endpoint URL is unreachable`. See
   [Worker Host reference](docs/reference/worker.md#data-endpoint).
+- The desktop app is now built on Electron and needs macOS 13 or later (it needed macOS 11). The
+  Debian package installs an AppArmor profile so the app's sandbox can start on Ubuntu 23.10 and
+  later, and replaces the earlier `super-tag` package. See
+  [Install the desktop app](docs/operations/install.md#install-the-desktop-app).
+
+### Removed
+
+- The Linux AppImage of the desktop app. On Linux the desktop app ships as a Debian package for
+  amd64 and arm64.
 
 ## [0.3.2] - 2026-11-18
 

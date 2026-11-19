@@ -1,11 +1,11 @@
 /**
- * The one table of what the window may ask the main process: the Tauri app's commands, one for
- * one and camel-cased, plus the shell's own notification, badge and link channels. The preload
+ * The one table of what the window may ask the main process: the app's commands, plus the
+ * shell's own notification, badge and link channels. The preload
  * generates `window.supertag` from it, the main process registers exactly one guarded handler per
  * entry, and the renderer's type of `window.supertag` derives from it, so a missing or extra
  * handler is a type error.
  *
- * Every call keeps the Tauri contract: it resolves with the result, or rejects with one
+ * Every call keeps one contract: it resolves with the result, or rejects with one
  * user-facing string, never an upstream message.
  */
 import type {

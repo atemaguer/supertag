@@ -30,8 +30,8 @@ export function gatewayStore(env?: NodeJS.ProcessEnv, platform?: NodeJS.Platform
 }
 
 /**
- * Where the app caches what it shows on launch: as the Tauri app's data directory, beside the
- * configuration on macOS and in `~/.local/share` (or `$XDG_DATA_HOME`) elsewhere.
+ * Where the app caches what it shows on launch: its data directory, beside the configuration
+ * on macOS and in `~/.local/share` (or `$XDG_DATA_HOME`) elsewhere.
  */
 export function cacheDirectory(
   env: NodeJS.ProcessEnv = process.env,

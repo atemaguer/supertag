@@ -1538,7 +1538,7 @@ button.identity-pill[aria-expanded="true"] {
   color: var(--text);
   font-size: 13px;
 }
-/* WebKit draws a native select at its own small height; drawn like the inputs beside it. */
+/* A native select draws at its own small height; drawn like the inputs beside it. */
 .workspace-dialog .field-select {
   appearance: none;
   padding-right: 32px;

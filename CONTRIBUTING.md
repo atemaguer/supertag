@@ -365,7 +365,6 @@ rewrite every other manifest from it, refresh the lockfiles, and run the version
 ```sh
 python3 scripts/release_version.py --sync
 (cd core && cargo metadata --format-version 1 > /dev/null)
-(cd apps/desktop/src-tauri && cargo metadata --format-version 1 > /dev/null)
 (cd sdks/python && uv lock)
 python3 scripts/release_version.py vVERSION
 pnpm exec vitest run tests/release-version.test.ts

@@ -1,7 +1,6 @@
 /**
- * Unit tests of the main process's Gateway backend, ported from the Tauri app's Rust tests
- * (`gateway/tests.rs` 13–255, `cache.rs`, `task_files.rs`, `new_tag.rs`, `activity.rs`,
- * `memories.rs`, `network.rs`, `schedules.rs`, `watch/tests.rs`'s registration test).
+ * Unit tests of the main process's Gateway backend: the cache, task files, new Tags, activity,
+ * memories, network, schedules, and Watch registration.
  */
 import { chmod, mkdir, mkdtemp, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

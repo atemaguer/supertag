@@ -1,6 +1,5 @@
 /**
- * The main process's Gateway connection: a port of the Tauri app's `GatewayState`. One
- * connection is current at a time; its `connectionId` is a generation counter the window sends
+ * The main process's Gateway connection. One connection is current at a time; its `connectionId` is a generation counter the window sends
  * with every call. A call for an older generation is refused, and a result that arrives after
  * the connection changed is dropped, so nothing of one Gateway reaches a view of another.
  * Switching ends the Watch and every follow of the connection it replaces.

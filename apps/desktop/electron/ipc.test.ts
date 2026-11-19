@@ -97,7 +97,7 @@ it("registers exactly the table's channels", () => {
       .map((name) => `supertag:${name}`)
       .sort(),
   );
-  // The Tauri app's 39 commands, and the shell's notification, badge and link channels.
+  // 39 app commands, and the shell's notification, badge and link channels.
   expect(registered).toHaveLength(42);
 });
 
@@ -166,7 +166,7 @@ it("answers with the handler's value, or its own message, never an internal erro
   expect(await call("chooseProjectFolder", {})).toEqual({ ok: true, value: "/tmp/project" });
   // With no CLI, nothing local needs starting.
   expect(await call("localStartNeeded", {})).toEqual({ ok: true, value: false });
-  // The Gateway channels answer as the Tauri commands did before a connection.
+  // Before a connection, the Gateway channels refuse the call.
   const send = { connectionId: "1", tagId: "engineer", text: "hello", operationId: "ipc-test" };
   expect(await call("sendMessage", send)).toEqual({
     ok: false,
@@ -247,21 +247,4 @@ it("pushes stream updates under the preload's key until the stream ends", async 
   pushed?.({ kind: "lost" });
   expect(main.sent.at(-1)).toEqual([STREAM_END, "s1"]);
   expect(streams.size).toBe(0);
-});
-
-it("mirrors the Tauri commands one for one, which the Tauri bridge calls by snake-cased name", async () => {
-  const { readFile } = await import("node:fs/promises");
-  const permission = await readFile(
-    new URL("../src-tauri/permissions/gateway.toml", import.meta.url),
-    "utf8",
-  );
-  const allowed = [...(permission.split("commands.allow = [")[1] ?? "").matchAll(/"([a-z_]+)"/g)]
-    .map((match) => match[1])
-    .sort();
-  const shellChannels = ["notify", "setBadge", "openExternal"];
-  const commands = Object.keys(CHANNELS)
-    .filter((name) => !shellChannels.includes(name))
-    .map((name) => name.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`))
-    .sort();
-  expect(commands).toEqual(allowed);
 });

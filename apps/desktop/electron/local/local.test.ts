@@ -1,6 +1,5 @@
 /**
- * The local services and onboarding, ported from the Tauri app's `local_start.rs`,
- * `onboarding.rs` and `gateway/local.rs` tests. Stand-in CLIs are shell scripts.
+ * The local services, onboarding, and the local Gateway upgrade. Stand-in CLIs are shell scripts.
  */
 import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";

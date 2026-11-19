@@ -4,7 +4,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  // Relative asset URLs, so the build loads from app://supertag/ and from Tauri alike.
+  // Relative asset URLs, so the build loads from app://supertag/.
   base: "./",
   plugins: [react(), tailwindcss()],
   resolve: {

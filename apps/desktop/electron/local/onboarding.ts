@@ -1,6 +1,5 @@
 /**
- * First launch: setting SuperTag up from the app, with no terminal. A port of the Tauri app's
- * `onboarding.rs`. The app checks a project folder and the harnesses with
+ * First launch: setting SuperTag up from the app, with no terminal. The app checks a project folder and the harnesses with
  * `supertag init --check --json`, which also says whether Claude Code and Codex are installed and
  * signed in and how to install them (the app bundles neither), then runs `supertag init --yes`.
  * The CLI does all the work, so the app never repeats init's logic.

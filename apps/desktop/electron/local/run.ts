@@ -1,6 +1,5 @@
 /**
- * Running the `supertag` CLI as a child process and reading what it printed. A port of the
- * Tauri app's `onboarding::run`, `reason`, `json_of` and `result`.
+ * Running the `supertag` CLI as a child process and reading what it printed.
  */
 import { spawn } from "node:child_process";
 

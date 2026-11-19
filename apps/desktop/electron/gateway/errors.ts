@@ -1,6 +1,5 @@
 /**
- * The strings the window shows when a Gateway call fails, exactly as the Tauri app's Rust
- * backend wrote them. A handler throws one of these strings; never an upstream message, which
+ * The strings the window shows when a Gateway call fails. A handler throws one of these strings; never an upstream message, which
  * can carry request data, backend details, or a credential an unexpected server echoed.
  */
 import { Code, ConnectError } from "./sdk";

@@ -1,9 +1,9 @@
 /**
  * The saved Gateways, `<config>/ai.supertag.desktop/gateways.json`, which the CLI also reads
- * (`core/crates/cli/src/profiles.rs`, `desktop_store`). Same JSON shape and modes as the Tauri
- * app wrote: `{ active, gateways: [{ profile: { name, origin }, token }] }`, an owner-only file
+ * (`core/crates/cli/src/profiles.rs`, `desktop_store`). Its shape:
+ * `{ active, gateways: [{ profile: { name, origin }, token }] }`, an owner-only file
  * in a directory only its owner can write, replaced atomically. The single-instance lock keeps
- * one app writing it, in place of the Tauri app's file lock.
+ * one app writing it.
  */
 import { randomBytes } from "node:crypto";
 import { constants, promises as fs } from "node:fs";

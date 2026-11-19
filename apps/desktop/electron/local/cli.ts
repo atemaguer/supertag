@@ -1,6 +1,5 @@
 /**
- * Which `supertag` CLI the app runs, and the PATH it runs with. A port of the Tauri app's
- * `local_start::{cli, usable_cli, environment, login_path}`.
+ * Which `supertag` CLI the app runs, and the PATH it runs with.
  *
  * The CLI is the copy bundled in the app's resources (`Contents/Resources/supertag/supertag` on
  * macOS, `/opt/SuperTag/resources/supertag/supertag` from the deb), else the first `supertag` on

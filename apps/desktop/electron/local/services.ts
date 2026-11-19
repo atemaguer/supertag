@@ -1,6 +1,5 @@
 /**
- * The local services, run with the app's own CLI. A port of the Tauri app's `local_start.rs` and
- * `gateway/local.rs:local_upgrade`.
+ * The local services, run with the app's own CLI.
  *
  * Later launches: when this user's SuperTag is set up but its services are stopped, the app starts
  * them with `supertag up`, then connects. First-launch setup stays with onboarding. When the local

@@ -1,6 +1,5 @@
 /**
- * The Gateway backend against real deployments run by this repository's CLI, ported from the
- * Tauri app's `gateway/tests.rs` and `gateway/watch/tests.rs`. Set `SUPERTAG_RUST_TEST_CLI` to a
+ * The Gateway backend against real deployments run by this repository's CLI. Set `SUPERTAG_RUST_TEST_CLI` to a
  * built `supertag` to run them; every deployment gets throwaway directories and system-picked
  * ports.
  */

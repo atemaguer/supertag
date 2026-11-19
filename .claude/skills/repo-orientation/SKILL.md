@@ -16,7 +16,7 @@ Worker Hosts, in the desktop app, or in the `supertag-ai` SDK.
 | `proto/` | The `supertag.runtime.v2` protobuf contract every language uses, and the shared execution provider's `supertag.environment.v2` |
 | `sdks/` | One directory per language: the hand-written SDK and its generated bindings |
 | `harnesses/` | Node harness bridges and Workspace providers a Worker Host starts, and their shared SDK |
-| `apps/` | The Go terminal UI and the Tauri desktop app |
+| `apps/` | The Go terminal UI and the Electron desktop app |
 | `scripts/` | Repository checks, binding generation, and release, packaging, and install scripts |
 | `deploy/` | Container images and platform definitions for the native services |
 | `docs/` | User documentation; `docs/development/` holds contributor records |
@@ -32,7 +32,7 @@ Worker Hosts, in the desktop app, or in the `supertag-ai` SDK.
 | `core/crates/gateway` | Collaboration surfaces: ingress, rendering, reply delivery, notifications |
 | `core/crates/worker-host` | A Worker Host: `worklet/` registers, claims, holds leases, runs the Worker pool (`pool.rs`), keeps one journal with a directory per slot, recovers, and owns checkouts, checkpoints, held artifacts, and landings; `worker/` is the per-Task Attempt process: adapter, guardian, egress and provider proxies, Context Items, MCP, captures; `local.rs` is the Worklet-Worker channel. The host credential stays in the Worklet process; a Worker's calls carry only the Task Attempt credential, and it asks its Worklet for host calls |
 | `core/crates/{protocol,api,transport}` | Wire types, gRPC services, tunnel and TLS transport |
-| `core/crates/local-state` | The local state directory and local Control Plane discovery, shared by the CLI and the desktop app |
+| `core/crates/local-state` | The local state directory and local Control Plane discovery, used by the CLI |
 | `core/crates/{workspaces,github,shared-execution,credential-vault,codex-adapter}` | Workspaces, GitHub, shared execution, credential vault, native Codex adapter |
 | `proto/supertag/runtime/v2` | The public API contract; `scripts/generate-bindings.py` regenerates every binding from it |
 | `sdks/typescript` | The `supertag-ai` npm SDK (`src/`) and the generated TypeScript bindings (`gen/`) |
@@ -42,7 +42,7 @@ Worker Hosts, in the desktop app, or in the `supertag-ai` SDK.
 | `harnesses/environments/{e2b,modal}` | Node Workspace providers a Worker Host starts |
 | `harnesses/sdk` | `@supertag/worker-sdk`, the code those bridges share; its domain types are in `src/domain` |
 | `apps/tui` | Go terminal UI; runtime.v2 client in `client/`, presentation types in `views/` |
-| `apps/desktop` | Tauri desktop app; its crate depends on `core/crates` by path |
+| `apps/desktop` | Electron desktop app: main process in `electron/`, React renderer in `src/`; it reaches SuperTag through `supertag-ai` and the `supertag` CLI |
 
 ## Boundaries
 

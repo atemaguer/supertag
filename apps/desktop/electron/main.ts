@@ -131,7 +131,7 @@ function createWindow() {
     minHeight: 560,
     backgroundColor: "#19191c",
     show: false,
-    // As the Tauri window's overlay title bar: the page runs under it, with the window controls.
+    // An overlay title bar: the page runs under it, with the window controls.
     ...(mac ? { titleBarStyle: "hidden", trafficLightPosition: { x: 18, y: 22 } } : {}),
     webPreferences: {
       preload: path.join(here, "preload.cjs"),
@@ -150,7 +150,7 @@ function createWindow() {
   mainWindow = window;
   // `web-contents-created` already locked its navigation.
   const contents = window.webContents;
-  // A reload or a new page drops what the last one opened, as the Tauri app disconnects.
+  // A reload or a new page drops what the last one opened.
   contents.on("did-start-navigation", (event) => {
     if (event.isMainFrame && !event.isSameDocument) resetWindow();
   });

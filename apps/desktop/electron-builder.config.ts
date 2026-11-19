@@ -80,7 +80,7 @@ const config: Configuration = {
     afterInstall: "build/linux/after-install.sh",
     afterRemove: "build/linux/after-remove.sh",
     appArmorProfile: "build/linux/apparmor-profile",
-    // Releases up to 0.3.2 shipped the Tauri app as the package super-tag; installing this one
+    // Releases up to 0.3.2 shipped the desktop app as the package super-tag; installing this one
     // removes it rather than leaving two SuperTag apps in the menu.
     fpm: ["--conflicts", "super-tag", "--replaces", "super-tag"],
   },

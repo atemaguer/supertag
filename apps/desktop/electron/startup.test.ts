@@ -1,7 +1,7 @@
 /**
  * The window's first screen, decided by the renderer's own startup sequence (`src/startup.ts`)
  * against the main process's real handlers, with a stand-in CLI. A fresh state directory must
- * reach the setup screen, as the Tauri app did; with no CLI, the setup screen says how to install
+ * reach the setup screen; with no CLI, the setup screen says how to install
  * it; a set-up machine with stopped services starts them.
  */
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";

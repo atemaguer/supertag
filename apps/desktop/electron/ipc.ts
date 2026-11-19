@@ -35,8 +35,8 @@ export function originOf(url: string): string | undefined {
 
 /**
  * Whether an IPC call comes from the app's own page in the main window: the main window's
- * webContents, its top frame, at an app origin. Anything else is refused before a handler runs,
- * as Tauri refused commands from another window or a remote URL.
+ * webContents, its top frame, at an app origin. Anything else, such as another window or a
+ * remote URL, is refused before a handler runs.
  */
 export function trustedSender(
   event: Pick<IpcMainInvokeEvent, "sender" | "senderFrame">,
@@ -116,14 +116,14 @@ export class Streams {
   }
 }
 
-/** The one refusal a window outside the guard sees, as Tauri's "not allowed". */
+/** The one refusal a window outside the guard sees. */
 export const REFUSED = "This window is not allowed to call SuperTag.";
 const FAILED = "Something went wrong in the SuperTag app.";
 const STREAM_KEY = /^s[0-9]{1,15}$/;
 
 /**
  * A handler's failure as the one string the window shows. A thrown string is the handler's own
- * user-facing message (the Tauri commands' `Err(String)`); anything else is logged and hidden.
+ * user-facing message; anything else is logged and hidden.
  */
 export function replyError(error: unknown, log: (error: unknown) => void = console.error): string {
   if (typeof error === "string") return error;

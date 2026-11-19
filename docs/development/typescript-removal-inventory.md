@@ -35,7 +35,7 @@ sits beside the ledger in this directory.
 | `packages/runtime/environments/modal` | `@supertag/worker-environment-modal` | Keep, pruned | `node_bridges.py` packages `dist/rust-provider/main.js` as the Modal Workspace provider; `rust-port.yml` builds it |
 | `packages/runtime/sdk` | `@supertag/worker-sdk` | Keep, pruned | Dependency of all five bridges and `supertag-ai` (`internal/rust-harness`, `internal/rust-workspace-provider`, `internal/process-inventory`, `redaction`); `cursor_runtime.rs` loads `dist/rust-harness` and `dist/rust-workspace-provider`; `generate-bindings.py` writes `src/rust-harness/gen` |
 | `packages/core` | `@supertag/core` | Keep, pruned | Dependency of `@supertag/worker-sdk` and `@supertag/worker-cursor`; 13 of 49 source files remain |
-| `apps/desktop` | `@supertag/desktop` | Keep | Tauri app; `rust-port.yml` `desktop` job builds its frontend before `cargo clippy` |
+| `apps/desktop` | `@supertag/desktop` | Keep | Electron desktop app; `desktop.yml` builds and tests it |
 | `apps/tui` | Go module | Keep | Go terminal UI started by `supertag tui`; `rust-port.yml` builds it for `operator_runtime.rs` |
 | `packages/operator-api/go` | Go module | Remove (2026-11-14) | Generated `supertag.operator.v1` Go types and Connect clients. The TUI's presentation types moved to `apps/tui/views`; the protoc Go plugins it pinned moved to `rust/bindings/go` |
 | `packages/operator-api` (TypeScript: `src`, `package.json`, tests) | `@supertag/operator-api` | Remove | Imported only by `apps/cli` and TypeScript tests |

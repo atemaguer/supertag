@@ -2,8 +2,7 @@
  * What the app keeps on disk to show at once on launch, before the Gateway answers: the Tag
  * list, recent conversations, and messages not yet sent. Each Gateway and principal has its own
  * directory, named by digests, under the app's cache directory. The files hold only what the app
- * read or wrote, never a credential, and only this user can read them. Same layout as the Tauri
- * app's cache.
+ * read or wrote, never a credential, and only this user can read them.
  */
 import { createHash, randomBytes } from "node:crypto";
 import { constants, promises as fs } from "node:fs";

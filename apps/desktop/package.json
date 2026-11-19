@@ -11,14 +11,12 @@
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "dev": "tsx scripts/dev.ts",
     "build": "tsc --noEmit && tsc --build electron && vite build && tsup",
     "electron": "tsup && electron .",
-    "electron:dev": "tsup && SUPERTAG_DESKTOP_DEV_URL=${SUPERTAG_DESKTOP_DEV_URL:-http://127.0.0.1:1420} electron .",
     "package:mac": "pnpm build && electron-builder --config electron-builder.config.ts --publish never --mac --arm64",
     "package:linux": "pnpm build && electron-builder --config electron-builder.config.ts --publish never --linux",
-    "smoke": "tsx scripts/smoke.ts",
-    "tauri": "tauri"
+    "smoke": "tsx scripts/smoke.ts"
   },
   "devDependencies": {
     "@bufbuild/protobuf": "2.15.0",
@@ -31,10 +29,6 @@
     "@radix-ui/react-dropdown-menu": "2.2.1",
     "@radix-ui/react-slot": "1.5.0",
     "@tailwindcss/vite": "4.3.5",
-    "@tauri-apps/api": "2.12.4",
-    "@tauri-apps/cli": "2.12.4",
-    "@tauri-apps/plugin-notification": "2.8.1",
-    "@tauri-apps/plugin-opener": "2.7.3",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.3.0",

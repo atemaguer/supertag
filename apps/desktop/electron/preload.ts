@@ -33,7 +33,7 @@ ipcRenderer.on(NOTIFICATION_CLICK, (_event, tagId: unknown) => {
 async function call(name: Channel, args: unknown, key?: string): Promise<unknown> {
   const reply = (await ipcRenderer.invoke(invokeChannel(name), args ?? {}, key)) as Reply<unknown>;
   if (reply.ok) return reply.value;
-  // As the Tauri commands: the window sees one user-facing string.
+  // The window sees one user-facing string.
   throw reply.error;
 }
 

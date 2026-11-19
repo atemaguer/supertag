@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
@@ -166,15 +166,4 @@ it("packages Electron without its Node escape hatches", () => {
     4: true, // EnableEmbeddedAsarIntegrityValidation
     5: true, // OnlyLoadAppFromAsar
   });
-});
-
-it("leaves Tauri imports only in src-tauri, which the Electron shell replaces", async () => {
-  const desktop = path.join(import.meta.dirname, "..");
-  for (const directory of ["src", "electron"]) {
-    const files = await readdir(path.join(desktop, directory), { recursive: true });
-    for (const file of files.filter((name) => /\.tsx?$/.test(name))) {
-      const source = await readFile(path.join(desktop, directory, file), "utf8");
-      expect(source, `${directory}/${file}`).not.toMatch(/from "@tauri-apps\//);
-    }
-  }
 });

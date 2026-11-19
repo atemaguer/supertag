@@ -66,8 +66,8 @@ struct DesktopProfile {
     origin: String,
 }
 
-/// The per-user configuration directory used by Go's `os.UserConfigDir` and
-/// Tauri's `app_config_dir` on this platform.
+/// The per-user configuration directory used by Go's `os.UserConfigDir` and the
+/// desktop app on this platform.
 fn config_directory() -> Result<PathBuf> {
     let home = std::env::var_os("HOME").filter(|home| !home.is_empty());
     if cfg!(target_os = "macos") {

@@ -1,6 +1,6 @@
 /**
  * The Gateway channels of the table, on the main process's {@link GatewayState}. Each checks
- * its arguments' types, as the Tauri commands' deserialization did, before anything runs.
+ * its arguments' types before anything runs.
  */
 import type { ReadMessages, ScheduleAction } from "../../src/gateway";
 import type { NewTag } from "../../src/tag-admin";

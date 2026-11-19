@@ -1,7 +1,6 @@
 /**
  * The channels backed by the app's own CLI: starting and restarting the local services, the
- * first-launch setup, and adding a folder as a Workspace of the local Gateway. Ports of the Tauri
- * commands of the same names (`lib.rs`).
+ * first-launch setup, and adding a folder as a Workspace of the local Gateway.
  */
 import type { SetupCheck } from "../../src/gateway";
 import { type LocalDiscovery, readLocalGateway } from "../gateway/local";
@@ -89,7 +88,7 @@ export function localHandlers(deps: LocalDependencies): Pick<Handlers, LocalChan
         // No CLI, or one of another version than the app: say what to do instead of running it.
         return { cli: null, problem: String(problem), install } satisfies SetupCheck;
       }
-      // The CLI's own JSON, passed on as the Tauri app did.
+      // The CLI's own JSON, passed on as is.
       return (await checkWith(found.cli, found.path, install, directory, harness)) as SetupCheck;
     },
 

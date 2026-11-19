@@ -1,7 +1,7 @@
 # SuperTag desktop app
 
-SuperTag's desktop app, built with Tauri 2: a Rust backend in `src-tauri/` and a React and
-TypeScript frontend in `src/`. It shows your conversations with Tags in a window of their own,
+SuperTag's desktop app, built with Electron: a main process in `electron/` and a React and
+TypeScript renderer in `src/`. It shows your conversations with Tags in a window of their own,
 on an Apple silicon Mac or on Linux. To install it, see
 [Install the desktop app](../../docs/operations/install.md#install-the-desktop-app).
 
@@ -20,23 +20,22 @@ version, it names the install command for its own release.
 From the repository root, after `pnpm install`:
 
 ```sh
-pnpm --filter @supertag/desktop tauri dev
+pnpm --filter @supertag/desktop dev               # Vite server and Electron, in one command
+pnpm --filter @supertag/desktop dev --preview     # the same, with the sample Tags
+pnpm --filter @supertag/desktop build             # renderer, main process and preload
+pnpm --filter @supertag/desktop electron          # the built app
 ```
 
-Check a change with `pnpm --filter @supertag/desktop build`, then run `cargo clippy` and the whole
-`cargo test` with `--manifest-path apps/desktop/src-tauri/Cargo.toml`. The unfiltered test run
-checks that every Tauri command is allowed. CI runs them in `.github/workflows/desktop.yml`.
+`dev` serves the renderer from `http://127.0.0.1:1420` and points Electron at it; closing the
+window stops the server. Check a change with `pnpm --filter @supertag/desktop build` and
+`pnpm vitest run apps/desktop`. CI runs them in `.github/workflows/desktop.yml`.
 
-### The Electron shell
-
-The app is moving from Tauri to Electron; until the move completes, both shells build from the
-same renderer. The Electron shell is in `electron/`: `main.ts` opens the window, serves the built
-renderer from `app://supertag/` with its Content Security Policy, and keeps the window on it;
-`preload.ts` exposes `window.supertag`, one method per entry of the channel table in
-`channels.ts`; `ipc.ts` refuses any call that isn't from the main window's own page. In a Tauri
-window, `src-tauri/bridge.ts` provides the same `window.supertag`. The main process connects to
-Gateways in `electron/gateway/` with `supertag-ai`'s Gateway client, so tokens and Auth Keys stay
-in it, and runs the local services and setup with the app's CLI in `electron/local/`.
+`electron/main.ts` opens the window, serves the built renderer from `app://supertag/` with its
+Content Security Policy, and keeps the window on it; `preload.ts` exposes `window.supertag`, one
+method per entry of the channel table in `channels.ts`; `ipc.ts` refuses any call that isn't from
+the main window's own page. The main process connects to Gateways in `electron/gateway/` with
+`supertag-ai`'s Gateway client, so tokens and Auth Keys stay in it, and runs the local services
+and setup with the app's CLI in `electron/local/`.
 
 The Gateway backend's integration tests run against Control Planes and Gateways started by a
 built CLI, each with throwaway directories and ports:
@@ -50,19 +49,9 @@ Run them under Electron's own Node.js as well, which differs from the repository
 `ELECTRON_RUN_AS_NODE=1 apps/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron node_modules/vitest/vitest.mjs run apps/desktop/electron`
 (on Linux, `apps/desktop/node_modules/electron/dist/electron`).
 
-```sh
-pnpm --filter @supertag/desktop build      # renderer, main process and preload
-pnpm --filter @supertag/desktop electron   # the built app
-pnpm --filter @supertag/desktop dev        # in one terminal: the Vite server
-pnpm --filter @supertag/desktop electron:dev   # in another: Electron against it
-```
+## Package the app
 
-`electron:dev` loads `SUPERTAG_DESKTOP_DEV_URL`, by default `http://127.0.0.1:1420`; set it to
-`http://127.0.0.1:1420/?preview` for the sample Tags.
-
-### Package the Electron app
-
-Releases ship the Electron app (`.github/workflows/release.yml`). electron-builder
+Releases ship the app (`.github/workflows/release.yml`). electron-builder
 (`electron-builder.config.ts`) bundles only `dist/`, `dist-electron/` and `package.json`, and
 flips the fuses in `electron/fuses.ts` after packing:
 

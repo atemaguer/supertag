@@ -25,8 +25,7 @@ VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?")
 SKIPPED_DIRECTORIES = {".git", "node_modules", "target", "dist", ".venv", ".turbo", ".pnpm-store"}
 TOML_VERSION = re.compile(r'^(version = ")([^"]*)(")$', re.M)
 JSON_VERSION = re.compile(r'^(  "version": ")([^"]*)(",?)$', re.M)
-# The desktop app depends on the Rust workspace crates by path, so its lockfile records them too.
-CARGO_LOCKS = ["core/Cargo.lock", "apps/desktop/src-tauri/Cargo.lock"]
+CARGO_LOCKS = ["core/Cargo.lock"]
 WORKSPACE_CRATE = re.compile(r'^name = "(supertag-[a-z-]+)"\nversion = "([^"]*)"\n(?!source)', re.M)
 
 
@@ -53,9 +52,7 @@ def tracked_files(repo, name):
 def manifests(repo):
     """(relative path, pattern) for each manifest that names the version on one line."""
     found = [(path.relative_to(repo).as_posix(), JSON_VERSION) for path in tracked_files(repo, "package.json")]
-    found += [("sdks/python/pyproject.toml", TOML_VERSION),
-              ("apps/desktop/src-tauri/Cargo.toml", TOML_VERSION),
-              ("apps/desktop/src-tauri/tauri.conf.json", JSON_VERSION)]
+    found += [("sdks/python/pyproject.toml", TOML_VERSION)]
     return [(name, pattern) for name, pattern in found if (repo / name).exists()]
 
 

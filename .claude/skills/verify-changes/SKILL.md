@@ -32,9 +32,8 @@ After `supertag-ai` changes, run `pnpm --filter supertag-ai typecheck` and, with
 After Python SDK changes, install it with `python -m pip install "./sdks/python[dev]"` in a virtual
 environment, then run `ruff check sdks/python` and `pytest sdks/python/tests`.
 After terminal UI changes, run `go vet ./...` and `go test ./...` in `apps/tui`. After desktop
-changes, run `pnpm --filter @supertag/desktop build`, then `cargo clippy` and the whole
-`cargo test` (unfiltered: it checks that every Tauri command is allowed) with
-`--manifest-path apps/desktop/src-tauri/Cargo.toml`. CI runs them in `.github/workflows/desktop.yml`.
+changes, run `pnpm --filter @supertag/desktop build` and `pnpm vitest run apps/desktop`. CI runs
+them, and the integration suites against a built CLI, in `.github/workflows/desktop.yml`.
 
 After changes under `proto/`, decide whether the protocol version changes and update
 `proto/protocol.lock` (see "Changing `proto/`" in `AGENTS.md`); `cargo test -p supertag-protocol

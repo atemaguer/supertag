@@ -21,7 +21,7 @@ The runtime is the Rust workspace in `core/`, one `supertag` binary. The **Contr
 the organization, accepts and schedules work, recovers interrupted work, and preserves audit
 history. It serves one gRPC API (`supertag.runtime.v2`), over native gRPC or a `wss://` WebSocket
 tunnel. The **Gateway** is the endpoint clients connect to (the CLI, the Go terminal UI in
-`apps/tui`, the Tauri desktop app in `apps/desktop`, and SDK bindings): it forwards their calls to
+`apps/tui`, the Electron desktop app in `apps/desktop`, and SDK bindings): it forwards their calls to
 the Control Plane, and carries collaboration surface traffic as a client of the Control Plane. A
 **Worker Host** is a machine or sandbox that provides execution capacity. Its **Worklet**
 (`supertag worker-host`) connects it to the Control Plane, claims Tasks, holds their leases, and
