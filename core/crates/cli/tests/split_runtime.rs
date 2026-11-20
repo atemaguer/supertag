@@ -3479,7 +3479,7 @@ async fn native_codex_takes_a_folded_slack_message_into_its_running_turn(
     assert_eq!(follower.1, TaskState::Succeeded as i64, "{listed:?}");
     assert_eq!(follower.2, None, "the folded message launched its own run");
     let (state, follower_id): (i64, String) = sqlx::query_as(
-        "SELECT state,follower_task_id FROM supertag_v2_live_inputs WHERE task_id=$1",
+        "SELECT offer_state,admitted_task_id FROM supertag_v2_session_inputs WHERE offer_task_id=$1",
     )
     .bind(&running)
     .fetch_one(&mut db)

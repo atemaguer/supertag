@@ -214,7 +214,7 @@ pub(crate) async fn admit_connector_task_in(
     if verified.scope.is_chat() {
         let principal = format!("connector:{}", verified.connector_account_id);
         let operation = format!("surface/{}", task.task_id);
-        crate::inputs::fold_in(tx, &principal, &operation, &task, order, now_ms).await?;
+        crate::inputs::fold_in(tx, &principal, &operation, &task, now_ms).await?;
     }
     Ok(Some(task))
 }

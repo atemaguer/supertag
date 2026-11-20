@@ -4,11 +4,11 @@ use supertag_protocol::v2::{
     InspectAttemptRequest, LiveInput, LiveInputDecision, LiveInputReceipt, LiveInputState,
     QueueInputRequest, ResolveInputRequest, SettleInputRequest, TakeInputResponse, Task, TaskState,
 };
-use uuid::Uuid;
 
 use crate::{
     Store, StoreError,
     objectives::{objective_admission_in, objective_link_task_in},
+    session_inputs::{self, InputKind, NewInput},
     store::{
         HostAuthority, Result, insert_task, invalid, lease_is_live, name, owned, task_in, text,
     },
@@ -29,10 +29,13 @@ impl Store {
         name("operation ID", &request.operation_id)?;
         required_text("live input", &request.text)?;
         let (mut tx, order) = self.write().await?;
-        let existing: Option<String> = sqlx::query_scalar("SELECT input_id FROM supertag_v2_live_inputs WHERE operator_principal=$1 AND operation_id=$2")
-            .bind(principal).bind(&request.operation_id).fetch_optional(&mut *tx).await?;
-        if let Some(id) = existing {
-            let (input, _) = input_in(&mut tx, &id).await?;
+        let existing = session_inputs::by_key_in(
+            &mut tx,
+            &session_inputs::key(&[LIVE, principal, &request.operation_id]),
+        )
+        .await?;
+        if let Some(existing) = existing {
+            let (input, _) = input_in(&mut tx, &existing.input_id).await?;
             if input.task_id != request.task_id || input.text != request.text {
                 return Err(StoreError::Conflict(
                     "operation ID was used with different live input".into(),
@@ -92,7 +95,7 @@ impl Store {
             &request.task_id,
             &attempt_id,
             &follower,
-            order,
+            now,
         )
         .await?
         .ok_or_else(|| {
@@ -133,9 +136,9 @@ impl Store {
         let tag_id: String = task.try_get("tag_id")?;
         let session_id: String = task.try_get("session_id")?;
         let id: Option<String> = sqlx::query_scalar(
-            "SELECT i.input_id FROM supertag_v2_live_inputs i WHERE i.task_id=$1 AND i.attempt_id=$2 AND i.state=$3
-             AND i.follower_task_id=(SELECT task_id FROM supertag_v2_tasks WHERE tag_id=$4 AND session_id=$5 AND state=$6 ORDER BY accepted_order LIMIT 1)
-             AND NOT EXISTS (SELECT 1 FROM supertag_v2_live_inputs prior JOIN supertag_v2_tasks f ON f.task_id=prior.follower_task_id WHERE f.tag_id=$4 AND f.session_id=$5 AND prior.state IN ($7,$8))",
+            "SELECT i.input_id FROM supertag_v2_session_inputs i WHERE i.offer_task_id=$1 AND i.offer_attempt_id=$2 AND i.offer_state=$3
+             AND i.admitted_task_id=(SELECT task_id FROM supertag_v2_tasks WHERE tag_id=$4 AND session_id=$5 AND state=$6 ORDER BY accepted_order LIMIT 1)
+             AND NOT EXISTS (SELECT 1 FROM supertag_v2_session_inputs prior WHERE prior.tag_id=$4 AND prior.session_id=$5 AND prior.offer_state IN ($7,$8))",
         )
         .bind(&attempt.task_id).bind(&attempt.attempt_id).bind(LiveInputState::Pending as i64)
         .bind(tag_id).bind(session_id).bind(TaskState::Queued as i64)
@@ -155,7 +158,7 @@ impl Store {
         }
         let lease_end: i64 = task.try_get("lease_expires_at_ms")?;
         let valid_for_ms = lease_end.saturating_sub(now).min(ACKNOWLEDGEMENT_MS) as u64;
-        sqlx::query("UPDATE supertag_v2_live_inputs SET state=$1,acknowledgement_deadline_ms=$2 WHERE input_id=$3")
+        sqlx::query("UPDATE supertag_v2_session_inputs SET offer_state=$1,acknowledgement_deadline_ms=$2 WHERE input_id=$3")
             .bind(LiveInputState::Dispatching as i64).bind(now.saturating_add(ACKNOWLEDGEMENT_MS))
             .bind(&id).execute(&mut *tx).await?;
         input.state = LiveInputState::Dispatching.into();
@@ -186,7 +189,8 @@ impl Store {
         };
         let (mut tx, _) = self.write().await?;
         owned_attempt(&mut tx, host, attempt).await?;
-        sweep_in(&mut tx, self.execution_now_ms()).await?;
+        let now = self.execution_now_ms();
+        sweep_in(&mut tx, now).await?;
         let (mut input, _) = input_in(&mut tx, &request.input_id).await?;
         if input.task_id != attempt.task_id || input.attempt_id != attempt.attempt_id {
             return Err(StoreError::PermissionDenied);
@@ -218,8 +222,11 @@ impl Store {
                 )
                 .await?;
                 crate::reply_progress::follow_up_in(&mut tx, &input.task_id).await?;
+                session_inputs::bind_in(&mut tx, &input.input_id, &input.task_id, false, now)
+                    .await?;
             }
             LiveInputState::Withdrawn if current == LiveInputState::Accepted => {
+                session_inputs::unbind_in(&mut tx, &input.input_id).await?;
                 update_follower(
                     &mut tx,
                     &input.follower_task_id,
@@ -254,7 +261,7 @@ impl Store {
             }
         };
         let (mut tx, _) = self.write().await?;
-        let replay = sqlx::query("SELECT input_id,decision,evidence FROM supertag_v2_live_input_resolutions WHERE operator_principal=$1 AND operation_id=$2")
+        let replay = sqlx::query("SELECT input_id,resolution_decision AS decision,resolution_evidence AS evidence FROM supertag_v2_session_inputs WHERE resolution_principal=$1 AND resolution_operation_id=$2")
             .bind(principal).bind(&request.operation_id).fetch_optional(&mut *tx).await?;
         if let Some(replay) = replay {
             if replay.try_get::<String, _>("input_id")? != request.input_id
@@ -292,7 +299,7 @@ impl Store {
             )
             .await?;
         }
-        sqlx::query("INSERT INTO supertag_v2_live_input_resolutions (input_id,operator_principal,operation_id,decision,evidence,resolved_at_ms) VALUES ($1,$2,$3,$4,$5,$6)")
+        sqlx::query("UPDATE supertag_v2_session_inputs SET resolution_principal=$2,resolution_operation_id=$3,resolution_decision=$4,resolution_evidence=$5,resolved_at_ms=$6 WHERE input_id=$1")
             .bind(&input.input_id).bind(principal).bind(&request.operation_id)
             .bind(i64::from(request.decision)).bind(&request.evidence).bind(now)
             .execute(&mut *tx).await?;
@@ -316,15 +323,15 @@ impl Store {
 pub(crate) async fn sweep_in(tx: &mut Transaction<'_, Any>, now: i64) -> Result<u64> {
     // The target can finish while a valid acknowledgement is in flight.
     // Preserve the dispatch hold until that receipt arrives or its window ends.
-    let unknown = sqlx::query("UPDATE supertag_v2_live_inputs SET state=$1 WHERE state=$2 AND acknowledgement_deadline_ms <= $3")
+    let unknown = sqlx::query("UPDATE supertag_v2_session_inputs SET offer_state=$1 WHERE offer_state=$2 AND acknowledgement_deadline_ms <= $3")
         .bind(LiveInputState::Unknown as i64).bind(LiveInputState::Dispatching as i64).bind(now)
         .execute(&mut **tx).await?.rows_affected();
     // A pending input was never taken. It can fall back to its ordinary queued
     // Task when the original attempt can no longer receive it.
     let rejected = sqlx::query(
-        "UPDATE supertag_v2_live_inputs AS i SET state=$1 WHERE i.state=$2
-         AND (NOT EXISTS (SELECT 1 FROM supertag_v2_tasks t WHERE t.task_id=i.task_id AND t.attempt_id=i.attempt_id AND t.state=$3 AND t.lease_expires_at_ms > $4)
-         OR NOT EXISTS (SELECT 1 FROM supertag_v2_tasks f WHERE f.task_id=i.follower_task_id AND f.state=$5))",
+        "UPDATE supertag_v2_session_inputs SET offer_state=$1 WHERE offer_state=$2
+         AND (NOT EXISTS (SELECT 1 FROM supertag_v2_tasks t WHERE t.task_id=supertag_v2_session_inputs.offer_task_id AND t.attempt_id=supertag_v2_session_inputs.offer_attempt_id AND t.state=$3 AND t.lease_expires_at_ms > $4)
+         OR NOT EXISTS (SELECT 1 FROM supertag_v2_tasks f WHERE f.task_id=supertag_v2_session_inputs.admitted_task_id AND f.state=$5))",
     )
     .bind(LiveInputState::Rejected as i64).bind(LiveInputState::Pending as i64)
     .bind(TaskState::Running as i64).bind(now).bind(TaskState::Queued as i64)
@@ -338,15 +345,22 @@ pub(crate) async fn can_claim_in(
     order: i64,
 ) -> Result<bool> {
     let blocked: Option<String> = sqlx::query_scalar(
-        "SELECT i.input_id FROM supertag_v2_live_inputs i JOIN supertag_v2_tasks f ON f.task_id=i.follower_task_id
-         WHERE f.tag_id=$1 AND f.session_id=$2 AND f.accepted_order <= $3 AND i.state IN ($4,$5) LIMIT 1",
+        "SELECT input_id FROM supertag_v2_session_inputs
+         WHERE tag_id=$1 AND session_id=$2 AND position <= $3 AND offer_state IN ($4,$5) LIMIT 1",
     )
-    .bind(&task.tag_id).bind(&task.session_id).bind(order)
-    .bind(LiveInputState::Dispatching as i64).bind(LiveInputState::Unknown as i64)
-    .fetch_optional(&mut **tx).await?;
+    .bind(&task.tag_id)
+    .bind(&task.session_id)
+    .bind(order)
+    .bind(LiveInputState::Dispatching as i64)
+    .bind(LiveInputState::Unknown as i64)
+    .fetch_optional(&mut **tx)
+    .await?;
     Ok(blocked.is_none())
 }
 
+/// Offers a person's message, the input `follower` was admitted for, to the running Attempt
+/// `attempt_id` of `task_id`. A message with no input yet records one for `principal`'s
+/// operation. `None` when the running Task's policy differs, so the message waits for its own turn.
 pub(crate) async fn record_live_input_in(
     tx: &mut Transaction<'_, Any>,
     principal: &str,
@@ -354,25 +368,42 @@ pub(crate) async fn record_live_input_in(
     task_id: &str,
     attempt_id: &str,
     follower: &Task,
-    order: i64,
+    now: i64,
 ) -> Result<Option<LiveInput>> {
     if !compatible_policy_in(tx, task_id, &follower.task_id).await? {
         return Ok(None);
     }
-    let input = LiveInput {
-        input_id: Uuid::new_v4().to_string(),
-        task_id: task_id.to_owned(),
-        attempt_id: attempt_id.to_owned(),
-        follower_task_id: follower.task_id.clone(),
-        text: follower.prompt.clone(),
-        state: LiveInputState::Pending.into(),
-        order: order as u64,
+    let input_id = match session_inputs::own_in(tx, &follower.task_id).await? {
+        Some(own) if own.kind != InputKind::Person || own.offer_state.is_some() => {
+            return Ok(None);
+        }
+        Some(own) => {
+            sqlx::query("UPDATE supertag_v2_session_inputs SET offer_task_id=$1,offer_attempt_id=$2,offer_state=$3 WHERE input_id=$4")
+                .bind(task_id).bind(attempt_id).bind(LiveInputState::Pending as i64).bind(&own.input_id)
+                .execute(&mut **tx).await?;
+            own.input_id
+        }
+        None => {
+            let (_, audience) = session_inputs::requester_of_in(tx, &follower.task_id).await?;
+            let own = session_inputs::admit_in(
+                tx,
+                follower,
+                NewInput {
+                    kind: InputKind::Person,
+                    source_key: session_inputs::key(&[LIVE, principal, operation]),
+                    requester: principal,
+                    audience: &audience,
+                },
+                now,
+            )
+            .await?;
+            sqlx::query("UPDATE supertag_v2_session_inputs SET offer_task_id=$1,offer_attempt_id=$2,offer_state=$3 WHERE input_id=$4")
+                .bind(task_id).bind(attempt_id).bind(LiveInputState::Pending as i64).bind(&own.input_id)
+                .execute(&mut **tx).await?;
+            own.input_id
+        }
     };
-    sqlx::query("INSERT INTO supertag_v2_live_inputs (input_id,operator_principal,operation_id,task_id,attempt_id,follower_task_id,state) VALUES ($1,$2,$3,$4,$5,$6,$7)")
-        .bind(&input.input_id).bind(principal).bind(operation).bind(&input.task_id)
-        .bind(&input.attempt_id).bind(&input.follower_task_id).bind(i64::from(input.state))
-        .execute(&mut **tx).await?;
-    Ok(Some(input))
+    Ok(Some(input_in(tx, &input_id).await?.0))
 }
 
 /// Delivers a person's just-admitted message into the Session's running Attempt as live input,
@@ -383,7 +414,6 @@ pub(crate) async fn fold_in(
     principal: &str,
     operation: &str,
     follower: &Task,
-    order: i64,
     now: i64,
 ) -> Result<Option<LiveInput>> {
     if follower.prompt.len() > MAX_INPUT_BYTES {
@@ -397,7 +427,7 @@ pub(crate) async fn fold_in(
     };
     let source: String = active.try_get("task_id")?;
     let attempt: String = active.try_get("attempt_id")?;
-    record_live_input_in(tx, principal, operation, &source, &attempt, follower, order).await
+    record_live_input_in(tx, principal, operation, &source, &attempt, follower, now).await
 }
 
 /// A batch answers at most this many messages: the claimed Task's and the ones joined to it.
@@ -405,16 +435,20 @@ pub(crate) const MAX_BATCH_MESSAGES: usize = 10;
 /// Joined messages carry at most this much text in total.
 pub(crate) const MAX_JOINED_BYTES: usize = 16 * 1024;
 const JOIN_PRINCIPAL: &str = "control-plane:join";
+/// The first field of a live input's or joined message's source key.
+const LIVE: &str = "live";
 
 /// The person's messages a claimed Task answers together with its own. The first claim binds
 /// them: the later Queued messages of the Session, up to the first that is not a person's message,
-/// has another audience or policy, or would pass a cap. Each joined message is recorded as live
-/// input the Task accepted, so it settles now and gets no reply of its own. Every later claim of
-/// the Task (a lost-start replay, an expired reservation, a retry) presents the same messages.
+/// acts for another requester or replies to another audience, has another policy, or would pass a
+/// cap. Each joined message is bound to the Task as live input it accepted, so it settles now and
+/// gets no reply of its own. Every later claim of the Task (a lost-start replay, an expired
+/// reservation, a redelivery) presents the same messages, and the ones an earlier Attempt took in.
 pub(crate) async fn join_at_claim_in(
     tx: &mut Transaction<'_, Any>,
     task: &Task,
     attempt_id: &str,
+    now: i64,
 ) -> Result<Vec<supertag_protocol::v2::JoinedMessage>> {
     let claimed_before: Option<String> =
         sqlx::query_scalar("SELECT task_id FROM supertag_v2_claims WHERE task_id=$1 LIMIT 1")
@@ -422,12 +456,12 @@ pub(crate) async fn join_at_claim_in(
             .fetch_optional(&mut **tx)
             .await?;
     if claimed_before.is_some() {
-        return joined_in(tx, &task.task_id).await;
+        return session_inputs::replayed_in(tx, &task.task_id, attempt_id).await;
     }
     if !person_message_in(tx, &task.task_id).await? {
         return Ok(vec![]);
     }
-    let owner = audience_owner_in(tx, &task.task_id).await?;
+    let head = session_inputs::requester_of_in(tx, &task.task_id).await?;
     let order: i64 =
         sqlx::query_scalar("SELECT accepted_order FROM supertag_v2_tasks WHERE task_id=$1")
             .bind(&task.task_id)
@@ -444,39 +478,52 @@ pub(crate) async fn join_at_claim_in(
         if joined.len() + 1 >= MAX_BATCH_MESSAGES
             || bytes + text.len() > MAX_JOINED_BYTES
             || !person_message_in(tx, &id).await?
-            || audience_owner_in(tx, &id).await? != owner
+            || session_inputs::requester_of_in(tx, &id).await? != head
             || !compatible_policy_in(tx, &task.task_id, &id).await?
         {
             break;
         }
-        let prior = sqlx::query(
-            "SELECT input_id,state FROM supertag_v2_live_inputs WHERE follower_task_id=$1",
-        )
-        .bind(&id)
-        .fetch_optional(&mut **tx)
-        .await?;
-        match prior {
+        let input_id = match session_inputs::own_in(tx, &id).await? {
+            Some(own) if own.task_id.is_some() || own.kind != InputKind::Person => break,
             // An input its harness never took falls back to its queued Task, which joins here.
-            Some(prior)
-                if [
-                    LiveInputState::Rejected as i64,
-                    LiveInputState::Retried as i64,
-                    LiveInputState::Withdrawn as i64,
-                ]
-                .contains(&prior.try_get::<i64, _>("state")?) =>
+            Some(own)
+                if own.offer_state.is_none_or(|state| {
+                    [
+                        LiveInputState::Rejected as i64,
+                        LiveInputState::Retried as i64,
+                        LiveInputState::Withdrawn as i64,
+                    ]
+                    .contains(&state)
+                }) =>
             {
-                sqlx::query("UPDATE supertag_v2_live_inputs SET task_id=$1,attempt_id=$2,state=$3,acknowledgement_deadline_ms=NULL,joined_at_claim=1 WHERE input_id=$4")
-                    .bind(&task.task_id).bind(attempt_id).bind(LiveInputState::Accepted as i64)
-                    .bind(prior.try_get::<String, _>("input_id")?).execute(&mut **tx).await?;
+                own.input_id
             }
             Some(_) => break,
             None => {
-                sqlx::query("INSERT INTO supertag_v2_live_inputs (input_id,operator_principal,operation_id,task_id,attempt_id,follower_task_id,state,joined_at_claim) VALUES ($1,$2,$3,$4,$5,$6,$7,1)")
-                    .bind(Uuid::new_v4().to_string()).bind(JOIN_PRINCIPAL).bind(format!("join/{id}"))
-                    .bind(&task.task_id).bind(attempt_id).bind(&id).bind(LiveInputState::Accepted as i64)
-                    .execute(&mut **tx).await?;
+                let follower = task_in(tx, &id).await?;
+                session_inputs::admit_in(
+                    tx,
+                    &follower,
+                    NewInput {
+                        kind: InputKind::Person,
+                        source_key: session_inputs::key(&[
+                            LIVE,
+                            JOIN_PRINCIPAL,
+                            &format!("join/{id}"),
+                        ]),
+                        requester: &head.0,
+                        audience: &head.1,
+                    },
+                    now,
+                )
+                .await?
+                .input_id
             }
-        }
+        };
+        sqlx::query("UPDATE supertag_v2_session_inputs SET offer_task_id=$1,offer_attempt_id=$2,offer_state=$3,acknowledgement_deadline_ms=NULL WHERE input_id=$4")
+            .bind(&task.task_id).bind(attempt_id).bind(LiveInputState::Accepted as i64)
+            .bind(&input_id).execute(&mut **tx).await?;
+        session_inputs::bind_in(tx, &input_id, &task.task_id, true, now).await?;
         let result = format!("Input accepted by Task {}.", task.task_id);
         update_follower(
             tx,
@@ -498,24 +545,14 @@ pub(crate) async fn join_at_claim_in(
     Ok(joined)
 }
 
-/// The messages joined into `task_id` when it was first claimed, oldest first.
+/// The messages `task_id`'s Attempt `attempt_id` answers with its own; see
+/// [`session_inputs::replayed_in`].
 pub(crate) async fn joined_in(
     tx: &mut Transaction<'_, Any>,
     task_id: &str,
+    attempt_id: &str,
 ) -> Result<Vec<supertag_protocol::v2::JoinedMessage>> {
-    let rows = sqlx::query("SELECT f.task_id,f.prompt,f.accepted_at_ms FROM supertag_v2_live_inputs i JOIN supertag_v2_tasks f ON f.task_id=i.follower_task_id WHERE i.task_id=$1 AND i.joined_at_claim=1 ORDER BY f.accepted_order")
-        .bind(task_id).fetch_all(&mut **tx).await?;
-    rows.iter()
-        .map(|row| {
-            Ok(supertag_protocol::v2::JoinedMessage {
-                task_id: row.try_get("task_id")?,
-                text: row.try_get("prompt")?,
-                sent_at_ms: row
-                    .try_get::<Option<i64>, _>("accepted_at_ms")?
-                    .unwrap_or_default(),
-            })
-        })
-        .collect()
+    session_inputs::replayed_in(tx, task_id, attempt_id).await
 }
 
 /// A message a person sent: in a conversation, in a Slack, Teams or Lark thread, or as live input.
@@ -528,22 +565,12 @@ async fn person_message_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> Resu
             OR EXISTS (SELECT 1 FROM supertag_v2_slack_messages WHERE task_id=$1)
             OR EXISTS (SELECT 1 FROM supertag_v2_lark_messages WHERE task_id=$1)
             OR EXISTS (SELECT 1 FROM supertag_v2_microsoft_teams_activities WHERE task_id=$1)
-            OR EXISTS (SELECT 1 FROM supertag_v2_live_inputs WHERE follower_task_id=$1))",
+            OR EXISTS (SELECT 1 FROM supertag_v2_session_inputs WHERE admitted_task_id=$1 AND kind=2 AND conversation_id IS NULL))",
     )
     .bind(task_id)
     .fetch_optional(&mut **tx)
     .await?;
     Ok(found.is_some())
-}
-
-async fn audience_owner_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> Result<String> {
-    Ok(
-        sqlx::query_scalar("SELECT owner FROM supertag_v2_task_audience WHERE task_id=$1")
-            .bind(task_id)
-            .fetch_optional(&mut **tx)
-            .await?
-            .unwrap_or_default(),
-    )
 }
 
 async fn compatible_policy_in(
@@ -589,7 +616,7 @@ pub(crate) async fn inputs_for_followers_in(
     let mut inputs = std::collections::HashMap::new();
     for chunk in follower_task_ids.chunks(crate::store::ID_BATCH) {
         let sql = format!(
-            "{INPUT_SELECT} WHERE i.follower_task_id IN ({})",
+            "{INPUT_SELECT} WHERE i.offer_state IS NOT NULL AND i.admitted_task_id IN ({})",
             crate::store::placeholders(1, chunk.len())
         );
         let mut query = sqlx::query(&sql);
@@ -604,16 +631,19 @@ pub(crate) async fn inputs_for_followers_in(
     Ok(inputs)
 }
 
-const INPUT_SELECT: &str =
-    "SELECT i.*,f.prompt AS input_text,f.accepted_order AS input_order,f.state AS follower_state
-         FROM supertag_v2_live_inputs i JOIN supertag_v2_tasks f ON f.task_id=i.follower_task_id";
+/// A live input: a person's message offered to a running Attempt, read as `LiveInput`.
+const INPUT_SELECT: &str = "SELECT i.input_id,i.offer_task_id,i.offer_attempt_id,i.admitted_task_id,i.offer_state,
+         f.prompt AS input_text,f.accepted_order AS input_order,f.state AS follower_state
+         FROM supertag_v2_session_inputs i JOIN supertag_v2_tasks f ON f.task_id=i.admitted_task_id";
 
 async fn input_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<(LiveInput, i64)> {
-    let row = sqlx::query(&format!("{INPUT_SELECT} WHERE i.input_id=$1"))
-        .bind(id)
-        .fetch_optional(&mut **tx)
-        .await?
-        .ok_or_else(|| StoreError::NotFound("live input was not found".into()))?;
+    let row = sqlx::query(&format!(
+        "{INPUT_SELECT} WHERE i.input_id=$1 AND i.offer_state IS NOT NULL"
+    ))
+    .bind(id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| StoreError::NotFound("live input was not found".into()))?;
     input_row(&row)
 }
 
@@ -621,11 +651,11 @@ fn input_row(row: &AnyRow) -> Result<(LiveInput, i64)> {
     Ok((
         LiveInput {
             input_id: row.try_get("input_id")?,
-            task_id: row.try_get("task_id")?,
-            attempt_id: row.try_get("attempt_id")?,
-            follower_task_id: row.try_get("follower_task_id")?,
+            task_id: row.try_get("offer_task_id")?,
+            attempt_id: row.try_get("offer_attempt_id")?,
+            follower_task_id: row.try_get("admitted_task_id")?,
             text: row.try_get("input_text")?,
-            state: row.try_get::<i64, _>("state")? as i32,
+            state: row.try_get::<i64, _>("offer_state")? as i32,
             order: row.try_get::<i64, _>("input_order")? as u64,
         },
         row.try_get("follower_state")?,
@@ -665,7 +695,7 @@ async fn set_state(
     input: &mut LiveInput,
     state: LiveInputState,
 ) -> Result<()> {
-    sqlx::query("UPDATE supertag_v2_live_inputs SET state=$1 WHERE input_id=$2")
+    sqlx::query("UPDATE supertag_v2_session_inputs SET offer_state=$1 WHERE input_id=$2")
         .bind(state as i64)
         .bind(&input.input_id)
         .execute(&mut **tx)

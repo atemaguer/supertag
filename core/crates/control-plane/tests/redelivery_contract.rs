@@ -15,8 +15,9 @@ use supertag_control_plane::{AttemptAccess, HostAuthority, Store};
 use supertag_protocol::v2::{
     AppendEventRequest, Assignment, AttemptDecision, BeginEffectRequest, HarnessBeginEffectRequest,
     HarnessExecutionProfile, HarnessKind, InboxItem, InboxItemKind, InspectAttemptRequest,
-    ListInboxItemsRequest, ReclaimAttemptRequest, StartTaskRequest, SubmitTaskRequest,
-    TaskEventKind, TaskState,
+    ListInboxItemsRequest, LiveInputReceipt, LiveInputState, QueueInputRequest,
+    ReclaimAttemptRequest, SettleInputRequest, StartTaskRequest, SubmitTaskRequest, TaskEventKind,
+    TaskState,
 };
 use uuid::Uuid;
 
@@ -395,6 +396,188 @@ async fn contract(url: &str) {
     // The Inbox shows them for a week.
     f.at(5_000 + 30_000 + 7 * 24 * 60 * 60 * 1000);
     assert!(f.interrupted_items().await.is_empty());
+
+    // Live input (stage 2): a message on its way to the lost Attempt, or one it may have read, is
+    // covered by the redelivery of the same Task and given to its next Attempt once; one it was
+    // never given falls back to its own turn. A Task that is not run again leaves its uncertain
+    // input for the operator.
+    for leftover in [&later, &sandboxed.task_id] {
+        f.store.cancel_task(leftover).await.unwrap();
+    }
+    let t0 = 5_000 + 30_000 + 7 * 24 * 60 * 60 * 1000;
+    let queue = |task: &InspectAttemptRequest, operation: &str| QueueInputRequest {
+        task_id: task.task_id.clone(),
+        operation_id: operation.into(),
+        text: format!("Also {operation}"),
+    };
+    let live = f.running("worker", "live", HarnessKind::Unspecified).await;
+    let access = AttemptAccess::new(&f.host, &live);
+    let in_flight = f
+        .store
+        .queue_input(OPERATOR, &queue(&live, "in-flight"))
+        .await
+        .unwrap();
+    let took = f.store.take_input(&access).await.unwrap().unwrap();
+    assert_eq!(took.input_id, in_flight.input_id);
+    let never_given = f
+        .store
+        .queue_input(OPERATOR, &queue(&live, "never-given"))
+        .await
+        .unwrap();
+    assert_eq!(f.reclaim(&live).await, AttemptDecision::Retry);
+    let settled = f.store.get_input(&in_flight.input_id).await.unwrap();
+    assert_eq!(settled.state(), LiveInputState::Accepted);
+    assert_eq!(settled.task_id, live.task_id);
+    assert_eq!(
+        f.store
+            .get_task(&in_flight.follower_task_id)
+            .await
+            .unwrap()
+            .state(),
+        TaskState::Succeeded,
+        "the redelivered Task answers it"
+    );
+    assert_eq!(
+        f.store
+            .get_input(&never_given.input_id)
+            .await
+            .unwrap()
+            .state(),
+        LiveInputState::Rejected
+    );
+    assert_eq!(
+        f.store
+            .get_task(&never_given.follower_task_id)
+            .await
+            .unwrap()
+            .state(),
+        TaskState::Queued,
+        "a message the lost Attempt never had keeps its own turn"
+    );
+    f.at(t0 + 5_000);
+    let next_attempt = f
+        .claim("live-redelivered", HarnessKind::Unspecified)
+        .await
+        .unwrap();
+    assert_eq!(next_attempt.task.as_ref().unwrap().task_id, live.task_id);
+    let joined: Vec<_> = next_attempt
+        .joined
+        .iter()
+        .map(|message| (message.task_id.clone(), message.text.clone()))
+        .collect();
+    assert_eq!(
+        joined,
+        [(in_flight.follower_task_id.clone(), "Also in-flight".into())]
+    );
+    // A replayed claim presents the same message, once.
+    assert_eq!(
+        f.claim("live-redelivered", HarnessKind::Unspecified)
+            .await
+            .unwrap()
+            .joined,
+        next_attempt.joined
+    );
+    let next_attempt = f.start(&next_attempt).await;
+
+    // An Unknown receipt: the lost Attempt may have read it.
+    let uncertain = f
+        .running("worker", "uncertain", HarnessKind::Unspecified)
+        .await;
+    let access = AttemptAccess::new(&f.host, &uncertain);
+    let unknown = f
+        .store
+        .queue_input(OPERATOR, &queue(&uncertain, "maybe-read"))
+        .await
+        .unwrap();
+    f.store.take_input(&access).await.unwrap().unwrap();
+    f.store
+        .settle_input(
+            &access,
+            &SettleInputRequest {
+                input_id: unknown.input_id.clone(),
+                receipt: LiveInputReceipt::Unknown.into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(f.reclaim(&uncertain).await, AttemptDecision::Retry);
+    assert_eq!(
+        f.store.get_input(&unknown.input_id).await.unwrap().state(),
+        LiveInputState::Accepted,
+        "no operator decision is needed"
+    );
+    f.at(t0 + 10_000);
+    let redelivered = f
+        .claim("uncertain-redelivered", HarnessKind::Unspecified)
+        .await
+        .unwrap();
+    assert_eq!(
+        redelivered.task.as_ref().unwrap().task_id,
+        uncertain.task_id
+    );
+    assert_eq!(
+        redelivered
+            .joined
+            .iter()
+            .map(|message| message.task_id.as_str())
+            .collect::<Vec<_>>(),
+        [unknown.follower_task_id.as_str()]
+    );
+    let redelivered = f.start(&redelivered).await;
+
+    // Not run again: the uncertain input stays for the operator to resolve.
+    let kept = f.running("worker", "kept", HarnessKind::Unspecified).await;
+    let access = AttemptAccess::new(&f.host, &kept);
+    let doubtful = f
+        .store
+        .queue_input(OPERATOR, &queue(&kept, "kept"))
+        .await
+        .unwrap();
+    f.store.take_input(&access).await.unwrap().unwrap();
+    f.store
+        .settle_input(
+            &access,
+            &SettleInputRequest {
+                input_id: doubtful.input_id.clone(),
+                receipt: LiveInputReceipt::Unknown.into(),
+            },
+        )
+        .await
+        .unwrap();
+    f.store
+        .begin_effect(
+            &access,
+            &BeginEffectRequest {
+                effect: Some(HarnessBeginEffectRequest {
+                    idempotency_key: "ticket/2".into(),
+                    operation: "create_ticket".into(),
+                    arguments_json: "{}".into(),
+                }),
+            },
+        )
+        .await
+        .unwrap();
+    f.refused(
+        &kept,
+        "worker",
+        "an external write it started never reported its outcome",
+    )
+    .await;
+    assert_eq!(
+        f.store.get_input(&doubtful.input_id).await.unwrap().state(),
+        LiveInputState::Unknown
+    );
+    assert_eq!(
+        f.store
+            .get_task(&doubtful.follower_task_id)
+            .await
+            .unwrap()
+            .state(),
+        TaskState::Queued
+    );
+    for attempt in [&next_attempt, &redelivered] {
+        f.store.cancel_task(&attempt.task_id).await.unwrap();
+    }
     f.pool.close().await;
     f.store.close().await;
 }

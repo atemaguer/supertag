@@ -46,6 +46,7 @@ mod replies;
 pub mod reply_progress;
 mod review_artifacts;
 mod schedules;
+mod session_inputs;
 mod spend;
 mod start_rates;
 mod store;

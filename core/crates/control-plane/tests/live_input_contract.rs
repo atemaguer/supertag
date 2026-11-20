@@ -638,12 +638,17 @@ async fn policy_fence(url: &str, store: &Store, host: &HostAuthority) {
 
     // Simulate an old persisted Pending row created before the admission fence.
     let legacy = submit(store, "reviewer", "policy-fence", "legacy-queued-policy").await;
-    let input_id = Uuid::new_v4().to_string();
     let mut db = sqlx::AnyConnection::connect(url).await.unwrap();
-    sqlx::query("INSERT INTO supertag_v2_live_inputs (input_id,operator_principal,operation_id,task_id,attempt_id,follower_task_id,state) VALUES ($1,$2,$3,$4,$5,$6,$7)")
-        .bind(&input_id).bind(OPERATOR).bind("legacy-policy")
-        .bind(&active.task_id).bind(&attempt.attempt_id).bind(&legacy.task_id)
+    sqlx::query("UPDATE supertag_v2_session_inputs SET kind=2,offer_task_id=$2,offer_attempt_id=$3,offer_state=$4 WHERE admitted_task_id=$1")
+        .bind(&legacy.task_id).bind(&active.task_id).bind(&attempt.attempt_id)
         .bind(LiveInputState::Pending as i64).execute(&mut db).await.unwrap();
+    let input_id: String = sqlx::query_scalar(
+        "SELECT input_id FROM supertag_v2_session_inputs WHERE admitted_task_id=$1",
+    )
+    .bind(&legacy.task_id)
+    .fetch_one(&mut db)
+    .await
+    .unwrap();
     db.close().await.unwrap();
     assert!(
         store

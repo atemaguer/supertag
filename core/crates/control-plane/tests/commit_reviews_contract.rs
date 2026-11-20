@@ -754,7 +754,7 @@ async fn close_objective_with_pending_review(
         ..
     } = reviews;
     let second_id: String = sqlx::query_scalar(
-        "SELECT task_id FROM supertag_v2_mailbox_tasks WHERE recipient_tag_id='second'",
+        "SELECT DISTINCT admitted_task_id FROM supertag_v2_session_inputs WHERE tag_id='second' AND kind=4 AND admitted_task_id IS NOT NULL",
     )
     .fetch_one(pool)
     .await
@@ -823,7 +823,7 @@ async fn approve_no_op_verdict(
     no_op_review: &TagMessage,
 ) {
     let gated_id: String = sqlx::query_scalar(
-        "SELECT task_id FROM supertag_v2_mailbox_tasks WHERE recipient_tag_id='gated'",
+        "SELECT DISTINCT admitted_task_id FROM supertag_v2_session_inputs WHERE tag_id='gated' AND kind=4 AND admitted_task_id IS NOT NULL",
     )
     .fetch_one(pool)
     .await

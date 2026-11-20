@@ -21,8 +21,8 @@ impl Store {
              (SELECT COUNT(*) FROM supertag_v2_permission_sets) AS permission_sets, \
              (SELECT COUNT(*) FROM supertag_v2_context_sets) AS context_sets, \
              (SELECT COUNT(*) FROM (SELECT DISTINCT tag_id, session_id FROM supertag_v2_tasks) sessions) AS sessions, \
-             (SELECT COUNT(*) FROM supertag_v2_wakes WHERE task_id IS NULL) AS mailbox_pending, \
-             (SELECT MIN(created_at_ms) FROM supertag_v2_wakes WHERE task_id IS NULL) AS mailbox_oldest, \
+             (SELECT COUNT(*) FROM supertag_v2_session_inputs WHERE task_id IS NULL AND conversation_id IS NOT NULL) AS mailbox_pending, \
+             (SELECT MIN(created_at_ms) FROM supertag_v2_session_inputs WHERE task_id IS NULL AND conversation_id IS NOT NULL) AS mailbox_oldest, \
              (SELECT COUNT(*) FROM supertag_v2_replies WHERE state IN ($1,$2,$3)) AS reply_backlog, \
              (SELECT COUNT(*) FROM supertag_v2_replies WHERE state=$4) AS reply_failed",
         )
@@ -160,7 +160,7 @@ impl Store {
                  SELECT 1 FROM supertag_v2_tasks active WHERE active.tag_id=pending.tag_id \
                    AND active.session_id=pending.session_id \
                    AND (active.state IN ($8,$2,$1) OR active.cleanup_pending=1))) blocked) AS blocked, \
-             (SELECT COUNT(*) FROM supertag_v2_live_inputs WHERE state=$9) AS unknown_inputs",
+             (SELECT COUNT(*) FROM supertag_v2_session_inputs WHERE offer_state=$9) AS unknown_inputs",
         )
         .bind(TaskState::Uncertain as i64)
         .bind(TaskState::Running as i64)

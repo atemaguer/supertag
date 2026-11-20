@@ -110,7 +110,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 121;
+        const SCHEMA_VERSION: i64 = 122;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -356,6 +356,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0119_messaging_rules.sql"),
                 include_str!("../migrations/sqlite/0120_redelivery.sql"),
                 include_str!("../migrations/sqlite/0121_native_memory_seeds.sql"),
+                include_str!("../migrations/sqlite/0122_session_input_queue.sql"),
             ]
         } else {
             [
@@ -482,6 +483,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0119_messaging_rules.sql"),
                 include_str!("../migrations/postgresql/0120_redelivery.sql"),
                 include_str!("../migrations/postgresql/0121_native_memory_seeds.sql"),
+                include_str!("../migrations/postgresql/0122_session_input_queue.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -863,6 +865,23 @@ impl Store {
         let id = &task.task_id;
         sqlx::query("INSERT INTO supertag_v2_admissions (principal, operation_id, request_digest, task_id) VALUES ($1,$2,$3,$4)")
             .bind(principal).bind(&input.operation_id).bind(digest).bind(id).execute(&mut *transaction).await?;
+        let (_, audience) = crate::session_inputs::requester_of_in(&mut transaction, id).await?;
+        crate::session_inputs::admit_in(
+            &mut transaction,
+            &task,
+            crate::session_inputs::NewInput {
+                kind: crate::session_inputs::InputKind::Request,
+                source_key: crate::session_inputs::key(&[
+                    "request",
+                    principal,
+                    &input.operation_id,
+                ]),
+                requester: principal,
+                audience: &audience,
+            },
+            self.execution_now_ms(),
+        )
+        .await?;
         supertag_protocol::crash_point("control-plane.submit", "before-commit");
         transaction.commit().await?;
         Ok(task)
@@ -1206,8 +1225,12 @@ impl Store {
                             ));
                         }
                         Some(Assignment {
-                            joined: crate::inputs::joined_in(&mut transaction, &task.task_id)
-                                .await?,
+                            joined: crate::inputs::joined_in(
+                                &mut transaction,
+                                &task.task_id,
+                                &attempt_id,
+                            )
+                            .await?,
                             native_memory: crate::native_memory::grant_in(&mut transaction, &task)
                                 .await?,
                             volume: crate::artifact_volumes::assigned_in(
@@ -1263,7 +1286,10 @@ impl Store {
         // Later messages from the person join this run, so one reply answers them all.
         let mut task = task_in(&mut transaction, &id).await?;
         crate::workspace_landings::with_author_in(&mut transaction, &mut task).await?;
-        let joined = crate::inputs::join_at_claim_in(&mut transaction, &task, &attempt).await?;
+        // The claimed Task binds the input it was admitted for.
+        crate::session_inputs::bind_own_in(&mut transaction, &id, now).await?;
+        let joined =
+            crate::inputs::join_at_claim_in(&mut transaction, &task, &attempt, now).await?;
         // Posts held for this person's thread arrive before the Tag answers them.
         crate::attention::claimed_in(&mut transaction, &task, now).await?;
         crate::reply_progress::claimed_in(&mut transaction, &task, !joined.is_empty()).await?;
@@ -1828,6 +1854,21 @@ impl Store {
         sqlx::query("INSERT INTO supertag_v2_inbound_events (account_id, event_id, request_digest, task_id, conversation_id, thread_id) VALUES ($1,$2,$3,$4,$5,$6)")
             .bind(account).bind(&input.event_id).bind(digest).bind(&task.task_id).bind(&destination.conversation_id).bind(&destination.thread_id)
             .execute(&mut *transaction).await?;
+        let requester = format!("connector:{account}");
+        let (_, audience) =
+            crate::session_inputs::requester_of_in(&mut transaction, &task.task_id).await?;
+        crate::session_inputs::admit_in(
+            &mut transaction,
+            &task,
+            crate::session_inputs::NewInput {
+                kind: crate::session_inputs::InputKind::SurfaceEvent,
+                source_key: crate::session_inputs::key(&["surface", account, &input.event_id]),
+                requester: &requester,
+                audience: &audience,
+            },
+            self.execution_now_ms(),
+        )
+        .await?;
         transaction.commit().await?;
         Ok(task)
     }

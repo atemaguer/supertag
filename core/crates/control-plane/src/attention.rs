@@ -86,11 +86,12 @@ async fn turn_in(tx: &mut Transaction<'_, Any>, task: &Task) -> Result<Turn> {
     if unprompted.is_none() {
         return Ok(Turn::Person);
     }
-    let joined: Option<String> =
-        sqlx::query_scalar("SELECT input_id FROM supertag_v2_live_inputs WHERE task_id=$1 LIMIT 1")
-            .bind(&task.task_id)
-            .fetch_optional(&mut **tx)
-            .await?;
+    let joined: Option<String> = sqlx::query_scalar(
+        "SELECT input_id FROM supertag_v2_session_inputs WHERE offer_task_id=$1 LIMIT 1",
+    )
+    .bind(&task.task_id)
+    .fetch_optional(&mut **tx)
+    .await?;
     Ok(if joined.is_some() {
         Turn::Person
     } else {

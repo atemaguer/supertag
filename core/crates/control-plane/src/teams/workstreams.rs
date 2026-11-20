@@ -226,10 +226,10 @@ async fn post_objective_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> Resu
             UNION
             SELECT w.task_id FROM supertag_v2_approval_waits w
             JOIN source_tasks s ON w.continuation_task_id=s.task_id
-        ) SELECT w.objective_id FROM supertag_v2_wakes w
+        ) SELECT w.objective_id FROM supertag_v2_session_inputs w
           JOIN source_tasks s ON w.task_id=s.task_id
-          WHERE w.objective_id IS NOT NULL
-          ORDER BY w.hops DESC,w.created_at_ms,w.wake_id LIMIT 1",
+          WHERE w.objective_id IS NOT NULL AND w.conversation_id IS NOT NULL
+          ORDER BY w.hops DESC,w.created_at_ms,w.position LIMIT 1",
     )
     .bind(task_id)
     .fetch_optional(&mut **tx)

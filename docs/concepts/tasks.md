@@ -432,9 +432,10 @@ The first message runs, and the harness gets the later ones after its prompt, ol
 joined message settles as input that Task accepted, so it gets no reply of its own. A turn takes
 in at most 10 messages and 16 KiB of joined text. The Tag's own turns end the run of messages it
 takes in, which keeps them in order: a Schedule firing, a notice, a Mailbox delivery or a report.
-So does a message with a different audience or execution requirements. GitHub and Linear events
-always run as their own turns. The first claim of a turn fixes the messages it answers: a retry
-or a replayed claim presents the same ones.
+So does a message from someone else, or with a different audience or execution requirements: it
+waits for its own turn. GitHub and Linear events always run as their own turns. The first claim of
+a turn fixes the messages it answers: a retry or a replayed claim presents the same ones, and the
+messages a lost Task Attempt took in.
 
 ### When delivery is uncertain
 

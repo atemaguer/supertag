@@ -290,8 +290,8 @@ async fn contract(url: &str) {
         .await
         .unwrap();
     let wakes: Vec<(i64, i64, i64, i64, i64, i64)> = sqlx::query_as(
-        "SELECT reasons,priority,first_seq,last_seq,hops,not_before_ms FROM supertag_v2_wakes
-         WHERE tag_id='bob' AND task_id IS NULL",
+        "SELECT reasons,priority,first_seq,last_seq,hops,not_before_ms FROM supertag_v2_session_inputs
+         WHERE tag_id='bob' AND kind=4 AND task_id IS NULL",
     )
     .fetch_all(&mut *tx)
     .await
@@ -324,7 +324,7 @@ async fn contract(url: &str) {
         (0, inbox.clone())
     );
     sqlx::query(
-        "UPDATE supertag_v2_wakes SET task_id=$1,through_seq=last_seq,bound_at_ms=1 WHERE tag_id='bob'",
+        "UPDATE supertag_v2_session_inputs SET task_id=$1,through_seq=last_seq,bound_at_ms=1 WHERE tag_id='bob' AND kind=4",
     )
     .bind(&inbox)
     .execute(&mut *tx)
@@ -334,7 +334,7 @@ async fn contract(url: &str) {
         origin_in(&mut tx, &inbox).await.unwrap(),
         (3, source.clone())
     );
-    sqlx::query("UPDATE supertag_v2_wakes SET hops=4 WHERE tag_id='bob'")
+    sqlx::query("UPDATE supertag_v2_session_inputs SET hops=4 WHERE tag_id='bob' AND kind=4")
         .execute(&mut *tx)
         .await
         .unwrap();
@@ -346,11 +346,12 @@ async fn contract(url: &str) {
     wake_in(&mut tx, &request(1, MessageKind::Note, 20_000))
         .await
         .unwrap();
-    let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_wakes WHERE tag_id='bob'")
-            .fetch_one(&mut *tx)
-            .await
-            .unwrap();
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM supertag_v2_session_inputs WHERE tag_id='bob' AND kind=4",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
     assert_eq!(count, 2);
     tx.commit().await.unwrap();
 

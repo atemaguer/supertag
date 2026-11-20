@@ -38,7 +38,7 @@ pub(crate) async fn starts_run_in(tx: &mut Transaction<'_, Any>, task: &Task) ->
         "SELECT 1 FROM supertag_v2_tasks other WHERE other.tag_id=$1 AND other.session_id=$2 AND other.task_id<>$3
            AND (other.state IN ($4,$5,$6) OR other.cleanup_pending=1
                 OR (other.state=$7 AND other.accepted_order<(SELECT accepted_order FROM supertag_v2_tasks WHERE task_id=$3)))
-         UNION ALL SELECT 1 FROM supertag_v2_live_inputs WHERE follower_task_id=$3
+         UNION ALL SELECT 1 FROM supertag_v2_session_inputs WHERE admitted_task_id=$3 AND offer_state IS NOT NULL
          LIMIT 1",
     )
     .bind(&task.tag_id)

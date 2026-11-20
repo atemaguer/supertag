@@ -5,6 +5,11 @@
 //! opens with the digest of its Team's unread posts, which is how addressed posts reach it. The
 //! receiving Tag's accepted policy owns the inbox turn; a sender's Objective is provenance, never
 //! authority.
+//!
+//! The Tag messages wait in the Tag's inbox Session's input queue (`crate::session_inputs`). An
+//! inbox turn is the exception to "a run binds only inputs that share its requester and reply
+//! audience": it binds messages from several Tags, under the receiving Tag's own policy. The inbox
+//! Task reserves the due messages when it is admitted and binds what fits when it starts.
 use crate::AttemptAccess;
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
@@ -138,11 +143,16 @@ pub(crate) async fn sweep_in(tx: &mut Transaction<'_, Any>, now: i64) -> Result<
             Err(StoreError::FailedPrecondition(_)) => continue,
             Err(error) => return Err(error),
         };
+        // No inbox Task of this Tag is Queued or Claimed (`due_recipients_in`), so every due
+        // message is free to reserve, including one an ended or running turn left behind.
         sqlx::query(
-            "INSERT INTO supertag_v2_mailbox_tasks (task_id,recipient_tag_id) VALUES ($1,$2)",
+            "UPDATE supertag_v2_session_inputs SET admitted_task_id=$1
+             WHERE tag_id=$2 AND task_id IS NULL AND conversation_id IS NOT NULL
+               AND not_before_ms<=$3",
         )
         .bind(&task.task_id)
         .bind(&recipient)
+        .bind(now)
         .execute(&mut **tx)
         .await?;
     }
@@ -152,6 +162,9 @@ pub(crate) async fn sweep_in(tx: &mut Transaction<'_, Any>, now: i64) -> Result<
 /// A pending wake the inbox turn delivers.
 struct PendingWake {
     wake_id: String,
+    requester: String,
+    /// None for a held message.
+    not_before_ms: Option<i64>,
     conversation_id: String,
     reasons: i64,
     priority: i64,
@@ -276,22 +289,35 @@ pub(crate) async fn started_in(
     task_id: &str,
     now: i64,
 ) -> Result<()> {
-    let link = sqlx::query(
-        "SELECT recipient_tag_id,bound FROM supertag_v2_mailbox_tasks WHERE task_id=$1",
+    // An inbox Task reserved Tag messages; it binds once, never on a lost-Start replay or a
+    // redelivery.
+    let recipient: Option<String> = sqlx::query_scalar(
+        "SELECT tag_id FROM supertag_v2_session_inputs
+         WHERE admitted_task_id=$1 AND conversation_id IS NOT NULL LIMIT 1",
     )
     .bind(task_id)
     .fetch_optional(&mut **tx)
     .await?;
-    let Some(link) = link else {
+    let Some(recipient) = recipient else {
         return Ok(());
     };
-    if link.try_get::<i64, _>("bound")? != 0 {
+    let bound: Option<String> = sqlx::query_scalar(
+        "SELECT input_id FROM supertag_v2_session_inputs
+         WHERE task_id=$1 AND conversation_id IS NOT NULL LIMIT 1",
+    )
+    .bind(task_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if bound.is_some() {
         return Ok(());
     }
-    let recipient: String = link.try_get("recipient_tag_id")?;
+    // Due wakes most urgent first, then the messages a wake limit or the backlog held.
     let pending: Vec<PendingWake> = sqlx::query(
-        "SELECT * FROM supertag_v2_wakes WHERE tag_id=$1 AND task_id IS NULL AND not_before_ms<=$2
-         ORDER BY priority DESC,not_before_ms,created_at_ms,wake_id",
+        "SELECT * FROM supertag_v2_session_inputs
+         WHERE tag_id=$1 AND task_id IS NULL AND conversation_id IS NOT NULL
+           AND (not_before_ms<=$2 OR not_before_ms IS NULL)
+         ORDER BY CASE WHEN not_before_ms IS NULL THEN 1 ELSE 0 END,priority DESC,not_before_ms,
+           created_at_ms,position",
     )
     .bind(&recipient)
     .bind(now)
@@ -300,7 +326,9 @@ pub(crate) async fn started_in(
     .iter()
     .map(|row| {
         Ok(PendingWake {
-            wake_id: row.try_get("wake_id")?,
+            wake_id: row.try_get("input_id")?,
+            requester: row.try_get("requester")?,
+            not_before_ms: row.try_get("not_before_ms")?,
             conversation_id: row.try_get("conversation_id")?,
             reasons: row.try_get("reasons")?,
             priority: row.try_get("priority")?,
@@ -373,8 +401,9 @@ pub(crate) async fn started_in(
         prompt.entries += included.len() as i64;
         prompt.text.push_str(&section);
         sqlx::query(
-            "UPDATE supertag_v2_wakes SET task_id=$1,first_seq=$2,through_seq=$3,bound_at_ms=$4
-             WHERE wake_id=$5",
+            "UPDATE supertag_v2_session_inputs
+             SET task_id=$1,admitted_task_id=$1,first_seq=$2,through_seq=$3,bound_at_ms=$4
+             WHERE input_id=$5",
         )
         .bind(task_id)
         .bind(first)
@@ -384,15 +413,22 @@ pub(crate) async fn started_in(
         .execute(&mut **tx)
         .await?;
         if rows.len() > included.len() {
-            // The rest did not fit: it becomes the next turn, due now.
+            // The rest did not fit: it becomes the next turn, due now; held messages stay held.
+            let position = increment_order(tx).await?;
+            let rest = uuid::Uuid::new_v4().simple().to_string();
             sqlx::query(
-                "INSERT INTO supertag_v2_wakes
-                    (wake_id,tag_id,conversation_id,reasons,priority,first_seq,last_seq,hops,
+                "INSERT INTO supertag_v2_session_inputs
+                    (input_id,tag_id,session_id,position,kind,source_key,requester,audience,
+                     conversation_id,reasons,priority,first_seq,last_seq,hops,
                      origin_task_id,objective_id,not_before_ms,created_at_ms)
-                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)",
+                 VALUES ($1,$2,$3,$4,4,$5,$6,'',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)",
             )
-            .bind(uuid::Uuid::new_v4().simple().to_string())
+            .bind(&rest)
             .bind(&recipient)
+            .bind(format!("inbox:{recipient}"))
+            .bind(position)
+            .bind(format!("wake\n{rest}"))
+            .bind(&wake.requester)
             .bind(&wake.conversation_id)
             .bind(wake.reasons)
             .bind(wake.priority)
@@ -401,6 +437,7 @@ pub(crate) async fn started_in(
             .bind(wake.hops)
             .bind(&wake.origin_task_id)
             .bind(&wake.objective_id)
+            .bind(wake.not_before_ms.map(|_| now))
             .bind(now)
             .execute(&mut **tx)
             .await?;
@@ -431,10 +468,6 @@ pub(crate) async fn started_in(
     let text = format!("{INTRODUCTION}{header}{}", prompt.text);
     sqlx::query("UPDATE supertag_v2_tasks SET prompt=$1 WHERE task_id=$2")
         .bind(text)
-        .bind(task_id)
-        .execute(&mut **tx)
-        .await?;
-    sqlx::query("UPDATE supertag_v2_mailbox_tasks SET bound=1 WHERE task_id=$1")
         .bind(task_id)
         .execute(&mut **tx)
         .await?;
@@ -513,7 +546,7 @@ async fn held_in(
            AND EXISTS (SELECT 1 FROM supertag_v2_message_addressees a
              WHERE a.conversation_id=mem.conversation_id AND a.tag_id=$1
              AND a.seq>mem.delivered_seq)
-           AND NOT EXISTS (SELECT 1 FROM supertag_v2_wakes w
+           AND NOT EXISTS (SELECT 1 FROM supertag_v2_session_inputs w
              WHERE w.tag_id=$1 AND w.conversation_id=mem.conversation_id AND w.task_id IS NULL)
          ORDER BY mem.conversation_id LIMIT $2",
     )
@@ -555,15 +588,22 @@ async fn held_in(
         prompt.mentions += included.len() as i64;
         prompt.entries += included.len() as i64;
         prompt.text.push_str(&section);
+        let position = increment_order(tx).await?;
+        let id = uuid::Uuid::new_v4().simple().to_string();
         sqlx::query(
-            "INSERT INTO supertag_v2_wakes
-                (wake_id,tag_id,conversation_id,reasons,priority,first_seq,last_seq,hops,
-                 origin_task_id,objective_id,not_before_ms,created_at_ms,task_id,through_seq,
-                 bound_at_ms)
-             VALUES ($1,$2,$3,$4,1,$5,$6,$7,$8,$9,$10,$10,$11,$6,$10)",
+            "INSERT INTO supertag_v2_session_inputs
+                (input_id,tag_id,session_id,position,kind,source_key,requester,audience,
+                 conversation_id,reasons,priority,first_seq,last_seq,hops,
+                 origin_task_id,objective_id,not_before_ms,created_at_ms,task_id,admitted_task_id,
+                 through_seq,bound_at_ms)
+             VALUES ($1,$2,$3,$4,4,$5,$6,'',$7,$8,1,$9,$10,$11,$12,$13,$14,$14,$15,$15,$10,$14)",
         )
-        .bind(uuid::Uuid::new_v4().simple().to_string())
+        .bind(&id)
         .bind(recipient)
+        .bind(format!("inbox:{recipient}"))
+        .bind(position)
+        .bind(format!("wake\n{id}"))
+        .bind(format!("tag:{}", first.try_get::<String, _>("sender_id")?))
         .bind(&conversation_id)
         .bind(wakes::REASON_DIRECT)
         .bind(first_seq)
@@ -685,11 +725,11 @@ async fn tag_message_in(tx: &mut Transaction<'_, Any>, row: &AnyRow) -> Result<T
     let channel = ConversationKind::from_stored(row.try_get("conversation_kind")?)?
         == ConversationKind::Channel;
     let delivery: Option<(String, i64)> = sqlx::query_as(
-        "SELECT w.task_id,t.state FROM supertag_v2_wakes w
+        "SELECT w.task_id,t.state FROM supertag_v2_session_inputs w
          JOIN supertag_v2_tasks t ON t.task_id=w.task_id
          WHERE w.tag_id=$1 AND w.conversation_id=$2 AND w.task_id IS NOT NULL
            AND w.first_seq<=$3 AND w.through_seq>=$3
-         ORDER BY w.bound_at_ms,w.wake_id LIMIT 1",
+         ORDER BY w.bound_at_ms,w.position LIMIT 1",
     )
     .bind(&addressee)
     .bind(&conversation_id)

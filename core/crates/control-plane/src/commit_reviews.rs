@@ -195,7 +195,7 @@ async fn authorized_review_in(
         ) SELECT r.* FROM supertag_v2_commit_reviews r
           JOIN supertag_v2_messages m ON m.message_id=r.request_id
           WHERE r.request_id=$2 AND r.reviewer_tag_id=$3
-            AND EXISTS (SELECT 1 FROM supertag_v2_wakes w
+            AND EXISTS (SELECT 1 FROM supertag_v2_session_inputs w
               WHERE w.tag_id=$3 AND w.conversation_id=m.conversation_id
                 AND w.task_id IN (SELECT task_id FROM lineage)
                 AND m.seq BETWEEN w.first_seq AND w.through_seq)",

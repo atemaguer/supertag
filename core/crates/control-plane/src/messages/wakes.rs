@@ -1,6 +1,8 @@
-//! Wake rows: which Tag must take an inbox turn for which messages. A pending wake (no Task yet)
-//! is coalesced per Tag and conversation, so a burst of messages makes one turn; the inbox Task
-//! that delivers it binds the wake and records the seqs it delivered. Only direct messages wake a
+//! Wake rows: which Tag must take an inbox turn for which messages. A wake is a Tag message input
+//! of the Tag's inbox Session (`crate::session_inputs`, kind 4). A pending wake (no Task yet) is
+//! coalesced per Tag and conversation, so a burst of messages makes one turn; the inbox Task that
+//! delivers it binds the wake and records the seqs it delivered. A held row (no due time) waits
+//! for the Tag's next inbox turn and wakes nobody. Only direct messages wake a
 //! Tag: a Workstream post wakes nobody and reaches its members in the digest of their next turn.
 //!
 //! Only Tags' messages come through here, so only they count toward the wake limits: mutual wakes
@@ -20,7 +22,7 @@ use crate::{StoreError, store::Result};
 /// A message continues a chain through at most this many inboxes.
 pub(crate) const MAX_HOPS: i64 = 4;
 
-/// `supertag_v2_wakes.reasons` bits. Bit 2 was an addressed Workstream post's; posts no longer
+/// `supertag_v2_session_inputs.reasons` bits of a wake. Bit 2 was an addressed Workstream post's; posts no longer
 /// wake.
 pub(crate) const REASON_DIRECT: i64 = 1;
 pub(crate) const REASON_QUESTION: i64 = 4;
@@ -344,7 +346,9 @@ pub(crate) async fn wake_in(
         "SELECT COUNT(*),
                 COUNT(CASE WHEN deferred_reason IS NULL THEN 1 END),
                 COUNT(CASE WHEN conversation_id=$2 THEN 1 END)
-         FROM supertag_v2_wakes WHERE tag_id=$1 AND task_id IS NULL",
+         FROM supertag_v2_session_inputs
+         WHERE tag_id=$1 AND task_id IS NULL AND conversation_id IS NOT NULL
+           AND not_before_ms IS NOT NULL",
     )
     .bind(request.tag_id)
     .bind(request.conversation_id)
@@ -399,29 +403,44 @@ pub(crate) async fn wake_in(
             None => count_in(tx, request).await?,
         }
     }
+    let position = crate::store::increment_order(tx).await?;
+    let wake_id = Uuid::new_v4().simple().to_string();
+    // A due time wins over held (none); the earlier due time wins over a later one.
     sqlx::query(
-        "INSERT INTO supertag_v2_wakes
-            (wake_id,tag_id,conversation_id,reasons,priority,first_seq,last_seq,hops,
+        "INSERT INTO supertag_v2_session_inputs
+            (input_id,tag_id,session_id,position,kind,source_key,requester,audience,
+             conversation_id,reasons,priority,first_seq,last_seq,hops,
              origin_task_id,objective_id,not_before_ms,deferred_reason,release_task_id,
              created_at_ms)
-         VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10,$11,$12,$13)
-         ON CONFLICT(tag_id,conversation_id) WHERE task_id IS NULL DO UPDATE SET
-            reasons=supertag_v2_wakes.reasons | excluded.reasons,
-            priority=CASE WHEN excluded.priority>supertag_v2_wakes.priority
-                THEN excluded.priority ELSE supertag_v2_wakes.priority END,
-            last_seq=CASE WHEN excluded.last_seq>supertag_v2_wakes.last_seq
-                THEN excluded.last_seq ELSE supertag_v2_wakes.last_seq END,
-            hops=CASE WHEN excluded.hops>supertag_v2_wakes.hops
-                THEN excluded.hops ELSE supertag_v2_wakes.hops END,
-            deferred_reason=CASE WHEN excluded.not_before_ms<supertag_v2_wakes.not_before_ms
-                THEN excluded.deferred_reason ELSE supertag_v2_wakes.deferred_reason END,
-            release_task_id=CASE WHEN excluded.not_before_ms<supertag_v2_wakes.not_before_ms
-                THEN excluded.release_task_id ELSE supertag_v2_wakes.release_task_id END,
-            not_before_ms=CASE WHEN excluded.not_before_ms<supertag_v2_wakes.not_before_ms
-                THEN excluded.not_before_ms ELSE supertag_v2_wakes.not_before_ms END",
+         VALUES ($1,$2,$3,$4,4,$5,$6,'',$7,$8,$9,$10,$10,$11,$12,$13,$14,$15,$16,$17)
+         ON CONFLICT(tag_id,conversation_id) WHERE task_id IS NULL AND conversation_id IS NOT NULL
+         DO UPDATE SET
+            reasons=supertag_v2_session_inputs.reasons | excluded.reasons,
+            priority=CASE WHEN excluded.priority>supertag_v2_session_inputs.priority
+                THEN excluded.priority ELSE supertag_v2_session_inputs.priority END,
+            last_seq=CASE WHEN excluded.last_seq>supertag_v2_session_inputs.last_seq
+                THEN excluded.last_seq ELSE supertag_v2_session_inputs.last_seq END,
+            hops=CASE WHEN excluded.hops>supertag_v2_session_inputs.hops
+                THEN excluded.hops ELSE supertag_v2_session_inputs.hops END,
+            deferred_reason=CASE WHEN excluded.not_before_ms IS NOT NULL
+                AND (supertag_v2_session_inputs.not_before_ms IS NULL
+                  OR excluded.not_before_ms<supertag_v2_session_inputs.not_before_ms)
+                THEN excluded.deferred_reason ELSE supertag_v2_session_inputs.deferred_reason END,
+            release_task_id=CASE WHEN excluded.not_before_ms IS NOT NULL
+                AND (supertag_v2_session_inputs.not_before_ms IS NULL
+                  OR excluded.not_before_ms<supertag_v2_session_inputs.not_before_ms)
+                THEN excluded.release_task_id ELSE supertag_v2_session_inputs.release_task_id END,
+            not_before_ms=CASE WHEN excluded.not_before_ms IS NOT NULL
+                AND (supertag_v2_session_inputs.not_before_ms IS NULL
+                  OR excluded.not_before_ms<supertag_v2_session_inputs.not_before_ms)
+                THEN excluded.not_before_ms ELSE supertag_v2_session_inputs.not_before_ms END",
     )
-    .bind(Uuid::new_v4().simple().to_string())
+    .bind(&wake_id)
     .bind(request.tag_id)
+    .bind(format!("inbox:{}", request.tag_id))
+    .bind(position)
+    .bind(format!("wake\n{wake_id}"))
+    .bind(format!("tag:{}", request.sender_tag_id))
     .bind(request.conversation_id)
     .bind(reasons)
     .bind(priority)
@@ -457,7 +476,7 @@ pub(crate) async fn release_in(
     now: i64,
 ) -> Result<u64> {
     Ok(sqlx::query(
-        "UPDATE supertag_v2_wakes SET release_task_id=NULL,
+        "UPDATE supertag_v2_session_inputs SET release_task_id=NULL,
             not_before_ms=CASE WHEN not_before_ms>$1 THEN $1 ELSE not_before_ms END
          WHERE task_id IS NULL AND release_task_id=$2",
     )
@@ -472,11 +491,11 @@ pub(crate) async fn release_in(
 /// without passing through [`release_in`], such as one its Objective cancelled.
 pub(crate) async fn release_ended_in(tx: &mut Transaction<'_, Any>, now: i64) -> Result<()> {
     sqlx::query(
-        "UPDATE supertag_v2_wakes SET release_task_id=NULL,
+        "UPDATE supertag_v2_session_inputs SET release_task_id=NULL,
             not_before_ms=CASE WHEN not_before_ms>$1 THEN $1 ELSE not_before_ms END
          WHERE task_id IS NULL AND release_task_id IS NOT NULL AND EXISTS (
             SELECT 1 FROM supertag_v2_tasks t
-            WHERE t.task_id=supertag_v2_wakes.release_task_id AND t.state IN ($2,$3,$4))",
+            WHERE t.task_id=supertag_v2_session_inputs.release_task_id AND t.state IN ($2,$3,$4))",
     )
     .bind(now)
     .bind(ENDED[0])
@@ -502,9 +521,10 @@ pub(crate) async fn origin_in(
             UNION
             SELECT w.task_id FROM supertag_v2_approval_waits w
             JOIN source_tasks s ON w.continuation_task_id=s.task_id
-        ) SELECT w.hops,w.origin_task_id FROM supertag_v2_wakes w
+        ) SELECT w.hops,w.origin_task_id FROM supertag_v2_session_inputs w
           JOIN source_tasks s ON w.task_id=s.task_id
-          ORDER BY w.hops DESC,w.created_at_ms,w.wake_id LIMIT 1",
+          WHERE w.conversation_id IS NOT NULL
+          ORDER BY w.hops DESC,w.created_at_ms,w.position LIMIT 1",
     )
     .bind(task_id)
     .fetch_optional(&mut **tx)
@@ -521,8 +541,9 @@ pub(crate) async fn origin_in(
     Ok((hops, origin.unwrap_or_else(|| task_id.to_owned())))
 }
 
-/// Tags with a wake due now that may take a new inbox turn, most urgent first. A retired Tag
-/// takes no turns; a Tag whose inbox turn waits or is claimed gets no second one; a Tag whose
+/// Tags with a wake due now that may take a new inbox turn, most urgent first. A held message is
+/// never due. A retired Tag takes no turns; a Tag whose inbox turn waits or is claimed (a Queued
+/// or Claimed Task that reserved Tag messages) gets no second one; a Tag whose
 /// Workspace changed since its last inbox turn keeps its mail pending. Only Workspace changes are
 /// filtered here; `insert_task` checks the rest of the accepted policy.
 pub(crate) async fn due_recipients_in(
@@ -531,12 +552,14 @@ pub(crate) async fn due_recipients_in(
     limit: i64,
 ) -> Result<Vec<String>> {
     Ok(sqlx::query_scalar(
-        "SELECT w.tag_id FROM supertag_v2_wakes w
+        "SELECT w.tag_id FROM supertag_v2_session_inputs w
          JOIN supertag_v2_tags tag ON tag.tag_id=w.tag_id
-         WHERE w.task_id IS NULL AND w.not_before_ms<=$1 AND tag.retired_at_ms IS NULL
-           AND NOT EXISTS (SELECT 1 FROM supertag_v2_mailbox_tasks link
-             JOIN supertag_v2_tasks t ON t.task_id=link.task_id
-             WHERE link.recipient_tag_id=w.tag_id AND t.state IN ($3,$4))
+         WHERE w.task_id IS NULL AND w.conversation_id IS NOT NULL AND w.not_before_ms<=$1
+           AND tag.retired_at_ms IS NULL
+           AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks t
+             WHERE t.tag_id=w.tag_id AND t.session_id=w.session_id AND t.state IN ($3,$4)
+             AND EXISTS (SELECT 1 FROM supertag_v2_session_inputs r
+               WHERE r.admitted_task_id=t.task_id AND r.conversation_id IS NOT NULL))
            AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks previous
              WHERE previous.tag_id=w.tag_id
              AND previous.session_id=('inbox:' || w.tag_id)

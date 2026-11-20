@@ -11,6 +11,15 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- Every input to a Session now waits in one queue, in the Session's order: a person's message,
+  another Tag's direct message, a Schedule firing, a work Session's report, a decision, a notice.
+  A redelivered Task answers the messages its lost Task Attempt took in or was being given,
+  including one whose delivery was uncertain, and its next Task Attempt gets them after its
+  prompt; a message it was never given runs as its own turn. A turn takes in only later messages
+  from the same person for the same audience: live input queued by someone else now runs as its
+  own turn. On upgrade, waiting messages, live inputs, and Tag messages a wake limit held move into
+  the queue; a waiting inbox turn with nothing left to deliver is cancelled.
+
 - A Tag's memory is its harness's own memory. The daily memory review now keeps that memory
   current: it corrects it against the Tag's Sessions, merges duplicates, dates time-relative
   facts, drops what the repository already records, and merges or drops Work Session proposals,

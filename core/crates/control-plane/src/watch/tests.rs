@@ -471,8 +471,9 @@ async fn private_work_sessions(
         .bind(TaskState::Running as i64).bind(i64::MAX).bind(&report.task_id).execute(&mut *tx).await?;
     // Even if a legacy or inconsistent row names private work, another
     // operator must not obtain the input by guessing its ID.
-    sqlx::query("INSERT INTO supertag_v2_live_inputs (input_id,operator_principal,operation_id,task_id,attempt_id,follower_task_id,state) VALUES ('private-input',$1,'stale-private-input',$2,'attempt',$3,$4)")
-        .bind(ALICE).bind(&child.task_id).bind(&report.task_id).bind(LiveInputState::Accepted as i64)
+    sqlx::query("INSERT INTO supertag_v2_session_inputs (input_id,tag_id,session_id,position,kind,source_key,requester,audience,admitted_task_id,offer_task_id,offer_attempt_id,offer_state,created_at_ms)
+        SELECT 'private-input',tag_id,session_id,accepted_order,2,$1,$2,'',task_id,$3,'attempt',$4,0 FROM supertag_v2_tasks WHERE task_id=$5")
+        .bind("live\nstale-private-input").bind(ALICE).bind(&child.task_id).bind(LiveInputState::Accepted as i64).bind(&report.task_id)
         .execute(&mut *tx).await?;
     tx.commit().await?;
     let get = GetInputRequest {

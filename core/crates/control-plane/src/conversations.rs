@@ -268,8 +268,7 @@ impl Store {
             return Ok(message);
         }
         let operation = format!("conversation/{}", task.task_id);
-        let live_input =
-            crate::inputs::fold_in(&mut tx, principal, &operation, &task, order, now).await?;
+        let live_input = crate::inputs::fold_in(&mut tx, principal, &operation, &task, now).await?;
         tx.commit().await?;
         Ok(sent(task, live_input, seq, sent_at))
     }
@@ -537,10 +536,10 @@ impl Store {
     pub(crate) async fn ensure_input_access(&self, principal: &str, input_id: &str) -> Result<()> {
         name("live input ID", input_id)?;
         let allowed: Option<i64> = sqlx::query_scalar(&format!(
-            "SELECT CAST(1 AS BIGINT) FROM supertag_v2_live_inputs i
-             JOIN supertag_v2_task_audience source ON source.task_id=i.task_id
-             JOIN supertag_v2_task_audience follower ON follower.task_id=i.follower_task_id
-             WHERE i.input_id=$1 AND {} AND {}",
+            "SELECT CAST(1 AS BIGINT) FROM supertag_v2_session_inputs i
+             JOIN supertag_v2_task_audience source ON source.task_id=i.offer_task_id
+             JOIN supertag_v2_task_audience follower ON follower.task_id=i.admitted_task_id
+             WHERE i.input_id=$1 AND i.offer_state IS NOT NULL AND {} AND {}",
             crate::store::sees_owner_sql("source.owner", "$2"),
             crate::store::sees_owner_sql("follower.owner", "$2"),
         ))
@@ -601,8 +600,8 @@ const HISTORY_WITH_QUIET: &str =
 /// taken in (live input states 1, 2, 3 and 5), since it may stay quiet; `t` is the turn's Task.
 const SCHEDULE_SHOWN: &str = "NOT (t.state IN (1,2,6)
     AND EXISTS (SELECT 1 FROM supertag_v2_schedule_fires f WHERE f.task_id=t.task_id)
-    AND NOT EXISTS (SELECT 1 FROM supertag_v2_live_inputs i
-                    WHERE i.task_id=t.task_id AND i.state IN (1,2,3,5)))";
+    AND NOT EXISTS (SELECT 1 FROM supertag_v2_session_inputs i
+                    WHERE i.offer_task_id=t.task_id AND i.offer_state IN (1,2,3,5)))";
 const UNFINISHED: &str = "1,2,6";
 const FINISHED: &str = "3,4,5";
 /// How much of the latest message a conversation list shows.

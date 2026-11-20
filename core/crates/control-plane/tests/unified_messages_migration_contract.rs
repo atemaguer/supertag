@@ -135,7 +135,7 @@ fn table(expected: &[&[&str]]) -> Vec<Vec<String>> {
 async fn contract(url: String) {
     let head = seed_prior_version(&url).await;
     let store = Store::open(&url).await.unwrap();
-    assert_eq!(store.migrated(), Some((116, 121)));
+    assert_eq!(store.migrated(), Some((116, 122)));
     let pool = AnyPool::connect(&url).await.unwrap();
 
     // Conversations: the Team's channel continues its sequence; the deleted Team's copy lives in
@@ -263,7 +263,7 @@ async fn contract(url: String) {
         "SELECT w.tag_id,c.kind,COALESCE(c.name,'-'),w.reasons,w.priority,w.first_seq,w.last_seq,
                 COALESCE(CAST(w.through_seq AS TEXT),'-'),w.hops,COALESCE(w.task_id,'-'),
                 COALESCE(w.origin_task_id,'-'),w.not_before_ms
-         FROM supertag_v2_wakes w JOIN supertag_v2_conversations c ON c.conversation_id=w.conversation_id
+         FROM supertag_v2_session_inputs w JOIN supertag_v2_conversations c ON c.conversation_id=w.conversation_id
          ORDER BY w.tag_id,c.kind,COALESCE(c.name,''),w.first_seq",
     )
     .await;

@@ -431,17 +431,21 @@ async fn benchmark(url: String, size: impl Size) {
     .await;
     let addressees = count(&pool, "SELECT COUNT(*) FROM supertag_v2_message_addressees").await;
     let operations = count(&pool, "SELECT COUNT(*) FROM supertag_v2_message_operations").await;
-    let wakes = count(&pool, "SELECT COUNT(*) FROM supertag_v2_wakes").await;
+    let wakes = count(
+        &pool,
+        "SELECT COUNT(*) FROM supertag_v2_session_inputs WHERE kind = 4",
+    )
+    .await;
     let pending_wakes = count(
         &pool,
-        "SELECT COUNT(*) FROM supertag_v2_wakes WHERE task_id IS NULL",
+        "SELECT COUNT(*) FROM supertag_v2_session_inputs WHERE kind = 4 AND task_id IS NULL",
     )
     .await;
     // Every Mailbox row is covered by exactly one wake of its recipient.
     let covered = count(
         &pool,
         "SELECT COUNT(*) FROM supertag_v2_messages m
-         JOIN supertag_v2_wakes w ON w.conversation_id = m.conversation_id
+         JOIN supertag_v2_session_inputs w ON w.conversation_id = m.conversation_id
              AND m.seq BETWEEN w.first_seq AND w.last_seq
          JOIN supertag_v2_conversations c ON c.conversation_id = m.conversation_id
          WHERE c.kind = 1 AND substr(c.direct_key, 1, 2) = 't:'

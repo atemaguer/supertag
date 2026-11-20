@@ -387,6 +387,14 @@ impl Store {
             sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = NULL, attempt_id = NULL, host_principal = NULL, host_generation = NULL, lease_token = NULL, lease_expires_at_ms = NULL, cleanup_pending = 0, cleanup_observed = 0, cleanup_failure = NULL, event_sequence_base = 0, finish_objective_signal = 0, redeliver_after_ms = $2 WHERE task_id = $3")
                 .bind(TaskState::Queued as i64).bind(now.saturating_add(backoff)).bind(&attempt.task_id)
                 .execute(&mut *transaction).await?;
+            // Messages the lost Attempt was given or may have read are covered by the redelivery.
+            crate::session_inputs::redeliver_in(
+                &mut transaction,
+                &attempt.task_id,
+                &attempt.attempt_id,
+                now,
+            )
+            .await?;
         } else {
             sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = COALESCE(result, $2), cleanup_pending = 0, cleanup_observed = 1, cleanup_failure = NULL WHERE task_id = $3")
                 // A cancelled Task keeps its cancellation as its result.

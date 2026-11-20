@@ -155,6 +155,12 @@ none. Its prompt says that an earlier run was interrupted and its file changes d
 quotes the messages that run already sent to the person, the 20 most recent up to 32 KiB, so the
 Tag does not say them twice.
 
+A person's message that reached the lost Task Attempt while it ran, or was on its way to it, is
+answered by the redelivered Task: the new Task Attempt gets it after its prompt, with the messages
+the Task took in when it was first claimed, and the message gets no turn of its own. That holds
+for a message whose delivery was uncertain, so it needs no decision. A message the lost Task
+Attempt was never given runs as its own turn after the redelivered Task.
+
 ```text
 Check CI
 
