@@ -165,6 +165,9 @@ sh scripts/stack.sh down
 `bench/perf.tsx` (test renderer, 30 Tags, 20 Objectives, 15 inbox items, a 300-turn Markdown
 conversation): keystroke to frame
 p95 ≤ 8 ms at 250×70; a page of 32 streamed updates blocks the event loop ≤ 16 ms; keys typed
-during a stream arrive in order; RSS ≤ 250 MB. `bench/first-paint.ts` (compiled binary in a PTY,
+during a stream arrive in order; memory held after the 300-turn conversation streamed ≤ 250 MB,
+measured in a process of its own after a full collection, as anonymous memory (Linux's RSS also
+counts the 40–50 MB of the executable and OpenTUI's library mapped from disk, which macOS's leaves
+out). `bench/first-paint.ts` (compiled binary in a PTY,
 30 ms round trip, 50 Markdown turns): median first launch ≤ 352 ms and next launch (from the
 cache) ≤ 163 ms, the Go TUI's medians plus 50 ms.

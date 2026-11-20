@@ -8,10 +8,19 @@
  *     loop is blocked while a page lands and draws. Budget ≤ 16 ms. Keys typed between pages
  *     arrive in order.
  *   first frame: from rendering the tree to the first frame showing the latest reply.
- *   memory: RSS after the 300-turn conversation rendered. Budget ≤ 250 MB.
+ *   memory: the memory a terminal UI process holds after it showed the 300-turn conversation and
+ *     streamed a turn into it. Budget ≤ 250 MB. Measured in a process of its own (`--memory`),
+ *     because each mount of the scenarios before it leaves native memory the allocator keeps,
+ *     which a terminal UI, rendering one tree, never accumulates; after a full collection, so
+ *     the number is what is held, not when the collector last ran; and as anonymous memory, the
+ *     same on every platform: Linux's VmRSS also counts the pages of the Bun executable and
+ *     OpenTUI's library mapped from disk (40–50 MB, shared and reclaimable), which macOS's
+ *     resident size leaves out. The figure before the collection is reported too.
  * Exits 1 when a budget is missed.
- *   bun bench/perf.tsx [--json]
+ *   bun bench/perf.tsx
  */
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { testRender } from "@opentui/react/test-utils";
 import { act } from "react";
 import { InboxItemKind } from "../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/runtime_pb";
@@ -176,11 +185,32 @@ async function streaming(turns: number, width: number, height: number, pages = 4
   }
   await view.renderOnce();
   const keysInOrder = view.captureCharFrame().includes(typed);
-  const rssMb = +(process.memoryUsage().rss / 1024 / 1024).toFixed(1);
+  const memory = { beforeCollectionMb: residentMb(), heldMb: 0 };
+  Bun.gc(true);
+  memory.heldMb = residentMb();
   given.controller.close();
   await view.dispose();
   reset(given);
-  return { pageStall: summary(stalls), streamed, keysInOrder, rssMbAfter: rssMb };
+  return { pageStall: summary(stalls), streamed, keysInOrder, memory };
+}
+
+/**
+ * The process's resident memory in MB, without what is mapped from files: RssAnon on Linux,
+ * the resident size elsewhere (macOS's already leaves out the executable's and libraries' pages).
+ */
+function residentMb(): number {
+  let kb: number | undefined;
+  try {
+    const anon = /^RssAnon:\s+(\d+) kB$/mu.exec(readFileSync("/proc/self/status", "utf8"));
+    if (anon) kb = Number(anon[1]);
+  } catch {}
+  return +((kb ?? process.memoryUsage().rss / 1024) / 1024).toFixed(1);
+}
+
+if (process.argv.includes("--memory")) {
+  const { memory } = await streaming(300, 250, 70);
+  console.log(JSON.stringify(memory));
+  process.exit(0);
 }
 
 const results = {
@@ -189,7 +219,21 @@ const results = {
   typing300_250x70: await typing(300, 250, 70),
   streaming300_160x50: await streaming(300, 160, 50),
   streaming300_250x70: await streaming(300, 250, 70),
+  memory300: memoryInItsOwnProcess(),
 };
+
+function memoryInItsOwnProcess(): { beforeCollectionMb: number; heldMb: number } {
+  const child = spawnSync(process.execPath, [import.meta.path, "--memory"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  const line = child.stdout.trim().split("\n").at(-1) ?? "";
+  if (child.status !== 0 || !line.startsWith("{")) {
+    console.error(`the memory measurement failed (exit ${child.status})`);
+    return { beforeCollectionMb: Number.NaN, heldMb: Number.NaN };
+  }
+  return JSON.parse(line);
+}
 const budgets = {
   "keystroke p95 at 250×70 ≤ 8 ms": results.typing300_250x70.keystroke.p95 <= 8,
   "streamed page blocks input ≤ 16 ms (p95, 250×70)":
@@ -198,7 +242,7 @@ const budgets = {
     results.streaming300_160x50.streamed && results.streaming300_250x70.streamed,
   "keys typed during a stream arrive in order":
     results.streaming300_160x50.keysInOrder && results.streaming300_250x70.keysInOrder,
-  "RSS after 300 turns ≤ 250 MB": results.streaming300_250x70.rssMbAfter <= 250,
+  "memory held after 300 turns ≤ 250 MB": results.memory300.heldMb <= 250,
 };
 console.log(JSON.stringify({ ...results, budgets }, null, 2));
 process.exit(Object.values(budgets).every(Boolean) ? 0 : 1);
