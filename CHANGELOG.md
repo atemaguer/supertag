@@ -85,6 +85,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- A wake limit that trips now also sends one operator notification through the configured
+  destinations, naming the Tags, the limit, and how many messages wait, with the command
+  `supertag get inbox-items --kind wake-limit`; messages it holds later send no more. The
+  `wake-limit` Inbox item also names the Tags the first held message went between.
 - A question, blocker, or review request the mutual wake limit held back now arrives when its
   originating Task ends, instead of always an hour later; an hour stays the longest it waits.
 - A Workstream post wakes nobody, not even the Tags it addresses: addressing a Tag counts as a

@@ -870,8 +870,11 @@ Over a limit, the message is stored and never dropped:
 - The response's `wake_deferred` tells the sender why. It is empty when the message woke its
   recipient or joined a waiting turn.
 - The operator Inbox shows one `wake-limit` item (`INBOX_ITEM_KIND_WAKE_LIMIT`) per tripped
-  limit and window for 24 hours, with how many messages waited. A client sees only the items of Objectives it
-  created.
+  limit and window for 24 hours, with how many messages waited and the Tags the first one went
+  between. A client sees only the items of Objectives it created.
+- The trip also sends one [operator notification](../guides/notifications.md) through the
+  configured destinations, naming the Tags, the limit, and what it holds. Later messages the same
+  trip holds send no more.
 
 A Tag with 64 wakes waiting gets no new wake for a note, evidence, or decision; the sender is told
 the Tag is behind. Questions, blockers, and review requests always get one.

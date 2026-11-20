@@ -681,9 +681,17 @@ fn headline(kind: InboxItemKind, item: &InboxItem, blocking: bool) -> (String, O
             "The Objective budget is used up".into(),
             Some(format!("supertag describe objective {objective}")),
         ),
-        InboxItemKind::ObjectiveLimit | InboxItemKind::WakeLimit => (
+        InboxItemKind::ObjectiveLimit => (
             summary(&item.reason),
             Some(format!("supertag describe objective {objective}")),
+        ),
+        // The Tags, the limit, and what it holds come first; the advice after them is dropped.
+        InboxItemKind::WakeLimit => (
+            format!(
+                "Wake limit: {}",
+                summary(item.reason.split(". ").next().unwrap_or(&item.reason))
+            ),
+            Some("supertag get inbox-items --kind wake-limit".into()),
         ),
         InboxItemKind::TaskAttention => {
             let attempt = item.attempt_id.as_deref().unwrap_or("?");

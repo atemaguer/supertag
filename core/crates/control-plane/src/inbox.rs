@@ -629,7 +629,9 @@ async fn mcp_logins_in(
 }
 
 /// Wake limits Tags tripped in the last day: one item per limit and window. The messages they
-/// held are delivered late, never dropped; the item says how many waited.
+/// held are delivered late, never dropped; the item says how many waited and between which Tags
+/// the first went. Its occurrence is the trip, so the operator is notified once per trip, not
+/// once per held message.
 async fn wake_limits_in(
     tx: &mut Transaction<'_, Any>,
     cursor: &Cursor,
@@ -659,11 +661,16 @@ async fn wake_limits_in(
         let limit: i64 = row.try_get("wake_limit")?;
         let held: i64 = row.try_get("held")?;
         let since: i64 = row.try_get("tripped_at_ms")?;
-        let waited = if held == 1 {
-            "1 message waited".to_owned()
-        } else {
-            format!("{held} messages waited")
-        };
+        let sender: String = row.try_get("sender_tag_id")?;
+        let recipient: String = row.try_get("recipient_tag_id")?;
+        let waited = format!(
+            "{}, the first from Tag {sender} to Tag {recipient}",
+            if held == 1 {
+                "1 message waited".to_owned()
+            } else {
+                format!("{held} messages waited")
+            }
+        );
         let reason = match scope {
             LIMIT_PAIR => {
                 let mut parts = scope_id.split('\n');

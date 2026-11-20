@@ -44,7 +44,9 @@ digest.
 
 SuperTag sends one alert per operator inbox item: approval requests, an Objective's questions,
 budget warnings, deadline and budget limits, uncertain **Task Attempts** (single executions of a
-Task), and MCP logins a Task waits on. It groups ordinary alerts for
+Task), MCP logins a Task waits on, and wake limits that held back Tags' messages. A wake-limit
+alert names the Tags, the limit, and how many messages wait. It goes out once when the limit trips,
+not once per held message, and points to `supertag get inbox-item --kind wake-limit`. It groups ordinary alerts for
 60 seconds; a digest shows an `…and N more` line when it omits items. A blocking approval goes
 out immediately. There are no quiet hours. Progress reports and ordinary reviews do not send an
 alert. Failed deliveries retry in the background, up to five attempts.

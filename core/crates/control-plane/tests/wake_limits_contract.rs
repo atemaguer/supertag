@@ -13,6 +13,7 @@ use supertag_protocol::v2::*;
 use uuid::Uuid;
 
 const OPERATOR: &str = "operator:alice";
+const WEBHOOK: &str = "webhook:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const HOUR_MS: i64 = 3_600_000;
 /// The start of an hour window, so a test step never crosses one by accident.
 const NOW: i64 = 527_778 * HOUR_MS;
@@ -133,6 +134,38 @@ impl Fixture {
             .await
             .unwrap()
             .items
+    }
+
+    /// Leases the next operator notification for a webhook, as a Gateway would, and marks it
+    /// delivered.
+    async fn notification(&self) -> Option<OperatorNotification> {
+        let response = self
+            .store
+            .claim_operator_notification(
+                OPERATOR,
+                &ClaimOperatorNotificationRequest {
+                    destinations: vec![NotificationDestination {
+                        key: WEBHOOK.into(),
+                        provider: NotificationProvider::Webhook as i32,
+                    }],
+                },
+            )
+            .await
+            .unwrap();
+        let notification = response.notification?;
+        self.store
+            .settle_operator_notification(
+                OPERATOR,
+                &SettleOperatorNotificationRequest {
+                    notification_id: notification.notification_id.clone(),
+                    lease_token: response.lease_token,
+                    delivered: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        Some(notification)
     }
 
     async fn set_limits(&self, operation: &str, limits: TeamWakeLimits) -> Team {
@@ -285,11 +318,28 @@ async fn mutual_limit(f: &Fixture) {
     f.finish(&a1).await;
     f.settle(DEBOUNCE_MS).await;
     let b2 = f.claim("b").await;
+    assert!(f.notification().await.is_none(), "no limit has tripped");
     let held = f
         .send(&b2, "a", "Reply three", MessageKind::Note)
         .await
         .unwrap();
     assert!(held.message.is_some(), "the message is stored");
+    // The trip notifies the operator once, with the Tags, the limit, and what it holds.
+    let notified = f.notification().await.expect("a wake-limit notification");
+    assert_eq!(notified.kinds, ["wake_limit"]);
+    assert!(
+        notified.text.starts_with(
+            "SuperTag needs you: Wake limit: a and b hit the mutual wake limit (3) for Task "
+        ) && notified
+            .text
+            .contains("; 1 message waited, the first from Tag b to Tag a\n"),
+        "{}",
+        notified.text
+    );
+    assert_eq!(
+        notified.command,
+        "supertag get inbox-items --kind wake-limit"
+    );
     assert!(
         held.wake_deferred
             .starts_with("a and b already woke each other 3 times for Task ")
@@ -312,6 +362,13 @@ async fn mutual_limit(f: &Fixture) {
     f.finish(&b2).await;
     f.settle(DEBOUNCE_MS).await;
     assert!(f.try_claim().await.is_none(), "the question waits");
+    // A second held message is the same trip: no second notification, even after the batching
+    // window.
+    f.clock.fetch_add(180_000, Ordering::SeqCst);
+    assert!(
+        f.notification().await.is_none(),
+        "one notification per trip"
+    );
     let pending = f.store.metrics().await.unwrap().mailbox.unwrap().pending;
     assert_eq!(pending, 1, "one deferred wake waits");
 
@@ -322,7 +379,9 @@ async fn mutual_limit(f: &Fixture) {
         items[0]
             .reason
             .starts_with("a and b hit the mutual wake limit (3) for Task ")
-            && items[0].reason.contains("; 2 messages waited."),
+            && items[0]
+                .reason
+                .contains("; 2 messages waited, the first from Tag b to Tag a."),
         "{}",
         items[0].reason
     );
@@ -381,7 +440,7 @@ async fn hourly_limit_and_held_notes(f: &Fixture) {
     assert_eq!(items.len(), 2);
     assert!(items.iter().any(|item| {
         item.reason
-            == "Tag d hit the hourly wake limit (1) for wakes by other Tags; 1 message waited. They are delivered late, never dropped. Raise the Team's spec.wakeLimits if this is expected."
+            == "Tag d hit the hourly wake limit (1) for wakes by other Tags; 1 message waited, the first from Tag a to Tag d. They are delivered late, never dropped. Raise the Team's spec.wakeLimits if this is expected."
     }));
 
     // The next hour b's note wakes d, and d's turn shows a's held note too.
