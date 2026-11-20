@@ -249,7 +249,11 @@ supertag tui --gateway team
 release, and refuses one from another release. `--binary PATH` or `SUPERTAG_TUI_BINARY` names
 another executable. The terminal UI connects on its own: to the Gateway `--gateway` names (a saved
 name, or a URL with the Operator Token in `SUPERTAG_OPERATOR_TOKEN`), else to the services
-`supertag up` runs from `--state-directory`, `SUPERTAG_STATE_DIR`, or `~/.supertag`. The CLI
+`supertag up` runs from `--state-directory`, `SUPERTAG_STATE_DIR`, or `~/.supertag`. Without
+`--gateway`, when SuperTag is set up on this machine but its services are stopped, it starts them
+with `supertag up` first, as the desktop app does; when they run an older release, it offers to
+restart them with this one (`supertag down`, then `supertag up`), which interrupts their running
+Tasks; and when SuperTag is not set up, it says to run `supertag init` in a repository. The CLI
 passes it no credential. Outside a terminal, plain `supertag` prints the help instead; when the
 terminal UI isn't installed, the help ends with a line that says so.
 

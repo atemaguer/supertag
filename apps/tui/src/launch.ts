@@ -22,7 +22,8 @@ export type Parsed =
 export const USAGE = `Usage: supertag-tui [--gateway URL|NAME|local] [--state-directory DIR]
 
 The SuperTag terminal UI. Without --gateway it opens the Gateway used last, else the local
-Gateway \`supertag up\` runs, else the first saved Gateway, else the Gateway chooser.
+Gateway \`supertag up\` runs (starting it when it was set up but is stopped), else the first
+saved Gateway, else the Gateway chooser.
 
   --gateway URL|NAME|local  A Gateway URL (its token from SUPERTAG_OPERATOR_TOKEN), the name of a
                             Gateway saved with \`supertag connect\` or in the desktop app, or local
@@ -54,9 +55,9 @@ export function parseArguments(args: readonly string[]): Parsed {
 }
 
 /**
- * The `supertag` CLI the terminal UI asks for the local Gateway and saves Gateways with:
- * `SUPERTAG_CLI`, else the one beside this executable (as the release archive installs them),
- * else `supertag` on PATH.
+ * The `supertag` CLI the terminal UI asks for the local Gateway, starts it with, and saves
+ * Gateways with: `SUPERTAG_CLI`, else the one beside this executable (as the release archive
+ * installs them), else `supertag` on PATH.
  */
 export function cliPath(env: NodeJS.ProcessEnv = process.env, execPath = process.execPath) {
   const named = env["SUPERTAG_CLI"];

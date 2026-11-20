@@ -29,6 +29,21 @@ const FIELDS = [
 ] as const;
 type Field = (typeof FIELDS)[number]["key"];
 
+/** Local's row until the CLI says where the local Gateway runs. */
+const LOOKING: GatewayEntry = {
+  id: "local",
+  name: "Local",
+  detail: "Looking for the local Gateway…",
+  kind: "local",
+  available: false,
+};
+
+/** The chooser's rows: the launch URL, Local, then the saved Gateways. */
+function withLocal(saved: GatewayEntry[], local: GatewayEntry): GatewayEntry[] {
+  const launch = saved.filter((entry) => entry.kind === "launch");
+  return [...launch, local, ...saved.filter((entry) => entry.kind !== "launch")];
+}
+
 export function Gateways({
   connections,
   current,
@@ -68,12 +83,32 @@ export function Gateways({
     }
   }
   useEffect(() => {
+    // The saved Gateways list at once; Local's row says it is looking until the CLI answers,
+    // which `findLocal` bounds.
     let stopped = false;
-    void connections.entries().then((listed) => {
-      if (stopped) return;
+    let saved: GatewayEntry[] | undefined;
+    let local = LOOKING;
+    let placed = false;
+    const show = () => {
+      if (stopped || saved === undefined) return;
+      const listed = withLocal(saved, local);
       setEntries(listed);
       const at = listed.findIndex((entry) => entry.id === current);
-      if (at >= 0) setIndex(at);
+      if (at >= 0 && !placed) {
+        placed = true;
+        setIndex(at);
+      }
+    };
+    void connections
+      .savedEntries()
+      .catch(() => [])
+      .then((found) => {
+        saved = found;
+        show();
+      });
+    void connections.localEntry().then((found) => {
+      local = found;
+      show();
     });
     return () => {
       stopped = true;
@@ -132,6 +167,10 @@ export function Gateways({
     }
   });
   const inner = Math.max(20, width - 4);
+  // Why Local can't be opened, in full: its row has room for the start of it only.
+  const localRow = list.find((entry) => entry.kind === "local");
+  const localProblem =
+    localRow && !localRow.available && localRow !== LOOKING ? localRow.detail : undefined;
   return (
     <box
       width={width}
@@ -176,6 +215,10 @@ export function Gateways({
               </span>
             </text>
           ))}
+          {localProblem ? <text fg={color.muted}>Local: {safe(localProblem)}</text> : null}
+          {entries !== undefined && list.every((entry) => entry.kind === "local") ? (
+            <text fg={color.muted}>No Gateways saved: a adds one with its URL and a token.</text>
+          ) : null}
           {problem ? <text fg={color.warning}>{safe(problem)}</text> : null}
           {forgetting ? (
             <text fg={color.warning}>

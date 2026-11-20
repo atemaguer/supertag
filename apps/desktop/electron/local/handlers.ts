@@ -5,24 +5,21 @@
  */
 
 import {
+  checkSetup,
   type LocalDiscovery,
+  localUpgrade,
+  type Peer,
   readLocalGateway,
+  restartLocal,
   SHARED_GATEWAY_HARNESS_MEMORY,
+  setUpLocal,
+  shouldStart,
+  startLocal,
 } from "@supertag/client/node";
 import type { SetupCheck } from "../../src/gateway";
 import type { Handlers } from "../ipc";
 import { type AppIdentity, environment, installCommand, usableCli } from "./cli";
-import { checkWith, setUpWith } from "./onboarding";
-import {
-  addWorkspace,
-  deleteHarnessMemory,
-  harnessMemory,
-  localUpgrade,
-  type Peer,
-  restart,
-  shouldStart,
-  up,
-} from "./services";
+import { addWorkspace, deleteHarnessMemory, harnessMemory } from "./services";
 
 export interface LocalDependencies {
   app: AppIdentity;
@@ -74,7 +71,7 @@ export function localHandlers(deps: LocalDependencies): Pick<Handlers, LocalChan
       const local = await discover();
       if (!shouldStart(local) || local === undefined) return false;
       const { cli, path } = await usableCli(app);
-      await up(cli, local.stateDirectory, path);
+      await startLocal(cli, local.stateDirectory, { path });
       return true;
     },
 
@@ -93,7 +90,7 @@ export function localHandlers(deps: LocalDependencies): Pick<Handlers, LocalChan
       // stopped; a remote Gateway, or a local one of this or a newer release, is never touched.
       const restartable = local.running ? (await upgrade(local)) !== null : shouldStart(local);
       if (!restartable) throw NOT_OLDER;
-      await restart(cli, local.stateDirectory, path, (step) => progress.send(step));
+      await restartLocal(cli, local.stateDirectory, { path }, (step) => progress.send(step));
     },
 
     async checkSetup({ directory, harness }) {
@@ -106,12 +103,18 @@ export function localHandlers(deps: LocalDependencies): Pick<Handlers, LocalChan
         return { cli: null, problem: String(problem), install } satisfies SetupCheck;
       }
       // The CLI's own JSON, passed on as is.
-      return (await checkWith(found.cli, found.path, install, directory, harness)) as SetupCheck;
+      return (await checkSetup(
+        found.cli,
+        { path: found.path },
+        install,
+        directory,
+        harness,
+      )) as SetupCheck;
     },
 
     async setUpSupertag({ directory, harness }) {
       const { cli, path } = await usableCli(app);
-      return setUpWith(cli, path, directory, harness);
+      return setUpLocal(cli, { path }, directory, harness);
     },
 
     async addLocalWorkspace({ connectionId }) {

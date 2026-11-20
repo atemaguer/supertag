@@ -41,6 +41,7 @@ export async function run(launch: Launch, version: string) {
     env,
     cli: cliPath(env),
     buildVersion: version === "dev" ? "supertag-tui" : version,
+    release: version === "dev" ? undefined : version,
     ...(launchUrl ? { launchUrl } : {}),
   });
   const file = preferencesFile(env);

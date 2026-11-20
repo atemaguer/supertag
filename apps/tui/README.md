@@ -62,7 +62,9 @@ client, transcript rules and React hooks with the desktop app through `@supertag
   proposed to it; `x` deletes one), Network (operators only), Schedules (`p` pauses or resumes,
   `x` deletes), Open inbox, Gateways, Keyboard shortcuts. Esc or Ctrl-K closes it.
 - **Gateways** (Ctrl-P): Local, and the Gateways saved with `supertag connect` or in the desktop
-  app. `a` adds one with `supertag connect`: a name, the URL, an Operator Token or a client Auth
+  app. The saved ones list at once; Local's row says where it runs, that it is stopped (Enter
+  starts it), that SuperTag is not set up here, or why the CLI could not say (it gives up after
+  12 seconds). `a` adds one with `supertag connect`: a name, the URL, an Operator Token or a client Auth
   Key (which enrolls this device as `client:HOSTNAME`), and optional TLS files (Ctrl-U clears the
   masked credential). `s` saves the Gateway the launch named (`--gateway URL`) the same way, and
   `e` changes a saved one's credential or TLS files (one saved in the desktop app is changed
@@ -107,10 +109,20 @@ There is no handover from the CLI: the terminal UI finds its own connection. In 
    (written by `supertag connect`, with its TLS files) or `<config>/ai.supertag.desktop/gateways.json`
    (the desktop app's). `<config>` is `~/Library/Application Support` on macOS, else an absolute
    `$XDG_CONFIG_HOME`, else `~/.config`, as the CLI computes it.
-4. Nothing: the Gateway used last, else Local when it runs, else the first saved Gateway, else
-   the Gateway chooser.
+4. Nothing (or only `--state-directory`): the Gateway used last, else Local when it runs or was
+   set up, else the first saved Gateway, else Local when SuperTag is not set up here, else the
+   Gateway chooser.
 
-The CLI it runs (for `__local-gateway` and `connect`) is `SUPERTAG_CLI`, else `supertag` beside
+Without `--gateway`, Local follows the desktop app's startup (`apps/desktop/src/startup.ts`,
+sharing `@supertag/client/node`'s `local-services.ts`): services that were set up but are
+stopped start with `supertag up --state-directory DIR` under "Starting SuperTag…", and a failed
+start shows what `up` printed (`r` tries again); a local Gateway of an older release is offered
+"Restart SuperTag with VERSION" (`supertag down`, then `supertag up`), confirmed first because
+its running Tasks are interrupted; when SuperTag is not set up, it says to run `supertag init` in
+a repository, and connects once Local runs. The chooser opens a stopped Local by starting it.
+`--gateway local` never starts the services.
+
+The CLI it runs (for `__local-gateway`, `up`, `down` and `connect`) is `SUPERTAG_CLI`, else `supertag` beside
 the binary, else `supertag` on `PATH`. It reads `SUPERTAG_STATE_DIR`, `HOME`, `XDG_CONFIG_HOME`,
 `XDG_CACHE_HOME`, `TERM`, `COLORTERM`, `TERM_PROGRAM`, `TMUX` and `SUPERTAG_TUI_NOTIFY`; a
 launcher passes the environment through.

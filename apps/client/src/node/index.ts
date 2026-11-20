@@ -10,6 +10,7 @@ export * from "./endpoint";
 export * from "./errors";
 export * from "./harness-memory";
 export * from "./local";
+export * from "./local-services";
 export * from "./profiles";
 export * from "./review";
 export {
