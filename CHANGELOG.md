@@ -22,6 +22,10 @@ within the pre-1.0 compatibility policy described in
   `/new`, `/inbox`, `/work`, `/memory`, `/schedules`, `/network`, `/activity`, `/gateways`,
   `/fold`, `/help`, and `/quit`. The palette (Ctrl-K) and the Keyboard shortcuts screen list the
   same commands with their keys.
+- The desktop app names its SuperTag release at the foot of the sidebar, and the Gateway's when
+  it runs another (`SuperTag 0.3.4 · Gateway 0.3.3`); hovering shows both and the protocol
+  version. `supertag-ai`'s Gateway client gains `client.negotiation()`, which returns the protocol
+  version and the Gateway's release.
 
 ### Changed
 

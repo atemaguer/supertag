@@ -42,7 +42,7 @@ require changes at any time.
 
 | Import | Level | Main exports |
 | --- | --- | --- |
-| `supertag-ai/gateway-client` | Experimental | `createGatewayClient` (native gRPC or a `ws://`/`wss://` WebSocket tunnel), operator service clients, and their `supertag.runtime.v2` protobuf requests, responses, and streams; `ProtocolMismatchError`, `PROTOCOL_VERSIONS`, `PrincipalRole` |
+| `supertag-ai/gateway-client` | Experimental | `createGatewayClient` (native gRPC or a `ws://`/`wss://` WebSocket tunnel), operator service clients, and their `supertag.runtime.v2` protobuf requests, responses, and streams; `Negotiation`, `ProtocolMismatchError`, `PROTOCOL_VERSIONS`, `PrincipalRole` |
 | `supertag-ai/harness` | Experimental | `openHarness`, exact-request receipt retries, Worker-managed effect receipts (`effects`, `EffectReceiptState`), Task event kinds (`TaskEventKind`), and execution-scoped `supertag.runtime.v2` clients |
 
 The Python SDK (`supertag` on PyPI) has two Experimental modules, both installed with the

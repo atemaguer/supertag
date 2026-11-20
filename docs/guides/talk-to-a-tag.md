@@ -69,7 +69,8 @@ turn failed, was cancelled, or needs attention.
 In the desktop app, drag the sidebar's edge to resize it, or past its narrowest to fold it into a
 rail of avatars; ⌘B does the same. The Task activity pane resizes from its edge too. ⌘1 to ⌘9 open
 the Tags in order, ⌘↑ and ⌘↓ the previous and next, and ⌘N creates a Tag; use Ctrl in place of
-⌘ outside macOS.
+⌘ outside macOS. The foot of the sidebar names the app's SuperTag release, and the Gateway's
+when it runs another one; hover over it to see both and the protocol version they agreed.
 
 To find a Tag, a message, or a setting, press ⌘K or the search button beside **+** at the top of
 the sidebar. The search lists your **Tags**, each with its latest message, and **Actions**: New

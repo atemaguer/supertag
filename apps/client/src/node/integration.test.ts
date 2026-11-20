@@ -31,6 +31,7 @@ import {
 } from "../../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/runtime_pb";
 import type { FollowUpdate, WatchUpdate } from "../model/gateway";
 import { entryPath } from "./cache";
+import { endpoint } from "./endpoint";
 import {
   baseEnv,
   CLI,
@@ -44,6 +45,7 @@ import {
 } from "./fixture";
 import { readLocalGateway } from "./local";
 import { createGatewayClient, PROTOCOL_VERSIONS } from "./sdk";
+import { Session } from "./session";
 import { GatewayState, type GatewayStateOptions, type Subscriber } from "./state";
 import { runWatch } from "./watch";
 
@@ -161,6 +163,11 @@ describe.skipIf(CLI === undefined)(
         const first = await client.saveGateway(stack.url, "Engineering", "operator-test-token");
         const id = first.connectionId;
         expect(first.principal).toMatch(/^operator:/u);
+        // The Gateway names its release while negotiating: the built CLI's own.
+        expect(first.release).toEqual({
+          build: expect.stringMatching(/^\d+\.\d+\.\d+/u),
+          protocol: PROTOCOL_VERSIONS[0],
+        });
         const tags = await client.tags(id);
         expect(tags).toHaveLength(1);
         expect(tags[0]).toMatchObject({ tagId: "engineer", harnessKind: "codex", lead: true });
@@ -660,6 +667,19 @@ describe.skipIf(CLI === undefined)(
 );
 
 /** A scripted Watch, as `watch/tests.rs` serves it: a token to resume from, then a resync. */
+it("keeps the release a compatible Gateway names while negotiating", async () => {
+  const fake = await negotiationServer({ build: "0.3.3", versions: [...PROTOCOL_VERSIONS] });
+  try {
+    const session = await Session.connect(endpoint(fake.url), "operator-token", {
+      buildVersion: "test",
+    });
+    session.close();
+    expect(session.release).toEqual({ build: "0.3.3", protocol: PROTOCOL_VERSIONS[0] });
+  } finally {
+    fake.server.close();
+  }
+});
+
 describe("the Watch against a scripted Gateway", () => {
   it("resumes and stops the real stream without a unary deadline", async () => {
     const tokens: string[] = [];

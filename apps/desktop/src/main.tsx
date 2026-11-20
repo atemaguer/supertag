@@ -6,6 +6,7 @@ import {
   type GatewayActivation,
   type GatewayList,
   type GatewayProfile,
+  type GatewayRelease,
   LOCAL_GATEWAY,
   type LocalUpgrade,
   type RestartStep,
@@ -21,6 +22,7 @@ import { GatewaySelector, gatewayActions } from "./components/gateway-selector";
 import { LocalUpgradeOffer } from "./components/local-upgrade";
 import { Onboarding } from "./components/onboarding";
 import type { SidebarMode } from "./components/sidebar";
+import { VersionLabel } from "./components/version";
 import { EmptyWorkspace, Workspace, WorkspaceShell } from "./components/workspace";
 import { gatewaySession, nativeGateway, nativeSetup, type SetupCheck } from "./gateway";
 import { useNotificationLevel } from "./lib/notifications";
@@ -37,6 +39,8 @@ interface Connection {
   id?: string;
   origin?: string;
   principal?: string;
+  /** The Gateway's release, which the sidebar names when it differs from the app's. */
+  release?: GatewayRelease;
   /** Creates Tags, when this connection's principal may. */
   tagAdmin?: TagAdmin;
 }
@@ -82,7 +86,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
   }, []);
 
   const activate = useCallback(
-    ({ gateways, origin, connectionId, tags, principal }: GatewayActivation) => {
+    ({ gateways, origin, connectionId, tags, principal, release }: GatewayActivation) => {
       localAddress.current = origin === LOCAL_GATEWAY ? gateways.local?.origin : undefined;
       setGateways(gateways);
       setConnection({
@@ -92,6 +96,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
         id: connectionId,
         origin,
         principal,
+        release,
         tagAdmin: tagAdminRefusal(principal)
           ? undefined
           : tagAdminSession(connectionId, origin === LOCAL_GATEWAY),
@@ -256,17 +261,20 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
   });
 
   const selector = (mode: SidebarMode) => (
-    <GatewaySelector
-      {...menu}
-      wide={mode === "expanded"}
-      principal={connection?.principal}
-      trigger={trigger}
-      onOpen={() => {
-        if (pendingSwitch.current || connection?.preview) return;
-        // A local Gateway started or stopped since the list was read shows as it is now.
-        nativeGateway.list().then(setGateways, () => {});
-      }}
-    />
+    <>
+      <GatewaySelector
+        {...menu}
+        wide={mode === "expanded"}
+        principal={connection?.principal}
+        trigger={trigger}
+        onOpen={() => {
+          if (pendingSwitch.current || connection?.preview) return;
+          // A local Gateway started or stopped since the list was read shows as it is now.
+          nativeGateway.list().then(setGateways, () => {});
+        }}
+      />
+      <VersionLabel wide={mode === "expanded"} gateway={connection?.release} />
+    </>
   );
 
   return (
@@ -366,13 +374,17 @@ async function start() {
   if (!target) throw new Error("Desktop root is missing");
   let initialConnection: Connection | undefined;
   if (import.meta.env.DEV && new URLSearchParams(location.search).has("preview")) {
-    const { previewGateway, previewTagAdmin, withoutLead } = await import("./preview");
+    const { previewGateway, previewRelease, previewTagAdmin, withoutLead } = await import(
+      "./preview"
+    );
     // `?preview&nolead` shows a Gateway without a lead Tag.
     if (new URLSearchParams(location.search).has("nolead")) withoutLead();
     initialConnection = {
       gateway: previewGateway,
       tags: await previewGateway.tags(),
       preview: true,
+      // `?preview&gateway=0.3.3` shows a Gateway of another release.
+      release: previewRelease(new URLSearchParams(location.search).get("gateway")),
       tagAdmin: previewTagAdmin,
     };
   }

@@ -585,6 +585,21 @@ button:disabled {
   height: 36px;
   border-radius: 11px;
 }
+/* The releases, small and muted under the Gateway menu. */
+.sidebar-version {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.3;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+  user-select: none;
+}
+.sidebar-version[data-wide="false"] span[aria-hidden] {
+  display: flex;
+  flex-direction: column;
+}
 .shell[data-sidebar="rail"] .sidebar-bottom {
   padding-inline: 0;
 }

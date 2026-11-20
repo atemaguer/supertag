@@ -409,6 +409,13 @@ export interface GatewayList {
   local?: LocalGateway;
 }
 
+/** The Gateway a connection reached: its SuperTag release and the protocol version agreed. */
+export interface GatewayRelease {
+  /** Such as `0.3.4`; `unknown` when the Gateway named none. */
+  build: string;
+  protocol: number;
+}
+
 export interface GatewayActivation {
   gateways: GatewayList;
   /** The saved origin connected to, or `local` for the local Gateway. */
@@ -417,6 +424,7 @@ export interface GatewayActivation {
   tags: Tag[];
   /** Whom the saved credential acts as, such as `operator:local` or `client:alice-laptop`. */
   principal: string;
+  release: GatewayRelease;
 }
 
 /** The scope of a connection's cached conversations: its Control Plane and principal. */

@@ -13,7 +13,9 @@ in the state directory (`SUPERTAG_STATE_DIR`, else `~/.supertag`), its setup scr
 launches it connects to the local Gateway, and starts the local services with `supertag up` when
 they are stopped. It runs only a `supertag` of its own version: the copy bundled in the Mac app,
 else the one on your login shell's `PATH` or in `~/.local/bin`. When it finds none, or another
-version, it names the install command for its own release.
+version, it names the install command for its own release. The foot of the sidebar names the
+app's release, from `package.json` as `app.getVersion()` reads it, and the Gateway's when it
+names another while negotiating.
 
 ## Develop
 

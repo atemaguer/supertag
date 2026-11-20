@@ -51,7 +51,8 @@ Auth Key), `memories`, `networkLogs`, `schedules`, and `taskFiles`. A Gateway fr
 release that speaks none of this client's protocol versions (`PROTOCOL_VERSIONS`) rejects every
 call with `ProtocolMismatchError`, whose `peerVersions` and `peerBuild` name the Gateway's
 release when it gave them. `client.negotiate()` checks this without sending the token, and
-`buildVersion` names your application's release to the Gateway.
+`client.negotiation()` also returns the Gateway's release (`gatewayBuild`). `buildVersion` names
+your application's release to the Gateway.
 
 Use Node.js 22.13.0 or newer. SuperTag is below version 1.0; the
 [API stability policy](https://github.com/atemaguer/supertag/blob/main/docs/reference/api-stability.md)

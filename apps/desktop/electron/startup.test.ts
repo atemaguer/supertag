@@ -106,6 +106,7 @@ const connected: GatewayActivation = {
   connectionId: "1",
   tags: [],
   principal: "operator:local",
+  release: { build: "0.3.4", protocol: 7 },
 };
 
 async function first(handlers: ReturnType<typeof table>) {

@@ -1,12 +1,14 @@
 import type {
   Conversation,
   Gateway,
+  GatewayRelease,
   HarnessMemory,
   Message,
   Tag,
   TagAdmin,
   TaskEvent,
 } from "@supertag/client/model";
+import { APP_VERSION } from "./components/version";
 
 const tags: Tag[] = [
   {
@@ -321,4 +323,9 @@ export const previewTagAdmin: TagAdmin = {
 /** Clears the preview's lead Tag, to show the sidebar without one. */
 export function withoutLead() {
   for (const tag of tags) tag.lead = false;
+}
+
+/** The sample Gateway's release: the app's own, or `build` when the preview names another. */
+export function previewRelease(build?: string | null): GatewayRelease {
+  return { build: build || APP_VERSION, protocol: 7 };
 }

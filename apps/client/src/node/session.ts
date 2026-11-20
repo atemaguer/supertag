@@ -4,7 +4,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import type { Tag } from "../../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/runtime_pb";
-import type { Tag as WindowTag } from "../model/gateway";
+import type { GatewayRelease, Tag as WindowTag } from "../model/gateway";
 import { tag } from "./convert";
 import type { Target } from "./endpoint";
 import { checkBearer, INCOMPATIBLE, rpc, rpcError, statusOf, UNREACHABLE } from "./errors";
@@ -64,8 +64,15 @@ export function connectError(error: unknown): string {
   return UNREACHABLE;
 }
 
+/** What a session knows of a Gateway it has not negotiated with yet. */
+const UNNEGOTIATED: GatewayRelease = { build: "unknown", protocol: 0 };
+
 export class Session {
-  constructor(readonly client: GatewayClient) {}
+  constructor(
+    readonly client: GatewayClient,
+    /** The Gateway's release, as it named itself while negotiating. */
+    readonly release: GatewayRelease = UNNEGOTIATED,
+  ) {}
 
   /** Connects and negotiates the protocol, which the Gateway requires before any call. */
   static async connect(
@@ -88,13 +95,15 @@ export class Session {
     } catch {
       throw UNREACHABLE;
     }
+    let release: GatewayRelease;
     try {
-      await client.negotiate();
+      const agreed = await client.negotiation();
+      release = { build: agreed.gatewayBuild, protocol: agreed.protocolVersion };
     } catch (error) {
       client.close();
       throw connectError(error);
     }
-    return new Session(client);
+    return new Session(client, release);
   }
 
   close() {

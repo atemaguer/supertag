@@ -396,6 +396,14 @@ function graphic(value: string, limit: number): boolean {
   return value.length > 0 && value.length <= limit && /^[\x21-\x7e]+$/u.test(value);
 }
 
+/** What the Gateway agreed to while negotiating. */
+export interface Negotiation {
+  /** The protocol version every call names. */
+  readonly protocolVersion: number;
+  /** The Gateway's SuperTag release, such as `0.3.4`; `unknown` when it named none. */
+  readonly gatewayBuild: string;
+}
+
 /**
  * Connect operator applications to the SuperTag Gateway over gRPC. The first call negotiates the
  * SuperTag protocol version, which every call then names; the Gateway refuses calls without it.
@@ -428,7 +436,7 @@ export function createGatewayClient(options: GatewayClientOptions) {
   const authorization = `Bearer ${options.token}`;
   let closed = false;
   // The exchange carries no credentials.
-  const negotiation = createClient(
+  const negotiator = createClient(
     ProtocolNegotiation,
     createGrpcTransport({
       baseUrl: endpoint.origin.origin,
@@ -438,13 +446,13 @@ export function createGatewayClient(options: GatewayClientOptions) {
       interceptors: [tunnelFailures],
     }),
   );
-  let negotiated: Promise<number> | undefined;
-  const protocolVersion = () => {
+  let negotiated: Promise<Negotiation> | undefined;
+  const negotiateOnce = () => {
     if (closed) return Promise.reject(new Error("Gateway client is closed"));
     negotiated ??= (async () => {
-      let answer: Awaited<ReturnType<typeof negotiation.negotiate>>;
+      let answer: Awaited<ReturnType<typeof negotiator.negotiate>>;
       try {
-        answer = await negotiation.negotiate(
+        answer = await negotiator.negotiate(
           {
             role: ServiceRole.CLIENT,
             protocolVersions: [...PROTOCOL_VERSIONS],
@@ -471,7 +479,10 @@ export function createGatewayClient(options: GatewayClientOptions) {
           versions: versions.length > 0 ? versions : [answer.protocolVersion],
         });
       }
-      return answer.protocolVersion;
+      return {
+        protocolVersion: answer.protocolVersion,
+        gatewayBuild: printable(answer.buildVersion),
+      };
     })().catch((error: unknown) => {
       negotiated = undefined;
       throw error;
@@ -487,7 +498,7 @@ export function createGatewayClient(options: GatewayClientOptions) {
       (next) => async (request) => {
         if (closed) throw new Error("Gateway client is closed");
         request.header.set("authorization", authorization);
-        request.header.set(PROTOCOL_HEADER, String(await protocolVersion()));
+        request.header.set(PROTOCOL_HEADER, String((await negotiateOnce()).protocolVersion));
         try {
           return await next(request);
         } catch (error) {
@@ -528,8 +539,12 @@ export function createGatewayClient(options: GatewayClientOptions) {
      * on their own; this tells whether the Gateway is reachable and compatible before any is
      * made. A Gateway from another release rejects it with {@link ProtocolMismatchError}.
      */
-    negotiate(): Promise<number> {
-      return protocolVersion();
+    async negotiate(): Promise<number> {
+      return (await negotiateOnce()).protocolVersion;
+    },
+    /** Negotiates as {@link negotiate} does, and also returns the Gateway's release. */
+    negotiation(): Promise<Negotiation> {
+      return negotiateOnce();
     },
     close() {
       closed = true;

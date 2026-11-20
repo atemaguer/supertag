@@ -341,6 +341,7 @@ export class GatewayState {
         connectionId,
         tags,
         principal,
+        release: session.release,
       };
     } catch (error) {
       if (this.session !== session) session.close();
