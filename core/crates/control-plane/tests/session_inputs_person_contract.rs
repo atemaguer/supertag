@@ -271,9 +271,9 @@ async fn conversation_messages(f: &Fixture) {
     f.finish(&attempt).await;
 }
 
-/// Live input acts for the principal that queued it. One from another requester than the running
-/// Task's is recorded as a Rejected offer and runs as its own turn; a claim never joins it to a
-/// message of another requester.
+/// Live input acts for the principal that queued it. An operator who sends input to a running Task
+/// chose that Task, so input from another requester is still offered to it; a claim never joins a
+/// message to one of another requester.
 async fn live_input_requesters(f: &Fixture) {
     let submitted = f
         .store
@@ -313,7 +313,11 @@ async fn live_input_requesters(f: &Fixture) {
     assert_eq!(f.inputs_of(&own.follower_task_id).await, 1);
 
     let other = f.store.queue_input(BOB, &queue("docs")).await.unwrap();
-    assert_eq!(other.state(), LiveInputState::Rejected, "another requester");
+    assert_eq!(
+        other.state(),
+        LiveInputState::Pending,
+        "an operator chose this Task"
+    );
     assert_eq!(other.task_id, submitted.task_id);
     let row = f.input(&other.follower_task_id).await;
     assert_eq!((row.requester.as_str(), row.task_id), (BOB, None));

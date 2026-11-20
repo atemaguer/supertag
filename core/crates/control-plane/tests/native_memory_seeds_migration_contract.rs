@@ -132,7 +132,10 @@ async fn contract(url: String) {
         "every note that took effect was announced"
     );
     let store = Store::open(&url).await.unwrap();
-    assert_eq!(store.migrated(), Some((120, 121)));
+    // From the version before the seeds to the newest; later migrations may follow 0121.
+    let (from, to) = store.migrated().unwrap();
+    assert_eq!(from, 120);
+    assert!(to >= 121, "migrated to {to}");
     let pool = AnyPool::connect(&url).await.unwrap();
     let expected = vec![
         (

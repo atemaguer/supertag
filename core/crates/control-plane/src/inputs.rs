@@ -101,7 +101,7 @@ impl Store {
             now,
         )
         .await?;
-        let input = offer_in(&mut tx, &request.task_id, &attempt_id, &own)
+        let input = offer_in(&mut tx, &request.task_id, &attempt_id, &own, true)
             .await?
             .ok_or_else(|| {
                 StoreError::FailedPrecondition(
@@ -368,11 +368,14 @@ pub(crate) async fn can_claim_in(
 /// running Task's policy differs: the message waits for its own turn. A message from another
 /// requester, or one whose reply another audience sees, is recorded as a Rejected offer: a run
 /// binds only inputs that share its requester and reply audience, so it too waits for its own turn.
+/// An operator who sends input to one running Task chose that Task, so `chosen` skips the
+/// requester check; the policy and audience checks still apply.
 pub(crate) async fn offer_in(
     tx: &mut Transaction<'_, Any>,
     task_id: &str,
     attempt_id: &str,
     own: &InputRow,
+    chosen: bool,
 ) -> Result<Option<LiveInput>> {
     let Some(follower) = own.admitted_task_id.as_deref() else {
         return Ok(None);
@@ -384,7 +387,7 @@ pub(crate) async fn offer_in(
         return Ok(None);
     }
     let (requester, audience) = session_inputs::requester_of_in(tx, task_id).await?;
-    let state = if requester == own.requester && audience == own.audience {
+    let state = if (chosen || requester == own.requester) && audience == own.audience {
         LiveInputState::Pending
     } else {
         LiveInputState::Rejected
@@ -416,7 +419,7 @@ pub(crate) async fn fold_in(
     };
     let source: String = active.try_get("task_id")?;
     let attempt: String = active.try_get("attempt_id")?;
-    offer_in(tx, &source, &attempt, own).await
+    offer_in(tx, &source, &attempt, own, false).await
 }
 
 /// A batch answers at most this many messages: the claimed Task's and the ones joined to it.
