@@ -410,6 +410,11 @@ enum Command {
         /// Address clients connect to. Port 0 picks a free port. Outside loopback it requires TLS.
         #[arg(long, default_value = "127.0.0.1:0")]
         listen: SocketAddr,
+        /// Serve on this inherited listening socket instead of binding --listen. `supertag up`
+        /// binds the local Gateway's port itself and hands it over, so the port is never free
+        /// between choosing it and serving on it.
+        #[arg(long, hide = true, conflicts_with = "listen")]
+        listen_fd: Option<std::os::fd::RawFd>,
         /// Also accept gRPC carried in a WebSocket on this address, for hosts that only
         /// forward HTTP/1.1. This service's TLS runs inside the tunnel. Its bound address
         /// is reported after the gRPC address.
@@ -1000,6 +1005,7 @@ async fn run(command: Command) -> Result<()> {
         Command::Gateway {
             command: None,
             listen,
+            listen_fd,
             websocket_listen,
             control_plane,
             state_directory,
@@ -1015,6 +1021,10 @@ async fn run(command: Command) -> Result<()> {
             microsoft_teams_state_directory,
             notify,
         } => {
+            let listen = match listen_fd {
+                Some(fd) => GatewayListen::Inherited(inherited_listener(fd)?),
+                None => GatewayListen::Bind(listen),
+            };
             gateway(
                 listen,
                 websocket_listen,
@@ -1600,6 +1610,40 @@ async fn listen_on(address: SocketAddr) -> Result<TcpListener> {
         .map_err(|error| anyhow::anyhow!("could not listen on {address}: {error}"))
 }
 
+/// Where a Gateway serves: an address it binds, or a listener `supertag up` bound and handed over.
+enum GatewayListen {
+    Bind(SocketAddr),
+    Inherited(std::net::TcpListener),
+}
+
+/// Takes the listening socket a supervisor handed this process as descriptor `fd`.
+fn inherited_listener(fd: std::os::fd::RawFd) -> Result<std::net::TcpListener> {
+    use std::os::fd::FromRawFd as _;
+    ensure!(fd > 2, "--listen-fd {fd} names a standard stream");
+    // SAFETY: fstat only writes the buffer it is given; an unopened descriptor fails.
+    let mut status: libc::stat = unsafe { std::mem::zeroed() };
+    ensure!(
+        unsafe { libc::fstat(fd, &mut status) } == 0
+            && status.st_mode & libc::S_IFMT == libc::S_IFSOCK,
+        "--listen-fd {fd} is not an open socket"
+    );
+    // SAFETY: the descriptor is open, a socket, and handed to this process alone; nothing else
+    // in it owns the descriptor, which the listener now closes.
+    let listener = unsafe { std::net::TcpListener::from_raw_fd(fd) };
+    listener
+        .local_addr()
+        .with_context(|| format!("--listen-fd {fd} is not a TCP listener"))?;
+    // Child processes of this Gateway must not inherit it in turn.
+    // SAFETY: F_SETFD on a descriptor this process owns changes only its flags.
+    ensure!(
+        unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } == 0,
+        "mark --listen-fd {fd} close-on-exec: {}",
+        std::io::Error::last_os_error()
+    );
+    listener.set_nonblocking(true)?;
+    Ok(listener)
+}
+
 async fn bind_websocket(address: Option<SocketAddr>) -> Result<Option<TcpListener>> {
     let Some(address) = address else {
         return Ok(None);
@@ -1631,7 +1675,7 @@ struct GatewayConnectors {
 const CLIENT_CONNECTIONS: usize = 8;
 
 async fn gateway(
-    listen: SocketAddr,
+    listen: GatewayListen,
     websocket: Option<SocketAddr>,
     control_plane: String,
     credential_directory: Option<PathBuf>,
@@ -1660,7 +1704,11 @@ async fn gateway(
     };
     // Refuse every call from a peer that skipped protocol negotiation, then forward client calls
     // and Task Attempts' data calls to the Control Plane, which authorizes each as its caller.
-    let mut builder = network::server(listen, websocket)
+    let address = match &listen {
+        GatewayListen::Bind(address) => *address,
+        GatewayListen::Inherited(listener) => listener.local_addr()?,
+    };
+    let mut builder = network::server(address, websocket)
         .await?
         .layer(fence(ServiceRole::Gateway))
         .layer(client_api);
@@ -1746,7 +1794,10 @@ async fn gateway(
     health
         .set_serving::<supertag_protocol::v2::operator_notification_test_server::OperatorNotificationTestServer<supertag_gateway::notifications::TestNotifications>>()
         .await;
-    let listener = listen_on(listen).await?;
+    let listener = match listen {
+        GatewayListen::Bind(address) => listen_on(address).await?,
+        GatewayListen::Inherited(listener) => TcpListener::from_std(listener)?,
+    };
     outln!("{}", listener.local_addr()?);
     let tunnel = bind_websocket(websocket).await?;
     if let Some((_, Some(listener))) = &slack {

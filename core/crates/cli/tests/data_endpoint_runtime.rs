@@ -40,6 +40,8 @@ database_tests! {
     a_workers_data_calls_reach_the_control_plane_through_the_gateway;
     #[tokio::test]
     an_unreachable_data_endpoint_fails_the_attempt_once_and_names_it;
+    #[tokio::test]
+    a_gateway_serves_on_the_listener_its_supervisor_handed_it;
 }
 
 /// A Control Plane that names `data_endpoint` to Worker Hosts, and a Gateway in front of it.
@@ -53,6 +55,18 @@ struct Services {
 
 impl Services {
     async fn start(database: &str, data_endpoint: &str) -> Result<Self> {
+        Self::start_with(database, data_endpoint, |gateway| {
+            gateway.args(["--listen", "127.0.0.1:0"]);
+        })
+        .await
+    }
+
+    /// Like `start`, with `listen` choosing where the Gateway serves.
+    async fn start_with(
+        database: &str,
+        data_endpoint: &str,
+        listen: impl FnOnce(&mut Command),
+    ) -> Result<Self> {
         let gateway = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
         let operator = Uuid::new_v4().to_string();
         let host = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
@@ -64,13 +78,8 @@ impl Services {
             .env("SUPERTAG_DATA_ENDPOINT", data_endpoint)
             .env("SUPERTAG_DATABASE_URL", database);
         let (plane, control_plane) = service(plane).await?;
-        let mut forwarder = bare(&[
-            "gateway",
-            "--control-plane",
-            &control_plane,
-            "--listen",
-            "127.0.0.1:0",
-        ]);
+        let mut forwarder = bare(&["gateway", "--control-plane", &control_plane]);
+        listen(&mut forwarder);
         forwarder.env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway);
         let (forwarder, gateway) = service(forwarder).await?;
         Ok(Self {
@@ -249,6 +258,59 @@ async fn an_unreachable_data_endpoint_fails_the_attempt_once_and_names_it(
         after["finished_at_ms"], settled["finished_at_ms"],
         "{after}"
     );
+    Ok(())
+}
+
+/// `supertag up` binds the Gateway's port and hands the socket over, so the port is never free
+/// between being chosen and the Gateway serving on it: a program binding it in a loop all the
+/// while never gets it, and the Gateway still starts and serves there.
+async fn a_gateway_serves_on_the_listener_its_supervisor_handed_it(database: String) -> Result<()> {
+    use std::os::fd::{AsRawFd as _, OwnedFd};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let address = listener.local_addr()?;
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let competitor = {
+        let stop = stop.clone();
+        std::thread::spawn(move || {
+            let mut attempts = 0_usize;
+            while !stop.load(Ordering::SeqCst) {
+                if std::net::TcpListener::bind(address).is_ok() {
+                    return Err(attempts);
+                }
+                attempts += 1;
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Ok(attempts)
+        })
+    };
+    let socket = OwnedFd::from(listener);
+    let fd = socket.as_raw_fd();
+    let services = Services::start_with(&database, "http://127.0.0.1:9", move |gateway| {
+        gateway.args(["--listen-fd", &fd.to_string()]);
+        // SAFETY: clearing close-on-exec with fcntl is async-signal-safe.
+        unsafe {
+            gateway.pre_exec(move || {
+                if libc::fcntl(socket.as_raw_fd(), libc::F_SETFD, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    })
+    .await?;
+    assert_eq!(services.gateway, format!("http://{address}"));
+    // The Gateway serves operator calls on the handed-over socket.
+    json(services.cli(&["tag", "put", "handed", "--instructions", "Serve here"])).await?;
+    let tags = text(services.cli(&["get", "tags"])).await?;
+    ensure!(tags.contains("handed"), "the Tag is missing: {tags}");
+    stop.store(true, Ordering::SeqCst);
+    let attempts = competitor
+        .join()
+        .expect("the competing bind loop panicked")
+        .map_err(|attempts| {
+            anyhow::anyhow!("another program bound {address} after {attempts} attempts")
+        })?;
+    ensure!(attempts > 0, "the competing bind loop never ran");
     Ok(())
 }
 

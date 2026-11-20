@@ -336,12 +336,10 @@ impl Children {
         bootstrap_host: bool,
     ) -> Result<String> {
         let Extras { vault, surfaces } = extras;
-        // The Gateway's address is chosen first: the Control Plane names it to Worker Hosts as
-        // their Workers' data endpoint.
-        let gateway_listen = match previous_gateway(directory) {
-            Some(address) => address,
-            None => free_loopback_port()?,
-        };
+        // The Gateway's listener is bound first: the Control Plane names its address to Worker
+        // Hosts as their Workers' data endpoint, and the Gateway serves on this same socket.
+        let gateway_listener = gateway_listener(directory)?;
+        let gateway_listen = gateway_listener.local_addr()?;
         let mut plane = command(executable, "control-plane");
         plane
             .envs(self.proxy.iter().cloned())
@@ -397,13 +395,9 @@ impl Children {
         let mut gateway = command(executable, "gateway");
         gateway
             .envs(self.proxy.iter().cloned())
-            .args([
-                "--control-plane",
-                &endpoint,
-                "--listen",
-                &gateway_listen.to_string(),
-            ])
+            .args(["--control-plane", &endpoint])
             .env("SUPERTAG_GATEWAY_CREDENTIAL", &credentials.gateway);
+        hand_over(&mut gateway, gateway_listener)?;
         for destination in &self.notify.0 {
             gateway.arg("--notify").arg(destination);
         }
@@ -457,8 +451,9 @@ impl Children {
             &self.logs,
             lifecycle::GATEWAY,
         )
-        .await
-        .map_err(|error| gateway_port_taken(error, gateway_listen))?;
+        .await?;
+        // The Gateway holds its listener now; this process's copy closes with the command.
+        drop(gateway);
         let gateway_address = loopback_address(&address)?;
         ensure!(
             gateway_address == gateway_listen,
@@ -1427,36 +1422,51 @@ fn data_endpoint(environment: &Environment, gateway: Option<&str>) -> Option<OsS
         .or_else(|| gateway.map(OsString::from))
 }
 
-/// A loopback address whose port is free now, for a service started with it right after.
-fn free_loopback_port() -> Result<SocketAddr> {
-    let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-        .context("choose the local Gateway's port")?;
-    Ok(listener.local_addr()?)
-}
-
-/// The port is chosen free but released before the Gateway binds it, so another program can take
-/// it in between. Say so, since the next `supertag up` chooses again.
-fn gateway_port_taken(error: anyhow::Error, listen: SocketAddr) -> anyhow::Error {
-    if !error
-        .to_string()
-        .contains(&format!("could not listen on {listen}:"))
+/// The local Gateway's listener: on its last loopback address when that port is free, otherwise
+/// on a new port. `supertag up` binds it and hands it to the Gateway, so no other program can take
+/// the port between choosing it and the Gateway serving on it.
+fn gateway_listener(directory: &Path) -> Result<std::net::TcpListener> {
+    if let Some(address) = read_private(&directory.join(GATEWAY_ADDRESS))
+        .ok()
+        .and_then(|address| loopback_address(address.trim()).ok())
+        // Another program may have taken the port meanwhile; then the Gateway takes a new one.
+        && let Ok(listener) = std::net::TcpListener::bind(address)
     {
-        return error;
+        return Ok(listener);
     }
-    anyhow::anyhow!(
-        "{error}. Another program took port {} after supertag up chose it for the local Gateway; \
-         run supertag up again to choose another",
-        listen.port()
-    )
+    std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .context("listen for the local Gateway")
 }
 
-/// The local Gateway's last loopback address, when its port is free again.
-fn previous_gateway(directory: &Path) -> Option<SocketAddr> {
-    let address =
-        loopback_address(read_private(&directory.join(GATEWAY_ADDRESS)).ok()?.trim()).ok()?;
-    // Another program may have taken the port meanwhile; then the Gateway takes a new one.
-    std::net::TcpListener::bind(address).ok()?;
-    Some(address)
+/// Has the process `command` starts inherit `listener` and name it with `--listen-fd`.
+fn hand_over(command: &mut Command, listener: std::net::TcpListener) -> Result<()> {
+    use std::os::fd::{AsRawFd as _, OwnedFd};
+    let mut socket = OwnedFd::from(listener);
+    // The child's standard streams replace descriptors 0 to 2 before the handover runs.
+    if socket.as_raw_fd() <= 2 {
+        // SAFETY: F_DUPFD_CLOEXEC returns a new descriptor or -1, and touches no memory.
+        let duplicate = unsafe { libc::fcntl(socket.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 3) };
+        ensure!(
+            duplicate >= 0,
+            "keep the local Gateway's listener: {}",
+            io::Error::last_os_error()
+        );
+        // SAFETY: fcntl just returned this open descriptor, which nothing else owns.
+        socket = unsafe { std::os::fd::FromRawFd::from_raw_fd(duplicate) };
+    }
+    let fd = socket.as_raw_fd();
+    command.arg("--listen-fd").arg(fd.to_string());
+    // SAFETY: the closure only clears close-on-exec with fcntl, which is async-signal-safe, so it
+    // is sound between fork and exec. It owns the descriptor, which stays open until then.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::fcntl(socket.as_raw_fd(), libc::F_SETFD, 0) == -1 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    Ok(())
 }
 
 fn stable_listen(directory: &Path, configured: SocketAddr) -> Result<SocketAddr> {
@@ -1718,43 +1728,23 @@ mod tests {
         );
     }
     #[test]
-    fn a_gateway_that_lost_its_port_says_which_and_to_run_up_again() {
-        let listen: SocketAddr = "127.0.0.1:43210".parse().unwrap();
-        let taken = anyhow::anyhow!(
-            "Gateway did not report readiness: could not listen on 127.0.0.1:43210: Address \
-             already in use (os error 48)"
-        );
-        assert_eq!(
-            gateway_port_taken(taken, listen).to_string(),
-            "Gateway did not report readiness: could not listen on 127.0.0.1:43210: Address \
-             already in use (os error 48). Another program took port 43210 after supertag up \
-             chose it for the local Gateway; run supertag up again to choose another"
-        );
-        // Any other failure, including another listener's, is reported unchanged.
-        for other in [
-            "Gateway did not report readiness: could not listen on 127.0.0.1:3000: Address \
-             already in use (os error 48)",
-            "Gateway did not become ready",
-        ] {
-            assert_eq!(
-                gateway_port_taken(anyhow::anyhow!(other), listen).to_string(),
-                other
-            );
-        }
-    }
-    #[test]
     fn the_local_gateway_comes_back_on_its_last_port_when_free() {
         let temp = tempfile::tempdir().unwrap();
-        assert_eq!(previous_gateway(temp.path()), None);
-        let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = taken.local_addr().unwrap();
+        let fresh = gateway_listener(temp.path()).unwrap();
+        let address = fresh.local_addr().unwrap();
+        assert!(address.ip().is_loopback() && address.port() != 0);
+        // The listener holds the port: nothing else can take it before the Gateway serves on it.
+        assert!(std::net::TcpListener::bind(address).is_err());
         write_private(temp.path(), GATEWAY_ADDRESS, address.to_string().as_bytes()).unwrap();
-        // Another program holds the port: the Gateway takes a new one.
-        assert_eq!(previous_gateway(temp.path()), None);
-        drop(taken);
-        assert_eq!(previous_gateway(temp.path()), Some(address));
+        // Another program holds the port: the Gateway takes a new one instead of failing.
+        let other = gateway_listener(temp.path()).unwrap().local_addr().unwrap();
+        assert_ne!(other, address);
+        drop(fresh);
+        let again = gateway_listener(temp.path()).unwrap();
+        assert_eq!(again.local_addr().unwrap(), address);
         write_private(temp.path(), GATEWAY_ADDRESS, b"10.0.0.1:80").unwrap();
-        assert_eq!(previous_gateway(temp.path()), None);
+        let elsewhere = gateway_listener(temp.path()).unwrap().local_addr().unwrap();
+        assert!(elsewhere.ip().is_loopback() && elsewhere.port() != address.port());
     }
 
     #[test]
@@ -1786,13 +1776,6 @@ mod tests {
             data_endpoint(&blank, Some(gateway)),
             Some(OsString::from(gateway))
         );
-    }
-
-    #[test]
-    fn a_free_loopback_port_can_be_listened_on() {
-        let address = free_loopback_port().unwrap();
-        assert!(address.ip().is_loopback() && address.port() != 0);
-        std::net::TcpListener::bind(address).unwrap();
     }
 
     #[test]

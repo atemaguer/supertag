@@ -51,6 +51,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- `supertag up` no longer fails when another program takes the local Gateway's port while the
+  Gateway starts. It binds the port itself and hands the open socket to the Gateway, so the port is
+  never free in between; a remembered port that is taken gets a new one.
 - A Codex Tag's daily review folds in the notes kept since the last review. Codex consolidates
   only what changed since its last consolidation, measured against a git baseline in its memory
   folder, which SuperTag didn't keep, so after a Tag's first consolidation every later review
