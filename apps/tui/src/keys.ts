@@ -10,6 +10,8 @@ export const SHORTCUTS: readonly { keys: string; does: string }[] = [
   { keys: "Ctrl-P", does: "Choose a Gateway (d forgets a saved one)" },
   { keys: "Alt-1…9 (Ctrl-1…9)", does: "Open the nth Tag (the lead is first), also in the palette" },
   { keys: "Alt-↑ Alt-↓, Alt-k Alt-j", does: "Open the previous or next Tag" },
+  { keys: "→ in the list", does: "Move to the conversation's composer or the pane" },
+  { keys: "← at the start of a message", does: "Move to the list; elsewhere ← moves the cursor" },
   { keys: "Tab", does: "Move between the list and the pane" },
   { keys: "↑ ↓, k j", does: "Move in the list: Tags, Objectives, the inbox, Teams" },
   { keys: "↑ on an empty message", does: "Work Sessions: Enter expands, d diff, o pull request" },

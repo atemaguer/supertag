@@ -9,6 +9,13 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Added
+
+- Left and Right move between the terminal UI's Tag list and the conversation: → in the list
+  moves to the composer (or the Objective, inbox item, or Team in front), and ← moves back when
+  the field is empty or its cursor is at the start, otherwise it moves the cursor. ← also closes
+  Work Sessions and the Tag panels. The list's selected row is brighter while it has the keys.
+
 ## [0.3.4] - 2026-11-20
 
 ### Added

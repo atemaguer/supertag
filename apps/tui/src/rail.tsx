@@ -106,6 +106,8 @@ export const Rail = memo(function Rail({
   height: number;
 }) {
   const inner = Math.max(4, width - 2);
+  // The selected row is brighter while the list has the keyboard.
+  const highlight = focused ? color.selectedFocus : color.selected;
   const shown = folded ? items.filter((item) => item.kind === "tag") : items;
   const inboxCount = shown.filter((item) => item.kind === "inbox").length;
   const lines = folded
@@ -170,20 +172,20 @@ export const Rail = memo(function Rail({
             </text>
           );
         const item = line.item;
-        const isSelected = item.key === selected;
+        const background = item.key === selected ? highlight : undefined;
         if (item.kind === "tag")
           return folded ? (
-            <FoldedRow key={item.key} row={item.row} selected={isSelected} />
+            <FoldedRow key={item.key} row={item.row} selected={background} />
           ) : (
             <Row
               key={item.key}
               row={item.row}
               index={item.index}
-              selected={isSelected}
+              selected={background}
               width={inner}
             />
           );
-        return <OtherRow key={item.key} item={item} selected={isSelected} width={inner} />;
+        return <OtherRow key={item.key} item={item} selected={background} width={inner} />;
       })}
     </box>
   );
@@ -191,10 +193,10 @@ export const Rail = memo(function Rail({
 
 const nameOf = (tag: Tag) => tag.name ?? tag.tagId;
 
-function FoldedRow({ row, selected }: { row: RailRow; selected: boolean }) {
+function FoldedRow({ row, selected }: { row: RailRow; selected: string | undefined }) {
   const mark = row.tag.lead ? "★" : row.summary.unread ? "•" : row.summary.working ? "…" : " ";
   return (
-    <text fg={selected ? color.strong : color.muted} bg={selected ? color.selected : undefined}>
+    <text fg={selected ? color.strong : color.muted} bg={selected}>
       {mark}
       {initials(nameOf(row.tag))}
     </text>
@@ -207,7 +209,8 @@ function OtherRow({
   width,
 }: {
   item: Exclude<RailItem, { kind: "tag" }>;
-  selected: boolean;
+  /** The selected row's background; none when not selected. */
+  selected: string | undefined;
   width: number;
 }) {
   let mark = " ";
@@ -227,7 +230,7 @@ function OtherRow({
   const name = clip(label, room);
   const pad = " ".repeat(Math.max(1, width - 3 - [...name].length - detail.length));
   return (
-    <text fg={selected ? color.strong : color.text} bg={selected ? color.selected : undefined}>
+    <text fg={selected ? color.strong : color.text} bg={selected}>
       <span fg={item.kind === "inbox" ? color.warning : color.faint}>{` ${mark} `}</span>
       {name}
       {pad}
@@ -252,7 +255,7 @@ function Row({
 }: {
   row: RailRow;
   index: number;
-  selected: boolean;
+  selected: string | undefined;
   width: number;
 }) {
   const { tag, summary, conversation } = row;
@@ -269,7 +272,7 @@ function Row({
       : (summary.preview ?? "");
   const pad = " ".repeat(Math.max(1, width - 3 - [...name].length - time.length));
   return (
-    <box flexDirection="column" backgroundColor={selected ? color.selected : undefined}>
+    <box flexDirection="column" backgroundColor={selected}>
       <text fg={selected ? color.strong : color.text}>
         <span fg={color.faint}>{key}</span>
         {mark}

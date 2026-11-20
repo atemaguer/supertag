@@ -3,6 +3,7 @@
  * OpenTUI only through here (JSX elements aside), so a breaking OpenTUI minor touches one place.
  */
 import type {
+  CliRenderer,
   EditBufferRenderable,
   KeyEvent,
   Renderable,
@@ -61,6 +62,18 @@ export function pasteOnOneLine(this: EditBufferRenderable, event: PasteEvent) {
   event.preventDefault();
   const line = text.replace(/[\r\n]+$/u, "").replace(/[ \t]*(?:\r\n?|\n)[ \t]*/gu, " ");
   field.handlePaste(new PasteEvent(new TextEncoder().encode(line)));
+}
+
+/**
+ * Whether the field that has the keyboard has text before its cursor, so ← moves the cursor
+ * instead of the keyboard moving to the Tag list. Asked before the field takes the key.
+ */
+export function textBeforeCursor(renderer: CliRenderer): boolean {
+  const field = renderer.currentFocusedRenderable as
+    | (Renderable & { cursorOffset?: number })
+    | null;
+  if (!field || field.isDestroyed || !field.focused) return false;
+  return typeof field.cursorOffset === "number" && field.cursorOffset > 0;
 }
 
 /** Whether a scroll view shows its end. */

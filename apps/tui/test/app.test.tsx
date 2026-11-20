@@ -184,3 +184,60 @@ test("Ctrl-B folds the Tag list to initials, Tab and j move in it", async () => 
   await screen.waitFor("Message engineer");
   await screen.close();
 });
+
+test("← on an empty message moves to the Tag list, and → back to the composer", async () => {
+  current = setup();
+  const screen = await render(current);
+  await screen.waitFor("Message lead");
+  await screen.press("ARROW_LEFT");
+  // The list has the keyboard: j moves it from the Tag that was in front.
+  await screen.press("j");
+  await screen.waitFor("Message engineer");
+  await screen.press("ARROW_RIGHT");
+  await screen.type("jk");
+  const frame = await screen.waitFor("jk");
+  expect(frame).toContain("Message engineer");
+  expect(frame).not.toContain("Message reviewer");
+  await screen.close();
+});
+
+test("← with text before the cursor moves the cursor; at the start it moves to the Tag list", async () => {
+  current = setup();
+  const screen = await render(current);
+  await screen.waitFor("Message lead");
+  await screen.type("ab");
+  await screen.press("ARROW_LEFT");
+  await screen.type("X");
+  await screen.waitFor("aXb");
+  // The cursor is after X: two ← reach the start.
+  await screen.press("ARROW_LEFT");
+  await screen.press("ARROW_LEFT");
+  await screen.type("Y");
+  await screen.waitFor("YaXb");
+  // After Y: one ← to the start, and the next moves to the list.
+  await screen.press("ARROW_LEFT");
+  await screen.press("ARROW_LEFT");
+  await screen.press("j");
+  await screen.waitFor("Message engineer");
+  await screen.press("ARROW_RIGHT");
+  await screen.type("QQ");
+  await screen.waitFor("QQ");
+  // The draft was kept as it was.
+  await screen.press("k", { meta: true });
+  const frame = await screen.waitFor("YaXb");
+  expect(frame).not.toContain("YaXbj");
+  await screen.close();
+});
+
+test("→ at the end of the text stays in the composer", async () => {
+  current = setup();
+  const screen = await render(current);
+  await screen.waitFor("Message lead");
+  await screen.type("ab");
+  await screen.press("ARROW_RIGHT");
+  await screen.type("c");
+  await screen.waitFor("abc");
+  await screen.type("j");
+  await screen.waitFor("abcj");
+  await screen.close();
+});

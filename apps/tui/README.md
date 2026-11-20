@@ -138,10 +138,21 @@ launcher passes the environment through.
 
 Enter send · Ctrl-K or `/` palette · Ctrl-N New Tag · Ctrl-P Gateways · Alt-1…9 (or Ctrl-1…9
 where the terminal reports it) the nth Tag ·
-Alt-↑/↓ (Alt-k/j) previous or next Tag · Tab between the list and the pane · ↑/↓ (k/j) in the
-list · ↑ on an empty message Work Sessions · `m` message an Objective's owner · `a`/`d` approve or
+Alt-↑/↓ (Alt-k/j) previous or next Tag · → from the list to the pane · ← from the pane to the
+list · Tab between the list and the pane · ↑/↓ (k/j) in the list · ↑ on an empty message Work
+Sessions · `m` message an Objective's owner · `a`/`d` approve or
 deny · Ctrl-B fold · `[` `]` resize · PgUp/PgDn scroll · End or Ctrl-End latest · Ctrl-R retry ·
 Ctrl-X edit · Esc close · Ctrl-C quit. The Keyboard shortcuts screen (in the palette) lists them from `src/keys.ts`.
+
+← and → never take a key a field needs. → in the list moves the keys to the pane in front: the
+composer, or the Objective, inbox item, or Team the list selected. ← in the pane moves them back
+to the list, whose selection stays on the row in front, only when the field that has the keys is
+empty or its cursor is at the start (or the pane has no field); otherwise ← moves the cursor, and
+→ at the end of the text does nothing. With Ctrl, Alt, or Shift they move and select in the text
+as before. ← also closes Work Sessions and the Tag panels (Memory, Schedules, Network, Activity),
+back to the list; the palette, Gateways, New Tag, and the new Objective form keep ← for their
+fields. The list's border and selected row are brighter while it has the keys; the composer's
+border while the conversation does.
 
 ## Developing
 

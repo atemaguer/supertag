@@ -14,6 +14,8 @@ export const color = {
   border: "#444444",
   focus: "#8aa4ff",
   selected: "#2a2f45",
+  /** The Tag list's selected row while the list has the keyboard. */
+  selectedFocus: "#3d4a80",
   warning: "#e5c07b",
   error: "#f07178",
 } as const;

@@ -249,6 +249,63 @@ test("an inbox question is answered in place", async () => {
   await screen.close();
 });
 
+test("← from an Objective or an inbox item moves to the list, unless its field has text before the cursor", async () => {
+  current = setup(coordinated());
+  const screen = await render(current, { width: 120, height: 40 });
+  await screen.waitFor("Waiting on you (2)");
+  await railDown(screen, 3);
+  await screen.waitFor("ship-sso · working");
+  await screen.press("TAB");
+  await screen.press("ARROW_LEFT");
+  await screen.press("j");
+  await screen.waitFor(/fix-ci · /u);
+  // → opens the pane; ← in the follow-up field moves its cursor until the start.
+  await screen.press("ARROW_RIGHT");
+  await screen.press("m");
+  await screen.waitFor("Message engineer");
+  await screen.type("ab");
+  await screen.press("ARROW_LEFT");
+  await screen.type("X");
+  await screen.waitFor("aXb");
+  for (let i = 0; i < 3; i++) await screen.press("ARROW_LEFT");
+  await screen.press("j");
+  await screen.waitFor("A question · Objective ship-sso");
+  // The answer field: one ← back to the start, the next to the list.
+  await screen.press("ARROW_RIGHT");
+  await screen.type("z");
+  await screen.press("ARROW_LEFT");
+  await screen.press("ARROW_LEFT");
+  await screen.press("j");
+  await screen.waitFor("An approval request");
+  // An approval request has no field: ← moves to the list at once.
+  await screen.press("ARROW_RIGHT");
+  await screen.press("ARROW_LEFT");
+  await screen.press("j");
+  await screen.waitFor("The rollout is ready.");
+  await screen.close();
+});
+
+test("← closes Work Sessions and the Tag panels, back to the list", async () => {
+  current = setup();
+  const screen = await render(current, { width: 120, height: 40 });
+  await screen.waitFor("Message lead");
+  await screen.press("k", { ctrl: true });
+  await screen.type("schedules");
+  await screen.press("RETURN");
+  await screen.waitFor("has no Schedules that will fire");
+  await screen.press("ARROW_LEFT");
+  await screen.press("j");
+  const frame = await screen.waitFor("Message engineer");
+  expect(frame).not.toContain("has no Schedules that will fire");
+  await screen.press("ARROW_RIGHT");
+  await screen.press("ARROW_UP");
+  await screen.waitFor("Work Sessions");
+  await screen.press("ARROW_LEFT");
+  await screen.press("j");
+  await screen.waitFor("Message reviewer");
+  await screen.close();
+});
+
 test("an approval request is approved once with a then Enter, or denied with a reason", async () => {
   const fake = coordinated();
   fake.inbox.push({
@@ -888,5 +945,7 @@ test("Keyboard shortcuts lists the new keys", async () => {
   const frame = await screen.waitFor("Create a Tag");
   expect(frame).toContain("Work Sessions: Enter expands");
   expect(frame).toContain("Approve once or deny an approval");
+  expect(frame).toContain("→ in the list");
+  expect(frame).toContain("← at the start of a message");
   await screen.close();
 });

@@ -56,9 +56,11 @@ import {
   color,
   type KeyEvent,
   StyleProvider,
+  textBeforeCursor,
   useBlur,
   useFocus,
   useKeyboard,
+  useRenderer,
   useTerminalDimensions,
 } from "./ui";
 import { WorkSessions } from "./work";
@@ -480,8 +482,18 @@ function Workspace({
     },
     [rows, tag, select],
   );
+  const renderer = useRenderer();
   useKeyboard((key: KeyEvent) => {
-    if (overlay) return;
+    // ← and → with nothing held: Ctrl, Alt and Shift with them move and select by words.
+    const plain = !key.ctrl && !key.meta && !key.option && !key.shift;
+    if (overlay) {
+      // Work Sessions and the Tag panels have no text: ← closes them, back to the list.
+      if (plain && key.name === "left" && (overlay === "work" || overlay in PANELS)) {
+        setOverlay(undefined);
+        setFocus("rail");
+      }
+      return;
+    }
     if (key.ctrl && key.name === "k") {
       setSlash(false);
       setOverlay("palette");
@@ -502,7 +514,12 @@ function Workspace({
     else if (focus === "rail") {
       if (key.name === "down" || key.name === "j") move(1);
       else if (key.name === "up" || key.name === "k") move(-1);
-      else if (key.name === "return" || key.name === "enter" || key.name === "escape")
+      else if (
+        key.name === "return" ||
+        key.name === "enter" ||
+        key.name === "escape" ||
+        (plain && key.name === "right")
+      )
         setFocus("composer");
       else if (key.sequence === "[" || key.sequence === "]") {
         setRailWidth((prior) => {
@@ -514,6 +531,11 @@ function Workspace({
           return next;
         });
       }
+    } else if (plain && key.name === "left" && !textBeforeCursor(renderer)) {
+      // The pane's field is empty, or its cursor is at the start: back to the list, whose
+      // selection stays on the row in front. Text before the cursor: the field moves it.
+      key.preventDefault();
+      setFocus("rail");
     }
   });
 
