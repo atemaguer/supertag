@@ -19,6 +19,10 @@ within the pre-1.0 compatibility policy described in
   from the same person for the same audience: live input queued by someone else now runs as its
   own turn. On upgrade, waiting messages, live inputs, and Tag messages a wake limit held move into
   the queue; a waiting inbox turn with nothing left to deliver is cancelled.
+- A Schedule firing, a work Session's report, an approval decision, a question's answer, and an
+  Objective's start, review feedback, and notices each enter the Session's queue once, with the
+  turn they deliver, and that turn's claim takes them. In a person's conversation they act for
+  that person, so the person's message still joins a running Schedule turn.
 - A Tag's message that a wake limit or the backlog holds now waits in its recipient's inbox queue,
   wakes no one, and arrives in the next inbox turn, after the messages that woke the Tag, in the
   same turn as other Tags' messages. A later message in its conversation that wakes the Tag brings

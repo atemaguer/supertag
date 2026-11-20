@@ -1163,6 +1163,38 @@ async fn queue_turn_in(
         .bind(&schedule.schedule_id).bind(due).bind(&task.task_id).bind(now).execute(&mut **tx).await?;
     sqlx::query("UPDATE supertag_v2_schedules SET fire_count=fire_count+1,last_task_id=$1,last_fired_at_ms=$2 WHERE schedule_id=$3")
         .bind(&task.task_id).bind(now).bind(&schedule.schedule_id).execute(&mut **tx).await?;
+    // The fire is the turn's input. It acts for the conversation's person, so their next message
+    // folds into this turn; in a surface thread, for the connector account that routes it.
+    let requester = match &schedule.audience {
+        Some(principal) => principal.clone(),
+        None => sqlx::query_scalar::<_, String>(
+            "SELECT account_id FROM supertag_v2_inbound_events WHERE task_id=$1",
+        )
+        .bind(&task.task_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .map_or_else(
+            || format!("schedule:{}", schedule.schedule_id),
+            |account| format!("connector:{account}"),
+        ),
+    };
+    let (_, audience) = crate::session_inputs::requester_of_in(tx, &task.task_id).await?;
+    crate::session_inputs::admit_in(
+        tx,
+        &task,
+        crate::session_inputs::NewInput {
+            kind: crate::session_inputs::InputKind::ScheduleFire,
+            source_key: crate::session_inputs::key(&[
+                "schedule",
+                &schedule.schedule_id,
+                &due.to_string(),
+            ]),
+            requester: &requester,
+            audience: &audience,
+        },
+        now,
+    )
+    .await?;
     Ok(task)
 }
 

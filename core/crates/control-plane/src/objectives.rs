@@ -410,6 +410,50 @@ async fn internal_turn_in(
     .await?;
     sqlx::query("INSERT INTO supertag_v2_objective_notices (objective_id,notice_key,task_id) VALUES ($1,$2,$3)")
         .bind(&record.value.objective_id).bind(key).bind(&task.task_id).execute(&mut **tx).await?;
+    // Review feedback is a decision; budget, deadline, idle, and resume turns are notices.
+    let input_kind = if kind == "work" {
+        crate::session_inputs::InputKind::Decision
+    } else {
+        crate::session_inputs::InputKind::Notice
+    };
+    admit_objective_input_in(
+        tx,
+        &task,
+        &record.value,
+        input_kind,
+        crate::session_inputs::key(&["objective", &record.value.objective_id, key]),
+        now_ms,
+    )
+    .await
+}
+
+/// Records an Objective's own turn as the input of `task`. It acts for the Objective's creator.
+async fn admit_objective_input_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &Task,
+    objective: &Objective,
+    kind: crate::session_inputs::InputKind,
+    source_key: String,
+    now_ms: i64,
+) -> Result<()> {
+    let requester = if objective.created_by.is_empty() {
+        format!("objective:{}", objective.objective_id)
+    } else {
+        objective.created_by.clone()
+    };
+    let (_, audience) = crate::session_inputs::requester_of_in(tx, &task.task_id).await?;
+    crate::session_inputs::admit_in(
+        tx,
+        task,
+        crate::session_inputs::NewInput {
+            kind,
+            source_key,
+            requester: &requester,
+            audience: &audience,
+        },
+        now_ms,
+    )
+    .await?;
     Ok(())
 }
 
@@ -586,6 +630,15 @@ pub(crate) async fn create_objective_in(
         .execute(&mut **tx)
         .await?;
     let record = get_in(tx, &input.objective_id).await?;
+    admit_objective_input_in(
+        tx,
+        &task,
+        &record.value,
+        crate::session_inputs::InputKind::Request,
+        crate::session_inputs::key(&["objective-home", &input.objective_id]),
+        now_ms,
+    )
+    .await?;
     receipt_in(
         tx,
         principal,

@@ -751,6 +751,69 @@ async fn continue_in(tx: &mut Transaction<'_, Any>, task_id: &str, now: i64) -> 
     )
     .await?;
     sqlx::query("UPDATE supertag_v2_approval_waits SET continuation_task_id=$1 WHERE task_id=$2 AND continuation_task_id IS NULL").bind(&task.task_id).bind(task_id).execute(&mut **tx).await?;
+    admit_decision_in(tx, &task, task_id, now).await
+}
+
+/// Records the operator's decision as the input of `task`, the turn that continues the waiting
+/// Task `waiting_task_id`. It acts for whoever the waiting Task acted for.
+pub(crate) async fn admit_decision_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &supertag_protocol::v2::Task,
+    waiting_task_id: &str,
+    now: i64,
+) -> Result<()> {
+    admit_continuation_in(
+        tx,
+        task,
+        waiting_task_id,
+        crate::session_inputs::InputKind::Decision,
+        crate::session_inputs::key(&["approval", waiting_task_id]),
+        now,
+    )
+    .await
+}
+
+/// Records a budget or permission stop after an approval decision as the input of the notice
+/// `task`. It acts for whoever the stopped Task `stopped_task_id` acted for.
+pub(crate) async fn admit_stop_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &supertag_protocol::v2::Task,
+    stopped_task_id: &str,
+    now: i64,
+) -> Result<()> {
+    admit_continuation_in(
+        tx,
+        task,
+        stopped_task_id,
+        crate::session_inputs::InputKind::Notice,
+        crate::session_inputs::key(&["approval-budget-stop", stopped_task_id]),
+        now,
+    )
+    .await
+}
+
+async fn admit_continuation_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &supertag_protocol::v2::Task,
+    source_task_id: &str,
+    kind: crate::session_inputs::InputKind,
+    source_key: String,
+    now: i64,
+) -> Result<()> {
+    let (requester, _) = crate::session_inputs::requester_of_in(tx, source_task_id).await?;
+    let (_, audience) = crate::session_inputs::requester_of_in(tx, &task.task_id).await?;
+    crate::session_inputs::admit_in(
+        tx,
+        task,
+        crate::session_inputs::NewInput {
+            kind,
+            source_key,
+            requester: &requester,
+            audience: &audience,
+        },
+        now,
+    )
+    .await?;
     Ok(())
 }
 
@@ -812,7 +875,7 @@ async fn budget_stop_in(
         .await?;
     }
     sqlx::query("INSERT INTO supertag_v2_approval_continuation_stops (task_id,reason,notice_task_id) VALUES ($1,'budget',$2)").bind(&source.task_id).bind(&notice.task_id).execute(&mut **tx).await?;
-    Ok(())
+    admit_stop_in(tx, &notice, &source.task_id, now).await
 }
 
 pub(crate) async fn pending_in(

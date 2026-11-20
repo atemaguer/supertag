@@ -160,9 +160,33 @@ pub(crate) async fn settle_in(
     let digest = format!("{:x}", Sha256::digest(event.as_bytes()));
     sqlx::query("INSERT INTO supertag_v2_inbound_events (account_id,event_id,request_digest,task_id,conversation_id,thread_id) SELECT account_id,$1,$2,$3,conversation_id,thread_id FROM supertag_v2_inbound_events WHERE task_id=$4")
         .bind(event).bind(digest).bind(&report.task_id).bind(&starter.task_id).execute(&mut **tx).await?;
-    if let Some(objective) = objective {
+    if let Some(objective) = &objective {
         sqlx::query("INSERT INTO supertag_v2_objective_tasks (task_id,objective_id,kind) VALUES ($1,$2,'work')")
-            .bind(&report.task_id).bind(&objective).execute(&mut **tx).await?;
+            .bind(&report.task_id).bind(objective).execute(&mut **tx).await?;
+    }
+    // The report is the parent turn's input. In a person's conversation it acts for that person.
+    let requester: String = sqlx::query_scalar(
+        "SELECT principal FROM supertag_v2_conversation_sessions WHERE session_id=$1 AND tag_id=$2",
+    )
+    .bind(&report.session_id)
+    .bind(&report.tag_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .unwrap_or_else(|| format!("work-session:{session}"));
+    let (_, audience) = crate::session_inputs::requester_of_in(tx, &report.task_id).await?;
+    crate::session_inputs::admit_in(
+        tx,
+        &report,
+        crate::session_inputs::NewInput {
+            kind: crate::session_inputs::InputKind::Report,
+            source_key: crate::session_inputs::key(&["report", &task.task_id]),
+            requester: &requester,
+            audience: &audience,
+        },
+        now_ms,
+    )
+    .await?;
+    if let Some(objective) = objective {
         let status: i64 =
             sqlx::query_scalar("SELECT status FROM supertag_v2_objectives WHERE objective_id=$1")
                 .bind(&objective)

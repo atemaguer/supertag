@@ -162,7 +162,9 @@ thread goes to the Objective, not to the thread's own conversation with the Tag.
 
 Each delivery is one Task. The Control Plane allows one due turn per Session, so an Objective's
 conversation is a serial actor: a second trigger during a running turn waits and is delivered
-next.
+next. Each trigger delivers once: a repeated decision, answer, or notice, or a restart, queues no
+second turn. A turn that isn't a message acts for the person whose conversation it is, else for
+the person who created the Objective.
 
 ### Operator messages
 
@@ -590,11 +592,13 @@ When a Schedule is due, the Control Plane queues an ordinary Task for the Tag. I
 run itself: the Session runs one turn at a time, in order, and the Tag's current Permission Sets
 apply. The turn's prompt says why the Tag was woken; the conversation shows only the Tag's reply,
 with a "Scheduled" caption, and nothing while the turn runs: no message, no typing indicator, and
-no work in the conversation list. A message you send while it runs joins it, so from then on it
-answers you and shows as it works. When the check finds nothing that needs attention, the Tag calls
-`stay_quiet` and nothing is posted; see [Quiet results](#quiet-results). The prompt also says how
-the Schedule's last ten fires landed, such as "Of this Schedule's last 4 fires: 2 posted (2 read,
-1 answered); 2 stayed quiet.", so the Tag can calibrate when to speak.
+no work in the conversation list. A turn woken in your conversation answers you, so a message you
+send while it runs joins it, and from then on it shows as it works. Messages already waiting before
+the wake-up are answered ahead of it, in a turn of their own. When the check finds nothing that
+needs attention, the Tag calls `stay_quiet` and nothing is posted; see
+[Quiet results](#quiet-results). The prompt also says how the Schedule's last ten fires landed,
+such as "Of this Schedule's last 4 fires: 2 posted (2 read, 1 answered); 2 stayed quiet.", so the
+Tag can calibrate when to speak.
 
 | Situation | What happens |
 | --- | --- |

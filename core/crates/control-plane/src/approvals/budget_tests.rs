@@ -64,6 +64,13 @@ async fn contract(url: &str) {
             .unwrap()
             .unwrap();
         assert_eq!(assigned.task.unwrap().task_id, next.task_id);
+        if index > 1 {
+            // Its own claim binds the continuation's decision.
+            assert_eq!(
+                own_input(&store, &next.task_id).await.task_id,
+                Some(next.task_id.clone())
+            );
+        }
         let attempt = InspectAttemptRequest {
             task_id: next.task_id.clone(),
             attempt_id: assigned.attempt_id,
@@ -189,6 +196,21 @@ async fn contract(url: &str) {
                 "owed notice receives only the remaining reported pool"
             );
             assert!(notice.allowed_actions.is_empty());
+            // The stop is the notice's own input, once, for the person whose turn it stopped.
+            let input = own_input(&store, &notice.task_id).await;
+            assert_eq!(
+                (
+                    input.kind,
+                    input.source_key.as_str(),
+                    input.requester.as_str()
+                ),
+                (
+                    crate::session_inputs::InputKind::Notice,
+                    format!("approval-budget-stop\n{}", attempt.task_id).as_str(),
+                    OPERATOR
+                )
+            );
+            assert_eq!(input.audience, OPERATOR);
             let history = ListMessagesRequest {
                 tag_id: "lead".into(),
                 limit: 100,
@@ -236,9 +258,36 @@ async fn contract(url: &str) {
             "approval turn {index} must draw from the original turn's cumulative pool"
         );
         assert_ne!(next.task_id, attempt.task_id);
+        // The decision is the continuation's own input, recorded once although it was decided
+        // twice, for the person the waiting turn acted for.
+        let input = own_input(&store, &next.task_id).await;
+        assert_eq!(
+            (
+                input.kind,
+                input.source_key.as_str(),
+                input.requester.as_str()
+            ),
+            (
+                crate::session_inputs::InputKind::Decision,
+                format!("approval\n{}", attempt.task_id).as_str(),
+                OPERATOR
+            )
+        );
+        assert_eq!((input.audience.as_str(), input.task_id), (OPERATOR, None));
     }
     objective_notice_case(&store, &host).await;
     store.close().await;
+}
+
+/// The Session input `task_id` was admitted for.
+async fn own_input(store: &Store, task_id: &str) -> crate::session_inputs::InputRow {
+    let mut tx = store.pool.begin().await.unwrap();
+    let input = crate::session_inputs::own_in(&mut tx, task_id)
+        .await
+        .unwrap()
+        .expect("the Task has its own input");
+    tx.rollback().await.unwrap();
+    input
 }
 
 async fn objective_notice_case(store: &Store, host: &HostAuthority) {

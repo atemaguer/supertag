@@ -145,7 +145,7 @@ async fn contract(url: String) {
     retiring_a_tag_cancels_its_schedules(&store).await;
     replicas_fire_each_occurrence_once(&url, &store, &host, &clock).await;
     declared_schedules_and_their_watch_notices(&url, &store, &clock).await;
-    backfill_replays_missed_occurrences(&store, &clock).await;
+    backfill_replays_missed_occurrences(&url, &store, &clock).await;
     store.close().await;
 }
 
@@ -1097,8 +1097,22 @@ async fn declared_schedules_and_their_watch_notices(
         .unwrap();
 }
 
-async fn backfill_replays_missed_occurrences(store: &Store, clock: &Arc<AtomicI64>) {
+async fn backfill_replays_missed_occurrences(url: &str, store: &Store, clock: &Arc<AtomicI64>) {
     cancel_all(store).await;
+    sqlx::any::install_default_drivers();
+    let pool = sqlx::AnyPool::connect(url).await.unwrap();
+    // Each occurrence with a turn is one input of the Session; one that coalesced is none.
+    let inputs = async |schedule: &str| -> Vec<String> {
+        let keys: Vec<String> = sqlx::query_scalar(
+            "SELECT source_key FROM supertag_v2_session_inputs WHERE kind=5 ORDER BY position",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        keys.into_iter()
+            .filter(|key| key.starts_with(&format!("schedule\n{schedule}\n")))
+            .collect()
+    };
     let start = NOW + 120 * 24 * HOUR;
     clock.store(start, Ordering::SeqCst);
     let hourly = store
@@ -1119,6 +1133,10 @@ async fn backfill_replays_missed_occurrences(store: &Store, clock: &Arc<AtomicI6
             .unwrap()
             .missed_count,
         3
+    );
+    assert_eq!(
+        inputs(&hourly.schedule_id).await,
+        [format!("schedule\n{}\n{first}", hourly.schedule_id)]
     );
     let backfill = |from_ms: i64| BackfillScheduleRequest {
         schedule_id: hourly.schedule_id.clone(),
@@ -1142,7 +1160,8 @@ async fn backfill_replays_missed_occurrences(store: &Store, clock: &Arc<AtomicI6
         "{}",
         task.prompt
     );
-    // Repeating it finds nothing left to replay.
+    assert_eq!(inputs(&hourly.schedule_id).await.len(), 4);
+    // Repeating it finds nothing left to replay, and records no input.
     assert!(
         store
             .backfill_schedule(ALICE, &backfill(start))
@@ -1151,6 +1170,7 @@ async fn backfill_replays_missed_occurrences(store: &Store, clock: &Arc<AtomicI6
             .task_ids
             .is_empty()
     );
+    assert_eq!(inputs(&hourly.schedule_id).await.len(), 4);
     // Another principal cannot see it; a future or too-old start is refused; a one-off has no
     // occurrences to replay.
     assert!(matches!(

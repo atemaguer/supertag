@@ -268,6 +268,20 @@ impl Store {
         sqlx::query("UPDATE supertag_v2_objective_questions SET answer_task_id=$1 WHERE attempt_id=$2 AND answer_task_id IS NULL").bind(&task.task_id).bind(&question.attempt_id).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO supertag_v2_question_answers (principal,operation_id,request_digest,question_attempt_id,answer_task_id) VALUES ($1,$2,$3,$4,$5)")
             .bind(principal).bind(&input.operation_id).bind(digest).bind(&question.attempt_id).bind(&task.task_id).execute(&mut *tx).await?;
+        // The answer is the next turn's input; it acts for the person who answered.
+        let (_, audience) = crate::session_inputs::requester_of_in(&mut tx, &task.task_id).await?;
+        crate::session_inputs::admit_in(
+            &mut tx,
+            &task,
+            crate::session_inputs::NewInput {
+                kind: crate::session_inputs::InputKind::Decision,
+                source_key: crate::session_inputs::key(&["answer", principal, &input.operation_id]),
+                requester: principal,
+                audience: &audience,
+            },
+            self.execution_now_ms(),
+        )
+        .await?;
         tx.commit().await?;
         Ok(task)
     }

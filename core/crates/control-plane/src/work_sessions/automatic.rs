@@ -100,7 +100,7 @@ pub(crate) async fn continue_in(
         .execute(&mut **tx)
         .await?;
     sqlx::query("UPDATE supertag_v2_approval_waits SET continuation_task_id=$1 WHERE task_id=$2 AND continuation_task_id IS NULL").bind(&next.task_id).bind(&source.task_id).execute(&mut **tx).await?;
-    Ok(())
+    crate::approvals::admit_decision_in(tx, &next, &source.task_id, now).await
 }
 
 async fn stop_in(
@@ -143,7 +143,7 @@ async fn stop_in(
     let digest = format!("{:x}", Sha256::digest(event.as_bytes()));
     sqlx::query("INSERT INTO supertag_v2_inbound_events (account_id,event_id,request_digest,task_id,conversation_id,thread_id) SELECT account_id,$1,$2,$3,conversation_id,thread_id FROM supertag_v2_inbound_events WHERE task_id=$4").bind(event).bind(digest).bind(&notice.task_id).bind(&starter.task_id).execute(&mut **tx).await?;
     sqlx::query("INSERT INTO supertag_v2_approval_continuation_stops (task_id,reason,notice_task_id) VALUES ($1,$2,$3)").bind(&source.task_id).bind(reason).bind(&notice.task_id).execute(&mut **tx).await?;
-    Ok(())
+    crate::approvals::admit_stop_in(tx, &notice, &source.task_id, now).await
 }
 
 #[cfg(test)]
