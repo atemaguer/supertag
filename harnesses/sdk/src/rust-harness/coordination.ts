@@ -263,7 +263,7 @@ export function memoryContext(
       ? "This turn can change notes; a change takes effect when the turn succeeds."
       : "This turn can't change notes: Work Session turns, turns an outside event such as a GitHub or Linear webhook started, and Tags whose memory is off can't.",
     harnessMemory === "claude-code"
-      ? "Separately, Claude Code keeps its own auto-memory in the memory folder its instructions name. SuperTag keeps that folder on the Worker Host, or on the Tag's Volume if it has one, never in the Control Plane, one for each Tag and audience, and only this Tag's Claude Code turns see it: a Work Session on another harness doesn't share it yet."
+      ? "Separately, Claude Code keeps its own auto-memory in the memory folder its instructions name. SuperTag keeps that folder on the Worker Host, or on the Tag's Volume if it has one, never in the Control Plane, one for each Tag and audience, and only this Tag's Claude Code turns see it: a Work Session on another harness doesn't share it yet. People see each memory in it, and delete any, with supertag get memories on that Worker Host's machine, or in the desktop and terminal apps there."
       : "This turn keeps no harness memory of its own: only notes and Sessions last beyond it.",
   ].join(" ");
 }

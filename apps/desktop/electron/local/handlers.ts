@@ -1,14 +1,28 @@
 /**
  * The channels backed by the app's own CLI: starting and restarting the local services, the
- * first-launch setup, and adding a folder as a Workspace of the local Gateway.
+ * first-launch setup, adding a folder as a Workspace of the local Gateway, and the Tags' harness
+ * memory its Worker Hosts keep, which never passes through the Control Plane.
  */
 
-import { type LocalDiscovery, readLocalGateway } from "@supertag/client/node";
+import {
+  type LocalDiscovery,
+  readLocalGateway,
+  SHARED_GATEWAY_HARNESS_MEMORY,
+} from "@supertag/client/node";
 import type { SetupCheck } from "../../src/gateway";
 import type { Handlers } from "../ipc";
 import { type AppIdentity, environment, installCommand, usableCli } from "./cli";
 import { checkWith, setUpWith } from "./onboarding";
-import { addWorkspace, localUpgrade, type Peer, restart, shouldStart, up } from "./services";
+import {
+  addWorkspace,
+  deleteHarnessMemory,
+  harnessMemory,
+  localUpgrade,
+  type Peer,
+  restart,
+  shouldStart,
+  up,
+} from "./services";
 
 export interface LocalDependencies {
   app: AppIdentity;
@@ -33,7 +47,9 @@ type LocalChannels =
   | "restartLocalServices"
   | "checkSetup"
   | "setUpSupertag"
-  | "addLocalWorkspace";
+  | "addLocalWorkspace"
+  | "listHarnessMemory"
+  | "deleteHarnessMemory";
 
 const NOT_OLDER =
   "The local SuperTag does not run an older release, so it was not restarted. Connect to it again.";
@@ -104,6 +120,22 @@ export function localHandlers(deps: LocalDependencies): Pick<Handlers, LocalChan
       if (folder === null) return null;
       const { cli, path } = await usableCli(app);
       return addWorkspace(cli, path, state, folder);
+    },
+
+    // Only the local Gateway's Worker Hosts are on this machine to read harness memory from.
+    async listHarnessMemory({ connectionId, tagId }) {
+      const state = await deps.localStateOf(connectionId).catch(() => undefined);
+      if (state === undefined) {
+        return { memories: [], keptOn: [], unavailable: SHARED_GATEWAY_HARNESS_MEMORY };
+      }
+      const { cli, path } = await usableCli(app);
+      return harnessMemory(cli, path, state, tagId);
+    },
+
+    async deleteHarnessMemory({ connectionId, memoryId }) {
+      const state = await deps.localStateOf(connectionId);
+      const { cli, path } = await usableCli(app);
+      return deleteHarnessMemory(cli, path, state, memoryId);
     },
   };
 }

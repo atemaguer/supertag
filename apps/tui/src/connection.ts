@@ -16,6 +16,8 @@ import {
   describe,
   type FollowUpdate,
   type Gateway,
+  type HarnessMemory,
+  type HarnessMemoryList,
   type HostPhases,
   type InboxItem,
   LOCAL_GATEWAY,
@@ -46,6 +48,7 @@ import {
   type CliGateway,
   cliStore,
   type DirectConnection,
+  deleteHarnessMemoryWithCli,
   deliveryDiff,
   desktopStore,
   entryPath,
@@ -54,11 +57,13 @@ import {
   GatewayState,
   gatewayOrigin,
   type LocalDiscovery,
+  listHarnessMemoryWithCli,
   loadCliGateways,
   loadProfiles,
   openUrl,
   readEntry,
   readLocalGateway,
+  SHARED_GATEWAY_HARNESS_MEMORY,
   type Subscriber,
   saveWithCli,
   type Tls,
@@ -347,6 +352,16 @@ export class Connections {
   addFolder(state: string, folder: string): Promise<AddedWorkspace> {
     return addWorkspaceWithCli(this.options.cli, state, folder, this.options.env);
   }
+
+  /** A Tag's harness memory on the local services' Worker Hosts, with `supertag get memories`. */
+  harnessMemory(state: string, tagId: string): Promise<HarnessMemoryList> {
+    return listHarnessMemoryWithCli(this.options.cli, state, tagId, this.options.env);
+  }
+
+  /** Deletes one harness memory on the local services' Worker Hosts. */
+  deleteHarnessMemory(state: string, memoryId: string): Promise<HarnessMemory> {
+    return deleteHarnessMemoryWithCli(this.options.cli, state, memoryId, this.options.env);
+  }
 }
 
 type Waiting = { resolve: (id: string) => void; reject: (error: unknown) => void };
@@ -441,6 +456,21 @@ export class TuiGateway implements Gateway {
   }
   async deleteNote(memoryId: string): Promise<Note> {
     return this.state.deleteNote(await this.ready(), memoryId);
+  }
+  /** Only the local Gateway's Worker Hosts are on this machine to read harness memory from. */
+  async harnessMemory(tagId: string): Promise<HarnessMemoryList> {
+    const connectionId = await this.ready();
+    const state = this.local
+      ? await this.state.localStateOf(connectionId).catch(() => undefined)
+      : undefined;
+    if (state === undefined) {
+      return { memories: [], keptOn: [], unavailable: SHARED_GATEWAY_HARNESS_MEMORY };
+    }
+    return this.connections.harnessMemory(state, tagId);
+  }
+  async deleteHarnessMemory(memoryId: string): Promise<HarnessMemory> {
+    const state = await this.state.localStateOf(await this.ready());
+    return this.connections.deleteHarnessMemory(state, memoryId);
   }
   async schedules(tagId: string): Promise<Schedule[]> {
     return this.state.schedules(await this.ready(), tagId);

@@ -299,6 +299,10 @@ pub(crate) fn arguments(
     configuration.push(format!("features.memories={}", policy.memory));
     if policy.memory {
         configuration.extend([
+            // The pipeline whose folder, `memories`, SuperTag carries. Codex 0.163.0 defaults to
+            // v1, but later releases select `memories_v2` on fresh profiles, which every
+            // Attempt's Codex home is (`MemoriesToml::version`, `codex-rs/config/src/types.rs`).
+            "memories.version=\"v1\"".into(),
             "memories.use_memories=true".into(),
             "memories.dedicated_tools=true".into(),
             format!(
@@ -803,6 +807,7 @@ mod tests {
         let with = arguments(workspace.path(), None, None, &policy)?;
         for setting in [
             "features.memories=true",
+            "memories.version=\"v1\"",
             "memories.use_memories=true",
             "memories.dedicated_tools=true",
             "memories.generate_memories=false",

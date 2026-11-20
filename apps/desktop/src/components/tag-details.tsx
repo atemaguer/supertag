@@ -1,5 +1,7 @@
 import type {
   Gateway,
+  HarnessMemory,
+  HarnessMemoryList,
   NetworkLog,
   NetworkRequest,
   Note,
@@ -89,6 +91,7 @@ export function TagDetails({
       </div>
       <ActivitySection gateway={gateway} watch={watch} tag={tag} />
       <NotesSection gateway={gateway} watch={watch} tag={tag} />
+      <HarnessMemorySection gateway={gateway} watch={watch} tag={tag} />
       <ScheduleList gateway={gateway} watch={watch} tagId={tag.tagId} />
       <NetworkSection gateway={gateway} watch={watch} tag={tag} />
     </aside>
@@ -188,6 +191,149 @@ export function NotesSection({
                   title="Delete note"
                   disabled={deleting !== undefined}
                   onClick={() => void remove(note)}
+                >
+                  <Trash2 size={14} aria-hidden />
+                </Button>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** How often harness memory is read again; a turn that changes it is also a conversation change. */
+const HARNESS_MEMORY_INTERVAL = 30_000;
+
+const HARNESS_NAMES: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex" };
+
+/**
+ * What the details panel says of a harness memory: whose harness keeps it, what it is about, who
+ * sees it, whether a turn that may not write the Tag's memory last changed it, and when.
+ */
+export function harnessMemoryCaption(memory: HarnessMemory, now = Date.now()): string {
+  const parts = [
+    HARNESS_NAMES[memory.harness] ?? memory.harness,
+    memory.kind,
+    memory.private ? "Only you" : "Shared",
+  ];
+  if (memory.trust === "proposed-only") parts.push("proposed by a Work Session");
+  parts.push(`kept ${relativeTime(memory.updatedAtMs, now)}`);
+  return parts.join(" · ");
+}
+
+/**
+ * The memory the Tag's harness keeps itself, such as Claude Code's auto-memory, as this Mac's
+ * Worker Host reads it from the harness's files; each can be deleted. It never passes through the
+ * Control Plane, so a shared Gateway's Tags show none here.
+ */
+export function HarnessMemorySection({
+  gateway,
+  watch,
+  tag,
+}: {
+  gateway: Gateway;
+  watch?: WatchFeed;
+  tag: Tag;
+}) {
+  const [list, setList] = useState<HarnessMemoryList>();
+  const [error, setError] = useState("");
+  const [deleting, setDeleting] = useState<string>();
+  const tagId = tag.tagId;
+  const read = useCallback(
+    async (signal: AbortSignal) => {
+      if (!gateway.harnessMemory) return;
+      try {
+        const next = await gateway.harnessMemory(tagId);
+        if (signal.aborted) return;
+        setList(next);
+        setError("");
+      } catch (error) {
+        if (!signal.aborted) setError(describe(error));
+        return false;
+      }
+    },
+    [gateway, tagId],
+  );
+  // A finished turn is when the harness may have changed its memory.
+  const affected = useCallback(
+    (update: WatchUpdate) =>
+      (update.kind === "conversation" || update.kind === "memory") && update.tagId === tagId,
+    [tagId],
+  );
+  const refresh = useWatchRefresh(read, HARNESS_MEMORY_INTERVAL, watch, affected);
+
+  async function remove(memory: HarnessMemory) {
+    if (!gateway.deleteHarnessMemory || deleting) return;
+    setDeleting(memory.memoryId);
+    try {
+      await gateway.deleteHarnessMemory(memory.memoryId);
+      setList(
+        (prior) =>
+          prior && {
+            ...prior,
+            memories: prior.memories.filter(({ memoryId }) => memoryId !== memory.memoryId),
+          },
+      );
+      setError("");
+      refresh();
+    } catch (error) {
+      setError(describe(error));
+    } finally {
+      setDeleting(undefined);
+    }
+  }
+
+  if (!gateway.harnessMemory) return null;
+  const name = tag.name ?? tag.tagId;
+  const memories = list?.memories ?? [];
+  const status =
+    error ||
+    (list === undefined
+      ? "Loading harness memory…"
+      : (list.unavailable ??
+        (memories.length ? "" : `${name}'s harness keeps no memory on this Mac yet.`)));
+  return (
+    <section className="details-section" aria-labelledby="tag-details-harness-memory">
+      <h3 id="tag-details-harness-memory">Harness memory</h3>
+      <p className="tag-details-intro">
+        What {name}'s harness keeps itself, on this Mac's Worker Host. Delete one to have it forget
+        it.
+      </p>
+      {status && (
+        <p className="activity-status" role="status">
+          {status}
+        </p>
+      )}
+      {list && list.keptOn.length > 0 && (
+        <p className="activity-status">
+          More is kept on Worker Host {list.keptOn.join(", ")}, and shows only there.
+        </p>
+      )}
+      <ul className="notes" aria-label="Harness memory">
+        {memories.map((memory) => (
+          <li key={memory.memoryId} className="note">
+            <p className="note-text">
+              <strong>{memory.title}</strong>
+              {memory.title && memory.text ? " — " : ""}
+              {memory.text}
+              {memory.truncated ? "…" : ""}
+            </p>
+            <div className="note-footer">
+              <small>
+                {memory.private && <Lock size={11} aria-hidden />}
+                {harnessMemoryCaption(memory)}
+              </small>
+              {gateway.deleteHarnessMemory && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="icon-button"
+                  aria-label={`Delete harness memory: ${memory.title || memory.text}`}
+                  title="Delete harness memory"
+                  disabled={deleting !== undefined}
+                  onClick={() => void remove(memory)}
                 >
                   <Trash2 size={14} aria-hidden />
                 </Button>

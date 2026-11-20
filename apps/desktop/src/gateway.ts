@@ -21,6 +21,8 @@ export function gatewaySession(connectionId: string, scope: string): Gateway {
     },
     notes: (tagId) => api.listNotes({ connectionId, tagId }),
     deleteNote: (memoryId) => api.deleteNote({ connectionId, memoryId }),
+    harnessMemory: (tagId) => api.listHarnessMemory({ connectionId, tagId }),
+    deleteHarnessMemory: (memoryId) => api.deleteHarnessMemory({ connectionId, memoryId }),
     networkLogs: (tagId) => api.listNetworkLogs({ connectionId, tagId }),
     locateTaskFiles: (taskId) => api.locateTaskFiles({ connectionId, taskId }),
     listTaskFiles: (taskId, path) => api.listTaskFiles({ connectionId, taskId, path }),

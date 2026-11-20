@@ -669,8 +669,10 @@ A Tag with `memory: false` (`supertag tag put TAG --memory false`, or `spec.memo
 manifest) keeps no notes, has neither tool, and never reviews. Retiring a Tag deletes its notes.
 
 People read notes with `supertag get memories [--tag TAG]` and `supertag describe memory ID`, and
-delete one with `supertag delete memory ID`. The desktop app shows a Tag's notes in its details
-panel, opened from the Tag's name above the conversation, and deletes a note too. It never writes a
+delete one with `supertag delete memory ID`; the same commands read and delete
+[harness memory](#reading-and-deleting-harness-memory) on this machine. The desktop app shows a Tag's notes in its
+details panel, opened from the Tag's name above the conversation, and the terminal app in its
+Notes panel; both delete a note too. It never writes a
 note: people tell the Tag ("remember that I prefer squash merges", "forget that"). An operator sees shared notes and those
 of clients' conversations; a client sees shared notes and its own. Each note records when a turn
 last had it in its context (`last_seen_at` in `describe memory`), so a note no turn has used for
@@ -736,9 +738,46 @@ OpenCode and Cursor keep no memory of their own on the Worker Host. Codex doesn'
 Workspaces.
 
 `supertag describe tag` lists the copies Worker Hosts hold (`native_memory`), and
-`supertag delete memory --native TAG` drops all of them: each host deletes
-its copies before it next runs one of the Tag's Tasks. A Tag with `memory: false` keeps no harness
-memory either.
+`supertag delete memory --native TAG` drops all of them: the Worker Hosts on this machine delete
+theirs at once, and every other host deletes its copies before it next runs one of the Tag's
+Tasks. A Tag with `memory: false` keeps no harness memory either.
+
+### Reading and deleting harness memory
+
+A Tag's [harness memory](#harness-memory) is read on the machine whose Worker Host keeps it. The
+Worker Host keeps one record for each memory beside each store, read from the harness's own files
+with no model call, and rebuilds the records from the files whenever they are missing or older. In Claude Code's folder, each Markdown file but `MEMORY.md` is a memory, with
+the title, description, and type its frontmatter names, and so is each line of `MEMORY.md` that
+links no file. In Codex's folder, each note it saved (`extensions/ad_hoc/notes/`) is a memory, and
+so is each bullet or paragraph of its summary (`memory_summary.md`). Codex's task groups
+(`MEMORY.md`), rollout summaries, and skills are its own working files and are not listed. Each
+record has:
+
+| Field | What it says |
+| --- | --- |
+| `memory_id` | `hmem_` and 24 hex digits, from its Tag, audience, harness, and place in the files. A note's ID starts with `mem_`. |
+| `text`, `title`, `hook` | Up to 2 KB of the memory (`truncated` when its file holds more), its title, and its one-line description, when it has one. |
+| `kind` | `preference`, `feedback`, `fact`, `reference`, or `procedure`, from Claude Code's memory type or the heading in Codex's summary. |
+| `shared`, `audience`, `scope` | Its store's audience: shared, or one person's conversations. |
+| `trust` | `trusted` when the turn that last changed it may write the Tag's memory; `proposed-only` when that turn could not keep notes, such as a Work Session's own turn; unset when no recorded turn did. |
+| `status` | `owned`: the Tag's own harness keeps it. |
+| `source` | The Worker Host, the file, the memory's place in it (`native_id`), and the store's revision. |
+| `source_task_id`, `source_session_id` | The turn that last changed it, when known. |
+| `content_hash` | The SHA-256 of its whole text. |
+
+The memory never passes through the Control Plane. Each Worker Host that `supertag up` runs
+serves its records to programs of the same user on the same machine, over a socket in its state
+directory (`memory.sock`, readable only by that user). `supertag get memories` lists them beside
+the notes; `--native` lists only harness memory, and `--tag TAG` one Tag's. `supertag describe
+memory ID` and `supertag get memory ID` read one, and `supertag delete memory ID` deletes it:
+the host removes it from the harness's files (a file, and its line in Claude Code's `MEMORY.md`,
+or one bullet of Codex's summary) as the store's next revision, so a turn that started earlier
+keeps it only if that turn changed it. The desktop app shows a Tag's harness memory in the Tag's
+details panel, and the terminal app in its Notes panel, both with delete. They read it through
+the CLI too, so only the local Gateway's connection shows it. With no Worker Host running on this
+machine, or a command that reaches a shared Gateway, nothing is listed and the output says why
+(`native_memory_unavailable`); when the Control Plane records part of the Tag's memory on a Worker
+Host elsewhere, `native_memory_kept_on` names it. Harness memory on a Volume isn't listed yet.
 
 ### Quiet results
 

@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { HarnessMemory } from "@supertag/client/model";
 import {
   HarnessKind,
   InboxItemKind,
@@ -506,6 +507,56 @@ test("Notes lists the Tag's notes and x deletes one", async () => {
   for (let i = 0; i < 50 && screen.frame().includes("squash merges"); i++) await screen.settle(1);
   expect(screen.frame()).not.toContain("squash merges");
   expect(fake.notes.map((note) => note.memoryId)).toEqual(["mem-2"]);
+  await screen.close();
+});
+
+test("Notes lists the Tag's harness memory on this machine first and x deletes one", async () => {
+  const fake = new FakeGateway(TAGS);
+  fake.notes = [{ memoryId: "mem-1", tagId: "lead", text: "Atem prefers squash merges." }];
+  current = setup(fake);
+  const memory = (memoryId: string, title: string, extra: Partial<HarnessMemory> = {}) => ({
+    memoryId,
+    tagId: "lead",
+    harness: "codex",
+    private: false,
+    kind: "fact",
+    title,
+    text: title,
+    truncated: false,
+    path: "extensions/ad_hoc/notes/n.md",
+    updatedAtMs: Date.now(),
+    ...extra,
+  });
+  let held: HarnessMemory[] = [
+    memory("hmem_1", "Staging runs in eu-north-1."),
+    memory("hmem_2", "Prefers small pull requests.", {
+      harness: "claude-code",
+      kind: "preference",
+      trust: "proposed-only",
+    }),
+  ];
+  const gateway = current.controller.gateway as TuiGateway;
+  gateway.harnessMemory = async () => ({ memories: held, keptOn: [] });
+  gateway.deleteHarnessMemory = async (memoryId) => {
+    const deleted = held.find((entry) => entry.memoryId === memoryId) as HarnessMemory;
+    held = held.filter((entry) => entry !== deleted);
+    return deleted;
+  };
+  const screen = await render(current, { width: 140, height: 40 });
+  await screen.waitFor("Message lead");
+  await screen.press("k", { ctrl: true });
+  await screen.type("notes");
+  await screen.press("RETURN");
+  const frame = await screen.waitFor("Atem prefers squash merges.");
+  expect(frame).toContain("Codex · fact · everyone");
+  expect(frame).toContain("Claude Code · preference · everyone · proposed");
+  expect(frame).toContain("· note ·");
+  await screen.press("x");
+  for (let i = 0; i < 50 && screen.frame().includes("eu-north-1"); i++) await screen.settle(1);
+  expect(screen.frame()).not.toContain("eu-north-1");
+  expect(screen.frame()).toContain("Prefers small pull requests.");
+  expect(held.map((entry) => entry.memoryId)).toEqual(["hmem_2"]);
+  expect(fake.notes).toHaveLength(1);
   await screen.close();
 });
 

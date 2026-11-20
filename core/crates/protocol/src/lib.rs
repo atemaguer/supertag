@@ -49,6 +49,21 @@ pub fn web_access_note(allowed_actions: &[String]) -> Option<&'static str> {
     .then_some(NO_WEB_ACCESS)
 }
 
+/// The native memory store a turn's audience uses within its Tag and harness: `shared`, or
+/// `person-` and the first 32 hex digits of the SHA-256 of the person's principal. The Control
+/// Plane grants it (`NativeMemoryGrant.scope`) and the Worker Host names the store's directory
+/// after it, so a person's private store never shows in another person's turns.
+pub fn native_memory_scope(audience: Option<&str>) -> String {
+    use sha2::Digest as _;
+    match audience {
+        None => "shared".to_owned(),
+        Some(principal) => {
+            let digest = format!("{:x}", sha2::Sha256::digest(principal.as_bytes()));
+            format!("person-{}", &digest[..32])
+        }
+    }
+}
+
 /// The harness memory a turn was granted, for [`memory_context`]: the harness's own memory
 /// folder, which the Worker Host keeps for the Tag.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,9 +82,9 @@ pub mod memory_text {
         "This turn can change notes; a change takes effect when the turn succeeds.";
     pub const NOTES_READ_ONLY: &str = "This turn can't change notes: Work Session turns, turns an outside event such as a GitHub or Linear webhook started, and Tags whose memory is off can't.";
     /// A Codex turn granted its native memory.
-    pub const CODEX: &str = "Separately, Codex keeps its own memory in the memories folder of its Codex home: it loads memory_summary.md each turn when there is one, and finds the rest only by search, so before answering anything that may depend on earlier work, such as a fact about this project, its people, or its environments, search it with the `search` tool in the `memories` namespace. SuperTag keeps that folder on the Worker Host, or on the Tag's Volume if it has one, never in the Control Plane, one for each Tag and audience, and only this Tag's Codex turns see it: a Work Session on another harness doesn't share it yet. Codex's rule to add to its memory only when someone asks covers that folder, not notes.";
+    pub const CODEX: &str = "Separately, Codex keeps its own memory in the memories folder of its Codex home: it loads memory_summary.md each turn when there is one, and finds the rest only by search, so before answering anything that may depend on earlier work, such as a fact about this project, its people, or its environments, search it with the `search` tool in the `memories` namespace. SuperTag keeps that folder on the Worker Host, or on the Tag's Volume if it has one, never in the Control Plane, one for each Tag and audience, and only this Tag's Codex turns see it: a Work Session on another harness doesn't share it yet. People see each memory in it, and delete any, with supertag get memories on that Worker Host's machine, or in the desktop and terminal apps there. Codex's rule to add to its memory only when someone asks covers that folder, not notes.";
     /// A Claude Code turn granted its native memory.
-    pub const CLAUDE_CODE: &str = "Separately, Claude Code keeps its own auto-memory in the memory folder its instructions name. SuperTag keeps that folder on the Worker Host, or on the Tag's Volume if it has one, never in the Control Plane, one for each Tag and audience, and only this Tag's Claude Code turns see it: a Work Session on another harness doesn't share it yet.";
+    pub const CLAUDE_CODE: &str = "Separately, Claude Code keeps its own auto-memory in the memory folder its instructions name. SuperTag keeps that folder on the Worker Host, or on the Tag's Volume if it has one, never in the Control Plane, one for each Tag and audience, and only this Tag's Claude Code turns see it: a Work Session on another harness doesn't share it yet. People see each memory in it, and delete any, with supertag get memories on that Worker Host's machine, or in the desktop and terminal apps there.";
     /// A turn granted no harness memory.
     pub const NO_HARNESS_MEMORY: &str =
         "This turn keeps no harness memory of its own: only notes and Sessions last beyond it.";

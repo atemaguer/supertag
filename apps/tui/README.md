@@ -58,7 +58,7 @@ client, transcript rules and React hooks with the desktop app through `@supertag
 - **The palette** (Ctrl-K, or `/` on an empty message): Tags with their Alt-N keys (which open
   one at once, there too), found by name, ID or latest message, and commands:
   New Tag, `/goal` · Create Objective (typing `/goal OUTCOME` there sends it), Work Sessions,
-  Activity, Notes (`x` deletes one), Network (operators only), Schedules (`p` pauses or resumes,
+  Activity, Notes (the Tag's notes and its harness memory on this machine; `x` deletes one), Network (operators only), Schedules (`p` pauses or resumes,
   `x` deletes), Open inbox, Gateways, Keyboard shortcuts. Esc or Ctrl-K closes it.
 - **Gateways** (Ctrl-P): Local, and the Gateways saved with `supertag connect` or in the desktop
   app. `a` adds one with `supertag connect`: a name, the URL, an Operator Token or a client Auth

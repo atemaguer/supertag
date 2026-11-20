@@ -1,6 +1,7 @@
 import type {
   Conversation,
   Gateway,
+  HarnessMemory,
   Message,
   Note,
   Tag,
@@ -109,6 +110,25 @@ let notes: Note[] = [
   },
 ];
 
+/** What the preview's Tags' harnesses keep themselves. */
+let harnessMemories: HarnessMemory[] = [
+  {
+    memoryId: "hmem_preview00000000000001",
+    tagId: "finch",
+    harness: "claude-code",
+    private: false,
+    kind: "feedback",
+    title: "Prefer squash merges",
+    hook: "merge pull requests by squashing",
+    text: "Prefer squash merges.\n**Why:** linear history for bisect.",
+    truncated: false,
+    trust: "trusted",
+    path: "feedback_squash.md",
+    hostId: "local",
+    updatedAtMs: Date.now() - 3 * hour,
+  },
+];
+
 const previewFiles: Record<string, import("@supertag/client/model").TaskFileEntry[]> = {
   "": [
     { name: "src", path: "src", kind: "directory", size: 96, modifiedMs: Date.now(), text: false },
@@ -189,6 +209,15 @@ export const previewGateway: Gateway = {
     const deleted = notes.find((note) => note.memoryId === memoryId);
     if (!deleted) throw new Error("Memory was not found");
     notes = notes.filter((note) => note !== deleted);
+    return deleted;
+  },
+  async harnessMemory(tagId) {
+    return { memories: harnessMemories.filter((memory) => memory.tagId === tagId), keptOn: [] };
+  },
+  async deleteHarnessMemory(memoryId) {
+    const deleted = harnessMemories.find((memory) => memory.memoryId === memoryId);
+    if (!deleted) throw new Error("Memory was not found");
+    harnessMemories = harnessMemories.filter((memory) => memory !== deleted);
     return deleted;
   },
   async tags() {

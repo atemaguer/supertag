@@ -110,6 +110,8 @@ struct RunState {
     native_usage_sequence: u64,
     reported_tokens: Option<u64>,
     measured_cost: Option<ReportedCostLimit>,
+    /// Whether the turn may write the Tag's trusted memory, from its capabilities at attach.
+    may_remember: Option<bool>,
 }
 
 impl Bridge {
@@ -221,6 +223,7 @@ impl Harness for Bridge {
             )
             .await?
             .entries;
+        self.state.lock().await.may_remember = Some(capabilities.may_remember);
         if !self.attached.swap(true, Ordering::AcqRel) {
             crate::worker::milestones::report_milestone(
                 &self.host,
@@ -856,7 +859,21 @@ async fn finish_native_memory(bridge: &Bridge, memory: NativeMemory) {
             return;
         }
     };
-    let summary = match tokio::task::spawn_blocking(move || prepared.finish()).await {
+    // The turn is the source of what it changed: trusted when it may write the Tag's memory
+    // (a root turn that no outside event started), else, like a Work Session's own turn, only a
+    // proposal for the owner to merge.
+    let trusted = bridge.state.lock().await.may_remember;
+    let writer = bridge
+        .assignment
+        .task
+        .as_ref()
+        .map(|task| crate::memory::Writer {
+            task_id: task.task_id.clone(),
+            session_id: task.session_id.clone(),
+            attempt_id: bridge.assignment.attempt_id.clone(),
+            trusted,
+        });
+    let summary = match tokio::task::spawn_blocking(move || prepared.finish(writer)).await {
         Ok(Ok(summary)) => summary,
         Ok(Err(error)) => {
             crate::failures::note("Native memory changes were not kept", &error);

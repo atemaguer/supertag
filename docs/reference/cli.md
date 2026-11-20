@@ -3629,7 +3629,7 @@ Commands:
   question              Read the full question an Objective Task asked [alias: questions]
   inbox-item            List the questions and work waiting for an operator [alias: inbox-items]
   schedule              Read one Schedule: its next time, recurrence, missed occurrences, and latest turn, or list the Schedules that have not finished [alias: schedules]
-  memory                Read one of a Tag's notes, or list the notes Tags keep: what each Tag wrote with its remember tool, shared or private to one person's conversation [alias: memories]
+  memory                Read one of a Tag's memories, or list them: the notes each Tag wrote with its remember tool, and its harness memory, the files its harness keeps itself, read from the Worker Hosts on this machine. Each is shared or private to one person's conversation [alias: memories]
   help                  Print this message or the help of the given subcommand(s)
 
 Options:
@@ -4434,18 +4434,20 @@ Options:
 ## `supertag get memory`
 
 ```text
-Read one of a Tag's notes, or list the notes Tags keep: what each Tag wrote with its remember tool, shared or private to one person's conversation
+Read one of a Tag's memories, or list them: the notes each Tag wrote with its remember tool, and its harness memory, the files its harness keeps itself, read from the Worker Hosts on this machine. Each is shared or private to one person's conversation
 
 Usage: supertag get memory [OPTIONS] [ID]
 
 Arguments:
-  [ID]  Note ID. Omit to list
+  [ID]  Note or harness memory ID. Omit to list
 
 Options:
       --gateway <URL|NAME>
           Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --tag <TAG>
-          Only this Tag's notes
+          Only this Tag's notes and harness memory
+      --native
+          Only harness memory: the files a Tag's harness keeps itself, as the Worker Hosts on this machine keep them. Without it, notes too
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -4489,7 +4491,7 @@ Commands:
   workspace         Delete a remote Workspace at its exact revision [alias: workspaces]
   surface-location  Remove a location's policy and stop new work on its connector alias [alias: surface-locations]
   schedule          Cancel a Schedule. A turn it already queued stays queued [alias: schedules]
-  memory            Delete one of a Tag's notes, or with --native, a Tag's harness-native memory. To change a note, tell the Tag [alias: memories]
+  memory            Delete one of a Tag's notes or harness memories, or with --native, all of a Tag's harness memory. To change a memory, tell the Tag [alias: memories]
   help              Print this message or the help of the given subcommand(s)
 
 Options:
@@ -4673,20 +4675,20 @@ Options:
 ## `supertag delete memory`
 
 ```text
-Delete one of a Tag's notes, or with --native, a Tag's harness-native memory. To change a note, tell the Tag
+Delete one of a Tag's notes or harness memories, or with --native, all of a Tag's harness memory. To change a memory, tell the Tag
 
 Usage: supertag delete memory [OPTIONS] [ID]
 
 Arguments:
-  [ID]  Note ID
+  [ID]  Note or harness memory ID
 
 Options:
       --gateway <URL|NAME>
           Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --native <TAG>
-          Instead of a note, drop this Tag's harness-native memory (such as Claude Code's auto-memory), which Worker Hosts keep: each host deletes its copies before it next runs one of the Tag's Tasks. Operators only
+          Instead of one memory, drop all of this Tag's harness memory (such as Claude Code's auto-memory): each Worker Host deletes its copies before it next runs one of the Tag's Tasks, and those on this machine at once. Operators only
       --dry-run
-          Check that the note exists and show what would be deleted, without deleting it
+          Check that the memory exists and show what would be deleted, without deleting it
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help

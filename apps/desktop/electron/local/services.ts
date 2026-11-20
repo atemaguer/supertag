@@ -7,8 +7,15 @@
  * then `supertag up`, which migrates the database.
  */
 import path from "node:path";
-import type { LocalDiscovery } from "@supertag/client/node";
-import { result, run } from "./run";
+import type { HarnessMemory, HarnessMemoryList } from "@supertag/client/model";
+import {
+  deleteHarnessMemoryArgs,
+  type LocalDiscovery,
+  listHarnessMemoryArgs,
+  parseHarnessMemory,
+  parseHarnessMemoryList,
+} from "@supertag/client/node";
+import { reason, result, run } from "./run";
 
 /** How long `supertag up` may take to report its services ready. */
 const UP_LIMIT_MS = 180_000;
@@ -115,6 +122,39 @@ export async function addWorkspace(
   if (typeof value?.["ref"] === "string") added.workspaceRef = value["ref"];
   if (typeof value?.["baseCommit"] === "string") added.workspaceCommit = value["baseCommit"];
   return added;
+}
+
+/** How long reading or deleting harness memory may take. */
+const HARNESS_MEMORY_LIMIT_MS = 30_000;
+
+/** The Tag's harness memory the Worker Hosts of the local services in `state` keep. */
+export async function harnessMemory(
+  cli: string,
+  searchPath: string | undefined,
+  state: string,
+  tagId: string,
+): Promise<HarnessMemoryList> {
+  const ran = await run(cli, listHarnessMemoryArgs(state, tagId), {
+    path: searchPath,
+    timeoutMs: HARNESS_MEMORY_LIMIT_MS,
+  });
+  if (!ran.success) throw reason(ran);
+  return parseHarnessMemoryList(ran.stdout);
+}
+
+/** Deletes one harness memory a Worker Host of the local services in `state` keeps. */
+export async function deleteHarnessMemory(
+  cli: string,
+  searchPath: string | undefined,
+  state: string,
+  memoryId: string,
+): Promise<HarnessMemory> {
+  const ran = await run(cli, deleteHarnessMemoryArgs(state, memoryId), {
+    path: searchPath,
+    timeoutMs: HARNESS_MEMORY_LIMIT_MS,
+  });
+  if (!ran.success) throw reason(ran);
+  return parseHarnessMemory(ran.stdout);
 }
 
 /** The local Gateway runs an older release than this app: `running` is it, `version` the app's. */

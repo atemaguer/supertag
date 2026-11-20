@@ -7,6 +7,7 @@ mod credentials;
 pub mod environment;
 mod failures;
 mod local;
+pub mod memory;
 mod worker;
 mod worklet;
 mod workspace_mounts;

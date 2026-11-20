@@ -59,6 +59,14 @@ within the pre-1.0 compatibility policy described in
   harness, slot, state (starting, executing, or finalizing), how long it has run, and its Task,
   Task Attempt, and Tag. `--output json` adds them as the host's `workers`. The Worklet keeps them
   in `workers.json` in the host's state directory, and `ps` shows none for a Worklet that died.
+- Harness memory can be read and deleted: `supertag get memories` lists each memory Claude Code
+  and Codex keep for a Tag on this machine's Worker Hosts beside its notes (`--native` for only
+  those), with its kind, audience, trust, and the turn that last changed it; `describe memory
+  hmem_…` reads one and `delete memory hmem_…` removes it from the harness's files. Each Worker
+  Host keeps the records beside its stores, rebuilt from the files with no model call, and
+  serves them over a socket in its state directory, never through the Control Plane. The
+  desktop app's Tag details and the terminal app's Notes panel show and delete them, and
+  `delete memory --native TAG` now drops this machine's copies at once.
 
 ### Fixed
 
@@ -102,7 +110,10 @@ within the pre-1.0 compatibility policy described in
   Tag's memory works: notes and who sees them, the daily review, whether the turn can change
   notes, and its harness memory, where that lives and that a Work Session on another harness
   doesn't share it. A Codex turn is told that Codex's rule to add to its memory only when asked
-  doesn't apply to notes; this replaces its one-line reminder to search its memory.
+  doesn't apply to notes; this replaces its one-line reminder to search its memory. The paragraph
+  also says where people see and delete the harness memory.
+- Codex turns pin `memories.version="v1"`, the memory folder SuperTag carries, so a Codex
+  release that defaults fresh profiles to `memories_v2` doesn't leave the Tag's memory unread.
 - A wake limit that trips now also sends one operator notification through the configured
   destinations, naming the Tags, the limit, and how many messages wait, with the command
   `supertag get inbox-items --kind wake-limit`; messages it holds later send no more. The

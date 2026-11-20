@@ -414,6 +414,24 @@ pub(crate) async fn run(
             &shutdown,
         )
         .await?;
+    // Clients on this machine list and delete the Tags' harness memory here, over a socket in
+    // the state directory; the memory never goes upstream.
+    let memory_shutdown = shutdown.child_token();
+    let memory_endpoint = if options.once {
+        None
+    } else {
+        match crate::memory::spawn(
+            &options.state_directory,
+            serving.storage.root().to_owned(),
+            memory_shutdown.clone(),
+        ) {
+            Ok(endpoint) => Some(endpoint),
+            Err(error) => {
+                failures::note("The local memory endpoint did not start", &error);
+                None
+            }
+        }
+    };
     let signer = HostSigner::Host(credential.clone());
     let storage = registration::host_storage(
         &channel,
@@ -541,6 +559,10 @@ pub(crate) async fn run(
     let token = worklet.token.clone();
     drop(worklet);
     drop(serving);
+    memory_shutdown.cancel();
+    if let Some(endpoint) = memory_endpoint {
+        let _ = endpoint.await;
+    }
     if let Ok(keep_awake) = Arc::try_unwrap(keep_awake) {
         keep_awake.stop().await;
     }

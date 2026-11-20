@@ -9,7 +9,14 @@
 import { execFile } from "node:child_process";
 import { constants, promises as fs } from "node:fs";
 import path from "node:path";
+import type { HarnessMemory, HarnessMemoryList } from "../model/gateway";
 import type { AddedWorkspace } from "../model/tag-admin";
+import {
+  deleteHarnessMemoryArgs,
+  listHarnessMemoryArgs,
+  parseHarnessMemory,
+  parseHarnessMemoryList,
+} from "./harness-memory";
 import type { Tls } from "./session";
 
 const MAX_STORE_BYTES = 16 * 1024 * 1024;
@@ -287,4 +294,43 @@ export async function addWorkspaceWithCli(
   if (typeof value?.["ref"] === "string") added.workspaceRef = value["ref"];
   if (typeof value?.["baseCommit"] === "string") added.workspaceCommit = value["baseCommit"];
   return added;
+}
+
+/** How long reading or deleting harness memory may take. */
+const HARNESS_MEMORY_TIMEOUT_MS = 30_000;
+
+/** The Tag's harness memory that the Worker Hosts of the local services in `state` keep. */
+export async function listHarnessMemoryWithCli(
+  cli: string,
+  state: string,
+  tagId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<HarnessMemoryList> {
+  return parseHarnessMemoryList(
+    await runCli(
+      cli,
+      listHarnessMemoryArgs(state, tagId),
+      env,
+      HARNESS_MEMORY_TIMEOUT_MS,
+      "supertag get memories failed.",
+    ),
+  );
+}
+
+/** Deletes one harness memory a Worker Host of the local services in `state` keeps. */
+export async function deleteHarnessMemoryWithCli(
+  cli: string,
+  state: string,
+  memoryId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<HarnessMemory> {
+  return parseHarnessMemory(
+    await runCli(
+      cli,
+      deleteHarnessMemoryArgs(state, memoryId),
+      env,
+      HARNESS_MEMORY_TIMEOUT_MS,
+      "supertag delete memory failed.",
+    ),
+  );
 }

@@ -18,6 +18,8 @@ fn every_turn_hears_notes_the_review_and_its_harness_memory() {
         "review turn",
         "never in the Control Plane",
         "a Work Session on another harness doesn't share it yet",
+        // Where people see it, which never goes through the Control Plane.
+        "supertag get memories on that Worker Host's machine",
         // Codex's own template says to add memory only when asked; notes say otherwise.
         "covers that folder, not notes",
     ] {

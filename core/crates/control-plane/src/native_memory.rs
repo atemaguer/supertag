@@ -12,7 +12,6 @@
 //! hands it out with the grant, and moves it by compare-and-set on the revision
 //! ([`Store::advance_native_memory`]), so concurrent turns on any hosts merge, never overwrite.
 use crate::AttemptAccess;
-use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::v2::*;
 
@@ -26,15 +25,7 @@ pub(crate) const MAX_FILES: u32 = 1_000;
 pub(crate) const MAX_BYTES: u64 = 4 * 1024 * 1024;
 
 /// The store a turn's audience uses within its Tag and harness.
-fn scope(audience: Option<&str>) -> String {
-    match audience {
-        None => "shared".to_owned(),
-        Some(principal) => {
-            let digest = format!("{:x}", Sha256::digest(principal.as_bytes()));
-            format!("person-{}", &digest[..32])
-        }
-    }
-}
+use supertag_protocol::native_memory_scope as scope;
 
 async fn generation_in(tx: &mut Transaction<'_, Any>, tag: &str) -> Result<u64> {
     let generation: i64 =

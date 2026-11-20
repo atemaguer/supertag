@@ -2475,6 +2475,23 @@ fn resolve_target(connection: Connection) -> Result<OperatorTarget> {
     })
 }
 
+/// The local services' state directory when `connection` reaches the local Gateway, as
+/// [`resolve_target`] decides; `None` for any other Gateway.
+fn local_state_of(connection: &Connection) -> Result<Option<PathBuf>> {
+    if let Some(directory) = &connection.state_directory {
+        return Ok(Some(local_config::state_directory(Some(
+            directory.clone(),
+        ))?));
+    }
+    if connection.gateway.is_some()
+        || ROOT_GATEWAY.get().is_some()
+        || environment_gateway().is_some()
+    {
+        return Ok(None);
+    }
+    Ok(Some(local_config::state_directory(None)?))
+}
+
 /// Reads one secret and saves the Control Plane by name. An operator token is proven against the
 /// Control Plane and saved; a client Auth Key enrolls this device and only the enrolled credential
 /// is saved.

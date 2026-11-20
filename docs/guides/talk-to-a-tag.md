@@ -114,6 +114,13 @@ its details: its notes, who sees each, and when a turn last used it. Delete one 
 forget it. The conversation itself shows only messages. To add or change a note, tell the Tag. See
 [Memory](../reference/coordination.md#memory).
 
+The details also show the Tag's harness memory: what its harness, such as Claude Code or Codex,
+keeps itself between turns, read from the Worker Host on your Mac. Each shows its harness, what it
+is about, and who sees it, and you can delete one the same way. Harness memory never passes
+through the Control Plane, so it shows only on the machine whose Worker Host keeps it. From a
+terminal, `supertag get memories --tag TAG` lists both. See
+[Reading and deleting harness memory](../reference/coordination.md#reading-and-deleting-harness-memory).
+
 ## See how a Tag's messages land
 
 A Tag's details in the desktop app open with **Activity**: over the last 30 days, how many of the

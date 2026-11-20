@@ -14,6 +14,8 @@ import type {
   FollowUpdate,
   GatewayActivation,
   GatewayList,
+  HarnessMemory,
+  HarnessMemoryList,
   LocalUpgrade,
   Message,
   MessagePage,
@@ -95,6 +97,10 @@ export interface Commands {
   // Notes
   listNotes: Call<Connected & { tagId: string }, Note[]>;
   deleteNote: Call<Connected & { memoryId: string }, Note>;
+  /** The Tag's harness memory this machine's Worker Hosts keep; none for a shared Gateway. */
+  listHarnessMemory: Call<Connected & { tagId: string }, HarnessMemoryList>;
+  /** Local Gateway only: removes one harness memory from its harness's files. */
+  deleteHarnessMemory: Call<Connected & { memoryId: string }, HarnessMemory>;
   // Network log
   listNetworkLogs: Call<Connected & { tagId: string }, NetworkLog[]>;
   // Schedules
@@ -163,6 +169,8 @@ export const CHANNELS = {
   addLocalWorkspace: "call",
   listNotes: "call",
   deleteNote: "call",
+  listHarnessMemory: "call",
+  deleteHarnessMemory: "call",
   listNetworkLogs: "call",
   listSchedules: "call",
   changeSchedule: "call",

@@ -2724,7 +2724,202 @@ async fn slack_notify_destination_posts_as_a_slack_surface_without_a_location() 
     supervisor.stop().await
 }
 
+/// Writes one of a Tag's harness memory stores as its Worker Host keeps it.
+fn seed_store(host: &Path, tag: &str, harness: &str, files: &[(&str, &str)]) -> Result<PathBuf> {
+    let store = host
+        .join("artifacts/tags")
+        .join(format!("{:x}", Sha256::digest(tag.as_bytes())))
+        .join("native-memory")
+        .join(harness)
+        .join("shared");
+    for (path, contents) in files {
+        let path = store.join("current").join(path);
+        fs::create_dir_all(path.parent().context("memory file parent")?)?;
+        fs::write(path, contents)?;
+    }
+    fs::write(
+        store.join("meta.json"),
+        serde_json::json!({"revision": 1, "generation": 0, "tag": tag}).to_string(),
+    )?;
+    Ok(store)
+}
+
+/// A Tag's harness memory is listed, described and deleted through the CLI from the memory
+/// endpoint of the Worker Host `up` runs here, never through the Control Plane; a reset drops the
+/// copies here at once.
+async fn local_hosts_serve_harness_memory_to_the_cli(database: String) -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let state = temp.path().join("state");
+    let file = temp.path().join("supertag.yaml");
+    let (section, secrets) = if database.starts_with("postgres") {
+        database_password::config(&database, temp.path())?
+    } else {
+        (Value::Null, serde_json::json!({}))
+    };
+    yaml(
+        &file,
+        &serde_json::json!({"version":1,"secrets":secrets,"services":{
+            "control-plane":{"type":"control-plane","ports":["127.0.0.1:0"],"database":section},
+            "keeper":{"type":"host","adapter":ADAPTER,"concurrency":1}
+        }}),
+    )?;
+    let mut supervisor = Process::spawn(&state, Some(&file), &[])?;
+    let endpoint = supervisor.ready()?;
+    uses_database(&state, &database)?;
+    let credential = token(&state)?;
+    let mut operator = client(&endpoint).await?;
+    tag(&mut operator, &credential, "lead", HarnessKind::ClaudeCode).await?;
+    let host = state.join("hosts/keeper");
+    let socket = host.join("memory.sock");
+    timeout(WAIT, async {
+        while !socket.exists() {
+            sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await?;
+    assert_eq!(fs::metadata(&socket)?.permissions().mode() & 0o777, 0o600);
+    let claude = seed_store(
+        &host,
+        "lead",
+        "claude-code",
+        &[
+            (
+                "MEMORY.md",
+                "- [Squash merges](feedback_squash.md) — how to merge\n",
+            ),
+            (
+                "feedback_squash.md",
+                "---\nname: Prefer squash merges\ndescription: how to merge\ntype: feedback\n---\nPrefer squash merges.\n",
+            ),
+        ],
+    )?;
+    let codex = seed_store(
+        &host,
+        "lead",
+        "codex",
+        &[
+            (
+                "extensions/ad_hoc/notes/2026-11-19-region.md",
+                "Staging runs in eu-north-1.",
+            ),
+            (
+                "memory_summary.md",
+                "v1\n\n## User preferences\n\n- Prefers small pull requests.\n",
+            ),
+            ("MEMORY.md", "# Task Group: payments\n"),
+        ],
+    )?;
+    let cli = |args: &[&str]| -> Result<Value> {
+        let output = reaped(Command::new(BIN))
+            .args(args)
+            .arg("--state-directory")
+            .arg(&state)
+            .env_clear()
+            .output()?;
+        ensure!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&output.stdout)?)
+    };
+    let listed = cli(&["get", "memories", "--tag", "lead", "--native"])?;
+    assert!(listed.get("memories").is_none(), "{listed}");
+    let memories = listed["native_memory"]
+        .as_array()
+        .context("native memory")?;
+    let mut found: Vec<(&str, &str)> = memories
+        .iter()
+        .map(|memory| {
+            (
+                memory["harness"].as_str().unwrap_or_default(),
+                memory["kind"].as_str().unwrap_or_default(),
+            )
+        })
+        .collect();
+    found.sort();
+    assert_eq!(
+        found,
+        [
+            ("claude-code", "feedback"),
+            ("codex", "fact"),
+            ("codex", "preference")
+        ],
+        "{listed}"
+    );
+    for memory in memories {
+        assert_eq!(memory["source"]["host_id"], "keeper", "{memory}");
+        assert_eq!(memory["shared"], true, "{memory}");
+    }
+    let squash = memories
+        .iter()
+        .find(|memory| memory["harness"] == "claude-code")
+        .context("Claude Code memory")?;
+    let id = squash["memory_id"].as_str().context("memory ID")?;
+    assert!(id.starts_with("hmem_"), "{id}");
+    let described = cli(&["describe", "memory", id, "--output", "json"])?;
+    assert_eq!(described["title"], "Prefer squash merges", "{described}");
+    assert_eq!(described["text"], "Prefer squash merges.", "{described}");
+    let output = reaped(Command::new(BIN))
+        .args(["describe", "memory", id, "--state-directory"])
+        .arg(&state)
+        .env_clear()
+        .output()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success() && text.contains("Prefer squash merges"),
+        "{text}"
+    );
+    // Notes are listed beside it until they go.
+    let all = cli(&["get", "memories"])?;
+    assert_eq!(all["memories"], serde_json::json!([]), "{all}");
+    assert_eq!(
+        all["native_memory"].as_array().map(Vec::len),
+        Some(3),
+        "{all}"
+    );
+
+    let deleted = cli(&["delete", "memory", id])?;
+    assert_eq!(deleted["memory_id"], id, "{deleted}");
+    assert!(!claude.join("current/feedback_squash.md").exists());
+    assert!(!fs::read_to_string(claude.join("current/MEMORY.md"))?.contains("feedback_squash.md"));
+    let output = reaped(Command::new(BIN))
+        .args(["get", "memory", id, "--state-directory"])
+        .arg(&state)
+        .env_clear()
+        .output()?;
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("was not found"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let reset = cli(&["delete", "memory", "--native", "lead"])?;
+    assert_eq!(reset["reset_generation"], 1, "{reset}");
+    assert!(!codex.join("current").exists());
+    let listed = cli(&["get", "memories", "--tag", "lead", "--native"])?;
+    assert_eq!(listed["native_memory"], serde_json::json!([]), "{listed}");
+    supervisor.stop().await?;
+    assert!(
+        !socket.exists(),
+        "the Worklet removes its socket when it stops"
+    );
+    Ok(())
+}
+
 // Each `supertag up` case runs with the local Control Plane on SQLite and on PostgreSQL.
+
+#[tokio::test]
+async fn sqlite_local_hosts_serve_harness_memory_to_the_cli() -> Result<()> {
+    with_database(false, local_hosts_serve_harness_memory_to_the_cli).await
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_local_hosts_serve_harness_memory_to_the_cli() -> Result<()> {
+    with_database(true, local_hosts_serve_harness_memory_to_the_cli).await
+}
 
 #[tokio::test]
 async fn sqlite_operator_commands_default_to_the_local_control_plane() -> Result<()> {

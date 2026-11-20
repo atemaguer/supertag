@@ -81,7 +81,9 @@ this thread; `supertag get schedules` lists them. See
 
 A Tag keeps short notes ([Memory](../../docs/reference/coordination.md#memory)) of what a person
 tells it to remember. `supertag get memories --tag TAG` lists them and `supertag delete memory ID`
-removes one; to change a note, tell the Tag.
+removes one; to change a note, tell the Tag. The same commands list and delete the Tag's harness
+memory (Claude Code's auto-memory, Codex's notes), read from the Worker Hosts on this machine
+(`--native` for only those; IDs start `hmem_`), which never passes through the Control Plane.
 
 ```sh
 supertag get objective

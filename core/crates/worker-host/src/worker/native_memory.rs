@@ -6,7 +6,9 @@
 //! `tags/<sha256(tag)>/native-memory/<harness>/<scope>/current`, beside the Tag's Session
 //! checkpoints. Each Attempt gets its own copy to work in, in the lane's state directory; when its harness stops, the host merges the copy back file by file against
 //! the revision it started from, so parallel Sessions of one Tag keep each other's memories.
-//! The Control Plane never holds the files; the host reports only counts and a digest.
+//! The Control Plane never holds the files; the host reports only counts and a digest. Beside
+//! each store the host keeps its canonical memory records, derived from the files
+//! ([`crate::memory`]), which local clients read through the Worklet's memory endpoint.
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
@@ -56,9 +58,12 @@ pub(crate) fn component(kind: &str, value: &str) -> Result<()> {
 }
 
 #[derive(Default, Serialize, Deserialize)]
-struct Meta {
-    revision: u64,
-    generation: u64,
+pub(crate) struct Meta {
+    pub(crate) revision: u64,
+    pub(crate) generation: u64,
+    /// The Tag the store belongs to, which its hashed directory doesn't say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) tag: Option<String>,
 }
 
 /// What the store holds after an Attempt, for the Control Plane's record.
@@ -79,6 +84,7 @@ pub(crate) struct Prepared {
     attempt: PathBuf,
     label: String,
     generation: u64,
+    key: crate::memory::StoreKey,
 }
 
 pub(crate) fn private_directory(path: &Path) -> Result<()> {
@@ -99,10 +105,10 @@ pub(crate) fn remove(path: &Path) -> Result<()> {
 }
 
 /// Holds the store's lock until dropped.
-struct Lock(fs::File);
+pub(crate) struct Lock(fs::File);
 
 impl Lock {
-    fn take(store: &Path) -> Result<Self> {
+    pub(crate) fn take(store: &Path) -> Result<Self> {
         let file = fs::OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -126,7 +132,7 @@ impl Drop for Lock {
     }
 }
 
-fn read_meta(store: &Path) -> Result<Meta> {
+pub(crate) fn read_meta(store: &Path) -> Result<Meta> {
     match fs::read(store.join("meta.json")) {
         Ok(bytes) => Ok(serde_json::from_slice(&bytes).unwrap_or_default()),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(Meta::default()),
@@ -134,7 +140,7 @@ fn read_meta(store: &Path) -> Result<Meta> {
     }
 }
 
-fn write_meta(store: &Path, meta: &Meta) -> Result<()> {
+pub(crate) fn write_meta(store: &Path, meta: &Meta) -> Result<()> {
     let temporary = store.join("meta.json.tmp");
     fs::write(&temporary, serde_json::to_vec(meta)?)?;
     fs::rename(temporary, store.join("meta.json"))?;
@@ -296,6 +302,31 @@ pub(crate) fn merge(base: &Files, ours: &Files, theirs: &Files, label: &str) -> 
     merged
 }
 
+/// Makes `files` the store's current revision, the next after `meta`'s, under the store's lock,
+/// which the caller holds: the old revision stays whole until the new one has replaced it.
+pub(crate) fn replace_current(
+    store: &Path,
+    meta: &mut Meta,
+    files: &Files,
+    label: &str,
+) -> Result<()> {
+    check_caps(files)?;
+    let next = store.join(format!("next-{label}"));
+    remove(&next)?;
+    write_tree(&next, files)?;
+    let previous = store.join(format!("previous-{label}"));
+    remove(&previous)?;
+    match fs::rename(store.join("current"), &previous) {
+        Err(error) if error.kind() != ErrorKind::NotFound => return Err(error.into()),
+        _ => {}
+    }
+    fs::rename(&next, store.join("current"))?;
+    meta.revision += 1;
+    write_meta(store, meta)?;
+    remove(&previous)?;
+    Ok(())
+}
+
 pub(crate) fn check_caps(files: &Files) -> Result<()> {
     ensure!(
         files.len() <= MAX_FILES,
@@ -343,10 +374,16 @@ impl Prepared {
         let mut meta = read_meta(&store)?;
         if meta.generation != grant.reset_generation {
             remove(&store.join("current"))?;
+            crate::memory::forget_records(&store)?;
             meta = Meta {
                 revision: 0,
                 generation: grant.reset_generation,
+                tag: None,
             };
+            write_meta(&store, &meta)?;
+        }
+        if meta.tag.as_deref() != Some(tag) {
+            meta.tag = Some(tag.to_owned());
             write_meta(&store, &meta)?;
         }
         let current = snapshot(&store.join("current"))?;
@@ -357,6 +394,11 @@ impl Prepared {
             attempt: attempt_root,
             label: attempt.chars().take(8).collect(),
             generation: grant.reset_generation,
+            key: crate::memory::StoreKey {
+                tag: tag.to_owned(),
+                harness: harness.to_owned(),
+                scope: grant.scope.clone(),
+            },
         })
     }
 
@@ -366,16 +408,16 @@ impl Prepared {
     }
 
     /// Merges the working copy back and removes it. On an error the store keeps its previous
-    /// revision.
-    pub(crate) fn finish(self) -> Result<Summary> {
-        let result = self.merge_back();
+    /// revision. `writer` is the turn, recorded as the source of each memory it changed.
+    pub(crate) fn finish(self, writer: Option<crate::memory::Writer>) -> Result<Summary> {
+        let result = self.merge_back(writer);
         let removed = remove(&self.attempt);
         let summary = result?;
         removed?;
         Ok(summary)
     }
 
-    fn merge_back(&self) -> Result<Summary> {
+    fn merge_back(&self, writer: Option<crate::memory::Writer>) -> Result<Summary> {
         let base = snapshot(&self.attempt.join("base"))?;
         let ours = snapshot(&self.working_directory());
         let _lock = Lock::take(&self.store)?;
@@ -391,20 +433,22 @@ impl Prepared {
         if merged == theirs {
             return Ok(theirs_summary);
         }
-        check_caps(&merged)?;
-        let next = self.store.join(format!("next-{}", self.label));
-        remove(&next)?;
-        write_tree(&next, &merged)?;
-        let previous = self.store.join(format!("previous-{}", self.label));
-        remove(&previous)?;
-        match fs::rename(self.store.join("current"), &previous) {
-            Err(error) if error.kind() != ErrorKind::NotFound => return Err(error.into()),
-            _ => {}
+        replace_current(&self.store, &mut meta, &merged, &self.label)?;
+        // The files are the memory and the records are derived from them, so a failure here
+        // only leaves the records to be rebuilt, without this turn as the source of its changes.
+        let changed: BTreeSet<String> = ours
+            .iter()
+            .filter(|(path, contents)| base.get(*path) != Some(*contents))
+            .map(|(path, _)| path.clone())
+            .collect();
+        if let Err(error) = crate::memory::refresh(
+            &self.store,
+            &self.key,
+            (&merged, &meta),
+            writer.as_ref().map(|writer| (writer, &changed)),
+        ) {
+            crate::failures::note("Native memory records were not updated", &error);
         }
-        fs::rename(&next, self.store.join("current"))?;
-        meta.revision += 1;
-        write_meta(&self.store, &meta)?;
-        remove(&previous)?;
         Ok(summarize(&merged, &meta))
     }
 }
@@ -482,8 +526,8 @@ mod tests {
         fs::write(first.working_directory().join("MEMORY.md"), "- one\n")?;
         fs::write(second.working_directory().join("two.md"), "second")?;
         fs::write(second.working_directory().join("MEMORY.md"), "- two\n")?;
-        assert_eq!(first.finish()?.revision, 1);
-        let summary = second.finish()?;
+        assert_eq!(first.finish(None)?.revision, 1);
+        let summary = second.finish(None)?;
         assert_eq!((summary.revision, summary.files), (2, 3));
         let current = crate::worklet::checkpoints::tag_directory(state.path(), "tag-1")
             .join("native-memory/claude-code/shared/current");
@@ -509,7 +553,7 @@ mod tests {
             fs::read_to_string(unchanged.working_directory().join("one.md"))?,
             "first"
         );
-        assert_eq!(unchanged.finish()?.revision, 2);
+        assert_eq!(unchanged.finish(None)?.revision, 2);
 
         let reset = Prepared::prepare(
             (state.path(), state.path()),
@@ -519,7 +563,7 @@ mod tests {
             &grant(1),
         )?;
         assert!(fs::read_dir(reset.working_directory())?.next().is_none());
-        let summary = reset.finish()?;
+        let summary = reset.finish(None)?;
         assert_eq!(
             (summary.revision, summary.files, summary.generation),
             (0, 0, 1)
@@ -541,7 +585,7 @@ mod tests {
             big.working_directory().join("big.md"),
             vec![b'x'; MAX_FILE_BYTES as usize + 1],
         )?;
-        assert!(big.finish().is_err());
+        assert!(big.finish(None).is_err());
         let linked = Prepared::prepare(
             (state.path(), state.path()),
             "tag",
@@ -550,7 +594,7 @@ mod tests {
             &grant(0),
         )?;
         std::os::unix::fs::symlink("/etc/passwd", linked.working_directory().join("p.md"))?;
-        assert!(linked.finish().is_err());
+        assert!(linked.finish(None).is_err());
         let after = Prepared::prepare(
             (state.path(), state.path()),
             "tag",
@@ -559,7 +603,7 @@ mod tests {
             &grant(0),
         )?;
         assert!(fs::read_dir(after.working_directory())?.next().is_none());
-        assert_eq!(after.finish()?.revision, 0);
+        assert_eq!(after.finish(None)?.revision, 0);
         assert!(
             !state
                 .path()
@@ -584,7 +628,7 @@ mod tests {
         fs::write(work.join(".git/HEAD"), "ref: refs/heads/main")?;
         fs::create_dir_all(work.join("extensions/ad_hoc/notes"))?;
         fs::write(work.join("extensions/ad_hoc/notes/region.md"), "eu-north-1")?;
-        let summary = turn.finish()?;
+        let summary = turn.finish(None)?;
         assert_eq!(summary.files, 1);
         let current = crate::worklet::checkpoints::tag_directory(state.path(), "tag")
             .join("native-memory/codex/shared/current");

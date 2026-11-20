@@ -136,6 +136,10 @@ export interface Gateway {
   notes?(tagId: string): Promise<Note[]>;
   /** Deletes a note at once; the Tag no longer sees it from its next turn. */
   deleteNote?(memoryId: string): Promise<Note>;
+  /** The Tag's harness memory that a Worker Host on this machine keeps, newest first. */
+  harnessMemory?(tagId: string): Promise<HarnessMemoryList>;
+  /** Removes one harness memory from its harness's files at once. */
+  deleteHarnessMemory?(memoryId: string): Promise<HarnessMemory>;
   /** How the Tag's unprompted messages landed lately, and its start rate. */
   tagActivity?(tagId: string): Promise<TagActivity>;
   /** Where a Task's files are; a running Task's checkout on this machine is read here. */
@@ -247,6 +251,47 @@ export interface Note {
   updatedAtMs: number;
   /** When a turn last had it in its context. */
   lastSeenAtMs?: number;
+}
+
+/**
+ * One memory a Tag's harness keeps itself, such as a Claude Code auto-memory file or a Codex
+ * note, as a Worker Host on this machine reads it from the harness's files. It never passes
+ * through the Control Plane, so only the machine whose Worker Host keeps it can show it.
+ */
+export interface HarnessMemory {
+  /** `hmem_` and 24 hex digits. */
+  memoryId: string;
+  tagId: string;
+  /** `claude-code` or `codex`. */
+  harness: string;
+  /** Private to one person's conversations; otherwise every conversation's turns see it. */
+  private: boolean;
+  /** `preference`, `feedback`, `fact`, `reference`, or `procedure`. */
+  kind: string;
+  title: string;
+  hook?: string;
+  /** Up to 2 KB of its text; `truncated` when its file holds more. */
+  text: string;
+  truncated: boolean;
+  /**
+   * `proposed-only` when the turn that last changed it, such as a Work Session's own turn, may
+   * not write the Tag's memory; unknown when no recorded turn did.
+   */
+  trust?: "trusted" | "proposed-only";
+  /** Its file in the harness's memory folder. */
+  path: string;
+  /** The Worker Host that keeps it. */
+  hostId?: string;
+  updatedAtMs: number;
+}
+
+/** A Tag's harness memory on this machine. */
+export interface HarnessMemoryList {
+  memories: HarnessMemory[];
+  /** Why none can be read here, when none can. */
+  unavailable?: string;
+  /** Worker Hosts elsewhere that keep some of the Tag's harness memory. */
+  keptOn: string[];
 }
 
 /** One request a Task Attempt's egress proxy allowed or refused. Never headers or bodies. */

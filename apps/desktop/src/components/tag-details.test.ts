@@ -1,12 +1,20 @@
 // @vitest-environment happy-dom
 
-import type { Gateway, NetworkLog, Note, Tag, TagActivity } from "@supertag/client/model";
+import type {
+  Gateway,
+  HarnessMemory,
+  NetworkLog,
+  Note,
+  Tag,
+  TagActivity,
+} from "@supertag/client/model";
 import { watchFeed } from "@supertag/client/react";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   attentionLine,
+  harnessMemoryCaption,
   networkRequestLine,
   networkTotals,
   noteCaption,
@@ -108,6 +116,88 @@ it("says when the Tag keeps no notes you can see", async () => {
   await settle();
   expect(host.textContent).toContain("Lead keeps no notes you can see yet");
   expect(host.querySelector('[aria-label^="Delete note"]')).toBeNull();
+});
+
+const harness = (memoryId: string, extra: Partial<HarnessMemory> = {}): HarnessMemory => ({
+  memoryId,
+  tagId: "lead",
+  harness: "codex",
+  private: false,
+  kind: "fact",
+  title: `Memory ${memoryId}`,
+  text: "Staging runs in eu-north-1.",
+  truncated: false,
+  path: "extensions/ad_hoc/notes/region.md",
+  updatedAtMs: Date.now() - DAY,
+  ...extra,
+});
+
+it("says whose harness keeps a memory, who sees it, and a Work Session's proposal", () => {
+  const now = Date.now();
+  expect(harnessMemoryCaption(harness("a", { private: true }), now)).toMatch(
+    /^Codex · fact · Only you · kept /,
+  );
+  expect(
+    harnessMemoryCaption(
+      harness("b", { harness: "claude-code", kind: "feedback", trust: "proposed-only" }),
+      now,
+    ),
+  ).toMatch(/^Claude Code · feedback · Shared · proposed by a Work Session · kept /);
+});
+
+it("lists the Tag's harness memory on this Mac and deletes one", async () => {
+  let held = [harness("one"), harness("two", { private: true })];
+  const harnessMemory = vi.fn(async () => ({ memories: held, keptOn: ["laptop-2"] }));
+  const deleteHarnessMemory = vi.fn(async (memoryId: string) => {
+    const deleted = held.find((entry) => entry.memoryId === memoryId) as HarnessMemory;
+    held = held.filter((entry) => entry.memoryId !== memoryId);
+    return deleted;
+  });
+  const gateway = {
+    notes: async () => [],
+    harnessMemory,
+    deleteHarnessMemory,
+  } as unknown as Gateway;
+  const feed = watchFeed();
+  act(() => root.render(createElement(TagDetails, { gateway, watch: feed, tag, onClose() {} })));
+  await settle();
+  expect(harnessMemory).toHaveBeenCalledWith("lead");
+  const section = () => host.querySelector('[aria-label="Harness memory"]');
+  const texts = () =>
+    [...(section()?.querySelectorAll(".note-text") ?? [])].map((n) => n.textContent);
+  expect(texts()).toEqual([
+    "Memory one — Staging runs in eu-north-1.",
+    "Memory two — Staging runs in eu-north-1.",
+  ]);
+  expect(host.textContent).toContain("More is kept on Worker Host laptop-2");
+  await act(async () =>
+    host
+      .querySelector<HTMLButtonElement>('[aria-label="Delete harness memory: Memory one"]')
+      ?.click(),
+  );
+  await settle();
+  expect(deleteHarnessMemory).toHaveBeenCalledWith("one");
+  expect(texts()).toEqual(["Memory two — Staging runs in eu-north-1."]);
+  // A finished turn may have changed it: the list rereads.
+  held = [harness("three"), ...held];
+  act(() => feed.publish({ kind: "conversation", tagId: "lead" }));
+  await settle();
+  expect(texts()).toHaveLength(2);
+});
+
+it("says why a shared Gateway shows no harness memory", async () => {
+  const gateway = {
+    notes: async () => [],
+    harnessMemory: async () => ({
+      memories: [],
+      keptOn: [],
+      unavailable: "Harness memory is read only on the machine whose Worker Host keeps it.",
+    }),
+  } as unknown as Gateway;
+  act(() => root.render(createElement(TagDetails, { gateway, tag, onClose() {} })));
+  await settle();
+  expect(host.textContent).toContain("read only on the machine whose Worker Host keeps it");
+  expect(host.querySelector('[aria-label^="Delete harness memory"]')).toBeNull();
 });
 
 const networkLog: NetworkLog = {
