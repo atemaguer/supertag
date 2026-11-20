@@ -1,7 +1,7 @@
 # MCP tools for GitHub, Slack, Linear, Teams, and Lark
 
 An MCP server gives a **Task**, one request accepted for a **Tag** (a persistent AI actor with
-its own responsibilities and permissions), tools to read or change an external service. The
+its own identity, responsibilities, permissions, and work history), tools to read or change an external service. The
 **Worker Host**, the machine that runs the Task, offers MCP servers from its catalog and holds
 their credentials. Each Task Attempt's **Worker**, the process that runs it, starts or connects
 to them. A **Permission Set**, a set of allowed actions, selects which tools and

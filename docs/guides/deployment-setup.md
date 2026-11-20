@@ -3,7 +3,7 @@
 Prepare, check, and verify the configuration of a hosted **Control Plane**, the service that
 stores a SuperTag organization and schedules its work, and of its optional **Gateway**, the
 service that connects collaboration surfaces such as Slack. Every platform uses the same three
-commands. A Tag is a persistent AI actor with its own responsibilities and permissions; see the
+commands. A Tag is a persistent AI actor with its own identity, responsibilities, permissions, and work history; see the
 [glossary](../reference/glossary.md) for other terms.
 
 ## Before you start

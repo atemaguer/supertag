@@ -1,6 +1,6 @@
 # Deploy the Control Plane on Cloudflare
 
-A **Tag** is a persistent AI actor with its own responsibilities and permissions. The **Control
+A **Tag** is a persistent AI actor with its own identity, responsibilities, permissions, and work history. The **Control
 Plane** is the service that stores a SuperTag organization and schedules its work; it is the one
 public endpoint for operators, **Worker Hosts** (the machines that run the work), and the
 optional **Gateway**, which connects **collaboration surfaces** such as Slack. This guide runs the

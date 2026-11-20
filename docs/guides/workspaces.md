@@ -1,7 +1,7 @@
 # Work in a repository with Workspaces
 
 Let Tags change a repository without touching your checkout. A **Tag** is a persistent AI actor
-with its own responsibilities and permissions. A **Workspace** is a named repository its Tasks
+with its own identity, responsibilities, permissions, and work history. A **Workspace** is a named repository its Tasks
 work in. Each **Task Attempt**, one execution of a Task, runs in its own checkout pinned to an
 exact commit, on a **Worker Host**, the machine that runs the work. Its changes come back as a
 branch you review. See the [glossary](../reference/glossary.md) for other terms.

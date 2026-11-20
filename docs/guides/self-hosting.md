@@ -3,7 +3,7 @@
 Run one shared, always-on **Control Plane**, the service that stores your organization and
 schedules its work, so teammates can direct the same Tags and lend their machines as **Worker
 Hosts**, the machines that run the work. A Tag is a persistent AI actor with its own
-responsibilities and permissions. See the [glossary](../reference/glossary.md) for other terms.
+identity, responsibilities, permissions, and work history. See the [glossary](../reference/glossary.md) for other terms.
 
 A deployment has up to three roles:
 

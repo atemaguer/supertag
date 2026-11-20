@@ -1,7 +1,7 @@
 # Write an Objective
 
 An **Objective** is a desired outcome with an accountable **Tag**: a persistent AI actor with its
-own responsibilities and permissions. For example, an engineering team could deliver a tested
+own identity, responsibilities, permissions, and work history. For example, an engineering team could deliver a tested
 database upgrade rather than just edit a dependency file. Use an Objective when several pieces of
 work need one definition of success. A **Session** is one Tag's thread of **Tasks**, one Task per
 turn; a **Team** is a flat list of member Tags.

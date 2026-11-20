@@ -2,7 +2,7 @@
 
 Read, watch, declare, and delete the resources that make up your organization in a **Control
 Plane**, the service that stores it and schedules its work. Tags are persistent AI actors with
-their own responsibilities and permissions; Roles, Permission Sets, Context Sets, Teams,
+their own identities, responsibilities, permissions, and work histories; Roles, Permission Sets, Context Sets, Teams,
 Objectives, Surface Accounts, and Workspaces shape what they do. See the
 [resource model](../reference/resource-model.md) for every kind and the
 [glossary](../reference/glossary.md) for terms.

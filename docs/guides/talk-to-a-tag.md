@@ -1,8 +1,8 @@
 # Talk to a Tag from your terminal
 
 Send a **Tag** a message from your terminal and get its reply, without Slack or another
-collaboration surface. A Tag is a persistent AI actor with its own responsibilities and
-permissions. You have one conversation with each Tag. It continues a **Session**, a thread of
+collaboration surface. A Tag is a persistent AI actor with its own identity, responsibilities, permissions, and
+work history. You have one conversation with each Tag. It continues a **Session**, a thread of
 work, and a **Task** is one turn in it, so follow-ups continue where you left off.
 
 Use this for questions and small requests. To give a Tag an outcome to own, create an

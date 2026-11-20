@@ -4,7 +4,7 @@ Bring your own agent system to SuperTag by writing a **harness adapter**: a prog
 each **Task Attempt**, one execution of a Task, and drives your agent through the harness protocol.
 The **Worklet**, the program that connects a **Worker Host** to SuperTag, starts a **Worker**
 process for each Task Attempt, and the Worker starts your adapter. A Tag, a persistent AI actor with
-its own responsibilities and permissions, then runs on your agent exactly as it runs on Codex or
+its own identity, responsibilities, permissions, and work history, then runs on your agent exactly as it runs on Codex or
 Claude Code. See the [glossary](../reference/glossary.md) for other terms.
 
 The built-in harnesses are adapters too. Read one before you start:

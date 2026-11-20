@@ -1,7 +1,7 @@
 # Install SuperTag
 
-Install the `supertag` command to run Tags, persistent AI actors with their own responsibilities
-and permissions, on your repositories. One installation holds everything a machine needs:
+Install the `supertag` command to run Tags, persistent AI actors with their own identities, responsibilities,
+permissions, and work histories, on your repositories. One installation holds everything a machine needs:
 
 | Part | What it is |
 | --- | --- |

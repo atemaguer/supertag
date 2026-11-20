@@ -1,7 +1,7 @@
 # Troubleshoot the first reply
 
 Trace a request from where someone asked a **Tag**, a persistent AI actor with its own
-responsibilities and permissions, to the **Worker Host** where it runs and back. Work through the
+identity, responsibilities, permissions, and work history, to the **Worker Host** where it runs and back. Work through the
 steps in order; each checks one layer. Terms are defined in the [glossary](../reference/glossary.md).
 
 Commands talk to a **Gateway**, which forwards them to the **Control Plane**, the service that
