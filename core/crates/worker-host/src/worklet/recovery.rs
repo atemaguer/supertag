@@ -3,7 +3,10 @@
 use std::time::Duration;
 
 use anyhow::{Result, ensure};
-use supertag_protocol::{authenticated_request, v2::ReclaimAttemptRequest};
+use supertag_protocol::{
+    authenticated_request,
+    v2::{AttemptDecision, ReclaimAttemptRequest},
+};
 use tonic::Status;
 
 use crate::{
@@ -89,16 +92,17 @@ pub(crate) async fn resolved(
 }
 
 /// Reclaims an interrupted Attempt when its process record proves every process it started is
-/// gone, as TypeScript's automatic reclaim does. Returns whether the Control Plane recorded it;
-/// without proof, or when the Control Plane refuses, the Attempt waits for an operator.
+/// gone, as TypeScript's automatic reclaim does. Returns the Control Plane's decision once it
+/// recorded one: `Retry` when it redelivers the Task as a new Attempt, `Failed` when it did not.
+/// Without proof, or when the Control Plane refuses, the Attempt waits for an operator.
 pub(crate) async fn reclaim(
     host: &mut RegisteredHost,
     journal: &Journal,
     attempt: &Attempt,
     token: &str,
-) -> Result<bool> {
+) -> Result<Option<AttemptDecision>> {
     let Some(evidence) = journal.processes(attempt).stopped()? else {
-        return Ok(false);
+        return Ok(None);
     };
     let mut request = request(
         ReclaimAttemptRequest {
@@ -116,16 +120,16 @@ pub(crate) async fn reclaim(
                     && resolution.attempt_id == attempt.attempt_id,
                 "recovery receipt has mismatched identity"
             );
-            Ok(true)
+            Ok(Some(resolution.decision()))
         }
-        Err(error) if retryable(&error) => Ok(false),
+        Err(error) if retryable(&error) => Ok(None),
         Err(error)
             if matches!(
                 error.code(),
                 tonic::Code::FailedPrecondition | tonic::Code::AlreadyExists | tonic::Code::Aborted
             ) =>
         {
-            Ok(false)
+            Ok(None)
         }
         Err(error) => Err(error.into()),
     }

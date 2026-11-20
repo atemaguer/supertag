@@ -693,6 +693,21 @@ fn headline(kind: InboxItemKind, item: &InboxItem, blocking: bool) -> (String, O
             ),
             Some("supertag get inbox-items --kind wake-limit".into()),
         ),
+        // A Task the Control Plane did not run again after its Worker was lost.
+        InboxItemKind::TaskAttention if item.key.starts_with("task_interrupted:") => (
+            format!(
+                "Task {} was interrupted and not run again: {}",
+                item.task_id,
+                summary(
+                    item.reason
+                        .split(" because ")
+                        .nth(1)
+                        .and_then(|reason| reason.split(". ").next())
+                        .unwrap_or(&item.reason)
+                )
+            ),
+            Some(format!("supertag task events {}", item.task_id)),
+        ),
         InboxItemKind::TaskAttention => {
             let attempt = item.attempt_id.as_deref().unwrap_or("?");
             (
@@ -971,6 +986,30 @@ mod tests {
         assert_eq!(
             render("*", &[&unscoped], false),
             "SuperTag needs you: Approval a1: merge (requested by Tag t)\n`supertag get question a1`"
+        );
+    }
+
+    #[test]
+    fn a_task_that_was_not_run_again_names_why() {
+        let item = InboxItem {
+            key: "task_interrupted:t1".into(),
+            kind: InboxItemKind::TaskAttention as i32,
+            task_id: "t1".into(),
+            attempt_id: Some("a1".into()),
+            reason: crate::store::not_redelivered_notice(
+                "t1",
+                "builder",
+                "it ran an action that needed approval",
+            ),
+            ..Default::default()
+        };
+        assert_eq!(
+            headline(InboxItemKind::TaskAttention, &item, false),
+            (
+                "Task t1 was interrupted and not run again: it ran an action that needed approval"
+                    .into(),
+                Some("supertag task events t1".into())
+            )
         );
     }
 

@@ -920,7 +920,9 @@ async fn killed_worker_host_stops_adapter_and_restart_reclaims_without_rerunning
             tag_id: "engineer".into(),
             instructions: "Require explicit recovery".into(),
             execution: None,
-            allowed_actions: vec!["files:read".into()],
+            // Commands that may have run outside a sandbox keep the reclaimed Task from being
+            // run again (redelivery_contract.rs covers the rule).
+            allowed_actions: vec!["files:read".into(), "commands:execute".into()],
             memory: None,
             start_rate: None,
             volume: None,
@@ -1047,8 +1049,9 @@ async fn killed_worker_host_stops_adapter_and_restart_reclaims_without_rerunning
         "an unproven restart must not invent an outcome"
     );
 
-    // With every recorded process group gone, the restarted host reclaims the Attempt as
-    // failed with an unknown outcome, never reruns it, and claims new work.
+    // With every recorded process group gone, the restarted host reclaims the Attempt. Its Task
+    // may have run commands outside a sandbox, so it fails with an unknown outcome, is never
+    // rerun, and the host claims new work.
     std::fs::remove_file(&pending)?;
     // Without --once, the restarted host goes on to claim new work.
     let mut restarted = Process::spawn(
@@ -1068,7 +1071,8 @@ async fn killed_worker_host_stops_adapter_and_restart_reclaims_without_rerunning
         reclaimed
             .result
             .as_deref()
-            .is_some_and(|result| result.contains("outcome is unknown")),
+            .is_some_and(|result| result.contains("outcome is unknown")
+                && result.contains("it could run commands with network access outside a sandbox")),
         "{reclaimed:?}"
     );
     assert_eq!(reclaimed.attempt_id, running.attempt_id);

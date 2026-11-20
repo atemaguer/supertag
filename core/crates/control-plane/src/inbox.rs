@@ -460,6 +460,13 @@ pub(crate) async fn inbox_page_in(
             items.push(InboxItem { key: key.clone(), occurrence: format!("{key}:{}", attempt_id.as_deref().unwrap_or("")), kind: InboxItemKind::TaskAttention as i32, objective_id: row.try_get("objective_id")?, task_id, attempt_id, operator_eligible: true, actionable_since_ms: row.try_get("lease_expires_at_ms")?, reason: "Execution is uncertain. Confirm cleanup on the Worker Host before resolving this Attempt.".into(), question: None, approval: None, notification: None });
         }
     }
+    if creator.is_empty() && wants(&cursor, InboxItemKind::TaskAttention) {
+        let (interrupted, more) = not_redelivered_in(tx, &cursor, principal).await?;
+        if more && !truncated.contains(&(InboxItemKind::TaskAttention as i32)) {
+            truncated.push(InboxItemKind::TaskAttention as i32);
+        }
+        items.extend(interrupted);
+    }
     if wants(&cursor, InboxItemKind::Approval) {
         let pending = crate::approvals::pending_in(
             tx,
@@ -516,6 +523,58 @@ pub(crate) async fn inbox_page_in(
         next_cursor,
         truncated_kinds: truncated,
     })
+}
+
+/// Tasks whose Worker was lost and that the Control Plane did not run again (see
+/// `store::authority::not_redelivered_in`), for a week after it decided, each once. Only the
+/// Tasks the operator sees are shown.
+async fn not_redelivered_in(
+    tx: &mut Transaction<'_, Any>,
+    cursor: &Cursor,
+    principal: &str,
+) -> Result<(Vec<InboxItem>, bool)> {
+    let rows = sqlx::query(
+        "SELECT r.task_id,r.attempt_id,r.resolved_at_ms,r.not_redelivered_reason,t.tag_id,
+                COALESCE((SELECT MIN(link.objective_id) FROM supertag_v2_objective_tasks link
+                          WHERE link.task_id=r.task_id),'') AS objective_id
+         FROM supertag_v2_attempt_resolutions r JOIN supertag_v2_tasks t ON t.task_id=r.task_id
+         WHERE r.not_redelivered_reason IS NOT NULL AND r.resolved_at_ms>$1 AND r.resolved_at_ms<=$2
+           AND ($3='' OR EXISTS (SELECT 1 FROM supertag_v2_objective_tasks link
+                                 WHERE link.task_id=r.task_id AND link.objective_id=$3))
+         ORDER BY r.resolved_at_ms,r.task_id LIMIT $4",
+    )
+    .bind(cursor.as_of_ms - crate::store::NOT_REDELIVERED_SHOWN_MS)
+    .bind(cursor.as_of_ms)
+    .bind(&cursor.objective_id)
+    .bind((SCAN + 1) as i64)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut items = Vec::new();
+    for row in rows.iter().take(SCAN) {
+        let task_id: String = row.try_get("task_id")?;
+        if !crate::conversations::task_access_in(tx, principal, &task_id).await? {
+            continue;
+        }
+        let attempt_id: String = row.try_get("attempt_id")?;
+        let tag_id: String = row.try_get("tag_id")?;
+        let reason: String = row.try_get("not_redelivered_reason")?;
+        let key = format!("task_interrupted:{task_id}");
+        items.push(InboxItem {
+            occurrence: format!("{key}:{attempt_id}"),
+            key,
+            kind: InboxItemKind::TaskAttention as i32,
+            objective_id: row.try_get("objective_id")?,
+            reason: crate::store::not_redelivered_notice(&task_id, &tag_id, &reason),
+            task_id,
+            attempt_id: Some(attempt_id),
+            operator_eligible: true,
+            actionable_since_ms: row.try_get("resolved_at_ms")?,
+            question: None,
+            approval: None,
+            notification: None,
+        });
+    }
+    Ok((items, rows.len() > SCAN))
 }
 
 /// Queued Objective Tasks that wait for an OAuth MCP server whose login lapsed: no live

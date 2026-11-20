@@ -2520,6 +2520,17 @@ message Assignment {
   // The Tag's Volume when it names one, as of the claim: where the host writes the Attempt's
   // captures and, for a file Volume, which of its own mappings it uses.
   AssignedVolume volume = 6;
+  // Set when an earlier Attempt of this Task was interrupted after its harness started and the
+  // Task was queued again. The Worker Host tells the harness in its prompt.
+  Redelivery redelivery = 7;
+}
+
+// What a redelivered Attempt is told about the Attempts of its Task that were interrupted.
+message Redelivery {
+  // How many earlier Attempts of this Task were interrupted and run again.
+  uint32 interrupted_attempts = 1;
+  // What those Attempts already said to the person, their message events, oldest first.
+  repeated string already_said = 2;
 }
 
 // A Tag's harness-native memory: the files a harness keeps itself, such as Claude Code's

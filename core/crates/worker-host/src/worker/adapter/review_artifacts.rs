@@ -179,6 +179,7 @@ mod tests {
                 attempt_id: "review-attempt".into(),
                 lease_token: "review-lease".into(),
                 joined: vec![],
+                redelivery: None,
                 volume: None,
             },
             checkpoint: None,

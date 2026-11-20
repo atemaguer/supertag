@@ -18,7 +18,7 @@ use prost::Message;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
-        ClaimTaskRequest, FinishTaskRequest, HarnessKind, HostRecord, TaskState,
+        AttemptDecision, ClaimTaskRequest, FinishTaskRequest, HarnessKind, HostRecord, TaskState,
         worker_host_client::WorkerHostClient,
     },
 };
@@ -1000,16 +1000,30 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                     .context(cleanup_failure::CleanupUnconfirmed::default())?;
                 // A Worker that just died leaves its guardian stopping the harness's processes.
                 wait_for_processes(journal, &attempt, shutdown).await;
-                match resolved(&mut host, &attempt, token).await {
-                    Ok(true) => journal.save(&Entry::Terminal { attempt, prepared })?,
-                    Ok(false) if reclaim(&mut host, journal, &attempt, token).await? => {
+                // `Some(None)`: the Attempt is unresolved and could not be reclaimed.
+                let reclaimed = match resolved(&mut host, &attempt, token).await {
+                    Ok(true) => Ok(None),
+                    Ok(false) => Ok(Some(reclaim(&mut host, journal, &attempt, token).await?)),
+                    Err(error) => Err(error),
+                };
+                match reclaimed {
+                    Ok(None) => journal.save(&Entry::Terminal { attempt, prepared })?,
+                    Ok(Some(Some(decision))) => {
+                        // The Terminal entry discards the checkout: only a completed Attempt's is
+                        // kept for its Session, so a redelivered Attempt starts from a fresh one.
                         supertag_protocol::terminal_text::warn(&format!(
-                            "Task {} Attempt {} was interrupted; its processes stopped, so this host recorded it as failed with an unknown outcome",
-                            attempt.task_id, attempt.attempt_id
+                            "Task {} Attempt {} was interrupted; its processes stopped, so this host reclaimed it{}",
+                            attempt.task_id,
+                            attempt.attempt_id,
+                            if decision == AttemptDecision::Retry {
+                                " and the Control Plane will run the Task again as a new Attempt"
+                            } else {
+                                ", and the Control Plane recorded it as failed with an unknown outcome"
+                            }
                         ));
                         journal.save(&Entry::Terminal { attempt, prepared })?;
                     }
-                    Ok(false) if options.wait_for_recovery => {
+                    Ok(Some(None)) if options.wait_for_recovery => {
                         worklet.ready();
                         // Once per Attempt, however this host came to wait: this slot claims no
                         // work until the operator decides.
@@ -1019,7 +1033,7 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                         }
                         wait_for_work(shutdown).await;
                     }
-                    Ok(false) => {
+                    Ok(Some(None)) => {
                         return Err(anyhow::anyhow!(
                             "Task {} Attempt {} needs recovery before this host can claim work",
                             attempt.task_id,

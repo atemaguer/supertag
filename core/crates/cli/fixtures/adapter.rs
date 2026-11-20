@@ -585,12 +585,23 @@ async fn main() -> Result<()> {
         ensure!(replay.approval.as_ref() == Some(&approval));
         waiting_approval_ids.push(approval.approval_id);
     }
+    coordination::begin_unsettled(&bootstrap).await?;
+    // `--say-first=<text>`: the first event is a message to the person instead of an activity.
+    let (first, kind) = match std::env::args()
+        .find_map(|arg| arg.strip_prefix("--say-first=").map(str::to_owned))
+    {
+        Some(text) => (text, TaskEventKind::Message),
+        None => (
+            format!("{} started", run.attempt_id),
+            TaskEventKind::Activity,
+        ),
+    };
     harness
         .publish(authenticated_request(
             HarnessPublishRequest {
                 sequence: 1,
-                text: format!("{} started", run.attempt_id),
-                kind: TaskEventKind::Activity as i32,
+                text: first,
+                kind: kind as i32,
             },
             &bootstrap.token,
             None,

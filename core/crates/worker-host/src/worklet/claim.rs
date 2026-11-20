@@ -96,6 +96,10 @@ impl Attempt {
                 source: volume.source,
                 revision: volume.revision,
             }),
+            redelivery: assignment.redelivery.map(|redelivery| journal::Redelivery {
+                interrupted_attempts: redelivery.interrupted_attempts,
+                already_said: redelivery.already_said,
+            }),
         })
     }
 }

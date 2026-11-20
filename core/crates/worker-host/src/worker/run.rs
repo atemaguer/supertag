@@ -738,7 +738,10 @@ impl Worker<'_> {
         let sandbox_task = defer_sandbox.then(|| task.clone());
         // The harness answers the joined messages in the same turn. The Task's stored prompt keeps
         // only the person's own text.
-        task.prompt = joined_prompt(&task.prompt, &attempt.joined);
+        task.prompt = redelivered_prompt(
+            &joined_prompt(&task.prompt, &attempt.joined),
+            attempt.redelivery.as_ref(),
+        );
         let assignment = Assignment {
             native_memory: attempt.native_memory.as_ref().map(|grant| {
                 supertag_protocol::v2::NativeMemoryGrant {
@@ -775,6 +778,12 @@ impl Worker<'_> {
                     sent_at_ms: message.sent_at_ms,
                 })
                 .collect(),
+            redelivery: attempt.redelivery.as_ref().map(|redelivery| {
+                supertag_protocol::v2::Redelivery {
+                    interrupted_attempts: redelivery.interrupted_attempts,
+                    already_said: redelivery.already_said.clone(),
+                }
+            }),
         };
         let sandbox_cancel = shutdown.child_token();
         let run = async {
@@ -1294,6 +1303,70 @@ pub(crate) fn joined_prompt(prompt: &str, joined: &[journal::JoinedMessage]) -> 
     }
     text.push_str("\nAnswer them together.");
     text
+}
+
+/// A redelivered Attempt's prompt: its Task's prompt, then a note that an earlier run was
+/// interrupted, with what that run already said to the person, so the harness does not say it
+/// again. Its checkout is fresh: the interrupted run's file changes were discarded.
+pub(crate) fn redelivered_prompt(prompt: &str, redelivery: Option<&journal::Redelivery>) -> String {
+    let Some(redelivery) = redelivery else {
+        return prompt.to_owned();
+    };
+    let runs = if redelivery.interrupted_attempts > 1 {
+        format!(
+            "{} previous runs of this request were",
+            redelivery.interrupted_attempts
+        )
+    } else {
+        "A previous run of this request was".to_owned()
+    };
+    let mut text = format!(
+        "{prompt}\n\n{runs} interrupted before finishing. Any file changes it made were discarded, so check the current state before continuing."
+    );
+    if redelivery.already_said.is_empty() {
+        text.push_str(" It had not said anything to the person yet.");
+    } else {
+        text.push_str(" It had already said this to the person (oldest first):");
+        for message in &redelivery.already_said {
+            text.push_str("\n> ");
+            text.push_str(&message.replace('\n', "\n> "));
+        }
+        text.push_str("\nDo not repeat what it already said; continue from there.");
+    }
+    text
+}
+
+#[cfg(test)]
+mod redelivered_prompt_tests {
+    use super::*;
+
+    #[test]
+    fn a_redelivered_prompt_says_the_run_was_interrupted_and_what_it_already_said() {
+        assert_eq!(redelivered_prompt("Check CI", None), "Check CI");
+        assert_eq!(
+            redelivered_prompt(
+                "Check CI",
+                Some(&journal::Redelivery {
+                    interrupted_attempts: 1,
+                    already_said: vec![],
+                })
+            ),
+            "Check CI\n\nA previous run of this request was interrupted before finishing. Any file changes it made were discarded, so check the current state before continuing. It had not said anything to the person yet."
+        );
+        assert_eq!(
+            redelivered_prompt(
+                "Check CI",
+                Some(&journal::Redelivery {
+                    interrupted_attempts: 2,
+                    already_said: vec![
+                        "Looking at CI now.".into(),
+                        "Two jobs failed:\nlint".into()
+                    ],
+                })
+            ),
+            "Check CI\n\n2 previous runs of this request were interrupted before finishing. Any file changes it made were discarded, so check the current state before continuing. It had already said this to the person (oldest first):\n> Looking at CI now.\n> Two jobs failed:\n> lint\nDo not repeat what it already said; continue from there."
+        );
+    }
 }
 
 #[cfg(test)]

@@ -1179,6 +1179,7 @@ mod tests {
                 execution_selection: None,
                 requires_unsandboxed_commands: false,
                 joined: vec![],
+                redelivery: None,
                 volume: None,
             },
             result: "Capture a checked result".into(),

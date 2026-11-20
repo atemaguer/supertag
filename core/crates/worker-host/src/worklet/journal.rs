@@ -39,6 +39,10 @@ pub(crate) struct Attempt {
     /// The Tag's Volume as the claim assigned it.
     #[serde(default)]
     pub volume: Option<AssignedVolume>,
+    /// Set when the Control Plane redelivered this Attempt's Task after an earlier Attempt was
+    /// interrupted.
+    #[serde(default)]
+    pub redelivery: Option<Redelivery>,
 }
 
 /// One Attempt is the same Attempt whichever credential its latest start returned: a replayed
@@ -55,6 +59,7 @@ impl PartialEq for Attempt {
             joined,
             native_memory,
             volume,
+            redelivery,
         } = self;
         *task_id == other.task_id
             && *attempt_id == other.attempt_id
@@ -64,6 +69,7 @@ impl PartialEq for Attempt {
             && *joined == other.joined
             && *native_memory == other.native_memory
             && *volume == other.volume
+            && *redelivery == other.redelivery
     }
 }
 
@@ -85,6 +91,14 @@ pub(crate) struct AssignedVolume {
     pub volume_id: String,
     pub source: String,
     pub revision: u64,
+}
+
+/// `supertag_protocol::v2::Redelivery`, as the journal keeps it: how many earlier Attempts of
+/// the Task were interrupted, and what they already said to the person, oldest first.
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct Redelivery {
+    pub interrupted_attempts: u32,
+    pub already_said: Vec<String>,
 }
 
 /// A person's message this Attempt answers together with its Task's own prompt.
@@ -1249,6 +1263,7 @@ mod tests {
             execution_selection: None,
             requires_unsandboxed_commands: false,
             joined: vec![],
+            redelivery: None,
             volume: None,
         };
         let processes = journal.processes(&attempt("attempt"));
@@ -1306,6 +1321,7 @@ mod tests {
             execution_selection: None,
             requires_unsandboxed_commands: false,
             joined: vec![],
+            redelivery: None,
             volume: None,
         };
         let journal = Journal::open(state.path())?;
@@ -1473,6 +1489,7 @@ mod tests {
                 execution_selection: execution_selection.clone(),
                 requires_unsandboxed_commands: false,
                 joined: vec![],
+                redelivery: None,
                 volume: None,
             },
             prepared: None,

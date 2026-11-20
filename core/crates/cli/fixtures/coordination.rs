@@ -130,6 +130,24 @@ impl Effects {
     }
 }
 
+/// `--begin-effect=<key>`: begins a Worker-managed effect and leaves it unsettled, as an Attempt
+/// that dies during its provider call does.
+pub async fn begin_unsettled(bootstrap: &AdapterBootstrap) -> Result<()> {
+    let Some(key) =
+        std::env::args().find_map(|arg| arg.strip_prefix("--begin-effect=").map(str::to_owned))
+    else {
+        return Ok(());
+    };
+    let mut effects = Effects {
+        client: HarnessEffectsClient::connect(bootstrap.endpoint.clone()).await?,
+        token: bootstrap.token.clone(),
+        provider: PathBuf::new(),
+    };
+    let begun = effects.begin(&key, "{}").await?;
+    ensure!(begun.state() == EffectReceiptState::Acquired, "{begun:?}");
+    Ok(())
+}
+
 /// `--effect-fixture=<provider log>`: the prompt names the phase.
 pub async fn effects(bootstrap: &AdapterBootstrap, task: &Task) -> Result<Option<String>> {
     let Some(provider) =

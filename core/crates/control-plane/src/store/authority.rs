@@ -18,9 +18,25 @@ use super::{
 };
 
 const LEASE_MS: i64 = 30_000;
-/// The result a reclaimed Attempt's Task records when it has none, as TypeScript's
-/// `InterruptedExecutionOutcomeUnknown` failure says.
-const RECLAIMED_RESULT: &str = "Execution was interrupted before the harness finished. The host confirmed that every process it started for this Attempt is gone. The outcome is unknown, and the Task does not run again automatically.";
+/// The most Task Attempts a Task gets when its Attempts are interrupted: two redeliveries.
+pub(crate) const MAX_TASK_ATTEMPTS: i64 = 3;
+/// How long a redelivered Task waits before it can be claimed: after its first interrupted
+/// Attempt, then after its second.
+const REDELIVERY_BACKOFF_MS: [i64; 2] = [5_000, 30_000];
+/// At most this many of the interrupted runs' messages, and this many bytes of them, go into a
+/// redelivered Attempt's prompt: the most recent.
+const ALREADY_SAID_MESSAGES: i64 = 20;
+const ALREADY_SAID_BYTES: usize = 32 * 1024;
+/// How long the operator Inbox shows a Task that was not redelivered.
+pub(crate) const NOT_REDELIVERED_SHOWN_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+
+/// The result a reclaimed Attempt's Task records when it is not redelivered and has none, as
+/// TypeScript's `InterruptedExecutionOutcomeUnknown` failure says, with why it was not retried.
+fn reclaimed_result(reason: &str) -> String {
+    format!(
+        "Execution was interrupted before the harness finished. The host confirmed that every process it started for this Attempt is gone. The outcome is unknown, and SuperTag did not run the Task again because {reason}."
+    )
+}
 
 impl Store {
     /// Supply the Control Plane's clock for deterministic state transition tests.
@@ -150,7 +166,7 @@ impl Store {
             return Err(StoreError::Conflict(
                 match principal.strip_prefix("host:") {
                     Some(host) => format!(
-                        "Worker Host {host} reclaimed this Task Attempt as failed after it proved the Attempt's processes stopped"
+                        "Worker Host {host} reclaimed this Task Attempt after it proved the Attempt's processes stopped"
                     ),
                     None => "Task Attempt already has a recovery decision".into(),
                 },
@@ -221,10 +237,13 @@ impl Store {
     }
 
     /// The Attempt's own Worker Host, restarted after it was killed, proves every process it
-    /// recorded for the Attempt has stopped. Like TypeScript's automatic reclaim, this records a
-    /// failed Attempt whose outcome remains unknown: the Task never runs again on its own, and
-    /// effects the Attempt left in doubt keep their own resolution. An operator's decision, or a
-    /// Task another Attempt already owns, wins.
+    /// recorded for the Attempt has stopped. The Control Plane, the scheduler, then decides here
+    /// whether the Task runs again: it is redelivered, keeping its ID, as a new Attempt after a
+    /// short backoff, when the lost Attempt did nothing that cannot be repeated (see
+    /// [`not_redelivered_in`]) and the Task has had fewer than [`MAX_TASK_ATTEMPTS`]. Otherwise it
+    /// fails with an unknown outcome, as before, saying why it was not retried, and the operator
+    /// Inbox shows it. Effects the Attempt left in doubt keep their own resolution. An operator's
+    /// decision, or a Task another Attempt already owns, wins.
     pub async fn reclaim_attempt(
         &self,
         host: &HostAuthority,
@@ -303,20 +322,42 @@ impl Store {
                 ));
             }
         };
-        sqlx::query("INSERT INTO supertag_v2_attempt_resolutions (attempt_id, task_id, operator_principal, operation_id, decision, evidence, confirmed_stopped, resolved_at_ms) VALUES ($1,$2,$3,$4,$5,$6,1,$7)")
+        // A cancelled Task stays cancelled; a failed one may run again.
+        let not_redelivered = match state {
+            TaskState::Failed => {
+                not_redelivered_in(&mut transaction, &task, &attempt.attempt_id).await?
+            }
+            _ => None,
+        };
+        let decision = if state == TaskState::Failed && not_redelivered.is_none() {
+            AttemptDecision::Retry
+        } else {
+            AttemptDecision::Failed
+        };
+        sqlx::query("INSERT INTO supertag_v2_attempt_resolutions (attempt_id, task_id, operator_principal, operation_id, decision, evidence, confirmed_stopped, resolved_at_ms, not_redelivered_reason) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8)")
             .bind(&attempt.attempt_id).bind(&attempt.task_id).bind(&host.principal).bind(&attempt.attempt_id)
-            .bind(AttemptDecision::Failed as i64).bind(&input.evidence).bind(now)
+            .bind(decision as i64).bind(&input.evidence).bind(now).bind(&not_redelivered)
             .execute(&mut *transaction).await?;
-        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = COALESCE(result, $2), cleanup_pending = 0, cleanup_observed = 1, cleanup_failure = NULL WHERE task_id = $3")
-            // A cancelled Task keeps its cancellation as its result.
-            .bind(state as i64).bind((state == TaskState::Failed).then_some(RECLAIMED_RESULT)).bind(&attempt.task_id)
-            .execute(&mut *transaction).await?;
+        if decision == AttemptDecision::Retry {
+            let started = started_attempts_in(&mut transaction, &attempt.task_id).await?;
+            let backoff = REDELIVERY_BACKOFF_MS[usize::try_from(started - 1)
+                .unwrap_or(0)
+                .min(REDELIVERY_BACKOFF_MS.len() - 1)];
+            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = NULL, attempt_id = NULL, host_principal = NULL, host_generation = NULL, lease_token = NULL, lease_expires_at_ms = NULL, cleanup_pending = 0, cleanup_observed = 0, cleanup_failure = NULL, event_sequence_base = 0, finish_objective_signal = 0, redeliver_after_ms = $2 WHERE task_id = $3")
+                .bind(TaskState::Queued as i64).bind(now.saturating_add(backoff)).bind(&attempt.task_id)
+                .execute(&mut *transaction).await?;
+        } else {
+            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = COALESCE(result, $2), cleanup_pending = 0, cleanup_observed = 1, cleanup_failure = NULL WHERE task_id = $3")
+                // A cancelled Task keeps its cancellation as its result.
+                .bind(state as i64).bind(not_redelivered.as_deref().map(reclaimed_result)).bind(&attempt.task_id)
+                .execute(&mut *transaction).await?;
+        }
         crate::objectives::objective_sweep_in(&mut transaction, now).await?;
         transaction.commit().await?;
         Ok(AttemptResolution {
             task_id: attempt.task_id.clone(),
             attempt_id: attempt.attempt_id.clone(),
-            decision: AttemptDecision::Failed as i32,
+            decision: decision as i32,
             operator_id: String::new(),
             evidence: input.evidence.clone(),
             resolved_at_ms: now,
@@ -581,9 +622,11 @@ pub(super) async fn claim_candidate(
     let mut placement = scope.placement(transaction).await?;
     let mut after = 0_i64;
     loop {
-        let candidates = sqlx::query("SELECT pending.task_id, pending.accepted_order FROM supertag_v2_tasks pending WHERE pending.state = $1 AND pending.accepted_order > $2 AND pending.harness_kind IN (0,$8) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks active WHERE active.tag_id = pending.tag_id AND active.session_id = pending.session_id AND (active.state IN ($3,$4,$5) OR active.cleanup_pending = 1)) AND ($6 = 1 OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=$7 AND scope.tag_id=pending.tag_id)) ORDER BY pending.accepted_order LIMIT 32")
+        // A redelivered Task waits out its backoff, and the later Tasks of its Session wait
+        // behind it.
+        let candidates = sqlx::query("SELECT pending.task_id, pending.accepted_order FROM supertag_v2_tasks pending WHERE pending.state = $1 AND pending.accepted_order > $2 AND pending.harness_kind IN (0,$8) AND (pending.redeliver_after_ms IS NULL OR pending.redeliver_after_ms <= $9) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks active WHERE active.tag_id = pending.tag_id AND active.session_id = pending.session_id AND (active.state IN ($3,$4,$5) OR active.cleanup_pending = 1 OR (active.state = $1 AND active.redeliver_after_ms > $9 AND active.accepted_order < pending.accepted_order))) AND ($6 = 1 OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=$7 AND scope.tag_id=pending.tag_id)) ORDER BY pending.accepted_order LIMIT 32")
             .bind(TaskState::Queued as i64).bind(after).bind(TaskState::Claimed as i64)
-            .bind(TaskState::Running as i64).bind(TaskState::Uncertain as i64).bind(scope.all_tags).bind(&scope.host_id).bind(scope.harness as i64)
+            .bind(TaskState::Running as i64).bind(TaskState::Uncertain as i64).bind(scope.all_tags).bind(&scope.host_id).bind(scope.harness as i64).bind(now)
             .fetch_all(&mut **transaction).await?;
         let last_page = candidates.len() < 32;
         for candidate in candidates {
@@ -737,6 +780,180 @@ pub(super) async fn mark_uncertain(
     Ok(())
 }
 
+/// How many Attempts of `task_id` started their harness, the interrupted one included.
+async fn started_attempts_in(transaction: &mut Transaction<'_, Any>, task_id: &str) -> Result<i64> {
+    Ok(sqlx::query_scalar(
+        "SELECT CAST(COUNT(*) AS BIGINT) FROM supertag_v2_claims WHERE task_id = $1 AND started_at_ms IS NOT NULL",
+    )
+    .bind(task_id)
+    .fetch_one(&mut **transaction)
+    .await?)
+}
+
+/// Why the interrupted `attempt_id` of `task` may not run again, or `None` when the Task is
+/// redelivered. Redelivery is on for every Tag (operator decision, 2026-11-19). It is refused
+/// when the lost Attempt did something that repeating could do twice: an effect it began never
+/// settled; it started a delivery of the Session's changes, published an artifact, or its reply
+/// was already shown; an action that needed approval ran; or it could run a command with the
+/// network reachable outside a sandbox (see [`commands_reach_network`]). It is also refused once
+/// the Task has had [`MAX_TASK_ATTEMPTS`].
+pub(crate) async fn not_redelivered_in(
+    transaction: &mut Transaction<'_, Any>,
+    task: &Task,
+    attempt_id: &str,
+) -> Result<Option<String>> {
+    let any = |sql: &'static str| sqlx::query_scalar::<_, i64>(sql).bind(attempt_id.to_owned());
+    // A STARTED effect receipt of an ended Attempt is in doubt: the provider may have committed
+    // it. So is an MCP call the Control Plane brokered that is still reserved or unconfirmed.
+    if any("SELECT CAST(1 AS BIGINT) FROM supertag_v2_effect_receipts WHERE attempt_id = $1 AND state = 1")
+        .fetch_optional(&mut **transaction)
+        .await?
+        .is_some()
+        || any("SELECT CAST(1 AS BIGINT) FROM supertag_v2_mcp_effects WHERE attempt_id = $1 AND state IN (1,3)")
+            .fetch_optional(&mut **transaction)
+            .await?
+            .is_some()
+    {
+        return Ok(Some(
+            "an external write it started never reported its outcome".into(),
+        ));
+    }
+    if any("SELECT CAST(1 AS BIGINT) FROM supertag_v2_workspace_deliveries WHERE attempt_id = $1")
+        .fetch_optional(&mut **transaction)
+        .await?
+        .is_some()
+    {
+        return Ok(Some("it started delivering the Session's changes".into()));
+    }
+    if any("SELECT CAST(1 AS BIGINT) FROM supertag_v2_artifact_captures WHERE attempt_id = $1")
+        .fetch_optional(&mut **transaction)
+        .await?
+        .is_some()
+    {
+        return Ok(Some("it published an artifact".into()));
+    }
+    // A running Task has a result only once its harness finished and its reply was shown.
+    if task.result.is_some() {
+        return Ok(Some("its reply was already sent".into()));
+    }
+    // An approval granted to this Attempt was consumed by its action. A brokered MCP call
+    // always runs under an approval, so one it confirmed ran too.
+    if any("SELECT CAST(1 AS BIGINT) FROM supertag_v2_approval_operations WHERE attempt_id = $1 AND granted = 1")
+        .fetch_optional(&mut **transaction)
+        .await?
+        .is_some()
+        || any("SELECT CAST(1 AS BIGINT) FROM supertag_v2_mcp_effects WHERE attempt_id = $1")
+            .fetch_optional(&mut **transaction)
+            .await?
+            .is_some()
+    {
+        return Ok(Some("it ran an action that needed approval".into()));
+    }
+    let claim = sqlx::query(
+        "SELECT harness_kind, execution_profile FROM supertag_v2_claims WHERE attempt_id = $1",
+    )
+    .bind(attempt_id)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let reaches_network = match &claim {
+        Some(claim) => commands_reach_network(
+            task,
+            HarnessKind::try_from(claim.try_get::<i64, _>("harness_kind")? as i32)
+                .unwrap_or(HarnessKind::Unspecified),
+            &execution::read_profile(claim.try_get("execution_profile")?)?.unwrap_or_default(),
+        ),
+        None => true,
+    };
+    if reaches_network {
+        return Ok(Some(
+            "it could run commands with network access outside a sandbox".into(),
+        ));
+    }
+    if started_attempts_in(transaction, &task.task_id).await? >= MAX_TASK_ATTEMPTS {
+        return Ok(Some(format!(
+            "it had already run {MAX_TASK_ATTEMPTS} Task Attempts"
+        )));
+    }
+    Ok(None)
+}
+
+/// Whether an Attempt of `task` on a `harness` lane with `profile` may have run a command that
+/// reached the network outside a sandbox. Nothing records it precisely: a Worker's activity
+/// events are display text, and its network log sees only traffic through the egress proxy, not
+/// an unsandboxed command's. So this reads what the Task was admitted with and how the lane runs
+/// commands, conservatively. A Task without `commands:execute` runs none. One with it is safe
+/// only where every command runs in a sandbox without network: Codex's own sandbox on its
+/// Worker Host, or a Claude Code command sandbox, and only while the Task has no `web:fetch`,
+/// which opens that sandbox's network (directly for Codex, through the egress proxy for Claude
+/// Code). Unsandboxed lanes, remote Workspace sandboxes, and shared execution count as reaching
+/// the network.
+pub(crate) fn commands_reach_network(
+    task: &Task,
+    harness: HarnessKind,
+    profile: &HarnessExecutionProfile,
+) -> bool {
+    let admitted = |action: &str| task.allowed_actions.iter().any(|granted| granted == action);
+    if !admitted("commands:execute") {
+        return false;
+    }
+    let sandboxed = !profile.allow_unsandboxed_commands
+        && !profile.remote_file_workspace
+        && profile.shared_execution.is_none()
+        && (harness == HarnessKind::Codex
+            || (harness == HarnessKind::ClaudeCode && profile.command_sandbox));
+    !sandboxed || admitted("web:fetch")
+}
+
+/// What a new Attempt of `task_id` is told about its Task's interrupted Attempts, when it had
+/// any: how many, and the message events they published, which a new Attempt's events follow.
+pub(crate) async fn redelivery_in(
+    transaction: &mut Transaction<'_, Any>,
+    task_id: &str,
+) -> Result<Option<supertag_protocol::v2::Redelivery>> {
+    let interrupted: i64 = sqlx::query_scalar(
+        "SELECT CAST(COUNT(*) AS BIGINT) FROM supertag_v2_attempt_resolutions WHERE task_id = $1 AND decision = $2",
+    )
+    .bind(task_id)
+    .bind(AttemptDecision::Retry as i64)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if interrupted == 0 {
+        return Ok(None);
+    }
+    let rows = sqlx::query(
+        "SELECT e.text FROM supertag_v2_task_events e JOIN supertag_v2_tasks t ON t.task_id = e.task_id
+         WHERE e.task_id = $1 AND e.kind = $2 AND e.sequence <= t.event_sequence_base
+         ORDER BY e.sequence DESC LIMIT $3",
+    )
+    .bind(task_id)
+    .bind(supertag_protocol::v2::TaskEventKind::Message as i64)
+    .bind(ALREADY_SAID_MESSAGES)
+    .fetch_all(&mut **transaction)
+    .await?;
+    let mut already_said = Vec::new();
+    let mut bytes = 0;
+    for row in rows {
+        let text: String = row.try_get("text")?;
+        bytes += text.len();
+        if bytes > ALREADY_SAID_BYTES {
+            break;
+        }
+        already_said.push(text);
+    }
+    already_said.reverse();
+    Ok(Some(supertag_protocol::v2::Redelivery {
+        interrupted_attempts: u32::try_from(interrupted).unwrap_or(u32::MAX),
+        already_said,
+    }))
+}
+
+/// The operator Inbox's reason for a Task that was not redelivered.
+pub(crate) fn not_redelivered_notice(task_id: &str, tag_id: &str, reason: &str) -> String {
+    format!(
+        "Task {task_id} of Tag {tag_id} was interrupted when its Worker was lost, and SuperTag did not run it again because {reason}. Check what it did before you run it again."
+    )
+}
+
 pub(crate) fn system_now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -763,4 +980,88 @@ fn resolution_row(row: &AnyRow) -> Result<AttemptResolution> {
         resolved_at_ms: row.try_get("resolved_at_ms")?,
         worker_host_id: worker_host_id.into(),
     })
+}
+
+#[cfg(test)]
+mod redelivery_tests {
+    use super::*;
+
+    fn task(actions: &[&str]) -> Task {
+        Task {
+            allowed_actions: actions.iter().map(|action| (*action).to_owned()).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn only_commands_in_a_sandbox_without_network_are_safe_to_repeat() {
+        let plain = HarnessExecutionProfile::default();
+        let unsandboxed = HarnessExecutionProfile {
+            allow_unsandboxed_commands: true,
+            ..Default::default()
+        };
+        let command_sandbox = HarnessExecutionProfile {
+            command_sandbox: true,
+            network_sandbox: true,
+            ..Default::default()
+        };
+        let remote = HarnessExecutionProfile {
+            remote_file_workspace: true,
+            ..Default::default()
+        };
+        let commands = task(&["files:write", "commands:execute"]);
+        let online = task(&["commands:execute", "web:fetch"]);
+        // A Task that runs no commands is safe anywhere, even with web:fetch.
+        for harness in [HarnessKind::ClaudeCode, HarnessKind::Opencode] {
+            assert!(!commands_reach_network(
+                &task(&["files:write", "web:fetch"]),
+                harness,
+                &unsandboxed
+            ));
+        }
+        // Codex's own sandbox and Claude Code's command sandbox have no network without web:fetch.
+        assert!(!commands_reach_network(
+            &commands,
+            HarnessKind::Codex,
+            &plain
+        ));
+        assert!(!commands_reach_network(
+            &commands,
+            HarnessKind::ClaudeCode,
+            &command_sandbox
+        ));
+        assert!(commands_reach_network(&online, HarnessKind::Codex, &plain));
+        assert!(commands_reach_network(
+            &online,
+            HarnessKind::ClaudeCode,
+            &command_sandbox
+        ));
+        // Unsandboxed lanes, remote Workspace sandboxes, and harnesses without a sandbox do not
+        // count as sandboxed.
+        assert!(commands_reach_network(
+            &commands,
+            HarnessKind::ClaudeCode,
+            &unsandboxed
+        ));
+        assert!(commands_reach_network(
+            &commands,
+            HarnessKind::Opencode,
+            &unsandboxed
+        ));
+        assert!(commands_reach_network(
+            &commands,
+            HarnessKind::Codex,
+            &remote
+        ));
+        assert!(commands_reach_network(
+            &commands,
+            HarnessKind::ClaudeCode,
+            &plain
+        ));
+        assert!(commands_reach_network(
+            &commands,
+            HarnessKind::Unspecified,
+            &plain
+        ));
+    }
 }

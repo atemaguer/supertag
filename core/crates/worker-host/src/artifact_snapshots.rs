@@ -628,6 +628,7 @@ mod tests {
                 execution_selection: None,
                 requires_unsandboxed_commands: false,
                 joined: vec![],
+                redelivery: None,
                 volume: None,
             },
             prepared: None,

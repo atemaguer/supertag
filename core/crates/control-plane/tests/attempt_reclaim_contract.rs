@@ -156,12 +156,14 @@ async fn reclaim_contract(url: &str) {
         .reclaim_attempt(&host, &reclaim(&first, evidence))
         .await
         .unwrap();
-    assert_eq!(resolution.decision(), AttemptDecision::Failed);
+    // The lost Attempt did nothing that cannot be repeated, so the Control Plane runs its Task
+    // again (redelivery_contract.rs covers the rule).
+    assert_eq!(resolution.decision(), AttemptDecision::Retry);
     assert_eq!(resolution.worker_host_id, "laptop");
     assert_eq!(resolution.operator_id, "");
     let task = store.get_task(&first.task_id).await.unwrap();
-    assert_eq!(task.state(), TaskState::Failed);
-    assert!(task.result.unwrap().contains("outcome is unknown"));
+    assert_eq!(task.state(), TaskState::Queued);
+    assert!(task.result.is_none());
     assert_eq!(
         store
             .get_attempt_resolution(&host, &first)
@@ -201,6 +203,8 @@ async fn reclaim_contract(url: &str) {
             .await,
         Err(StoreError::Conflict(message)) if message.contains("Worker Host laptop reclaimed")
     ));
+    // The redelivered Task is not this contract's subject.
+    store.cancel_task(&first.task_id).await.unwrap();
 
     // A host that registers a new incarnation fences its old Attempt as uncertain; that host
     // still reclaims it once it proves the processes gone.
@@ -226,8 +230,9 @@ async fn reclaim_contract(url: &str) {
         .unwrap();
     assert_eq!(
         store.get_task(&fenced.task_id).await.unwrap().state(),
-        TaskState::Failed
+        TaskState::Queued
     );
+    store.cancel_task(&fenced.task_id).await.unwrap();
 
     // Cancellation stays authoritative; reclaim only completes its cleanup.
     let cancelled = running(&store, &restarted, "cancelled", "cancelled", false).await;

@@ -3081,20 +3081,30 @@ class ClaimTaskResponse(_message.Message):
     def __init__(self, assignment: _Optional[_Union[Assignment, _Mapping]] = ...) -> None: ...
 
 class Assignment(_message.Message):
-    __slots__ = ("task", "attempt_id", "lease_token", "joined", "native_memory", "volume")
+    __slots__ = ("task", "attempt_id", "lease_token", "joined", "native_memory", "volume", "redelivery")
     TASK_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
     JOINED_FIELD_NUMBER: _ClassVar[int]
     NATIVE_MEMORY_FIELD_NUMBER: _ClassVar[int]
     VOLUME_FIELD_NUMBER: _ClassVar[int]
+    REDELIVERY_FIELD_NUMBER: _ClassVar[int]
     task: Task
     attempt_id: str
     lease_token: str
     joined: _containers.RepeatedCompositeFieldContainer[JoinedMessage]
     native_memory: NativeMemoryGrant
     volume: AssignedVolume
-    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., joined: _Optional[_Iterable[_Union[JoinedMessage, _Mapping]]] = ..., native_memory: _Optional[_Union[NativeMemoryGrant, _Mapping]] = ..., volume: _Optional[_Union[AssignedVolume, _Mapping]] = ...) -> None: ...
+    redelivery: Redelivery
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., joined: _Optional[_Iterable[_Union[JoinedMessage, _Mapping]]] = ..., native_memory: _Optional[_Union[NativeMemoryGrant, _Mapping]] = ..., volume: _Optional[_Union[AssignedVolume, _Mapping]] = ..., redelivery: _Optional[_Union[Redelivery, _Mapping]] = ...) -> None: ...
+
+class Redelivery(_message.Message):
+    __slots__ = ("interrupted_attempts", "already_said")
+    INTERRUPTED_ATTEMPTS_FIELD_NUMBER: _ClassVar[int]
+    ALREADY_SAID_FIELD_NUMBER: _ClassVar[int]
+    interrupted_attempts: int
+    already_said: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, interrupted_attempts: _Optional[int] = ..., already_said: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class NativeMemoryStore(_message.Message):
     __slots__ = ("tag_id", "harness", "audience", "host_id", "revision", "files", "bytes", "digest", "updated_at_ms", "task_id", "volume_id")

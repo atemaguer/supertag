@@ -26,6 +26,7 @@ mod sqlite_files;
 pub use attempt_credentials::{AttemptAccess, AttemptCall};
 pub(crate) use authority::ClaimScope;
 pub(crate) use authority::lease_is_live;
+pub(crate) use authority::{NOT_REDELIVERED_SHOWN_MS, not_redelivered_notice};
 pub use enrollments::Role;
 pub(crate) use enrollments::{client_tags_in, enrollee_name};
 pub(crate) use execution::lane_requirement;
@@ -107,7 +108,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 119;
+        const SCHEMA_VERSION: i64 = 120;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -351,6 +352,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0117_unified_messages.sql"),
                 include_str!("../migrations/sqlite/0118_person_conversations.sql"),
                 include_str!("../migrations/sqlite/0119_messaging_rules.sql"),
+                include_str!("../migrations/sqlite/0120_redelivery.sql"),
             ]
         } else {
             [
@@ -475,6 +477,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0117_unified_messages.sql"),
                 include_str!("../migrations/postgresql/0118_person_conversations.sql"),
                 include_str!("../migrations/postgresql/0119_messaging_rules.sql"),
+                include_str!("../migrations/postgresql/0120_redelivery.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -1208,6 +1211,7 @@ impl Store {
                                 &task.tag_id,
                             )
                             .await?,
+                            redelivery: authority::redelivery_in(&mut transaction, &id).await?,
                             task: Some(task),
                             attempt_id,
                             lease_token: prior.try_get("lease_token")?,
@@ -1249,7 +1253,7 @@ impl Store {
         let attempt = Uuid::new_v4().to_string();
         let lease = Uuid::new_v4().to_string();
         let attempt_execution = attempt_execution.encode_to_vec();
-        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, host_generation = $4, lease_token = $5, lease_expires_at_ms = $6, event_sequence_base = next_sequence - 1, attempt_execution = $7, applied_execution_limits = NULL, cleanup_failure = NULL, failure_detail = NULL, waiting_holder = NULL, result = NULL WHERE task_id = $8")
+        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, host_generation = $4, lease_token = $5, lease_expires_at_ms = $6, event_sequence_base = next_sequence - 1, attempt_execution = $7, applied_execution_limits = NULL, cleanup_failure = NULL, failure_detail = NULL, waiting_holder = NULL, result = NULL, redeliver_after_ms = NULL WHERE task_id = $8")
             .bind(TaskState::Claimed as i64).bind(&attempt).bind(&host.principal).bind(host.generation).bind(&lease)
             .bind(authority::lease_deadline(now)).bind(&attempt_execution).bind(&id).execute(&mut *transaction).await?;
         // Later messages from the person join this run, so one reply answers them all.
@@ -1263,11 +1267,13 @@ impl Store {
             .bind(&host.principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).bind(workspace_scope).bind(harness as i64).bind(context_scope).bind(profile_bytes).bind(attempt_execution).bind(gateway_workspace_scope).bind(now).execute(&mut *transaction).await?;
         let native_memory = crate::native_memory::grant_in(&mut transaction, &task).await?;
         let volume = crate::artifact_volumes::assigned_in(&mut transaction, &task.tag_id).await?;
+        let redelivery = authority::redelivery_in(&mut transaction, &id).await?;
         supertag_protocol::crash_point("control-plane.claim", "before-commit");
         transaction.commit().await?;
         Ok(Some(Assignment {
             native_memory,
             volume,
+            redelivery,
             task: Some(task),
             attempt_id: attempt,
             lease_token: lease,

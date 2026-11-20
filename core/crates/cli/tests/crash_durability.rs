@@ -11,7 +11,9 @@
 //!
 //! - exactly one Task exists for the accepted request, and a redelivered request
 //!   resolves to that Task;
-//! - the adapter is launched at most once (no duplicate execution);
+//! - the adapter is launched at most once (no duplicate execution), except that a Task whose
+//!   Attempt was lost with its Worker, and did nothing that cannot be repeated, is redelivered
+//!   and runs once more on a new Attempt;
 //! - a terminal outcome produced by the adapter is never lost;
 //! - the provider receives the reply at most once, and the reply is either
 //!   delivered with its receipt or visibly uncertain (never silently resent or
@@ -57,11 +59,12 @@ use sqlx::{
 use supertag_protocol::{
     CRASH_MARKER_ENV, CRASH_POINT_ENV, authenticated_request,
     v2::{
-        GetTaskRequest, ListEventsRequest, ListReplyDeliveriesRequest, PutSurfaceAccountRequest,
-        PutSurfaceLocationRequest, PutTagRequest, Reply, ReplyState, SlackSurfaceChannel,
-        SlackSurfaceIdentity, SubmitTaskRequest, SurfaceAccount, SurfaceAccountIdentity,
-        SurfaceLocation, SurfaceLocationScope, Task, TaskState, operator_client::OperatorClient,
-        surface_account_identity, surface_location_scope,
+        GetTaskRequest, InboxItem, InboxItemKind, ListEventsRequest, ListInboxItemsRequest,
+        ListReplyDeliveriesRequest, PutSurfaceAccountRequest, PutSurfaceLocationRequest,
+        PutTagRequest, Reply, ReplyState, SlackSurfaceChannel, SlackSurfaceIdentity,
+        SubmitTaskRequest, SurfaceAccount, SurfaceAccountIdentity, SurfaceLocation,
+        SurfaceLocationScope, Task, TaskState, inbox_client::InboxClient,
+        operator_client::OperatorClient, surface_account_identity, surface_location_scope,
         surface_policy_catalog_client::SurfacePolicyCatalogClient,
     },
 };
@@ -166,10 +169,16 @@ enum Expect {
     /// The Task fails with this durable event count. Its only reply is the failure text,
     /// delivered once, besides at most one acknowledgement.
     Failed { events: usize },
-    /// The restarted host proves every process it recorded for the interrupted Attempt is gone
-    /// and reclaims it: the Task fails with an unknown outcome, nothing is rerun, and an
-    /// acknowledgement, if posted, is replaced once by the failure text.
-    Reclaimed { launches: usize, events: usize },
+    /// The host proves every process it recorded for the interrupted Attempt is gone and
+    /// reclaims it, and the lost Attempt did nothing that cannot be repeated: the Control Plane
+    /// redelivers the Task, keeping its ID, as one new Attempt that is told the first run was
+    /// interrupted, and it succeeds once. The harness launched this many times in all, and the
+    /// Task has this many events across both Attempts.
+    Redelivered { launches: usize, events: usize },
+    /// The host reclaims the interrupted Attempt, which left an effect in doubt: the Task fails
+    /// with an unknown outcome, saying why it was not run again, nothing is rerun, the operator
+    /// Inbox shows it, and an acknowledgement, if posted, is replaced once by the failure text.
+    NotRedelivered { launches: usize, events: usize },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -178,6 +187,8 @@ struct Case {
     point: &'static str,
     ingress: Ingress,
     expect: Expect,
+    /// Extra fixture adapter arguments, for every launch.
+    adapter_args: &'static [&'static str],
 }
 
 const fn case(target: Target, point: &'static str, ingress: Ingress, expect: Expect) -> Case {
@@ -186,6 +197,14 @@ const fn case(target: Target, point: &'static str, ingress: Ingress, expect: Exp
         point,
         ingress,
         expect,
+        adapter_args: &[],
+    }
+}
+
+const fn with_adapter(case: Case, adapter_args: &'static [&'static str]) -> Case {
+    Case {
+        adapter_args,
+        ..case
     }
 }
 
@@ -664,6 +683,9 @@ impl<'a> System<'a> {
                 .env(CRASH_POINT_ENV, point)
                 .env(CRASH_MARKER_ENV, marker);
         }
+        for arg in self.case.adapter_args {
+            command.arg(format!("--adapter-arg={arg}"));
+        }
         if self.case.target == Target::Adapter {
             let boundary = self
                 .case
@@ -842,6 +864,45 @@ impl<'a> System<'a> {
             .collect())
     }
 
+    /// The one recovery decision recorded for the Task's Attempts: its Attempt, and decision.
+    async fn resolution(&self, id: &str) -> Result<(String, i64)> {
+        let mut connection = self.connect_database().await?;
+        let rows = sqlx::query(
+            "SELECT attempt_id, decision FROM supertag_v2_attempt_resolutions WHERE task_id = $1",
+        )
+        .bind(id)
+        .fetch_all(&mut connection)
+        .await?;
+        connection.close().await?;
+        ensure!(rows.len() == 1, "{} recovery decisions", rows.len());
+        Ok((rows[0].try_get("attempt_id")?, rows[0].try_get("decision")?))
+    }
+
+    /// The operator Inbox items for a Task that was not run again after its Worker was lost.
+    async fn interrupted_items(&self, id: &str) -> Result<Vec<InboxItem>> {
+        let channel = protocol::negotiated(
+            Channel::from_shared(format!("http://{}", self.private))?
+                .connect_timeout(Duration::from_secs(2))
+                .timeout(Duration::from_secs(3))
+                .connect()
+                .await?,
+        )
+        .await?;
+        Ok(InboxClient::new(channel)
+            .list_items(self.credentials.request(ListInboxItemsRequest {
+                objective_id: String::new(),
+                kind: InboxItemKind::TaskAttention as i32,
+                page_size: 100,
+                cursor: String::new(),
+            })?)
+            .await?
+            .into_inner()
+            .items
+            .into_iter()
+            .filter(|item| item.key == format!("task_interrupted:{id}"))
+            .collect())
+    }
+
     fn launches(&self) -> Result<usize> {
         match std::fs::read_to_string(&self.launches) {
             Ok(text) => Ok(text.lines().count()),
@@ -894,7 +955,17 @@ impl<'a> System<'a> {
                                 .any(|reply| reply.state() == ReplyState::Delivered)
                         }))
             }
-            Expect::Reclaimed { .. } => {
+            Expect::Redelivered { .. } => {
+                exit.is_some()
+                    && task.state() == TaskState::Succeeded
+                    && (self.case.ingress != Ingress::Slack
+                        || self.replies().await.is_ok_and(|replies| {
+                            replies
+                                .iter()
+                                .any(|reply| reply.state() == ReplyState::Delivered)
+                        }))
+            }
+            Expect::NotRedelivered { .. } => {
                 exit.is_some()
                     && task.state() == TaskState::Failed
                     && (self.case.ingress != Ingress::Slack
@@ -913,6 +984,18 @@ impl<'a> System<'a> {
             self.recover().await?;
             if self.crashed && self.settled(id).await? {
                 return Ok(());
+            }
+            // A `--once` host exits once it reclaimed the Attempt; another runs the redelivered
+            // Task after its backoff.
+            if self.crashed
+                && matches!(self.case.expect, Expect::Redelivered { .. })
+                && self.host_exit()?.is_some_and(|status| status.success())
+                && self
+                    .task(id)
+                    .await
+                    .is_ok_and(|task| task.state() == TaskState::Queued)
+            {
+                self.start_host()?;
             }
             // A host that fails is never a recovered outcome. Only the host chosen to crash may
             // die, by SIGKILL at its crash point, before recover() sees the marker.
@@ -1046,7 +1129,65 @@ impl<'a> System<'a> {
                     ensure!(replies.is_empty() && provider_requests == 0);
                 }
             }
-            Expect::Reclaimed {
+            Expect::Redelivered {
+                launches: expected,
+                events: count,
+            } => {
+                ensure!(launches == expected, "adapter launched {launches} times");
+                ensure!(task.state() == TaskState::Succeeded, "task {task:?}");
+                // The fixture's result repeats its prompt, which says the first run was
+                // interrupted and what it had already said.
+                let result = task.result.clone().unwrap_or_default();
+                ensure!(
+                    result.starts_with(&format!(
+                        "{INSTRUCTIONS}: {PROMPT}\n\nA previous run of this request was interrupted before finishing."
+                    )),
+                    "the redelivered Attempt was not told about the interruption: {result}"
+                );
+                for said in case
+                    .adapter_args
+                    .iter()
+                    .filter_map(|arg| arg.strip_prefix("--say-first="))
+                {
+                    ensure!(
+                        result.contains(&format!("> {said}")),
+                        "the redelivered Attempt was not told what was already said: {result}"
+                    );
+                }
+                ensure!(
+                    sequences == (1..=count as u64).collect::<Vec<_>>(),
+                    "events {sequences:?}"
+                );
+                ensure!(events.last().is_some_and(|event| event.text == result));
+                // The same Task, finished once by a new Attempt.
+                let (lost, decision) = self.resolution(id).await?;
+                ensure!(
+                    decision == supertag_protocol::v2::AttemptDecision::Retry as i64,
+                    "the interrupted Attempt was not redelivered"
+                );
+                ensure!(
+                    task.attempt_id
+                        .as_deref()
+                        .is_some_and(|attempt| attempt != lost)
+                );
+                let exit = self.host_exit()?.context("host still running")?;
+                ensure!(exit.success(), "redelivering host exited with {exit}");
+                if case.ingress == Ingress::Slack {
+                    let result_posts = posts
+                        .iter()
+                        .filter(|body| body["text"] == result.as_str())
+                        .count();
+                    ensure!(replies.len() == 1, "replies {replies:?}");
+                    ensure!(replies[0].state() == ReplyState::Delivered);
+                    ensure!(
+                        result_posts == 1 && provider_requests <= 2,
+                        "provider received {provider_requests} posts, {result_posts} with the result"
+                    );
+                } else {
+                    ensure!(replies.is_empty() && provider_requests == 0);
+                }
+            }
+            Expect::NotRedelivered {
                 launches: expected,
                 events,
             } => {
@@ -1055,11 +1196,20 @@ impl<'a> System<'a> {
                 ensure!(exit.success(), "reclaiming host exited with {exit}");
                 ensure!(
                     task.state() == TaskState::Failed
-                        && task
-                            .result
-                            .as_deref()
-                            .is_some_and(|result| result.contains("outcome is unknown")),
-                    "host death was not reclaimed: {task:?}"
+                        && task.result.as_deref().is_some_and(|result| {
+                            result.contains("outcome is unknown")
+                                && result.contains("did not run the Task again because an external write it started never reported its outcome")
+                        }),
+                    "host death was not reclaimed without redelivery: {task:?}"
+                );
+                let (_, decision) = self.resolution(id).await?;
+                ensure!(decision == supertag_protocol::v2::AttemptDecision::Failed as i64);
+                let items = self.interrupted_items(id).await?;
+                ensure!(
+                    items.len() == 1
+                        && items[0].reason.contains(&format!("of Tag {TAG}"))
+                        && items[0].reason.contains("an external write"),
+                    "Inbox items {items:?}"
                 );
                 ensure!(
                     sequences == (1..=events as u64).collect::<Vec<_>>(),
@@ -1118,7 +1268,10 @@ impl<'a> System<'a> {
             (Ingress::Operator, Expect::Succeeded) => {
                 ensure!(replies.is_empty() && provider_requests == 0);
             }
-            (_, Expect::Failed { .. } | Expect::Reclaimed { .. }) => {}
+            (
+                _,
+                Expect::Failed { .. } | Expect::Redelivered { .. } | Expect::NotRedelivered { .. },
+            ) => {}
             (ingress, expect) => bail!("invalid case: {ingress:?} with {expect:?}"),
         }
         // A settled reply is never offered again: no claimable reply remains.
@@ -1390,15 +1543,16 @@ crash_matrix! {
         case(ControlPlane, "api.start.after-forward", Slack, Delivered);
     worker_host_start_answered =>
         case(WorkerHost, "worker-host.start.answered", Slack, Delivered);
+    // The harness never launched, so the redelivered Task runs it once.
     worker_host_execute_journaled =>
         case(WorkerHost, "worker-host.execute.journaled", Slack,
-            Reclaimed { launches: 0, events: 0 });
+            Redelivered { launches: 1, events: 2 });
     // The Worker dies once it read its Assign: its Worklet starts another for the Attempt.
     worker_assign_received =>
         case(Worker, "worker.assign.received", Slack, Delivered);
     worker_execute_journaled =>
         case(Worker, "worker.execute.journaled", Slack,
-            Reclaimed { launches: 0, events: 0 });
+            Redelivered { launches: 1, events: 2 });
     adapter_attached =>
         case(Adapter, "adapter.attached", Slack, Failed { events: 0 });
 
@@ -1412,9 +1566,22 @@ crash_matrix! {
         case(ControlPlane, "api.append-event.before-forward", Slack, Delivered);
     api_event_after_forward =>
         case(ControlPlane, "api.append-event.after-forward", Slack, Delivered);
+    // The harness launched and published before its Worker died: it runs once more.
     worker_event_answered =>
         case(Worker, "worker.append-event.answered", Slack,
-            Reclaimed { launches: 1, events: 1 });
+            Redelivered { launches: 2, events: 3 });
+    // What the first run said reaches the second run's prompt.
+    worker_message_answered =>
+        with_adapter(
+            case(Worker, "worker.append-event.answered", Operator,
+                Redelivered { launches: 2, events: 3 }),
+            &["--say-first=Looking into it."]);
+    // An effect begun and never settled: the Task is not run again, and the Inbox shows it.
+    worker_effect_begun =>
+        with_adapter(
+            case(Worker, "worker.append-event.answered", Slack,
+                NotRedelivered { launches: 1, events: 1 }),
+            &["--begin-effect=ticket/crash"]);
     adapter_published =>
         case(Adapter, "adapter.published", Slack, Failed { events: 1 });
 
