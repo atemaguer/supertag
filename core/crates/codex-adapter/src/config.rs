@@ -208,6 +208,21 @@ pub(crate) fn code_mode_host(policy: &Policy) -> bool {
     policy.commands && (policy.network || policy.remote)
 }
 
+/// The consolidation model of every Codex turn but the Tag's daily review: no model, so Codex's
+/// consolidation agent fails at its first request and spends nothing.
+///
+/// `generate_memories=false` does not stop consolidation. Codex 0.163.0 (and 0.171.0) starts its
+/// memory pipeline at every `turn/start` of a non-ephemeral thread with memories on, and phase 2
+/// spawns a consolidation agent whenever the memory folder lacks `MEMORY.md` or a valid
+/// `memory_summary.md`, or changed since the baseline it commits at the start of the Attempt
+/// (`memories/write/src/phase2.rs`). A Tag's folder lacks them until a consolidation lands, so
+/// every ordinary turn started one. Measured live on Codex 0.163.0, 2026-11-19: a one-line turn
+/// of 12,964 tokens on gpt-5.6-luna started a gpt-5.6-terra agent that spent 121,944 more
+/// (96,115 cached), unreported to the app-server client; with this model it made only refused
+/// requests (404, no tokens) and Codex marked the job failed. Codex offers no switch for phase 2
+/// alone: turning `features.memories` off would also take away the summary and memory tools.
+pub(crate) const NO_CONSOLIDATION_MODEL: &str = "supertag-no-consolidation";
+
 pub(crate) fn arguments(
     workspace: &Path,
     model: Option<&str>,
@@ -291,6 +306,12 @@ pub(crate) fn arguments(
                 policy.consolidate.is_some()
             ),
         ]);
+        if policy.consolidate.is_none() {
+            configuration.push(format!(
+                "memories.consolidation_model={}",
+                serde_json::to_string(NO_CONSOLIDATION_MODEL)?
+            ));
+        }
     }
     configuration.push(format!(
         "features.code_mode_host={}",
@@ -790,10 +811,19 @@ mod tests {
             assert!(with.contains(&setting.to_owned()), "{setting}");
         }
         assert!(!with.contains(&"features.memories=false".to_owned()));
-        // Only the Tag's daily review runs Codex's own consolidation.
+        // An ordinary turn's consolidation agent, which Codex starts anyway, has no model.
+        assert!(
+            with.contains(&"memories.consolidation_model=\"supertag-no-consolidation\"".to_owned())
+        );
+        // Only the Tag's daily review runs Codex's own consolidation, with Codex's model.
         policy.consolidate = Some(workspace.path().to_path_buf());
         let review = arguments(workspace.path(), None, None, &policy)?;
         assert!(review.contains(&"memories.generate_memories=true".to_owned()));
+        assert!(
+            !review
+                .iter()
+                .any(|argument| argument.starts_with("memories.consolidation_model"))
+        );
         Ok(())
     }
 

@@ -21,6 +21,7 @@ import {
   fileScopeRefusal,
   harnessClient,
   LiveInputReceipt,
+  memoryContext,
   NetworkRules,
   type NetworkScopeLike,
   networkCredentials,
@@ -884,6 +885,7 @@ export async function runAdapter(
         task.instructions,
         TURN_GUIDANCE,
         webAccessNote(task.allowedActions),
+        memoryContext(run, memory ? "claude-code" : undefined),
         tagPortfolio(run),
         remote
           ? `The Task workspace is in a sandbox. Use the mcp__workspace tools, with paths relative to the workspace, for every file and command in it.${memory ? " Your memory folder is not in the sandbox: it is on this Worker Host, so keep your memories there with Read, Write, and Edit." : ""}`

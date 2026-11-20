@@ -968,6 +968,7 @@ async function turn(message) {
       autoDreamEnabled: settings.autoDreamEnabled,
       autoMemoryDirectory: settings.autoMemoryDirectory,
       memoryOverride: process.env.CLAUDE_COWORK_MEMORY_PATH_OVERRIDE ?? null,
+      systemPrompt: initialized.systemPrompt?.join("\n") ?? "",
     });
   }
   if (prompt === "provider-env") {

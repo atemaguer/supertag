@@ -627,6 +627,11 @@ A Tag keeps a short notebook of what it cannot look up again: a person's prefere
 corrections, decisions and their reasons, and pointers to where things live. Notes are pointers,
 not copies; the Tag's Sessions stay the record. Each root turn's portfolio lists the notes it may
 see, newest first, as state rather than instructions. The Tag's own instructions still rule.
+Every turn, a Work Session's own turns included, on every harness, also starts with one short
+paragraph on how its memory works: what notes are and who sees them, the daily review, whether
+this turn can change notes, and its [harness memory](#harness-memory), if it has one: where that
+lives, and that a Work Session on another harness doesn't share it yet. It too states facts and
+grants nothing.
 
 ```text
 remember(text: "Atem prefers squash merges and small PRs.")
@@ -716,8 +721,12 @@ Claude Code and Codex keep harness memory this way:
   every tool that touches the Workspace runs in the sandbox, which never reaches the folder.
 - **Codex** keeps its memory folder: notes it saves with its memory tools, and the summary it
   reads at the start of each turn. Each turn is told to search its notes before answering
-  anything that may depend on earlier work. Codex's own consolidation, which folds the notes into
-  that summary with extra model calls, runs only in the Tag's daily review turn: the turn waits up
+  anything that may depend on earlier work, and that Codex's own rule, to add to its memory only
+  when someone asks, covers that folder and not the Tag's notes. Codex's own consolidation, which
+  folds the notes into that summary with extra model calls, runs only in the Tag's daily review
+  turn. Codex starts its consolidation agent at every turn, so in other turns SuperTag names a
+  model that doesn't exist for it: the agent fails at its first request and spends nothing. The
+  review turn waits up
   to 3 minutes after it finishes for Codex to complete it, so later turns read the notes in the
   summary without searching. Codex doesn't report the consolidation's tokens, so a Codex review
   turn is reported unpriced, with only its own tokens counted. Codex's git repository inside the

@@ -42,6 +42,7 @@ import {
   HarnessWorkstreams,
   LiveInputReceipt,
   MessageKind,
+  memoryContext,
   NetworkRules,
   ObjectiveSignal,
   type ResolvedSkill,
@@ -786,6 +787,8 @@ it("starts a fresh native Session from the recap, with no auto memory when none 
   expect(seen.autoMemoryEnabled).toBe(false);
   expect(seen.autoDreamEnabled).toBeUndefined();
   expect(seen.memoryOverride).toBeNull();
+  // The turn still hears how memory works: notes, and that it keeps no harness memory.
+  expect(seen.systemPrompt).toContain(memoryContext({}));
 
   // A resumed native Session already holds its history: no recap.
   const first = await invoke({ prompt: "write" });
@@ -808,6 +811,8 @@ it("keeps Claude's auto memory in the Tag's native memory directory, writable ev
   expect(seen.autoMemoryDirectory).toBe(memory);
   expect(seen.autoMemoryEnabled).toBeUndefined();
   expect(seen.autoDreamEnabled).toBeUndefined();
+  // It hears where Claude Code's memory lives and that other harnesses don't share it.
+  expect(seen.systemPrompt).toContain(memoryContext({}, "claude-code"));
 
   // A read-only Task still writes its memories, and only there.
   const readOnly = await invoke({

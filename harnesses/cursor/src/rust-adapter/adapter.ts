@@ -8,6 +8,7 @@ import {
   createRemoteWorkspaceExecutor,
   fileScopeRefusal,
   harnessClient,
+  memoryContext,
   type ObjectiveSignal,
   receipt,
   redact,
@@ -231,6 +232,7 @@ export async function runAdapter(
           CURSOR_WORKER_POLICY,
           safeText(task.instructions, secrets),
           TURN_GUIDANCE,
+          memoryContext(run),
           safeText(tagPortfolio(run), secrets),
           shared
             ? "Use paths relative to the fixed shared root in the admitted file tools."

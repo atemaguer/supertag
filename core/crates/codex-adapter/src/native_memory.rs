@@ -4,9 +4,9 @@
 //! so the adapter copies the Worker Host's working copy (`SUPERTAG_NATIVE_MEMORY_DIRECTORY`) in
 //! before Codex starts and back out after it stops. The host merges the copy into the Tag's
 //! store. Codex reads its memories (`use_memories`) and keeps notes with its memory tools
-//! (`dedicated_tools`); it never runs its own extraction and consolidation agents
-//! (`generate_memories`), which spend unbudgeted model calls at startup and die with a short
-//! turn. Codex turns the folder into a git repository and writes a consolidation scratch file;
+//! (`dedicated_tools`); outside the Tag's daily review it never runs its own extraction and
+//! consolidation agents, which spend model calls Codex doesn't report (see
+//! `config::NO_CONSOLIDATION_MODEL`). Codex turns the folder into a git repository and writes a consolidation scratch file;
 //! neither is memory, so neither is copied.
 use std::{
     ffi::OsString,
@@ -19,10 +19,6 @@ use anyhow::{Context, Result, ensure};
 
 /// The Worker Host's working copy of the Tag's Codex memory for this Attempt.
 pub(crate) const DIRECTORY: &str = "SUPERTAG_NATIVE_MEMORY_DIRECTORY";
-
-/// Told to the model when it has memory: Codex loads its consolidated summary on its own, but a
-/// note an earlier turn kept is found only by searching.
-pub(crate) const NUDGE: &str = "You keep memory notes from earlier turns. Before answering anything that may depend on earlier work, such as a fact about this project, its people, or its environments, search your notes with the `search` tool in the `memories` namespace.";
 
 /// Entries of `CODEX_HOME/memories` that are not memory: Codex's own git repository and the
 /// scratch file its consolidation writes.
@@ -172,7 +168,7 @@ mod tests {
 
     /// One live model turn (operator-approved): a note an earlier turn kept, in the form Codex
     /// 0.156.0 writes it, reaches a later turn's private CODEX_HOME through `copy_in`, and the
-    /// turn finds it by search under SuperTag's memory settings and nudge. Needs
+    /// turn finds it by search under SuperTag's memory settings and memory context. Needs
     /// SUPERTAG_TEST_CODEX_BINARY, SUPERTAG_LIVE_CODE_MODE_HOME (a private CODEX_HOME holding a
     /// copied auth.json), and SUPERTAG_LIVE_CODE_MODE_MODEL.
     #[tokio::test]
@@ -210,7 +206,8 @@ mod tests {
         policy.memory = true;
         let args = crate::config::arguments(&workspace, Some(&model), Some("low"), &policy)?;
         let prompt = format!(
-            "{NUDGE}\n\nTask:\nWhich region is staging in? Reply with just the region, or UNKNOWN."
+            "{}\n\nTask:\nWhich region is staging in? Reply with just the region, or UNKNOWN.",
+            supertag_protocol::memory_context(false, Some(supertag_protocol::HarnessMemory::Codex))
         );
         let output = tokio::process::Command::new(&executable)
             .arg("exec")

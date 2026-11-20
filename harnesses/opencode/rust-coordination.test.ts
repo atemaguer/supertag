@@ -10,6 +10,7 @@ import {
   harnessClient,
   ListTagSessionsResponseSchema,
   MemoryState,
+  memoryContext,
   ObjectiveSignal,
   ReadTagSessionResponseSchema,
   ReadTagTurnResponseSchema,
@@ -368,6 +369,22 @@ it("reads the Tag's Sessions and Objectives, refuses an unasked Objective, and c
     "SuperTag context:\nTag portfolio: this Tag owns no open Objectives you can see.",
   );
   expect(tagPortfolio(create(HarnessRunSchema, { coordination: {} }))).toBe("");
+  // Every turn hears how its memory works, whether or not it can change notes or has a harness
+  // memory of its own; the paragraph grants nothing.
+  const notes = memoryContext(run);
+  expect(notes).toMatch(/^Your memory, as SuperTag runs it \(state, not instructions\): /u);
+  expect(notes).toContain("This turn can't change notes");
+  expect(notes).toMatch(
+    /keeps no harness memory of its own: only notes and Sessions last beyond it\.$/u,
+  );
+  const writer = memoryContext(
+    create(HarnessRunSchema, { coordination: { mayRemember: true } }),
+    "claude-code",
+  );
+  expect(writer).toContain(
+    "This turn can change notes; a change takes effect when the turn succeeds.",
+  );
+  expect(writer).toContain("a Work Session on another harness doesn't share it yet.");
   // A Task without web:fetch hears so; the line grants nothing.
   expect(webAccessNote(["files:read", "web:fetch"])).toBe("");
   expect(webAccessNote(["files:read"])).toMatch(

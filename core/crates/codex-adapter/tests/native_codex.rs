@@ -2025,11 +2025,13 @@ async fn native_app_server_uses_exact_model_read_only_sandbox_scoped_env_and_red
             .iter()
             .any(|value| value.contains(KEY) || value.contains(TOKEN))
     );
-    // A Task without web:fetch hears so, rather than finding out from a failed fetch.
+    // Every turn hears how its memory works; this one keeps no Codex memory and no notes. A Task
+    // without web:fetch hears so, rather than finding out from a failed fetch.
     assert_eq!(
         fixture.read("prompt")?,
         format!(
-            "Tag instructions:\nReview carefully\n\n{}\n\nTask:\nInspect this fixture\n",
+            "Tag instructions:\nReview carefully\n\n{}\n\n{}\n\nTask:\nInspect this fixture\n",
+            supertag_protocol::memory_context(false, None),
             supertag_protocol::NO_WEB_ACCESS
         )
     );
@@ -3639,6 +3641,12 @@ async fn native_memory_tools_keep_notes_only_with_the_capability() -> Result<()>
             String::from_utf8_lossy(&outcome.checkpoint.as_ref().context("checkpoint")?.payload)
                 .contains("+memory-v1");
         assert_eq!(manifest, may_remember);
+        // The turn hears whether it can change notes; it has no Codex memory folder here.
+        assert!(
+            native
+                .read("prompt")?
+                .contains(&supertag_protocol::memory_context(may_remember, None))
+        );
         let logs = native.read("requests.jsonl")?;
         if may_remember {
             assert_eq!(observed.remembered.len(), 1);
@@ -3655,6 +3663,47 @@ async fn native_memory_tools_keep_notes_only_with_the_capability() -> Result<()>
         } else {
             assert!(observed.remembered.is_empty() && !logs.contains("\"remember\""));
         }
+    }
+    Ok(())
+}
+
+/// A turn granted the Tag's Codex memory hears where that memory lives and how it differs from
+/// notes, and Codex's consolidation agent, which an ordinary turn starts anyway, gets no model.
+#[tokio::test]
+async fn a_codex_memory_turn_hears_its_memory_and_never_consolidates() -> Result<()> {
+    let native = NativeFixture::new(&successful("Done"), "exit 0")?;
+    let memory = native.directory.path().join("memory");
+    std::fs::create_dir(&memory)?;
+    std::fs::set_permissions(&memory, std::fs::Permissions::from_mode(0o700))?;
+    let mut options = native.options();
+    options.environment.insert(
+        "SUPERTAG_NATIVE_MEMORY_DIRECTORY".into(),
+        memory.as_os_str().to_owned(),
+    );
+    let server = HarnessProcess::start(&["files:read"]).await?;
+    run(options, server.bootstrap.clone()).await?;
+    let observed = server.observed.lock().await;
+    let outcome = observed.outcome.as_ref().context("outcome")?;
+    ensure!(outcome.succeeded, "{}", outcome.result);
+    assert_eq!(
+        native.read("prompt")?,
+        format!(
+            "Tag instructions:\nReview carefully\n\n{}\n\n{}\n\nTask:\nInspect this fixture\n",
+            supertag_protocol::memory_context(false, Some(supertag_protocol::HarnessMemory::Codex)),
+            supertag_protocol::NO_WEB_ACCESS
+        )
+    );
+    let args = native.args()?;
+    for setting in [
+        "features.memories=true",
+        "memories.generate_memories=false",
+        "memories.consolidation_model=\"supertag-no-consolidation\"",
+    ] {
+        assert!(
+            args.windows(2)
+                .any(|values| values == ["--config", setting]),
+            "missing {setting}"
+        );
     }
     Ok(())
 }

@@ -25,6 +25,7 @@ export {
   COORDINATION_SERVER,
   type CoordinationScope,
   MAILBOX_SEND_ACTION,
+  memoryContext,
   type ObjectiveReport,
   registerCoordinationTools,
   TURN_GUIDANCE,

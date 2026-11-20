@@ -937,9 +937,11 @@ pub(crate) async fn execute(
     // No turn guidance: Codex opens a longer turn with a short message on its own (measured
     // 2026-11-18: 10 of 10 turns with and without it), unlike Claude Code.
     let mut prompt = format!("Tag instructions:\n{}\n\n", task.instructions);
-    if memory {
-        prompt.push_str(&format!("{}\n\n", crate::native_memory::NUDGE));
-    }
+    let harness_memory = memory.then_some(supertag_protocol::HarnessMemory::Codex);
+    prompt.push_str(&format!(
+        "{}\n\n",
+        supertag_protocol::memory_context(questions.may_remember(), harness_memory)
+    ));
     if let Some(note) = supertag_protocol::web_access_note(&task.allowed_actions) {
         prompt.push_str(&format!("{note}\n\n"));
     }

@@ -10,6 +10,7 @@ import {
   type HarnessCompleteRequest,
   type HarnessRun,
   harnessClient,
+  memoryContext,
   receipt,
   redact,
   resolveOutsideDirectories,
@@ -257,7 +258,7 @@ export async function nativeRequest(
   history: readonly AttemptHistoryEntry[] = [],
   privateSecrets: readonly string[] = [],
   signal?: AbortSignal,
-  /** The Tag portfolio for this turn's context (`tagPortfolio`), state rather than instructions. */
+  /** The turn's context (`memoryContext`, `tagPortfolio`), state rather than instructions. */
   context = "",
   /** Whether the turn has `read_session` and `read_turn` to reread the Session. */
   reread = false,
@@ -493,7 +494,7 @@ export async function runAdapter(
       run.history,
       [bootstrap.token],
       cancellation,
-      tagPortfolio(run),
+      [memoryContext(run), tagPortfolio(run)].filter(Boolean).join("\n\n"),
       (run.coordination?.mayReadTagSessions || run.coordination?.mayReadOwnSession) ?? false,
       run.remoteWorkspace,
     );

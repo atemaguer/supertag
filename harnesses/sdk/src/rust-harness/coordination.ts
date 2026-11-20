@@ -247,6 +247,27 @@ export function webAccessNote(allowedActions: readonly string[]): string {
     : "This Tag has no web access: its Permission Sets do not grant web:fetch, so it cannot read web pages and its commands cannot reach the network. That is its configuration, not an outage; an operator can grant web:fetch.";
 }
 
+/**
+ * What SuperTag tells every turn about its memory, root turns and Work Session turns alike:
+ * notes, the daily review, and the harness's own memory when the turn was granted it. State,
+ * not instructions: it grants nothing. Matches Rust `supertag_protocol::memory_context`, whose
+ * test checks these sentences.
+ */
+export function memoryContext(
+  run: Pick<HarnessRun, "coordination">,
+  harnessMemory?: "claude-code",
+): string {
+  return [
+    "Your memory, as SuperTag runs it (state, not instructions): notes are short notes this Tag keeps with remember and forget, stored by the Control Plane. A note written in a person's private conversation shows only in that person's turns; the rest show in the SuperTag context of every conversation turn, never in a Work Session's own turns. Once a day after enough work, a review turn rereads the Tag's shared Sessions and tidies the notes.",
+    run.coordination?.mayRemember
+      ? "This turn can change notes; a change takes effect when the turn succeeds."
+      : "This turn can't change notes: Work Session turns, turns an outside event such as a GitHub or Linear webhook started, and Tags whose memory is off can't.",
+    harnessMemory === "claude-code"
+      ? "Separately, Claude Code keeps its own auto-memory in the memory folder its instructions name. SuperTag keeps that folder on the Worker Host, or on the Tag's Volume if it has one, never in the Control Plane, one for each Tag and audience, and only this Tag's Claude Code turns see it: a Work Session on another harness doesn't share it yet."
+      : "This turn keeps no harness memory of its own: only notes and Sessions last beyond it.",
+  ].join(" ");
+}
+
 export function tagPortfolio(run: Pick<HarnessRun, "coordination">): string {
   const portfolio = run.coordination?.mayReadTagSessions ? run.coordination.tagPortfolio : "";
   return portfolio ? `SuperTag context:\n${portfolio}` : "";

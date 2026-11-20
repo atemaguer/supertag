@@ -62,6 +62,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- A Codex Tag's ordinary turns no longer start Codex's memory consolidation agent in the
+  background. Codex 0.163.0 started it at every turn until the Tag's memory had been consolidated,
+  whatever `generate_memories` said, and spent unreported tokens on it, about nine times the turn's
+  own in a measured one-line turn. Only the Tag's daily memory review consolidates now.
 - The desktop app notifies a Tag's reply to your own message when you opened another Tag's
   conversation while it worked; it notified only replies that came with a new message.
 - A Worker hides a secret from its Worklet's environment again when a harness repeats it, such as
@@ -85,6 +89,11 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- Every turn, a Work Session's own turns included, now starts with one short paragraph on how the
+  Tag's memory works: notes and who sees them, the daily review, whether the turn can change
+  notes, and its harness memory, where that lives and that a Work Session on another harness
+  doesn't share it. A Codex turn is told that Codex's rule to add to its memory only when asked
+  doesn't apply to notes; this replaces its one-line reminder to search its memory.
 - A wake limit that trips now also sends one operator notification through the configured
   destinations, naming the Tags, the limit, and how many messages wait, with the command
   `supertag get inbox-items --kind wake-limit`; messages it holds later send no more. The

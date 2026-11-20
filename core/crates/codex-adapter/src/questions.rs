@@ -277,6 +277,11 @@ impl Bridge {
         self.tools
     }
     /// The Tag portfolio for this turn's context, when this turn reads the Tag's Sessions.
+    /// Whether this turn offers `remember` and `forget`.
+    pub(crate) fn may_remember(&self) -> bool {
+        self.current.memory && self.capabilities.may_remember
+    }
+
     pub(crate) fn portfolio(&self) -> &str {
         if self.tools.tag_sessions == crate::tag_sessions::Reads::All
             && self.capabilities.may_read_tag_sessions
