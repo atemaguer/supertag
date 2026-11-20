@@ -74,6 +74,9 @@ pub(crate) enum Turn {
     /// An Objective's own turn, with its Objective.
     Objective(String),
     Report,
+    /// A memory review: it reads only Sessions of its store's audience, the shared ones or one
+    /// person's own.
+    Review,
     /// A Work Session's own Task: it reads only its own Session.
     Work,
 }
@@ -98,14 +101,18 @@ impl Viewer {
 
     pub(crate) fn sees(&self, session: &str, audience: &Audience) -> bool {
         session == self.session()
-            || self.turn != Turn::Work
-                && match audience {
-                    Audience::Shared => true,
-                    Audience::Private(Some(requester)) => {
-                        self.requester.as_deref() == Some(requester.as_str())
-                    }
-                    Audience::Private(None) => false,
+            || match audience {
+                Audience::Shared => match self.turn {
+                    Turn::Work => false,
+                    // A person's review keeps their store from their own work alone.
+                    Turn::Review => self.requester.is_none(),
+                    _ => true,
+                },
+                Audience::Private(Some(requester)) => {
+                    self.turn != Turn::Work && self.requester.as_deref() == Some(requester.as_str())
                 }
+                Audience::Private(None) => false,
+            }
     }
 }
 
@@ -165,8 +172,12 @@ async fn audience_at(
         .await?;
         return Ok(Audience::Private(principal));
     }
-    // The inbox, and the review that reads the Tag's shared work, are shared.
-    if crate::mailbox::private_session(&session) || crate::memories::review_session(&session) {
+    // A store's review has its store's audience: shared, or the person whose store it reviews.
+    if crate::memories::review_session(&session) {
+        return crate::memories::review_audience_in(tx, &tag, &session).await;
+    }
+    // The inbox is shared.
+    if crate::mailbox::private_session(&session) {
         return Ok(Audience::Shared);
     }
     if session.starts_with("surface-status:") {
@@ -278,6 +289,7 @@ pub(crate) async fn viewer_in(
     let turn = match (kind, &objective) {
         (Some(_), _) => Turn::Report,
         (None, _) if crate::mailbox::private_session(&task.session_id) => Turn::Inbox,
+        (None, _) if crate::memories::review_session(&task.session_id) => Turn::Review,
         (None, Some(objective)) => Turn::Objective(objective.clone()),
         (None, None)
             if crate::work_sessions::reserved_session(&task.session_id)

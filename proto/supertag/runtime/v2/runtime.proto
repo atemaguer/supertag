@@ -1809,7 +1809,7 @@ message Tag {
   uint32 open_work_sessions = 6701;
   // Whether the Tag keeps memory (see PutTagRequest.memory).
   bool memory = 6800;
-  // When the Tag last queued the daily review of its work and memory.
+  // When the Tag last queued a daily review of one of its memory stores.
   optional int64 memory_reviewed_at_ms = 6801;
   // How the Tag's unprompted messages were received over the last `window_days`; read with GetTag.
   AttentionSummary attention = 6900;
@@ -2600,7 +2600,7 @@ message NativeMemoryGrant {
   repeated NativeMemorySeed seeds = 4;
   // Whether what the turn changes in the store is the Tag's own (AttemptCapabilities.memory_trusted).
   // Otherwise the host keeps the turn's changes beside the store as proposals, which the Tag's
-  // daily review, or for a person's store that person's next such turn, merges or drops.
+  // review of that store merges or drops.
   bool trusted = 5;
 }
 

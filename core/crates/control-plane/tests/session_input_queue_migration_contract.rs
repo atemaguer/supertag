@@ -215,7 +215,7 @@ fn input(
 async fn contract(url: String) {
     seed_prior_version(&url).await;
     let store = Store::open(&url).await.unwrap();
-    assert_eq!(store.migrated(), Some((121, 122)));
+    assert_eq!(store.migrated(), Some((121, 123)));
     let pool = AnyPool::connect(&url).await.unwrap();
     let base: i64 = 32;
     let conversation = ("alpha", "conversation/pc");

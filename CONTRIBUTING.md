@@ -231,14 +231,20 @@ harness (Claude Code, Codex, OpenCode, Cursor) a Tag named `memeval-HARNESS`, an
 scenario on each: a Session teaches a preference and a fact, later Sessions recall them, one
 corrects the preference, a Work Session proposes a fix for the stale fact and an unverified note,
 the operator's conversation shares their Sessions' memory, an Objective (whose Sessions are
-shared) teaches what the operator's own Sessions must not see, and the daily review merges and
-drops the shared proposals. It moves the Control Plane's clock a day ahead so the review runs at
-once, which needs a CLI built with `--features test-fixtures`. It prints each check and the
-Worker Hosts' memory counters (`supertag metrics`), and `--json` prints them as JSON.
+shared) teaches what the operator's own Sessions must not see, and a second person, a client
+device it enrolls with a client Auth Key, teaches what neither the operator's Sessions nor the
+shared ones may see. Each of the three stores then gets its daily review, which merges and drops
+its proposals, lists only its own audience's Sessions, and on Codex consolidates that store's
+notes into the summary its later turns load. It moves the Control Plane's clock a day ahead so
+the reviews run at once, which needs a CLI built with `--features test-fixtures`. Its state
+directory is deeper than a socket address holds, so every memory read goes through the Worker
+Host's short socket in `/tmp/supertag-UID`, and a second deployment checks that a memory socket
+that can't listen is named in `supertag get memories` and `supertag status`. It prints each check
+and the Worker Hosts' memory counters (`supertag metrics`), and `--json` prints them as JSON.
 
 The fixture mode, the default, runs the fixture adapter as each harness, writing and reading the
 memory folder in that harness's own format, and checks the plumbing: whether each later turn
-started with the memory in its store, and with nothing from the other store. It takes about a
+started with the memory in its store, and with nothing from the other stores. It takes about a
 minute and runs as the `memory_eval_runtime` Cargo test:
 
 ```sh
@@ -258,10 +264,11 @@ node tests/evals/memory/run.mjs --live --yes-spend --credentials-file ./eval.env
   --cli core/target/debug/supertag --harness claude-code,codex
 ```
 
-Each harness runs about 16 turns: the 12 the eval starts (it stops at 20), each submitted one
-stopped at 400,000 reported tokens, and its Work Sessions' and review's own. With these short
-prompts, expect about $1 to $1.50 per harness, $3 to $6 for all four, depending on each harness's
-model. Live replies are scored by what they say; what each turn loaded is checked only in the
+Each harness runs about 42 turns: the 37 the eval starts (it stops at 48), 22 of them one-line
+padding that brings each store to the turns its review waits for, each submitted one stopped at
+400,000 reported tokens, and its Work Sessions' and three reviews' own. This estimate is not
+measured since the reviews became per store: expect roughly $2 to $3 per harness, $8 to $12 for
+all four, depending on each harness's model. Live replies are scored by what they say; what each turn loaded is checked only in the
 fixture mode.
 
 ## Submit a pull request

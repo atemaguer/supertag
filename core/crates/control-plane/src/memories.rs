@@ -8,10 +8,13 @@
 //! turn that gets the store, such as a Work Session's own turn, only proposes its changes, which
 //! the host keeps beside the store for the review to merge or drop.
 //!
-//! The maintenance sweep queues a review turn in the Tag's reserved `memory:` Session once a day
-//! after enough work. The review reads the Tag's shared Sessions and corrects the Tag's shared
-//! memory against them with the harness's own tools; it has no tool that reaches anyone, and it
-//! ends with `stay_quiet` (attention.rs), so it posts nothing. It runs read-only: of the Tag's
+//! Each store is reviewed: the maintenance sweep queues a review turn for a store once a day after
+//! enough of its turns ([`finish_in`] counts them), never while another review of that store is
+//! queued or running. The shared store's review runs in the Tag's reserved Session `memory:TAG`
+//! and reads the Tag's shared Sessions; a person's runs in `memory:TAG:SCOPE`, which only that
+//! person sees ([`review_audience_in`]), and reads only that person's own Sessions. Either corrects
+//! its store against them with the harness's own tools; it has no tool that reaches anyone, and
+//! it ends with `stay_quiet` (attention.rs), so it posts nothing. It runs read-only: of the Tag's
 //! actions it keeps only reading files, and the harness's memory folder stays writable.
 //!
 //! The notes Tags kept before (`remember` and `forget`) were moved by migration 121 into seeds,
@@ -27,11 +30,13 @@ use crate::{
     tag_sessions::Audience,
 };
 
-/// Root turns finished since the last review before the next one, and the least time between.
+/// Turns of a store finished since its last review before the next one, and the least time
+/// between.
 const REVIEW_AFTER_TURNS: i64 = 10;
 const REVIEW_INTERVAL_MS: i64 = 24 * 60 * 60 * 1000;
-/// Sessions a review turn's prompt names.
-const REVIEW_SESSIONS: i64 = 30;
+/// Sessions a review turn's prompt names, and the recent Sessions it picks them from.
+const REVIEW_SESSIONS: usize = 30;
+const REVIEW_CANDIDATES: i64 = 500;
 const SWEEP_BATCH: i64 = 32;
 /// Seeds one grant carries, and one acknowledgement names.
 const MAX_SEEDS: i64 = 200;
@@ -210,7 +215,7 @@ impl Store {
         Ok(())
     }
 
-    /// Queues each due review.
+    /// Queues each due review, one for each store that is due.
     pub async fn sweep_memory(&self) -> Result<u64> {
         let now = self.execution_now_ms();
         let due = due_reviews(&self.pool, now).await?;
@@ -219,8 +224,8 @@ impl Store {
         }
         let (mut tx, _) = self.write().await?;
         let mut queued = 0;
-        for tag in due {
-            if queue_review_in(&mut tx, &tag, now).await? {
+        for (tag, audience) in due {
+            if queue_review_in(&mut tx, &tag, &audience, now).await? {
                 queued += 1;
             }
         }
@@ -229,34 +234,142 @@ impl Store {
     }
 }
 
-/// Tags due a review: they keep memory, finished enough root turns since their last review, and
-/// last reviewed long enough ago. A Tag never reviewed waits the same interval from its first
-/// finished turn, so a new Tag's first few quick exchanges don't trigger a review at once.
-async fn due_reviews(pool: &sqlx::AnyPool, now: i64) -> Result<Vec<String>> {
-    Ok(sqlx::query_scalar(
-        "SELECT g.tag_id FROM supertag_v2_tags g
-         WHERE g.memory=1 AND g.retired_at_ms IS NULL
-           AND (g.memory_reviewed_at_ms<=$1
-                OR (g.memory_reviewed_at_ms IS NULL AND EXISTS (
-                    SELECT 1 FROM supertag_v2_tasks f
-                    WHERE f.tag_id=g.tag_id AND f.state=$2 AND f.completed_at_ms<=$1)))
-           AND (SELECT COUNT(*) FROM supertag_v2_tasks t
-                WHERE t.tag_id=g.tag_id AND t.state=$2 AND t.completed_at_ms IS NOT NULL
-                  AND t.completed_at_ms>COALESCE(g.memory_reviewed_at_ms,0)
-                  AND substr(t.session_id,1,5)<>'work/' AND substr(t.session_id,1,7)<>'memory:')>=$3
-         ORDER BY g.tag_id LIMIT $4",
-    )
-    .bind(now - REVIEW_INTERVAL_MS)
-    .bind(TaskState::Succeeded as i64)
-    .bind(REVIEW_AFTER_TURNS)
-    .bind(SWEEP_BATCH)
-    .fetch_all(pool)
-    .await?)
+/// The reserved Session a store's reviews run in: `memory:TAG` for the shared store, and for a
+/// person's `memory:TAG:SCOPE`, with the scope the Worker Host names that person's store by.
+fn review_session_for(tag: &str, audience: Option<&str>) -> String {
+    match audience {
+        None => review_session_of(tag),
+        Some(_) => format!(
+            "{}:{}",
+            review_session_of(tag),
+            supertag_protocol::native_memory_scope(audience)
+        ),
+    }
 }
 
-/// Queues the Tag's review turn, unless one is still queued or running.
-async fn queue_review_in(tx: &mut Transaction<'_, Any>, tag: &str, now: i64) -> Result<bool> {
-    let session = review_session_of(tag);
+/// The audience of one of the Tag's review Sessions: shared for `memory:TAG`, the person whose
+/// store it reviews for theirs, and no one for a Session no store names.
+pub(crate) async fn review_audience_in(
+    tx: &mut Transaction<'_, Any>,
+    tag: &str,
+    session: &str,
+) -> Result<Audience> {
+    if session == review_session_of(tag) {
+        return Ok(Audience::Shared);
+    }
+    let principal: Option<String> = sqlx::query_scalar(
+        "SELECT audience_principal FROM supertag_v2_memory_reviews WHERE tag_id=$1 AND session_id=$2",
+    )
+    .bind(tag)
+    .bind(session)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(Audience::Private(
+        principal.filter(|principal| !principal.is_empty()),
+    ))
+}
+
+/// Counts a finished turn toward its store's next review: a turn whose changes are the Tag's own,
+/// other than a review. Its audience is the store's: the shared store for shared work, a person's
+/// store for that person's own Sessions.
+pub(crate) async fn finish_in(tx: &mut Transaction<'_, Any>, task: &Task, now: i64) -> Result<()> {
+    if review_session(&task.session_id) || !trusted_turn_in(tx, task).await? {
+        return Ok(());
+    }
+    if !tag_keeps_memory_in(tx, &task.tag_id).await? {
+        return Ok(());
+    }
+    let Some(audience) = turn_audience_in(tx, task).await? else {
+        return Ok(());
+    };
+    sqlx::query(
+        "INSERT INTO supertag_v2_memory_reviews
+            (tag_id,audience_principal,session_id,turns,first_turn_at_ms)
+         VALUES ($1,$2,$3,1,$4)
+         ON CONFLICT (tag_id,audience_principal)
+         DO UPDATE SET turns=supertag_v2_memory_reviews.turns+1",
+    )
+    .bind(&task.tag_id)
+    .bind(audience.as_deref().unwrap_or(""))
+    .bind(review_session_for(&task.tag_id, audience.as_deref()))
+    .bind(now)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// Stores due a review, by Tag and audience ('' for shared): their Tag keeps memory, enough of
+/// their turns finished since their last review, and they were last reviewed long enough ago. A
+/// store never reviewed waits the same interval from its first counted turn, so a new Tag's
+/// first few quick exchanges don't trigger a review at once.
+async fn due_reviews(pool: &sqlx::AnyPool, now: i64) -> Result<Vec<(String, String)>> {
+    let rows = sqlx::query(
+        "SELECT r.tag_id,r.audience_principal FROM supertag_v2_memory_reviews r
+         JOIN supertag_v2_tags g ON g.tag_id=r.tag_id
+         WHERE g.memory=1 AND g.retired_at_ms IS NULL AND r.turns>=$1
+           AND COALESCE(r.reviewed_at_ms,r.first_turn_at_ms)<=$2
+         ORDER BY r.tag_id,r.audience_principal LIMIT $3",
+    )
+    .bind(REVIEW_AFTER_TURNS)
+    .bind(now - REVIEW_INTERVAL_MS)
+    .bind(SWEEP_BATCH)
+    .fetch_all(pool)
+    .await?;
+    rows.iter()
+        .map(|row| Ok((row.try_get("tag_id")?, row.try_get("audience_principal")?)))
+        .collect()
+}
+
+/// The Sessions a store's review names: those of its audience with work since `since`, most
+/// recent first. A person's review names only that person's own Sessions; the shared review only
+/// shared ones.
+async fn review_sessions_in(
+    tx: &mut Transaction<'_, Any>,
+    tag: &str,
+    audience: &Audience,
+    since: i64,
+) -> Result<Vec<String>> {
+    let candidates: Vec<String> = sqlx::query_scalar(
+        "SELECT session_id FROM supertag_v2_tasks
+         WHERE tag_id=$1 AND state=$2 AND completed_at_ms>$3 AND substr(session_id,1,7)<>'memory:'
+         GROUP BY session_id ORDER BY MAX(completed_at_ms) DESC LIMIT $4",
+    )
+    .bind(tag)
+    .bind(TaskState::Succeeded as i64)
+    .bind(since)
+    .bind(REVIEW_CANDIDATES)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut sessions = vec![];
+    for session in candidates {
+        if crate::tag_sessions::audience_in(tx, tag, &session).await? == *audience {
+            sessions.push(session);
+            if sessions.len() == REVIEW_SESSIONS {
+                break;
+            }
+        }
+    }
+    Ok(sessions)
+}
+
+/// Queues the review of the Tag's store for `audience` ('' for shared), unless one of that store
+/// is still queued or running.
+async fn queue_review_in(
+    tx: &mut Transaction<'_, Any>,
+    tag: &str,
+    audience: &str,
+    now: i64,
+) -> Result<bool> {
+    let row = sqlx::query(
+        "SELECT session_id,reviewed_at_ms FROM supertag_v2_memory_reviews
+         WHERE tag_id=$1 AND audience_principal=$2",
+    )
+    .bind(tag)
+    .bind(audience)
+    .fetch_one(&mut **tx)
+    .await?;
+    let session: String = row.try_get("session_id")?;
+    let since: Option<i64> = row.try_get("reviewed_at_ms")?;
     let open: Option<String> = sqlx::query_scalar(
         "SELECT task_id FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 AND state IN ($3,$4,$5) LIMIT 1",
     )
@@ -270,24 +383,14 @@ async fn queue_review_in(tx: &mut Transaction<'_, Any>, tag: &str, now: i64) -> 
     if open.is_some() {
         return Ok(false);
     }
-    let since: Option<i64> =
-        sqlx::query_scalar("SELECT memory_reviewed_at_ms FROM supertag_v2_tags WHERE tag_id=$1")
-            .bind(tag)
-            .fetch_one(&mut **tx)
-            .await?;
-    let sessions: Vec<String> = sqlx::query_scalar(
-        "SELECT session_id FROM supertag_v2_tasks
-         WHERE tag_id=$1 AND state=$2 AND completed_at_ms>$3 AND session_id<>$4
-         GROUP BY session_id ORDER BY MAX(completed_at_ms) DESC LIMIT $5",
-    )
-    .bind(tag)
-    .bind(TaskState::Succeeded as i64)
-    .bind(since.unwrap_or(0))
-    .bind(&session)
-    .bind(REVIEW_SESSIONS)
-    .fetch_all(&mut **tx)
-    .await?;
-    let prompt = review_prompt(since, &sessions);
+    let shared = audience.is_empty();
+    let readers = if shared {
+        Audience::Shared
+    } else {
+        Audience::Private(Some(audience.to_owned()))
+    };
+    let sessions = review_sessions_in(tx, tag, &readers, since.unwrap_or(0)).await?;
+    let prompt = review_prompt(since, shared, &sessions);
     let order = next_order(tx).await?;
     let task = Box::pin(insert_task(tx, order, tag, &session, &prompt)).await?;
     // The review reads the Tag's work and keeps its memory; it changes nothing else. It runs
@@ -305,9 +408,18 @@ async fn queue_review_in(tx: &mut Transaction<'_, Any>, tag: &str, now: i64) -> 
         .bind(&task.task_id)
         .execute(&mut **tx)
         .await?;
-    sqlx::query("UPDATE supertag_v2_tags SET memory_reviewed_at_ms=$1,memory_review_task_id=$2 WHERE tag_id=$3")
+    sqlx::query(
+        "UPDATE supertag_v2_memory_reviews SET turns=0,reviewed_at_ms=$1,review_task_id=$2
+         WHERE tag_id=$3 AND audience_principal=$4",
+    )
+    .bind(now)
+    .bind(&task.task_id)
+    .bind(tag)
+    .bind(audience)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query("UPDATE supertag_v2_tags SET memory_reviewed_at_ms=$1 WHERE tag_id=$2")
         .bind(now)
-        .bind(&task.task_id)
         .bind(tag)
         .execute(&mut **tx)
         .await?;
@@ -316,7 +428,7 @@ async fn queue_review_in(tx: &mut Transaction<'_, Any>, tag: &str, now: i64) -> 
 
 /// The review turn's request. Its Worker Host adds the proposals waiting for it, which the
 /// Control Plane never sees.
-fn review_prompt(since: Option<i64>, sessions: &[String]) -> String {
+fn review_prompt(since: Option<i64>, shared: bool, sessions: &[String]) -> String {
     let since = match since.and_then(chrono::DateTime::from_timestamp_millis) {
         Some(at) => format!(
             "since {}",
@@ -324,8 +436,19 @@ fn review_prompt(since: Option<i64>, sessions: &[String]) -> String {
         ),
         None => "so far".to_owned(),
     };
+    let (memory, readable) = if shared {
+        (
+            "your own memory, the memory folder your harness keeps for the Tag's shared work",
+            "you may see only shared Sessions",
+        )
+    } else {
+        (
+            "your own memory of one person, the memory folder your harness keeps private to them",
+            "you may see only that person's own Sessions",
+        )
+    };
     let mut text = format!(
-        "Memory review. Review your work {since} and keep your own memory, the memory folder your harness keeps, current. Read the Sessions below with read_session, and read_turn for detail; you may see only shared Sessions, and they are the record. Then, in your memory: correct what the Sessions contradict, merge duplicates, rewrite time-relative facts with their dates, keep only what you can't look up again (drop what the repository or the Sessions already record), and remove what no longer matters. Merge or drop the proposals listed below, if any. Don't contact anyone. Finish by calling stay_quiet with one line saying what you changed."
+        "Memory review. Review your work {since} and keep {memory}, current. Read the Sessions below with read_session, and read_turn for detail; {readable}, and they are the record. Then, in your memory: correct what the Sessions contradict, merge duplicates, rewrite time-relative facts with their dates, keep only what you can't look up again (drop what the repository or the Sessions already record), and remove what no longer matters. Merge or drop the proposals listed below, if any. Don't contact anyone. Finish by calling stay_quiet with one line saying what you changed."
     );
     if sessions.is_empty() {
         text.push_str("\nSessions: none listed; use list_sessions.");
@@ -336,6 +459,15 @@ fn review_prompt(since: Option<i64>, sessions: &[String]) -> String {
         }
     }
     text
+}
+
+/// Retiring a Tag drops its review state, and what [`retire_tag_in`] drops.
+pub(crate) async fn retire_reviews_in(tx: &mut Transaction<'_, Any>, tag: &str) -> Result<()> {
+    sqlx::query("DELETE FROM supertag_v2_memory_reviews WHERE tag_id=$1")
+        .bind(tag)
+        .execute(&mut **tx)
+        .await?;
+    retire_tag_in(tx, tag).await
 }
 
 /// Retiring a Tag drops its seeds and its native memory records.
@@ -445,8 +577,15 @@ mod tests {
 
     #[test]
     fn the_review_names_its_sessions_and_its_harness_memory() {
-        let prompt = review_prompt(Some(0), &["conversation:alice".into()]);
+        let prompt = review_prompt(Some(0), true, &["conversation:alice".into()]);
         assert!(prompt.contains("your own memory"), "{prompt}");
+        assert!(prompt.contains("only shared Sessions"), "{prompt}");
+        let private = review_prompt(None, false, &[]);
+        assert!(private.contains("private to them"), "{private}");
+        assert!(
+            private.contains("only that person's own Sessions"),
+            "{private}"
+        );
         assert!(prompt.contains("proposals"), "{prompt}");
         assert!(prompt.contains("stay_quiet"), "{prompt}");
         assert!(prompt.ends_with("\n- conversation:alice"), "{prompt}");

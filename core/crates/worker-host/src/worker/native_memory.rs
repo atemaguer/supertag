@@ -580,20 +580,15 @@ impl Prepared {
         &self.key.harness
     }
 
-    /// Whether this is the Tag's shared store, rather than one person's.
-    pub(crate) fn shared(&self) -> bool {
-        self.key.scope == "shared"
-    }
-
-    /// The proposals waiting in the store, and what the request of the turn that merges them
-    /// adds for them: the Tag's `review`, or a person's turn.
-    pub(crate) fn review_proposals(&self, review: bool) -> Result<(String, Vec<String>)> {
+    /// The proposals waiting in the store, and what the request of the store's review adds for
+    /// them.
+    pub(crate) fn review_proposals(&self) -> Result<(String, Vec<String>)> {
         let _lock = Lock::take(&self.store)?;
         let meta = read_meta(&self.store)?;
-        Ok(crate::memory::review_section(
-            &crate::memory::proposals(&self.store, meta.generation),
-            review,
-        ))
+        Ok(crate::memory::review_section(&crate::memory::proposals(
+            &self.store,
+            meta.generation,
+        )))
     }
 
     /// Marks the proposals a review was shown, once it finished: the merge-back drops them,

@@ -261,7 +261,7 @@ async fn retire_unused_in(
     .await?;
     crate::apply_sets::forget(tx, "Tag", tag_id).await?;
     crate::schedules::retire_tag_in(tx, tag_id, now_ms).await?;
-    crate::memories::retire_tag_in(tx, tag_id).await?;
+    crate::memories::retire_reviews_in(tx, tag_id).await?;
     Ok(row)
 }
 

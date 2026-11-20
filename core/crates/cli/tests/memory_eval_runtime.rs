@@ -1,8 +1,10 @@
 //! The memory eval's fixture mode (`tests/evals/memory/run.mjs`): on a throwaway `supertag up`, the
 //! fixture adapter runs as each harness, and every check of the scenario passes. It checks that
 //! what one Session taught reaches later Sessions in the right store, that a Work Session only
-//! proposes, that the merging turn and the daily review merge and drop proposals, and that the
-//! Worker Host counts it all.
+//! proposes, that each store's daily review (the shared one, the operator's, and a second
+//! person's) merges and drops its proposals from its own audience's Sessions alone, that two
+//! people's stores stay apart, that a state directory too deep for a socket still serves its
+//! memory and a socket that can't listen is named, and that the Worker Host counts it all.
 #![cfg(feature = "test-fixtures")]
 #[path = "support/children.rs"]
 mod children;

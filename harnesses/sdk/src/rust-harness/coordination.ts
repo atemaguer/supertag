@@ -277,7 +277,7 @@ export function memoryContext(
   }[harnessMemory];
   return [
     ...opening,
-    "SuperTag keeps that folder on the Worker Host, or on the Tag's Volume if it has one, never in the Control Plane, one for each Tag and audience: what a person's private conversation keeps shows only in that person's turns. Only this Tag's turns on the same harness see it; a Work Session on another harness doesn't share it yet. Once a day after enough work, a review turn rereads the Tag's shared Sessions, corrects the memory against them, and merges or drops what other turns proposed. People see each memory, and delete any, with supertag get memories on that Worker Host's machine, or in the desktop and terminal apps there.",
+    "SuperTag keeps that folder on the Worker Host, or on the Tag's Volume if it has one, never in the Control Plane, one for each Tag and audience: what a person's private conversation keeps shows only in that person's turns. Only this Tag's turns on the same harness see it; a Work Session on another harness doesn't share it yet. Once a day after enough work in it, each store gets a review turn that rereads that store's Sessions (the Tag's shared Sessions, or the person's own), corrects the memory against them, and merges or drops what other turns proposed. People see each memory, and delete any, with supertag get memories on that Worker Host's machine, or in the desktop and terminal apps there.",
     run.coordination?.memoryTrusted
       ? "What this turn keeps there stays the Tag's memory when the turn ends."
       : "This turn can't change the Tag's memory directly: what it changes there is kept as a proposal for the daily review to merge or drop, as for every Work Session turn.",

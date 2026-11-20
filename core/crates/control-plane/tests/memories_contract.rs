@@ -336,6 +336,36 @@ async fn contract(url: &str) {
     store.close().await;
 }
 
+/// The audience owner of a Task, as Task reads and the Watch show it to people.
+async fn owner(url: &str, task: &str) -> String {
+    let pool = AnyPool::connect(url).await.unwrap();
+    let owner: String =
+        sqlx::query_scalar("SELECT owner FROM supertag_v2_task_audience WHERE task_id=$1")
+            .bind(task)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    pool.close().await;
+    owner
+}
+
+/// The Sessions a running turn sees with `list_sessions`.
+async fn listed(store: &Store, host: &HostAuthority, turn: &InspectAttemptRequest) -> Vec<String> {
+    store
+        .list_tag_sessions(
+            &AttemptAccess::new(host, turn),
+            &ListTagSessionsRequest {
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .sessions
+        .into_iter()
+        .map(|session| session.session_id)
+        .collect()
+}
+
 async fn review_contract(url: &str) {
     // The first ten turns finish a day before BASE, so the first review is due at BASE.
     let clock = Arc::new(AtomicI64::new(BASE - 25 * HOUR));
@@ -353,6 +383,12 @@ async fn review_contract(url: &str) {
         )
         .await
         .unwrap();
+    // Bob says one thing; Alice works with the Tag ten times. Each person's store is reviewed
+    // from that person's own turns: Bob's one turn is not enough work for his.
+    let (bob_turn, _) = say(&store, &host, BOB, "Bob's secret", HarnessKind::Codex).await;
+    let bob_session = store.get_task(&bob_turn.task_id).await.unwrap().session_id;
+    finish(&store, &host, &bob_turn, true).await;
+    let mut alice_session = String::new();
     for index in 0..10 {
         let (turn, _) = say(
             &store,
@@ -362,33 +398,46 @@ async fn review_contract(url: &str) {
             HarnessKind::Codex,
         )
         .await;
+        alice_session = store.get_task(&turn.task_id).await.unwrap().session_id;
         finish(&store, &host, &turn, true).await;
     }
-    // A shared note the Tag kept before goes to a turn of a shared Session, such as the review.
-    insert_seeds(url, &[("mem_shared", "", "Releases ship from main.")]).await;
+    // A note Alice's store kept before goes to a turn of that store whose changes are the Tag's
+    // own, such as her review.
+    insert_seeds(url, &[("mem_alice", ALICE, "Alice prefers squash merges.")]).await;
     clock.store(BASE, Ordering::SeqCst);
-    assert_eq!(store.sweep_memory().await.unwrap(), 1);
+    assert_eq!(store.sweep_memory().await.unwrap(), 1, "only Alice's store");
     let (review, assignment) = claim(&store, &host, HarnessKind::Codex).await;
     assert_eq!(
         seeds(&assignment),
         [(
-            "mem_shared".to_owned(),
-            "Releases ship from main.".to_owned()
+            "mem_alice".to_owned(),
+            "Alice prefers squash merges.".to_owned()
         )]
     );
     let task = assignment.task.clone().unwrap();
-    assert!(
-        task.session_id.starts_with("memory:"),
-        "{}",
-        task.session_id
-    );
-    // The review keeps the harness's own memory, against the Sessions, and merges proposals.
-    for text in ["your own memory", "proposals", "stay_quiet", "read_session"] {
+    // Her review runs in a Session of its own, named by her store's scope, which only she sees.
+    let scope = supertag_protocol::native_memory_scope(Some(ALICE));
+    assert_eq!(task.session_id, format!("memory:{TAG}:{scope}"));
+    assert_eq!(owner(url, &review.task_id).await, ALICE);
+    // The review keeps the harness's own memory, against her Sessions, and merges proposals.
+    for text in [
+        "your own memory",
+        "private to them",
+        "that person's own Sessions",
+        "proposals",
+        "stay_quiet",
+        "read_session",
+    ] {
         assert!(task.prompt.contains(text), "{text}: {}", task.prompt);
     }
-    assert!(!task.prompt.contains("remember"), "{}", task.prompt);
-    // It gets the shared store, and its changes are the Tag's own.
-    assert_eq!(assignment.native_memory.unwrap().scope, "shared");
+    assert!(
+        task.prompt.ends_with(&format!("\n- {alice_session}")),
+        "{}",
+        task.prompt
+    );
+    assert!(!task.prompt.contains(&bob_session), "{}", task.prompt);
+    // It gets her store, and its changes are the Tag's own.
+    assert_eq!(assignment.native_memory.unwrap().scope, scope);
     // The review runs read-only: of the Tag's actions it keeps only reading files.
     assert_eq!(
         store
@@ -410,40 +459,79 @@ async fn review_contract(url: &str) {
             && !caps.may_use_workstream
             && !caps.may_ask_objective_question
     );
-    // It sees only shared Sessions: Alice's conversation is private to her.
-    let listed = store
-        .list_tag_sessions(
+    // It sees only Alice's own Sessions: never Bob's.
+    assert_eq!(
+        listed(&store, &host, &review).await,
+        [alice_session.clone()]
+    );
+    let refused = store
+        .read_tag_session(
             &AttemptAccess::new(&host, &review),
-            &ListTagSessionsRequest {
+            &ReadTagSessionRequest {
+                session_id: bob_session.clone(),
                 ..Default::default()
             },
         )
-        .await
-        .unwrap();
-    assert!(listed.sessions.is_empty(), "{listed:?}");
+        .await;
+    assert!(refused.is_err(), "{refused:?}");
     finish(&store, &host, &review, true).await;
+    assert_eq!(
+        store.get_tag(TAG).await.unwrap().memory_reviewed_at_ms,
+        Some(BASE)
+    );
+    // Bob's turns never see her review's Session.
+    let (bob_turn, _) = say(&store, &host, BOB, "Anything new?", HarnessKind::Codex).await;
+    assert!(
+        !listed(&store, &host, &bob_turn)
+            .await
+            .iter()
+            .any(|session| session.starts_with("memory:")),
+    );
+    finish(&store, &host, &bob_turn, true).await;
 
-    // Within a day, more work queues no review; after a day it does.
+    // Within a day, more work queues no review; after a day each store due gets its own.
     clock.store(BASE + HOUR, Ordering::SeqCst);
     for index in 0..10 {
-        let (turn, _) = say(
-            &store,
-            &host,
-            BOB,
-            &format!("More {index}"),
-            HarnessKind::Codex,
-        )
-        .await;
-        finish(&store, &host, &turn, true).await;
+        for person in [ALICE, BOB] {
+            let (turn, _) = say(
+                &store,
+                &host,
+                person,
+                &format!("More {index}"),
+                HarnessKind::Codex,
+            )
+            .await;
+            finish(&store, &host, &turn, true).await;
+        }
     }
+    // Bob's store first counted a turn more than a day ago, so his is due already; Alice's waits
+    // a day from her last review.
     clock.store(BASE + 23 * HOUR, Ordering::SeqCst);
-    assert_eq!(store.sweep_memory().await.unwrap(), 0);
+    assert_eq!(store.sweep_memory().await.unwrap(), 1, "Bob's");
+    let (turn, assignment) = claim(&store, &host, HarnessKind::Codex).await;
+    assert_eq!(owner(url, &turn.task_id).await, BOB);
+    assert_eq!(
+        assignment.native_memory.unwrap().scope,
+        supertag_protocol::native_memory_scope(Some(BOB))
+    );
+    let prompt = assignment.task.unwrap().prompt;
+    assert!(prompt.contains("Review your work so far"), "{prompt}");
+    assert!(prompt.contains(&bob_session), "{prompt}");
+    assert!(!prompt.contains(&alice_session), "{prompt}");
+    // Bob's review sees his Sessions, never Alice's.
+    assert_eq!(
+        listed(&store, &host, &turn).await,
+        std::slice::from_ref(&bob_session)
+    );
+    finish(&store, &host, &turn, true).await;
     clock.store(BASE + 25 * HOUR, Ordering::SeqCst);
-    assert_eq!(store.sweep_memory().await.unwrap(), 1);
-    let (second, assignment) = claim(&store, &host, HarnessKind::Codex).await;
+    assert_eq!(store.sweep_memory().await.unwrap(), 1, "Alice's");
+    let (turn, assignment) = claim(&store, &host, HarnessKind::Codex).await;
+    assert_eq!(owner(url, &turn.task_id).await, ALICE);
     let prompt = assignment.task.unwrap().prompt;
     assert!(prompt.contains("Review your work since"), "{prompt}");
-    finish(&store, &host, &second, true).await;
+    assert!(!prompt.contains(&bob_session), "{prompt}");
+    finish(&store, &host, &turn, true).await;
 
     // memory: false turns off the review.
     store

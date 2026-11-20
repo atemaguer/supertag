@@ -39,6 +39,9 @@ pub struct StatusArgs {
 #[derive(Serialize)]
 struct StatusView {
     worker_hosts: Vec<HostView>,
+    /// Worker Hosts on this machine whose memory endpoint isn't listening, and why.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    memory_endpoint_problems: Vec<String>,
     tags: Vec<TagView>,
     objectives: Vec<ObjectiveView>,
     inbox: InboxView,
@@ -86,31 +89,28 @@ struct InboxView {
 /// What the organization is doing now: Worker Hosts, Tags, unfinished Objectives, and the
 /// operator inbox, read through the Control Plane's operator API.
 pub async fn status(args: StatusArgs) -> Result<()> {
-    // The hosts this machine's supervisor stopped because their registration was fenced.
-    let fenced = if args.gateway.is_none() {
-        local_config::state_directory(args.state_directory.clone())
-            .ok()
-            .and_then(|state| match lifecycle::inspect(&state) {
-                Ok(Supervisor::Running(status)) => Some(status),
-                _ => None,
-            })
-            .map(|status| {
-                status
-                    .services
-                    .into_iter()
-                    .filter(|service| service.kind == lifecycle::HOST)
-                    .filter_map(|service| Some((service.host_id?, service.fenced?)))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-    let (channel, token) = crate::connect_operator(Connection {
+    let connection = Connection {
         gateway: args.gateway,
         state_directory: args.state_directory,
-    })
-    .await?;
+    };
+    let local = crate::local_state_of(&connection)?;
+    // The hosts this machine's supervisor stopped because their registration was fenced.
+    let fenced = local
+        .as_deref()
+        .and_then(|state| match lifecycle::inspect(state) {
+            Ok(Supervisor::Running(status)) => Some(status),
+            _ => None,
+        })
+        .map(|status| {
+            status
+                .services
+                .into_iter()
+                .filter(|service| service.kind == lifecycle::HOST)
+                .filter_map(|service| Some((service.host_id?, service.fenced?)))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let (channel, token) = crate::connect_operator(connection).await?;
     let mut operator = OperatorClient::new(channel.clone())
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
@@ -220,6 +220,7 @@ pub async fn status(args: StatusArgs) -> Result<()> {
         cursor = page.next_cursor;
     }
     let view = StatusView {
+        memory_endpoint_problems: crate::memories::endpoint_problems(local.as_deref()),
         worker_hosts: hosts
             .iter()
             .map(|host| HostView {
@@ -326,6 +327,11 @@ fn format_status(view: &StatusView, now_ms: i64) -> String {
                 "    this machine's Worklet for it stopped: {reason}. Another process registered it with its credential; stop that process, then run supertag up"
             ));
         }
+    }
+    for problem in &view.memory_endpoint_problems {
+        lines.push(format!(
+            "  {problem}; supertag get memories can't read its memory"
+        ));
     }
     lines.push(String::new());
     lines.push("Tags".into());
@@ -489,6 +495,10 @@ mod tests {
     #[test]
     fn status_text_names_every_section_and_neutralizes_terminal_escapes() {
         let view = StatusView {
+            memory_endpoint_problems: vec![
+                "Worker Host laptop runs here, but its memory endpoint did not start: denied"
+                    .into(),
+            ],
             worker_hosts: vec![
                 HostView {
                     id: "laptop".into(),
@@ -538,6 +548,10 @@ mod tests {
         );
         assert!(
             text.contains("  desk  offline  0/1 Task Attempts running (codex)\n    this machine's Worklet for it stopped: Worker Host registration generation 2 is no longer current. "),
+            "{text}"
+        );
+        assert!(
+            text.contains("  Worker Host laptop runs here, but its memory endpoint did not start: denied; supertag get memories can't read its memory\n"),
             "{text}"
         );
         assert!(!text.contains('\u{1b}'), "{text}");

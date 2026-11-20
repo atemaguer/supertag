@@ -388,7 +388,7 @@ it("reads the Tag's Sessions and Objectives, refuses an unasked Objective, and c
     expect(folder).toContain(`${name} keeps no memory of its own, so SuperTag keeps this Tag's`);
     expect(folder).toContain("Its index, MEMORY.md, loads each turn");
     expect(folder).toContain("type (user, feedback, project, or reference)");
-    expect(folder).toContain("a review turn rereads the Tag's shared Sessions");
+    expect(folder).toContain("each store gets a review turn that rereads that store's Sessions");
     expect(folder).toMatch(/kept as a proposal for the daily review .*\.$/u);
   }
   for (const text of [none, writer]) expect(text).not.toMatch(/remember|notes/u);
