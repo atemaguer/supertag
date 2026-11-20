@@ -460,7 +460,6 @@ describe.skipIf(CLI === undefined)(
         );
         expect((await client.tags(id)).map((tag) => tag.tagId)).toEqual(["engineer", "reviewer"]);
         // The details panel's reads reach the services the SDK added.
-        expect(await client.notes(id, "engineer")).toEqual([]);
         expect(await client.networkLogs(id, "engineer")).toEqual([]);
         expect(await client.schedules(id, "engineer")).toEqual([]);
         expect((await client.tagActivity(id, "engineer")).windowDays).toBeTypeOf("number");
@@ -687,7 +686,6 @@ describe("the Watch against a scripted Gateway", () => {
             WatchKind.CONVERSATION_MESSAGE,
             WatchKind.TASK,
             WatchKind.SCHEDULE,
-            WatchKind.MEMORY,
             WatchKind.OBJECTIVE,
             WatchKind.TEAM,
             WatchKind.WORKSTREAM_POST,
@@ -759,14 +757,14 @@ describe("the Watch against a scripted Gateway", () => {
             change({ kind: WatchKind.WORKSTREAM_POST, id: "p1", teamId: "release" }),
           );
           for (const [token, tag] of [
-            ["note", "engineer"],
-            ["tagless-note", ""],
+            ["schedule", "engineer"],
+            ["tagless-schedule", ""],
           ] as const) {
             yield frame(
               token,
               change({
-                kind: WatchKind.MEMORY,
-                id: "mem_1",
+                kind: WatchKind.SCHEDULE,
+                id: "sch_1",
                 tagId: tag,
                 reason: WatchReason.DELETED,
               }),
@@ -811,7 +809,7 @@ describe("the Watch against a scripted Gateway", () => {
         { kind: "conversation", tagId: "engineer" },
         { kind: "objective", objectiveId: "ship-sso" },
         { kind: "team", teamId: "release" },
-        { kind: "memory", tagId: "engineer" },
+        { kind: "schedule", tagId: "engineer" },
       ];
       for (let waited = 0; received.length < expected.length && waited < 200; waited++) {
         await new Promise((resolve) => setTimeout(resolve, 20));

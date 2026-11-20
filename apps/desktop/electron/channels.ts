@@ -22,7 +22,6 @@ import type {
   MessagePage,
   NetworkLog,
   NewTag,
-  Note,
   ReadMessages,
   RestartStep,
   Schedule,
@@ -95,12 +94,10 @@ export interface Commands {
   createTag: Call<Connected & { tag: NewTag }, Tag>;
   /** Local Gateway only: picks a folder and adds its repository as a Workspace. */
   addLocalWorkspace: Call<Connected, AddedWorkspace | null>;
-  // Notes
-  listNotes: Call<Connected & { tagId: string }, Note[]>;
-  deleteNote: Call<Connected & { memoryId: string }, Note>;
-  /** The Tag's harness memory this machine's Worker Hosts keep; none for a shared Gateway. */
+  // Memory
+  /** The Tag's memory this machine's Worker Hosts keep; none for a shared Gateway. */
   listHarnessMemory: Call<Connected & { tagId: string }, HarnessMemoryList>;
-  /** Local Gateway only: removes one harness memory from its harness's files. */
+  /** Local Gateway only: removes one memory, or a proposed change, from its harness's files. */
   deleteHarnessMemory: Call<Connected & { memoryId: string }, HarnessMemory>;
   // Network log
   listNetworkLogs: Call<Connected & { tagId: string }, NetworkLog[]>;
@@ -173,8 +170,6 @@ export const CHANNELS = {
   listTagOptions: "call",
   createTag: "call",
   addLocalWorkspace: "call",
-  listNotes: "call",
-  deleteNote: "call",
   listHarnessMemory: "call",
   deleteHarnessMemory: "call",
   listNetworkLogs: "call",

@@ -105,9 +105,6 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     ("Schedules", "Backfill", OC),
     // A client lists and deletes the shared notes and its own conversations' notes.
     ("Memories", "*", O),
-    ("Memories", "List", OC),
-    ("Memories", "Get", OC),
-    ("Memories", "Delete", OC),
     // A network log names the origins and paths of other people's Tasks.
     ("NetworkLogs", "List", O),
     ("TaskFiles", "Locate", OC),
@@ -187,7 +184,6 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     ("HarnessMcp", "*", PEER_LOCAL),
     ("HarnessQuestions", "*", PEER_LOCAL),
     ("HarnessSchedules", "*", PEER_LOCAL),
-    ("HarnessMemory", "*", PEER_LOCAL),
     ("HarnessTagSessions", "*", PEER_LOCAL),
     ("HarnessWorkSessions", "*", PEER_LOCAL),
     ("HarnessWorkspace", "*", PEER_LOCAL),

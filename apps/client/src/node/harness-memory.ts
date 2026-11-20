@@ -1,23 +1,23 @@
 /**
- * A Tag's harness memory, read with the app's own CLI: `supertag get memories --native` asks
+ * A Tag's memory, which its harness keeps, read with the app's own CLI: `supertag get memories` asks
  * the memory endpoint of each Worker Host `supertag up` runs from the local state directory, so
  * the memory never passes through the Control Plane and none of that is ported here. Only the
  * local Gateway's connection has a state directory to ask.
  */
 import type { HarnessMemory, HarnessMemoryList } from "../model/gateway";
 
-/** What a client says when it reaches a shared Gateway, which can't read harness memory. */
+/** What a client says when it reaches a shared Gateway, which can't read a Tag's memory. */
 export const SHARED_GATEWAY_HARNESS_MEMORY =
-  "Harness memory is read only on the machine whose Worker Host keeps it, and this connection reaches a shared Gateway.";
+  "A Tag's memory is read only on the machine whose Worker Host keeps it, and this connection reaches a shared Gateway.";
 
-const UNREADABLE = "This version of the supertag CLI can't list harness memory. Update it.";
+const UNREADABLE = "This version of the supertag CLI can't list a Tag's memory. Update it.";
 
-/** `supertag ARGS` for one Tag's harness memory in the local services' `state`. */
+/** `supertag ARGS` for one Tag's memory in the local services' `state`. */
 export function listHarnessMemoryArgs(state: string, tagId: string): string[] {
-  return ["get", "memories", "--native", "--tag", tagId, "--state-directory", state];
+  return ["get", "memories", "--tag", tagId, "--state-directory", state];
 }
 
-/** `supertag ARGS` to delete one harness memory in the local services' `state`. */
+/** `supertag ARGS` to delete one memory, or a proposed change, in the local services' `state`. */
 export function deleteHarnessMemoryArgs(state: string, memoryId: string): string[] {
   return ["delete", "memory", memoryId, "--state-directory", state];
 }
@@ -51,6 +51,7 @@ export function harnessMemory(value: unknown): HarnessMemory {
     title: text(memory, "title") ?? "",
     text: memoryText,
     truncated: memory["truncated"] === true,
+    status: text(memory, "status") === "proposed" ? "proposed" : "owned",
     path: text(source, "path") ?? "",
     updatedAtMs: Number.isNaN(updated) ? 0 : updated,
   };
@@ -62,7 +63,7 @@ export function harnessMemory(value: unknown): HarnessMemory {
   return parsed;
 }
 
-/** The CLI's `get memories --native` output. */
+/** The CLI's `get memories` output. */
 export function parseHarnessMemoryList(output: string): HarnessMemoryList {
   let value: unknown;
   try {
@@ -71,21 +72,21 @@ export function parseHarnessMemoryList(output: string): HarnessMemoryList {
     throw UNREADABLE;
   }
   const listed = record(value);
-  const memories = listed["native_memory"];
+  const memories = listed["memories"];
   if (!Array.isArray(memories)) throw UNREADABLE;
-  const keptOn = listed["native_memory_kept_on"];
+  const keptOn = listed["kept_on"];
   const list: HarnessMemoryList = {
     memories: memories.map(harnessMemory),
     keptOn: Array.isArray(keptOn)
       ? keptOn.filter((host): host is string => typeof host === "string")
       : [],
   };
-  const unavailable = text(listed, "native_memory_unavailable");
+  const unavailable = text(listed, "unavailable");
   if (unavailable) list.unavailable = unavailable;
   return list;
 }
 
-/** The CLI's `delete memory` output for a harness memory. */
+/** The CLI's `delete memory` output for one memory. */
 export function parseHarnessMemory(output: string): HarnessMemory {
   try {
     return harnessMemory(JSON.parse(output));

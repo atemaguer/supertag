@@ -4,29 +4,17 @@ package supertag.runtime.v2;
 
 import "supertag/runtime/v2/runtime.proto";
 
-// A Tag's memory: a few short notes the Tag keeps of what it cannot look up again, such as a
-// person's preferences, corrections, decisions and their reasons, and pointers to where things
-// live. Every root turn reads the notes it may see as untrusted state, never as instructions.
-//
-// A note is shared, or private to one person when a turn in that person's conversation wrote it.
-// A turn sees the shared notes and its own person's private notes, never another person's.
-//
-// Operators list and delete every note. A client lists and deletes the notes of its own
-// conversations and the shared notes. People never write notes directly; they tell the Tag.
+// A Tag's memory is its harness's own memory, such as Claude Code's auto-memory or Codex's
+// memories folder. Worker Hosts keep the files (NativeMemoryStore); the Control Plane never holds
+// them, and people read and delete them on the Worker Host's machine.
 service Memories {
-  rpc List(ListMemoriesRequest) returns (ListMemoriesResponse);
-  rpc Get(GetMemoryRequest) returns (Memory);
-  rpc Delete(GetMemoryRequest) returns (Memory);
   // Operators only. Drops a Tag's harness-native memory (NativeMemoryStore): every Worker Host
   // deletes its copies before it next runs one of the Tag's Tasks, and the records go now.
   rpc ResetNative(ResetNativeMemoryRequest) returns (ResetNativeMemoryResponse);
 }
 
-// Called by a Worker Host for the turn it runs. A note written or forgotten during a turn takes
-// effect only when that turn succeeds; a failed, cancelled, or expired turn changes nothing.
+// Called by a Worker Host for the turn it runs.
 service AttemptMemory {
-  rpc Remember(AttemptRememberRequest) returns (AttemptMemoryResponse);
-  rpc Forget(AttemptForgetRequest) returns (AttemptMemoryResponse);
   // After a turn's harness stops, its Worker Host records what it now holds of the store the
   // turn was granted (Assignment.native_memory). Never file contents.
   rpc ReportNative(ReportNativeMemoryRequest) returns (ReportNativeMemoryResponse);
@@ -34,78 +22,9 @@ service AttemptMemory {
   // store is still at `expected_revision`; otherwise it changes nothing and returns the current
   // head, so the host merges again.
   rpc AdvanceNative(AdvanceNativeMemoryRequest) returns (AdvanceNativeMemoryResponse);
-}
-
-// Served by a Worker Host to its harness adapter. The Worker Host sets `attempt` from the
-// Attempt it supervises; an adapter leaves it unset.
-service HarnessMemory {
-  rpc Remember(AttemptRememberRequest) returns (AttemptMemoryResponse);
-  rpc Forget(AttemptForgetRequest) returns (AttemptMemoryResponse);
-}
-
-enum MemoryState {
-  MEMORY_STATE_UNSPECIFIED = 0;
-  // Written by a turn that has not finished yet.
-  MEMORY_STATE_STAGED = 1;
-  MEMORY_STATE_ACTIVE = 2;
-  // Forgotten or replaced by a turn that has not finished yet.
-  MEMORY_STATE_FORGETTING = 3;
-}
-
-message Memory {
-  string memory_id = 1;
-  string tag_id = 2;
-  // At most 500 characters.
-  string text = 3;
-  // Unset for a shared note; the principal whose conversation wrote a private note.
-  optional string audience = 4;
-  MemoryState state = 5;
-  // `tag:ID` for the Tag that wrote it.
-  string created_by = 6;
-  // The turn that wrote it.
-  optional string source_task_id = 7;
-  int64 created_at_ms = 8;
-  int64 updated_at_ms = 9;
-  // When a turn last had the note in its context; unset until one has.
-  optional int64 last_seen_at_ms = 10;
-}
-
-message ListMemoriesRequest {
-  optional string tag_id = 1;
-}
-
-// Newest first.
-message ListMemoriesResponse {
-  repeated Memory memories = 1;
-}
-
-message GetMemoryRequest {
-  string memory_id = 1;
-}
-
-// The `remember` tool. A note takes this turn's audience. `replaces` names a note this turn may
-// see, which the new note replaces when the turn succeeds.
-message AttemptRememberRequest {
-  reserved 1;
-  reserved "attempt";
-  string operation_id = 2;
-  // 1 to 500 characters.
-  string text = 3;
-  optional string replaces = 4;
-}
-
-// The `forget` tool, for a note this turn may see.
-message AttemptForgetRequest {
-  reserved 1;
-  reserved "attempt";
-  string operation_id = 2;
-  string memory_id = 3;
-}
-
-message AttemptMemoryResponse {
-  Memory memory = 1;
-  // The notes this turn sees after the call, newest first, staged changes included.
-  repeated Memory notes = 2;
+  // The host has written the grant's seeds (NativeMemoryGrant.seeds) into the turn's store; the
+  // Control Plane drops them and grants them to no later turn.
+  rpc AcknowledgeSeeds(AcknowledgeNativeMemorySeedsRequest) returns (AcknowledgeNativeMemorySeedsResponse);
 }
 
 message ResetNativeMemoryRequest {
@@ -154,3 +73,10 @@ message AdvanceNativeMemoryResponse {
   // The store's head now: the new one, or the one another turn moved it to. Unset while empty.
   NativeMemoryVolumeHead head = 2;
 }
+
+message AcknowledgeNativeMemorySeedsRequest {
+  // The seeds written, by `seed_id`.
+  repeated string seed_ids = 1;
+}
+
+message AcknowledgeNativeMemorySeedsResponse {}

@@ -6,6 +6,8 @@ import {
   parseHarnessMemoryList,
 } from "./harness-memory";
 
+const proposal = "hmem_76543210fedcba9876543210";
+
 const record = {
   memory_id: "hmem_0123456789abcdef01234567",
   tag_id: "lead",
@@ -32,12 +34,11 @@ const record = {
   updated_at: "2026-11-19T11:00:00Z",
 };
 
-describe("harness memory from the CLI", () => {
-  it("asks the local services' state directory for one Tag's harness memory only", () => {
+describe("a Tag's memory from the CLI", () => {
+  it("asks the local services' state directory for one Tag's memory only", () => {
     expect(listHarnessMemoryArgs("/state", "lead")).toEqual([
       "get",
       "memories",
-      "--native",
       "--tag",
       "lead",
       "--state-directory",
@@ -52,9 +53,12 @@ describe("harness memory from the CLI", () => {
     ]);
   });
 
-  it("reads each memory with who sees it, its trust, and where it is kept", () => {
+  it("reads each memory with who sees it, its trust, whether it is a proposal, and where it is kept", () => {
     const list = parseHarnessMemoryList(
-      JSON.stringify({ native_memory: [record], native_memory_kept_on: ["laptop-2"] }),
+      JSON.stringify({
+        memories: [record, { ...record, memory_id: proposal, status: "proposed" }],
+        kept_on: ["laptop-2"],
+      }),
     );
     expect(list).toEqual({
       memories: [
@@ -69,10 +73,12 @@ describe("harness memory from the CLI", () => {
           text: "Prefer squash merges.",
           truncated: false,
           trust: "proposed-only",
+          status: "owned",
           path: "feedback_squash.md",
           hostId: "local",
           updatedAtMs: Date.parse("2026-11-19T11:00:00Z"),
         },
+        expect.objectContaining({ memoryId: proposal, status: "proposed" }),
       ],
       keptOn: ["laptop-2"],
     });
@@ -81,12 +87,10 @@ describe("harness memory from the CLI", () => {
 
   it("says why none can be read, and refuses output it doesn't understand", () => {
     expect(
-      parseHarnessMemoryList(
-        JSON.stringify({ native_memory: [], native_memory_unavailable: "No Worker Host runs." }),
-      ),
+      parseHarnessMemoryList(JSON.stringify({ memories: [], unavailable: "No Worker Host runs." })),
     ).toEqual({ memories: [], keptOn: [], unavailable: "No Worker Host runs." });
-    expect(() => parseHarnessMemoryList("{}")).toThrow(/can't list harness memory/u);
-    expect(() => parseHarnessMemoryList("not json")).toThrow(/can't list harness memory/u);
+    expect(() => parseHarnessMemoryList("{}")).toThrow(/can't list a Tag's memory/u);
+    expect(() => parseHarnessMemoryList("not json")).toThrow(/can't list a Tag's memory/u);
     expect(() => parseHarnessMemory(JSON.stringify({ memory_id: "x" }))).toThrow();
   });
 });

@@ -28,7 +28,6 @@ class WatchKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     WATCH_KIND_TEAM: _ClassVar[WatchKind]
     WATCH_KIND_WORKSTREAM_POST: _ClassVar[WatchKind]
     WATCH_KIND_SCHEDULE: _ClassVar[WatchKind]
-    WATCH_KIND_MEMORY: _ClassVar[WatchKind]
     WATCH_KIND_MAILBOX_MESSAGE: _ClassVar[WatchKind]
 
 class WatchReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
@@ -360,7 +359,6 @@ WATCH_KIND_OBJECTIVE: WatchKind
 WATCH_KIND_TEAM: WatchKind
 WATCH_KIND_WORKSTREAM_POST: WatchKind
 WATCH_KIND_SCHEDULE: WatchKind
-WATCH_KIND_MEMORY: WatchKind
 WATCH_KIND_MAILBOX_MESSAGE: WatchKind
 WATCH_REASON_UNSPECIFIED: WatchReason
 WATCH_REASON_CREATED: WatchReason
@@ -1026,7 +1024,7 @@ class AskQuestionRequest(_message.Message):
     def __init__(self, operation_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
 
 class AttemptCapabilities(_message.Message):
-    __slots__ = ("may_ask_objective_question", "may_use_workstream", "may_read_mailbox", "may_send_tag_message", "may_start_work_session", "may_continue_work_session", "may_ask_work_session_question", "may_request_commit_review", "may_read_tag_sessions", "tag_portfolio", "objective_ongoing", "may_schedule", "time_zone", "open_work_sessions", "max_work_sessions", "may_remember", "may_stay_quiet", "may_read_own_session")
+    __slots__ = ("may_ask_objective_question", "may_use_workstream", "may_read_mailbox", "may_send_tag_message", "may_start_work_session", "may_continue_work_session", "may_ask_work_session_question", "may_request_commit_review", "may_read_tag_sessions", "tag_portfolio", "objective_ongoing", "may_schedule", "time_zone", "open_work_sessions", "max_work_sessions", "memory_trusted", "may_stay_quiet", "may_read_own_session")
     MAY_ASK_OBJECTIVE_QUESTION_FIELD_NUMBER: _ClassVar[int]
     MAY_USE_WORKSTREAM_FIELD_NUMBER: _ClassVar[int]
     MAY_READ_MAILBOX_FIELD_NUMBER: _ClassVar[int]
@@ -1042,7 +1040,7 @@ class AttemptCapabilities(_message.Message):
     TIME_ZONE_FIELD_NUMBER: _ClassVar[int]
     OPEN_WORK_SESSIONS_FIELD_NUMBER: _ClassVar[int]
     MAX_WORK_SESSIONS_FIELD_NUMBER: _ClassVar[int]
-    MAY_REMEMBER_FIELD_NUMBER: _ClassVar[int]
+    MEMORY_TRUSTED_FIELD_NUMBER: _ClassVar[int]
     MAY_STAY_QUIET_FIELD_NUMBER: _ClassVar[int]
     MAY_READ_OWN_SESSION_FIELD_NUMBER: _ClassVar[int]
     may_ask_objective_question: bool
@@ -1060,10 +1058,10 @@ class AttemptCapabilities(_message.Message):
     time_zone: str
     open_work_sessions: int
     max_work_sessions: int
-    may_remember: bool
+    memory_trusted: bool
     may_stay_quiet: bool
     may_read_own_session: bool
-    def __init__(self, may_ask_objective_question: _Optional[bool] = ..., may_use_workstream: _Optional[bool] = ..., may_read_mailbox: _Optional[bool] = ..., may_send_tag_message: _Optional[bool] = ..., may_start_work_session: _Optional[bool] = ..., may_continue_work_session: _Optional[bool] = ..., may_ask_work_session_question: _Optional[bool] = ..., may_request_commit_review: _Optional[bool] = ..., may_read_tag_sessions: _Optional[bool] = ..., tag_portfolio: _Optional[str] = ..., objective_ongoing: _Optional[bool] = ..., may_schedule: _Optional[bool] = ..., time_zone: _Optional[str] = ..., open_work_sessions: _Optional[int] = ..., max_work_sessions: _Optional[int] = ..., may_remember: _Optional[bool] = ..., may_stay_quiet: _Optional[bool] = ..., may_read_own_session: _Optional[bool] = ...) -> None: ...
+    def __init__(self, may_ask_objective_question: _Optional[bool] = ..., may_use_workstream: _Optional[bool] = ..., may_read_mailbox: _Optional[bool] = ..., may_send_tag_message: _Optional[bool] = ..., may_start_work_session: _Optional[bool] = ..., may_continue_work_session: _Optional[bool] = ..., may_ask_work_session_question: _Optional[bool] = ..., may_request_commit_review: _Optional[bool] = ..., may_read_tag_sessions: _Optional[bool] = ..., tag_portfolio: _Optional[str] = ..., objective_ongoing: _Optional[bool] = ..., may_schedule: _Optional[bool] = ..., time_zone: _Optional[str] = ..., open_work_sessions: _Optional[int] = ..., max_work_sessions: _Optional[int] = ..., memory_trusted: _Optional[bool] = ..., may_stay_quiet: _Optional[bool] = ..., may_read_own_session: _Optional[bool] = ...) -> None: ...
 
 class CloseWorkSessionRequest(_message.Message):
     __slots__ = ("work_session_id", "delivery_pulled")
@@ -3151,14 +3149,28 @@ class NativeMemoryStore(_message.Message):
     def __init__(self, tag_id: _Optional[str] = ..., harness: _Optional[str] = ..., audience: _Optional[str] = ..., host_id: _Optional[str] = ..., revision: _Optional[int] = ..., files: _Optional[int] = ..., bytes: _Optional[int] = ..., digest: _Optional[str] = ..., updated_at_ms: _Optional[int] = ..., task_id: _Optional[str] = ..., volume_id: _Optional[str] = ...) -> None: ...
 
 class NativeMemoryGrant(_message.Message):
-    __slots__ = ("scope", "reset_generation", "volume_head")
+    __slots__ = ("scope", "reset_generation", "volume_head", "seeds", "trusted")
     SCOPE_FIELD_NUMBER: _ClassVar[int]
     RESET_GENERATION_FIELD_NUMBER: _ClassVar[int]
     VOLUME_HEAD_FIELD_NUMBER: _ClassVar[int]
+    SEEDS_FIELD_NUMBER: _ClassVar[int]
+    TRUSTED_FIELD_NUMBER: _ClassVar[int]
     scope: str
     reset_generation: int
     volume_head: NativeMemoryVolumeHead
-    def __init__(self, scope: _Optional[str] = ..., reset_generation: _Optional[int] = ..., volume_head: _Optional[_Union[NativeMemoryVolumeHead, _Mapping]] = ...) -> None: ...
+    seeds: _containers.RepeatedCompositeFieldContainer[NativeMemorySeed]
+    trusted: bool
+    def __init__(self, scope: _Optional[str] = ..., reset_generation: _Optional[int] = ..., volume_head: _Optional[_Union[NativeMemoryVolumeHead, _Mapping]] = ..., seeds: _Optional[_Iterable[_Union[NativeMemorySeed, _Mapping]]] = ..., trusted: _Optional[bool] = ...) -> None: ...
+
+class NativeMemorySeed(_message.Message):
+    __slots__ = ("seed_id", "text", "created_at_ms")
+    SEED_ID_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    seed_id: str
+    text: str
+    created_at_ms: int
+    def __init__(self, seed_id: _Optional[str] = ..., text: _Optional[str] = ..., created_at_ms: _Optional[int] = ...) -> None: ...
 
 class NativeMemoryVolumeHead(_message.Message):
     __slots__ = ("revision", "manifest")

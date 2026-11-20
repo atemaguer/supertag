@@ -100,10 +100,11 @@ only when it holds `{ target: runtime, action: schedule:create }`. `supertag ini
 the lead; add it to a set to let another Tag follow up on its own, and leave it out to stop one.
 
 Every Tag keeps [Memory](../../docs/reference/coordination.md#memory) unless its spec sets
-`memory: false` (or `supertag tag put TAG --memory false`): short notes it writes with `remember`
-and a daily review of its work, plus its harness's own memory (Claude Code's auto-memory,
-Codex's memory notes), which Worklets keep per Tag. Turn it off for a Tag that must not carry anything between
-conversations. `supertag delete memory --native TAG` drops the harness memory alone.
+`memory: false` (or `supertag tag put TAG --memory false`): its harness's own memory (Claude
+Code's auto-memory, Codex's memory notes), which Worklets keep per Tag and audience, and a daily
+review that corrects it against the Tag's Sessions and merges what Work Sessions proposed. Turn it
+off for a Tag that must not carry anything between conversations. `supertag delete memory --tag
+TAG` drops all of it.
 
 Two harness rules decide whether `commands:execute` works:
 

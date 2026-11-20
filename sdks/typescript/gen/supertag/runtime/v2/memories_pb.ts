@@ -2,8 +2,8 @@
 // @generated from file supertag/runtime/v2/memories.proto (package supertag.runtime.v2, syntax proto3)
 /* eslint-disable */
 
-import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { BlobReference, NativeMemoryStore, NativeMemoryVolumeHead } from "./runtime_pb.js";
 import { file_supertag_runtime_v2_runtime } from "./runtime_pb.js";
 import type { Message } from "@bufbuild/protobuf";
@@ -12,212 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/memories.proto.
  */
 export const file_supertag_runtime_v2_memories: GenFile = /*@__PURE__*/
-  fileDesc("CiJzdXBlcnRhZy9ydW50aW1lL3YyL21lbW9yaWVzLnByb3RvEhNzdXBlcnRhZy5ydW50aW1lLnYyIrICCgZNZW1vcnkSEQoJbWVtb3J5X2lkGAEgASgJEg4KBnRhZ19pZBgCIAEoCRIMCgR0ZXh0GAMgASgJEhUKCGF1ZGllbmNlGAQgASgJSACIAQESLwoFc3RhdGUYBSABKA4yIC5zdXBlcnRhZy5ydW50aW1lLnYyLk1lbW9yeVN0YXRlEhIKCmNyZWF0ZWRfYnkYBiABKAkSGwoOc291cmNlX3Rhc2tfaWQYByABKAlIAYgBARIVCg1jcmVhdGVkX2F0X21zGAggASgDEhUKDXVwZGF0ZWRfYXRfbXMYCSABKAMSHAoPbGFzdF9zZWVuX2F0X21zGAogASgDSAKIAQFCCwoJX2F1ZGllbmNlQhEKD19zb3VyY2VfdGFza19pZEISChBfbGFzdF9zZWVuX2F0X21zIjUKE0xpc3RNZW1vcmllc1JlcXVlc3QSEwoGdGFnX2lkGAEgASgJSACIAQFCCQoHX3RhZ19pZCJFChRMaXN0TWVtb3JpZXNSZXNwb25zZRItCghtZW1vcmllcxgBIAMoCzIbLnN1cGVydGFnLnJ1bnRpbWUudjIuTWVtb3J5IiUKEEdldE1lbW9yeVJlcXVlc3QSEQoJbWVtb3J5X2lkGAEgASgJIm8KFkF0dGVtcHRSZW1lbWJlclJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAIgASgJEgwKBHRleHQYAyABKAkSFQoIcmVwbGFjZXMYBCABKAlIAIgBAUILCglfcmVwbGFjZXNKBAgBEAJSB2F0dGVtcHQiTgoUQXR0ZW1wdEZvcmdldFJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAIgASgJEhEKCW1lbW9yeV9pZBgDIAEoCUoECAEQAlIHYXR0ZW1wdCJwChVBdHRlbXB0TWVtb3J5UmVzcG9uc2USKwoGbWVtb3J5GAEgASgLMhsuc3VwZXJ0YWcucnVudGltZS52Mi5NZW1vcnkSKgoFbm90ZXMYAiADKAsyGy5zdXBlcnRhZy5ydW50aW1lLnYyLk1lbW9yeSIqChhSZXNldE5hdGl2ZU1lbW9yeVJlcXVlc3QSDgoGdGFnX2lkGAEgASgJIm0KGVJlc2V0TmF0aXZlTWVtb3J5UmVzcG9uc2USNgoGc3RvcmVzGAEgAygLMiYuc3VwZXJ0YWcucnVudGltZS52Mi5OYXRpdmVNZW1vcnlTdG9yZRIYChByZXNldF9nZW5lcmF0aW9uGAIgASgEIoQBChlSZXBvcnROYXRpdmVNZW1vcnlSZXF1ZXN0EhAKCHJldmlzaW9uGAIgASgEEg0KBWZpbGVzGAMgASgNEg0KBWJ5dGVzGAQgASgEEg4KBmRpZ2VzdBgFIAEoCRIYChByZXNldF9nZW5lcmF0aW9uGAYgASgESgQIARACUgdhdHRlbXB0IhwKGlJlcG9ydE5hdGl2ZU1lbW9yeVJlc3BvbnNlIukBChpBZHZhbmNlTmF0aXZlTWVtb3J5UmVxdWVzdBIZChFleHBlY3RlZF9yZXZpc2lvbhgCIAEoBBI0CghtYW5pZmVzdBgDIAEoCzIiLnN1cGVydGFnLnJ1bnRpbWUudjIuQmxvYlJlZmVyZW5jZRINCgVmaWxlcxgEIAEoDRINCgVieXRlcxgFIAEoBBIYChByZXNldF9nZW5lcmF0aW9uGAYgASgEEjMKB29iamVjdHMYByADKAsyIi5zdXBlcnRhZy5ydW50aW1lLnYyLkJsb2JSZWZlcmVuY2VKBAgBEAJSB2F0dGVtcHQiagobQWR2YW5jZU5hdGl2ZU1lbW9yeVJlc3BvbnNlEhAKCGFkdmFuY2VkGAEgASgIEjkKBGhlYWQYAiABKAsyKy5zdXBlcnRhZy5ydW50aW1lLnYyLk5hdGl2ZU1lbW9yeVZvbHVtZUhlYWQqegoLTWVtb3J5U3RhdGUSHAoYTUVNT1JZX1NUQVRFX1VOU1BFQ0lGSUVEEAASFwoTTUVNT1JZX1NUQVRFX1NUQUdFRBABEhcKE01FTU9SWV9TVEFURV9BQ1RJVkUQAhIbChdNRU1PUllfU1RBVEVfRk9SR0VUVElORxADMu4CCghNZW1vcmllcxJbCgRMaXN0Eiguc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0TWVtb3JpZXNSZXF1ZXN0Gikuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0TWVtb3JpZXNSZXNwb25zZRJJCgNHZXQSJS5zdXBlcnRhZy5ydW50aW1lLnYyLkdldE1lbW9yeVJlcXVlc3QaGy5zdXBlcnRhZy5ydW50aW1lLnYyLk1lbW9yeRJMCgZEZWxldGUSJS5zdXBlcnRhZy5ydW50aW1lLnYyLkdldE1lbW9yeVJlcXVlc3QaGy5zdXBlcnRhZy5ydW50aW1lLnYyLk1lbW9yeRJsCgtSZXNldE5hdGl2ZRItLnN1cGVydGFnLnJ1bnRpbWUudjIuUmVzZXROYXRpdmVNZW1vcnlSZXF1ZXN0Gi4uc3VwZXJ0YWcucnVudGltZS52Mi5SZXNldE5hdGl2ZU1lbW9yeVJlc3BvbnNlMroDCg1BdHRlbXB0TWVtb3J5EmMKCFJlbWVtYmVyEisuc3VwZXJ0YWcucnVudGltZS52Mi5BdHRlbXB0UmVtZW1iZXJSZXF1ZXN0Giouc3VwZXJ0YWcucnVudGltZS52Mi5BdHRlbXB0TWVtb3J5UmVzcG9uc2USXwoGRm9yZ2V0Eikuc3VwZXJ0YWcucnVudGltZS52Mi5BdHRlbXB0Rm9yZ2V0UmVxdWVzdBoqLnN1cGVydGFnLnJ1bnRpbWUudjIuQXR0ZW1wdE1lbW9yeVJlc3BvbnNlEm8KDFJlcG9ydE5hdGl2ZRIuLnN1cGVydGFnLnJ1bnRpbWUudjIuUmVwb3J0TmF0aXZlTWVtb3J5UmVxdWVzdBovLnN1cGVydGFnLnJ1bnRpbWUudjIuUmVwb3J0TmF0aXZlTWVtb3J5UmVzcG9uc2UScgoNQWR2YW5jZU5hdGl2ZRIvLnN1cGVydGFnLnJ1bnRpbWUudjIuQWR2YW5jZU5hdGl2ZU1lbW9yeVJlcXVlc3QaMC5zdXBlcnRhZy5ydW50aW1lLnYyLkFkdmFuY2VOYXRpdmVNZW1vcnlSZXNwb25zZTLVAQoNSGFybmVzc01lbW9yeRJjCghSZW1lbWJlchIrLnN1cGVydGFnLnJ1bnRpbWUudjIuQXR0ZW1wdFJlbWVtYmVyUmVxdWVzdBoqLnN1cGVydGFnLnJ1bnRpbWUudjIuQXR0ZW1wdE1lbW9yeVJlc3BvbnNlEl8KBkZvcmdldBIpLnN1cGVydGFnLnJ1bnRpbWUudjIuQXR0ZW1wdEZvcmdldFJlcXVlc3QaKi5zdXBlcnRhZy5ydW50aW1lLnYyLkF0dGVtcHRNZW1vcnlSZXNwb25zZWIGcHJvdG8z", [file_supertag_runtime_v2_runtime]);
-
-/**
- * @generated from message supertag.runtime.v2.Memory
- */
-export type Memory = Message<"supertag.runtime.v2.Memory"> & {
-  /**
-   * @generated from field: string memory_id = 1;
-   */
-  memoryId: string;
-
-  /**
-   * @generated from field: string tag_id = 2;
-   */
-  tagId: string;
-
-  /**
-   * At most 500 characters.
-   *
-   * @generated from field: string text = 3;
-   */
-  text: string;
-
-  /**
-   * Unset for a shared note; the principal whose conversation wrote a private note.
-   *
-   * @generated from field: optional string audience = 4;
-   */
-  audience?: string | undefined;
-
-  /**
-   * @generated from field: supertag.runtime.v2.MemoryState state = 5;
-   */
-  state: MemoryState;
-
-  /**
-   * `tag:ID` for the Tag that wrote it.
-   *
-   * @generated from field: string created_by = 6;
-   */
-  createdBy: string;
-
-  /**
-   * The turn that wrote it.
-   *
-   * @generated from field: optional string source_task_id = 7;
-   */
-  sourceTaskId?: string | undefined;
-
-  /**
-   * @generated from field: int64 created_at_ms = 8;
-   */
-  createdAtMs: bigint;
-
-  /**
-   * @generated from field: int64 updated_at_ms = 9;
-   */
-  updatedAtMs: bigint;
-
-  /**
-   * When a turn last had the note in its context; unset until one has.
-   *
-   * @generated from field: optional int64 last_seen_at_ms = 10;
-   */
-  lastSeenAtMs?: bigint | undefined;
-};
-
-/**
- * Describes the message supertag.runtime.v2.Memory.
- * Use `create(MemorySchema)` to create a new message.
- */
-export const MemorySchema: GenMessage<Memory> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_memories, 0);
-
-/**
- * @generated from message supertag.runtime.v2.ListMemoriesRequest
- */
-export type ListMemoriesRequest = Message<"supertag.runtime.v2.ListMemoriesRequest"> & {
-  /**
-   * @generated from field: optional string tag_id = 1;
-   */
-  tagId?: string | undefined;
-};
-
-/**
- * Describes the message supertag.runtime.v2.ListMemoriesRequest.
- * Use `create(ListMemoriesRequestSchema)` to create a new message.
- */
-export const ListMemoriesRequestSchema: GenMessage<ListMemoriesRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_memories, 1);
-
-/**
- * Newest first.
- *
- * @generated from message supertag.runtime.v2.ListMemoriesResponse
- */
-export type ListMemoriesResponse = Message<"supertag.runtime.v2.ListMemoriesResponse"> & {
-  /**
-   * @generated from field: repeated supertag.runtime.v2.Memory memories = 1;
-   */
-  memories: Memory[];
-};
-
-/**
- * Describes the message supertag.runtime.v2.ListMemoriesResponse.
- * Use `create(ListMemoriesResponseSchema)` to create a new message.
- */
-export const ListMemoriesResponseSchema: GenMessage<ListMemoriesResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_memories, 2);
-
-/**
- * @generated from message supertag.runtime.v2.GetMemoryRequest
- */
-export type GetMemoryRequest = Message<"supertag.runtime.v2.GetMemoryRequest"> & {
-  /**
-   * @generated from field: string memory_id = 1;
-   */
-  memoryId: string;
-};
-
-/**
- * Describes the message supertag.runtime.v2.GetMemoryRequest.
- * Use `create(GetMemoryRequestSchema)` to create a new message.
- */
-export const GetMemoryRequestSchema: GenMessage<GetMemoryRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_memories, 3);
-
-/**
- * The `remember` tool. A note takes this turn's audience. `replaces` names a note this turn may
- * see, which the new note replaces when the turn succeeds.
- *
- * @generated from message supertag.runtime.v2.AttemptRememberRequest
- */
-export type AttemptRememberRequest = Message<"supertag.runtime.v2.AttemptRememberRequest"> & {
-  /**
-   * @generated from field: string operation_id = 2;
-   */
-  operationId: string;
-
-  /**
-   * 1 to 500 characters.
-   *
-   * @generated from field: string text = 3;
-   */
-  text: string;
-
-  /**
-   * @generated from field: optional string replaces = 4;
-   */
-  replaces?: string | undefined;
-};
-
-/**
- * Describes the message supertag.runtime.v2.AttemptRememberRequest.
- * Use `create(AttemptRememberRequestSchema)` to create a new message.
- */
-export const AttemptRememberRequestSchema: GenMessage<AttemptRememberRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_memories, 4);
-
-/**
- * The `forget` tool, for a note this turn may see.
- *
- * @generated from message supertag.runtime.v2.AttemptForgetRequest
- */
-export type AttemptForgetRequest = Message<"supertag.runtime.v2.AttemptForgetRequest"> & {
-  /**
-   * @generated from field: string operation_id = 2;
-   */
-  operationId: string;
-
-  /**
-   * @generated from field: string memory_id = 3;
-   */
-  memoryId: string;
-};
-
-/**
- * Describes the message supertag.runtime.v2.AttemptForgetRequest.
- * Use `create(AttemptForgetRequestSchema)` to create a new message.
- */
-export const AttemptForgetRequestSchema: GenMessage<AttemptForgetRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_memories, 5);
-
-/**
- * @generated from message supertag.runtime.v2.AttemptMemoryResponse
- */
-export type AttemptMemoryResponse = Message<"supertag.runtime.v2.AttemptMemoryResponse"> & {
-  /**
-   * @generated from field: supertag.runtime.v2.Memory memory = 1;
-   */
-  memory?: Memory | undefined;
-
-  /**
-   * The notes this turn sees after the call, newest first, staged changes included.
-   *
-   * @generated from field: repeated supertag.runtime.v2.Memory notes = 2;
-   */
-  notes: Memory[];
-};
-
-/**
- * Describes the message supertag.runtime.v2.AttemptMemoryResponse.
- * Use `create(AttemptMemoryResponseSchema)` to create a new message.
- */
-export const AttemptMemoryResponseSchema: GenMessage<AttemptMemoryResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_memories, 6);
+  fileDesc("CiJzdXBlcnRhZy9ydW50aW1lL3YyL21lbW9yaWVzLnByb3RvEhNzdXBlcnRhZy5ydW50aW1lLnYyIioKGFJlc2V0TmF0aXZlTWVtb3J5UmVxdWVzdBIOCgZ0YWdfaWQYASABKAkibQoZUmVzZXROYXRpdmVNZW1vcnlSZXNwb25zZRI2CgZzdG9yZXMYASADKAsyJi5zdXBlcnRhZy5ydW50aW1lLnYyLk5hdGl2ZU1lbW9yeVN0b3JlEhgKEHJlc2V0X2dlbmVyYXRpb24YAiABKAQihAEKGVJlcG9ydE5hdGl2ZU1lbW9yeVJlcXVlc3QSEAoIcmV2aXNpb24YAiABKAQSDQoFZmlsZXMYAyABKA0SDQoFYnl0ZXMYBCABKAQSDgoGZGlnZXN0GAUgASgJEhgKEHJlc2V0X2dlbmVyYXRpb24YBiABKARKBAgBEAJSB2F0dGVtcHQiHAoaUmVwb3J0TmF0aXZlTWVtb3J5UmVzcG9uc2Ui6QEKGkFkdmFuY2VOYXRpdmVNZW1vcnlSZXF1ZXN0EhkKEWV4cGVjdGVkX3JldmlzaW9uGAIgASgEEjQKCG1hbmlmZXN0GAMgASgLMiIuc3VwZXJ0YWcucnVudGltZS52Mi5CbG9iUmVmZXJlbmNlEg0KBWZpbGVzGAQgASgNEg0KBWJ5dGVzGAUgASgEEhgKEHJlc2V0X2dlbmVyYXRpb24YBiABKAQSMwoHb2JqZWN0cxgHIAMoCzIiLnN1cGVydGFnLnJ1bnRpbWUudjIuQmxvYlJlZmVyZW5jZUoECAEQAlIHYXR0ZW1wdCJqChtBZHZhbmNlTmF0aXZlTWVtb3J5UmVzcG9uc2USEAoIYWR2YW5jZWQYASABKAgSOQoEaGVhZBgCIAEoCzIrLnN1cGVydGFnLnJ1bnRpbWUudjIuTmF0aXZlTWVtb3J5Vm9sdW1lSGVhZCI3CiNBY2tub3dsZWRnZU5hdGl2ZU1lbW9yeVNlZWRzUmVxdWVzdBIQCghzZWVkX2lkcxgBIAMoCSImCiRBY2tub3dsZWRnZU5hdGl2ZU1lbW9yeVNlZWRzUmVzcG9uc2UyeAoITWVtb3JpZXMSbAoLUmVzZXROYXRpdmUSLS5zdXBlcnRhZy5ydW50aW1lLnYyLlJlc2V0TmF0aXZlTWVtb3J5UmVxdWVzdBouLnN1cGVydGFnLnJ1bnRpbWUudjIuUmVzZXROYXRpdmVNZW1vcnlSZXNwb25zZTL+AgoNQXR0ZW1wdE1lbW9yeRJvCgxSZXBvcnROYXRpdmUSLi5zdXBlcnRhZy5ydW50aW1lLnYyLlJlcG9ydE5hdGl2ZU1lbW9yeVJlcXVlc3QaLy5zdXBlcnRhZy5ydW50aW1lLnYyLlJlcG9ydE5hdGl2ZU1lbW9yeVJlc3BvbnNlEnIKDUFkdmFuY2VOYXRpdmUSLy5zdXBlcnRhZy5ydW50aW1lLnYyLkFkdmFuY2VOYXRpdmVNZW1vcnlSZXF1ZXN0GjAuc3VwZXJ0YWcucnVudGltZS52Mi5BZHZhbmNlTmF0aXZlTWVtb3J5UmVzcG9uc2UShwEKEEFja25vd2xlZGdlU2VlZHMSOC5zdXBlcnRhZy5ydW50aW1lLnYyLkFja25vd2xlZGdlTmF0aXZlTWVtb3J5U2VlZHNSZXF1ZXN0Gjkuc3VwZXJ0YWcucnVudGltZS52Mi5BY2tub3dsZWRnZU5hdGl2ZU1lbW9yeVNlZWRzUmVzcG9uc2ViBnByb3RvMw", [file_supertag_runtime_v2_runtime]);
 
 /**
  * @generated from message supertag.runtime.v2.ResetNativeMemoryRequest
@@ -234,7 +29,7 @@ export type ResetNativeMemoryRequest = Message<"supertag.runtime.v2.ResetNativeM
  * Use `create(ResetNativeMemoryRequestSchema)` to create a new message.
  */
 export const ResetNativeMemoryRequestSchema: GenMessage<ResetNativeMemoryRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_memories, 7);
+  messageDesc(file_supertag_runtime_v2_memories, 0);
 
 /**
  * @generated from message supertag.runtime.v2.ResetNativeMemoryResponse
@@ -258,7 +53,7 @@ export type ResetNativeMemoryResponse = Message<"supertag.runtime.v2.ResetNative
  * Use `create(ResetNativeMemoryResponseSchema)` to create a new message.
  */
 export const ResetNativeMemoryResponseSchema: GenMessage<ResetNativeMemoryResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_memories, 8);
+  messageDesc(file_supertag_runtime_v2_memories, 1);
 
 /**
  * @generated from message supertag.runtime.v2.ReportNativeMemoryRequest
@@ -299,7 +94,7 @@ export type ReportNativeMemoryRequest = Message<"supertag.runtime.v2.ReportNativ
  * Use `create(ReportNativeMemoryRequestSchema)` to create a new message.
  */
 export const ReportNativeMemoryRequestSchema: GenMessage<ReportNativeMemoryRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_memories, 9);
+  messageDesc(file_supertag_runtime_v2_memories, 2);
 
 /**
  * @generated from message supertag.runtime.v2.ReportNativeMemoryResponse
@@ -312,7 +107,7 @@ export type ReportNativeMemoryResponse = Message<"supertag.runtime.v2.ReportNati
  * Use `create(ReportNativeMemoryResponseSchema)` to create a new message.
  */
 export const ReportNativeMemoryResponseSchema: GenMessage<ReportNativeMemoryResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_memories, 10);
+  messageDesc(file_supertag_runtime_v2_memories, 3);
 
 /**
  * @generated from message supertag.runtime.v2.AdvanceNativeMemoryRequest
@@ -363,7 +158,7 @@ export type AdvanceNativeMemoryRequest = Message<"supertag.runtime.v2.AdvanceNat
  * Use `create(AdvanceNativeMemoryRequestSchema)` to create a new message.
  */
 export const AdvanceNativeMemoryRequestSchema: GenMessage<AdvanceNativeMemoryRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_memories, 11);
+  messageDesc(file_supertag_runtime_v2_memories, 4);
 
 /**
  * @generated from message supertag.runtime.v2.AdvanceNativeMemoryResponse
@@ -389,81 +184,48 @@ export type AdvanceNativeMemoryResponse = Message<"supertag.runtime.v2.AdvanceNa
  * Use `create(AdvanceNativeMemoryResponseSchema)` to create a new message.
  */
 export const AdvanceNativeMemoryResponseSchema: GenMessage<AdvanceNativeMemoryResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_memories, 12);
+  messageDesc(file_supertag_runtime_v2_memories, 5);
 
 /**
- * @generated from enum supertag.runtime.v2.MemoryState
+ * @generated from message supertag.runtime.v2.AcknowledgeNativeMemorySeedsRequest
  */
-export enum MemoryState {
+export type AcknowledgeNativeMemorySeedsRequest = Message<"supertag.runtime.v2.AcknowledgeNativeMemorySeedsRequest"> & {
   /**
-   * @generated from enum value: MEMORY_STATE_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * Written by a turn that has not finished yet.
+   * The seeds written, by `seed_id`.
    *
-   * @generated from enum value: MEMORY_STATE_STAGED = 1;
+   * @generated from field: repeated string seed_ids = 1;
    */
-  STAGED = 1,
-
-  /**
-   * @generated from enum value: MEMORY_STATE_ACTIVE = 2;
-   */
-  ACTIVE = 2,
-
-  /**
-   * Forgotten or replaced by a turn that has not finished yet.
-   *
-   * @generated from enum value: MEMORY_STATE_FORGETTING = 3;
-   */
-  FORGETTING = 3,
-}
+  seedIds: string[];
+};
 
 /**
- * Describes the enum supertag.runtime.v2.MemoryState.
+ * Describes the message supertag.runtime.v2.AcknowledgeNativeMemorySeedsRequest.
+ * Use `create(AcknowledgeNativeMemorySeedsRequestSchema)` to create a new message.
  */
-export const MemoryStateSchema: GenEnum<MemoryState> = /*@__PURE__*/
-  enumDesc(file_supertag_runtime_v2_memories, 0);
+export const AcknowledgeNativeMemorySeedsRequestSchema: GenMessage<AcknowledgeNativeMemorySeedsRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_memories, 6);
 
 /**
- * A Tag's memory: a few short notes the Tag keeps of what it cannot look up again, such as a
- * person's preferences, corrections, decisions and their reasons, and pointers to where things
- * live. Every root turn reads the notes it may see as untrusted state, never as instructions.
- *
- * A note is shared, or private to one person when a turn in that person's conversation wrote it.
- * A turn sees the shared notes and its own person's private notes, never another person's.
- *
- * Operators list and delete every note. A client lists and deletes the notes of its own
- * conversations and the shared notes. People never write notes directly; they tell the Tag.
+ * @generated from message supertag.runtime.v2.AcknowledgeNativeMemorySeedsResponse
+ */
+export type AcknowledgeNativeMemorySeedsResponse = Message<"supertag.runtime.v2.AcknowledgeNativeMemorySeedsResponse"> & {
+};
+
+/**
+ * Describes the message supertag.runtime.v2.AcknowledgeNativeMemorySeedsResponse.
+ * Use `create(AcknowledgeNativeMemorySeedsResponseSchema)` to create a new message.
+ */
+export const AcknowledgeNativeMemorySeedsResponseSchema: GenMessage<AcknowledgeNativeMemorySeedsResponse> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_memories, 7);
+
+/**
+ * A Tag's memory is its harness's own memory, such as Claude Code's auto-memory or Codex's
+ * memories folder. Worker Hosts keep the files (NativeMemoryStore); the Control Plane never holds
+ * them, and people read and delete them on the Worker Host's machine.
  *
  * @generated from service supertag.runtime.v2.Memories
  */
 export const Memories: GenService<{
-  /**
-   * @generated from rpc supertag.runtime.v2.Memories.List
-   */
-  list: {
-    methodKind: "unary";
-    input: typeof ListMemoriesRequestSchema;
-    output: typeof ListMemoriesResponseSchema;
-  },
-  /**
-   * @generated from rpc supertag.runtime.v2.Memories.Get
-   */
-  get: {
-    methodKind: "unary";
-    input: typeof GetMemoryRequestSchema;
-    output: typeof MemorySchema;
-  },
-  /**
-   * @generated from rpc supertag.runtime.v2.Memories.Delete
-   */
-  delete: {
-    methodKind: "unary";
-    input: typeof GetMemoryRequestSchema;
-    output: typeof MemorySchema;
-  },
   /**
    * Operators only. Drops a Tag's harness-native memory (NativeMemoryStore): every Worker Host
    * deletes its copies before it next runs one of the Tag's Tasks, and the records go now.
@@ -479,28 +241,11 @@ export const Memories: GenService<{
   serviceDesc(file_supertag_runtime_v2_memories, 0);
 
 /**
- * Called by a Worker Host for the turn it runs. A note written or forgotten during a turn takes
- * effect only when that turn succeeds; a failed, cancelled, or expired turn changes nothing.
+ * Called by a Worker Host for the turn it runs.
  *
  * @generated from service supertag.runtime.v2.AttemptMemory
  */
 export const AttemptMemory: GenService<{
-  /**
-   * @generated from rpc supertag.runtime.v2.AttemptMemory.Remember
-   */
-  remember: {
-    methodKind: "unary";
-    input: typeof AttemptRememberRequestSchema;
-    output: typeof AttemptMemoryResponseSchema;
-  },
-  /**
-   * @generated from rpc supertag.runtime.v2.AttemptMemory.Forget
-   */
-  forget: {
-    methodKind: "unary";
-    input: typeof AttemptForgetRequestSchema;
-    output: typeof AttemptMemoryResponseSchema;
-  },
   /**
    * After a turn's harness stops, its Worker Host records what it now holds of the store the
    * turn was granted (Assignment.native_memory). Never file contents.
@@ -524,31 +269,16 @@ export const AttemptMemory: GenService<{
     input: typeof AdvanceNativeMemoryRequestSchema;
     output: typeof AdvanceNativeMemoryResponseSchema;
   },
+  /**
+   * The host has written the grant's seeds (NativeMemoryGrant.seeds) into the turn's store; the
+   * Control Plane drops them and grants them to no later turn.
+   *
+   * @generated from rpc supertag.runtime.v2.AttemptMemory.AcknowledgeSeeds
+   */
+  acknowledgeSeeds: {
+    methodKind: "unary";
+    input: typeof AcknowledgeNativeMemorySeedsRequestSchema;
+    output: typeof AcknowledgeNativeMemorySeedsResponseSchema;
+  },
 }> = /*@__PURE__*/
   serviceDesc(file_supertag_runtime_v2_memories, 1);
-
-/**
- * Served by a Worker Host to its harness adapter. The Worker Host sets `attempt` from the
- * Attempt it supervises; an adapter leaves it unset.
- *
- * @generated from service supertag.runtime.v2.HarnessMemory
- */
-export const HarnessMemory: GenService<{
-  /**
-   * @generated from rpc supertag.runtime.v2.HarnessMemory.Remember
-   */
-  remember: {
-    methodKind: "unary";
-    input: typeof AttemptRememberRequestSchema;
-    output: typeof AttemptMemoryResponseSchema;
-  },
-  /**
-   * @generated from rpc supertag.runtime.v2.HarnessMemory.Forget
-   */
-  forget: {
-    methodKind: "unary";
-    input: typeof AttemptForgetRequestSchema;
-    output: typeof AttemptMemoryResponseSchema;
-  },
-}> = /*@__PURE__*/
-  serviceDesc(file_supertag_runtime_v2_memories, 2);

@@ -36,7 +36,7 @@ use crate::{
 /// How many times a turn merges onto a head another turn moved before giving up.
 const ATTEMPTS: usize = 5;
 
-type Memory = AttemptMemoryClient<InterceptedService<Channel, HostHeaders>>;
+pub(crate) type Memory = AttemptMemoryClient<InterceptedService<Channel, HostHeaders>>;
 
 /// What the host needs to reach the Tag's Volume for one Attempt.
 #[derive(Clone)]
@@ -168,18 +168,21 @@ pub(crate) struct Prepared {
 }
 
 impl Prepared {
-    /// Reads the store at the grant's head into a fresh working copy in the lane's state.
+    /// Reads the store at the grant's head into a fresh working copy in the lane's state, with the
+    /// grant's seeds written into it.
     pub(crate) async fn prepare(
         access: &Access,
         state: &Path,
-        attempt: &str,
+        (harness, attempt): (&str, &str),
         grant: &NativeMemoryGrant,
     ) -> Result<Self> {
         component("Attempt ID", attempt)?;
         let head = grant.volume_head.clone();
         let (base, manifest) = access.load(head.as_ref()).await?;
         let root = state.join("native-memory-attempts").join(attempt);
-        let files = base.clone();
+        // The grant's seeds start in the working copy, so they reach the store with the turn's
+        // own changes; a seed already in the store is not written again.
+        let files = crate::worker::native_memory::seeded(harness, &base, &grant.seeds);
         let directory = root.clone();
         tokio::task::spawn_blocking(move || -> Result<()> {
             remove(&directory)?;

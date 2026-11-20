@@ -99,9 +99,10 @@ scheduler then chooses a compatible harness and model on one of those hosts. Non
   expression in a time zone). When it is due, the Control Plane queues an ordinary Task; it never
   starts a run. A Tag creates one with its `schedule` tool; an operator or client creates one in
   its own conversation with `supertag schedule create`. See [Schedules](coordination.md#schedules).
-- **Memory** is a Tag's notebook: short notes it keeps with its `remember` and `forget` tools,
-  each shared or private to one person's conversation. People list and delete notes; they never
-  write them. See [Memory](coordination.md#memory).
+- **Memory** is what a Tag keeps of what it cannot look up again: its harness's own memory, such
+  as Claude Code's auto-memory, which the Worker Host keeps, shared or private to one person's
+  conversations. People list and delete memories on that host's machine; they never write them.
+  See [Memory](coordination.md#memory).
 - **Task Attempt** records one execution or retry of a Task on a Worker Host.
 - **Landing** records where git delivery put one Session's changes; see [Landing](#landing).
 - An **approval request** records one ask for a decision on a gated action, with its scope and
@@ -125,7 +126,7 @@ it names, may also be declared in a manifest; see [Declared Objectives](#declare
 may a recurring Schedule; see [Declared Schedules](#declared-schedules).
 Otherwise an Objective comes from `supertag objective create` or a person's `/goal` message,
 a Team from `supertag team create`, a Schedule from a Tag's `schedule` tool or
-`supertag schedule create`, and a note of a Tag's Memory from its `remember` tool. A Team's Workstream exists with the Team. Status is never
+`supertag schedule create`, and a Tag's Memory from its harness. A Team's Workstream exists with the Team. Status is never
 declared: owners and operators record it explicitly. The execution records report what the service
 did.
 
@@ -165,7 +166,7 @@ More Tag fields declare where its Tasks run, where the Tag works, and who may me
 | `spec.acceptsMessagesFrom` | Tag name | Mailbox grants where this Tag is the recipient |
 | `spec.lead` | `true` or `false` | Whether this is the Control Plane's **lead Tag**. Omitted keeps the current value. |
 | `spec.maxWorkSessions` | 1 to 64 | How many work Sessions the Tag may have open at once, 8 by default. Omitted keeps the current value. See [Open work Sessions](coordination.md#open-work-sessions). |
-| `spec.memory` | `true` or `false` | Whether the Tag keeps [Memory](coordination.md#memory): notes it writes and a daily review. Omitted keeps the current value; a new Tag keeps memory. |
+| `spec.memory` | `true` or `false` | Whether the Tag keeps [Memory](coordination.md#memory): its harness's own memory and a daily review. Omitted keeps the current value; a new Tag keeps memory. |
 | `spec.volume` | A Volume ID, or `""` | Keeps the Tag's work beyond any one Worker Host: the capturing host's Worklet writes a copy of every capture there, and a capture fails when its copy cannot be written. Its Sessions' checkpoints live there too, so any host that reaches the Volume resumes them; see [Session checkpoints](control-plane.md#session-checkpoints). A file Volume places the Tag only on hosts that map it. Omitted keeps the current value. See [Keep every capture on a Volume](artifacts.md#keep-every-capture-on-a-volume). |
 | `spec.startRate` | `starts` (1 to 10,000) and `per` (`1m` to `7d`) | At most how many of the Tag's Task Attempts start per period; `starts: 0` removes it. Omitted keeps the current value; a new Tag has none. See [Start rates](scheduling-and-recovery.md#start-rates). |
 

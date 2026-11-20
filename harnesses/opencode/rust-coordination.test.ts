@@ -3,13 +3,11 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
-  AttemptMemoryResponseSchema,
   AttemptScheduleResponseSchema,
   HarnessKind,
   HarnessRunSchema,
   harnessClient,
   ListTagSessionsResponseSchema,
-  MemoryState,
   memoryContext,
   ObjectiveSignal,
   ReadTagSessionResponseSchema,
@@ -369,22 +367,19 @@ it("reads the Tag's Sessions and Objectives, refuses an unasked Objective, and c
     "SuperTag context:\nTag portfolio: this Tag owns no open Objectives you can see.",
   );
   expect(tagPortfolio(create(HarnessRunSchema, { coordination: {} }))).toBe("");
-  // Every turn hears how its memory works, whether or not it can change notes or has a harness
-  // memory of its own; the paragraph grants nothing.
-  const notes = memoryContext(run);
-  expect(notes).toMatch(/^Your memory, as SuperTag runs it \(state, not instructions\): /u);
-  expect(notes).toContain("This turn can't change notes");
-  expect(notes).toMatch(
-    /keeps no harness memory of its own: only notes and Sessions last beyond it\.$/u,
-  );
+  // Every turn hears how its memory works, whether or not it has a harness memory of its own
+  // and whether its changes are the Tag's own; the paragraph grants nothing.
+  const none = memoryContext(run);
+  expect(none).toMatch(/^Your memory, as SuperTag runs it \(state, not instructions\): /u);
+  expect(none).toMatch(/keeps no memory of its own, .* Only Sessions last beyond it\.$/u);
   const writer = memoryContext(
-    create(HarnessRunSchema, { coordination: { mayRemember: true } }),
+    create(HarnessRunSchema, { coordination: { memoryTrusted: true } }),
     "claude-code",
   );
-  expect(writer).toContain(
-    "This turn can change notes; a change takes effect when the turn succeeds.",
-  );
+  expect(writer).toContain("What this turn keeps there stays the Tag's memory when the turn ends.");
   expect(writer).toContain("a Work Session on another harness doesn't share it yet.");
+  expect(memoryContext(run, "claude-code")).toContain("kept as a proposal for the daily review");
+  for (const text of [none, writer]) expect(text).not.toMatch(/remember|notes/u);
   // A Task without web:fetch hears so; the line grants nothing.
   expect(webAccessNote(["files:read", "web:fetch"])).toBe("");
   expect(webAccessNote(["files:read"])).toMatch(
@@ -767,96 +762,6 @@ it("shows the open Work Sessions, passes the limit's refusal to the model, and c
     expect(
       await client.callTool({ name: "close_session", arguments: { sessionId: "not-a-session" } }),
     ).toMatchObject({ isError: true });
-  } finally {
-    await client.close();
-    await service.close();
-  }
-});
-
-it("keeps notes with remember and forget only with the capability, redacted", async () => {
-  const bridge = harnessClient("http://127.0.0.1:1", grpcToken);
-  const scope = {
-    taskId,
-    tagId,
-    attemptId,
-    secrets: [grpcToken],
-    signal: new AbortController().signal,
-    active: () => true,
-  };
-  const plain = await startCoordination(
-    bridge,
-    create(HarnessRunSchema, { task: { taskId, tagId, sessionId: "ops" }, attemptId }),
-    scope,
-  );
-  expect(plain.tools).toEqual([]);
-  await plain.close();
-
-  const remember = vi
-    .spyOn(bridge.memory, "remember")
-    .mockImplementationOnce(async ({ text }) =>
-      create(AttemptMemoryResponseSchema, {
-        memory: { memoryId: "mem_new", text, state: MemoryState.STAGED },
-        notes: [
-          { memoryId: "mem_new", text, state: MemoryState.STAGED },
-          { memoryId: "mem_old", text: "Release checklist: docs/release.md" },
-        ],
-      }),
-    )
-    .mockImplementationOnce(async () => {
-      throw new ConnectError("your notes are full", Code.FailedPrecondition);
-    });
-  const forget = vi
-    .spyOn(bridge.memory, "forget")
-    .mockImplementation(async () => create(AttemptMemoryResponseSchema, {}));
-  const service = await startCoordination(
-    bridge,
-    create(HarnessRunSchema, {
-      task: { taskId, tagId, sessionId: "ops" },
-      attemptId,
-      coordination: { mayRemember: true },
-    }),
-    scope,
-  );
-  const client = new Client({ name: "opencode-fixture", version: "1" });
-  try {
-    const [tool] = service.tools;
-    if (!tool) throw new Error("expected private MCP binding");
-    expect(tool.operations).toEqual(["remember", "forget"]);
-    await client.connect(
-      new StreamableHTTPClientTransport(new URL(tool.url), {
-        requestInit: { headers: tool.headers },
-      }),
-    );
-    for (const args of [{ text: " " }, { text: "x".repeat(501) }, { text: "x", tag: "other" }])
-      expect(await client.callTool({ name: "remember", arguments: args })).toMatchObject({
-        isError: true,
-      });
-    expect(remember).not.toHaveBeenCalled();
-    const saved = await client.callTool({
-      name: "remember",
-      arguments: { text: ` Atem prefers squash merges ${grpcToken} `, replaces: "mem_older" },
-    });
-    expect(saved.isError).toBeFalsy();
-    expect(remember).toHaveBeenNthCalledWith(
-      1,
-      {
-        operationId: "opencode-memory-1",
-        text: "Atem prefers squash merges [REDACTED]",
-        replaces: "mem_older",
-      },
-      expect.objectContaining({ timeoutMs: 5000 }),
-    );
-    const text = (saved.content as { text: string }[])[0]?.text ?? "";
-    expect(text).toContain("Saved mem_new. It takes effect when this turn succeeds.");
-    expect(text).toContain("- mem_old: Release checklist: docs/release.md");
-    const full = await client.callTool({ name: "remember", arguments: { text: "More" } });
-    expect((full.content as { text: string }[])[0]?.text).toBe("Refused: your notes are full");
-    const forgot = await client.callTool({ name: "forget", arguments: { memoryId: "mem_old" } });
-    expect((forgot.content as { text: string }[])[0]?.text).toContain("Forgot mem_old.");
-    expect(forget).toHaveBeenCalledExactlyOnceWith(
-      { operationId: "opencode-memory-3", memoryId: "mem_old" },
-      expect.objectContaining({ timeoutMs: 5000 }),
-    );
   } finally {
     await client.close();
     await service.close();

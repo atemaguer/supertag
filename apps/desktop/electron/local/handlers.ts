@@ -122,7 +122,7 @@ export function localHandlers(deps: LocalDependencies): Pick<Handlers, LocalChan
       return addWorkspace(cli, path, state, folder);
     },
 
-    // Only the local Gateway's Worker Hosts are on this machine to read harness memory from.
+    // Only the local Gateway's Worker Hosts are on this machine to read a Tag's memory from.
     async listHarnessMemory({ connectionId, tagId }) {
       const state = await deps.localStateOf(connectionId).catch(() => undefined);
       if (state === undefined) {

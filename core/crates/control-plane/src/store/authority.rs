@@ -1073,10 +1073,6 @@ pub(crate) async fn held_for_person_in(
             "SELECT 1 FROM supertag_v2_commit_reviews WHERE source_task_id=$1",
             "it requested a commit review",
         ),
-        (
-            "SELECT 1 FROM supertag_v2_tag_memories WHERE source_task_id=$1",
-            "it kept a note",
-        ),
     ];
     for (sql, reason) in EFFECTS {
         let found: Option<i64> =

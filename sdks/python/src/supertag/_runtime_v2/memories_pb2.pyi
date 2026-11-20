@@ -1,91 +1,11 @@
 from . import runtime_pb2 as _runtime_pb2
 from google.protobuf.internal import containers as _containers
-from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from collections.abc import Iterable as _Iterable, Mapping as _Mapping
 from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
-
-class MemoryState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = ()
-    MEMORY_STATE_UNSPECIFIED: _ClassVar[MemoryState]
-    MEMORY_STATE_STAGED: _ClassVar[MemoryState]
-    MEMORY_STATE_ACTIVE: _ClassVar[MemoryState]
-    MEMORY_STATE_FORGETTING: _ClassVar[MemoryState]
-MEMORY_STATE_UNSPECIFIED: MemoryState
-MEMORY_STATE_STAGED: MemoryState
-MEMORY_STATE_ACTIVE: MemoryState
-MEMORY_STATE_FORGETTING: MemoryState
-
-class Memory(_message.Message):
-    __slots__ = ("memory_id", "tag_id", "text", "audience", "state", "created_by", "source_task_id", "created_at_ms", "updated_at_ms", "last_seen_at_ms")
-    MEMORY_ID_FIELD_NUMBER: _ClassVar[int]
-    TAG_ID_FIELD_NUMBER: _ClassVar[int]
-    TEXT_FIELD_NUMBER: _ClassVar[int]
-    AUDIENCE_FIELD_NUMBER: _ClassVar[int]
-    STATE_FIELD_NUMBER: _ClassVar[int]
-    CREATED_BY_FIELD_NUMBER: _ClassVar[int]
-    SOURCE_TASK_ID_FIELD_NUMBER: _ClassVar[int]
-    CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
-    UPDATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
-    LAST_SEEN_AT_MS_FIELD_NUMBER: _ClassVar[int]
-    memory_id: str
-    tag_id: str
-    text: str
-    audience: str
-    state: MemoryState
-    created_by: str
-    source_task_id: str
-    created_at_ms: int
-    updated_at_ms: int
-    last_seen_at_ms: int
-    def __init__(self, memory_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., text: _Optional[str] = ..., audience: _Optional[str] = ..., state: _Optional[_Union[MemoryState, str]] = ..., created_by: _Optional[str] = ..., source_task_id: _Optional[str] = ..., created_at_ms: _Optional[int] = ..., updated_at_ms: _Optional[int] = ..., last_seen_at_ms: _Optional[int] = ...) -> None: ...
-
-class ListMemoriesRequest(_message.Message):
-    __slots__ = ("tag_id",)
-    TAG_ID_FIELD_NUMBER: _ClassVar[int]
-    tag_id: str
-    def __init__(self, tag_id: _Optional[str] = ...) -> None: ...
-
-class ListMemoriesResponse(_message.Message):
-    __slots__ = ("memories",)
-    MEMORIES_FIELD_NUMBER: _ClassVar[int]
-    memories: _containers.RepeatedCompositeFieldContainer[Memory]
-    def __init__(self, memories: _Optional[_Iterable[_Union[Memory, _Mapping]]] = ...) -> None: ...
-
-class GetMemoryRequest(_message.Message):
-    __slots__ = ("memory_id",)
-    MEMORY_ID_FIELD_NUMBER: _ClassVar[int]
-    memory_id: str
-    def __init__(self, memory_id: _Optional[str] = ...) -> None: ...
-
-class AttemptRememberRequest(_message.Message):
-    __slots__ = ("operation_id", "text", "replaces")
-    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
-    TEXT_FIELD_NUMBER: _ClassVar[int]
-    REPLACES_FIELD_NUMBER: _ClassVar[int]
-    operation_id: str
-    text: str
-    replaces: str
-    def __init__(self, operation_id: _Optional[str] = ..., text: _Optional[str] = ..., replaces: _Optional[str] = ...) -> None: ...
-
-class AttemptForgetRequest(_message.Message):
-    __slots__ = ("operation_id", "memory_id")
-    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
-    MEMORY_ID_FIELD_NUMBER: _ClassVar[int]
-    operation_id: str
-    memory_id: str
-    def __init__(self, operation_id: _Optional[str] = ..., memory_id: _Optional[str] = ...) -> None: ...
-
-class AttemptMemoryResponse(_message.Message):
-    __slots__ = ("memory", "notes")
-    MEMORY_FIELD_NUMBER: _ClassVar[int]
-    NOTES_FIELD_NUMBER: _ClassVar[int]
-    memory: Memory
-    notes: _containers.RepeatedCompositeFieldContainer[Memory]
-    def __init__(self, memory: _Optional[_Union[Memory, _Mapping]] = ..., notes: _Optional[_Iterable[_Union[Memory, _Mapping]]] = ...) -> None: ...
 
 class ResetNativeMemoryRequest(_message.Message):
     __slots__ = ("tag_id",)
@@ -142,3 +62,13 @@ class AdvanceNativeMemoryResponse(_message.Message):
     advanced: bool
     head: _runtime_pb2.NativeMemoryVolumeHead
     def __init__(self, advanced: _Optional[bool] = ..., head: _Optional[_Union[_runtime_pb2.NativeMemoryVolumeHead, _Mapping]] = ...) -> None: ...
+
+class AcknowledgeNativeMemorySeedsRequest(_message.Message):
+    __slots__ = ("seed_ids",)
+    SEED_IDS_FIELD_NUMBER: _ClassVar[int]
+    seed_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, seed_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class AcknowledgeNativeMemorySeedsResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...

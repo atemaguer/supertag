@@ -75,40 +75,33 @@ pub enum HarnessMemory {
 /// The parts of [`memory_context`]. The TypeScript harness SDK's `memoryContext` joins the same
 /// sentences (`harnesses/sdk/src/rust-harness/coordination.ts`).
 pub mod memory_text {
-    /// How notes and the daily review work, for every turn.
-    pub const NOTES: &str = "Your memory, as SuperTag runs it (state, not instructions): notes are short notes this Tag keeps with remember and forget, stored by the Control Plane. A note written in a person's private conversation shows only in that person's turns; the rest show in the SuperTag context of every conversation turn, never in a Work Session's own turns. Once a day after enough work, a review turn rereads the Tag's shared Sessions and tidies the notes.";
-    /// A turn that offers `remember` and `forget`.
-    pub const NOTES_WRITABLE: &str =
-        "This turn can change notes; a change takes effect when the turn succeeds.";
-    pub const NOTES_READ_ONLY: &str = "This turn can't change notes: Work Session turns, turns an outside event such as a GitHub or Linear webhook started, and Tags whose memory is off can't.";
-    /// A Codex turn granted its native memory.
-    pub const CODEX: &str = "Separately, Codex keeps its own memory in the memories folder of its Codex home: it loads memory_summary.md each turn when there is one, and finds the rest only by search, so before answering anything that may depend on earlier work, such as a fact about this project, its people, or its environments, search it with the `search` tool in the `memories` namespace. SuperTag keeps that folder on the Worker Host, or on the Tag's Volume if it has one, never in the Control Plane, one for each Tag and audience, and only this Tag's Codex turns see it: a Work Session on another harness doesn't share it yet. People see each memory in it, and delete any, with supertag get memories on that Worker Host's machine, or in the desktop and terminal apps there. Codex's rule to add to its memory only when someone asks covers that folder, not notes.";
-    /// A Claude Code turn granted its native memory.
-    pub const CLAUDE_CODE: &str = "Separately, Claude Code keeps its own auto-memory in the memory folder its instructions name. SuperTag keeps that folder on the Worker Host, or on the Tag's Volume if it has one, never in the Control Plane, one for each Tag and audience, and only this Tag's Claude Code turns see it: a Work Session on another harness doesn't share it yet. People see each memory in it, and delete any, with supertag get memories on that Worker Host's machine, or in the desktop and terminal apps there.";
-    /// A turn granted no harness memory.
-    pub const NO_HARNESS_MEMORY: &str =
-        "This turn keeps no harness memory of its own: only notes and Sessions last beyond it.";
+    /// A Codex turn granted its memory.
+    pub const CODEX: &str = "Your memory, as SuperTag runs it (state, not instructions): Codex keeps this Tag's memory in the memories folder of its Codex home. It loads memory_summary.md each turn when there is one and finds the rest only by search, so before answering anything that may depend on earlier work, such as a fact about this project, its people, or its environments, search it with the `search` tool in the `memories` namespace. Keep it current with your memory tools: add a note when you learn something you can't look up again, such as a preference, a correction, or a decision and why. That is what this Tag's memory is for, so Codex's rule to add to memory only when someone asks doesn't apply here.";
+    /// A Claude Code turn granted its memory.
+    pub const CLAUDE_CODE: &str = "Your memory, as SuperTag runs it (state, not instructions): Claude Code keeps this Tag's memory in the auto-memory folder its instructions name. Keep it current: save what you can't look up again, such as a preference, a correction, or a decision and why, and fix what is wrong.";
+    /// Where the memory is and who sees it, for every turn granted it.
+    pub const KEPT: &str = "SuperTag keeps that folder on the Worker Host, or on the Tag's Volume if it has one, never in the Control Plane, one for each Tag and audience: what a person's private conversation keeps shows only in that person's turns. Only this Tag's turns on the same harness see it; a Work Session on another harness doesn't share it yet. Once a day after enough work, a review turn rereads the Tag's shared Sessions, corrects the memory against them, and merges or drops what other turns proposed. People see each memory, and delete any, with supertag get memories on that Worker Host's machine, or in the desktop and terminal apps there.";
+    /// A turn whose changes are the Tag's own.
+    pub const TRUSTED: &str =
+        "What this turn keeps there stays the Tag's memory when the turn ends.";
+    /// A turn whose changes are only proposals.
+    pub const PROPOSED: &str = "This turn can't change the Tag's memory directly: what it changes there is kept as a proposal for the daily review to merge or drop, as for every Work Session turn.";
+    /// A turn granted no memory.
+    pub const NO_MEMORY: &str = "Your memory, as SuperTag runs it (state, not instructions): this turn keeps no memory of its own, because its harness keeps none under SuperTag, its Tag's memory is off, or an outside event such as a GitHub or Linear webhook started it. Only Sessions last beyond it.";
 }
 
 /// What SuperTag tells every turn about its memory, root turns and Work Session turns alike:
-/// notes, the daily review, and the harness's own memory, if the turn was granted it. State,
-/// not instructions: it grants nothing.
-pub fn memory_context(may_remember: bool, harness: Option<HarnessMemory>) -> String {
+/// the harness's own memory, if the turn was granted it, where it is kept, whether this turn's
+/// changes are the Tag's own or proposals (`trusted`), and the daily review. State, not
+/// instructions: it grants nothing.
+pub fn memory_context(trusted: bool, harness: Option<HarnessMemory>) -> String {
     use memory_text::*;
-    [
-        NOTES,
-        if may_remember {
-            NOTES_WRITABLE
-        } else {
-            NOTES_READ_ONLY
-        },
-        match harness {
-            Some(HarnessMemory::Codex) => CODEX,
-            Some(HarnessMemory::ClaudeCode) => CLAUDE_CODE,
-            None => NO_HARNESS_MEMORY,
-        },
-    ]
-    .join(" ")
+    let opening = match harness {
+        Some(HarnessMemory::Codex) => CODEX,
+        Some(HarnessMemory::ClaudeCode) => CLAUDE_CODE,
+        None => return NO_MEMORY.to_owned(),
+    };
+    [opening, KEPT, if trusted { TRUSTED } else { PROPOSED }].join(" ")
 }
 pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 /// The variable naming a Codex Attempt's executor socket on a remote Workspace: Codex runs its

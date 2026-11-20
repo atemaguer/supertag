@@ -218,9 +218,8 @@ enum WatchKind {
   // A Schedule was created or changed: paused, resumed, fired, done, or cancelled. The change's
   // tag_id names its Tag.
   WATCH_KIND_SCHEDULE = 7;
-  // A Tag's note was kept, rewritten, or deleted (Memories). The change's id names the note and
-  // its tag_id the Tag; a private note reaches only its person.
-  WATCH_KIND_MEMORY = 8;
+  reserved 8;
+  reserved "WATCH_KIND_MEMORY";
   // A Tag's direct message to another Tag (Mailbox). The change's id names the message, its
   // tag_id the recipient, and its objective_id the sender's Objective. A Workstream post addressed
   // to a Tag is a WATCH_KIND_WORKSTREAM_POST change only.
@@ -524,9 +523,10 @@ message AttemptCapabilities {
   // conversations and Objectives, and how many it may have (the Tag's `max_work_sessions`).
   uint32 open_work_sessions = 15;
   uint32 max_work_sessions = 16;
-  // A root turn of a Tag with memory may write and forget the Tag's notes (AttemptMemory),
-  // unless an outside event, such as a GitHub or Linear webhook, started it.
-  bool may_remember = 17;
+  // What this turn changes in its Tag's harness memory is kept as the Tag's own: a root turn or
+  // the daily memory review of a Tag with memory that no outside event, such as a GitHub or
+  // Linear webhook, started. Any other turn's changes become proposals the review merges or drops.
+  bool memory_trusted = 17;
   // No person is waiting on this turn (a Schedule fire, a memory review, an inbox turn, or an
   // Objective notice), so it may finish quietly: FinishTaskRequest.quiet. A person's message is
   // always answered.
@@ -1765,8 +1765,8 @@ message PutTagRequest {
   // How many Work Sessions the Tag may have open at once, across all its conversations and
   // Objectives; from 1 to 64. Omitted keeps the current value; a new Tag gets 8.
   optional uint32 max_work_sessions = 6700;
-  // Whether the Tag keeps memory: notes it writes with `remember` and a daily review of its
-  // work. Omitted keeps the current value; a new Tag keeps memory.
+  // Whether the Tag keeps memory: its harness's own memory, which the Worker Host keeps, and a
+  // daily review of its work. Omitted keeps the current value; a new Tag keeps memory.
   optional bool memory = 6800;
   // At most how many of the Tag's Task Attempts start per period. Omitted keeps the current
   // value; `starts` 0 removes the limit. A new Tag has none.
@@ -1809,7 +1809,7 @@ message Tag {
   uint32 open_work_sessions = 6701;
   // Whether the Tag keeps memory (see PutTagRequest.memory).
   bool memory = 6800;
-  // When the Tag last reviewed its work and tidied its notes.
+  // When the Tag last queued the daily review of its work and memory.
   optional int64 memory_reviewed_at_ms = 6801;
   // How the Tag's unprompted messages were received over the last `window_days`; read with GetTag.
   AttentionSummary attention = 6900;
@@ -2593,6 +2593,24 @@ message NativeMemoryGrant {
   // and the files it names as NATIVE_MEMORY_BLOB objects, and after the turn writes the new ones
   // and moves the head with AttemptMemory.AdvanceNative.
   NativeMemoryVolumeHead volume_head = 3;
+  // Memory the host writes into the store before the turn starts, once, and then acknowledges
+  // with AttemptMemory.AcknowledgeSeeds: the notes this Tag kept before its harness's own memory
+  // became its memory, for this audience. Granted only to a turn on the Tag's own harness whose
+  // changes are kept.
+  repeated NativeMemorySeed seeds = 4;
+  // Whether what the turn changes in the store is the Tag's own (AttemptCapabilities.memory_trusted).
+  // Otherwise the host keeps the turn's changes beside the store as proposals, which the Tag's
+  // daily review, or for a person's store that person's next such turn, merges or drops.
+  bool trusted = 5;
+}
+
+// One memory to write into a store as the harness's own: a Claude Code memory file, a Codex ad
+// hoc note.
+message NativeMemorySeed {
+  string seed_id = 1;
+  // At most 500 characters.
+  string text = 2;
+  int64 created_at_ms = 3;
 }
 
 // A native memory store's current manifest on the Tag's Volume. The manifest is an immutable

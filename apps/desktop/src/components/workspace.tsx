@@ -133,8 +133,8 @@ export function WorkspaceShell({
         ? [
             {
               id: "tag-details",
-              label: "Notes",
-              caption: `what ${tag.name ?? tag.tagId} remembers · delete a note`,
+              label: "Memory",
+              caption: `what ${tag.name ?? tag.tagId} remembers · delete a memory`,
               icon: <NotebookText aria-hidden />,
               keywords: "memory remember forget tag details",
               run: () => onTagDetails(true),
@@ -174,7 +174,7 @@ export function WorkspaceShell({
                 className="identity-pill"
                 aria-expanded={Boolean(detailsOpen)}
                 aria-controls="tag-details"
-                title={detailsOpen ? "Hide Tag details" : "Show Tag details and notes"}
+                title={detailsOpen ? "Hide Tag details" : "Show Tag details and memory"}
                 onClick={() => onTagDetails()}
               >
                 <TagAvatar tagId={tag.tagId} />

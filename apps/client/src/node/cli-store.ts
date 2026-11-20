@@ -296,10 +296,10 @@ export async function addWorkspaceWithCli(
   return added;
 }
 
-/** How long reading or deleting harness memory may take. */
+/** How long reading or deleting a Tag's memory may take. */
 const HARNESS_MEMORY_TIMEOUT_MS = 30_000;
 
-/** The Tag's harness memory that the Worker Hosts of the local services in `state` keep. */
+/** The Tag's memory that the Worker Hosts of the local services in `state` keep. */
 export async function listHarnessMemoryWithCli(
   cli: string,
   state: string,
@@ -317,7 +317,7 @@ export async function listHarnessMemoryWithCli(
   );
 }
 
-/** Deletes one harness memory a Worker Host of the local services in `state` keeps. */
+/** Deletes one memory a Worker Host of the local services in `state` keeps. */
 export async function deleteHarnessMemoryWithCli(
   cli: string,
   state: string,

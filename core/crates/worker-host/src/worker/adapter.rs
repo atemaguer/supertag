@@ -4,7 +4,6 @@ mod effects;
 mod inputs;
 mod limits;
 mod mcp;
-mod memory;
 mod questions;
 mod review_artifacts;
 mod schedules;
@@ -110,8 +109,6 @@ struct RunState {
     native_usage_sequence: u64,
     reported_tokens: Option<u64>,
     measured_cost: Option<ReportedCostLimit>,
-    /// Whether the turn may write the Tag's trusted memory, from its capabilities at attach.
-    may_remember: Option<bool>,
 }
 
 impl Bridge {
@@ -223,7 +220,6 @@ impl Harness for Bridge {
             )
             .await?
             .entries;
-        self.state.lock().await.may_remember = Some(capabilities.may_remember);
         if !self.attached.swap(true, Ordering::AcqRel) {
             crate::worker::milestones::report_milestone(
                 &self.host,
@@ -572,7 +568,7 @@ pub(crate) async fn execute(
 
 async fn run(
     options: &Settings<'_>,
-    assignment: Assignment,
+    mut assignment: Assignment,
     ExecutionInputs {
         checkpoint,
         workspace,
@@ -618,6 +614,34 @@ async fn run(
         attempt_token,
     )
     .await;
+    // What other turns proposed goes in the request of a turn that merges it: the Tag's review
+    // for its shared store, and for a person's store, which no review reads, that person's next
+    // turn whose changes are the Tag's own.
+    let trusted = assignment
+        .native_memory
+        .as_ref()
+        .is_some_and(|grant| grant.trusted);
+    let shown_proposals = match (&native_memory, assignment.task.as_mut()) {
+        (Some(NativeMemory::Host(prepared)), Some(task))
+            if trusted
+                && (task
+                    .session_id
+                    .starts_with(supertag_protocol::MEMORY_REVIEW_SESSION_PREFIX)
+                    || !prepared.shared()) =>
+        {
+            match prepared.review_proposals(prepared.shared()) {
+                Ok((section, shown)) => {
+                    task.prompt.push_str(&section);
+                    shown
+                }
+                Err(error) => {
+                    crate::failures::note("Memory proposals could not be read", &error);
+                    vec![]
+                }
+            }
+        }
+        _ => vec![],
+    };
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let bootstrap = AdapterBootstrap {
         endpoint: format!("http://{}", listener.local_addr()?),
@@ -687,7 +711,6 @@ async fn run(
             .add_service(bridge.work_sessions_service())
             .add_service(bridge.tag_sessions_service())
             .add_service(bridge.schedules_service())
-            .add_service(bridge.memory_service())
             .add_service(bridge.workspace_service())
             .add_service(bridge.mcp_service())
             .add_service(bridge.artifact_capture_service())
@@ -723,7 +746,7 @@ async fn run(
     }
     bridge.inputs.close();
     if let Some(prepared) = native_memory {
-        finish_native_memory(&bridge, prepared).await;
+        finish_native_memory(&bridge, prepared, &shown_proposals).await;
     }
     stop_server.cancel();
     if time::timeout(Duration::from_secs(2), &mut server)
@@ -801,11 +824,17 @@ async fn prepare_native_memory(
             volumes: host_storage.volumes.clone(),
         };
         return match crate::worker::native_memory_volume::Prepared::prepare(
-            &access, &state, &attempt, &grant,
+            &access,
+            &state,
+            (harness, &attempt),
+            &grant,
         )
         .await
         {
-            Ok(prepared) => Some(NativeMemory::Volume(prepared, Box::new(access))),
+            Ok(prepared) => {
+                acknowledge_seeds(&coordination.memory, attempt_token, &grant).await;
+                Some(NativeMemory::Volume(prepared, Box::new(access)))
+            }
             Err(error) => {
                 crate::failures::note(
                     "Native memory could not be read from the Tag's Volume",
@@ -821,18 +850,24 @@ async fn prepare_native_memory(
     // The live storage the host serves from, which `run` opened from `--artifact-directory`;
     // `options.artifact_source` is taken before any turn runs.
     let storage = host_storage.artifact_source.as_ref()?.root().to_owned();
+    let granted = grant.clone();
     match tokio::task::spawn_blocking(move || {
         crate::worker::native_memory::Prepared::prepare(
             (&storage, &state),
             &tag,
             harness,
             &attempt,
-            &grant,
+            &granted,
         )
     })
     .await
     {
-        Ok(Ok(prepared)) => Some(NativeMemory::Host(prepared)),
+        Ok(Ok(prepared)) => {
+            if !prepared.seeded().is_empty() {
+                acknowledge_seeds(&coordination.memory, attempt_token, &grant).await;
+            }
+            Some(NativeMemory::Host(prepared))
+        }
         Ok(Err(error)) => {
             crate::failures::note("Native memory could not be prepared", &error);
             None
@@ -844,8 +879,41 @@ async fn prepare_native_memory(
     }
 }
 
-/// Merges the Attempt's native memory back and records what this host now holds.
-async fn finish_native_memory(bridge: &Bridge, memory: NativeMemory) {
+/// Tells the Control Plane the grant's seeds are in the store, so no later turn gets them. A lost
+/// acknowledgement only grants them again, and the host writes each seed once.
+async fn acknowledge_seeds(
+    memory: &crate::worker::native_memory_volume::Memory,
+    attempt_token: &str,
+    grant: &supertag_protocol::v2::NativeMemoryGrant,
+) {
+    if grant.seeds.is_empty() {
+        return;
+    }
+    let acknowledgement = supertag_protocol::v2::AcknowledgeNativeMemorySeedsRequest {
+        seed_ids: grant
+            .seeds
+            .iter()
+            .map(|seed| seed.seed_id.clone())
+            .collect(),
+    };
+    let sent = async {
+        let mut request = authenticated_request(acknowledgement, attempt_token, None)
+            .map_err(|error| Status::internal(error.to_string()))?;
+        request.set_timeout(Duration::from_secs(10));
+        memory.clone().acknowledge_seeds(request).await
+    }
+    .await;
+    if let Err(status) = sent {
+        crate::failures::note(
+            "Native memory seeds were not acknowledged",
+            &status.message(),
+        );
+    }
+}
+
+/// Merges the Attempt's native memory back and records what this host now holds. A review that
+/// finished drops the proposals it was shown.
+async fn finish_native_memory(bridge: &Bridge, memory: NativeMemory, shown_proposals: &[String]) {
     let prepared = match memory {
         NativeMemory::Host(prepared) => prepared,
         // The store on the Volume records itself: moving its head is the record.
@@ -859,10 +927,27 @@ async fn finish_native_memory(bridge: &Bridge, memory: NativeMemory) {
             return;
         }
     };
-    // The turn is the source of what it changed: trusted when it may write the Tag's memory
-    // (a root turn that no outside event started), else, like a Work Session's own turn, only a
-    // proposal for the owner to merge.
-    let trusted = bridge.state.lock().await.may_remember;
+    // The turn is the source of what it changed: the Tag's own when its grant says so (a root
+    // turn or the review that no outside event started); else, like a Work Session's own turn,
+    // only proposals for the review to merge.
+    let trusted = bridge
+        .assignment
+        .native_memory
+        .as_ref()
+        .map(|grant| grant.trusted);
+    let reviewed = bridge
+        .state
+        .lock()
+        .await
+        .outcome
+        .as_ref()
+        .is_some_and(|outcome| outcome.succeeded);
+    // A review that finished merged or dropped the proposals it was shown.
+    let shown = if reviewed {
+        shown_proposals.to_vec()
+    } else {
+        vec![]
+    };
     let writer = bridge
         .assignment
         .task
@@ -873,7 +958,14 @@ async fn finish_native_memory(bridge: &Bridge, memory: NativeMemory) {
             attempt_id: bridge.assignment.attempt_id.clone(),
             trusted,
         });
-    let summary = match tokio::task::spawn_blocking(move || prepared.finish(writer)).await {
+    let summary = match tokio::task::spawn_blocking(move || {
+        if let Err(error) = prepared.reviewed(&shown) {
+            crate::failures::note("Reviewed memory proposals were not dropped", &error);
+        }
+        prepared.finish(writer)
+    })
+    .await
+    {
         Ok(Ok(summary)) => summary,
         Ok(Err(error)) => {
             crate::failures::note("Native memory changes were not kept", &error);

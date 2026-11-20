@@ -73,8 +73,7 @@ Further services on the same endpoint let an adapter ask the operator a question
 (`HarnessMailbox`), start, continue, or close work Sessions (`HarnessWorkSessions`), list, search, and
 read the Tag's other Sessions and Objectives or create an Objective a person asked for
 (`HarnessTagSessions`), set and cancel the Tag's [Schedules](../reference/coordination.md#schedules)
-(`HarnessSchedules`), keep the Tag's [notes](../reference/coordination.md#memory)
-(`HarnessMemory`, when `may_remember`), capture artifacts (`HarnessArtifacts`), use MCP servers the Worker Host offers
+(`HarnessSchedules`), capture artifacts (`HarnessArtifacts`), use MCP servers the Worker Host offers
 (`HarnessMcp`), and record external effects so a retry does not repeat them (`HarnessEffects`).
 The run's capabilities say which of these the Task may use. When the Task reads the Tag's
 Sessions, its capabilities also carry `tag_portfolio`, the Tag's open Objectives, which an adapter

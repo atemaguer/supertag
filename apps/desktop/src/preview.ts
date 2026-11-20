@@ -3,7 +3,6 @@ import type {
   Gateway,
   HarnessMemory,
   Message,
-  Note,
   Tag,
   TagAdmin,
   TaskEvent,
@@ -87,30 +86,7 @@ function conversationFor(tagId: string): Message[] {
 }
 
 const hour = 60 * 60 * 1000;
-/** What the preview's Tags remember, newest first. */
-let notes: Note[] = [
-  {
-    memoryId: "mem_preview_1",
-    tagId: "finch",
-    text: "Flaky deadline tests usually mean the clock is read twice; check objective_sweep first.",
-    private: false,
-    createdBy: "tag:finch",
-    createdAtMs: Date.now() - 2 * hour,
-    updatedAtMs: Date.now() - 2 * hour,
-    lastSeenAtMs: Date.now() - 10 * 60 * 1000,
-  },
-  {
-    memoryId: "mem_preview_2",
-    tagId: "finch",
-    text: "You prefer one test covering both databases over two separate tests.",
-    private: true,
-    createdBy: "tag:finch",
-    createdAtMs: Date.now() - 30 * hour,
-    updatedAtMs: Date.now() - 30 * hour,
-  },
-];
-
-/** What the preview's Tags' harnesses keep themselves. */
+/** What the preview's Tags remember, as their harnesses keep it. */
 let harnessMemories: HarnessMemory[] = [
   {
     memoryId: "hmem_preview00000000000001",
@@ -123,9 +99,25 @@ let harnessMemories: HarnessMemory[] = [
     text: "Prefer squash merges.\n**Why:** linear history for bisect.",
     truncated: false,
     trust: "trusted",
+    status: "owned",
     path: "feedback_squash.md",
     hostId: "local",
     updatedAtMs: Date.now() - 3 * hour,
+  },
+  {
+    memoryId: "hmem_preview00000000000002",
+    tagId: "finch",
+    harness: "claude-code",
+    private: false,
+    kind: "fact",
+    title: "Flaky deadline tests",
+    text: "Flaky deadline tests usually mean the clock is read twice; check objective_sweep first.",
+    truncated: false,
+    trust: "proposed-only",
+    status: "proposed",
+    path: "fact_flaky_deadlines.md",
+    hostId: "local",
+    updatedAtMs: Date.now() - 4 * hour,
   },
 ];
 
@@ -201,15 +193,6 @@ export const previewGateway: Gateway = {
           ],
         }
       : { windowDays: 30, posted: 0, read: 0, answered: 0, quiet: 0 };
-  },
-  async notes(tagId) {
-    return notes.filter((note) => note.tagId === tagId);
-  },
-  async deleteNote(memoryId) {
-    const deleted = notes.find((note) => note.memoryId === memoryId);
-    if (!deleted) throw new Error("Memory was not found");
-    notes = notes.filter((note) => note !== deleted);
-    return deleted;
   },
   async harnessMemory(tagId) {
     return { memories: harnessMemories.filter((memory) => memory.tagId === tagId), keptOn: [] };

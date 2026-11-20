@@ -110,7 +110,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 120;
+        const SCHEMA_VERSION: i64 = 121;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -355,6 +355,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0118_person_conversations.sql"),
                 include_str!("../migrations/sqlite/0119_messaging_rules.sql"),
                 include_str!("../migrations/sqlite/0120_redelivery.sql"),
+                include_str!("../migrations/sqlite/0121_native_memory_seeds.sql"),
             ]
         } else {
             [
@@ -480,6 +481,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0118_person_conversations.sql"),
                 include_str!("../migrations/postgresql/0119_messaging_rules.sql"),
                 include_str!("../migrations/postgresql/0120_redelivery.sql"),
+                include_str!("../migrations/postgresql/0121_native_memory_seeds.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -1371,7 +1373,6 @@ impl Store {
         let mut task = task_in(&mut transaction, &input.task_id).await?;
         if state == TaskState::Claimed as i64 {
             crate::objectives::objective_started_in(&mut transaction, &task).await?;
-            crate::memories::started_in(&mut transaction, &task, now).await?;
             supertag_protocol::crash_point("control-plane.start", "before-commit");
         }
         crate::workspace_landings::with_author_in(&mut transaction, &mut task).await?;
@@ -1706,7 +1707,6 @@ impl Store {
             crate::approvals::finish_in(&mut transaction, &task, input, now).await?;
             crate::work_sessions::questions::finish_in(&mut transaction, &task, input, now).await?;
             crate::schedules::finish_in(&mut transaction, &task, now).await?;
-            crate::memories::finish_in(&mut transaction, &task, now).await?;
             crate::attention::finish_in(&mut transaction, &task, input, now).await?;
         }
         if state == TaskState::Running && task.state() == TaskState::Succeeded {

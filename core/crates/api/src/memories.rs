@@ -49,21 +49,6 @@ macro_rules! attempt_memory {
 
 #[tonic::async_trait]
 impl memories_server::Memories for Api {
-    async fn list(
-        &self,
-        request: Request<ListMemoriesRequest>,
-    ) -> Result<Response<ListMemoriesResponse>, Status> {
-        memories!(self, request, list)
-    }
-
-    async fn get(&self, request: Request<GetMemoryRequest>) -> Result<Response<Memory>, Status> {
-        memories!(self, request, get)
-    }
-
-    async fn delete(&self, request: Request<GetMemoryRequest>) -> Result<Response<Memory>, Status> {
-        memories!(self, request, delete)
-    }
-
     async fn reset_native(
         &self,
         request: Request<ResetNativeMemoryRequest>,
@@ -74,20 +59,6 @@ impl memories_server::Memories for Api {
 
 #[tonic::async_trait]
 impl attempt_memory_server::AttemptMemory for Api {
-    async fn remember(
-        &self,
-        request: Request<AttemptRememberRequest>,
-    ) -> Result<Response<AttemptMemoryResponse>, Status> {
-        attempt_memory!(self, request, remember)
-    }
-
-    async fn forget(
-        &self,
-        request: Request<AttemptForgetRequest>,
-    ) -> Result<Response<AttemptMemoryResponse>, Status> {
-        attempt_memory!(self, request, forget)
-    }
-
     async fn report_native(
         &self,
         request: Request<ReportNativeMemoryRequest>,
@@ -100,5 +71,12 @@ impl attempt_memory_server::AttemptMemory for Api {
         request: Request<AdvanceNativeMemoryRequest>,
     ) -> Result<Response<AdvanceNativeMemoryResponse>, Status> {
         attempt_memory!(self, request, advance_native)
+    }
+
+    async fn acknowledge_seeds(
+        &self,
+        request: Request<AcknowledgeNativeMemorySeedsRequest>,
+    ) -> Result<Response<AcknowledgeNativeMemorySeedsResponse>, Status> {
+        attempt_memory!(self, request, acknowledge_seeds)
     }
 }

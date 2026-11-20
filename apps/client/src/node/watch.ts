@@ -1,6 +1,6 @@
 /**
  * The Gateway Watch: tells the window which views to read again as Tags, conversations,
- * Schedules, notes, Objectives, Teams and Work Sessions change. It resumes from its last token
+ * Schedules, Objectives, Teams and Work Sessions change. It resumes from its last token
  * after the stream drops, and starts over when the Gateway no longer knows the token.
  */
 
@@ -30,7 +30,6 @@ const KINDS = [
   WatchKind.CONVERSATION_MESSAGE,
   WatchKind.TASK,
   WatchKind.SCHEDULE,
-  WatchKind.MEMORY,
   WatchKind.OBJECTIVE,
   WatchKind.TEAM,
   WatchKind.WORKSTREAM_POST,
@@ -43,8 +42,6 @@ export function invalidation(change: WatchChange): WatchUpdate | undefined {
       return { kind: "tag" };
     case WatchKind.SCHEDULE:
       return change.tagId === "" ? undefined : { kind: "schedule", tagId: change.tagId };
-    case WatchKind.MEMORY:
-      return change.tagId === "" ? undefined : { kind: "memory", tagId: change.tagId };
     case WatchKind.OBJECTIVE:
       return change.objectiveId === "" && change.id === ""
         ? undefined

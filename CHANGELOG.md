@@ -9,6 +9,48 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Changed
+
+- A Tag's memory is its harness's own memory. The daily memory review now keeps that memory
+  current: it corrects it against the Tag's Sessions, merges duplicates, dates time-relative
+  facts, drops what the repository already records, and merges or drops Work Session proposals,
+  with its harness's own tools. On upgrade, the notes each Tag kept with `remember` are written
+  once into its harness's memory for the same audience by its next turn on Claude Code or Codex
+  (a memory file each for Claude Code, an ad hoc note each for Codex); notes of a Tag on another
+  harness wait until it can keep them.
+- A Work Session's own turn no longer changes its Tag's memory: what it writes there is kept
+  beside the store as a proposal (`"status": "proposed"` in `supertag get memories`, a
+  **Proposed** badge in the desktop and terminal apps) with the turn that wrote it. The Tag's next
+  daily review gets the shared store's proposals in its request and merges or drops them; a
+  person's go to that person's next conversation turn instead. Proposals no turn takes go after
+  14 days. `NativeMemoryGrant.trusted` tells the Worker Host which turns only propose.
+- Every turn's memory paragraph now describes the harness's memory as the Tag's memory: where it
+  is and who sees it, whether the turn's changes are the Tag's own or proposals, the daily review,
+  and where people see and delete it. A Codex turn is told to keep its memory current, whatever
+  Codex's rule to add to memory only when asked.
+- `supertag get memories` lists only memory, under `memories`, `unavailable`, and `kept_on`, and
+  `delete memory --tag TAG` drops all of a Tag's memory; the desktop app's Tag details and the
+  terminal app's Memory panel show only memory.
+
+### Fixed
+
+- A Codex Tag's daily review folds in the notes kept since the last review. Codex consolidates
+  only what changed since its last consolidation, measured against a git baseline in its memory
+  folder, which SuperTag didn't keep, so after a Tag's first consolidation every later review
+  found nothing new. The Tag's store now keeps the folder as Codex last consolidated it, and the
+  review starts Codex from that baseline.
+
+### Removed
+
+- Notes: the `remember` and `forget` tools, `Memories.List`, `Get`, and `Delete`, the
+  `AttemptMemory.Remember` and `Forget` and `HarnessMemory` services, the `Memory` and
+  `MemoryState` messages, `WATCH_KIND_MEMORY` and `supertag watch memory`, the notes in a turn's
+  context, and the desktop and terminal apps' notes. Migration 121 keeps each note that took
+  effect as a seed for its Tag's harness memory and drops the notes tables.
+  `AttemptCapabilities.may_remember` is now `memory_trusted`, and `NativeMemoryGrant.seeds` and
+  `AttemptMemory.AcknowledgeSeeds` are new. `supertag get memories --native` and
+  `delete memory --native TAG` are gone.
+
 ## [0.3.3] - 2026-11-19
 
 ### Added

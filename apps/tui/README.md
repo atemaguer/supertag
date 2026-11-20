@@ -58,7 +58,8 @@ client, transcript rules and React hooks with the desktop app through `@supertag
 - **The palette** (Ctrl-K, or `/` on an empty message): Tags with their Alt-N keys (which open
   one at once, there too), found by name, ID or latest message, and commands:
   New Tag, `/goal` · Create Objective (typing `/goal OUTCOME` there sends it), Work Sessions,
-  Activity, Notes (the Tag's notes and its harness memory on this machine; `x` deletes one), Network (operators only), Schedules (`p` pauses or resumes,
+  Activity, Memory (what the Tag's harness keeps on this machine, with the changes Work Sessions
+  proposed to it; `x` deletes one), Network (operators only), Schedules (`p` pauses or resumes,
   `x` deletes), Open inbox, Gateways, Keyboard shortcuts. Esc or Ctrl-K closes it.
 - **Gateways** (Ctrl-P): Local, and the Gateways saved with `supertag connect` or in the desktop
   app. `a` adds one with `supertag connect`: a name, the URL, an Operator Token or a client Auth
@@ -154,7 +155,7 @@ Watch run their real code.
 `TUI_ROOT`), the Control Plane on `127.0.0.1:47451` (`TUI_PORT`), and four Worker Hosts on the
 fixture adapter, which answers every message. `stack.sh tag ID LABEL` picks one by its label:
 `plain` (the default) only answers; `coord` also starts a Work Session from each conversation
-turn, keeps a note and schedules a wake-up; `ask` asks the operator when an Objective's turn says
+turn and schedules a wake-up; `ask` asks the operator when an Objective's turn says
 "Ask which branch to release"; `approve` posts to its Team's Workstream and waits for an
 approval. It never touches `~/.supertag`. `stack.sh tui` runs Bun with a short `PATH`; set
 `BUN=/tmp/bun/bin/bun` when Bun is elsewhere. With `SUPERTAG_TUI_BINARY` set, `stack.sh tui` and
@@ -167,7 +168,7 @@ approval. It never touches `~/.supertag`. `stack.sh tui` runs Bun with a short `
 sh scripts/stack.sh up && sh scripts/stack.sh tag engineer && sh scripts/stack.sh tag lead
 sh scripts/stack.sh tui --gateway local   # try it
 sh scripts/tmux-e2e.sh engineer           # send, paste, Alt-2, notify, the Gateway restarting, inbox,
-                                          # /goal, Work Sessions, Notes, Schedules, a Team, New Tag,
+                                          # /goal, Work Sessions, Schedules, a Team, New Tag,
                                           # save and forget a Gateway
 TUI_BINARY=/tmp/supertag-tui/dist/supertag-tui-darwin-arm64 SUPERTAG_CLI=../../core/target/debug/supertag \
   bun bench/first-paint.ts 10             # first paint in a PTY, 30 ms round trip

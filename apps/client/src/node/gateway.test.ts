@@ -1,13 +1,12 @@
 /**
  * Unit tests of the main process's Gateway backend: the cache, task files, new Tags, activity,
- * memories, network, schedules, and Watch registration.
+ * network, schedules, and Watch registration.
  */
 import { chmod, mkdir, mkdtemp, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { create } from "@bufbuild/protobuf";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { MemorySchema } from "../../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/memories_pb";
 import {
   ConversationMessageSchema,
   ConversationSchema,
@@ -41,7 +40,7 @@ import {
   writeEntry,
 } from "./cache";
 import { conversation, message } from "./convert";
-import { activity, networkLog, note, schedule } from "./details";
+import { activity, networkLog, schedule } from "./details";
 import { endpoint, gatewayOrigin } from "./endpoint";
 import { checkBearer, rpcError } from "./errors";
 import { parseLocalGateway } from "./local";
@@ -538,7 +537,7 @@ it("offers every ready host's harnesses and Workspaces", () => {
   expect(optionsOf([])).toEqual({ harnesses: [], workspaces: [], noCommands: [], noWeb: [] });
 });
 
-it("shows a Tag's activity, notes, network log and Schedules as the window reads them", () => {
+it("shows a Tag's activity, network log and Schedules as the window reads them", () => {
   const shown = activity(
     create(TagSchema, {
       attention: { posted: 4, read: 2, answered: 1, quiet: 7, windowDays: 30 },
@@ -561,24 +560,6 @@ it("shows a Tag's activity, notes, network log and Schedules as the window reads
   const without = activity(create(TagSchema, {}));
   expect(without).not.toHaveProperty("startRate");
   expect(without).not.toHaveProperty("idleObjectives");
-
-  const kept = note(
-    create(MemorySchema, {
-      memoryId: "mem_1",
-      tagId: "lead",
-      text: "Alice prefers squash merges.",
-      audience: "operator:alice",
-      createdBy: "tag:lead",
-      createdAtMs: 1n,
-      updatedAtMs: 2n,
-      lastSeenAtMs: 3n,
-    }),
-  );
-  expect(kept).toMatchObject({ memoryId: "mem_1", private: true, lastSeenAtMs: 3 });
-  expect(kept).not.toHaveProperty("audience");
-  const shared = note(create(MemorySchema, {}));
-  expect(shared.private).toBe(false);
-  expect(shared).not.toHaveProperty("lastSeenAtMs");
 
   const log = networkLog(
     create(TaskNetworkLogSchema, {
@@ -660,11 +641,6 @@ it("tells the window which views a Watch change invalidates", () => {
     teamId: "release",
   });
   expect(change({ kind: WatchKind.TEAM, teamId: "" })).toBeUndefined();
-  expect(change({ kind: WatchKind.MEMORY, tagId: "engineer" })).toEqual({
-    kind: "memory",
-    tagId: "engineer",
-  });
-  expect(change({ kind: WatchKind.MEMORY, tagId: "" })).toBeUndefined();
   expect(change({ kind: WatchKind.SCHEDULE, tagId: "lead" })).toEqual({
     kind: "schedule",
     tagId: "lead",

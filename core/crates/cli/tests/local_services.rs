@@ -2823,11 +2823,8 @@ async fn local_hosts_serve_harness_memory_to_the_cli(database: String) -> Result
         );
         Ok(serde_json::from_slice(&output.stdout)?)
     };
-    let listed = cli(&["get", "memories", "--tag", "lead", "--native"])?;
-    assert!(listed.get("memories").is_none(), "{listed}");
-    let memories = listed["native_memory"]
-        .as_array()
-        .context("native memory")?;
+    let listed = cli(&["get", "memories", "--tag", "lead"])?;
+    let memories = listed["memories"].as_array().context("memories")?;
     let mut found: Vec<(&str, &str)> = memories
         .iter()
         .map(|memory| {
@@ -2850,6 +2847,7 @@ async fn local_hosts_serve_harness_memory_to_the_cli(database: String) -> Result
     for memory in memories {
         assert_eq!(memory["source"]["host_id"], "keeper", "{memory}");
         assert_eq!(memory["shared"], true, "{memory}");
+        assert_eq!(memory["status"], "owned", "{memory}");
     }
     let squash = memories
         .iter()
@@ -2870,14 +2868,8 @@ async fn local_hosts_serve_harness_memory_to_the_cli(database: String) -> Result
         output.status.success() && text.contains("Prefer squash merges"),
         "{text}"
     );
-    // Notes are listed beside it until they go.
     let all = cli(&["get", "memories"])?;
-    assert_eq!(all["memories"], serde_json::json!([]), "{all}");
-    assert_eq!(
-        all["native_memory"].as_array().map(Vec::len),
-        Some(3),
-        "{all}"
-    );
+    assert_eq!(all["memories"].as_array().map(Vec::len), Some(3), "{all}");
 
     let deleted = cli(&["delete", "memory", id])?;
     assert_eq!(deleted["memory_id"], id, "{deleted}");
@@ -2895,11 +2887,11 @@ async fn local_hosts_serve_harness_memory_to_the_cli(database: String) -> Result
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let reset = cli(&["delete", "memory", "--native", "lead"])?;
+    let reset = cli(&["delete", "memory", "--tag", "lead"])?;
     assert_eq!(reset["reset_generation"], 1, "{reset}");
     assert!(!codex.join("current").exists());
-    let listed = cli(&["get", "memories", "--tag", "lead", "--native"])?;
-    assert_eq!(listed["native_memory"], serde_json::json!([]), "{listed}");
+    let listed = cli(&["get", "memories", "--tag", "lead"])?;
+    assert_eq!(listed["memories"], serde_json::json!([]), "{listed}");
     supervisor.stop().await?;
     assert!(
         !socket.exists(),

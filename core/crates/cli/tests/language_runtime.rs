@@ -1415,7 +1415,7 @@ async fn claude_keeps_native_memory_on_its_tags_volume_across_hosts(
         );
     }
     services
-        .operator(&["delete", "memory", "--native", "keeper"])
+        .operator(&["delete", "memory", "--tag", "keeper"])
         .await?;
     assert!(
         run("third-host", "recall-native")
@@ -1596,7 +1596,7 @@ async fn claude_keeps_native_memory_on_its_host_across_tasks(database: String) -
     );
 
     let reset = services
-        .operator(&["delete", "memory", "--native", "keeper"])
+        .operator(&["delete", "memory", "--tag", "keeper"])
         .await?;
     assert_eq!(reset["reset_generation"], 1, "{reset}");
     assert!(run("recall-native").await?.starts_with("no memory\n"));

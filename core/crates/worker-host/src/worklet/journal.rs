@@ -83,6 +83,12 @@ pub(crate) struct NativeMemoryGrant {
     /// The store's head on the Tag's Volume: revision, manifest SHA-256, and manifest length.
     #[serde(default)]
     pub volume_head: Option<(u64, String, u64)>,
+    /// Memory to write into the store before the turn: ID, text, and when it was kept.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub seeds: Vec<(String, String, i64)>,
+    /// Whether the turn's changes are the Tag's own, rather than proposals.
+    #[serde(default)]
+    pub trusted: bool,
 }
 
 /// The Tag's Volume as an Attempt's assignment carries it.

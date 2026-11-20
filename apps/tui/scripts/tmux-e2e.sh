@@ -6,7 +6,7 @@
 # starting again, after which a message still round-trips. Then the screens around conversations, on Tags it creates
 # on the stack's labeled hosts: answers an Objective's question and approves a Workstream post
 # from the inbox, creates an Objective with /goal and messages its owner, expands a Work Session,
-# deletes a note, pauses a Schedule, reads Activity and a Team, and creates a Tag with Ctrl-N.
+# pauses a Schedule, reads Activity and a Team, and creates a Tag with Ctrl-N.
 # Last it saves a Gateway with `supertag connect`, switches to it, forgets it with
 # `supertag disconnect`, quits with Ctrl-C and checks the terminal was restored.
 # With SUPERTAG_TUI_BINARY set it runs that binary through `supertag tui`, as plain `supertag`
@@ -189,18 +189,13 @@ t send-keys -t e2e Enter
 wait_for "Latest Task"
 esc
 echo "Work Sessions ok"
-# The same turn kept a note and scheduled a wake-up.
-palette notes
-wait_for "The release branch is main."
-t send-keys -t e2e x
-sleep 0.5
-esc
+# The same turn scheduled a wake-up.
 palette schedules
 wait_for "Check PR 412"
 t send-keys -t e2e p
 wait_for "paused ·"
 esc
-echo "Notes and Schedules ok"
+echo "Schedules ok"
 palette activity
 wait_for "Over the last"
 esc

@@ -1,16 +1,16 @@
 /**
- * The palette's panels about the selected Tag: **Notes** (what it keeps of what it cannot look
- * up again: its harness memory on this machine's Worker Hosts, and its notes; `x` deletes one), **Schedules** (its wake-ups that will still fire; `p` pauses or
- * resumes one, `x` deletes it), **Network** (what its Task Attempts' egress proxy allowed and
- * refused; operators only) and **Activity** (how its unprompted messages landed). The Watch keeps
- * Notes and Schedules current. ↑ ↓ move, Esc closes.
+ * The palette's panels about the selected Tag: **Memory** (what its harness keeps between turns
+ * on this machine's Worker Hosts, with the changes Work Sessions proposed to it; `x` deletes
+ * one), **Schedules** (its wake-ups that will still fire; `p` pauses or resumes one, `x` deletes
+ * it), **Network** (what its Task Attempts' egress proxy allowed and refused; operators only) and
+ * **Activity** (how its unprompted messages landed). The Watch keeps Memory and Schedules
+ * current. ↑ ↓ move, Esc closes.
  */
 import {
   describe,
   type HarnessMemory,
   type HarnessMemoryList,
   type NetworkLog,
-  type Note,
   type Schedule,
   type TagActivity,
   type WatchUpdate,
@@ -21,10 +21,10 @@ import type { TuiGateway } from "./connection";
 import { clip, safe, shortTime } from "./text";
 import { color, type KeyEvent, useKeyboard } from "./ui";
 
-export type PanelKind = "notes" | "schedules" | "network" | "activity";
+export type PanelKind = "memory" | "schedules" | "network" | "activity";
 
 export const PANEL_TITLES: Record<PanelKind, string> = {
-  notes: "Notes",
+  memory: "Memory",
   schedules: "Schedules",
   network: "Network",
   activity: "Activity",
@@ -114,107 +114,80 @@ function useList(count: number, onClose: () => void, act: (key: KeyEvent, at: nu
 
 const when = (ms: number | undefined) => (ms ? shortTime(ms) : "never");
 
-/** What the Notes panel lists: the Tag's harness memory on this machine, then its notes. */
-interface Memories {
-  harness: HarnessMemoryList;
-  notes: Note[];
-}
-
-type Row = { kind: "harness"; memory: HarnessMemory } | { kind: "note"; note: Note };
-
 const HARNESS_NAMES: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex" };
 
-/** Whose harness memory it is, who sees it, and whether a turn that may not write it did. */
-function harnessCaption(memory: HarnessMemory): string {
+/**
+ * Whose harness keeps a memory, who sees it, whether it waits for the Tag's daily memory review
+ * or a turn that may not write the Tag's memory last changed it, and when.
+ */
+function memoryCaption(memory: HarnessMemory): string {
   return [
     HARNESS_NAMES[memory.harness] ?? memory.harness,
     memory.kind,
     memory.private ? "only you" : "everyone",
-    ...(memory.trust === "proposed-only" ? ["proposed"] : []),
+    ...(memory.status === "proposed"
+      ? ["waits for review"]
+      : memory.trust === "proposed-only"
+        ? ["changed by a Work Session"]
+        : []),
     `kept ${when(memory.updatedAtMs)}`,
   ].join(" · ");
 }
 
-export function NotesPanel(props: PanelProps) {
+export function MemoryPanel(props: PanelProps) {
   const { gateway, tagId } = props;
-  const read = useCallback(async (): Promise<Memories> => {
-    const [notes, harness] = await Promise.all([
-      gateway.notes(tagId),
-      // Harness memory is read from this machine's Worker Hosts; a failure there still shows
-      // the notes.
-      gateway.harnessMemory(tagId).catch(
-        (error: unknown): HarnessMemoryList => ({
-          memories: [],
-          keptOn: [],
-          unavailable: describe(error),
-        }),
-      ),
-    ]);
-    return { notes, harness };
-  }, [gateway, tagId]);
+  const read = useCallback(() => gateway.harnessMemory(tagId), [gateway, tagId]);
+  // A finished turn is when the harness may have changed its memory.
   const affected = useCallback(
-    (update: WatchUpdate) => update.kind === "memory" && update.tagId === tagId,
+    (update: WatchUpdate) => update.kind === "conversation" && update.tagId === tagId,
     [tagId],
   );
-  const { value, problem, setProblem, request } = useRead<Memories>(read, props.watch, affected);
-  const rows: Row[] = [
-    ...(value?.harness.memories ?? []).map((memory) => ({ kind: "harness" as const, memory })),
-    ...(value?.notes ?? []).map((note) => ({ kind: "note" as const, note })),
-  ];
-  const at = useList(rows.length, props.onClose, (key, index) => {
-    const row = rows[index];
-    if (key.name !== "x" || !row) return;
-    const deleted =
-      row.kind === "note"
-        ? gateway.deleteNote(row.note.memoryId)
-        : gateway.deleteHarnessMemory(row.memory.memoryId);
-    void deleted.then(request, (error) => setProblem(describe(error)));
+  const { value, problem, setProblem, request } = useRead<HarnessMemoryList>(
+    read,
+    props.watch,
+    affected,
+  );
+  const memories = value?.memories ?? [];
+  const at = useList(memories.length, props.onClose, (key, index) => {
+    const memory = memories[index];
+    if (key.name !== "x" || !memory) return;
+    void gateway
+      .deleteHarnessMemory(memory.memoryId)
+      .then(request, (error) => setProblem(describe(error)));
   });
   const inner = props.width - 4;
-  const elsewhere = value?.harness.keptOn ?? [];
+  const elsewhere = value?.keptOn ?? [];
   return (
     <Frame
-      title={`Notes · ${clip(props.tagName, 30)}`}
+      title={`Memory · ${clip(props.tagName, 30)}`}
       width={props.width}
       height={props.height}
       problem={problem}
       hint="↑ ↓ move · x delete · Esc close"
     >
-      {value === undefined && !problem ? <text fg={color.muted}>Loading notes…</text> : null}
-      {value && rows.length === 0 ? (
-        <text fg={color.muted}>
-          {safe(props.tagName)} keeps no notes or harness memory you can see.
-        </text>
-      ) : null}
-      {value?.harness.unavailable ? (
-        <text fg={color.faint}>{safe(clip(value.harness.unavailable, inner))}</text>
+      {value === undefined && !problem ? <text fg={color.muted}>Loading memory…</text> : null}
+      {value?.unavailable ? (
+        <text fg={color.faint}>{safe(clip(value.unavailable, inner))}</text>
+      ) : value && memories.length === 0 ? (
+        <text fg={color.muted}>{safe(props.tagName)} keeps no memory on this machine yet.</text>
       ) : null}
       {elsewhere.length > 0 ? (
         <text fg={color.faint}>
-          {safe(clip(`More harness memory is kept on Worker Host ${elsewhere.join(", ")}.`, inner))}
+          {safe(clip(`More memory is kept on Worker Host ${elsewhere.join(", ")}.`, inner))}
         </text>
       ) : null}
-      {rows.slice(0, Math.max(1, props.height - 7)).map((row, position) => {
+      {memories.slice(0, Math.max(1, props.height - 7)).map((memory, position) => {
         const selected = position === at;
-        const fg = selected ? color.strong : color.text;
-        const bg = selected ? color.selected : undefined;
-        if (row.kind === "harness") {
-          const { memory } = row;
-          return (
-            <text key={memory.memoryId} fg={fg} bg={bg}>
-              {clip(memory.title || memory.text, Math.max(10, inner - 44))}
-              <span fg={color.muted}> · {harnessCaption(memory)}</span>
-            </text>
-          );
-        }
-        const { note } = row;
+        const proposed = memory.status === "proposed";
         return (
-          <text key={note.memoryId} fg={fg} bg={bg}>
-            {clip(note.text, Math.max(10, inner - 28))}
-            <span fg={color.muted}>
-              {" "}
-              · note · {note.private ? "only you" : "everyone"} · used {when(note.lastSeenAtMs)}
-            </span>
+          <text
+            key={memory.memoryId}
+            fg={selected ? color.strong : color.text}
+            bg={selected ? color.selected : undefined}
+          >
+            {proposed ? <span fg={color.warning}>proposed </span> : null}
+            {clip(memory.title || memory.text, Math.max(10, inner - 44 - (proposed ? 9 : 0)))}
+            <span fg={color.muted}> · {memoryCaption(memory)}</span>
           </text>
         );
       })}
@@ -376,7 +349,7 @@ export function ActivityPanel(props: PanelProps) {
 }
 
 export const PANELS: Record<PanelKind, (props: PanelProps) => ReactNode> = {
-  notes: NotesPanel,
+  memory: MemoryPanel,
   schedules: SchedulesPanel,
   network: NetworkPanel,
   activity: ActivityPanel,

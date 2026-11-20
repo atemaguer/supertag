@@ -2,7 +2,7 @@
  * The terminal UI's screen: the rail (Tags, Objectives, the inbox, Teams), the selected row's
  * pane (a Tag's conversation and composer, an Objective, an inbox item, a Team), the status
  * line, and the panels over them: the palette, Gateways, Keyboard shortcuts, New Tag, the new
- * Objective form, Work Sessions, and the selected Tag's Notes, Schedules, Network and Activity.
+ * Objective form, Work Sessions, and the selected Tag's Memory, Schedules, Network and Activity.
  * Everything of one Gateway lives under one `Workspace`, keyed by its cache scope, so switching
  * Gateways starts from that Gateway's own cache and nothing of one shows on another.
  */
@@ -525,7 +525,7 @@ function Workspace({
               section: "Commands" as const,
               run: () => setOverlay("work"),
             },
-            ...(["activity", "notes", "network", "schedules"] as const).map((kind) => ({
+            ...(["activity", "memory", "network", "schedules"] as const).map((kind) => ({
               id: kind,
               label: PANEL_TITLES[kind],
               section: "Commands" as const,

@@ -1,9 +1,8 @@
 /**
- * What the Tag details panel shows besides the conversation: the Tag's activity, its notes, its
- * network log, and its Schedules, converted from the Gateway's messages as the Rust app did.
+ * What the Tag details panel shows besides the conversation: the Tag's activity, its network
+ * log, and its Schedules, converted from the Gateway's messages as the Rust app did.
  */
 
-import type { Memory } from "../../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/memories_pb";
 import type {
   Tag,
   TaskNetworkLog,
@@ -12,7 +11,7 @@ import {
   type Schedule as ProtoSchedule,
   ScheduleState,
 } from "../../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/schedules_pb";
-import type { NetworkLog, Note, Schedule, TagActivity } from "../model/gateway";
+import type { NetworkLog, Schedule, TagActivity } from "../model/gateway";
 import { compact, enumName, num, optionalNum } from "./convert";
 
 /** How the Tag's unprompted messages were received, and how often its work may start. */
@@ -38,20 +37,6 @@ export function activity(tag: Tag): TagActivity {
             idleSinceMs: num(idle.idleSinceMs),
           })),
   } as TagActivity);
-}
-
-/** One note. The window learns only that it is private, never whose it is. */
-export function note(memory: Memory): Note {
-  return compact({
-    memoryId: memory.memoryId,
-    tagId: memory.tagId,
-    text: memory.text,
-    private: memory.audience !== undefined,
-    createdBy: memory.createdBy,
-    createdAtMs: num(memory.createdAtMs),
-    updatedAtMs: num(memory.updatedAtMs),
-    lastSeenAtMs: optionalNum(memory.lastSeenAtMs),
-  } as Note);
 }
 
 /** One Task Attempt's network log: counts, and only what the proxy recorded. */

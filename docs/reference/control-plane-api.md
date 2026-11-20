@@ -104,7 +104,7 @@ name in `supertag audit`.
 | `Inbox` | Inbox items, questions and their answers, and approval decisions |
 | `WorkSessions` | Work Sessions started from a parent Session, how many their Tag has open, and closing one |
 | `Schedules` | [Schedules](coordination.md#schedules) that wake a Tag in your conversation: create, read, list, pause, resume, and delete |
-| `Memories` | A Tag's [notes](coordination.md#memory) you may see: list, read, and delete |
+| `Memories` | Operators only: drop all of a Tag's [memory](coordination.md#memory) on every Worker Host |
 | `Teams` | Teams and their Workstream posts |
 | `Mailbox` | Messages between Tags and Mailbox grants |
 | `LiveInputs` | Messages to a running Task, and resolving an uncertain delivery |
@@ -215,8 +215,7 @@ returns every event of a turn, including the activity a conversation page leaves
 ## Watch for changes
 
 `OperatorEvents.Watch` streams change notices for Tags, Tasks, conversation messages and read
-marks, Objectives, Teams, Workstream posts, and a Tag's notes (`WATCH_KIND_MEMORY`: a note kept,
-rewritten, or deleted; a private note reaches only its person). Each notice carries a resume token; reconnect with the last one to
+marks, Objectives, Teams, Workstream posts, Schedules, and Mailbox messages. Each notice carries a resume token; reconnect with the last one to
 continue without a gap. A notice says what changed, not its new contents: read the resource.
 A Watch request may name the kinds it follows. A kind the Control Plane does not know, such as one a
 newer client asks for, is ignored rather than refused.

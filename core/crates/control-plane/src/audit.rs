@@ -205,9 +205,6 @@ fn rule(path: &str) -> Option<Rule> {
                 &value.tag_id
             ))
         }
-        ("Memories", "Delete") => rule!("memory.delete", "Memory", GetMemoryRequest, |value| {
-            named("Memory", &value.memory_id)
-        }),
         ("Operator", "CancelTask") => rule!("task.cancel", "Task", CancelTaskRequest, |value| {
             named("Task", &value.task_id)
         }),

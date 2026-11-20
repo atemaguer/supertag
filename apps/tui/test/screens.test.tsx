@@ -1,7 +1,7 @@
 /**
  * Screen tests for the screens around conversations: the rail's Objectives, inbox and Teams,
  * the Objective view and form, inbox answers and approvals, a Team, Work Sessions and their
- * diff, New Tag, the Tag panels (Notes, Schedules, Network, Activity), a long rail, and
+ * diff, New Tag, the Tag panels (Memory, Schedules, Network, Activity), a long rail, and
  * forgetting a saved Gateway. Run with `bun test` in apps/tui.
  */
 import { afterEach, expect, test } from "bun:test";
@@ -566,31 +566,8 @@ test("a client device is told only an operator creates Tags", async () => {
   await screen.close();
 });
 
-test("Notes lists the Tag's notes and x deletes one", async () => {
+test("Memory lists the Tag's memory on this machine, marks proposals, and x deletes one", async () => {
   const fake = new FakeGateway(TAGS);
-  fake.notes = [
-    { memoryId: "mem-1", tagId: "lead", text: "Atem prefers squash merges." },
-    { memoryId: "mem-2", tagId: "lead", text: "The staging host is flaky.", private: true },
-  ];
-  current = setup(fake);
-  const screen = await render(current, { width: 120, height: 40 });
-  await screen.waitFor("Message lead");
-  await screen.press("k", { ctrl: true });
-  await screen.type("notes");
-  await screen.press("RETURN");
-  const frame = await screen.waitFor("Atem prefers squash merges.");
-  expect(frame).toContain("only you");
-  await screen.press("x");
-  await screen.waitFor(/Notes · lead[\s\S]*The staging host is flaky/u);
-  for (let i = 0; i < 50 && screen.frame().includes("squash merges"); i++) await screen.settle(1);
-  expect(screen.frame()).not.toContain("squash merges");
-  expect(fake.notes.map((note) => note.memoryId)).toEqual(["mem-2"]);
-  await screen.close();
-});
-
-test("Notes lists the Tag's harness memory on this machine first and x deletes one", async () => {
-  const fake = new FakeGateway(TAGS);
-  fake.notes = [{ memoryId: "mem-1", tagId: "lead", text: "Atem prefers squash merges." }];
   current = setup(fake);
   const memory = (memoryId: string, title: string, extra: Partial<HarnessMemory> = {}) => ({
     memoryId,
@@ -601,6 +578,7 @@ test("Notes lists the Tag's harness memory on this machine first and x deletes o
     title,
     text: title,
     truncated: false,
+    status: "owned" as const,
     path: "extensions/ad_hoc/notes/n.md",
     updatedAtMs: Date.now(),
     ...extra,
@@ -610,11 +588,13 @@ test("Notes lists the Tag's harness memory on this machine first and x deletes o
     memory("hmem_2", "Prefers small pull requests.", {
       harness: "claude-code",
       kind: "preference",
+      private: true,
       trust: "proposed-only",
     }),
+    memory("hmem_3", "The staging host is flaky.", { status: "proposed" }),
   ];
   const gateway = current.controller.gateway as TuiGateway;
-  gateway.harnessMemory = async () => ({ memories: held, keptOn: [] });
+  gateway.harnessMemory = async () => ({ memories: held, keptOn: ["laptop-2"] });
   gateway.deleteHarnessMemory = async (memoryId) => {
     const deleted = held.find((entry) => entry.memoryId === memoryId) as HarnessMemory;
     held = held.filter((entry) => entry !== deleted);
@@ -623,18 +603,32 @@ test("Notes lists the Tag's harness memory on this machine first and x deletes o
   const screen = await render(current, { width: 140, height: 40 });
   await screen.waitFor("Message lead");
   await screen.press("k", { ctrl: true });
-  await screen.type("notes");
+  await screen.type("memory");
   await screen.press("RETURN");
-  const frame = await screen.waitFor("Atem prefers squash merges.");
+  const frame = await screen.waitFor(/Memory · lead[\s\S]*Staging runs in eu-north-1/u);
   expect(frame).toContain("Codex · fact · everyone");
-  expect(frame).toContain("Claude Code · preference · everyone · proposed");
-  expect(frame).toContain("· note ·");
+  expect(frame).toContain("Claude Code · preference · only you · changed by a Work Session");
+  expect(frame).toContain("proposed The staging host is flaky.");
+  expect(frame).toContain("waits for review");
+  expect(frame).toContain("More memory is kept on Worker Host laptop-2.");
   await screen.press("x");
   for (let i = 0; i < 50 && screen.frame().includes("eu-north-1"); i++) await screen.settle(1);
   expect(screen.frame()).not.toContain("eu-north-1");
   expect(screen.frame()).toContain("Prefers small pull requests.");
-  expect(held.map((entry) => entry.memoryId)).toEqual(["hmem_2"]);
-  expect(fake.notes).toHaveLength(1);
+  expect(held.map((entry) => entry.memoryId)).toEqual(["hmem_2", "hmem_3"]);
+  await screen.close();
+});
+
+test("Memory says when the Tag keeps none on this machine", async () => {
+  current = setup(new FakeGateway(TAGS));
+  const gateway = current.controller.gateway as TuiGateway;
+  gateway.harnessMemory = async () => ({ memories: [], keptOn: [] });
+  const screen = await render(current, { width: 120, height: 40 });
+  await screen.waitFor("Message lead");
+  await screen.press("k", { ctrl: true });
+  await screen.type("memory");
+  await screen.press("RETURN");
+  await screen.waitFor("lead keeps no memory on this machine yet.");
   await screen.close();
 });
 

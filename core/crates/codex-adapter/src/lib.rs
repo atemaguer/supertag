@@ -7,7 +7,6 @@ mod config;
 mod coordination;
 mod events;
 pub mod launcher;
-mod memory;
 mod native_memory;
 mod notifications;
 mod pricing;
@@ -140,7 +139,6 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         tag_sessions: tag_sessions::Reads::new(&capabilities),
         schedule: capabilities.may_schedule,
         close_sessions: capabilities.may_start_work_session,
-        memory: capabilities.may_remember,
         quiet: capabilities.may_stay_quiet,
         report_objective: questions::Reporting::new(&capabilities),
     };
@@ -325,7 +323,7 @@ async fn execute(
     policy.memory = native_memory.is_some();
     let authentication = auth::Prepared::new(&options.environment, &options.state_directory)?;
     // The Tag's daily review consolidates the notes its turns kept into the summary Codex loads
-    // into every later turn.
+    // into every later turn, against the folder as it last consolidated it.
     if policy.memory
         && task
             .session_id
@@ -336,8 +334,9 @@ async fn execute(
     let arguments = config::arguments(&workspace, model, effort, &policy)?;
     let thread_parameters = config::thread_parameters(&workspace, &policy, &arguments)?;
     let skills = skills::prepare(task, resolved_skills, authentication.home())?;
+    let consolidate = policy.consolidate.is_some();
     if let Some(directory) = &native_memory {
-        native_memory::copy_in(directory, authentication.home())?;
+        native_memory::copy_in(directory, authentication.home(), consolidate)?;
     }
     if let Some(socket) = &exec_socket {
         remote::write_environments(
@@ -499,7 +498,7 @@ async fn execute(
     child.wait().await.context("could not reap Codex process")?;
     // Whatever the outcome, the Worker Host decides what of the turn's memory to keep.
     if let Some(directory) = &native_memory {
-        native_memory::copy_out(authentication.home(), directory)?;
+        native_memory::copy_out(authentication.home(), directory, consolidate)?;
     }
     outcome.context("Codex execution timed out")?
 }

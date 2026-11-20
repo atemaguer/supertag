@@ -1,6 +1,7 @@
-//! A Tag's memory: notes it writes with `remember` and `forget`, staged until the turn
-//! succeeds, scoped so one person's notes never reach another's conversation, bounded, listed
-//! and deleted by people, and tidied by a daily review turn that reaches no one.
+//! A Tag's memory is its harness's own. The Control Plane says which turns' changes are the
+//! Tag's own (`memory_trusted`), hands the notes Tags kept before to the first such turn on a
+//! harness that keeps memory until its host acknowledges them, and queues a daily review turn
+//! that reaches no one.
 mod support;
 
 use std::sync::{
@@ -8,8 +9,8 @@ use std::sync::{
     atomic::{AtomicI64, Ordering},
 };
 
-use sqlx::{Connection, Executor};
-use supertag_control_plane::{HostAuthority, Store, StoreError};
+use sqlx::{AnyPool, Connection, Executor};
+use supertag_control_plane::{AttemptAccess, HostAuthority, Store};
 use supertag_protocol::v2::*;
 use uuid::Uuid;
 
@@ -18,18 +19,37 @@ const HOUR: i64 = 60 * 60 * 1000;
 const ALICE: &str = "operator:alice";
 const BOB: &str = "operator:bob";
 const TAG: &str = "keeper";
+const LOCAL: &str = "operator:local";
 
-async fn claim(store: &Store, host: &HostAuthority, id: &str) -> InspectAttemptRequest {
-    let assignment = store
-        .claim_task(host, &Uuid::new_v4().to_string())
+/// Seeds as the upgrade leaves the notes Tags kept: ID, audience, and text.
+async fn insert_seeds(url: &str, seeds: &[(&str, &str, &str)]) {
+    let pool = AnyPool::connect(url).await.unwrap();
+    for (index, (id, audience, text)) in seeds.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO supertag_v2_native_memory_seeds (seed_id,tag_id,audience_principal,text,created_at_ms)
+             VALUES ($1,$2,$3,$4,$5)",
+        )
+        .bind(*id)
+        .bind(TAG)
+        .bind(*audience)
+        .bind(*text)
+        .bind(index as i64 + 1)
+        .execute(&pool)
         .await
-        .unwrap()
-        .expect("expected Task");
-    assert_eq!(assignment.task.unwrap().task_id, id);
+        .unwrap();
+    }
+    pool.close().await;
+}
+
+async fn start(
+    store: &Store,
+    host: &HostAuthority,
+    assignment: &Assignment,
+) -> InspectAttemptRequest {
     let attempt = InspectAttemptRequest {
-        task_id: id.into(),
-        attempt_id: assignment.attempt_id,
-        lease_token: assignment.lease_token,
+        task_id: assignment.task.as_ref().unwrap().task_id.clone(),
+        attempt_id: assignment.attempt_id.clone(),
+        lease_token: assignment.lease_token.clone(),
     };
     store
         .start_task(
@@ -43,6 +63,28 @@ async fn claim(store: &Store, host: &HostAuthority, id: &str) -> InspectAttemptR
         .await
         .unwrap();
     attempt
+}
+
+/// Claims the next Task as a host running `harness`, and starts it.
+async fn claim(
+    store: &Store,
+    host: &HostAuthority,
+    harness: HarnessKind,
+) -> (InspectAttemptRequest, Assignment) {
+    let assignment = store
+        .claim_task_waiting(
+            host,
+            &ClaimTaskRequest {
+                operation_id: Uuid::new_v4().to_string(),
+                harness_kind: harness.into(),
+                ..Default::default()
+            },
+            std::time::Duration::ZERO,
+        )
+        .await
+        .unwrap()
+        .expect("expected Task");
+    (start(store, host, &assignment).await, assignment)
 }
 
 async fn finish(store: &Store, host: &HostAuthority, attempt: &InspectAttemptRequest, ok: bool) {
@@ -62,14 +104,15 @@ async fn finish(store: &Store, host: &HostAuthority, attempt: &InspectAttemptReq
         .unwrap();
 }
 
-/// A turn of `principal`'s conversation with the Tag, claimed and running.
+/// A turn of `principal`'s conversation with the Tag on `harness`, claimed and running.
 async fn say(
     store: &Store,
     host: &HostAuthority,
     principal: &str,
     text: &str,
-) -> InspectAttemptRequest {
-    let task = store
+    harness: HarnessKind,
+) -> (InspectAttemptRequest, Assignment) {
+    store
         .send_message(
             principal,
             &SendMessageRequest {
@@ -80,388 +123,198 @@ async fn say(
             },
         )
         .await
-        .unwrap()
-        .task
         .unwrap();
-    claim(store, host, &task.task_id).await
+    claim(store, host, harness).await
 }
 
-async fn remember(
+/// A turn the operator submitted to the Tag's `ops` Session on `harness`, claimed and running.
+async fn submit(
     store: &Store,
     host: &HostAuthority,
-    attempt: &InspectAttemptRequest,
-    operation: &str,
     text: &str,
-    replaces: Option<&str>,
-) -> Result<AttemptMemoryResponse, StoreError> {
+    harness: HarnessKind,
+) -> (InspectAttemptRequest, Assignment) {
     store
-        .attempt_remember(
-            &supertag_control_plane::AttemptAccess::new(host, attempt),
-            &AttemptRememberRequest {
-                operation_id: operation.into(),
-                text: text.into(),
-                replaces: replaces.map(str::to_owned),
-            },
-        )
-        .await
-}
-
-async fn forget(
-    store: &Store,
-    host: &HostAuthority,
-    attempt: &InspectAttemptRequest,
-    id: &str,
-) -> Result<AttemptMemoryResponse, StoreError> {
-    store
-        .attempt_forget(
-            &supertag_control_plane::AttemptAccess::new(host, attempt),
-            &AttemptForgetRequest {
+        .submit_task(
+            LOCAL,
+            &SubmitTaskRequest {
+                tag_id: TAG.into(),
+                session_id: "ops".into(),
                 operation_id: Uuid::new_v4().to_string(),
-                memory_id: id.into(),
-            },
-        )
-        .await
-}
-
-async fn texts(store: &Store, principal: &str) -> Vec<String> {
-    store
-        .list_memories(
-            principal,
-            &ListMemoriesRequest {
-                tag_id: Some(TAG.into()),
-            },
-        )
-        .await
-        .unwrap()
-        .memories
-        .into_iter()
-        .map(|memory| memory.text)
-        .collect()
-}
-
-async fn portfolio(store: &Store, host: &HostAuthority, attempt: &InspectAttemptRequest) -> String {
-    store
-        .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(host, attempt))
-        .await
-        .unwrap()
-        .tag_portfolio
-}
-
-async fn contract(url: &str) {
-    let clock = Arc::new(AtomicI64::new(BASE));
-    let source = clock.clone();
-    let store = Store::open(url)
-        .await
-        .unwrap()
-        .with_execution_clock(move || source.load(Ordering::SeqCst));
-    let host = support::register_host(&store, "memory-host").await;
-    let tag = store
-        .put_tag(TAG, "Keep notes", vec!["files:read".into()])
-        .await
-        .unwrap();
-    assert!(tag.memory, "a new Tag keeps memory");
-
-    // Alice's conversation writes a note private to her; it applies when her turn succeeds.
-    let a1 = say(&store, &host, ALICE, "I prefer squash merges").await;
-    let caps = store
-        .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(&host, &a1))
-        .await
-        .unwrap();
-    assert!(caps.may_remember);
-    // A person waits on her message: it is always answered.
-    assert!(!caps.may_stay_quiet);
-    assert!(
-        caps.tag_portfolio
-            .contains("Notes: this Tag keeps none yet.")
-    );
-    let saved = remember(
-        &store,
-        &host,
-        &a1,
-        "op-1",
-        " Alice prefers squash merges. ",
-        None,
-    )
-    .await
-    .unwrap();
-    let alice_note = saved.memory.clone().unwrap();
-    assert_eq!(alice_note.text, "Alice prefers squash merges.");
-    assert_eq!(alice_note.state(), MemoryState::Staged);
-    assert_eq!(alice_note.audience.as_deref(), Some(ALICE));
-    assert!(
-        texts(&store, ALICE).await.is_empty(),
-        "staged until the turn succeeds"
-    );
-    // A replay returns the same note; a different call under the same ID is a conflict.
-    let replay = remember(
-        &store,
-        &host,
-        &a1,
-        "op-1",
-        "Alice prefers squash merges.",
-        None,
-    )
-    .await
-    .unwrap();
-    assert_eq!(replay.memory.unwrap().memory_id, alice_note.memory_id);
-    assert!(matches!(
-        remember(&store, &host, &a1, "op-1", "Something else", None).await,
-        Err(StoreError::Conflict(_))
-    ));
-    assert!(matches!(
-        remember(&store, &host, &a1, "op-2", &"x".repeat(501), None).await,
-        Err(StoreError::InvalidArgument(_))
-    ));
-    finish(&store, &host, &a1, true).await;
-    assert_eq!(texts(&store, ALICE).await, ["Alice prefers squash merges."]);
-    let kept = store
-        .get_memory(ALICE, &alice_note.memory_id)
-        .await
-        .unwrap();
-    assert_eq!(
-        kept.last_seen_at_ms, None,
-        "no turn has had it in its context yet"
-    );
-
-    // A failed turn's notes never apply.
-    let a2 = say(&store, &host, ALICE, "Note this, then fail").await;
-    // Her next turn started with the note in its context.
-    let seen = store
-        .get_memory(ALICE, &alice_note.memory_id)
-        .await
-        .unwrap();
-    assert!(seen.last_seen_at_ms.is_some());
-    remember(&store, &host, &a2, "op-1", "Never kept", None)
-        .await
-        .unwrap();
-    finish(&store, &host, &a2, false).await;
-    assert_eq!(texts(&store, ALICE).await, ["Alice prefers squash merges."]);
-
-    // An operator's Objective is shared: its notes reach every conversation.
-    let objective = store
-        .create_objective(
-            "operator:carol",
-            &CreateObjectiveRequest {
-                operation_id: "release".into(),
-                objective_id: "release".into(),
-                owner_tag_id: TAG.into(),
-                outcome: "Ship the release".into(),
+                prompt: text.into(),
                 ..Default::default()
             },
         )
         .await
         .unwrap();
-    let o1 = claim(&store, &host, &objective.starting_task_id).await;
-    let shared = remember(
-        &store,
-        &host,
-        &o1,
-        "op-1",
-        "Release checklist lives in docs/operations/release.md.",
-        None,
-    )
-    .await
-    .unwrap()
-    .memory
-    .unwrap();
-    assert!(shared.audience.is_none());
-    finish(&store, &host, &o1, true).await;
+    claim(store, host, harness).await
+}
+
+async fn capabilities(
+    store: &Store,
+    host: &HostAuthority,
+    attempt: &InspectAttemptRequest,
+) -> AttemptCapabilities {
     store
-        .pause_objective(
-            ALICE,
-            &ObjectiveActionRequest {
-                objective_id: "release".into(),
-                operation_id: "pause".into(),
-                reason: String::new(),
+        .attempt_capabilities(&AttemptAccess::new(host, attempt))
+        .await
+        .unwrap()
+}
+
+fn seeds(assignment: &Assignment) -> Vec<(String, String)> {
+    assignment
+        .native_memory
+        .as_ref()
+        .map(|grant| {
+            grant
+                .seeds
+                .iter()
+                .map(|seed| (seed.seed_id.clone(), seed.text.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+async fn contract(url: &str) {
+    let store = Store::open(url).await.unwrap();
+    let host = support::register_host(&store, "memory-host").await;
+    let tag = store
+        .put_tag(TAG, "Keep memory", vec!["files:read".into()])
+        .await
+        .unwrap();
+    assert!(tag.memory, "a new Tag keeps memory");
+    // The notes the Tag kept before, as the upgrade left them: Alice's, and the operator's.
+    insert_seeds(
+        url,
+        &[
+            ("mem_local", LOCAL, "Releases ship from main."),
+            ("mem_alice", ALICE, "Alice prefers squash merges."),
+        ],
+    )
+    .await;
+
+    // A conversation turn's changes are the Tag's own; its context lists no notes any more.
+    let (custom, assignment) = say(&store, &host, ALICE, "Hello", HarnessKind::Opencode).await;
+    let caps = capabilities(&store, &host, &custom).await;
+    assert!(caps.memory_trusted);
+    assert!(
+        !caps.tag_portfolio.contains("Notes"),
+        "{}",
+        caps.tag_portfolio
+    );
+    // A harness that keeps no memory of its own gets no seeds: they wait for one that does.
+    assert!(seeds(&assignment).is_empty());
+    finish(&store, &host, &custom, true).await;
+
+    // Alice's turn on Codex gets her note to write into her store, the operator's turn only
+    // theirs, and Bob's conversation none.
+    let (alice, assignment) = say(&store, &host, ALICE, "Hi again", HarnessKind::Codex).await;
+    assert_eq!(
+        seeds(&assignment),
+        [(
+            "mem_alice".to_owned(),
+            "Alice prefers squash merges.".to_owned()
+        )]
+    );
+    let (bob, assignment) = say(&store, &host, BOB, "Hi", HarnessKind::Codex).await;
+    assert!(seeds(&assignment).is_empty());
+    finish(&store, &host, &bob, true).await;
+    let (bob, bob_assignment) = submit(&store, &host, "Hi all", HarnessKind::Codex).await;
+    assert_eq!(
+        seeds(&bob_assignment),
+        [(
+            "mem_local".to_owned(),
+            "Releases ship from main.".to_owned()
+        )]
+    );
+    // An acknowledgement names only its own audience's seeds; another's stay, and repeating
+    // one changes nothing.
+    for _ in 0..2 {
+        store
+            .acknowledge_native_memory_seeds(
+                &AttemptAccess::new(&host, &alice),
+                &AcknowledgeNativeMemorySeedsRequest {
+                    seed_ids: vec!["mem_alice".into(), "mem_local".into()],
+                },
+            )
+            .await
+            .unwrap();
+    }
+    finish(&store, &host, &alice, true).await;
+    finish(&store, &host, &bob, false).await;
+    let (alice, assignment) = say(&store, &host, ALICE, "Once more", HarnessKind::Codex).await;
+    assert!(seeds(&assignment).is_empty(), "acknowledged seeds go");
+    finish(&store, &host, &alice, true).await;
+    let (bob, assignment) = submit(&store, &host, "Again", HarnessKind::ClaudeCode).await;
+    assert_eq!(
+        seeds(&assignment).len(),
+        1,
+        "unacknowledged seeds are granted again"
+    );
+
+    // An operator's reset of the Tag's memory drops its waiting seeds too.
+    store
+        .reset_native_memory(
+            "operator:local",
+            &ResetNativeMemoryRequest { tag_id: TAG.into() },
+        )
+        .await
+        .unwrap();
+    finish(&store, &host, &bob, true).await;
+    let (bob, assignment) = submit(&store, &host, "After reset", HarnessKind::Codex).await;
+    assert!(seeds(&assignment).is_empty());
+    finish(&store, &host, &bob, true).await;
+
+    // A Work Session's own turn reads its parent's store but only proposes: its grant says so,
+    // and it gets no seeds.
+    insert_seeds(url, &[("mem_later", ALICE, "Alice reviews on Fridays.")]).await;
+    let (alice, parent) = say(&store, &host, ALICE, "Split this up", HarnessKind::Codex).await;
+    let parent = parent
+        .native_memory
+        .expect("a conversation turn gets its store");
+    assert!(parent.trusted);
+    store
+        .start_work_session(
+            &AttemptAccess::new(&host, &alice),
+            &StartWorkSessionRequest {
+                operation_id: "work".into(),
+                title: "Draft".into(),
+                instruction: "Draft the plan".into(),
+                ..Default::default()
             },
         )
         .await
         .unwrap();
+    let (work, assignment) = claim(&store, &host, HarnessKind::Codex).await;
+    let grant = assignment
+        .native_memory
+        .expect("a Work Session reads its Tag's memory");
+    assert_eq!(grant.scope, parent.scope, "its parent's audience");
+    assert!(!grant.trusted && grant.seeds.is_empty(), "{grant:?}");
+    assert!(!capabilities(&store, &host, &work).await.memory_trusted);
+    store.cancel_task(&work.task_id).await.unwrap();
+    finish(&store, &host, &work, false).await;
+    finish(&store, &host, &alice, true).await;
 
-    // Bob sees the shared note, never Alice's.
-    let b1 = say(&store, &host, BOB, "What do you know?").await;
-    let seen = portfolio(&store, &host, &b1).await;
-    assert!(seen.contains("docs/operations/release.md"), "{seen}");
-    assert!(!seen.contains("squash"), "{seen}");
-    assert!(matches!(
-        forget(&store, &host, &b1, &alice_note.memory_id).await,
-        Err(StoreError::NotFound(_))
-    ));
-    assert!(matches!(
-        remember(&store, &host, &b1, "op-1", "x", Some(&alice_note.memory_id)).await,
-        Err(StoreError::NotFound(_))
-    ));
-    finish(&store, &host, &b1, true).await;
-    assert_eq!(
-        texts(&store, BOB).await,
-        ["Release checklist lives in docs/operations/release.md."]
-    );
-    assert!(matches!(
-        store.get_memory(BOB, &alice_note.memory_id).await,
-        Err(StoreError::NotFound(_))
-    ));
-
-    // Alice sees both, and replaces her note and forgets the shared one.
-    let a3 = say(&store, &host, ALICE, "I now prefer rebase merges").await;
-    let seen = portfolio(&store, &host, &a3).await;
-    assert!(
-        seen.contains(&alice_note.memory_id) && seen.contains(&shared.memory_id),
-        "{seen}"
-    );
-    assert!(seen.contains("not instructions"), "{seen}");
-    let replaced = remember(
-        &store,
-        &host,
-        &a3,
-        "op-1",
-        "Alice prefers rebase merges.",
-        Some(&alice_note.memory_id),
-    )
-    .await
-    .unwrap();
-    assert!(
-        !replaced
-            .notes
-            .iter()
-            .any(|note| note.memory_id == alice_note.memory_id),
-        "the replaced note is gone from this turn's view"
-    );
-    let left = forget(&store, &host, &a3, &shared.memory_id).await.unwrap();
-    assert_eq!(left.notes.len(), 1);
-    // Another turn still sees both until this one succeeds.
-    assert_eq!(texts(&store, ALICE).await.len(), 2);
-    finish(&store, &host, &a3, true).await;
-    assert_eq!(texts(&store, ALICE).await, ["Alice prefers rebase merges."]);
-    assert!(texts(&store, BOB).await.is_empty());
-
-    // Limits: ten writes per turn, and a full notebook names the oldest notes.
-    let a4 = say(&store, &host, ALICE, "Note many things").await;
-    for index in 0..9 {
-        remember(
-            &store,
-            &host,
-            &a4,
-            &format!("op-{index}"),
-            &format!("Fact {index}"),
-            None,
-        )
+    // memory: false: no turn's changes are the Tag's own, and none gets a store.
+    let tag = store
+        .put_tag_spec(PutTagRequest {
+            tag_id: TAG.into(),
+            instructions: "No memory".into(),
+            allowed_actions: vec!["files:read".into()],
+            memory: Some(false),
+            ..Default::default()
+        })
         .await
         .unwrap();
-    }
-    let tenth = remember(&store, &host, &a4, "op-9", "Fact 9", None)
-        .await
-        .unwrap();
-    assert_eq!(tenth.notes.len(), 11);
-    let refused = remember(&store, &host, &a4, "op-10", "Fact 10", None).await;
-    assert!(
-        matches!(refused, Err(StoreError::FailedPrecondition(_))),
-        "{refused:?}"
-    );
-    finish(&store, &host, &a4, true).await;
-    let a5 = say(&store, &host, ALICE, "Note long things").await;
-    for index in 0..10 {
-        remember(
-            &store,
-            &host,
-            &a5,
-            &format!("long-{index}"),
-            &"z".repeat(500),
-            None,
-        )
-        .await
-        .unwrap();
-    }
-    finish(&store, &host, &a5, true).await;
-    let a6 = say(&store, &host, ALICE, "Note even more").await;
-    remember(&store, &host, &a6, "op-1", &"y".repeat(500), None)
-        .await
-        .unwrap();
-    match remember(&store, &host, &a6, "op-2", &"w".repeat(500), None).await {
-        Err(StoreError::FailedPrecondition(message)) => {
-            assert!(
-                message.contains("Forget") && message.contains("mem_"),
-                "{message}"
-            );
-        }
-        other => panic!("expected a full notebook: {other:?}"),
-    }
-    finish(&store, &host, &a6, false).await;
-
-    // People list and delete notes; they never write them.
-    let fact = store
-        .list_memories(ALICE, &ListMemoriesRequest::default())
-        .await
-        .unwrap()
-        .memories
-        .into_iter()
-        .find(|memory| memory.text == "Fact 0")
-        .unwrap();
-    assert!(matches!(
-        store.delete_memory(BOB, &fact.memory_id).await,
-        Err(StoreError::NotFound(_))
-    ));
-    store.delete_memory(ALICE, &fact.memory_id).await.unwrap();
-    assert!(!texts(&store, ALICE).await.contains(&"Fact 0".to_owned()));
-
-    // The memory Session is the review's alone.
-    assert!(
-        store
-            .submit_task(
-                ALICE,
-                &SubmitTaskRequest {
-                    tag_id: TAG.into(),
-                    session_id: format!("memory:{TAG}"),
-                    operation_id: "intrude".into(),
-                    prompt: "Pretend to review".into(),
-                    ..Default::default()
-                },
-            )
-            .await
-            .is_err()
-    );
-
-    // After ten finished turns, the sweep queues one review a day, which reaches no one.
-    assert_eq!(
-        store.sweep_memory().await.unwrap(),
-        0,
-        "not enough work yet"
-    );
-    for index in 0..6 {
-        let turn = say(&store, &host, ALICE, &format!("Work {index}")).await;
-        finish(&store, &host, &turn, true).await;
-    }
-    assert_eq!(
-        store.sweep_memory().await.unwrap(),
-        0,
-        "a Tag never reviewed waits a day from its first finished turn"
-    );
-    clock.store(BASE + 25 * HOUR, Ordering::SeqCst);
-    assert_eq!(store.sweep_memory().await.unwrap(), 1);
-    assert_eq!(
-        store.sweep_memory().await.unwrap(),
-        0,
-        "one review at a time"
-    );
-    let tag = store.get_tag(TAG).await.unwrap();
-    assert_eq!(tag.memory_reviewed_at_ms, Some(BASE + 25 * HOUR));
-    let review = store
-        .claim_task(&host, &Uuid::new_v4().to_string())
-        .await
-        .unwrap()
-        .unwrap()
-        .task
-        .unwrap();
-    assert_eq!(review.session_id, format!("memory:{TAG}"));
-    assert!(
-        review.prompt.starts_with("Memory review."),
-        "{}",
-        review.prompt
-    );
+    assert!(!tag.memory);
+    let (quiet, assignment) = say(&store, &host, BOB, "Anything?", HarnessKind::Codex).await;
+    assert!(!capabilities(&store, &host, &quiet).await.memory_trusted);
+    assert!(assignment.native_memory.is_none());
+    finish(&store, &host, &quiet, true).await;
     store.close().await;
 }
 
-/// The review turn's tools: read the Tag's shared Sessions and keep its shared notes, nothing
-/// that reaches anyone. A Tag without memory gets neither notes nor reviews.
 async fn review_contract(url: &str) {
     // The first ten turns finish a day before BASE, so the first review is due at BASE.
     let clock = Arc::new(AtomicI64::new(BASE - 25 * HOUR));
@@ -474,38 +327,47 @@ async fn review_contract(url: &str) {
     store
         .put_tag(
             TAG,
-            "Keep notes",
+            "Keep memory",
             vec!["files:read".into(), "schedule:create".into()],
         )
         .await
         .unwrap();
     for index in 0..10 {
-        let turn = say(&store, &host, ALICE, &format!("Work {index}")).await;
+        let (turn, _) = say(
+            &store,
+            &host,
+            ALICE,
+            &format!("Work {index}"),
+            HarnessKind::Codex,
+        )
+        .await;
         finish(&store, &host, &turn, true).await;
     }
+    // A shared note the Tag kept before goes to a turn of a shared Session, such as the review.
+    insert_seeds(url, &[("mem_shared", "", "Releases ship from main.")]).await;
     clock.store(BASE, Ordering::SeqCst);
     assert_eq!(store.sweep_memory().await.unwrap(), 1);
-    let task = store
-        .claim_task(&host, &Uuid::new_v4().to_string())
-        .await
-        .unwrap()
-        .unwrap();
-    let review = InspectAttemptRequest {
-        task_id: task.task.unwrap().task_id,
-        attempt_id: task.attempt_id,
-        lease_token: task.lease_token,
-    };
-    store
-        .start_task(
-            &host,
-            &StartTaskRequest {
-                task_id: review.task_id.clone(),
-                attempt_id: review.attempt_id.clone(),
-                lease_token: review.lease_token.clone(),
-            },
-        )
-        .await
-        .unwrap();
+    let (review, assignment) = claim(&store, &host, HarnessKind::Codex).await;
+    assert_eq!(
+        seeds(&assignment),
+        [(
+            "mem_shared".to_owned(),
+            "Releases ship from main.".to_owned()
+        )]
+    );
+    let task = assignment.task.clone().unwrap();
+    assert!(
+        task.session_id.starts_with("memory:"),
+        "{}",
+        task.session_id
+    );
+    // The review keeps the harness's own memory, against the Sessions, and merges proposals.
+    for text in ["your own memory", "proposals", "stay_quiet", "read_session"] {
+        assert!(task.prompt.contains(text), "{text}: {}", task.prompt);
+    }
+    assert!(!task.prompt.contains("remember"), "{}", task.prompt);
+    // It gets the shared store, and its changes are the Tag's own.
+    assert_eq!(assignment.native_memory.unwrap().scope, "shared");
     // The review runs read-only: of the Tag's actions it keeps only reading files.
     assert_eq!(
         store
@@ -515,11 +377,8 @@ async fn review_contract(url: &str) {
             .allowed_actions,
         ["files:read"]
     );
-    let caps = store
-        .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(&host, &review))
-        .await
-        .unwrap();
-    assert!(caps.may_remember && caps.may_read_tag_sessions);
+    let caps = capabilities(&store, &host, &review).await;
+    assert!(caps.memory_trusted && caps.may_read_tag_sessions);
     // The review reaches no one: it finishes quietly.
     assert!(caps.may_stay_quiet);
     assert!(
@@ -533,7 +392,7 @@ async fn review_contract(url: &str) {
     // It sees only shared Sessions: Alice's conversation is private to her.
     let listed = store
         .list_tag_sessions(
-            &supertag_control_plane::AttemptAccess::new(&host, &review),
+            &AttemptAccess::new(&host, &review),
             &ListTagSessionsRequest {
                 ..Default::default()
             },
@@ -541,92 +400,52 @@ async fn review_contract(url: &str) {
         .await
         .unwrap();
     assert!(listed.sessions.is_empty(), "{listed:?}");
-    let note = remember(
-        &store,
-        &host,
-        &review,
-        "op-1",
-        "Lesson: run tests first.",
-        None,
-    )
-    .await
-    .unwrap()
-    .memory
-    .unwrap();
-    assert!(note.audience.is_none(), "a review writes shared notes");
     finish(&store, &host, &review, true).await;
-    assert_eq!(texts(&store, BOB).await, ["Lesson: run tests first."]);
 
     // Within a day, more work queues no review; after a day it does.
     clock.store(BASE + HOUR, Ordering::SeqCst);
     for index in 0..10 {
-        let turn = say(&store, &host, BOB, &format!("More {index}")).await;
+        let (turn, _) = say(
+            &store,
+            &host,
+            BOB,
+            &format!("More {index}"),
+            HarnessKind::Codex,
+        )
+        .await;
         finish(&store, &host, &turn, true).await;
     }
     clock.store(BASE + 23 * HOUR, Ordering::SeqCst);
     assert_eq!(store.sweep_memory().await.unwrap(), 0);
     clock.store(BASE + 25 * HOUR, Ordering::SeqCst);
     assert_eq!(store.sweep_memory().await.unwrap(), 1);
-    let next = store
-        .claim_task(&host, &Uuid::new_v4().to_string())
-        .await
-        .unwrap()
-        .unwrap();
-    let task = next.task.unwrap();
-    assert!(
-        task.prompt.contains("Review your work since"),
-        "{}",
-        task.prompt
-    );
-    let second = InspectAttemptRequest {
-        task_id: task.task_id,
-        attempt_id: next.attempt_id,
-        lease_token: next.lease_token,
-    };
-    store
-        .start_task(
-            &host,
-            &StartTaskRequest {
-                task_id: second.task_id.clone(),
-                attempt_id: second.attempt_id.clone(),
-                lease_token: second.lease_token.clone(),
-            },
-        )
-        .await
-        .unwrap();
+    let (second, assignment) = claim(&store, &host, HarnessKind::Codex).await;
+    let prompt = assignment.task.unwrap().prompt;
+    assert!(prompt.contains("Review your work since"), "{prompt}");
     finish(&store, &host, &second, true).await;
 
-    // memory: false turns off the notes, the tools, and the review.
-    let mut spec = PutTagRequest {
-        tag_id: TAG.into(),
-        instructions: "No notes".into(),
-        allowed_actions: vec!["files:read".into()],
-        memory: Some(false),
-        ..Default::default()
-    };
-    let tag = store.put_tag_spec(spec.clone()).await.unwrap();
-    assert!(!tag.memory);
-    spec.memory = None;
-    assert!(
-        !store.put_tag_spec(spec).await.unwrap().memory,
-        "omitted keeps it off"
-    );
-    let quiet = say(&store, &host, BOB, "Anything to note?").await;
-    let caps = store
-        .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(&host, &quiet))
+    // memory: false turns off the review.
+    store
+        .put_tag_spec(PutTagRequest {
+            tag_id: TAG.into(),
+            instructions: "No memory".into(),
+            allowed_actions: vec!["files:read".into()],
+            memory: Some(false),
+            ..Default::default()
+        })
         .await
         .unwrap();
-    assert!(!caps.may_remember);
-    assert!(
-        !caps.tag_portfolio.contains("Notes"),
-        "{}",
-        caps.tag_portfolio
-    );
-    assert!(matches!(
-        remember(&store, &host, &quiet, "op-1", "x", None).await,
-        Err(StoreError::PermissionDenied)
-    ));
-    finish(&store, &host, &quiet, true).await;
+    for index in 0..10 {
+        let (turn, _) = say(
+            &store,
+            &host,
+            BOB,
+            &format!("Late {index}"),
+            HarnessKind::Codex,
+        )
+        .await;
+        finish(&store, &host, &turn, true).await;
+    }
     clock.store(BASE + 60 * HOUR, Ordering::SeqCst);
     assert_eq!(store.sweep_memory().await.unwrap(), 0);
     store.close().await;

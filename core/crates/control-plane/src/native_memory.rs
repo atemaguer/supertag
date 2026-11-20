@@ -102,10 +102,20 @@ pub(crate) async fn grant_in(
     let volume_head = volume_store_in(tx, task, audience.as_deref())
         .await?
         .and_then(|(_, head)| head);
+    let trusted = crate::memories::trusted_turn_in(tx, task).await?;
+    // The notes the Tag kept before go into the store of a harness that keeps one, by a turn
+    // whose changes are the Tag's own.
+    let seeds = if trusted && matches!(store_harness(task), Some("claude-code" | "codex")) {
+        crate::memories::seeds_in(tx, task, audience.as_deref()).await?
+    } else {
+        vec![]
+    };
     Ok(Some(NativeMemoryGrant {
         scope: scope(audience.as_deref()),
         reset_generation: generation_in(tx, &task.tag_id).await?,
         volume_head,
+        seeds,
+        trusted,
     }))
 }
 
@@ -379,7 +389,8 @@ impl Store {
             )));
         }
         let stores = stores_in(&mut tx, &input.tag_id).await?;
-        retire_tag_in(&mut tx, &input.tag_id).await?;
+        // The memory to drop includes the notes still waiting to be written into it.
+        crate::memories::retire_tag_in(&mut tx, &input.tag_id).await?;
         sqlx::query("UPDATE supertag_v2_tags SET native_memory_generation=native_memory_generation+1 WHERE tag_id=$1")
             .bind(&input.tag_id)
             .execute(&mut *tx)

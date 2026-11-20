@@ -90,6 +90,12 @@ impl Attempt {
                         head.manifest
                             .map(|manifest| (head.revision, manifest.sha256, manifest.byte_length))
                     }),
+                    seeds: grant
+                        .seeds
+                        .into_iter()
+                        .map(|seed| (seed.seed_id, seed.text, seed.created_at_ms))
+                        .collect(),
+                    trusted: grant.trusted,
                 }),
             volume: assignment.volume.map(|volume| journal::AssignedVolume {
                 volume_id: volume.volume_id,

@@ -4,7 +4,6 @@ import type {
   HarnessMemoryList,
   NetworkLog,
   NetworkRequest,
-  Note,
   Tag,
   TagActivity,
   WatchUpdate,
@@ -16,19 +15,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ScheduleList } from "./schedules";
 import { relativeTime } from "./sidebar";
 import { Button } from "./ui/button";
-
-/** How often the notes are read again while the watch is down. */
-const NOTES_INTERVAL = 30_000;
-
-/** What the details panel says of a note: who sees it, when it was kept, and last seen. */
-export function noteCaption(note: Note, now = Date.now()): string {
-  const parts = [
-    note.private ? "Only you" : "Shared",
-    `kept ${relativeTime(note.updatedAtMs || note.createdAtMs, now)}`,
-    note.lastSeenAtMs ? `last used ${relativeTime(note.lastSeenAtMs, now)}` : "not used yet",
-  ];
-  return parts.join(" · ");
-}
 
 /**
  * The Tag details panel beside the conversation, opened from the Tag's name: one section per
@@ -90,145 +76,47 @@ export function TagDetails({
         </Button>
       </div>
       <ActivitySection gateway={gateway} watch={watch} tag={tag} />
-      <NotesSection gateway={gateway} watch={watch} tag={tag} />
-      <HarnessMemorySection gateway={gateway} watch={watch} tag={tag} />
+      <MemorySection gateway={gateway} watch={watch} tag={tag} />
       <ScheduleList gateway={gateway} watch={watch} tagId={tag.tagId} />
       <NetworkSection gateway={gateway} watch={watch} tag={tag} />
     </aside>
   );
 }
 
-/**
- * The notes the Tag keeps that you may see, each of which you can delete. People never write notes
- * here; they tell the Tag.
- */
-export function NotesSection({
-  gateway,
-  watch,
-  tag,
-}: {
-  gateway: Gateway;
-  watch?: WatchFeed;
-  tag: Tag;
-}) {
-  const [notes, setNotes] = useState<Note[]>();
-  const [error, setError] = useState("");
-  const [deleting, setDeleting] = useState<string>();
-  const tagId = tag.tagId;
-  const read = useCallback(
-    async (signal: AbortSignal) => {
-      if (!gateway.notes) {
-        setNotes([]);
-        return;
-      }
-      try {
-        const next = await gateway.notes(tagId);
-        if (signal.aborted) return;
-        setNotes(next);
-        setError("");
-      } catch (error) {
-        if (!signal.aborted) setError(describe(error));
-        return false;
-      }
-    },
-    [gateway, tagId],
-  );
-  const affected = useCallback(
-    (update: WatchUpdate) => update.kind === "memory" && update.tagId === tagId,
-    [tagId],
-  );
-  const refresh = useWatchRefresh(read, NOTES_INTERVAL, watch, affected);
-
-  async function remove(note: Note) {
-    if (!gateway.deleteNote || deleting) return;
-    setDeleting(note.memoryId);
-    try {
-      await gateway.deleteNote(note.memoryId);
-      setNotes((prior) => prior?.filter(({ memoryId }) => memoryId !== note.memoryId));
-      setError("");
-      refresh();
-    } catch (error) {
-      setError(describe(error));
-    } finally {
-      setDeleting(undefined);
-    }
-  }
-
-  const name = tag.name ?? tag.tagId;
-  const status =
-    error ||
-    (notes === undefined
-      ? "Loading notes…"
-      : notes.length
-        ? ""
-        : `${name} keeps no notes you can see yet. Tell it what to remember.`);
-  return (
-    <section className="details-section" aria-labelledby="tag-details-notes">
-      <h3 id="tag-details-notes">Notes</h3>
-      <p className="tag-details-intro">
-        What {name} keeps between turns. Delete a note to have it forget it.
-      </p>
-      {status && (
-        <p className="activity-status" role="status">
-          {status}
-        </p>
-      )}
-      <ul className="notes" aria-label="Notes">
-        {notes?.map((note) => (
-          <li key={note.memoryId} className="note">
-            <p className="note-text">{note.text}</p>
-            <div className="note-footer">
-              <small>
-                {note.private && <Lock size={11} aria-hidden />}
-                {noteCaption(note)}
-              </small>
-              {gateway.deleteNote && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="icon-button"
-                  aria-label={`Delete note: ${note.text}`}
-                  title="Delete note"
-                  disabled={deleting !== undefined}
-                  onClick={() => void remove(note)}
-                >
-                  <Trash2 size={14} aria-hidden />
-                </Button>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-/** How often harness memory is read again; a turn that changes it is also a conversation change. */
-const HARNESS_MEMORY_INTERVAL = 30_000;
+/** How often the Tag's memory is read again; a turn that changes it is also a conversation change. */
+const MEMORY_INTERVAL = 30_000;
 
 const HARNESS_NAMES: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex" };
 
 /**
- * What the details panel says of a harness memory: whose harness keeps it, what it is about, who
- * sees it, whether a turn that may not write the Tag's memory last changed it, and when.
+ * What the details panel says of a memory: whose harness keeps it, what it is about, who sees it,
+ * whether it waits for the Tag's daily memory review or a turn that may not write the Tag's
+ * memory last changed it, and when.
  */
-export function harnessMemoryCaption(memory: HarnessMemory, now = Date.now()): string {
+export function memoryCaption(memory: HarnessMemory, now = Date.now()): string {
   const parts = [
     HARNESS_NAMES[memory.harness] ?? memory.harness,
     memory.kind,
     memory.private ? "Only you" : "Shared",
   ];
-  if (memory.trust === "proposed-only") parts.push("proposed by a Work Session");
+  if (memory.status === "proposed") parts.push("waits for the daily memory review");
+  else if (memory.trust === "proposed-only") parts.push("changed by a Work Session");
   parts.push(`kept ${relativeTime(memory.updatedAtMs, now)}`);
   return parts.join(" · ");
 }
 
+/** What deleting a memory does: a proposal is dropped before the review merges it. */
+function deleteLabel(memory: HarnessMemory): string {
+  return memory.status === "proposed" ? "Drop proposed memory" : "Delete memory";
+}
+
 /**
- * The memory the Tag's harness keeps itself, such as Claude Code's auto-memory, as this Mac's
- * Worker Host reads it from the harness's files; each can be deleted. It never passes through the
- * Control Plane, so a shared Gateway's Tags show none here.
+ * The Tag's memory, which its harness keeps, such as Claude Code's auto-memory, as this Mac's
+ * Worker Host reads it from the harness's files, with the changes Work Sessions proposed to it;
+ * each can be deleted. It never passes through the Control Plane, so a shared Gateway's Tags show
+ * none here.
  */
-export function HarnessMemorySection({
+export function MemorySection({
   gateway,
   watch,
   tag,
@@ -258,11 +146,10 @@ export function HarnessMemorySection({
   );
   // A finished turn is when the harness may have changed its memory.
   const affected = useCallback(
-    (update: WatchUpdate) =>
-      (update.kind === "conversation" || update.kind === "memory") && update.tagId === tagId,
+    (update: WatchUpdate) => update.kind === "conversation" && update.tagId === tagId,
     [tagId],
   );
-  const refresh = useWatchRefresh(read, HARNESS_MEMORY_INTERVAL, watch, affected);
+  const refresh = useWatchRefresh(read, MEMORY_INTERVAL, watch, affected);
 
   async function remove(memory: HarnessMemory) {
     if (!gateway.deleteHarnessMemory || deleting) return;
@@ -291,15 +178,13 @@ export function HarnessMemorySection({
   const status =
     error ||
     (list === undefined
-      ? "Loading harness memory…"
-      : (list.unavailable ??
-        (memories.length ? "" : `${name}'s harness keeps no memory on this Mac yet.`)));
+      ? "Loading memory…"
+      : (list.unavailable ?? (memories.length ? "" : `${name} keeps no memory on this Mac yet.`)));
   return (
-    <section className="details-section" aria-labelledby="tag-details-harness-memory">
-      <h3 id="tag-details-harness-memory">Harness memory</h3>
+    <section className="details-section" aria-labelledby="tag-details-memory">
+      <h3 id="tag-details-memory">Memory</h3>
       <p className="tag-details-intro">
-        What {name}'s harness keeps itself, on this Mac's Worker Host. Delete one to have it forget
-        it.
+        What {name} keeps between turns, on this Mac's Worker Host. Delete one to have it forget it.
       </p>
       {status && (
         <p className="activity-status" role="status">
@@ -311,27 +196,28 @@ export function HarnessMemorySection({
           More is kept on Worker Host {list.keptOn.join(", ")}, and shows only there.
         </p>
       )}
-      <ul className="notes" aria-label="Harness memory">
+      <ul className="memories" aria-label="Memory">
         {memories.map((memory) => (
-          <li key={memory.memoryId} className="note">
-            <p className="note-text">
+          <li key={memory.memoryId} className="memory" data-status={memory.status}>
+            <p className="memory-text">
               <strong>{memory.title}</strong>
               {memory.title && memory.text ? " — " : ""}
               {memory.text}
               {memory.truncated ? "…" : ""}
             </p>
-            <div className="note-footer">
+            <div className="details-footer">
               <small>
+                {memory.status === "proposed" && <span className="memory-badge">Proposed</span>}
                 {memory.private && <Lock size={11} aria-hidden />}
-                {harnessMemoryCaption(memory)}
+                {memoryCaption(memory)}
               </small>
               {gateway.deleteHarnessMemory && (
                 <Button
                   variant="ghost"
                   size="icon"
                   className="icon-button"
-                  aria-label={`Delete harness memory: ${memory.title || memory.text}`}
-                  title="Delete harness memory"
+                  aria-label={`${deleteLabel(memory)}: ${memory.title || memory.text}`}
+                  title={deleteLabel(memory)}
                   disabled={deleting !== undefined}
                   onClick={() => void remove(memory)}
                 >
@@ -435,7 +321,7 @@ export function NetworkSection({
       <ul className="network-logs" aria-label="Network log">
         {logs?.map((log) => (
           <li key={log.attemptId} className="network-log">
-            <div className="note-footer">
+            <div className="details-footer">
               <small>Task {log.taskId.slice(0, 8)}</small>
               <small>{networkTotals(log)}</small>
             </div>

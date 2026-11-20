@@ -476,11 +476,11 @@ tool the turn does not get; it does not only leave it out of the list.
 
 | Turn | Tools |
 | --- | --- |
-| An Objective's conversation | `start_session`, `continue_session`, `ask`, `report_objective`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule` and `cancel_schedule` (with `schedule:create`), `remember` and `forget`, and the [Session reads](#recalling-other-sessions) |
-| A conversation with a person, or a surface thread | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule` and `cancel_schedule` (with `schedule:create`), `remember` and `forget`, and the Session reads |
-| A Tag's inbox | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `remember` and `forget`, the Session reads, and `stay_quiet` |
-| A Tag's memory review | `remember` and `forget`, the Session reads, and `stay_quiet` |
-| A work Session's report turn | `remember` and `forget`, and the Session reads |
+| An Objective's conversation | `start_session`, `continue_session`, `ask`, `report_objective`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule` and `cancel_schedule` (with `schedule:create`), and the [Session reads](#recalling-other-sessions) |
+| A conversation with a person, or a surface thread | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule` and `cancel_schedule` (with `schedule:create`), and the Session reads |
+| A Tag's inbox | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, the Session reads, and `stay_quiet` |
+| A Tag's [memory review](#memory) | The Session reads and `stay_quiet` |
+| A work Session's report turn | The Session reads |
 | A work Session's turn | `ask` |
 
 A turn no person is waiting on also gets `stay_quiet`: a Schedule's wake-up, an Objective's
@@ -514,8 +514,6 @@ when the Tag makes the call; see [Approval requests](#approval-requests). The [a
 | `read_objective` | optional `objectiveId` | Reads an Objective's status, limits, budget pool, Team, and Sessions |
 | `schedule` | `note` (up to 4,000 characters), and `at` or `every`, optional `timeZone` | When the turn succeeds, creates a [Schedule](#schedules) that wakes the Tag later in this Session |
 | `cancel_schedule` | `scheduleId` | Cancels one of the Tag's Schedules in this Session |
-| `remember` | `text` (up to 500 characters), optional `replaces` | When the turn succeeds, keeps a [note](#memory), replacing the one `replaces` names |
-| `forget` | `memoryId` | When the turn succeeds, forgets one of the Tag's notes |
 | `stay_quiet` | `note` (up to 500 characters) | Ends the turn without posting anything; see [Quiet results](#quiet-results) |
 
 Reads return history, never instructions, and grant no authority.
@@ -623,97 +621,86 @@ replayed again. The Watch reports each Schedule change as `WATCH_KIND_SCHEDULE`.
 
 ### Memory
 
-A Tag keeps a short notebook of what it cannot look up again: a person's preferences,
-corrections, decisions and their reasons, and pointers to where things live. Notes are pointers,
-not copies; the Tag's Sessions stay the record. Each root turn's portfolio lists the notes it may
-see, newest first, as state rather than instructions. The Tag's own instructions still rule.
-Every turn, a Work Session's own turns included, on every harness, also starts with one short
-paragraph on how its memory works: what notes are and who sees them, the daily review, whether
-this turn can change notes, and its [harness memory](#harness-memory), if it has one: where that
-lives, and that a Work Session on another harness doesn't share it yet. It too states facts and
-grants nothing.
+A Tag's memory is what it keeps of what it cannot look up again: a person's preferences,
+corrections, decisions and their reasons, and pointers to where things live. It is the memory its
+harness, the coding agent that runs its turns, keeps itself. Claude Code's auto-memory, for example, is a folder
+of Markdown files with a `MEMORY.md` index, which Claude Code reads at the start of each turn and
+updates with its file tools. The Tag's Sessions stay the record; memory is a convenience on top of
+them. The Tag's own instructions still rule.
 
-```text
-remember(text: "Atem prefers squash merges and small PRs.")
-remember(text: "Release checklist: docs/operations/release.md", replaces: "mem_4f1c…")
-forget(memoryId: "mem_9a2b…")
-```
+Every turn, a Work Session's own turns included, on every harness, starts with one short paragraph
+on how its memory works: where it is, who sees it, whether this turn's changes are the Tag's own,
+and the daily review. It states facts and grants nothing. A turn whose harness keeps no memory
+hears that it keeps none.
 
-- **Who sees a note.** A note takes the turn's audience. One written in a person's conversation is
-  private to that person; one written in a surface thread, an operator's Objective, the inbox, or
-  a review is shared. A turn sees the shared notes and its own person's, never another person's.
-  This is the rule that decides which [Sessions a turn sees](#recalling-other-sessions).
-- **When it applies.** A call takes effect when its turn succeeds. A turn that fails, is
-  cancelled, or loses its lease changes nothing, so a retried turn never writes twice. The tool's
-  result lists the notes the turn now sees.
-- **Limits.** A note is at most 500 characters. A turn sees at most 40 notes and 6,000 characters
-  of them. At the limit, `remember` is refused with the oldest notes named, so the Tag can forget
-  or merge them (`remember` with `replaces`). One turn writes or forgets at most 10 notes.
-- **Who may write.** Root turns of a Tag that keeps memory. A Work Session's own turn, and a turn
-  a GitHub or Linear event started, get no `remember` or `forget`: an issue or pull request may
-  hold text someone outside wrote. Otherwise, asking the Tag for work and teaching it are the
-  same trust. Anyone on a surface location's `allowed-users` may do both; the Gateway drops
-  everyone else's messages before the Control Plane sees them.
+- **Who sees it.** A Tag keeps one store for its shared turns and one for each person's
+  conversations, so one person's conversation never feeds another's. A turn in a surface thread,
+  an operator's Objective, the inbox, or the review uses the shared store. This is the rule that
+  decides which [Sessions a turn sees](#recalling-other-sessions).
+- **Whose changes count.** What a root turn or the daily review keeps in its memory is the Tag's
+  own. A Work Session's own turn reads the Tag's memory as it was and can't change it: what it
+  writes or changes there is kept beside the store as a proposal, with the turn that wrote it, for
+  the review to merge or drop. A turn a GitHub or Linear event started gets no memory at all: an
+  issue or pull request may hold text someone outside wrote. Otherwise, asking the Tag for work
+  and teaching it are the same trust. Anyone on a surface location's `allowed-users` may do both;
+  the Gateway drops everyone else's messages before the Control Plane sees them.
+- **Which harnesses.** Claude Code and Codex keep memory under SuperTag; OpenCode and Cursor keep
+  none on the Worker Host yet. Only the Tag's turns on the same harness share it: a Work Session on
+  another harness doesn't see it yet.
 
-**The daily review.** Once a day, after at least ten finished turns since the last one, the Tag
+### The daily review
+
+Once a day, after at least ten finished turns since the last one, the Tag
 gets a review turn in its reserved Session `memory:TAG`. The turn lists the shared Sessions with
-work since the last review. The Tag rereads them with `read_session` and `read_turn`, then
-merges, replaces, adds, and forgets notes. The review has only the Session reads, the memory
-tools, and `stay_quiet`: it cannot message anyone, start work, or schedule. It runs read-only in
-the Tag's Workspace: of the Tag's actions it keeps only `files:read`, so it cannot change files or
-run commands, whatever the Tag may do in other turns. It ends with
-`stay_quiet`, so it posts nothing and raises nothing unread. A review is never queued while another
-is still queued or running. `supertag describe tag` shows when the Tag last reviewed.
+work since the last review. The Tag rereads them with `read_session` and `read_turn` and keeps its
+own memory current with its harness's tools: it corrects what the Sessions contradict, merges
+duplicates, rewrites time-relative facts with their dates, and drops what the repository or the
+Sessions already record. Its Worker Host adds the proposals waiting in the shared store to the
+review's request, oldest first, as state rather than instructions; the review writes what is right
+into its memory in its own words, and the proposals it was shown go once it finishes. The review
+reads only shared work, so a person's store has none: its proposals go, up to 8 KiB of them, into
+that person's next conversation turn whose changes are the Tag's own, which merges them the same
+way as part of its work. A proposal no turn takes goes after 14 days. The review has only the Session reads and `stay_quiet`: it
+cannot message anyone, start work, or schedule. It runs read-only in the Tag's Workspace: of the
+Tag's actions it keeps only `files:read`, so it cannot change files or run commands, whatever the
+Tag may do in other turns; its harness's memory folder stays writable. It ends with `stay_quiet`,
+so it posts nothing and raises nothing unread. A review is never queued while another is still
+queued or running. `supertag describe tag` shows when the Tag last reviewed.
 
 A Tag with `memory: false` (`supertag tag put TAG --memory false`, or `spec.memory` in a Tag
-manifest) keeps no notes, has neither tool, and never reviews. Retiring a Tag deletes its notes.
+manifest) keeps no memory and never reviews.
 
-People read notes with `supertag get memories [--tag TAG]` and `supertag describe memory ID`, and
-delete one with `supertag delete memory ID`; the same commands read and delete
-[harness memory](#reading-and-deleting-harness-memory) on this machine. The desktop app shows a Tag's notes in its
-details panel, opened from the Tag's name above the conversation, and the terminal app in its
-Notes panel; both delete a note too. It never writes a
-note: people tell the Tag ("remember that I prefer squash merges", "forget that"). An operator sees shared notes and those
-of clients' conversations; a client sees shared notes and its own. Each note records when a turn
-last had it in its context (`last_seen_at` in `describe memory`), so a note no turn has used for
-a long time is easy to spot. `supertag watch memory` follows notes as they are kept, rewritten,
-and deleted.
+### Where memory lives
 
-### Harness memory
-
-Some harnesses keep a memory of their own. Claude Code's auto-memory, for
-example, is a folder of Markdown files with a `MEMORY.md` index, which Claude Code reads at the
-start of each turn and updates with its file tools. A Tag that keeps memory keeps its harness's
-memory too, beside its [notes](#memory), across Tasks:
-
-- **Where it lives.** On the Worker Host that ran the turn, in its artifact storage
-  (`--artifact-directory`, by default `artifacts` in its state directory), which every [Worker](glossary.md#worker) of the
-  host shares, at `tags/<SHA-256 of TAG>/native-memory/HARNESS/SCOPE/current`, beside
-  the Tag's Session checkpoints. The Control Plane never holds the files, only a record of what
-  each host holds: the revision, file count, size, and a digest.
-- **Who shares it.** It follows the audience rule for notes: one store for the Tag's shared turns
-  and one for each person's conversations, so one person's conversation never feeds another's.
-  A turn a GitHub or Linear event started gets none.
+- **On the Worker Host.** On the Worker Host that ran the turn, in its artifact storage
+  (`--artifact-directory`, by default `artifacts` in its state directory), which every
+  [Worker](glossary.md#worker) of the host shares, at
+  `tags/<SHA-256 of TAG>/native-memory/HARNESS/SCOPE/current`, beside the Tag's Session
+  checkpoints. Proposals wait beside it in `proposals.json`. The Control Plane never holds the
+  files, only a record of what each host holds: the revision, file count, size, and a digest.
 - **Parallel turns.** Each turn works on its own copy. When the harness stops, the host merges the
   copy back file by file: a file only one turn changed takes that change; a file two turns changed
   keeps the later one and saves the earlier as `NAME.conflict-ATTEMPT.md` beside it; the
   `MEMORY.md` index keeps both turns' lines.
 - **Limits.** A store holds at most 1,000 files and 4 MiB, and a file at most 256 KiB. A turn's
-  changes that would pass a limit, or that add a link or special file, are not kept.
-- **Another host.** Each Worker Host's Worklet keeps its own copy. A Tag whose next turn runs on another
-  host starts from that host's copy, or from none, and a host that is removed takes its copy with
-  it. The Tag's notes and Sessions stay; harness memory is a convenience on top of them.
+  changes that would pass a limit, or that add a link or special file, are not kept. A store keeps
+  at most 100 proposals, newest first.
+- **Another host.** Each Worker Host's Worklet keeps its own copy. A Tag whose next turn runs on
+  another host starts from that host's copy, or from none, and a host that is removed takes its
+  copy with it.
 - **On a Volume.** A Tag that names a Volume (`supertag tag put TAG --volume NAME`) keeps its
-  harness memory there instead, so every Worker Host that maps the Volume uses the same memory.
-  The Volume holds the files and a manifest of them as objects that never change, at
+  memory there instead, so every Worker Host that maps the Volume uses the same memory. The Volume
+  holds the files and a manifest of them as objects that never change, at
   `tags/<SHA-256 of TAG>/native-memory/HARNESS/SCOPE/objects/`; the Control Plane keeps only which
   manifest is current. When two turns end at once, the second merges onto what the first kept, as
   on one host. Objects the store no longer names, and all of them after
-  `supertag delete memory --native`, are deleted from the Volume like other Volume garbage; so are
+  `supertag delete memory --tag`, are deleted from the Volume like other Volume garbage; so are
   objects a turn wrote but never kept, once that turn has ended and an hour has passed since it
-  wrote them.
+  wrote them. A Work Session's changes to memory on a Volume are kept as the Tag's own for now.
 
-Claude Code and Codex keep harness memory this way:
+### Claude Code and Codex memory
+
+Claude Code and Codex keep their [memory](#memory) this way:
 
 - **Claude Code** keeps its auto-memory folder. A read-only turn may still write to its memory
   folder, and nowhere else. The folder belongs to the store, not to the checkout, so a turn in
@@ -722,62 +709,64 @@ Claude Code and Codex keep harness memory this way:
   Claude Code keeps its memories there with its own file tools, confined to the folder, while
   every tool that touches the Workspace runs in the sandbox, which never reaches the folder.
 - **Codex** keeps its memory folder: notes it saves with its memory tools, and the summary it
-  reads at the start of each turn. Each turn is told to search its notes before answering
-  anything that may depend on earlier work, and that Codex's own rule, to add to its memory only
-  when someone asks, covers that folder and not the Tag's notes. Codex's own consolidation, which
-  folds the notes into that summary with extra model calls, runs only in the Tag's daily review
-  turn. Codex starts its consolidation agent at every turn, so in other turns SuperTag names a
-  model that doesn't exist for it: the agent fails at its first request and spends nothing. The
-  review turn waits up
-  to 3 minutes after it finishes for Codex to complete it, so later turns read the notes in the
+  reads at the start of each turn. Each turn is told to search its memory before answering
+  anything that may depend on earlier work, and to add a note when it learns something lasting,
+  whatever Codex's own rule to add to memory only when someone asks. Codex's own consolidation,
+  which folds the notes into that summary with extra model calls, runs only in the Tag's daily
+  review turn. It consolidates what changed since its last consolidation, so the store keeps the
+  folder as Codex last consolidated it (`.supertag-consolidated`), and the review starts Codex
+  from that baseline; Codex's git repository inside the folder is not kept. Codex starts its
+  consolidation agent at every turn, so in other turns SuperTag names a model that doesn't exist
+  for it: the agent fails at its first request and spends nothing. The review turn waits up to 3
+  minutes after it finishes for Codex to complete it, so later turns read the notes in the
   summary without searching. Codex doesn't report the consolidation's tokens, so a Codex review
-  turn is reported unpriced, with only its own tokens counted. Codex's git repository inside the
-  folder is not kept.
-
-OpenCode and Cursor keep no memory of their own on the Worker Host. Codex doesn't run in remote
-Workspaces.
+  turn is reported unpriced, with only its own tokens counted. Codex doesn't run in remote
+  Workspaces.
 
 `supertag describe tag` lists the copies Worker Hosts hold (`native_memory`), and
-`supertag delete memory --native TAG` drops all of them: the Worker Hosts on this machine delete
+`supertag delete memory --tag TAG` drops all of them: the Worker Hosts on this machine delete
 theirs at once, and every other host deletes its copies before it next runs one of the Tag's
-Tasks. A Tag with `memory: false` keeps no harness memory either.
+Tasks.
 
-### Reading and deleting harness memory
+### Reading and deleting memory
 
-A Tag's [harness memory](#harness-memory) is read on the machine whose Worker Host keeps it. The
-Worker Host keeps one record for each memory beside each store, read from the harness's own files
-with no model call, and rebuilds the records from the files whenever they are missing or older. In Claude Code's folder, each Markdown file but `MEMORY.md` is a memory, with
-the title, description, and type its frontmatter names, and so is each line of `MEMORY.md` that
-links no file. In Codex's folder, each note it saved (`extensions/ad_hoc/notes/`) is a memory, and
-so is each bullet or paragraph of its summary (`memory_summary.md`). Codex's task groups
-(`MEMORY.md`), rollout summaries, and skills are its own working files and are not listed. Each
-record has:
+A Tag's [memory](#memory) is read on the machine whose Worker Host keeps it. The Worker Host keeps
+one record for each memory beside each store, read from the harness's own files with no model
+call, and rebuilds the records from the files whenever they are missing or older. In Claude Code's
+folder, each Markdown file but `MEMORY.md` is a memory, with the title, description, and type its
+frontmatter names, and so is each line of `MEMORY.md` that links no file. In Codex's folder, each
+note it saved (`extensions/ad_hoc/notes/`) is a memory, and so is each bullet or paragraph of its
+summary (`memory_summary.md`). Codex's task groups (`MEMORY.md`), rollout summaries, and skills
+are its own working files and are not listed. Each proposal is listed beside the store's own
+memories. Each record has:
 
 | Field | What it says |
 | --- | --- |
-| `memory_id` | `hmem_` and 24 hex digits, from its Tag, audience, harness, and place in the files. A note's ID starts with `mem_`. |
+| `memory_id` | `hmem_` and 24 hex digits, from its Tag, audience, harness, and place in the files. |
 | `text`, `title`, `hook` | Up to 2 KB of the memory (`truncated` when its file holds more), its title, and its one-line description, when it has one. |
 | `kind` | `preference`, `feedback`, `fact`, `reference`, or `procedure`, from Claude Code's memory type or the heading in Codex's summary. |
 | `shared`, `audience`, `scope` | Its store's audience: shared, or one person's conversations. |
-| `trust` | `trusted` when the turn that last changed it may write the Tag's memory; `proposed-only` when that turn could not keep notes, such as a Work Session's own turn; unset when no recorded turn did. |
-| `status` | `owned`: the Tag's own harness keeps it. |
+| `trust` | `trusted` when the turn that last changed it may change the Tag's memory; `proposed-only` when that turn could only propose, such as a Work Session's own turn; unset when no recorded turn did. |
+| `status` | `owned`: the Tag's own memory. `proposed`: a change waiting for the daily review. |
 | `source` | The Worker Host, the file, the memory's place in it (`native_id`), and the store's revision. |
 | `source_task_id`, `source_session_id` | The turn that last changed it, when known. |
 | `content_hash` | The SHA-256 of its whole text. |
 
 The memory never passes through the Control Plane. Each Worker Host that `supertag up` runs
 serves its records to programs of the same user on the same machine, over a socket in its state
-directory (`memory.sock`, readable only by that user). `supertag get memories` lists them beside
-the notes; `--native` lists only harness memory, and `--tag TAG` one Tag's. `supertag describe
-memory ID` and `supertag get memory ID` read one, and `supertag delete memory ID` deletes it:
-the host removes it from the harness's files (a file, and its line in Claude Code's `MEMORY.md`,
-or one bullet of Codex's summary) as the store's next revision, so a turn that started earlier
-keeps it only if that turn changed it. The desktop app shows a Tag's harness memory in the Tag's
-details panel, and the terminal app in its Notes panel, both with delete. They read it through
-the CLI too, so only the local Gateway's connection shows it. With no Worker Host running on this
-machine, or a command that reaches a shared Gateway, nothing is listed and the output says why
-(`native_memory_unavailable`); when the Control Plane records part of the Tag's memory on a Worker
-Host elsewhere, `native_memory_kept_on` names it. Harness memory on a Volume isn't listed yet.
+directory (`memory.sock`, readable only by that user). `supertag get memories` lists them, and
+`--tag TAG` one Tag's. `supertag describe memory ID` and `supertag get memory ID` read one, and
+`supertag delete memory ID` deletes it: the host removes it from the harness's files (a file, and
+its line in Claude Code's `MEMORY.md`, or one bullet of Codex's summary) as the store's next
+revision, so a turn that started earlier keeps it only if that turn changed it. Deleting a
+proposal drops it before any review sees it. The desktop app shows a Tag's memory in the Tag's
+details panel, opened from the Tag's name above the conversation, and the terminal app in its
+Memory panel, both with delete. They read it through the CLI too, so only the local Gateway's
+connection shows it. With no Worker Host running on this machine, or a command that reaches a
+shared Gateway, nothing is listed and the output says why (`unavailable`); when the Control Plane
+records part of the Tag's memory on a Worker Host elsewhere, `kept_on` names it. Memory on a
+Volume isn't listed yet. People never write memory directly: they tell the Tag ("remember that I
+prefer squash merges", "forget that").
 
 ### Quiet results
 

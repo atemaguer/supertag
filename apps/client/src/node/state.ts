@@ -29,7 +29,6 @@ import type {
   Message,
   MessagePage,
   NetworkLog,
-  Note,
   ReadMessages,
   Schedule,
   ScheduleAction,
@@ -43,7 +42,7 @@ import type { NewTag, TagOptions } from "../model/tag-admin";
 import { CACHE_ERROR, type CacheScope, entryPath, readEntry, validKey, writeEntry } from "./cache";
 import { conversation, event, message, messages, tag } from "./convert";
 import * as coordination from "./coordination";
-import { activity, networkLog, note, schedule } from "./details";
+import { activity, networkLog, schedule } from "./details";
 import { endpoint, gatewayOrigin, type Target } from "./endpoint";
 import { CONNECT_FIRST, CONNECTION_CHANGED, checkBearer, rpc, rpcError, statusOf } from "./errors";
 import { Cursor, runFollow } from "./follow";
@@ -544,21 +543,7 @@ export class GatewayState {
     });
   }
 
-  // Notes, network log, Schedules
-
-  /** The Tag's notes the caller sees, newest first. */
-  notes(connectionId: string, tagId: string): Promise<Note[]> {
-    return this.call(connectionId, async (session) =>
-      (await rpc(() => session.client.memories.list({ tagId }, CALL))).memories.map(note),
-    );
-  }
-
-  /** Deletes a note at once. The Tag no longer sees it from its next turn. */
-  deleteNote(connectionId: string, memoryId: string): Promise<Note> {
-    return this.call(connectionId, async (session) =>
-      note(await rpc(() => session.client.memories.delete({ memoryId }, CALL))),
-    );
-  }
+  // Network log, Schedules
 
   /** The Tag's newest Task Attempts with a network log, newest first. */
   networkLogs(connectionId: string, tagId: string): Promise<NetworkLog[]> {

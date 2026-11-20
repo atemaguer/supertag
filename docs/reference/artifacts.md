@@ -63,7 +63,7 @@ responsible for the submission; it may not have authored every file in a shared 
 
 Worklets do not collect content from a harness's own home directory, such as Codex memories
 or Claude Code plans, as artifacts; harness memory is kept as described in
-[Harness memory](coordination.md#harness-memory). Codex runs with image generation turned off.
+[Memory](coordination.md#memory). Codex runs with image generation turned off.
 
 ## Automatic Task outputs
 

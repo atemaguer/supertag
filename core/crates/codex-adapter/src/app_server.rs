@@ -940,7 +940,7 @@ pub(crate) async fn execute(
     let harness_memory = memory.then_some(supertag_protocol::HarnessMemory::Codex);
     prompt.push_str(&format!(
         "{}\n\n",
-        supertag_protocol::memory_context(questions.may_remember(), harness_memory)
+        supertag_protocol::memory_context(questions.memory_trusted(), harness_memory)
     ));
     if let Some(note) = supertag_protocol::web_access_note(&task.allowed_actions) {
         prompt.push_str(&format!("{note}\n\n"));

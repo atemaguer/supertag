@@ -180,75 +180,6 @@ async fn contract(url: &str) -> anyhow::Result<()> {
         Some(format!("v1.{}.{}", page.feed_id, page.head + bulk))
     );
     private_work_sessions(&watch, SECRET, parent).await?;
-    memory_notes(store).await?;
-    Ok(())
-}
-
-/// A note's changes reach the watch once it takes effect: a staged one is announced when its turn
-/// keeps it, a private one is its person's, and deleting one is announced.
-async fn memory_notes(store: &crate::Store) -> anyhow::Result<()> {
-    let before = store.watch_page(i64::MAX).await?;
-    let (mut tx, _) = store.write().await?;
-    for (id, audience, state) in [
-        ("mem_shared", None, 2_i64),
-        ("mem_alice", Some("operator:alice"), 2),
-        ("mem_staged", None, 1),
-    ] {
-        sqlx::query("INSERT INTO supertag_v2_tag_memories (memory_id,tag_id,audience_principal,text,state,created_by,created_at_ms,updated_at_ms) VALUES ($1,'engineer',$2,'A note',$3,'tag:engineer',1,1)")
-            .bind(id).bind(audience).bind(state).execute(&mut *tx).await?;
-    }
-    sqlx::query("UPDATE supertag_v2_tag_memories SET state=2 WHERE memory_id='mem_staged'")
-        .execute(&mut *tx)
-        .await?;
-    // Only a turn having seen it changes nothing anyone watches.
-    sqlx::query("UPDATE supertag_v2_tag_memories SET last_seen_at_ms=5")
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
-    store.delete_memory("operator:local", "mem_shared").await?;
-    let page = store.watch_page(before.head).await?;
-    assert_eq!(
-        page.notices
-            .iter()
-            .map(|n| (
-                n.change.kind(),
-                n.change.reason(),
-                n.change.id.as_str(),
-                n.change.tag_id.as_str(),
-                n.owner.as_str()
-            ))
-            .collect::<Vec<_>>(),
-        [
-            (
-                WatchKind::Memory,
-                WatchReason::Created,
-                "mem_shared",
-                "engineer",
-                ""
-            ),
-            (
-                WatchKind::Memory,
-                WatchReason::Created,
-                "mem_alice",
-                "engineer",
-                "operator:alice"
-            ),
-            (
-                WatchKind::Memory,
-                WatchReason::Created,
-                "mem_staged",
-                "engineer",
-                ""
-            ),
-            (
-                WatchKind::Memory,
-                WatchReason::Deleted,
-                "mem_shared",
-                "engineer",
-                ""
-            ),
-        ]
-    );
     Ok(())
 }
 
@@ -778,17 +709,20 @@ async fn watches_follow_the_tail_and_drop_what_their_read_returned() -> anyhow::
 
 #[test]
 fn unknown_watch_kinds_are_ignored_not_refused() {
-    let known = [WatchKind::Tag as i32, WatchKind::Memory as i32];
+    let known = [WatchKind::Tag as i32, WatchKind::Schedule as i32];
     let mask = super::kinds(&[known[0], 4_000, known[1], 0]);
     assert!(super::follows(mask, WatchKind::Tag as i32));
-    assert!(super::follows(mask, WatchKind::Memory as i32));
+    assert!(super::follows(mask, WatchKind::Schedule as i32));
     assert!(!super::follows(mask, WatchKind::Task as i32));
     assert!(!super::follows(mask, WatchKind::Team as i32));
     let unknown = super::kinds(&[4_000, -1]);
     assert_ne!(unknown, 0, "only unknown kinds must not mean every kind");
     assert!(!super::follows(unknown, WatchKind::Tag as i32));
-    assert!(!super::follows(unknown, WatchKind::Memory as i32));
+    assert!(!super::follows(unknown, WatchKind::Schedule as i32));
     // No kinds follows every kind, and a notice's kind past the mask never panics.
-    assert!(super::follows(super::kinds(&[]), WatchKind::Memory as i32));
+    assert!(super::follows(
+        super::kinds(&[]),
+        WatchKind::Schedule as i32
+    ));
     assert!(!super::follows(mask, 70));
 }

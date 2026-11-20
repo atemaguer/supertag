@@ -79,11 +79,11 @@ a Schedule with `supertag schedule create --tag TAG --at 1h "NOTE"`. That wakes 
 this thread; `supertag get schedules` lists them. See
 [Schedules](../../docs/reference/coordination.md#schedules).
 
-A Tag keeps short notes ([Memory](../../docs/reference/coordination.md#memory)) of what a person
-tells it to remember. `supertag get memories --tag TAG` lists them and `supertag delete memory ID`
-removes one; to change a note, tell the Tag. The same commands list and delete the Tag's harness
-memory (Claude Code's auto-memory, Codex's notes), read from the Worker Hosts on this machine
-(`--native` for only those; IDs start `hmem_`), which never passes through the Control Plane.
+A Tag keeps a [Memory](../../docs/reference/coordination.md#memory) of what a person tells it to
+remember: its harness's own (Claude Code's auto-memory, Codex's notes), read from the Worker Hosts
+on this machine, never through the Control Plane. `supertag get memories --tag TAG` lists it, with
+Work Session proposals marked `"status": "proposed"`, and `supertag delete memory ID` removes one
+(IDs start `hmem_`); to change one, tell the Tag.
 
 ```sh
 supertag get objective

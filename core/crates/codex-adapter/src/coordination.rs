@@ -39,7 +39,6 @@ pub(crate) enum Arguments {
     TagSessions(crate::tag_sessions::Call),
     CloseSession(String),
     Schedule(crate::schedules::Call),
-    Memory(crate::memory::Call),
     Report(crate::questions::ObjectiveReport),
     Quiet(String),
 }

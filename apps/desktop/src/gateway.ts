@@ -19,8 +19,6 @@ export function gatewaySession(connectionId: string, scope: string): Gateway {
       const followId = await api.startConversationFollow({ connectionId, read }, receive);
       return () => api.stopConversationFollow({ followId });
     },
-    notes: (tagId) => api.listNotes({ connectionId, tagId }),
-    deleteNote: (memoryId) => api.deleteNote({ connectionId, memoryId }),
     harnessMemory: (tagId) => api.listHarnessMemory({ connectionId, tagId }),
     deleteHarnessMemory: (memoryId) => api.deleteHarnessMemory({ connectionId, memoryId }),
     networkLogs: (tagId) => api.listNetworkLogs({ connectionId, tagId }),

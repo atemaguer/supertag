@@ -299,7 +299,7 @@ pub(crate) const KINDS: &[KindSpec] = &[
         "memory",
         "memories",
         "Memory",
-        [true, true, true, true],
+        [true, true, true, false],
     ),
 ];
 
@@ -570,12 +570,13 @@ pub enum GetCommand {
         #[command(flatten)]
         list: schedules::ListArgs,
     },
-    /// Read one of a Tag's memories, or list them: the notes each Tag wrote with its remember
-    /// tool, and its harness memory, the files its harness keeps itself, read from the Worker
-    /// Hosts on this machine. Each is shared or private to one person's conversation.
+    /// Read one of a Tag's memories, or list them: what its harness keeps itself (such as
+    /// Claude Code's auto-memory), read from the Worker Hosts on this machine, and what Work
+    /// Sessions proposed for its daily review. Each is shared or private to one person's
+    /// conversation.
     #[command(visible_alias = "memories")]
     Memory {
-        /// Note or harness memory ID. Omit to list.
+        /// Memory ID. Omit to list.
         id: Option<String>,
         #[command(flatten)]
         list: memories::ListArgs,
@@ -641,12 +642,12 @@ pub enum DeleteCommand {
         #[command(flatten)]
         args: schedules::DeleteArgs,
     },
-    /// Delete one of a Tag's notes or harness memories, or with --native, all of a Tag's harness
-    /// memory. To change a memory, tell the Tag.
+    /// Delete one of a Tag's memories or proposals, or with --tag, all of a Tag's memory. To
+    /// change a memory, tell the Tag.
     #[command(visible_alias = "memories")]
     Memory {
-        /// Note or harness memory ID.
-        #[arg(required_unless_present = "native", conflicts_with = "native")]
+        /// Memory ID.
+        #[arg(required_unless_present = "tag", conflicts_with = "tag")]
         id: Option<String>,
         #[command(flatten)]
         args: memories::DeleteArgs,
@@ -801,10 +802,9 @@ pub async fn get(connection: Connection, command: GetCommand) -> Result<()> {
         GetCommand::Schedule { id: None, list } => {
             return print(schedules::list(connection, list)).await;
         }
-        GetCommand::Memory { id: Some(id), .. } if memories::is_native(&id) => {
-            return print(memories::fetch_native(connection, id)).await;
+        GetCommand::Memory { id: Some(id), .. } => {
+            return print(memories::fetch(connection, id)).await;
         }
-        GetCommand::Memory { id: Some(id), .. } => (Kind::Memory, id),
         GetCommand::Memory { id: None, list } => {
             return print(memories::list(connection, list)).await;
         }
@@ -853,7 +853,7 @@ async fn fetch(channel: ProtocolChannel, token: &str, kind: Kind, id: String) ->
         Kind::Approval => inbox::fetch_approval(channel, token, id).await,
         Kind::Question => inbox::fetch_question(channel, token, id).await,
         Kind::Schedule => schedules::fetch(channel, token, id).await,
-        Kind::Memory => memories::fetch(channel, token, id).await,
+        Kind::Memory => bail!("a memory is read from the Worker Hosts on this machine"),
         Kind::RoleAssignment
         | Kind::MailboxGrant
         | Kind::Message
@@ -865,11 +865,11 @@ async fn fetch(channel: ProtocolChannel, token: &str, kind: Kind, id: String) ->
 /// Describes one resource in readable text, or as JSON. An Objective is described by its overview:
 /// its state, its owner's work, and what needs the operator.
 pub async fn describe(connection: Connection, args: DescribeArgs) -> Result<()> {
-    if args.kind == Kind::Memory && memories::is_native(&args.id) {
-        let value = memories::fetch_native(connection, args.id).await?;
+    if args.kind == Kind::Memory {
+        let value = memories::fetch(connection, args.id).await?;
         match args.output {
             Output::Json => crate::terminal::print_json(&value)?,
-            Output::Text => out!("{}", describe_text("Harness memory", &value)),
+            Output::Text => out!("{}", describe_text("Memory", &value)),
         }
         return Ok(());
     }
@@ -916,8 +916,8 @@ pub async fn delete(connection: Connection, command: DeleteCommand) -> Result<()
         }
         DeleteCommand::Schedule { id, args } => (format!("Schedule/{id}"), args.dry_run),
         DeleteCommand::Memory { id, args } => (
-            match (&args.native, id) {
-                (Some(tag), _) => format!("NativeMemory/{tag}"),
+            match (&args.tag, id) {
+                (Some(tag), _) => format!("Memory/tag:{tag}"),
                 (None, id) => format!("Memory/{}", id.as_deref().unwrap_or_default()),
             },
             args.dry_run,

@@ -1451,26 +1451,26 @@ button.identity-pill[aria-expanded="true"] {
   margin: 0 0 6px;
   font-variant-numeric: tabular-nums;
 }
-.notes {
+.memories {
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.note {
+.memory {
   margin-bottom: 10px;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--background);
 }
-.note-text {
+.memory-text {
   margin: 0 0 6px;
   font-size: 13px;
   line-height: 1.5;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
-.note-footer {
+.details-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1478,10 +1478,20 @@ button.identity-pill[aria-expanded="true"] {
   color: var(--muted);
   font-size: 11px;
 }
-.note-footer small {
+.details-footer small {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+.memory[data-status="proposed"] {
+  border-style: dashed;
+}
+.memory-badge {
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 16px;
 }
 .network-logs {
   margin: 0;

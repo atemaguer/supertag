@@ -1,5 +1,5 @@
 /**
- * What a SuperTag front end shows of a Gateway: Tags, conversations and their messages, notes,
+ * What a SuperTag front end shows of a Gateway: Tags, conversations and their messages, memory,
  * Schedules, and the saved Gateways, as the desktop window and the terminal UI receive them.
  * `Gateway` is one connection as a view uses it. No DOM and no Node.js here.
  */
@@ -134,13 +134,9 @@ export interface Gateway {
     read: ReadMessages,
     receive: (update: FollowUpdate) => void,
   ): Promise<() => Promise<void>>;
-  /** The Tag's notes the caller sees, newest first. */
-  notes?(tagId: string): Promise<Note[]>;
-  /** Deletes a note at once; the Tag no longer sees it from its next turn. */
-  deleteNote?(memoryId: string): Promise<Note>;
-  /** The Tag's harness memory that a Worker Host on this machine keeps, newest first. */
+  /** The Tag's memory that a Worker Host on this machine keeps, newest first. */
   harnessMemory?(tagId: string): Promise<HarnessMemoryList>;
-  /** Removes one harness memory from its harness's files at once. */
+  /** Removes one memory, or a proposed change to it, from its harness's files at once. */
   deleteHarnessMemory?(memoryId: string): Promise<HarnessMemory>;
   /** How the Tag's unprompted messages landed lately, and its start rate. */
   tagActivity?(tagId: string): Promise<TagActivity>;
@@ -242,8 +238,6 @@ export type WatchUpdate =
   | { kind: "ready" | "resync" | "lost" | "tag" }
   /** The caller's conversation with the Tag changed, or was marked read. */
   | { kind: "conversation"; tagId: string }
-  /** One of the Tag's notes the caller sees was kept, rewritten, or deleted. */
-  | { kind: "memory"; tagId: string }
   /** One of the Tag's Schedules was created, changed, or fired. */
   | { kind: "schedule"; tagId: string }
   /** An Objective was created or changed: its status, limits, or spend. */
@@ -252,20 +246,6 @@ export type WatchUpdate =
   | { kind: "team"; teamId: string }
   /** A Task outside a conversation changed: a Work Session's or an Objective's turn. */
   | { kind: "work"; tagId: string; sessionId: string };
-
-/** One of a Tag's notes: something it keeps of what it cannot look up again. */
-export interface Note {
-  memoryId: string;
-  tagId: string;
-  text: string;
-  /** Private to the person whose conversation wrote it; otherwise every turn sees it. */
-  private: boolean;
-  createdBy: string;
-  createdAtMs: number;
-  updatedAtMs: number;
-  /** When a turn last had it in its context. */
-  lastSeenAtMs?: number;
-}
 
 /**
  * One memory a Tag's harness keeps itself, such as a Claude Code auto-memory file or a Codex
@@ -292,6 +272,11 @@ export interface HarnessMemory {
    * not write the Tag's memory; unknown when no recorded turn did.
    */
   trust?: "trusted" | "proposed-only";
+  /**
+   * `owned` for the Tag's own memory; `proposed` for a change a Work Session proposed, which
+   * waits for the Tag's daily memory review to merge or drop it.
+   */
+  status: "owned" | "proposed";
   /** Its file in the harness's memory folder. */
   path: string;
   /** The Worker Host that keeps it. */
@@ -299,12 +284,12 @@ export interface HarnessMemory {
   updatedAtMs: number;
 }
 
-/** A Tag's harness memory on this machine. */
+/** A Tag's memory on this machine. */
 export interface HarnessMemoryList {
   memories: HarnessMemory[];
   /** Why none can be read here, when none can. */
   unavailable?: string;
-  /** Worker Hosts elsewhere that keep some of the Tag's harness memory. */
+  /** Worker Hosts elsewhere that keep some of the Tag's memory. */
   keptOn: string[];
 }
 

@@ -9,6 +9,13 @@
 //! The Control Plane never holds the files; the host reports only counts and a digest. Beside
 //! each store the host keeps its canonical memory records, derived from the files
 //! ([`crate::memory`]), which local clients read through the Worklet's memory endpoint.
+//!
+//! Only a turn whose changes are the Tag's own (`AttemptCapabilities.memory_trusted`: a root turn
+//! or the daily review) merges back. Any other turn granted the store, such as a Work Session's
+//! own turn, reads it as it was and leaves it so: what it wrote or changed is kept beside the store
+//! as proposals ([`crate::memory::propose`]), which the next review lists in its request and
+//! merges or drops. Before a turn starts, the host writes the grant's seeds into the store: the
+//! notes the Tag kept before its harness's memory became its memory.
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
@@ -20,7 +27,7 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use supertag_protocol::v2::{HarnessKind, NativeMemoryGrant};
+use supertag_protocol::v2::{HarnessKind, NativeMemoryGrant, NativeMemorySeed};
 
 /// The environment variable naming the Attempt's working copy for the adapter.
 pub(crate) const DIRECTORY: &str = "SUPERTAG_NATIVE_MEMORY_DIRECTORY";
@@ -64,6 +71,9 @@ pub(crate) struct Meta {
     /// The Tag the store belongs to, which its hashed directory doesn't say.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) tag: Option<String>,
+    /// The seeds already written, so a seed granted again is never written twice.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub(crate) seeded: BTreeSet<String>,
 }
 
 /// What the store holds after an Attempt, for the Control Plane's record.
@@ -85,6 +95,105 @@ pub(crate) struct Prepared {
     label: String,
     generation: u64,
     key: crate::memory::StoreKey,
+    /// The grant's seeds, now in the store, for the Control Plane to drop.
+    seeded: Vec<String>,
+}
+
+/// `YYYY-MM-DDTHH-MM-SS` in UTC, as Codex names its ad hoc notes.
+fn note_timestamp(ms: i64) -> String {
+    let seconds = ms.div_euclid(1000);
+    let (days, rest) = (seconds.div_euclid(86_400), seconds.rem_euclid(86_400));
+    // Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}-{:02}-{:02}",
+        rest / 3_600,
+        rest % 3_600 / 60,
+        rest % 60
+    )
+}
+
+/// A seed ID as part of a file name.
+fn seed_name(seed: &str) -> String {
+    seed.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        .take(64)
+        .collect()
+}
+
+fn one_line(text: &str, limit: usize) -> String {
+    let line = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default();
+    let line = line.replace(['[', ']'], "");
+    if line.chars().count() <= limit {
+        return line;
+    }
+    let mut short: String = line.chars().take(limit - 1).collect();
+    short.push('…');
+    short
+}
+
+/// `files` with `seeds` written into them as `harness`'s own memory: a Claude Code memory file
+/// each, linked from `MEMORY.md`, or a Codex ad hoc note each. A seed whose file is there already
+/// is left as it is.
+pub(crate) fn seeded(harness: &str, files: &Files, seeds: &[NativeMemorySeed]) -> Files {
+    let mut files = files.clone();
+    for seed in seeds {
+        let name = seed_name(&seed.seed_id);
+        let text = seed.text.trim();
+        if name.is_empty() || text.is_empty() {
+            continue;
+        }
+        match harness {
+            "claude-code" => {
+                let path = format!("supertag_note_{name}.md");
+                if files.contains_key(&path) {
+                    continue;
+                }
+                let title = one_line(text, 80);
+                let hook = one_line(text, 150);
+                files.insert(
+                    path.clone(),
+                    format!(
+                        "---\nname: {title}\ndescription: {hook}\ntype: feedback\n---\n{text}\n\nKept as a SuperTag note on {}.\n",
+                        &note_timestamp(seed.created_at_ms)[..10]
+                    )
+                    .into_bytes(),
+                );
+                let mut index = files
+                    .get("MEMORY.md")
+                    .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+                    .unwrap_or_default();
+                if !index.is_empty() && !index.ends_with('\n') {
+                    index.push('\n');
+                }
+                index.push_str(&format!("- [{title}]({path}) — {hook}\n"));
+                files.insert("MEMORY.md".into(), index.into_bytes());
+            }
+            "codex" => {
+                let path = format!(
+                    "extensions/ad_hoc/notes/{}-supertag-note-{name}.md",
+                    note_timestamp(seed.created_at_ms)
+                );
+                files
+                    .entry(path)
+                    .or_insert_with(|| format!("{text}\n").into_bytes());
+            }
+            _ => {}
+        }
+    }
+    files
 }
 
 pub(crate) fn private_directory(path: &Path) -> Result<()> {
@@ -379,12 +488,40 @@ impl Prepared {
                 revision: 0,
                 generation: grant.reset_generation,
                 tag: None,
+                ..Default::default()
             };
             write_meta(&store, &meta)?;
         }
         if meta.tag.as_deref() != Some(tag) {
             meta.tag = Some(tag.to_owned());
             write_meta(&store, &meta)?;
+        }
+        let key = crate::memory::StoreKey {
+            tag: tag.to_owned(),
+            harness: harness.to_owned(),
+            scope: grant.scope.clone(),
+        };
+        // The notes the Tag kept before become its harness's own memory, once.
+        let fresh: Vec<NativeMemorySeed> = grant
+            .seeds
+            .iter()
+            .filter(|seed| !meta.seeded.contains(&seed.seed_id))
+            .cloned()
+            .collect();
+        if !fresh.is_empty() {
+            let files = snapshot(&store.join("current"))?;
+            let with_seeds = seeded(harness, &files, &fresh);
+            meta.seeded
+                .extend(fresh.iter().map(|seed| seed.seed_id.clone()));
+            if with_seeds == files {
+                write_meta(&store, &meta)?;
+            } else {
+                replace_current(&store, &mut meta, &with_seeds, "seeds")?;
+                if let Err(error) = crate::memory::refresh(&store, &key, (&with_seeds, &meta), None)
+                {
+                    crate::failures::note("Native memory records were not updated", &error);
+                }
+            }
         }
         let current = snapshot(&store.join("current"))?;
         write_tree(&attempt_root.join("base"), &current)?;
@@ -394,12 +531,47 @@ impl Prepared {
             attempt: attempt_root,
             label: attempt.chars().take(8).collect(),
             generation: grant.reset_generation,
-            key: crate::memory::StoreKey {
-                tag: tag.to_owned(),
-                harness: harness.to_owned(),
-                scope: grant.scope.clone(),
-            },
+            key,
+            seeded: grant
+                .seeds
+                .iter()
+                .map(|seed| seed.seed_id.clone())
+                .collect(),
         })
+    }
+
+    /// The grant's seeds, now in the store.
+    pub(crate) fn seeded(&self) -> &[String] {
+        &self.seeded
+    }
+
+    /// Whether this is the Tag's shared store, rather than one person's.
+    pub(crate) fn shared(&self) -> bool {
+        self.key.scope == "shared"
+    }
+
+    /// The proposals waiting in the store, and what the request of the turn that merges them
+    /// adds for them: the Tag's `review`, or a person's turn.
+    pub(crate) fn review_proposals(&self, review: bool) -> Result<(String, Vec<String>)> {
+        let _lock = Lock::take(&self.store)?;
+        let meta = read_meta(&self.store)?;
+        Ok(crate::memory::review_section(
+            &crate::memory::proposals(&self.store, meta.generation),
+            review,
+        ))
+    }
+
+    /// Drops the proposals a review was shown, once it finished.
+    pub(crate) fn reviewed(&self, shown: &[String]) -> Result<()> {
+        if shown.is_empty() {
+            return Ok(());
+        }
+        let _lock = Lock::take(&self.store)?;
+        let meta = read_meta(&self.store)?;
+        if meta.generation != self.generation {
+            return Ok(());
+        }
+        crate::memory::drop_proposals(&self.store, meta.generation, shown)
     }
 
     /// The directory the harness reads and writes as its memory.
@@ -408,7 +580,9 @@ impl Prepared {
     }
 
     /// Merges the working copy back and removes it. On an error the store keeps its previous
-    /// revision. `writer` is the turn, recorded as the source of each memory it changed.
+    /// revision. `writer` is the turn, recorded as the source of each memory it changed; a turn
+    /// that may not change the Tag's memory only proposes its changes, and the store stays as it
+    /// was. Without a `writer` the copy merges with no recorded source.
     pub(crate) fn finish(self, writer: Option<crate::memory::Writer>) -> Result<Summary> {
         let result = self.merge_back(writer);
         let removed = remove(&self.attempt);
@@ -429,6 +603,14 @@ impl Prepared {
             return Ok(theirs_summary);
         }
         let ours = ours?;
+        if let Some(writer) = writer
+            .as_ref()
+            .filter(|writer| writer.trusted != Some(true))
+        {
+            check_caps(&ours)?;
+            crate::memory::propose(&self.store, &self.key, (&meta, writer), (&base, &ours))?;
+            return Ok(theirs_summary);
+        }
         let merged = merge(&base, &ours, &theirs, &self.label);
         if merged == theirs {
             return Ok(theirs_summary);
@@ -469,6 +651,8 @@ mod tests {
             scope: "shared".into(),
             reset_generation: generation,
             volume_head: None,
+            seeds: vec![],
+            trusted: true,
         }
     }
 

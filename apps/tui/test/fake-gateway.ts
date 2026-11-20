@@ -4,7 +4,6 @@
  * real code against it. A test drives it: a Tag replies, streams text, or a message arrives.
  */
 import { Code, ConnectError, createClient, createRouterTransport } from "@connectrpc/connect";
-import { Memories } from "../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/memories_pb";
 import { Enrollments } from "../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/placement_pb";
 import {
   ApprovalState,
@@ -181,7 +180,6 @@ export class FakeGateway {
   workSessions: FakeWorkSession[] = [];
   /** Activity lines of a Task, for `ListEvents`. */
   activity = new Map<string, string[]>();
-  notes: { memoryId: string; tagId: string; text: string; private?: boolean }[] = [];
   schedules: { scheduleId: string; tagId: string; note: string; state: ScheduleState }[] = [];
   networkLogs: {
     tagId: string;
@@ -704,27 +702,6 @@ export class FakeGateway {
           };
         },
       } as never);
-      router.service(Memories, {
-        list: (request: { tagId: string }) => ({
-          memories: fake.notes
-            .filter((note) => note.tagId === request.tagId)
-            .map((note) => ({
-              memoryId: note.memoryId,
-              tagId: note.tagId,
-              text: note.text,
-              createdBy: "task:1",
-              createdAtMs: BigInt(Date.now()),
-              updatedAtMs: BigInt(Date.now()),
-              ...(note.private ? { audience: { principal: "operator:local" } } : {}),
-            })),
-        }),
-        delete: (request: { memoryId: string }) => {
-          const note = fake.notes.find((entry) => entry.memoryId === request.memoryId);
-          fake.notes = fake.notes.filter((entry) => entry !== note);
-          if (note) fake.notify({ kind: WatchKind.MEMORY, tagId: note.tagId });
-          return { memoryId: request.memoryId, tagId: note?.tagId ?? "", text: note?.text ?? "" };
-        },
-      } as never);
       const scheduleMessage = (schedule: (typeof fake.schedules)[number]) => ({
         scheduleId: schedule.scheduleId,
         tagId: schedule.tagId,
@@ -882,7 +859,6 @@ export class FakeGateway {
       teams: createClient(Teams, transport),
       workSessions: createClient(WorkSessions, transport),
       workspaceLandings: createClient(WorkspaceLandings, transport),
-      memories: createClient(Memories, transport),
       schedules: createClient(Schedules, transport),
       networkLogs: createClient(NetworkLogs, transport),
       negotiate: async () => 7,

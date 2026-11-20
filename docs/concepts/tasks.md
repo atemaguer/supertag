@@ -98,12 +98,14 @@ reasoning; the recap and `read_turn` recover what matters.
 
 ### Memory
 
-A Tag also keeps a short notebook, its Memory: what a person told it to remember, corrections,
-decisions and their reasons, and pointers to where things live. It writes notes with `remember`
-and drops them with `forget`, and every turn starts with the notes it may see. A note written in
-a person's conversation stays private to that person. Once a day, after enough work, the Tag
-rereads its shared Sessions in a quiet review turn and tidies its notes. People list and delete
-notes; to change one, they tell the Tag. See [Memory](../reference/coordination.md#memory).
+A Tag also keeps a memory: what a person told it to remember, corrections, decisions and their
+reasons, and pointers to where things live. It is the memory its harness keeps itself, such as
+Claude Code's auto-memory, which the Worker Host keeps for the Tag. What a person's conversation
+keeps stays private to that person. A Work Session's own turn can only propose changes. Once a
+day, after enough work, the Tag rereads its shared Sessions in a quiet review turn, corrects its
+memory against them, and merges or drops what was proposed. People list and delete memories on
+the Worker Host's machine; to change one, they tell the Tag. See
+[Memory](../reference/coordination.md#memory).
 
 ### Other Sessions
 

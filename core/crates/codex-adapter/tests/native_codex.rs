@@ -101,8 +101,6 @@ struct Observed {
     work_continuations: Vec<HarnessContinueWorkSessionRequest>,
     work_questions: Vec<HarnessAskWorkSessionQuestionRequest>,
     tag_session_calls: Vec<&'static str>,
-    remembered: Vec<supertag_protocol::v2::AttemptRememberRequest>,
-    forgotten: Vec<supertag_protocol::v2::AttemptForgetRequest>,
     /// The Session's recap the Worker Host attaches.
     history: Vec<supertag_protocol::v2::AttemptHistoryEntry>,
     pending_post: bool,
@@ -652,44 +650,6 @@ impl HarnessMailbox for HarnessFixture {
 }
 
 #[tonic::async_trait]
-impl supertag_protocol::v2::harness_memory_server::HarnessMemory for HarnessFixture {
-    async fn remember(
-        &self,
-        request: Request<supertag_protocol::v2::AttemptRememberRequest>,
-    ) -> Result<Response<supertag_protocol::v2::AttemptMemoryResponse>, Status> {
-        self.authenticate(&request)?;
-        let request = request.into_inner();
-        self.observed.lock().await.remembered.push(request);
-        let note = supertag_protocol::v2::Memory {
-            memory_id: "mem_fixture".into(),
-            text: "fixture-note-receipt".into(),
-            ..Default::default()
-        };
-        Ok(Response::new(
-            supertag_protocol::v2::AttemptMemoryResponse {
-                memory: Some(note.clone()),
-                notes: vec![note],
-            },
-        ))
-    }
-
-    async fn forget(
-        &self,
-        request: Request<supertag_protocol::v2::AttemptForgetRequest>,
-    ) -> Result<Response<supertag_protocol::v2::AttemptMemoryResponse>, Status> {
-        self.authenticate(&request)?;
-        self.observed
-            .lock()
-            .await
-            .forgotten
-            .push(request.into_inner());
-        Ok(Response::new(
-            supertag_protocol::v2::AttemptMemoryResponse::default(),
-        ))
-    }
-}
-
-#[tonic::async_trait]
 impl HarnessTagSessions for HarnessFixture {
     async fn list_sessions(
         &self,
@@ -993,11 +953,6 @@ impl HarnessProcess {
                 .add_service(HarnessWorkSessionsServer::new(fixture.clone()))
                 .add_service(HarnessArtifactsServer::new(fixture.clone()))
                 .add_service(HarnessTagSessionsServer::new(fixture.clone()))
-                .add_service(
-                    supertag_protocol::v2::harness_memory_server::HarnessMemoryServer::new(
-                        fixture.clone(),
-                    ),
-                )
                 .add_service(HarnessMailboxServer::new(fixture))
                 .serve_with_incoming(TcpListenerStream::new(listener)),
         );
@@ -3616,20 +3571,20 @@ async fn native_stay_quiet_finishes_quietly_only_with_the_capability() -> Result
     Ok(())
 }
 
+/// No turn has a tool to keep notes any more: memory is Codex's own, which it keeps with its
+/// memory tools. A turn hears whether its changes are the Tag's own; with no Codex memory folder
+/// granted here, it hears it keeps none.
 #[tokio::test]
-async fn native_memory_tools_keep_notes_only_with_the_capability() -> Result<()> {
-    for may_remember in [true, false] {
+async fn no_turn_offers_notes_and_each_hears_its_memory() -> Result<()> {
+    for memory_trusted in [true, false] {
         let native = NativeFixture::new(&successful("Noted"), "exit 0")?;
-        if may_remember {
-            std::fs::write(native.directory.path().join("memory-mode"), "")?;
-        }
         let server = HarnessProcess::configured_tools(
             &["files:read"],
             None,
             "Remember that I prefer squash merges",
             false,
             Some(AttemptCapabilities {
-                may_remember,
+                memory_trusted,
                 ..Default::default()
             }),
         )
@@ -3640,36 +3595,21 @@ async fn native_memory_tools_keep_notes_only_with_the_capability() -> Result<()>
         ensure!(outcome.succeeded, "{}", outcome.result);
         let manifest =
             String::from_utf8_lossy(&outcome.checkpoint.as_ref().context("checkpoint")?.payload)
-                .contains("+memory-v1");
-        assert_eq!(manifest, may_remember);
-        // The turn hears whether it can change notes; it has no Codex memory folder here.
+                .into_owned();
+        assert!(!manifest.contains("memory"), "{manifest}");
         assert!(
             native
                 .read("prompt")?
-                .contains(&supertag_protocol::memory_context(may_remember, None))
+                .contains(&supertag_protocol::memory_context(memory_trusted, None))
         );
         let logs = native.read("requests.jsonl")?;
-        if may_remember {
-            assert_eq!(observed.remembered.len(), 1);
-            assert_eq!(
-                observed.remembered[0].text,
-                "Atem prefers squash merges [REDACTED]"
-            );
-            assert_eq!(observed.remembered[0].replaces.as_deref(), Some("mem_old"));
-            assert!(observed.remembered[0].operation_id.starts_with("codex-"));
-            assert_eq!(observed.forgotten.len(), 1);
-            assert_eq!(observed.forgotten[0].memory_id, "mem_stale");
-            assert!(logs.contains("Saved mem_fixture") && logs.contains("Forgot mem_stale"));
-            assert!(!logs.contains(KEY));
-        } else {
-            assert!(observed.remembered.is_empty() && !logs.contains("\"remember\""));
-        }
+        assert!(!logs.contains("\"remember\"") && !logs.contains("\"forget\""));
     }
     Ok(())
 }
 
-/// A turn granted the Tag's Codex memory hears where that memory lives and how it differs from
-/// notes, and Codex's consolidation agent, which an ordinary turn starts anyway, gets no model.
+/// A turn granted the Tag's Codex memory hears where that memory lives and that, outside a root
+/// turn, its changes are only proposals, and Codex's consolidation agent, which an ordinary turn starts anyway, gets no model.
 #[tokio::test]
 async fn a_codex_memory_turn_hears_its_memory_and_never_consolidates() -> Result<()> {
     let native = NativeFixture::new(&successful("Done"), "exit 0")?;

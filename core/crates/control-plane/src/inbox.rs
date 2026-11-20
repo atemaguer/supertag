@@ -74,7 +74,7 @@ impl Store {
         let session: String = row.try_get("session_id")?;
         let scope = crate::work_sessions::task_scope_in(&mut tx, &attempt.task_id).await?;
         let kind = scope.as_ref().map(|scope| scope.kind);
-        // A memory review reads the Tag's work and keeps its notes; it reaches no one, and it ends
+        // A memory review reads the Tag's work and keeps its memory; it reaches no one, and it ends
         // with `stay_quiet`.
         let review = crate::memories::review_session(&session);
         let is_root =
@@ -96,14 +96,7 @@ impl Store {
                 Some(viewer) => Some(crate::tag_sessions::portfolio_in(&mut tx, &viewer).await?),
                 None => None,
             };
-        let (may_remember, notes) =
-            crate::memories::turn_memory_in(&mut tx, &task, kind, tag_portfolio.is_some()).await?;
-        if let Some(portfolio) = tag_portfolio.as_mut()
-            && let Some(notes) = notes
-        {
-            portfolio.push('\n');
-            portfolio.push_str(&notes);
-        }
+        let memory_trusted = crate::memories::trusted_in(&mut tx, &task, kind).await?;
         let may_schedule = crate::schedules::may_schedule_in(&mut tx, &task).await?;
         if may_schedule
             && let Some(portfolio) = tag_portfolio.as_mut()
@@ -150,7 +143,7 @@ impl Store {
             time_zone: self.time_zone().name().to_owned(),
             open_work_sessions,
             max_work_sessions,
-            may_remember,
+            memory_trusted,
             may_stay_quiet,
         })
     }

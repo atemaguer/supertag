@@ -77,12 +77,6 @@ if root.joinpath("tag-sessions-mode").exists():
         ("read_objective", {"objectiveId": "docs"}),
     ])
 
-if root.joinpath("memory-mode").exists():
-    coordination_tools.extend([
-        ("remember", {"text": "Atem prefers squash merges synthetic-codex-provider-secret", "replaces": "mem_old"}),
-        ("forget", {"memoryId": "mem_stale"}),
-    ])
-
 if root.joinpath("quiet-mode").exists():
     coordination_tools.append(("stay_quiet", {"note": "CI is green synthetic-codex-provider-secret"}))
 

@@ -1,12 +1,11 @@
-//! The Memory rows of `get`, `describe`, and `delete`: a Tag's notes, which it keeps with its
-//! `remember` and `forget` tools in the Control Plane, and its harness memory, the files its
-//! harness keeps itself (such as Claude Code's auto-memory), which a Worker Host keeps. People
-//! read both here and delete any, and tell the Tag to change them.
+//! The Memory rows of `get`, `describe`, and `delete`: a Tag's memory, the files its harness
+//! keeps itself (such as Claude Code's auto-memory or Codex's memories folder), which a Worker
+//! Host keeps. People read it here and delete any memory, and tell the Tag to change one. A
+//! memory a Work Session proposed waits beside the Tag's own for its daily review.
 //!
-//! Harness memory never passes through the Control Plane: these commands read it from the
-//! memory endpoint of each Worker Host `supertag up` runs on this machine, a socket in the
-//! host's state directory. The Control Plane says only who each store is for and which hosts
-//! hold one.
+//! Memory never passes through the Control Plane: these commands read it from the memory
+//! endpoint of each Worker Host `supertag up` runs on this machine, a socket in the host's state
+//! directory. The Control Plane says only who each store is for and which hosts hold one.
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
@@ -19,9 +18,8 @@ use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
-        GetMemoryRequest, GetTagRequest, ListMemoriesRequest, Memory, NativeMemoryStore,
-        ResetNativeMemoryRequest, Tag, memories_client::MemoriesClient,
-        operator_client::OperatorClient,
+        GetTagRequest, NativeMemoryStore, ResetNativeMemoryRequest, Tag,
+        memories_client::MemoriesClient, operator_client::OperatorClient,
     },
 };
 use supertag_worker_host::memory::{self as native, Record, Reply, Request};
@@ -31,31 +29,22 @@ use crate::{Connection, connect_operator, request};
 /// Options for `supertag get memories`.
 #[derive(Args)]
 pub struct ListArgs {
-    /// Only this Tag's notes and harness memory.
+    /// Only this Tag's memory.
     #[arg(long, conflicts_with = "id")]
     tag: Option<String>,
-    /// Only harness memory: the files a Tag's harness keeps itself, as the Worker Hosts on this
-    /// machine keep them. Without it, notes too.
-    #[arg(long, conflicts_with = "id")]
-    native: bool,
 }
 
 /// Options for `supertag delete memory`.
 #[derive(Args)]
 pub struct DeleteArgs {
-    /// Instead of one memory, drop all of this Tag's harness memory (such as Claude Code's
-    /// auto-memory): each Worker Host deletes its copies before it next runs one of the Tag's
-    /// Tasks, and those on this machine at once. Operators only.
+    /// Instead of one memory, drop all of this Tag's memory: each Worker Host deletes its copies
+    /// before it next runs one of the Tag's Tasks, and those on this machine at once. Operators
+    /// only.
     #[arg(long, value_name = "TAG")]
-    pub(crate) native: Option<String>,
+    pub(crate) tag: Option<String>,
     /// Check that the memory exists and show what would be deleted, without deleting it.
     #[arg(long)]
     pub(crate) dry_run: bool,
-}
-
-/// Whether `id` names a harness memory rather than a note.
-pub(crate) fn is_native(id: &str) -> bool {
-    id.starts_with(native::ID_PREFIX)
 }
 
 fn client(channel: ProtocolChannel) -> MemoriesClient<ProtocolChannel> {
@@ -68,19 +57,6 @@ fn operator(channel: ProtocolChannel) -> OperatorClient<ProtocolChannel> {
     OperatorClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)
-}
-
-pub(crate) async fn fetch(
-    channel: ProtocolChannel,
-    token: &str,
-    memory_id: String,
-) -> Result<Value> {
-    Ok(memory_json(
-        &client(channel)
-            .get(request(GetMemoryRequest { memory_id }, token)?)
-            .await?
-            .into_inner(),
-    ))
 }
 
 /// A Worker Host `supertag up` runs on this machine, and its memory endpoint.
@@ -114,9 +90,9 @@ fn local_hosts(state: Option<&Path>) -> Result<Vec<LocalHost>> {
 /// Why a command finds no harness memory on this machine, when it can't look.
 fn no_local_hosts(state: Option<&Path>) -> String {
     match state {
-        None => "Harness memory is kept by the Worker Host that ran the Tag's turns and is read only on that machine; this command reaches a shared Gateway, so it lists none.".into(),
+        None => "A Tag's memory is kept by the Worker Host that ran its turns and is read only on that machine; this command reaches a shared Gateway, so it lists none.".into(),
         Some(state) => format!(
-            "No Worker Host runs from {}, so no harness memory is listed; it is read only on the machine whose Worker Host keeps it.",
+            "No Worker Host runs from {}, so no memory is listed; it is read only on the machine whose Worker Host keeps it.",
             state.display()
         ),
     }
@@ -184,6 +160,7 @@ fn native_json(record: &Record, host: Option<&str>, audiences: &Audiences) -> Va
         "truncated": record.truncated,
         // Whether the turn that last changed it may write the Tag's memory; null when unknown.
         "trust": record.trust,
+        // `owned`, the Tag's own; `proposed`, a Work Session's change waiting for the review.
         "status": record.status,
         "source": {
             "host_id": host,
@@ -199,8 +176,8 @@ fn native_json(record: &Record, host: Option<&str>, audiences: &Audiences) -> Va
     })
 }
 
-/// The harness memory of `tag`, or every Tag, on this machine's Worker Hosts: the records, with
-/// what the reader should know when some are kept elsewhere or none can be read here.
+/// The memory of `tag`, or every Tag, on this machine's Worker Hosts: the records, with what the
+/// reader should know when some are kept elsewhere or none can be read here.
 async fn list_native(
     (channel, token): (&ProtocolChannel, &str),
     state: Option<&Path>,
@@ -234,17 +211,14 @@ async fn list_native(
     }
     let mut out = serde_json::Map::new();
     out.insert(
-        "native_memory".into(),
+        "memories".into(),
         found
             .iter()
             .map(|(host, record)| native_json(record, host.as_deref(), &audiences))
             .collect(),
     );
     if hosts.is_empty() {
-        out.insert(
-            "native_memory_unavailable".into(),
-            no_local_hosts(state).into(),
-        );
+        out.insert("unavailable".into(), no_local_hosts(state).into());
     }
     // The hosts the Control Plane says hold some of the Tag's memory that don't run here.
     if let Some(tag) = tag {
@@ -259,7 +233,7 @@ async fn list_native(
             .filter(|host| !host.is_empty() && !here.contains(host))
             .collect();
         if !elsewhere.is_empty() {
-            out.insert("native_memory_kept_on".into(), json!(elsewhere));
+            out.insert("kept_on".into(), json!(elsewhere));
         }
     }
     Ok(out)
@@ -272,22 +246,7 @@ pub(crate) async fn list(connection: Connection, args: ListArgs) -> Result<Value
         Some(tag) => Some(get_tag(&channel, &token, tag.clone()).await?),
         None => None,
     };
-    let mut out = list_native((&channel, &token), state.as_deref(), tag.as_ref()).await?;
-    if !args.native {
-        let listed = client(channel)
-            .list(request(
-                ListMemoriesRequest {
-                    tag_id: tag.map(|tag| tag.tag_id),
-                },
-                &token,
-            )?)
-            .await?
-            .into_inner();
-        out.insert(
-            "memories".into(),
-            listed.memories.iter().map(memory_json).collect(),
-        );
-    }
+    let out = list_native((&channel, &token), state.as_deref(), tag.as_ref()).await?;
     Ok(Value::Object(out))
 }
 
@@ -312,8 +271,9 @@ async fn on_local_host(
     Err(missing.expect("at least one host was asked"))
 }
 
-/// `get memory hmem_…` and `describe memory hmem_…`: one harness memory from this machine.
-pub(crate) async fn fetch_native(connection: Connection, memory_id: String) -> Result<Value> {
+/// `get memory hmem_…` and `describe memory hmem_…`: one memory from this machine.
+pub(crate) async fn fetch(connection: Connection, memory_id: String) -> Result<Value> {
+    check_id(&memory_id)?;
     let state = crate::local_state_of(&connection)?;
     let (host, record) = on_local_host(state.as_deref(), &memory_id, |memory_id| Request::Get {
         memory_id,
@@ -326,14 +286,26 @@ pub(crate) async fn fetch_native(connection: Connection, memory_id: String) -> R
     Ok(native_json(&record, host.as_deref(), &audiences))
 }
 
-/// Deletes a note or a harness memory at once, or with `--native`, all of a Tag's harness memory.
+/// A memory's ID: `hmem_` and its digest.
+fn check_id(memory_id: &str) -> Result<()> {
+    if !memory_id.starts_with(native::ID_PREFIX) {
+        bail!(
+            "{memory_id} names no memory; memory IDs start with {}",
+            native::ID_PREFIX
+        );
+    }
+    Ok(())
+}
+
+/// Deletes one memory or proposal at once, or with `--tag`, all of a Tag's memory.
 pub(crate) async fn delete(
     connection: Connection,
     id: Option<String>,
     args: DeleteArgs,
 ) -> Result<Value> {
     let state = crate::local_state_of(&connection)?;
-    if let Some(id) = id.as_ref().filter(|id| is_native(id)) {
+    if let Some(id) = &id {
+        check_id(id)?;
         let dry_run = args.dry_run;
         let (host, record) = on_local_host(state.as_deref(), id, |memory_id| Request::Delete {
             memory_id,
@@ -347,7 +319,7 @@ pub(crate) async fn delete(
         return Ok(native_json(&record, host.as_deref(), &audiences));
     }
     let (channel, token) = connect_operator(connection).await?;
-    if let Some(tag_id) = args.native {
+    if let Some(tag_id) = args.tag {
         let tag = get_tag(&channel, &token, tag_id).await?;
         if args.dry_run {
             return Ok(json!({
@@ -388,40 +360,12 @@ pub(crate) async fn delete(
             "reset_generation": reset.reset_generation,
         }));
     }
-    let id = id.ok_or_else(|| anyhow::anyhow!("name a memory ID, or --native TAG"))?;
-    let mut client = client(channel);
-    let memory = if args.dry_run {
-        client
-            .get(request(GetMemoryRequest { memory_id: id }, &token)?)
-            .await?
-    } else {
-        client
-            .delete(request(GetMemoryRequest { memory_id: id }, &token)?)
-            .await?
-    };
-    Ok(memory_json(&memory.into_inner()))
+    bail!("name a memory ID, or --tag TAG")
 }
 
 fn at(ms: i64) -> Value {
     chrono::DateTime::from_timestamp_millis(ms).map_or(Value::Null, |time| {
         json!(time.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
-    })
-}
-
-fn memory_json(memory: &Memory) -> Value {
-    json!({
-        "memory_id": memory.memory_id,
-        "tag_id": memory.tag_id,
-        "text": memory.text,
-        "shared": memory.audience.is_none(),
-        "audience": memory.audience,
-        "state": memory.state().as_str_name(),
-        "created_by": memory.created_by,
-        "source_task_id": memory.source_task_id,
-        "created_at": at(memory.created_at_ms),
-        "updated_at": at(memory.updated_at_ms),
-        // When a turn last had it in its context; null until one has.
-        "last_seen_at": memory.last_seen_at_ms.map_or(Value::Null, at),
     })
 }
 

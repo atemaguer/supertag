@@ -26,15 +26,9 @@ if _version_not_supported:
 
 
 class MemoriesStub:
-    """A Tag's memory: a few short notes the Tag keeps of what it cannot look up again, such as a
-    person's preferences, corrections, decisions and their reasons, and pointers to where things
-    live. Every root turn reads the notes it may see as untrusted state, never as instructions.
-
-    A note is shared, or private to one person when a turn in that person's conversation wrote it.
-    A turn sees the shared notes and its own person's private notes, never another person's.
-
-    Operators list and delete every note. A client lists and deletes the notes of its own
-    conversations and the shared notes. People never write notes directly; they tell the Tag.
+    """A Tag's memory is its harness's own memory, such as Claude Code's auto-memory or Codex's
+    memories folder. Worker Hosts keep the files (NativeMemoryStore); the Control Plane never holds
+    them, and people read and delete them on the Worker Host's machine.
     """
 
     def __init__(self, channel):
@@ -43,21 +37,6 @@ class MemoriesStub:
         Args:
             channel: A grpc.Channel.
         """
-        self.List = channel.unary_unary(
-                '/supertag.runtime.v2.Memories/List',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ListMemoriesRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ListMemoriesResponse.FromString,
-                _registered_method=True)
-        self.Get = channel.unary_unary(
-                '/supertag.runtime.v2.Memories/Get',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.GetMemoryRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.Memory.FromString,
-                _registered_method=True)
-        self.Delete = channel.unary_unary(
-                '/supertag.runtime.v2.Memories/Delete',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.GetMemoryRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.Memory.FromString,
-                _registered_method=True)
         self.ResetNative = channel.unary_unary(
                 '/supertag.runtime.v2.Memories/ResetNative',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ResetNativeMemoryRequest.SerializeToString,
@@ -66,34 +45,10 @@ class MemoriesStub:
 
 
 class MemoriesServicer:
-    """A Tag's memory: a few short notes the Tag keeps of what it cannot look up again, such as a
-    person's preferences, corrections, decisions and their reasons, and pointers to where things
-    live. Every root turn reads the notes it may see as untrusted state, never as instructions.
-
-    A note is shared, or private to one person when a turn in that person's conversation wrote it.
-    A turn sees the shared notes and its own person's private notes, never another person's.
-
-    Operators list and delete every note. A client lists and deletes the notes of its own
-    conversations and the shared notes. People never write notes directly; they tell the Tag.
+    """A Tag's memory is its harness's own memory, such as Claude Code's auto-memory or Codex's
+    memories folder. Worker Hosts keep the files (NativeMemoryStore); the Control Plane never holds
+    them, and people read and delete them on the Worker Host's machine.
     """
-
-    def List(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def Get(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def Delete(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
 
     def ResetNative(self, request, context):
         """Operators only. Drops a Tag's harness-native memory (NativeMemoryStore): every Worker Host
@@ -106,21 +61,6 @@ class MemoriesServicer:
 
 def add_MemoriesServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'List': grpc.unary_unary_rpc_method_handler(
-                    servicer.List,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ListMemoriesRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ListMemoriesResponse.SerializeToString,
-            ),
-            'Get': grpc.unary_unary_rpc_method_handler(
-                    servicer.Get,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.GetMemoryRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.Memory.SerializeToString,
-            ),
-            'Delete': grpc.unary_unary_rpc_method_handler(
-                    servicer.Delete,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.GetMemoryRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.Memory.SerializeToString,
-            ),
             'ResetNative': grpc.unary_unary_rpc_method_handler(
                     servicer.ResetNative,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ResetNativeMemoryRequest.FromString,
@@ -135,97 +75,10 @@ def add_MemoriesServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Memories:
-    """A Tag's memory: a few short notes the Tag keeps of what it cannot look up again, such as a
-    person's preferences, corrections, decisions and their reasons, and pointers to where things
-    live. Every root turn reads the notes it may see as untrusted state, never as instructions.
-
-    A note is shared, or private to one person when a turn in that person's conversation wrote it.
-    A turn sees the shared notes and its own person's private notes, never another person's.
-
-    Operators list and delete every note. A client lists and deletes the notes of its own
-    conversations and the shared notes. People never write notes directly; they tell the Tag.
+    """A Tag's memory is its harness's own memory, such as Claude Code's auto-memory or Codex's
+    memories folder. Worker Hosts keep the files (NativeMemoryStore); the Control Plane never holds
+    them, and people read and delete them on the Worker Host's machine.
     """
-
-    @staticmethod
-    def List(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.Memories/List',
-            supertag_dot_runtime_dot_v2_dot_memories__pb2.ListMemoriesRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_memories__pb2.ListMemoriesResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def Get(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.Memories/Get',
-            supertag_dot_runtime_dot_v2_dot_memories__pb2.GetMemoryRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_memories__pb2.Memory.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def Delete(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.Memories/Delete',
-            supertag_dot_runtime_dot_v2_dot_memories__pb2.GetMemoryRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_memories__pb2.Memory.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
 
     @staticmethod
     def ResetNative(request,
@@ -256,8 +109,7 @@ class Memories:
 
 
 class AttemptMemoryStub:
-    """Called by a Worker Host for the turn it runs. A note written or forgotten during a turn takes
-    effect only when that turn succeeds; a failed, cancelled, or expired turn changes nothing.
+    """Called by a Worker Host for the turn it runs.
     """
 
     def __init__(self, channel):
@@ -266,16 +118,6 @@ class AttemptMemoryStub:
         Args:
             channel: A grpc.Channel.
         """
-        self.Remember = channel.unary_unary(
-                '/supertag.runtime.v2.AttemptMemory/Remember',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptRememberRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptMemoryResponse.FromString,
-                _registered_method=True)
-        self.Forget = channel.unary_unary(
-                '/supertag.runtime.v2.AttemptMemory/Forget',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptForgetRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptMemoryResponse.FromString,
-                _registered_method=True)
         self.ReportNative = channel.unary_unary(
                 '/supertag.runtime.v2.AttemptMemory/ReportNative',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ReportNativeMemoryRequest.SerializeToString,
@@ -286,24 +128,16 @@ class AttemptMemoryStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AdvanceNativeMemoryRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AdvanceNativeMemoryResponse.FromString,
                 _registered_method=True)
+        self.AcknowledgeSeeds = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptMemory/AcknowledgeSeeds',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AcknowledgeNativeMemorySeedsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AcknowledgeNativeMemorySeedsResponse.FromString,
+                _registered_method=True)
 
 
 class AttemptMemoryServicer:
-    """Called by a Worker Host for the turn it runs. A note written or forgotten during a turn takes
-    effect only when that turn succeeds; a failed, cancelled, or expired turn changes nothing.
+    """Called by a Worker Host for the turn it runs.
     """
-
-    def Remember(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def Forget(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
 
     def ReportNative(self, request, context):
         """After a turn's harness stops, its Worker Host records what it now holds of the store the
@@ -322,19 +156,17 @@ class AttemptMemoryServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def AcknowledgeSeeds(self, request, context):
+        """The host has written the grant's seeds (NativeMemoryGrant.seeds) into the turn's store; the
+        Control Plane drops them and grants them to no later turn.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AttemptMemoryServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'Remember': grpc.unary_unary_rpc_method_handler(
-                    servicer.Remember,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptRememberRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptMemoryResponse.SerializeToString,
-            ),
-            'Forget': grpc.unary_unary_rpc_method_handler(
-                    servicer.Forget,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptForgetRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptMemoryResponse.SerializeToString,
-            ),
             'ReportNative': grpc.unary_unary_rpc_method_handler(
                     servicer.ReportNative,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ReportNativeMemoryRequest.FromString,
@@ -345,6 +177,11 @@ def add_AttemptMemoryServicer_to_server(servicer, server):
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AdvanceNativeMemoryRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AdvanceNativeMemoryResponse.SerializeToString,
             ),
+            'AcknowledgeSeeds': grpc.unary_unary_rpc_method_handler(
+                    servicer.AcknowledgeSeeds,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AcknowledgeNativeMemorySeedsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AcknowledgeNativeMemorySeedsResponse.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'supertag.runtime.v2.AttemptMemory', rpc_method_handlers)
@@ -354,63 +191,8 @@ def add_AttemptMemoryServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class AttemptMemory:
-    """Called by a Worker Host for the turn it runs. A note written or forgotten during a turn takes
-    effect only when that turn succeeds; a failed, cancelled, or expired turn changes nothing.
+    """Called by a Worker Host for the turn it runs.
     """
-
-    @staticmethod
-    def Remember(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.AttemptMemory/Remember',
-            supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptRememberRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptMemoryResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def Forget(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.AttemptMemory/Forget',
-            supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptForgetRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptMemoryResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
 
     @staticmethod
     def ReportNative(request,
@@ -466,75 +248,8 @@ class AttemptMemory:
             metadata,
             _registered_method=True)
 
-
-class HarnessMemoryStub:
-    """Served by a Worker Host to its harness adapter. The Worker Host sets `attempt` from the
-    Attempt it supervises; an adapter leaves it unset.
-    """
-
-    def __init__(self, channel):
-        """Constructor.
-
-        Args:
-            channel: A grpc.Channel.
-        """
-        self.Remember = channel.unary_unary(
-                '/supertag.runtime.v2.HarnessMemory/Remember',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptRememberRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptMemoryResponse.FromString,
-                _registered_method=True)
-        self.Forget = channel.unary_unary(
-                '/supertag.runtime.v2.HarnessMemory/Forget',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptForgetRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptMemoryResponse.FromString,
-                _registered_method=True)
-
-
-class HarnessMemoryServicer:
-    """Served by a Worker Host to its harness adapter. The Worker Host sets `attempt` from the
-    Attempt it supervises; an adapter leaves it unset.
-    """
-
-    def Remember(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def Forget(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-
-def add_HarnessMemoryServicer_to_server(servicer, server):
-    rpc_method_handlers = {
-            'Remember': grpc.unary_unary_rpc_method_handler(
-                    servicer.Remember,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptRememberRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptMemoryResponse.SerializeToString,
-            ),
-            'Forget': grpc.unary_unary_rpc_method_handler(
-                    servicer.Forget,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptForgetRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptMemoryResponse.SerializeToString,
-            ),
-    }
-    generic_handler = grpc.method_handlers_generic_handler(
-            'supertag.runtime.v2.HarnessMemory', rpc_method_handlers)
-    server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('supertag.runtime.v2.HarnessMemory', rpc_method_handlers)
-
-
- # This class is part of an EXPERIMENTAL API.
-class HarnessMemory:
-    """Served by a Worker Host to its harness adapter. The Worker Host sets `attempt` from the
-    Attempt it supervises; an adapter leaves it unset.
-    """
-
     @staticmethod
-    def Remember(request,
+    def AcknowledgeSeeds(request,
             target,
             options=(),
             channel_credentials=None,
@@ -547,36 +262,9 @@ class HarnessMemory:
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/supertag.runtime.v2.HarnessMemory/Remember',
-            supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptRememberRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptMemoryResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def Forget(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.HarnessMemory/Forget',
-            supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptForgetRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_memories__pb2.AttemptMemoryResponse.FromString,
+            '/supertag.runtime.v2.AttemptMemory/AcknowledgeSeeds',
+            supertag_dot_runtime_dot_v2_dot_memories__pb2.AcknowledgeNativeMemorySeedsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_memories__pb2.AcknowledgeNativeMemorySeedsResponse.FromString,
             options,
             channel_credentials,
             insecure,

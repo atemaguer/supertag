@@ -756,6 +756,18 @@ impl Worker<'_> {
                             }),
                         }
                     }),
+                    seeds: grant
+                        .seeds
+                        .iter()
+                        .map(|(seed_id, text, created_at_ms)| {
+                            supertag_protocol::v2::NativeMemorySeed {
+                                seed_id: seed_id.clone(),
+                                text: text.clone(),
+                                created_at_ms: *created_at_ms,
+                            }
+                        })
+                        .collect(),
+                    trusted: grant.trusted,
                 }
             }),
             volume: attempt

@@ -108,18 +108,15 @@ checks that stayed quiet never notify.
 
 ## See what a Tag remembers
 
-A Tag keeps a few short notes between turns, such as your preferences and decisions. In the desktop
-app, select the Tag's name above the conversation, or choose **Notes** in the ⌘K search, to open
-its details: its notes, who sees each, and when a turn last used it. Delete one to have the Tag
-forget it. The conversation itself shows only messages. To add or change a note, tell the Tag. See
-[Memory](../reference/coordination.md#memory).
-
-The details also show the Tag's harness memory: what its harness, such as Claude Code or Codex,
-keeps itself between turns, read from the Worker Host on your Mac. Each shows its harness, what it
-is about, and who sees it, and you can delete one the same way. Harness memory never passes
-through the Control Plane, so it shows only on the machine whose Worker Host keeps it. From a
-terminal, `supertag get memories --tag TAG` lists both. See
-[Reading and deleting harness memory](../reference/coordination.md#reading-and-deleting-harness-memory).
+A Tag keeps a memory between turns, such as your preferences and decisions: what its harness,
+such as Claude Code or Codex, keeps itself, read from the Worker Host on your Mac. In the desktop
+app, select the Tag's name above the conversation, or choose **Memory** in the ⌘K search, to open
+its details: each memory, its harness, what it is about, and who sees it. One marked **Proposed**
+is a change a Work Session suggested, which the Tag's daily review merges or drops. Delete one to
+have the Tag forget it. The conversation itself shows only messages. To add or change a memory,
+tell the Tag. Memory never passes through the Control Plane, so it shows only on the machine
+whose Worker Host keeps it. From a terminal, `supertag get memories --tag TAG` lists it. See
+[Reading and deleting memory](../reference/coordination.md#reading-and-deleting-memory).
 
 ## See how a Tag's messages land
 

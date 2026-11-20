@@ -27,7 +27,6 @@ import {
   type NetworkLog,
   type NewObjective,
   type NewTag,
-  type Note,
   type Objective,
   type ReadMessages,
   type Schedule,
@@ -354,12 +353,12 @@ export class Connections {
     return addWorkspaceWithCli(this.options.cli, state, folder, this.options.env);
   }
 
-  /** A Tag's harness memory on the local services' Worker Hosts, with `supertag get memories`. */
+  /** A Tag's memory on the local services' Worker Hosts, with `supertag get memories`. */
   harnessMemory(state: string, tagId: string): Promise<HarnessMemoryList> {
     return listHarnessMemoryWithCli(this.options.cli, state, tagId, this.options.env);
   }
 
-  /** Deletes one harness memory on the local services' Worker Hosts. */
+  /** Deletes one memory, or a proposed change, on the local services' Worker Hosts. */
   deleteHarnessMemory(state: string, memoryId: string): Promise<HarnessMemory> {
     return deleteHarnessMemoryWithCli(this.options.cli, state, memoryId, this.options.env);
   }
@@ -452,13 +451,7 @@ export class TuiGateway implements Gateway {
     const state = await this.state.localStateOf(await this.ready());
     return this.connections.addFolder(state, folder);
   }
-  async notes(tagId: string): Promise<Note[]> {
-    return this.state.notes(await this.ready(), tagId);
-  }
-  async deleteNote(memoryId: string): Promise<Note> {
-    return this.state.deleteNote(await this.ready(), memoryId);
-  }
-  /** Only the local Gateway's Worker Hosts are on this machine to read harness memory from. */
+  /** Only the local Gateway's Worker Hosts are on this machine to read a Tag's memory from. */
   async harnessMemory(tagId: string): Promise<HarnessMemoryList> {
     const connectionId = await this.ready();
     const state = this.local

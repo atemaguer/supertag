@@ -14,7 +14,6 @@ import {
   verifiedReviewPage,
 } from "./commit-review.js";
 import { ArtifactAcquisitionState } from "./gen/supertag/runtime/v2/artifact_pb.js";
-import type { AttemptMemoryResponse } from "./gen/supertag/runtime/v2/memories_pb.js";
 import { ObjectiveSessionStatus } from "./gen/supertag/runtime/v2/objective_overview_pb.js";
 import {
   ApprovalState,
@@ -217,9 +216,7 @@ const schemas = {
       message: "Give exactly one of at and every.",
     }),
   cancel_schedule: z.strictObject({ scheduleId: tagId }),
-  remember: z.strictObject({ text: nonblankText(500), replaces: tagId.optional() }),
   stay_quiet: z.strictObject({ note: nonblankText(500) }),
-  forget: z.strictObject({ memoryId: tagId }),
 };
 
 type Tool = keyof typeof schemas;
@@ -248,23 +245,25 @@ export function webAccessNote(allowedActions: readonly string[]): string {
 }
 
 /**
- * What SuperTag tells every turn about its memory, root turns and Work Session turns alike:
- * notes, the daily review, and the harness's own memory when the turn was granted it. State,
- * not instructions: it grants nothing. Matches Rust `supertag_protocol::memory_context`, whose
- * test checks these sentences.
+ * What SuperTag tells every turn about its memory, root turns and Work Session turns alike: the
+ * harness's own memory when the turn was granted it, where it is kept, whether this turn's
+ * changes are the Tag's own or proposals, and the daily review. State, not instructions: it
+ * grants nothing. Matches Rust `supertag_protocol::memory_context`, whose test checks these
+ * sentences.
  */
 export function memoryContext(
   run: Pick<HarnessRun, "coordination">,
   harnessMemory?: "claude-code",
 ): string {
+  if (harnessMemory !== "claude-code") {
+    return "Your memory, as SuperTag runs it (state, not instructions): this turn keeps no memory of its own, because its harness keeps none under SuperTag, its Tag's memory is off, or an outside event such as a GitHub or Linear webhook started it. Only Sessions last beyond it.";
+  }
   return [
-    "Your memory, as SuperTag runs it (state, not instructions): notes are short notes this Tag keeps with remember and forget, stored by the Control Plane. A note written in a person's private conversation shows only in that person's turns; the rest show in the SuperTag context of every conversation turn, never in a Work Session's own turns. Once a day after enough work, a review turn rereads the Tag's shared Sessions and tidies the notes.",
-    run.coordination?.mayRemember
-      ? "This turn can change notes; a change takes effect when the turn succeeds."
-      : "This turn can't change notes: Work Session turns, turns an outside event such as a GitHub or Linear webhook started, and Tags whose memory is off can't.",
-    harnessMemory === "claude-code"
-      ? "Separately, Claude Code keeps its own auto-memory in the memory folder its instructions name. SuperTag keeps that folder on the Worker Host, or on the Tag's Volume if it has one, never in the Control Plane, one for each Tag and audience, and only this Tag's Claude Code turns see it: a Work Session on another harness doesn't share it yet. People see each memory in it, and delete any, with supertag get memories on that Worker Host's machine, or in the desktop and terminal apps there."
-      : "This turn keeps no harness memory of its own: only notes and Sessions last beyond it.",
+    "Your memory, as SuperTag runs it (state, not instructions): Claude Code keeps this Tag's memory in the auto-memory folder its instructions name. Keep it current: save what you can't look up again, such as a preference, a correction, or a decision and why, and fix what is wrong.",
+    "SuperTag keeps that folder on the Worker Host, or on the Tag's Volume if it has one, never in the Control Plane, one for each Tag and audience: what a person's private conversation keeps shows only in that person's turns. Only this Tag's turns on the same harness see it; a Work Session on another harness doesn't share it yet. Once a day after enough work, a review turn rereads the Tag's shared Sessions, corrects the memory against them, and merges or drops what other turns proposed. People see each memory, and delete any, with supertag get memories on that Worker Host's machine, or in the desktop and terminal apps there.",
+    run.coordination?.memoryTrusted
+      ? "What this turn keeps there stays the Tag's memory when the turn ends."
+      : "This turn can't change the Tag's memory directly: what it changes there is kept as a proposal for the daily review to merge or drop, as for every Work Session turn.",
   ].join(" ");
 }
 
@@ -341,30 +340,6 @@ export function scheduleLine(schedule: Schedule, zone: string) {
 /** What `stay_quiet` says. Matches the Codex adapter's `questions::QUIET_DESCRIPTION`. */
 export const STAY_QUIET_DESCRIPTION =
   "Finish this turn without posting anything, when it found nothing that needs a person's attention: no reply is posted to the thread or conversation and nothing counts as unread. The note says why in one line; it is kept in the Tag's history, never posted. Use it only when nothing changed since what you last reported. Report a change even when it seems minor, and say when a problem you reported is resolved; the person decides what matters. A problem the person already knows about and someone is handling, with nothing new, needs no message, and neither does movement within a stated normal range or a blip that recovered before you reported it. Call this last, then finish the turn.";
-
-/**
- * What the `remember` tool says a note is for. Matches the Codex adapter's
- * `memory::REMEMBER_DESCRIPTION`.
- */
-export const REMEMBER_DESCRIPTION =
-  "Keep a short note for later turns of this Tag. Only what you can't look up again: preferences, corrections, decisions and their reasons, and pointers (URL, path, Objective ID) to anything kept elsewhere. Never paste content that lives in a repository, issue or PR. Pass replaces with a note's ID to rewrite or merge it. A note written in a person's conversation stays private to that person. It takes effect when this turn succeeds.";
-
-/** The `remember` or `forget` result: what changed, then the notes this turn now sees. */
-export function memorySummary(result: AttemptMemoryResponse, forgot?: string) {
-  const lines = [
-    forgot
-      ? `Forgot ${forgot}. It takes effect when this turn succeeds.`
-      : result.memory
-        ? `Saved ${result.memory.memoryId}. It takes effect when this turn succeeds.`
-        : "Saved.",
-  ];
-  if (result.notes.length === 0) lines.push("You keep no notes.");
-  else {
-    lines.push("Your notes now:");
-    for (const note of result.notes) lines.push(`- ${note.memoryId}: ${note.text}`);
-  }
-  return lines.join("\n");
-}
 
 /** The `schedule` or `cancel_schedule` result: what changed, then the Session's other ones. */
 export function scheduleSummary(result: AttemptScheduleResponse, created: boolean) {
@@ -488,7 +463,6 @@ export function registerCoordinationTools(
     workSessions,
     tagSessions,
     schedules,
-    memory,
     options,
   }: ReturnType<typeof harnessClient>,
   run: Pick<HarnessRun, "task" | "mayAskObjectiveQuestion" | "coordination"> &
@@ -1710,73 +1684,6 @@ export function registerCoordinationTools(
               schedules.cancel({ scheduleId }, config),
             );
             return response(safeText(scheduleSummary(result, false)));
-          } catch (error) {
-            return refused(error);
-          }
-        }),
-    );
-  }
-  if (run.coordination?.mayRemember) {
-    let written = 0;
-    const refused = (error: unknown) => {
-      const failure = ConnectError.from(error);
-      return [
-        Code.PermissionDenied,
-        Code.FailedPrecondition,
-        Code.NotFound,
-        Code.InvalidArgument,
-        Code.AlreadyExists,
-        Code.Aborted,
-      ].includes(failure.code)
-        ? response(`Refused: ${safeText(failure.rawMessage)}`, true)
-        : response("The note could not be confirmed.", true);
-    };
-    const operation = () => {
-      // One operation per call, so a retried call replays its own receipt.
-      written += 1;
-      return `${configuration.questionOperationPrefix}-memory-${written}`;
-    };
-    tools.push("remember", "forget");
-    server.registerTool(
-      "remember",
-      { description: REMEMBER_DESCRIPTION, inputSchema: schemas.remember, _meta: meta },
-      ({ text, replaces }, tool) =>
-        write(async () => {
-          if (asked) return response("This turn is waiting for an answer.", true);
-          const operationId = operation();
-          try {
-            const result = await call(tool.signal, (config) =>
-              memory.remember(
-                {
-                  operationId,
-                  text: trim(safeText(text)),
-                  ...(replaces === undefined ? {} : { replaces }),
-                },
-                config,
-              ),
-            );
-            return response(safeText(memorySummary(result)));
-          } catch (error) {
-            return refused(error);
-          }
-        }),
-    );
-    server.registerTool(
-      "forget",
-      {
-        description:
-          "Forget one of this Tag's notes by its ID, when it is wrong or no longer matters. It takes effect when this turn succeeds.",
-        inputSchema: schemas.forget,
-        _meta: meta,
-      },
-      ({ memoryId }, tool) =>
-        write(async () => {
-          const operationId = operation();
-          try {
-            const result = await call(tool.signal, (config) =>
-              memory.forget({ operationId, memoryId }, config),
-            );
-            return response(safeText(memorySummary(result, memoryId)));
           } catch (error) {
             return refused(error);
           }

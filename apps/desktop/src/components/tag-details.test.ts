@@ -1,23 +1,15 @@
 // @vitest-environment happy-dom
 
-import type {
-  Gateway,
-  HarnessMemory,
-  NetworkLog,
-  Note,
-  Tag,
-  TagActivity,
-} from "@supertag/client/model";
+import type { Gateway, HarnessMemory, NetworkLog, Tag, TagActivity } from "@supertag/client/model";
 import { watchFeed } from "@supertag/client/react";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   attentionLine,
-  harnessMemoryCaption,
+  memoryCaption,
   networkRequestLine,
   networkTotals,
-  noteCaption,
   periodWords,
   startRateLine,
   TagDetails,
@@ -34,17 +26,6 @@ const tag: Tag = {
   revision: 1,
   harnessKind: "codex",
 };
-const note = (memoryId: string, extra: Partial<Note> = {}): Note => ({
-  memoryId,
-  tagId: "lead",
-  text: `Note ${memoryId}`,
-  private: false,
-  createdBy: "tag:lead",
-  createdAtMs: Date.now() - DAY,
-  updatedAtMs: Date.now() - DAY,
-  ...extra,
-});
-
 let root: Root;
 let host: HTMLElement;
 beforeEach(() => {
@@ -61,64 +42,7 @@ async function settle() {
   for (let i = 0; i < 5; i++) await act(async () => {});
 }
 
-it("says who sees a note, when it was kept, and when a turn last used it", () => {
-  const now = Date.now();
-  expect(noteCaption(note("a", { private: true, lastSeenAtMs: now }), now)).toMatch(
-    /^Only you · kept .+ · last used /,
-  );
-  expect(noteCaption(note("b"), now)).toMatch(/^Shared · kept .+ · not used yet$/);
-});
-
-it("lists the Tag's notes, deletes one, and rereads when the watch says they changed", async () => {
-  let held = [note("one", { private: true }), note("two")];
-  const notes = vi.fn(async () => held);
-  const deleteNote = vi.fn(async (memoryId: string) => {
-    const deleted = held.find((entry) => entry.memoryId === memoryId) as Note;
-    held = held.filter((entry) => entry.memoryId !== memoryId);
-    return deleted;
-  });
-  const gateway = { notes, deleteNote } as unknown as Gateway;
-  const feed = watchFeed();
-  const onClose = vi.fn();
-  act(() => root.render(createElement(TagDetails, { gateway, watch: feed, tag, onClose })));
-  await settle();
-  expect(notes).toHaveBeenCalledWith("lead");
-  // The panel is the Tag's: its name heads it, and Notes is one section of it.
-  expect(host.querySelector("aside h2")?.textContent).toBe("Lead");
-  expect(host.querySelector("section.details-section h3")?.textContent).toBe("Notes");
-  const texts = () => [...host.querySelectorAll(".note-text")].map((node) => node.textContent);
-  expect(texts()).toEqual(["Note one", "Note two"]);
-  expect(host.textContent).toContain("Only you");
-
-  const remove = host.querySelector<HTMLButtonElement>('[aria-label="Delete note: Note one"]');
-  await act(async () => remove?.click());
-  await settle();
-  expect(deleteNote).toHaveBeenCalledWith("one");
-  expect(texts()).toEqual(["Note two"]);
-
-  // Another client or the Tag changed a note: the watch names this Tag, and the list rereads.
-  held = [note("three"), ...held];
-  const reads = notes.mock.calls.length;
-  act(() => feed.publish({ kind: "memory", tagId: "other" }));
-  await settle();
-  expect(notes.mock.calls.length).toBe(reads);
-  act(() => feed.publish({ kind: "memory", tagId: "lead" }));
-  await settle();
-  expect(texts()).toEqual(["Note three", "Note two"]);
-
-  host.querySelector<HTMLButtonElement>('[aria-label="Close Tag details"]')?.click();
-  expect(onClose).toHaveBeenCalled();
-});
-
-it("says when the Tag keeps no notes you can see", async () => {
-  const gateway = { notes: async () => [] } as unknown as Gateway;
-  act(() => root.render(createElement(TagDetails, { gateway, tag, onClose() {} })));
-  await settle();
-  expect(host.textContent).toContain("Lead keeps no notes you can see yet");
-  expect(host.querySelector('[aria-label^="Delete note"]')).toBeNull();
-});
-
-const harness = (memoryId: string, extra: Partial<HarnessMemory> = {}): HarnessMemory => ({
+const memory = (memoryId: string, extra: Partial<HarnessMemory> = {}): HarnessMemory => ({
   memoryId,
   tagId: "lead",
   harness: "codex",
@@ -127,77 +51,107 @@ const harness = (memoryId: string, extra: Partial<HarnessMemory> = {}): HarnessM
   title: `Memory ${memoryId}`,
   text: "Staging runs in eu-north-1.",
   truncated: false,
+  status: "owned",
   path: "extensions/ad_hoc/notes/region.md",
   updatedAtMs: Date.now() - DAY,
   ...extra,
 });
 
-it("says whose harness keeps a memory, who sees it, and a Work Session's proposal", () => {
+it("says whose harness keeps a memory, who sees it, and whether it waits for review", () => {
   const now = Date.now();
-  expect(harnessMemoryCaption(harness("a", { private: true }), now)).toMatch(
+  expect(memoryCaption(memory("a", { private: true }), now)).toMatch(
     /^Codex · fact · Only you · kept /,
   );
   expect(
-    harnessMemoryCaption(
-      harness("b", { harness: "claude-code", kind: "feedback", trust: "proposed-only" }),
+    memoryCaption(
+      memory("b", { harness: "claude-code", kind: "feedback", trust: "proposed-only" }),
       now,
     ),
-  ).toMatch(/^Claude Code · feedback · Shared · proposed by a Work Session · kept /);
+  ).toMatch(/^Claude Code · feedback · Shared · changed by a Work Session · kept /);
+  expect(memoryCaption(memory("c", { status: "proposed", trust: "proposed-only" }), now)).toMatch(
+    /^Codex · fact · Shared · waits for the daily memory review · kept /,
+  );
 });
 
-it("lists the Tag's harness memory on this Mac and deletes one", async () => {
-  let held = [harness("one"), harness("two", { private: true })];
+it("lists the Tag's memory on this Mac, marks proposals, and deletes one", async () => {
+  let held = [
+    memory("one"),
+    memory("two", { private: true }),
+    memory("three", { status: "proposed" }),
+  ];
   const harnessMemory = vi.fn(async () => ({ memories: held, keptOn: ["laptop-2"] }));
   const deleteHarnessMemory = vi.fn(async (memoryId: string) => {
     const deleted = held.find((entry) => entry.memoryId === memoryId) as HarnessMemory;
     held = held.filter((entry) => entry.memoryId !== memoryId);
     return deleted;
   });
-  const gateway = {
-    notes: async () => [],
-    harnessMemory,
-    deleteHarnessMemory,
-  } as unknown as Gateway;
+  const gateway = { harnessMemory, deleteHarnessMemory } as unknown as Gateway;
   const feed = watchFeed();
-  act(() => root.render(createElement(TagDetails, { gateway, watch: feed, tag, onClose() {} })));
+  const onClose = vi.fn();
+  act(() => root.render(createElement(TagDetails, { gateway, watch: feed, tag, onClose })));
   await settle();
   expect(harnessMemory).toHaveBeenCalledWith("lead");
-  const section = () => host.querySelector('[aria-label="Harness memory"]');
+  // The panel is the Tag's: its name heads it, and Memory is one section of it.
+  expect(host.querySelector("aside h2")?.textContent).toBe("Lead");
+  expect(host.querySelector("section.details-section h3")?.textContent).toBe("Memory");
+  const section = () => host.querySelector('[aria-label="Memory"]');
   const texts = () =>
-    [...(section()?.querySelectorAll(".note-text") ?? [])].map((n) => n.textContent);
+    [...(section()?.querySelectorAll(".memory-text") ?? [])].map((n) => n.textContent);
   expect(texts()).toEqual([
     "Memory one — Staging runs in eu-north-1.",
     "Memory two — Staging runs in eu-north-1.",
+    "Memory three — Staging runs in eu-north-1.",
   ]);
+  expect(host.textContent).toContain("Only you");
+  const badges = [...host.querySelectorAll(".memory-badge")].map((n) => n.textContent);
+  expect(badges).toEqual(["Proposed"]);
+  expect(host.querySelector('[aria-label="Drop proposed memory: Memory three"]')).not.toBeNull();
   expect(host.textContent).toContain("More is kept on Worker Host laptop-2");
   await act(async () =>
-    host
-      .querySelector<HTMLButtonElement>('[aria-label="Delete harness memory: Memory one"]')
-      ?.click(),
+    host.querySelector<HTMLButtonElement>('[aria-label="Delete memory: Memory one"]')?.click(),
   );
   await settle();
   expect(deleteHarnessMemory).toHaveBeenCalledWith("one");
-  expect(texts()).toEqual(["Memory two — Staging runs in eu-north-1."]);
-  // A finished turn may have changed it: the list rereads.
-  held = [harness("three"), ...held];
+  expect(texts()).toEqual([
+    "Memory two — Staging runs in eu-north-1.",
+    "Memory three — Staging runs in eu-north-1.",
+  ]);
+  // A finished turn may have changed it: the list rereads, but not for another Tag's turn.
+  held = [memory("four"), ...held];
+  const reads = harnessMemory.mock.calls.length;
+  act(() => feed.publish({ kind: "conversation", tagId: "other" }));
+  await settle();
+  expect(harnessMemory.mock.calls.length).toBe(reads);
   act(() => feed.publish({ kind: "conversation", tagId: "lead" }));
   await settle();
-  expect(texts()).toHaveLength(2);
+  expect(texts()).toHaveLength(3);
+
+  host.querySelector<HTMLButtonElement>('[aria-label="Close Tag details"]')?.click();
+  expect(onClose).toHaveBeenCalled();
 });
 
-it("says why a shared Gateway shows no harness memory", async () => {
+it("says when the Tag keeps no memory on this Mac", async () => {
   const gateway = {
-    notes: async () => [],
+    harnessMemory: async () => ({ memories: [], keptOn: [] }),
+  } as unknown as Gateway;
+  act(() => root.render(createElement(TagDetails, { gateway, tag, onClose() {} })));
+  await settle();
+  expect(host.textContent).toContain("Lead keeps no memory on this Mac yet.");
+  expect(host.querySelector('[aria-label^="Delete memory"]')).toBeNull();
+});
+
+it("says why a shared Gateway shows no memory", async () => {
+  const gateway = {
     harnessMemory: async () => ({
       memories: [],
       keptOn: [],
-      unavailable: "Harness memory is read only on the machine whose Worker Host keeps it.",
+      unavailable: "A Tag's memory is read only on the machine whose Worker Host keeps it.",
     }),
   } as unknown as Gateway;
   act(() => root.render(createElement(TagDetails, { gateway, tag, onClose() {} })));
   await settle();
   expect(host.textContent).toContain("read only on the machine whose Worker Host keeps it");
-  expect(host.querySelector('[aria-label^="Delete harness memory"]')).toBeNull();
+  expect(host.querySelector('[aria-label^="Delete memory"]')).toBeNull();
 });
 
 const networkLog: NetworkLog = {
@@ -242,7 +196,7 @@ it("words each network request and an Attempt's totals", () => {
 it("shows the Tag's network log as its own section and rereads when a turn ends", async () => {
   let held: NetworkLog[] = [];
   const networkLogs = vi.fn(async () => held);
-  const gateway = { notes: async () => [], networkLogs } as unknown as Gateway;
+  const gateway = { networkLogs } as unknown as Gateway;
   const feed = watchFeed();
   act(() => root.render(createElement(TagDetails, { gateway, watch: feed, tag, onClose() {} })));
   await settle();
@@ -250,7 +204,7 @@ it("shows the Tag's network log as its own section and rereads when a turn ends"
   const headings = [...host.querySelectorAll("section.details-section h3")].map(
     (node) => node.textContent,
   );
-  expect(headings).toEqual(["Notes", "Network"]);
+  expect(headings).toEqual(["Network"]);
   expect(host.textContent).toContain("No network log yet.");
   held = [networkLog];
   act(() => feed.publish({ kind: "conversation", tagId: "lead" }));
@@ -265,7 +219,6 @@ it("shows the Tag's network log as its own section and rereads when a turn ends"
 
 it("tells a person who is not an operator that only operators see the network log", async () => {
   const gateway = {
-    notes: async () => [],
     networkLogs: async () => {
       throw new Error("This connection cannot access that resource.");
     },
@@ -292,7 +245,7 @@ it("shows the Tag's activity first and rereads it when one of its turns ends", a
   let activity: TagActivity = { windowDays: 30, posted: 0, read: 0, answered: 0, quiet: 0 };
   const tagActivity = vi.fn(async () => activity);
   const feed = watchFeed();
-  const gateway = { notes: async () => [], tagActivity } as unknown as Gateway;
+  const gateway = { tagActivity } as unknown as Gateway;
   act(() => root.render(createElement(TagDetails, { gateway, watch: feed, tag, onClose() {} })));
   await settle();
   const section = host.querySelector('[aria-labelledby="tag-details-activity"]');
@@ -328,7 +281,7 @@ it("shows the Tag's activity first and rereads it when one of its turns ends", a
 
 it("closes on Esc, unless a dialog or menu is open and takes it first", async () => {
   const onClose = vi.fn();
-  const gateway = { notes: async () => [] } as unknown as Gateway;
+  const gateway = {} as unknown as Gateway;
   act(() => root.render(createElement(TagDetails, { gateway, tag, onClose })));
   await settle();
   const dialog = document.createElement("div");

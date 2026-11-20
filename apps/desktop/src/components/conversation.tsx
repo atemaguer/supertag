@@ -80,7 +80,7 @@ interface ConversationProps {
   onWriteChange(delta: 1 | -1): void;
   /** Reports what the sidebar shows for this conversation as its history changes. */
   onSummary?(summary: TagSummary): void;
-  /** The Tag details panel, with its notes, shows beside the conversation. */
+  /** The Tag details panel, with its memory, shows beside the conversation. */
   details?: boolean;
   onCloseDetails?(): void;
 }
