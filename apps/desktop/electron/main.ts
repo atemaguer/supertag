@@ -4,7 +4,12 @@
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { GatewayState, readLocalGateway } from "@supertag/client/node";
+import {
+  GatewayState,
+  PROTOCOL_VERSIONS,
+  probeGateway,
+  readLocalGateway,
+} from "@supertag/client/node";
 import {
   app,
   BrowserWindow,
@@ -22,7 +27,6 @@ import { NOTIFICATION_CLICK } from "./channels";
 import { handlers } from "./handlers";
 import { originOf, registerChannels, Streams } from "./ipc";
 import { type AppIdentity, appCli } from "./local/cli";
-import { PROTOCOL_VERSIONS, probe } from "./local/negotiate";
 import { menuTemplate } from "./menu";
 import { cacheDirectory, configDirectory, gatewayStore } from "./paths";
 import { APP_ORIGIN, APP_SCHEME, APP_URL, appResponse, contentSecurityPolicy } from "./protocol";
@@ -207,7 +211,7 @@ function start() {
       {
         app: appIdentity,
         protocolVersions: PROTOCOL_VERSIONS,
-        probe: (url, token) => probe(url, token, app.getVersion()),
+        probe: (url, token) => probeGateway(url, token, app.getVersion()),
         chooseWorkspaceFolder: () => chooseFolder(dialog, mainWindow, FOLDER_TITLES.workspace),
         localStateOf: (connectionId) => gateway.localStateOf(connectionId),
       },

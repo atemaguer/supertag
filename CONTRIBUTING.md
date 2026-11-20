@@ -98,11 +98,19 @@ connection itself, and the local Gateway with `$SUPERTAG_CLI __local-gateway`. T
 in `core/crates/cli/src/tui.rs`. `python3 scripts/smoke_native_archive.py --terminal-ui PATH`
 starts a build in a pseudo-terminal and quits it, as the release smoke does.
 
-Releases don't ship the terminal UI yet. `SHIP_TUI = False` in `scripts/native_archive.py` is the
-one switch: set it to `True` to put `supertag-tui` and `licenses/opentui/` in the release archives
-and the Mac app, and to make the installer and release smoke check them. CI builds and tests the
-terminal UI either way. To try a release archive with it before then, set
-`SUPERTAG_RELEASE_TUI=1` for one `native_release.py package` run.
+Releases ship the terminal UI: `SHIP_TUI = True` in `scripts/native_archive.py` puts
+`supertag-tui` and `licenses/opentui/` (OpenTUI's licenses and `FFMPEG-SOURCE.md`) in the release
+archives and the Mac app, and makes the installer and release smoke check them. Set it to `False`,
+or `SUPERTAG_RELEASE_TUI=0` for one run, to build archives with only the CLI; CI builds and tests
+the terminal UI either way, and the script tests run in both states.
+
+OpenTUI's native library statically links FFmpeg, under the LGPL 2.1, so every release must carry
+the exact FFmpeg source. The release workflow's publish job runs `scripts/ffmpeg_source.py` on the
+three archives: it reads the source URL and SHA-256 from each archive's
+`licenses/opentui/FFMPEG-SOURCE.md`, requires them to agree, downloads the tarball, and fails the
+release unless its SHA-256 matches. The tarball is listed in `SHA256SUMS` and attached as a
+release asset. When you upgrade `@opentui/core`, update the OpenTUI version, tag, and FFmpeg
+version in `NOTICE`; `scripts/test_ffmpeg_source.py` checks the version and tag.
 
 ### Protobuf contracts
 
@@ -214,6 +222,47 @@ uv run --python 3.13 --script tests/evals/attention/run.py --harness codex --har
 It needs a running Control Plane with a Worker Host for each harness, spends one turn per check
 and harness, and retires its Tags afterwards (`--keep` keeps them). `--plan` prints the notes it
 would schedule without running anything; `scenarios.json` holds the checks.
+
+### Memory eval
+
+When you change how a Tag's memory is kept, granted, merged, or reviewed, run the memory eval. It
+starts a throwaway deployment (`supertag up` of the CLI you name) under `/tmp`, gives each
+harness (Claude Code, Codex, OpenCode, Cursor) a Tag named `memeval-HARNESS`, and runs one
+scenario on each: a Session teaches a preference and a fact, later Sessions recall them, one
+corrects the preference, a Work Session proposes a fix for the stale fact and an unverified note,
+the operator's conversation shares their Sessions' memory, an Objective (whose Sessions are
+shared) teaches what the operator's own Sessions must not see, and the daily review merges and
+drops the shared proposals. It moves the Control Plane's clock a day ahead so the review runs at
+once, which needs a CLI built with `--features test-fixtures`. It prints each check and the
+Worker Hosts' memory counters (`supertag metrics`), and `--json` prints them as JSON.
+
+The fixture mode, the default, runs the fixture adapter as each harness, writing and reading the
+memory folder in that harness's own format, and checks the plumbing: whether each later turn
+started with the memory in its store, and with nothing from the other store. It takes about a
+minute and runs as the `memory_eval_runtime` Cargo test:
+
+```sh
+cargo build --manifest-path core/Cargo.toml --locked -p supertag-cli --features test-fixtures --bins
+node tests/evals/memory/run.mjs --cli core/target/debug/supertag \
+  --adapter core/target/debug/supertag-fixture-adapter
+```
+
+The live mode runs the real harnesses, which must be installed, and scores their replies with the
+same counters. It reads provider keys only from the file you name (`env_file` of the deployment it
+starts) and gives the deployment a home directory of its own, so no harness finds your own login,
+configuration, or keychain entries. It refuses to start without `--yes-spend`. OpenCode needs
+its model (`--model opencode=PROVIDER/MODEL`); `--model HARNESS=MODEL` sets any harness's.
+
+```sh
+node tests/evals/memory/run.mjs --live --yes-spend --credentials-file ./eval.env \
+  --cli core/target/debug/supertag --harness claude-code,codex
+```
+
+Each harness runs about 16 turns: the 12 the eval starts (it stops at 20), each submitted one
+stopped at 400,000 reported tokens, and its Work Sessions' and review's own. With these short
+prompts, expect about $1 to $1.50 per harness, $3 to $6 for all four, depending on each harness's
+model. Live replies are scored by what they say; what each turn loaded is checked only in the
+fixture mode.
 
 ## Submit a pull request
 

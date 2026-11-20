@@ -60,6 +60,21 @@ stops before it finishes them, or a Worklet restarted meanwhile, leaves them to 
 which the Worklet starts for them with a new credential. After three such Workers die, the Task
 Attempt fails.
 
+## Registration
+
+Each start of a Worklet registers the host again, and the newest registration is the current one.
+A Worklet whose registration another registration replaced, such as a second process started
+with the same state directory or credential, or whose host was revoked, is fenced: the Control
+Plane refuses its presence reports and its Task Attempts, and it stops with `Worker Host
+registration generation N is no longer current`. `supertag up` then stops only that host and
+does not start it again, since that would fence the other registration in turn. `supertag ps`
+shows the host as `fenced`, and `supertag status` says why under its row. Stop the other process,
+then run `supertag up`, which restarts the services to start the host again.
+
+A Worklet that can't record a presence report, for example because the disk is full, keeps
+running and sends no presence until it can. The Control Plane shows the host offline meanwhile,
+and the host's log says why. Nothing fenced it.
+
 ## Data endpoint
 
 A Gateway can carry a Task Attempt's data calls to the Control Plane. It forwards only calls a

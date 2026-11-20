@@ -111,6 +111,12 @@ pub(crate) struct Prepared {
     key: crate::memory::StoreKey,
     /// The grant's seeds, now in the store, for the Control Plane to drop.
     seeded: Vec<String>,
+    /// What the harness loads of the index the copy started with.
+    loaded: crate::memory_stats::Loaded,
+    /// The proposals a review that finished was shown, which the merge-back drops.
+    reviewed: std::sync::Mutex<Vec<String>>,
+    /// What the turn's activity said about the memory folder.
+    activity: std::sync::Mutex<crate::memory_stats::Activity>,
 }
 
 /// `YYYY-MM-DDTHH-MM-SS` in UTC, as Codex names its ad hoc notes.
@@ -498,6 +504,9 @@ impl Prepared {
         if meta.generation != grant.reset_generation {
             remove(&store.join("current"))?;
             crate::memory::forget_records(&store)?;
+            if meta.revision > 0 {
+                crate::memory_stats::count(&store, |counters| counters.resets += 1);
+            }
             meta = Meta {
                 revision: 0,
                 generation: grant.reset_generation,
@@ -535,12 +544,19 @@ impl Prepared {
                 {
                     crate::failures::note("Native memory records were not updated", &error);
                 }
+                let delivered = crate::memory::changes(harness, &files, &with_seeds).written;
+                crate::memory_stats::count(&store, |counters| {
+                    counters.seeds_delivered += delivered;
+                });
             }
         }
         let current = snapshot(&store.join("current"))?;
         write_tree(&attempt_root.join("base"), &current)?;
         write_tree(&attempt_root.join("work"), &current)?;
         Ok(Self {
+            loaded: crate::memory_stats::loaded(harness, &current),
+            reviewed: std::sync::Mutex::default(),
+            activity: std::sync::Mutex::default(),
             store,
             attempt: attempt_root,
             label: attempt.chars().take(8).collect(),
@@ -559,6 +575,11 @@ impl Prepared {
         &self.seeded
     }
 
+    /// The harness directory the store is kept under.
+    pub(crate) fn harness(&self) -> &str {
+        &self.key.harness
+    }
+
     /// Whether this is the Tag's shared store, rather than one person's.
     pub(crate) fn shared(&self) -> bool {
         self.key.scope == "shared"
@@ -575,17 +596,33 @@ impl Prepared {
         ))
     }
 
-    /// Drops the proposals a review was shown, once it finished.
-    pub(crate) fn reviewed(&self, shown: &[String]) -> Result<()> {
-        if shown.is_empty() {
-            return Ok(());
+    /// Marks the proposals a review was shown, once it finished: the merge-back drops them,
+    /// counting each the store then holds as merged and the rest as dropped.
+    pub(crate) fn reviewed(&self, shown: &[String]) {
+        self.reviewed
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .extend(shown.iter().cloned());
+    }
+
+    /// The memory folder's paths as the harness may name them in its activity: the working copy,
+    /// and its canonical path.
+    pub(crate) fn folder_names(&self) -> Vec<String> {
+        let work = self.working_directory();
+        let mut names = vec![work.to_string_lossy().into_owned()];
+        if let Ok(canonical) = work.canonicalize() {
+            names.push(canonical.to_string_lossy().into_owned());
         }
-        let _lock = Lock::take(&self.store)?;
-        let meta = read_meta(&self.store)?;
-        if meta.generation != self.generation {
-            return Ok(());
-        }
-        crate::memory::drop_proposals(&self.store, meta.generation, shown)
+        names.dedup();
+        names
+    }
+
+    /// Records what the turn's activity said about the memory folder.
+    pub(crate) fn noted(&self, activity: crate::memory_stats::Activity) {
+        *self
+            .activity
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = activity;
     }
 
     /// The directory the harness reads and writes as its memory.
@@ -606,28 +643,114 @@ impl Prepared {
     }
 
     fn merge_back(&self, writer: Option<crate::memory::Writer>) -> Result<Summary> {
-        let base = snapshot(&self.attempt.join("base"))?;
+        let base = snapshot(&self.attempt.join("base"));
         let ours = snapshot(&self.working_directory());
         let _lock = Lock::take(&self.store)?;
-        let mut meta = read_meta(&self.store)?;
         let theirs = snapshot(&self.store.join("current"))?;
-        let theirs_summary = summarize(&theirs, &meta);
+        let review = writer.as_ref().is_some_and(|writer| {
+            writer
+                .session_id
+                .starts_with(supertag_protocol::MEMORY_REVIEW_SESSION_PREFIX)
+        });
+        let proposing = writer
+            .as_ref()
+            .is_some_and(|writer| writer.trusted != Some(true));
+        let result = self.merge_locked(writer.as_ref(), base, ours, &theirs);
+        let meta = read_meta(&self.store)?;
+        let after = match &result {
+            Ok((_, Some(merged))) => merged.clone(),
+            _ => theirs.clone(),
+        };
+        // A review that finished merged or dropped what it was shown.
+        let shown = std::mem::take(
+            &mut *self
+                .reviewed
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()),
+        );
+        let (mut merged_proposals, mut dropped_proposals) = (0, 0);
+        if !shown.is_empty() && meta.generation == self.generation {
+            for proposal in crate::memory::proposals(&self.store, meta.generation)
+                .iter()
+                .filter(|proposal| shown.contains(&proposal.record.memory_id))
+            {
+                if crate::memory::holds(&self.key.harness, &after, proposal) {
+                    merged_proposals += 1;
+                } else {
+                    dropped_proposals += 1;
+                }
+            }
+            crate::memory::drop_proposals(&self.store, meta.generation, &shown)?;
+        }
+        let changes = if proposing {
+            crate::memory_stats::Changes::default()
+        } else {
+            crate::memory::changes(&self.key.harness, &theirs, &after)
+        };
+        let conflicts = after
+            .keys()
+            .filter(|path| !theirs.contains_key(*path) && path.contains(".conflict-"))
+            .count() as u64;
+        let loaded = self.loaded;
+        let activity = *self
+            .activity
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        crate::memory_stats::count(&self.store, |counters| {
+            counters.turns += 1;
+            counters.review_turns += u64::from(review);
+            counters.proposing_turns += u64::from(proposing);
+            if loaded.lines > 0 {
+                counters.turns_loaded += 1;
+                counters.loaded_bytes += loaded.bytes;
+                counters.loaded_lines += loaded.lines;
+            }
+            counters.truncated_turns += u64::from(loaded.truncated);
+            counters.recalls += activity.recalls;
+            counters.memory_edits += activity.edits;
+            if review {
+                counters.review_written += changes.written;
+                counters.review_updated += changes.updated;
+                counters.review_deleted += changes.deleted;
+                counters.last_review_at_ms = Some(crate::memory_stats::now_ms());
+            } else {
+                counters.written += changes.written;
+                counters.updated += changes.updated;
+                counters.deleted += changes.deleted;
+            }
+            counters.conflicts += conflicts;
+            counters.proposals_reviewed += merged_proposals + dropped_proposals;
+            counters.proposals_merged += merged_proposals;
+            counters.proposals_dropped += dropped_proposals;
+            counters.last_turn_at_ms = Some(crate::memory_stats::now_ms());
+        });
+        result.map(|(summary, _)| summary)
+    }
+
+    /// The merge-back under the store's lock: the store's summary afterwards, and its files when
+    /// this turn changed them.
+    fn merge_locked(
+        &self,
+        writer: Option<&crate::memory::Writer>,
+        base: Result<Files>,
+        ours: Result<Files>,
+        theirs: &Files,
+    ) -> Result<(Summary, Option<Files>)> {
+        let mut meta = read_meta(&self.store)?;
+        let theirs_summary = summarize(theirs, &meta);
         // A reset since this Attempt started drops what it wrote.
         if meta.generation != self.generation {
-            return Ok(theirs_summary);
+            return Ok((theirs_summary, None));
         }
-        let ours = ours?;
-        if let Some(writer) = writer
-            .as_ref()
-            .filter(|writer| writer.trusted != Some(true))
-        {
+        let (base, ours) = (base?, ours?);
+        if let Some(writer) = writer.filter(|writer| writer.trusted != Some(true)) {
             check_caps(&ours)?;
             crate::memory::propose(&self.store, &self.key, (&meta, writer), (&base, &ours))?;
-            return Ok(theirs_summary);
+            return Ok((theirs_summary, None));
         }
-        let merged = merge(&base, &ours, &theirs, &self.label);
-        if merged == theirs {
-            return Ok(theirs_summary);
+        let merged = merge(&base, &ours, theirs, &self.label);
+        if &merged == theirs {
+            return Ok((theirs_summary, None));
         }
         replace_current(&self.store, &mut meta, &merged, &self.label)?;
         // The files are the memory and the records are derived from them, so a failure here
@@ -641,11 +764,11 @@ impl Prepared {
             &self.store,
             &self.key,
             (&merged, &meta),
-            writer.as_ref().map(|writer| (writer, &changed)),
+            writer.map(|writer| (writer, &changed)),
         ) {
             crate::failures::note("Native memory records were not updated", &error);
         }
-        Ok(summarize(&merged, &meta))
+        Ok((summarize(&merged, &meta), Some(merged)))
     }
 }
 

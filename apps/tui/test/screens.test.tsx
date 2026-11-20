@@ -762,12 +762,12 @@ test("Gateways offers its keys only once the list is read, and keys before it do
     kind: "saved",
     available: true,
   };
-  const read = connections.entries.bind(connections);
+  const read = connections.savedEntries.bind(connections);
   let release = () => {};
   const listed = new Promise<void>((resolve) => {
     release = resolve;
   });
-  connections.entries = async () => {
+  connections.savedEntries = async () => {
     await listed;
     return read();
   };

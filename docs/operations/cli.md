@@ -236,9 +236,8 @@ conversations a window of their own.
 ### Open the terminal UI
 
 `supertag tui`, and plain `supertag` in a terminal, open `supertag-tui`, a full-screen terminal
-UI for your conversations with Tags, when it is installed beside `supertag`. Releases don't
-include it yet, so plain `supertag` prints the help, ending with a line that says the terminal UI
-isn't installed; it ships in a later release.
+UI for your conversations with Tags. The release archive and the installer put it beside
+`supertag`, and the desktop app's bundled CLI carries it too.
 
 ```sh
 supertag
@@ -249,7 +248,11 @@ supertag tui --gateway team
 release, and refuses one from another release. `--binary PATH` or `SUPERTAG_TUI_BINARY` names
 another executable. The terminal UI connects on its own: to the Gateway `--gateway` names (a saved
 name, or a URL with the Operator Token in `SUPERTAG_OPERATOR_TOKEN`), else to the services
-`supertag up` runs from `--state-directory`, `SUPERTAG_STATE_DIR`, or `~/.supertag`. The CLI
+`supertag up` runs from `--state-directory`, `SUPERTAG_STATE_DIR`, or `~/.supertag`. Without
+`--gateway`, when SuperTag is set up on this machine but its services are stopped, it starts them
+with `supertag up` first, as the desktop app does; when they run an older release, it offers to
+restart them with this one (`supertag down`, then `supertag up`), which interrupts their running
+Tasks; and when SuperTag is not set up, it says to run `supertag init` in a repository. The CLI
 passes it no credential. Outside a terminal, plain `supertag` prints the help instead; when the
 terminal UI isn't installed, the help ends with a line that says so.
 
@@ -341,7 +344,12 @@ narrow it, and `--cursor` with the `next_cursor` it returns reads the next page.
 follows one Objective as a timeline until it closes. `supertag metrics` prints counts of Tasks,
 usage, Worker Host capacity, backlogs, and how long recent Task Attempts took from start to a ready
 Workspace, an attached harness, and the harness's first event, and from the harness finishing to
-the result being reported.
+the result being reported. With a Worker Host running on this machine, it also prints how each
+Tag's memory is used there: memories, turns that loaded memory and how much, reads of memory
+files, what turns and daily reviews changed, and what became of proposals. These are counts kept
+by the Worker Host, never memory text; `supertag describe tag TAG` shows one Tag's as
+`memory_use`. [Seeing how memory is used](../reference/coordination.md#seeing-how-memory-is-used)
+lists the counters.
 
 ## Organize Tags
 

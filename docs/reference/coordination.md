@@ -806,6 +806,27 @@ records part of the Tag's memory on a Worker Host elsewhere, `kept_on` names it.
 Volume isn't listed yet. People never write memory directly: they tell the Tag ("remember that I
 prefer squash merges", "forget that").
 
+### Seeing how memory is used
+
+Each Worker Host counts how each store is used, beside the store (`stats.json`), as numbers only:
+the counters never hold memory text. `supertag metrics` adds them for every Tag on the Worker Hosts
+on this machine (`memory` in `--output json`), and `supertag describe tag TAG` adds the Tag's own
+(`memory_use`). For each store, by Tag, harness, and audience, they say:
+
+| Counter | What it counts |
+| --- | --- |
+| `memories`, `proposals_waiting` | What the store holds now, and the proposals waiting beside it. |
+| `loaded` | How much of its index the harness would load into the next turn: the first 200 lines or 25 KB of `MEMORY.md`, or for Codex `memory_summary.md`, cut to about 10 KB (2,500 tokens); `truncated` when the index goes past that. |
+| `turns`, `review_turns`, `proposing_turns` | Turns granted the store, the daily reviews among them, and the turns that could only propose, such as a Work Session's own. |
+| `turns_loaded`, `loaded_bytes`, `loaded_lines`, `truncated_turns` | Turns that started with memory to load, how much they loaded in all, and those whose index was cut short. |
+| `recalls`, `memory_edits` | The turn's activity lines that read or edit a file in the memory folder, as the harness reports its tool calls. Codex reads its memory in its own home, so its lines that name a `memories` folder count. |
+| `written`, `updated`, `deleted` | Memories other turns added, changed, and removed, by what the harness's reader finds before and after the turn. |
+| `review_written`, `review_updated`, `review_deleted` | The same for the daily reviews. |
+| `proposals_created`, `proposals_reviewed`, `proposals_merged`, `proposals_dropped`, `proposals_expired`, `proposals_deleted` | Proposals kept; shown to a turn that finished merging them; of those, the ones the store then holds in the same file or with the same text, and the rest; those that waited past 14 days; and those a person deleted. |
+| `seeds_delivered` | Notes the Tag kept before its harness's memory, written into the store. |
+| `deleted_by_people`, `resets`, `conflicts` | Memories deleted with `supertag delete memory`, resets of the store, and conflict files merge-backs kept. |
+| `oldest_updated_at` | When the least recently changed memory last changed. |
+
 ### Quiet results
 
 A Tag speaks when it has something to say. A recurring check that finds nothing, such as "check

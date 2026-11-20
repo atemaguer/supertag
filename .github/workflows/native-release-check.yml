@@ -71,8 +71,8 @@ jobs:
       - name: Check archive, installation, and platform boundaries
         run: |
           python -m unittest discover -s scripts -p 'test_*.py'
-          # Again with the terminal UI switched on, so turning SHIP_TUI on cannot break them.
-          SUPERTAG_RELEASE_TUI=1 python -m unittest discover -s scripts -p 'test_*.py'
+          # Again with the terminal UI switched off, so the SHIP_TUI switch keeps working.
+          SUPERTAG_RELEASE_TUI=0 python -m unittest discover -s scripts -p 'test_*.py'
 
   package:
     if: inputs.mode == 'package' || (github.event_name == 'pull_request' && github.event.label.name == 'release-check')

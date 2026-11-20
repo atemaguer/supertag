@@ -1,11 +1,11 @@
 /**
- * The local services, onboarding, and the local Gateway upgrade. Stand-in CLIs are shell scripts.
+ * The app's CLI, and the channels backed by it. Stand-in CLIs are shell scripts.
  */
 import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { parseLocalGateway } from "@supertag/client/node";
+import { parseLocalGateway, type RestartStep } from "@supertag/client/node";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import {
   bundledCli,
@@ -20,17 +20,7 @@ import {
   versionMismatch,
 } from "./cli";
 import { type LocalDependencies, localHandlers } from "./handlers";
-import { checkWith } from "./onboarding";
-import { jsonOf, MAX_REASON_CHARS, reason } from "./run";
-import {
-  addWorkspace,
-  localUpgrade,
-  older,
-  type RestartStep,
-  restart,
-  shouldStart,
-  up,
-} from "./services";
+import { addWorkspace } from "./services";
 
 let root: string;
 beforeAll(async () => {
@@ -157,64 +147,6 @@ it("reads the login shell's PATH between its marks", () => {
   expect(markedPath(`${PATH_MARK}${PATH_MARK}`)).toBeUndefined();
 });
 
-it("starts only a set-up machine whose services are stopped", () => {
-  // Nothing set up yet, or no CLI to say: first launch belongs to onboarding.
-  expect(shouldStart({ running: false, setUp: false })).toBe(false);
-  expect(shouldStart(undefined)).toBe(false);
-  expect(shouldStart({ running: false, setUp: true })).toBe(true);
-  // Already running: just connect.
-  expect(shouldStart({ running: true, setUp: true })).toBe(false);
-});
-
-it("says what a failed up printed and where the logs are", async () => {
-  const dir = await directory("up");
-  const state = path.join(dir, "state");
-  const failing = await tool(
-    dir,
-    "failing",
-    `test "$1 $2" = 'up --state-directory' || exit 9
-echo 'Starting SuperTag'
-echo 'Error: Worklet laptop did not report readiness: no Node' >&2
-exit 1`,
-  );
-  const error = await up(failing, state, undefined).catch((e: unknown) => e);
-  expect(error).toContain("did not report readiness: no Node");
-  expect(error).toContain(`Logs: ${path.join(state, "logs")}`);
-  expect(String(error).startsWith("Could not start SuperTag:\n")).toBe(true);
-  const working = await tool(dir, "working", `test "$1" = up && echo ready`);
-  await expect(up(working, state, undefined)).resolves.toBeUndefined();
-});
-
-it("restarts by stopping then starting the same state directory", async () => {
-  const dir = await directory("restart");
-  const state = path.join(dir, "state");
-  const calls = path.join(dir, "calls");
-  const cli = await tool(dir, "supertag", `echo "$*" >> '${calls}'`);
-  const steps: RestartStep[] = [];
-  await restart(cli, state, undefined, (step) => steps.push(step));
-  expect(await readFile(calls, "utf8")).toBe(
-    `down --state-directory ${state}\nup --state-directory ${state}\n`,
-  );
-  expect(steps).toEqual(["stopping", "starting"]);
-
-  // A failed down never starts up, and says what down printed.
-  await rm(calls);
-  await writeFile(
-    cli,
-    `#!/bin/sh\necho "$*" >> '${calls}'\ntest "$1" = down && echo 'Error: drain Worker Host laptop: timed out' >&2 && exit 1\nexit 0\n`,
-  );
-  const failed: RestartStep[] = [];
-  const error = await restart(cli, state, undefined, (step) => failed.push(step)).catch(
-    (e: unknown) => e,
-  );
-  expect(String(error).startsWith("Could not stop SuperTag:\n")).toBe(true);
-  expect(error).toContain("drain Worker Host laptop: timed out");
-  expect((await readFile(calls, "utf8")).split("\n").filter(Boolean)).toEqual([
-    `down --state-directory ${state}`,
-  ]);
-  expect(failed).toEqual(["stopping"]);
-});
-
 it("adds a folder with the CLI and reads its JSON, or its error and fix", async () => {
   const dir = await directory("workspace");
   const runs = path.join(dir, "runs");
@@ -248,46 +180,6 @@ it("adds a folder with the CLI and reads its JSON, or its error and fix", async 
   });
 });
 
-it("reads the JSON line after any progress", () => {
-  expect(jsonOf('Starting SuperTag…\n{"version":1,"tag":"lead"}\n')?.["tag"]).toBe("lead");
-  expect(jsonOf('{\n  "ready": true\n}')?.["ready"]).toBe(true);
-  expect(jsonOf("no json here")).toBeUndefined();
-});
-
-it("runs the CLI exactly once for a check", async () => {
-  const dir = await directory("check");
-  const runs = path.join(dir, "runs");
-  const cli = await tool(
-    dir,
-    "supertag",
-    `echo "$*" >> '${runs}'\necho '{"version":1,"ready":false}'`,
-  );
-  const value = await checkWith(cli, undefined, "install", "/tmp/My Project", "codex");
-  expect(value).toEqual({ version: 1, ready: false, cli });
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  expect(await readFile(runs, "utf8")).toBe(
-    "init --check --json --directory /tmp/My Project --harness codex\n",
-  );
-  // A CLI older than the app has no check: it is named as outdated.
-  await writeFile(cli, "#!/bin/sh\necho \"error: unexpected argument '--check'\" >&2\nexit 2\n");
-  expect(await checkWith(cli, undefined, "install", undefined, undefined)).toEqual({
-    cli: null,
-    outdated: cli,
-    install: "install",
-  });
-});
-
-it("bounds a failure reason to its last lines", () => {
-  expect(reason({ success: false, stdout: "", stderr: "one\ntwo\n\nthree\nfour\nfive\n" })).toBe(
-    "two three four five",
-  );
-  const long = reason({ success: false, stdout: "x".repeat(2000), stderr: "" });
-  expect([...long]).toHaveLength(MAX_REASON_CHARS + 1);
-  expect(reason({ success: false, stdout: "", stderr: "" })).toBe(
-    "The command failed without saying why.",
-  );
-});
-
 it("reads the local Gateway as __local-gateway reports it", () => {
   const running = parseLocalGateway(
     JSON.stringify({
@@ -310,37 +202,6 @@ it("reads the local Gateway as __local-gateway reports it", () => {
   });
   expect(() => parseLocalGateway('{"protocol":"local-gateway.v1","running":false}')).toThrow();
   expect(() => parseLocalGateway("nope")).toThrow();
-});
-
-it("offers a restart only to a release that speaks older protocols", async () => {
-  expect(older([2], [6])).toBe(true);
-  expect(older([2, 5], [6, 7])).toBe(true);
-  expect(older([7], [6])).toBe(false);
-  expect(older([5, 6], [6])).toBe(false);
-  expect(older([], [6])).toBe(false);
-
-  const local = { running: true, stateDirectory: "/s", setUp: true, machineId: null };
-  const at = { ...local, url: "http://127.0.0.1:9", token: "t" };
-  const peer = (build?: string, versions?: number[]) => async () => ({ build, versions });
-  expect(await localUpgrade(at, peer("0.3.0", [5]), [6], "0.3.2")).toEqual({
-    running: "0.3.0",
-    version: "0.3.2",
-  });
-  // A newer Gateway, one that names no release, one that agrees, or none running: no offer.
-  expect(await localUpgrade(at, peer("0.4.0", [7]), [6], "0.3.2")).toBeNull();
-  expect(await localUpgrade(at, peer(undefined, [5]), [6], "0.3.2")).toBeNull();
-  expect(await localUpgrade(at, async () => undefined, [6], "0.3.2")).toBeNull();
-  expect(await localUpgrade(local, peer("0.3.0", [5]), [6], "0.3.2")).toBeNull();
-  expect(
-    await localUpgrade(
-      at,
-      async () => {
-        throw new Error("unreachable");
-      },
-      [6],
-      "0.3.2",
-    ),
-  ).toBeNull();
 });
 
 /** A stand-in CLI of version 0.3.2 whose `__local-gateway` prints `discovery`. */

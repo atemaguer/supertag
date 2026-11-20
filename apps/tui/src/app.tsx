@@ -36,12 +36,13 @@ import {
 } from "@supertag/client/react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { TuiGateway } from "./connection";
-import type { Controller } from "./controller";
+import { type Controller, LOCAL_STATES } from "./controller";
 import { ConversationPane } from "./conversation";
 import { Gateways } from "./gateways";
 import { InboxView } from "./inbox";
 import { alt, SHORTCUTS } from "./keys";
 import type { NotifyLevel } from "./launch";
+import { LocalPanel } from "./local";
 import { NewTagForm } from "./newtag";
 import { alertLevel } from "./notify";
 import { ObjectiveForm, ObjectiveView } from "./objective";
@@ -70,7 +71,16 @@ export interface AppProps {
   notifyLevel: NotifyLevel;
 }
 
-type Overlay = "palette" | "gateways" | "help" | "newTag" | "goal" | "work" | PanelKind | undefined;
+type Overlay =
+  | "palette"
+  | "local"
+  | "gateways"
+  | "help"
+  | "newTag"
+  | "goal"
+  | "work"
+  | PanelKind
+  | undefined;
 
 export function App(props: AppProps) {
   const { controller } = props;
@@ -83,6 +93,9 @@ export function App(props: AppProps) {
   });
   const gateway = controller.gateway;
   const status = controller.status;
+  // Starting, restarting or setting up the local services: their panel takes the keys.
+  const local = LOCAL_STATES.has(status.kind) && overlay !== "gateways";
+  const shown: Overlay = local ? "local" : overlay;
   return (
     <StyleProvider>
       <box flexDirection="column" width="100%" height="100%">
@@ -91,12 +104,21 @@ export function App(props: AppProps) {
             key={gateway.scope}
             {...props}
             gateway={gateway}
-            overlay={overlay}
+            overlay={shown}
             setOverlay={setOverlay}
           />
         ) : (
-          <Waiting controller={controller} overlay={overlay} setOverlay={setOverlay} />
+          <Waiting controller={controller} overlay={shown} setOverlay={setOverlay} />
         )}
+        {local ? (
+          <Centered>
+            <LocalPanel
+              controller={controller}
+              width={72}
+              onChoose={() => setOverlay("gateways")}
+            />
+          </Centered>
+        ) : null}
         {overlay === "gateways" || (!gateway && status.kind === "choosing") ? (
           <Centered>
             <Gateways
@@ -105,9 +127,11 @@ export function App(props: AppProps) {
               width={72}
               onOpen={(entry) => {
                 setOverlay(undefined);
-                void controller.open(entry.id, entry);
+                void controller.open(entry.id, entry, { start: entry.kind === "local" });
               }}
-              onClose={() => (gateway ? setOverlay(undefined) : undefined)}
+              onClose={() =>
+                gateway || LOCAL_STATES.has(status.kind) ? setOverlay(undefined) : undefined
+              }
               onForgot={(entry) => controller.forgot(entry.id)}
             />
           </Centered>
@@ -149,9 +173,9 @@ function Waiting({
             <text fg={color.warning}>{safe(status.problem)}</text>
             <text fg={color.muted}>Trying again. Ctrl-P chooses another Gateway.</text>
           </>
-        ) : (
+        ) : status.kind === "choosing" ? (
           <text fg={color.muted}>Choose a Gateway.</text>
-        )}
+        ) : null}
       </box>
       <StatusLine controller={controller} unread={0} />
     </>
@@ -787,7 +811,17 @@ function StatusLine({
           ? brief
             ? "not connected"
             : `not connected: ${describe(status.problem)}`
-          : "choose a Gateway";
+          : status.kind === "starting"
+            ? "starting SuperTag…"
+            : status.kind === "restarting"
+              ? "restarting SuperTag…"
+              : status.kind === "startFailed"
+                ? "did not start"
+                : status.kind === "notSetUp"
+                  ? "not set up"
+                  : status.kind === "upgrade"
+                    ? `runs ${status.running}, an older release`
+                    : "choose a Gateway";
   const parts = [
     name,
     state,

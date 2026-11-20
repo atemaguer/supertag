@@ -99,6 +99,8 @@ struct Bridge {
     secrets: Arc<Vec<SensitiveValue>>,
     /// The message the harness is writing now.
     text: text::SharedTextStream,
+    /// Counts activity lines that name the memory folder, when the turn has one.
+    memory_watch: Option<Arc<crate::memory_stats::Watch>>,
 }
 
 #[derive(Default)]
@@ -307,6 +309,11 @@ impl Harness for Bridge {
             ));
         }
         let event = request.into_inner();
+        if event.kind == TaskEventKind::Activity as i32
+            && let Some(watch) = &self.memory_watch
+        {
+            watch.saw(&event.text);
+        }
         let append = AppendEventRequest {
             sequence: event.sequence,
             text: self.redact_within(&event.text, MAX_EVENT_TEXT_BYTES),
@@ -642,6 +649,13 @@ async fn run(
         }
         _ => vec![],
     };
+    let memory_watch = match &native_memory {
+        Some(NativeMemory::Host(prepared)) => Some(Arc::new(crate::memory_stats::Watch::new(
+            prepared.folder_names(),
+            prepared.harness() == "codex",
+        ))),
+        _ => None,
+    };
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let bootstrap = AdapterBootstrap {
         endpoint: format!("http://{}", listener.local_addr()?),
@@ -696,6 +710,7 @@ async fn run(
         artifact_capacity: Arc::new(Semaphore::new(1)),
         secrets,
         text: Arc::default(),
+        memory_watch,
     };
     let stop_server = CancellationToken::new();
     let mut server = tokio::spawn(
@@ -805,8 +820,9 @@ async fn prepare_native_memory(
     // and its memory folder stay on this host: nothing in the sandbox reaches the folder, and the
     // harness keeps its memories there with its own tools, which run here.
     let grant = assignment.native_memory.clone()?;
-    let harness = crate::worker::native_memory::harness_directory(options.harness)?;
     let task = assignment.task.as_ref()?;
+    let harness = crate::worker::native_memory::harness_directory(options.harness)
+        .or_else(|| fixture_memory_harness(options.harness, &task.tag_id))?;
     let state = options.state_directory.clone();
     let attempt = assignment.attempt_id.clone();
     if let Some(volume) = assignment.volume.clone() {
@@ -877,6 +893,28 @@ async fn prepare_native_memory(
             None
         }
     }
+}
+
+/// The memory eval (`tests/evals/memory/run.mjs`) runs the fixture adapter as each built-in
+/// harness: a test build keeps a protocol adapter's memory for a Tag named `memeval-HARNESS` in
+/// that harness's store, so the scenario exercises every harness's store, reader, proposals, and
+/// review on one fixture.
+#[cfg(feature = "test-fixtures")]
+fn fixture_memory_harness(harness: HarnessKind, tag: &str) -> Option<&'static str> {
+    let named = tag.strip_prefix("memeval-")?;
+    (harness == HarnessKind::Unspecified)
+        .then(|| {
+            crate::worker::native_memory::HARNESS_DIRECTORIES
+                .iter()
+                .copied()
+                .find(|directory| *directory == named)
+        })
+        .flatten()
+}
+
+#[cfg(not(feature = "test-fixtures"))]
+fn fixture_memory_harness(_: HarnessKind, _: &str) -> Option<&'static str> {
+    None
 }
 
 /// Tells the Control Plane the grant's seeds are in the store, so no later turn gets them. A lost
@@ -958,10 +996,11 @@ async fn finish_native_memory(bridge: &Bridge, memory: NativeMemory, shown_propo
             attempt_id: bridge.assignment.attempt_id.clone(),
             trusted,
         });
+    if let Some(watch) = &bridge.memory_watch {
+        prepared.noted(watch.activity());
+    }
     let summary = match tokio::task::spawn_blocking(move || {
-        if let Err(error) = prepared.reviewed(&shown) {
-            crate::failures::note("Reviewed memory proposals were not dropped", &error);
-        }
+        prepared.reviewed(&shown);
         prepared.finish(writer)
     })
     .await

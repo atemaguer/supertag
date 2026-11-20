@@ -52,6 +52,10 @@ struct HostView {
     running: u32,
     capacity: u32,
     harness: String,
+    /// Why this machine's supervisor stopped the host's Worklet for good: the Control Plane
+    /// fenced or revoked its registration. The phase is then the other registration's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fenced: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -82,6 +86,26 @@ struct InboxView {
 /// What the organization is doing now: Worker Hosts, Tags, unfinished Objectives, and the
 /// operator inbox, read through the Control Plane's operator API.
 pub async fn status(args: StatusArgs) -> Result<()> {
+    // The hosts this machine's supervisor stopped because their registration was fenced.
+    let fenced = if args.gateway.is_none() {
+        local_config::state_directory(args.state_directory.clone())
+            .ok()
+            .and_then(|state| match lifecycle::inspect(&state) {
+                Ok(Supervisor::Running(status)) => Some(status),
+                _ => None,
+            })
+            .map(|status| {
+                status
+                    .services
+                    .into_iter()
+                    .filter(|service| service.kind == lifecycle::HOST)
+                    .filter_map(|service| Some((service.host_id?, service.fenced?)))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     let (channel, token) = crate::connect_operator(Connection {
         gateway: args.gateway,
         state_directory: args.state_directory,
@@ -205,6 +229,10 @@ pub async fn status(args: StatusArgs) -> Result<()> {
                 running: host.active_attempts,
                 capacity: host.capacity,
                 harness: harness(host.harness_kind().as_str_name()),
+                fenced: fenced
+                    .iter()
+                    .find(|(id, _)| *id == host.host_id)
+                    .map(|(_, reason)| reason.clone()),
             })
             .collect(),
         tags: tags
@@ -293,6 +321,11 @@ fn format_status(view: &StatusView, now_ms: i64) -> String {
             host.capacity,
             host.harness
         ));
+        if let Some(reason) = &host.fenced {
+            lines.push(format!(
+                "    this machine's Worklet for it stopped: {reason}. Another process registered it with its credential; stop that process, then run supertag up"
+            ));
+        }
     }
     lines.push(String::new());
     lines.push("Tags".into());
@@ -456,14 +489,28 @@ mod tests {
     #[test]
     fn status_text_names_every_section_and_neutralizes_terminal_escapes() {
         let view = StatusView {
-            worker_hosts: vec![HostView {
-                id: "laptop".into(),
-                phase: "ready".into(),
-                draining: false,
-                running: 1,
-                capacity: 2,
-                harness: "codex".into(),
-            }],
+            worker_hosts: vec![
+                HostView {
+                    id: "laptop".into(),
+                    phase: "ready".into(),
+                    draining: false,
+                    running: 1,
+                    capacity: 2,
+                    harness: "codex".into(),
+                    fenced: None,
+                },
+                HostView {
+                    id: "desk".into(),
+                    phase: "offline".into(),
+                    draining: false,
+                    running: 0,
+                    capacity: 1,
+                    harness: "codex".into(),
+                    fenced: Some(
+                        "Worker Host registration generation 2 is no longer current".into(),
+                    ),
+                },
+            ],
             tags: vec![TagView {
                 id: "lead".into(),
                 name: "Lead\u{1b}[31m".into(),
@@ -487,6 +534,10 @@ mod tests {
         let text = format_status(&view, 0);
         assert!(
             text.contains("  laptop  ready  1/2 Task Attempts running (codex)\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("  desk  offline  0/1 Task Attempts running (codex)\n    this machine's Worklet for it stopped: Worker Host registration generation 2 is no longer current. "),
             "{text}"
         );
         assert!(!text.contains('\u{1b}'), "{text}");

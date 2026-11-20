@@ -47,6 +47,7 @@ import {
   type CacheScope,
   type CliGateway,
   cliStore,
+  type DirectActivation,
   type DirectConnection,
   deleteHarnessMemoryWithCli,
   deliveryDiff,
@@ -57,15 +58,24 @@ import {
   GatewayState,
   gatewayOrigin,
   type LocalDiscovery,
+  type LocalUpgrade,
   listHarnessMemoryWithCli,
   loadCliGateways,
   loadProfiles,
+  localUpgrade,
   openUrl,
+  type Peer,
+  PROTOCOL_VERSIONS,
+  probeGateway,
+  type RestartStep,
   readEntry,
   readLocalGateway,
+  restartLocal,
   SHARED_GATEWAY_HARNESS_MEMORY,
   type Subscriber,
   saveWithCli,
+  shouldStart,
+  startLocal,
   type Tls,
   tlsOf,
   validKey,
@@ -114,9 +124,11 @@ interface Credentialed {
 
 export interface ConnectionsOptions {
   env: NodeJS.ProcessEnv;
-  /** The `supertag` CLI, for `__local-gateway` and `connect`. */
+  /** The `supertag` CLI, for `__local-gateway`, `up`, `down` and `connect`. */
   cli: string;
   buildVersion: string;
+  /** This release, which a restart of an older local Gateway names; absent unbuilt. */
+  release?: string | undefined;
   /** A launch URL and its token, from `--gateway URL` or `SUPERTAG_GATEWAY_URL`. */
   launchUrl?: { url: string; token: string; tls: Tls };
   /** For tests: how the local Gateway is found, and where saved Gateways are. */
@@ -124,7 +136,18 @@ export interface ConnectionsOptions {
   cliStore?: string;
   desktopStore?: string;
   cacheRoot?: string;
+  /** For tests: how a Gateway's release is asked, and how a connection is made. */
+  probe?: (url: string, token: string) => Promise<Peer | undefined>;
+  connectTo?: (connection: DirectConnection) => Promise<DirectActivation>;
+  /** For tests: how long the CLI may take to say where the local Gateway runs. */
+  localDeadlineMs?: number;
 }
+
+/** How long the terminal UI waits for the CLI to say where the local Gateway runs. */
+const LOCAL_DEADLINE_MS = 12_000;
+
+/** What Local says when SuperTag is not set up on this machine. */
+export const NOT_SET_UP = "Not set up on this machine. In a repository, run supertag init.";
 
 /** Builds a launch URL's TLS from `SUPERTAG_SERVER_CA_FILE` and the client certificate pair. */
 export function launchTls(env: NodeJS.ProcessEnv): Promise<Tls> {
@@ -140,7 +163,8 @@ export class Connections {
   readonly state: GatewayState;
   readonly cache: string;
   private readonly discoverLocal: () => Promise<LocalDiscovery>;
-  private local: LocalDiscovery | undefined;
+  /** What the CLI last said of the local Gateway, while it said anything. */
+  local: LocalDiscovery | undefined;
 
   constructor(private readonly options: ConnectionsOptions) {
     this.discoverLocal =
@@ -223,10 +247,37 @@ export class Connections {
     };
   }
 
-  /** Local's entry, asking the CLI where the local Gateway runs. */
+  /** Asks the CLI where the local Gateway runs, and gives up when it does not say in time. */
+  async findLocal(): Promise<LocalDiscovery> {
+    const limit = this.options.localDeadlineMs ?? LOCAL_DEADLINE_MS;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            `${this.options.cli} __local-gateway did not say where the local Gateway runs in ${Math.round(limit / 1000)} seconds.`,
+          ),
+        limit,
+      );
+    });
+    try {
+      this.local = await Promise.race([this.discoverLocal(), deadline]);
+      return this.local;
+    } catch (problem) {
+      this.local = undefined;
+      throw problem;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Local's entry, asking the CLI where the local Gateway runs. Stopped services that were set
+   * up can be opened: opening them starts them.
+   */
   async localEntry(): Promise<GatewayEntry> {
     try {
-      this.local = await this.discoverLocal();
+      await this.findLocal();
     } catch (problem) {
       this.local = undefined;
       return {
@@ -237,16 +288,24 @@ export class Connections {
         available: false,
       };
     }
-    const local = this.local;
+    const local = this.local as LocalDiscovery;
     return {
       id: "local",
       name: "Local",
       detail: local.running
         ? (local.url ?? "")
-        : (local.message ?? "Not running. Start it with supertag up."),
+        : shouldStart(local)
+          ? "Stopped. Enter starts it."
+          : NOT_SET_UP,
       kind: "local",
-      available: local.running,
+      available: local.running || shouldStart(local),
     };
+  }
+
+  /** The launch URL and the saved Gateways, which need no CLI to list. */
+  async savedEntries(): Promise<GatewayEntry[]> {
+    const launch = this.launch();
+    return [...(launch ? [launch.entry] : []), ...(await this.saved()).map((item) => item.entry)];
   }
 
   /** Every Gateway the chooser lists: the launch URL, Local, then the saved ones. */
@@ -254,6 +313,54 @@ export class Connections {
     const [local, saved] = await Promise.all([this.localEntry(), this.saved()]);
     const launch = this.launch();
     return [...(launch ? [launch.entry] : []), local, ...saved.map((item) => item.entry)];
+  }
+
+  /** Connects to `connection` with the one `GatewayState`. */
+  connect(connection: DirectConnection): Promise<DirectActivation> {
+    return this.options.connectTo
+      ? this.options.connectTo(connection)
+      : this.state.connectTo(connection);
+  }
+
+  /** The environment the local services run with: never a launch URL's credential. */
+  private servicesEnv(): NodeJS.ProcessEnv {
+    const { SUPERTAG_OPERATOR_TOKEN: _, ...env } = this.options.env;
+    return env;
+  }
+
+  /**
+   * Starts the local services with `supertag up` when they were set up and are stopped, as the
+   * CLI says now; false when there was nothing to start. Rejects with what `up` printed.
+   */
+  async startLocal(): Promise<boolean> {
+    const local = await this.findLocal();
+    if (!shouldStart(local)) return false;
+    await startLocal(this.options.cli, local.stateDirectory, { env: this.servicesEnv() });
+    return true;
+  }
+
+  /**
+   * Whether the local Gateway runs an older release than this terminal UI, which a restart with
+   * this release's CLI upgrades; never one of this release or a newer one.
+   */
+  localUpgrade(local = this.local): Promise<LocalUpgrade | null> {
+    const probe =
+      this.options.probe ??
+      ((url: string, token: string) => probeGateway(url, token, this.options.buildVersion));
+    return localUpgrade(local, probe, PROTOCOL_VERSIONS, this.options.release ?? "this release");
+  }
+
+  /**
+   * Restarts an older local Gateway with this release: `supertag down`, which interrupts its
+   * running Tasks, then `supertag up`, which migrates its database. One of this release or a
+   * newer one is never touched.
+   */
+  async restartLocal(step: (step: RestartStep) => void): Promise<void> {
+    const local = await this.findLocal();
+    if ((await this.localUpgrade(local)) === null) {
+      throw "The local SuperTag does not run an older release, so it was not restarted.";
+    }
+    await restartLocal(this.options.cli, local.stateDirectory, { env: this.servicesEnv() }, step);
   }
 
   /** The saved Gateway with this name, as `--gateway NAME` names it. */
@@ -264,7 +371,7 @@ export class Connections {
   /** What a connection to `id` is, with its credential, read fresh (Local's token may change). */
   async resolve(id: string): Promise<DirectConnection> {
     if (id === "local") {
-      const local = await this.discoverLocal();
+      const local = await this.findLocal();
       if (!local.running || !local.url || !local.token) {
         throw local.message ?? "No local Gateway is running. Start it with supertag up.";
       }

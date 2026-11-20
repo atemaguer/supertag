@@ -483,6 +483,40 @@ fn read(harness: &str, files: &Files) -> Vec<Found> {
     }
 }
 
+/// What changed between `before` and `after`, by memory: one a reader finds only after is
+/// written, one whose text changed is updated, one only before had is deleted.
+pub(crate) fn changes(
+    harness: &str,
+    before: &Files,
+    after: &Files,
+) -> crate::memory_stats::Changes {
+    let hashes = |files: &Files| -> BTreeMap<String, String> {
+        read(harness, files)
+            .into_iter()
+            .map(|found| (found.native_id, sha256(found.text.as_bytes())))
+            .collect()
+    };
+    let (before, after) = (hashes(before), hashes(after));
+    let mut changes = crate::memory_stats::Changes::default();
+    for (id, hash) in &after {
+        match before.get(id) {
+            None => changes.written += 1,
+            Some(old) if old != hash => changes.updated += 1,
+            Some(_) => {}
+        }
+    }
+    changes.deleted = before.keys().filter(|id| !after.contains_key(*id)).count() as u64;
+    changes
+}
+
+/// Whether `files` hold what a proposal proposed: a memory in the same place, or the same text.
+pub(crate) fn holds(harness: &str, files: &Files, proposal: &Proposal) -> bool {
+    read(harness, files).iter().any(|found| {
+        found.native_id == proposal.record.native_id
+            || sha256(found.text.as_bytes()) == proposal.record.content_hash
+    })
+}
+
 /// `text` cut to [`MAX_TEXT_BYTES`] on a character boundary, and whether it was cut.
 fn capped(text: &str) -> (String, bool) {
     if text.len() <= MAX_TEXT_BYTES {
@@ -657,16 +691,28 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
 /// The store's proposals that have not expired, of its current reset generation. The caller
 /// holds the store's lock.
 pub(crate) fn proposals(store: &Path, generation: u64) -> Vec<Proposal> {
+    unexpired(store, generation).0
+}
+
+/// [`proposals`], and how many of those kept have expired.
+fn unexpired(store: &Path, generation: u64) -> (Vec<Proposal>, u64) {
     let now = now_ms();
-    fs::read(store.join(PROPOSALS))
+    let (fresh, expired): (Vec<Proposal>, Vec<Proposal>) = fs::read(store.join(PROPOSALS))
         .ok()
         .and_then(|bytes| serde_json::from_slice::<ProposalsFile>(&bytes).ok())
         .filter(|file| file.generation == generation)
         .map(|file| file.proposals)
         .unwrap_or_default()
         .into_iter()
-        .filter(|proposal| now - proposal.record.updated_at_ms < PROPOSAL_MAX_AGE_MS)
-        .collect()
+        .partition(|proposal| now - proposal.record.updated_at_ms < PROPOSAL_MAX_AGE_MS);
+    (fresh, expired.len() as u64)
+}
+
+/// Counts the proposals a rewrite of the proposals file let go because they expired.
+fn count_expired(store: &Path, expired: u64) {
+    if expired > 0 {
+        crate::memory_stats::count(store, |counters| counters.proposals_expired += expired);
+    }
 }
 
 fn write_proposals(store: &Path, generation: u64, proposals: Vec<Proposal>) -> Result<()> {
@@ -745,7 +791,7 @@ pub(crate) fn propose(
     if count == 0 {
         return Ok(0);
     }
-    let mut kept = proposals(store, meta.generation);
+    let (mut kept, expired) = unexpired(store, meta.generation);
     kept.retain(|old| {
         new.iter()
             .all(|proposal| proposal.record.memory_id != old.record.memory_id)
@@ -754,15 +800,21 @@ pub(crate) fn propose(
     kept.sort_by(|a, b| b.record.updated_at_ms.cmp(&a.record.updated_at_ms));
     kept.truncate(MAX_PROPOSALS);
     write_proposals(store, meta.generation, kept)?;
+    count_expired(store, expired);
+    crate::memory_stats::count(store, |counters| {
+        counters.proposals_created += count as u64;
+    });
     Ok(count)
 }
 
 /// Drops the proposals `ids` names, once a review merged or dropped them. The caller holds the
 /// store's lock.
 pub(crate) fn drop_proposals(store: &Path, generation: u64, ids: &[String]) -> Result<()> {
-    let mut kept = proposals(store, generation);
+    let (mut kept, expired) = unexpired(store, generation);
     kept.retain(|proposal| !ids.contains(&proposal.record.memory_id));
-    write_proposals(store, generation, kept)
+    write_proposals(store, generation, kept)?;
+    count_expired(store, expired);
+    Ok(())
 }
 
 /// What the request of the turn that merges proposals adds for those waiting in its store,
@@ -1067,12 +1119,14 @@ pub(crate) fn delete(
             meta.generation,
             std::slice::from_ref(&record.memory_id),
         )?;
+        crate::memory_stats::count(&store, |counters| counters.proposals_deleted += 1);
         return Ok(record);
     }
     let files = native_memory::snapshot(&store.join("current"))?;
     let kept = without(&files, &record)?;
     native_memory::replace_current(&store, &mut meta, &kept, "delete")?;
     refresh(&store, &key, (&kept, &meta), None)?;
+    crate::memory_stats::count(&store, |counters| counters.deleted_by_people += 1);
     Ok(record)
 }
 
@@ -1097,9 +1151,58 @@ pub(crate) fn reset(storage: &Path, tag: &str, generation: u64) -> Result<u32> {
                 ..Default::default()
             },
         )?;
+        crate::memory_stats::count(&store, |counters| counters.resets += 1);
         dropped += 1;
     }
     Ok(dropped)
+}
+
+/// One store's counters, and what it holds now: numbers only, never memory text.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoreStats {
+    pub tag_id: String,
+    pub harness: String,
+    /// `shared`, or `person-` and a digest of the person's principal.
+    pub scope: String,
+    pub counters: crate::memory_stats::Counters,
+    /// The memories it holds and the proposals waiting beside it.
+    pub memories: u64,
+    pub proposals_waiting: u64,
+    /// What the harness would load of its index into the next turn.
+    pub loaded: crate::memory_stats::Loaded,
+    /// When its least recently changed memory last changed: how stale the store may be.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oldest_updated_at_ms: Option<i64>,
+}
+
+/// The counters of each store `viewer` sees, of `tag` or every Tag on this host.
+pub(crate) fn stats(
+    storage: &Path,
+    tag: Option<&str>,
+    viewer: Option<&str>,
+) -> Result<Vec<StoreStats>> {
+    let mut found = vec![];
+    for (store, key) in stores(storage, tag)? {
+        if !visible(&key.scope, viewer) {
+            continue;
+        }
+        let _lock = Lock::take(&store)?;
+        let records = load(&store, &key)?;
+        let generation = native_memory::read_meta(&store)?.generation;
+        let files = native_memory::snapshot(&store.join("current"))?;
+        found.push(StoreStats {
+            memories: records.len() as u64,
+            proposals_waiting: proposals(&store, generation).len() as u64,
+            loaded: crate::memory_stats::loaded(&key.harness, &files),
+            oldest_updated_at_ms: records.iter().map(|record| record.updated_at_ms).min(),
+            counters: crate::memory_stats::read(&store),
+            tag_id: key.tag,
+            harness: key.harness,
+            scope: key.scope,
+        });
+    }
+    found.sort_by(|a, b| (&a.tag_id, &a.harness, &a.scope).cmp(&(&b.tag_id, &b.harness, &b.scope)));
+    Ok(found)
 }
 
 /// A call to the memory endpoint. `viewer` is a person's principal: they see the shared store
@@ -1131,6 +1234,13 @@ pub enum Request {
     },
     /// Drops a Tag's stores after the Control Plane reset its native memory to `generation`.
     Reset { tag_id: String, generation: u64 },
+    /// Each store's counters ([`crate::memory_stats`]), with no memory text.
+    Stats {
+        #[serde(default)]
+        tag_id: Option<String>,
+        #[serde(default)]
+        viewer: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1139,6 +1249,7 @@ pub enum Reply {
     Memories { memories: Vec<Record> },
     Memory { memory: Box<Record> },
     Reset { stores: u32 },
+    Stats { stores: Vec<StoreStats> },
     Error { message: String },
 }
 
@@ -1172,6 +1283,8 @@ fn answer(storage: &Path, request: Request) -> Reply {
         Request::Reset { tag_id, generation } => {
             reset(storage, &tag_id, generation).map(|stores| Reply::Reset { stores })
         }
+        Request::Stats { tag_id, viewer } => stats(storage, tag_id.as_deref(), viewer.as_deref())
+            .map(|stores| Reply::Stats { stores }),
     };
     result.unwrap_or_else(|error| Reply::Error {
         message: format!("{error:#}"),
@@ -1809,7 +1922,7 @@ mod tests {
             review.working_directory().join("feedback_squash.md"),
             SQUASH.replace("bisect", "bisect and blame"),
         )?;
-        review.reviewed(&shown)?;
+        review.reviewed(&shown);
         let summary = review.finish(Some(Writer {
             task_id: "task-r".into(),
             session_id: "memory:tag".into(),
@@ -2098,6 +2211,109 @@ mod tests {
             assert_eq!(shown, [proposed[0].memory_id.clone()]);
             assert!(section.contains("Deploys run from the ops repository."));
         }
+        Ok(())
+    }
+
+    #[test]
+    fn counters_follow_what_turns_teach_propose_and_review() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let writer = |attempt: &str, session: &str, trusted| Writer {
+            task_id: format!("task-{attempt}"),
+            session_id: session.into(),
+            attempt_id: attempt.into(),
+            trusted: Some(trusted),
+        };
+        let turn = |attempt: &str| {
+            native_memory::Prepared::prepare(
+                (dir.path(), dir.path()),
+                "tag",
+                "claude-code",
+                attempt,
+                &grant(),
+            )
+        };
+        // A root turn teaches; its activity reads the index and edits a memory.
+        let teach = turn("attempt-1")?;
+        let work = teach.working_directory();
+        fs::write(work.join("MEMORY.md"), CLAUDE_INDEX)?;
+        fs::write(work.join("feedback_squash.md"), SQUASH)?;
+        let folder = teach.folder_names()[0].clone();
+        let watch = crate::memory_stats::Watch::new(teach.folder_names(), false);
+        watch.saw(&format!("Reading {folder}/MEMORY.md"));
+        watch.saw(&format!("Editing {folder}/feedback_squash.md"));
+        watch.saw("Reading /repo/README.md");
+        teach.noted(watch.activity());
+        teach.finish(Some(writer("attempt-1", "main", true)))?;
+        // A Work Session's turn loads the index and proposes two changes.
+        let propose = turn("attempt-2")?;
+        fs::write(
+            propose.working_directory().join("feedback_squash.md"),
+            SQUASH.replace("bisect", "blame"),
+        )?;
+        fs::write(
+            propose.working_directory().join("user_role.md"),
+            "Atem leads releases.",
+        )?;
+        propose.finish(Some(writer("attempt-2", "work/abc", false)))?;
+        // The review keeps one proposal as proposed, drops the other, and removes the index.
+        let review = turn("attempt-3")?;
+        let (_, shown) = review.review_proposals(true)?;
+        assert_eq!(shown.len(), 2);
+        fs::write(
+            review.working_directory().join("feedback_squash.md"),
+            SQUASH.replace("bisect", "blame"),
+        )?;
+        fs::remove_file(review.working_directory().join("MEMORY.md"))?;
+        review.reviewed(&shown);
+        review.finish(Some(writer("attempt-3", "memory:tag", true)))?;
+
+        let found = stats(dir.path(), Some("tag"), None)?;
+        assert_eq!(found.len(), 1);
+        let store = &found[0];
+        let counters = &store.counters;
+        assert_eq!(
+            (
+                counters.turns,
+                counters.review_turns,
+                counters.proposing_turns
+            ),
+            (3, 1, 1)
+        );
+        // The first turn started with nothing to load; the next two loaded the index's 3 lines.
+        assert_eq!((counters.turns_loaded, counters.loaded_lines), (2, 6));
+        assert_eq!((counters.recalls, counters.memory_edits), (1, 1));
+        // Teaching wrote the file and the index line that links no file.
+        assert_eq!(
+            (counters.written, counters.updated, counters.deleted),
+            (2, 0, 0)
+        );
+        assert_eq!(
+            (
+                counters.review_written,
+                counters.review_updated,
+                counters.review_deleted
+            ),
+            (0, 1, 1)
+        );
+        assert_eq!(
+            (
+                counters.proposals_created,
+                counters.proposals_reviewed,
+                counters.proposals_merged,
+                counters.proposals_dropped
+            ),
+            (2, 2, 1, 1)
+        );
+        assert!(counters.last_review_at_ms.is_some());
+        assert_eq!((store.memories, store.proposals_waiting), (1, 0));
+        assert_eq!(store.loaded.lines, 0, "the review removed the index");
+        // A person deletes the last memory; no memory text ever reaches the counters.
+        let id = list(dir.path(), Some("tag"), None)?[0].memory_id.clone();
+        delete(dir.path(), &id, (None, None), false)?;
+        let after = &stats(dir.path(), Some("tag"), None)?[0];
+        assert_eq!((after.counters.deleted_by_people, after.memories), (1, 0));
+        let json = serde_json::to_string(after)?;
+        assert!(!json.contains("quash") && !json.contains("Atem"), "{json}");
         Ok(())
     }
 }

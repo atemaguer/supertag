@@ -363,6 +363,82 @@ pub(crate) async fn delete(
     bail!("name a memory ID, or --tag TAG")
 }
 
+/// The memory counters of `tag`, or every Tag, from this machine's Worker Hosts: how much each
+/// store is used, as numbers only. `None` when no Worker Host runs here. Counters are an aside
+/// to the commands that show them: a host that can't answer is warned about and left out.
+pub(crate) async fn local_stats(state: Option<&Path>, tag: Option<&str>) -> Result<Option<Value>> {
+    let hosts = local_hosts(state)?;
+    if hosts.is_empty() {
+        return Ok(None);
+    }
+    let mut stores = vec![];
+    for host in &hosts {
+        let reply = native::call(
+            &host.socket,
+            &Request::Stats {
+                tag_id: tag.map(str::to_owned),
+                viewer: None,
+            },
+        )
+        .await;
+        let found = match reply {
+            Ok(Reply::Stats { stores }) => stores,
+            Ok(_) => bail!("the memory endpoint answered for its counters with something else"),
+            Err(error) => {
+                supertag_protocol::terminal_text::warn(&format!(
+                    "Worker Host {} did not report its memory counters: {error:#}",
+                    host.host_id.as_deref().unwrap_or("on this machine")
+                ));
+                continue;
+            }
+        };
+        for store in found {
+            let mut value = serde_json::to_value(&store)?;
+            value["host_id"] = json!(host.host_id);
+            value["shared"] = json!(store.scope == "shared");
+            value["oldest_updated_at"] = store.oldest_updated_at_ms.map_or(Value::Null, at);
+            stores.push(value);
+        }
+    }
+    Ok(Some(Value::Array(stores)))
+}
+
+/// One line per store of [`local_stats`], for `supertag metrics`.
+pub(crate) fn stats_text(stores: &Value) -> String {
+    let Some(stores) = stores.as_array().filter(|stores| !stores.is_empty()) else {
+        return "Memory on this machine: no Tag has memory here yet\n".into();
+    };
+    let mut text = String::from("Memory on this machine:\n");
+    for store in stores {
+        let n = |field: &str| store["counters"][field].as_u64().unwrap_or(0);
+        let turns = n("turns");
+        text.push_str(&format!(
+            "  {} {} {}: {} memories, {} proposals waiting; {} turns, {} loaded memory ({} lines on average, {} cut short), {} reads of memory files; written {}, updated {}, deleted {}; {} reviews changed {}; proposals {} created, {} merged, {} dropped, {} expired; {} seeds\n",
+            crate::terminal::text(store["tag_id"].as_str().unwrap_or_default()),
+            store["harness"].as_str().unwrap_or_default(),
+            if store["shared"] == true { "shared" } else { "private" },
+            store["memories"],
+            store["proposals_waiting"],
+            turns,
+            n("turns_loaded"),
+            n("loaded_lines").checked_div(n("turns_loaded")).unwrap_or(0),
+            n("truncated_turns"),
+            n("recalls"),
+            n("written"),
+            n("updated"),
+            n("deleted"),
+            n("review_turns"),
+            n("review_written") + n("review_updated") + n("review_deleted"),
+            n("proposals_created"),
+            n("proposals_merged"),
+            n("proposals_dropped"),
+            n("proposals_expired"),
+            n("seeds_delivered"),
+        ));
+    }
+    text
+}
+
 fn at(ms: i64) -> Value {
     chrono::DateTime::from_timestamp_millis(ms).map_or(Value::Null, |time| {
         json!(time.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
