@@ -22,7 +22,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { TuiGateway } from "./connection";
 import { clip, safe } from "./text";
-import { color, type KeyEvent, useKeyboard } from "./ui";
+import { color, type KeyEvent, pasteOnOneLine, useKeyboard } from "./ui";
 
 const FIELDS = ["Name", "Harness", "Workspace", "Sessions", "Web access"] as const;
 /** The Workspace choice that adds a folder; no Workspace ID has a space. */
@@ -203,7 +203,13 @@ export function NewTagForm({
                 </text>
                 <box width={inner} height={1}>
                   {position === 0 ? (
-                    <input focused={at} placeholder="Reviewer" value={name} onInput={setName} />
+                    <input
+                      onPaste={pasteOnOneLine}
+                      focused={at}
+                      placeholder="Reviewer"
+                      value={name}
+                      onInput={setName}
+                    />
                   ) : position === 1 ? (
                     <text fg={color.text}>
                       ‹ {safe(harnessLabel(harness) ?? (harness || "…"))} ›
@@ -211,7 +217,13 @@ export function NewTagForm({
                   ) : position === 2 ? (
                     <text fg={color.text}>‹ {clip(shownWorkspace, inner - 4)} ›</text>
                   ) : position === 3 ? (
-                    <input focused={at} placeholder="8" value={sessions} onInput={setSessions} />
+                    <input
+                      onPaste={pasteOnOneLine}
+                      focused={at}
+                      placeholder="8"
+                      value={sessions}
+                      onInput={setSessions}
+                    />
                   ) : (
                     <text fg={rules.webless ? color.faint : color.text}>
                       {rules.webAccess ? "[x] on" : "[ ] off"}
@@ -238,6 +250,7 @@ export function NewTagForm({
           {folder !== undefined ? (
             <box border borderColor={color.focus} height={3} title="Folder of this machine">
               <input
+                onPaste={pasteOnOneLine}
                 focused
                 placeholder="/path/to/a/git/checkout"
                 value={folder}

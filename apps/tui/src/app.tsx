@@ -138,20 +138,23 @@ function Waiting({
   });
   const status = controller.status;
   return (
-    <box flexGrow={1} flexDirection="column" padding={1}>
-      {status.kind === "connecting" ? (
-        <text fg={color.muted}>Connecting to {safe(controller.entry?.name ?? "the Gateway")}…</text>
-      ) : status.kind === "failed" ? (
-        <>
-          <text fg={color.warning}>{safe(status.problem)}</text>
-          <text fg={color.muted}>Trying again. Ctrl-P chooses another Gateway.</text>
-        </>
-      ) : (
-        <text fg={color.muted}>Choose a Gateway.</text>
-      )}
-      <box flexGrow={1} />
+    <>
+      <box flexGrow={1} flexDirection="column" padding={1}>
+        {status.kind === "connecting" ? (
+          <text fg={color.muted}>
+            Connecting to {safe(controller.entry?.name ?? "the Gateway")}…
+          </text>
+        ) : status.kind === "failed" ? (
+          <>
+            <text fg={color.warning}>{safe(status.problem)}</text>
+            <text fg={color.muted}>Trying again. Ctrl-P chooses another Gateway.</text>
+          </>
+        ) : (
+          <text fg={color.muted}>Choose a Gateway.</text>
+        )}
+      </box>
       <StatusLine controller={controller} unread={0} />
-    </box>
+    </>
   );
 }
 
@@ -413,6 +416,20 @@ function Workspace({
     };
   }, [gateway, connectionId]);
 
+  // The Watch says when the Gateway stops answering, and when it answers again.
+  const [lost, setLost] = useState(false);
+  useEffect(() => {
+    setLost(false);
+    if (!watch) return;
+    const unsubscribe = watch.subscribe((update) => {
+      if (update.kind === "lost") setLost(true);
+      else if (update.kind === "ready" || update.kind === "resync") setLost(false);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [watch]);
+
   const [focus, setFocus] = useState<"composer" | "rail">("composer");
   const [railWidth, setRailWidth] = useState(controller.preferences.railWidth);
   const [folded, setFolded] = useState(controller.preferences.railFolded);
@@ -453,7 +470,7 @@ function Workspace({
       });
     } else if (key.name === "tab" && !key.ctrl)
       setFocus((prior) => (prior === "rail" ? "composer" : "rail"));
-    else if (alt(key) && /^[1-9]$/u.test(key.name)) {
+    else if ((alt(key) || key.ctrl) && /^[1-9]$/u.test(key.name)) {
       const row = rows[Number(key.name) - 1];
       if (row) select(row.tag.tagId);
     } else if (alt(key) && (key.name === "down" || key.name === "j")) step(1);
@@ -481,6 +498,7 @@ function Workspace({
       ...rows.map((row, index) => ({
         id: `tag:${row.tag.tagId}`,
         label: row.tag.name ?? row.tag.tagId,
+        keywords: `${row.tag.tagId} ${row.summary.preview ?? ""}`,
         section: "Tags" as const,
         ...(index < 9 ? { hint: `Alt-${index + 1}` } : {}),
         run: () => select(row.tag.tagId),
@@ -557,7 +575,8 @@ function Workspace({
   );
 
   const unread = unreadTotal(conversations, tag?.tagId);
-  const shownWidth = folded ? 6 : railWidth;
+  // A narrow terminal keeps most of its width for the conversation.
+  const shownWidth = folded ? 6 : Math.min(railWidth, Math.max(RAIL.min, Math.floor(width * 0.4)));
   const { height } = useTerminalDimensions();
   const paneFocused = focus === "composer" && !overlay;
   const panelWidth = Math.min(100, Math.max(40, width - 4));
@@ -615,6 +634,7 @@ function Workspace({
         onSessions={onSessions}
         onGoal={() => setOverlay("goal")}
         homeLine={homeLine}
+        offline={controller.status.kind === "failed"}
       />
     );
   } else {
@@ -631,8 +651,19 @@ function Workspace({
     );
   }
   const Panel = overlay && overlay in PANELS ? PANELS[overlay as PanelKind] : undefined;
+  const failed =
+    controller.status.kind === "failed"
+      ? `${safe(controller.status.problem)} Showing what this device kept; trying again. Ctrl-P chooses another Gateway.`
+      : undefined;
+  // The lines it wraps to, with room for breaking at words.
+  const bannerLines = failed ? Math.ceil([...failed].length / Math.max(1, width - 12)) : 0;
   return (
     <>
+      {failed ? (
+        <text fg={color.warning} flexShrink={0}>
+          {failed}
+        </text>
+      ) : null}
       <box flexDirection="row" flexGrow={1} minHeight={0}>
         <Rail
           items={items}
@@ -640,11 +671,11 @@ function Workspace({
           focused={focus === "rail" && !overlay}
           folded={folded}
           width={shownWidth}
-          height={Math.max(3, height - 1)}
+          height={Math.max(3, height - 1 - bannerLines)}
         />
         {pane}
       </box>
-      <StatusLine controller={controller} hosts={hosts} unread={unread} />
+      <StatusLine controller={controller} hosts={hosts} unread={unread} lost={lost} brief />
       {overlay === "palette" ? (
         <Centered>
           <box marginTop={2}>
@@ -731,32 +762,46 @@ function StatusLine({
   controller,
   hosts,
   unread,
+  lost = false,
+  brief = false,
 }: {
   controller: Controller;
   hosts?: string | undefined;
   unread: number;
+  /** The Gateway stopped answering the connection's Watch; it is being reopened. */
+  lost?: boolean;
+  /** Why connecting failed shows above, so this says only that it did. */
+  brief?: boolean;
 }) {
   const { width } = useTerminalDimensions();
   const status = controller.status;
   const name = controller.entry?.name ?? "No Gateway";
+  const reconnecting = status.kind === "connected" && lost;
   const state =
     status.kind === "connected"
-      ? "connected"
+      ? lost
+        ? "not answering, reconnecting…"
+        : "connected"
       : status.kind === "connecting"
         ? "connecting…"
         : status.kind === "failed"
-          ? `not connected: ${describe(status.problem)}`
+          ? brief
+            ? "not connected"
+            : `not connected: ${describe(status.problem)}`
           : "choose a Gateway";
   const parts = [
     name,
     state,
-    ...(hosts ? [`Worker Hosts: ${hosts}`] : []),
+    ...(hosts && !reconnecting ? [`Worker Hosts: ${hosts}`] : []),
     ...(unread > 0 ? [`${unread} unread`] : []),
     "Ctrl-K commands",
     "Ctrl-P Gateways",
   ];
   return (
-    <text fg={status.kind === "failed" ? color.warning : color.muted} flexShrink={0}>
+    <text
+      fg={status.kind === "failed" || reconnecting ? color.warning : color.muted}
+      flexShrink={0}
+    >
       {clip(parts.join(" · "), Math.max(10, width - 1))}
     </text>
   );

@@ -8,9 +8,9 @@
  */
 import { describe } from "@supertag/client/model";
 import { useEffect, useState } from "react";
-import type { Connections, GatewayEntry } from "./connection";
+import type { Connections, GatewayDraft, GatewayEntry } from "./connection";
 import { clip, safe } from "./text";
-import { color, type KeyEvent, MaskedField, useKeyboard } from "./ui";
+import { color, type KeyEvent, MaskedField, pasteOnOneLine, useKeyboard } from "./ui";
 
 const FIELDS = [
   { key: "name", label: "Name", placeholder: "work" },
@@ -40,7 +40,8 @@ export function Gateways({
 }) {
   const [entries, setEntries] = useState<GatewayEntry[] | undefined>();
   const [index, setIndex] = useState(0);
-  const [adding, setAdding] = useState(false);
+  /** The add form is open: empty for `a`, filled for `s` and `e`. */
+  const [adding, setAdding] = useState<Partial<GatewayDraft> | undefined>();
   const [problem, setProblem] = useState("");
   const [forgetting, setForgetting] = useState<GatewayEntry | undefined>();
   const [busy, setBusy] = useState(false);
@@ -83,8 +84,28 @@ export function Gateways({
     else if (key.name === "down" || key.name === "j")
       setIndex((i) => Math.min(i + 1, list.length - 1));
     else if (key.name === "up" || key.name === "k") setIndex((i) => Math.max(i - 1, 0));
-    else if (key.name === "a" && !key.ctrl) setAdding(true);
-    else if (key.name === "d" && !key.ctrl) {
+    else if (key.name === "a" && !key.ctrl) setAdding({});
+    else if ((key.name === "s" || key.name === "e") && !key.ctrl) {
+      // `s` saves the Gateway the launch named; `e` changes a saved one's credential or files.
+      const entry = list[index];
+      const wanted = key.name === "s" ? "launch" : "saved";
+      if (entry?.kind !== wanted) {
+        setProblem(
+          key.name === "s"
+            ? "s saves the Gateway this launch named (--gateway URL); select it first."
+            : "e changes a saved Gateway; Local's token is never saved.",
+        );
+        return;
+      }
+      if (entry.source === "desktop") {
+        setProblem(`${entry.name} is saved in the desktop app; change it there.`);
+        return;
+      }
+      void connections.draft(entry.id).then((draft) => {
+        if (draft) setAdding(draft);
+        else setProblem("That Gateway is no longer saved.");
+      });
+    } else if (key.name === "d" && !key.ctrl) {
       const entry = list[index];
       if (entry?.kind === "saved") setForgetting(entry);
       else if (entry) setProblem(`${entry.name} is not saved, so there is nothing to forget.`);
@@ -113,15 +134,16 @@ export function Gateways({
         <AddGateway
           connections={connections}
           width={inner}
+          initial={adding}
           onSaved={(id) => {
-            setAdding(false);
+            setAdding(undefined);
             void connections.entries().then((listed) => {
               setEntries(listed);
               const entry = listed.find((candidate) => candidate.id === id);
               if (entry) onOpen(entry);
             });
           }}
-          onCancel={() => setAdding(false)}
+          onCancel={() => setAdding(undefined)}
         />
       ) : (
         <>
@@ -150,7 +172,9 @@ export function Gateways({
             </text>
           ) : (
             <text fg={color.faint}>
-              {busy ? "Forgetting…" : "Enter connect · a add a Gateway · d forget · Esc close"}
+              {busy
+                ? "Forgetting…"
+                : "Enter connect · a add · s save launch · e edit · d forget · Esc close"}
             </text>
           )}
         </>
@@ -162,11 +186,13 @@ export function Gateways({
 function AddGateway({
   connections,
   width,
+  initial,
   onSaved,
   onCancel,
 }: {
   connections: Connections;
   width: number;
+  initial: Partial<GatewayDraft>;
   onSaved(id: string): void;
   onCancel(): void;
 }) {
@@ -177,8 +203,10 @@ function AddGateway({
     serverCaFile: "",
     clientCertFile: "",
     clientKeyFile: "",
+    ...initial,
   });
-  const [at, setAt] = useState(0);
+  // A saved Gateway's form starts on its credential, the launch Gateway's on its name.
+  const [at, setAt] = useState(initial.name ? 2 : 0);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState("");
   const set = (field: Field, value: string) => setValues((prior) => ({ ...prior, [field]: value }));
@@ -238,6 +266,7 @@ function AddGateway({
               />
             ) : (
               <input
+                onPaste={pasteOnOneLine}
                 focused={position === at}
                 placeholder={field.placeholder}
                 value={values[field.key]}

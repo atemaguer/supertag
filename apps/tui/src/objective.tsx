@@ -20,7 +20,7 @@ import { useWatchRefresh, type WatchFeed } from "@supertag/client/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TuiGateway } from "./connection";
 import { clip, safe } from "./text";
-import { color, type KeyEvent, useKeyboard } from "./ui";
+import { color, type KeyEvent, pasteOnOneLine, useKeyboard } from "./ui";
 
 const date = (ms: number) =>
   new Date(ms).toLocaleString("en-US", {
@@ -229,6 +229,7 @@ export function ObjectiveView({
           title={mode === "message" ? `Message ${clip(owner, 30)}` : "What should change?"}
         >
           <input
+            onPaste={pasteOnOneLine}
             focused={focused}
             placeholder={
               mode === "message" ? "A follow-up for the owner" : "Feedback for the owner"
@@ -403,6 +404,7 @@ export function ObjectiveForm({
                   </text>
                 ) : (
                   <input
+                    onPaste={pasteOnOneLine}
                     focused={position === field}
                     placeholder={
                       position === 0

@@ -2,8 +2,13 @@
  * The OpenTUI layer: the hooks, Markdown, scroll view and fields the screens use. Screens import
  * OpenTUI only through here (JSX elements aside), so a breaking OpenTUI minor touches one place.
  */
-import type { KeyEvent, ScrollBoxRenderable, SyntaxStyle } from "@opentui/core";
-import { decodePasteBytes } from "@opentui/core";
+import type {
+  EditBufferRenderable,
+  KeyEvent,
+  ScrollBoxRenderable,
+  SyntaxStyle,
+} from "@opentui/core";
+import { decodePasteBytes, PasteEvent } from "@opentui/core";
 import { useKeyboard, usePaste, useRenderer } from "@opentui/react";
 import { createContext, memo, useContext, useMemo } from "react";
 import { safe } from "../text";
@@ -42,6 +47,21 @@ export const Markdown = memo(function Markdown({
   return <markdown content={safe(text)} syntaxStyle={style} streaming={streaming ?? false} />;
 });
 
+/**
+ * An `<input>`'s `onPaste`: pasted lines join with a space, as in the Go TUI's fields, instead of
+ * the field dropping the line breaks and running the lines together. A trailing break goes.
+ */
+export function pasteOnOneLine(this: EditBufferRenderable, event: PasteEvent) {
+  // The input's own paste handling, which also removes escape sequences and control characters.
+  const field = this as EditBufferRenderable & { handlePaste?(event: PasteEvent): void };
+  if (!field.handlePaste) return;
+  const text = decodePasteBytes(event.bytes);
+  if (!/[\r\n]/u.test(text)) return;
+  event.preventDefault();
+  const line = text.replace(/[\r\n]+$/u, "").replace(/[ \t]*(?:\r\n?|\n)[ \t]*/gu, " ");
+  field.handlePaste(new PasteEvent(new TextEncoder().encode(line)));
+}
+
 /** Whether a scroll view shows its end. */
 export function atBottom(box: ScrollBoxRenderable | null): boolean {
   if (!box) return true;
@@ -50,7 +70,7 @@ export function atBottom(box: ScrollBoxRenderable | null): boolean {
 
 /**
  * A field whose text shows as dots, for a credential: it takes typed and pasted text while
- * `focused`, and Backspace.
+ * `focused`, Backspace, and Ctrl-U to clear it.
  */
 export function MaskedField({
   focused,
@@ -65,7 +85,9 @@ export function MaskedField({
   placeholder: string;
 }) {
   useKeyboard((key: KeyEvent) => {
-    if (!focused || key.ctrl || key.meta) return;
+    if (!focused) return;
+    if (key.ctrl && key.name === "u") onChange(() => "");
+    if (key.ctrl || key.meta) return;
     if (key.name === "backspace") onChange((prior) => prior.slice(0, -1));
     else if (key.sequence.length === 1 && key.sequence >= " " && key.sequence !== "\u007f")
       onChange((prior) => prior + key.sequence);

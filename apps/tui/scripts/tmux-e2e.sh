@@ -2,12 +2,15 @@
 # The terminal UI end to end against the stack from stack.sh, in a private tmux server: it opens
 # Local, sends a message to a fixture-adapter Tag and waits for the reply, pastes, switches Tags
 # with Alt-2, sees a message sent from the CLI arrive, checks a notification was written
-# (OSC 9 through tmux passthrough). Then the screens around conversations, on Tags it creates
+# (OSC 9 through tmux passthrough), and sees the status line follow the Gateway stopping and
+# starting again, after which a message still round-trips. Then the screens around conversations, on Tags it creates
 # on the stack's labeled hosts: answers an Objective's question and approves a Workstream post
 # from the inbox, creates an Objective with /goal and messages its owner, expands a Work Session,
 # deletes a note, pauses a Schedule, reads Activity and a Team, and creates a Tag with Ctrl-N.
 # Last it saves a Gateway with `supertag connect`, switches to it, forgets it with
 # `supertag disconnect`, quits with Ctrl-C and checks the terminal was restored.
+# With SUPERTAG_TUI_BINARY set it runs that binary through `supertag tui`, as plain `supertag`
+# does; otherwise the checkout's source under Bun.
 #   tmux-e2e.sh [TAG]
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
@@ -60,6 +63,13 @@ wait_for "pasted words"
 t send-keys -t e2e Enter
 wait_for "Process requests: pasted words"
 echo "paste ok"
+# Pasted lines join with spaces in the one-line composer.
+t set-buffer "$(printf 'two\npasted lines')"
+t paste-buffer -p -t e2e
+wait_for "two pasted lines"
+t send-keys -t e2e Enter
+wait_for "Process requests: two pasted lines"
+echo "multi-line paste ok"
 # A reply that lands after switching to another Tag notifies.
 t send-keys -t e2e -l "notify me $$"
 t send-keys -t e2e Enter M-2
@@ -81,6 +91,15 @@ t send-keys -t e2e -l "$tag"
 t send-keys -t e2e Enter
 wait_for "from the CLI $$"
 echo "from another client ok"
+# The Gateway stops and starts again: the status line says so, and the conversation goes on.
+sh "$here/stack.sh" down >/dev/null 2>&1
+wait_for "not answering, reconnecting…"
+sh "$here/stack.sh" up >/dev/null 2>&1
+wait_for "Local · connected"
+t send-keys -t e2e -l "after the restart $$"
+t send-keys -t e2e Enter
+wait_for "Process requests: after the restart $$"
+echo "reconnect ok"
 
 # The screens around conversations. Each Tag runs on the stack's host with its label.
 sh "$here/stack.sh" tag asker ask >/dev/null
@@ -92,17 +111,24 @@ cli objective create "rollout-$$" --owner releaser --team release "Verify the ro
 wait_for "Waiting on you ("
 echo "inbox listed ok"
 # Open inbox shows the first item; answer the question and approve the post, in either order.
+# What was answered stays in front until Open inbox shows the next item, so each round waits
+# for the kind not handled yet.
+answered=""
+approved=""
 for _ in 1 2; do
   palette "open inbox"
   i=0
-  while ! shows "A question" && ! shows "An approval request"; do
-    i=$((i + 1)); [ $i -gt 200 ] && { t capture-pane -p -t e2e >&2; exit 1; }; sleep 0.05
+  while :; do
+    if [ -z "$answered" ] && shows "A question" && ! shows "Answered."; then kind=question; break; fi
+    if [ -z "$approved" ] && shows "An approval request" && ! shows "Approved once."; then kind=approval; break; fi
+    i=$((i + 1)); [ $i -gt 400 ] && { t capture-pane -p -t e2e >&2; exit 1; }; sleep 0.05
   done
-  if shows "A question"; then
+  if [ "$kind" = question ]; then
     wait_for "Which branch should I release?"
     t send-keys -t e2e -l "Release from main"
     t send-keys -t e2e Enter
     wait_for "Answered."
+    answered=1
     echo "question answered ok"
   else
     wait_for "a approve once"
@@ -110,6 +136,7 @@ for _ in 1 2; do
     wait_for "Enter approves it once"
     t send-keys -t e2e Enter
     wait_for "Approved once."
+    approved=1
     echo "approval approved ok"
   fi
   sleep 0.5

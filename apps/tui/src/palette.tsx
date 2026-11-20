@@ -6,14 +6,18 @@
  */
 import { goalOutcome } from "@supertag/client/model";
 import { useState } from "react";
+import { alt } from "./keys";
 import { clip } from "./text";
-import { color, type KeyEvent, useKeyboard } from "./ui";
+import { color, type KeyEvent, pasteOnOneLine, useKeyboard } from "./ui";
 
 export interface PaletteItem {
   id: string;
   label: string;
+  /** More it matches by, such as a Tag's ID and latest message. */
+  keywords?: string;
   hint?: string;
-  section: "Tags" | "Commands";
+  /** The last only lists Tags found by their ID or latest message, after every name match. */
+  section: "Tags" | "Commands" | "Tags by ID or message";
   run(): void;
 }
 
@@ -27,6 +31,27 @@ export function matches(text: string, query: string): boolean {
     at++;
   }
   return true;
+}
+
+/** Whether `query`, as typed, appears in `text`, ignoring case: for an ID or a message. */
+function matchesWords(text: string, query: string): boolean {
+  return text.toLowerCase().includes(query.trim().toLowerCase());
+}
+
+/**
+ * The items `query` matches: those whose name matches, in their sections, then the Tags only an
+ * ID or latest message matches, so a command typed by name is never behind a Tag's message.
+ */
+function narrowed(items: readonly PaletteItem[], query: string): PaletteItem[] {
+  const byName = items.filter((item) => matches(item.label, query));
+  if (query.trim() === "") return byName;
+  const byWords = items
+    .filter(
+      (item) =>
+        !byName.includes(item) && item.keywords !== undefined && matchesWords(item.keywords, query),
+    )
+    .map((item) => ({ ...item, section: "Tags by ID or message" as const }));
+  return [...byName, ...byWords];
 }
 
 /** The palette item that creates an Objective, which inline `/goal` text selects. */
@@ -51,13 +76,18 @@ export function Palette({
   const [index, setIndex] = useState(0);
   const goal = goalOutcome(slash && !query.startsWith("/") ? `/${query}` : query);
   const shown =
-    goal !== undefined
-      ? items.filter((item) => item.id === GOAL_ITEM)
-      : items.filter((item) => matches(item.label, query));
+    goal !== undefined ? items.filter((item) => item.id === GOAL_ITEM) : narrowed(items, query);
   const selected = Math.min(index, Math.max(0, shown.length - 1));
   useKeyboard((key: KeyEvent) => {
-    if (key.name === "escape") onClose();
-    else if (key.name === "down" || (key.ctrl && key.name === "n"))
+    if (key.name === "escape" || (key.ctrl && key.name === "k")) onClose();
+    else if ((alt(key) || key.ctrl) && /^[1-9]$/u.test(key.name)) {
+      // Alt-N opens the nth Tag at once, as outside the palette.
+      const tag = items.filter((item) => item.section === "Tags")[Number(key.name) - 1];
+      if (tag) {
+        onClose();
+        tag.run();
+      }
+    } else if (key.name === "down" || (key.ctrl && key.name === "n"))
       setIndex(Math.min(selected + 1, shown.length - 1));
     else if (key.name === "up" || (key.ctrl && key.name === "p"))
       setIndex(Math.max(selected - 1, 0));
@@ -74,6 +104,7 @@ export function Palette({
       title="Commands"
     >
       <input
+        onPaste={pasteOnOneLine}
         focused
         placeholder="Search Tags, conversations, settings…"
         value={query}

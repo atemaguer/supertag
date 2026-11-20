@@ -241,3 +241,56 @@ jobs:
       - name: Draw and quit in a pseudo-terminal
         working-directory: scripts
         run: python smoke_native_archive.py --terminal-ui "$RUNNER_TEMP/tui/supertag-tui"
+
+  # The terminal UI end to end (apps/tui/scripts/tmux-e2e.sh): the compiled supertag-tui started
+  # through `supertag tui`, in tmux, against a throwaway local SuperTag whose Worker Hosts run the
+  # fixture adapter. It sends, pastes, switches Tags, notifies, follows the Gateway stopping and
+  # starting again, answers and approves from the inbox, creates an Objective and a Tag, opens
+  # Work Sessions, Notes, Schedules, Activity and a Team, and saves and forgets a Gateway.
+  tui-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      # Only main saves, so pull requests reuse main's cache without evicting it.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: tui-e2e
+          workspaces: core -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+          pnpm install --frozen-lockfile
+      - name: Build the CLI and the fixture adapter
+        working-directory: core
+        run: >-
+          cargo build --locked -p supertag-cli --features test-fixtures
+          --bin supertag --bin supertag-fixture-adapter
+      - name: Compile supertag-tui
+        run: python scripts/native_archive.py tui --output "$RUNNER_TEMP/tui/supertag-tui"
+      - name: End to end in tmux
+        working-directory: apps/tui
+        env:
+          TUI_ROOT: ${{ runner.temp }}/supertag-tui-e2e
+          SUPERTAG_TUI_BINARY: ${{ runner.temp }}/tui/supertag-tui
+        run: |
+          sh scripts/stack.sh up
+          trap 'sh scripts/stack.sh down || true' EXIT
+          sh scripts/stack.sh tag engineer
+          sh scripts/stack.sh tag lead
+          sh scripts/tmux-e2e.sh engineer

@@ -8,7 +8,7 @@ import { type ApprovalDetails, describe, type InboxItem, inboxMark } from "@supe
 import { useEffect, useState } from "react";
 import type { TuiGateway } from "./connection";
 import { safe } from "./text";
-import { color, type KeyEvent, useKeyboard } from "./ui";
+import { color, type KeyEvent, pasteOnOneLine, useKeyboard } from "./ui";
 
 export function InboxView({
   gateway,
@@ -155,6 +155,7 @@ export function InboxView({
           title="Answer"
         >
           <input
+            onPaste={pasteOnOneLine}
             focused={focused}
             placeholder="Type the answer"
             value={answer}
@@ -172,6 +173,7 @@ export function InboxView({
           title="Why is it denied?"
         >
           <input
+            onPaste={pasteOnOneLine}
             focused={focused}
             placeholder="The reason the Tag reads"
             value={reason}

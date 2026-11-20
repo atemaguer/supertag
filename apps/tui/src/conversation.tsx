@@ -45,7 +45,14 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DeliveryLine, Entry } from "./entry";
 import { safe } from "./text";
-import { atBottom, color, type KeyEvent, type ScrollBoxRenderable, useKeyboard } from "./ui";
+import {
+  atBottom,
+  color,
+  type KeyEvent,
+  pasteOnOneLine,
+  type ScrollBoxRenderable,
+  useKeyboard,
+} from "./ui";
 
 /** How many of the newest messages are mounted at first, and how many more each PgUp adds. */
 export const WINDOW = 40;
@@ -70,6 +77,8 @@ export interface ConversationProps {
   onGoal?(): void;
   /** The line under the reply that created an Objective, once it needs a person or ended. */
   homeLine?(objectiveId: string): string | undefined;
+  /** Connecting failed and the screen says so already: a read's own error is not repeated. */
+  offline?: boolean;
 }
 
 export function ConversationPane({
@@ -85,13 +94,18 @@ export function ConversationPane({
   onSessions,
   onGoal,
   homeLine,
+  offline = false,
 }: ConversationProps) {
   const tagId = tag.tagId;
   const platform = usePlatform();
   const [history, renderHistory] = useState<History>(
     () => cachedHistory(gateway, tagId) ?? emptyHistory,
   );
-  const outgoing = useOutbox(gateway, tagId)[0];
+  // Every message sent here that the Gateway has not accepted yet, oldest first. Another can be
+  // sent while one is on its way; each waits in the outbox, on disk.
+  const queued = useOutbox(gateway, tagId);
+  const outgoing = queued[0];
+  const undelivered = queued.filter((entry) => entry.error && !entry.sending);
   const current = useRef(history);
   const [error, setError] = useState("");
   const [window, setWindow] = useState(WINDOW);
@@ -207,7 +221,7 @@ export function ConversationPane({
       onGoal();
       return;
     }
-    if (!text || outgoing) return;
+    if (!text) return;
     onDraft("");
     jumpToLatest();
     void deliver(queue(gateway, tagId, text));
@@ -254,11 +268,16 @@ export function ConversationPane({
       jumpToLatest();
     } else if (key.name === "up" && focused && draft === "" && !key.meta && !key.option && onWork) {
       onWork();
-    } else if (key.ctrl && key.name === "r" && outgoing?.error) {
-      void deliver(retry(gateway, outgoing.operationId));
-    } else if (key.ctrl && key.name === "x" && outgoing?.error) {
-      discard(gateway, outgoing.operationId);
-      if (!draft.trim()) onDraft(outgoing.text);
+    } else if (key.ctrl && key.name === "r" && undelivered.length) {
+      // Each again with its own operation, oldest first, so they arrive in order.
+      void (async () => {
+        for (const entry of undelivered) await deliver(retry(gateway, entry.operationId));
+      })();
+    } else if (key.ctrl && key.name === "x" && undelivered.length && !draft.trim()) {
+      // The latest one goes back into the composer.
+      const latest = undelivered[undelivered.length - 1] as (typeof undelivered)[number];
+      discard(gateway, latest.operationId);
+      onDraft(latest.text);
     }
   });
 
@@ -268,7 +287,7 @@ export function ConversationPane({
   const name = tag.name ?? tagId;
   return (
     <box flexDirection="column" flexGrow={1} minHeight={0} minWidth={0}>
-      {error ? (
+      {error && !offline ? (
         <text fg={color.warning} flexShrink={0}>
           {safe(error)}
         </text>
@@ -319,21 +338,23 @@ export function ConversationPane({
             />
           );
         })}
-        {outgoing ? (
-          <box flexDirection="column" alignItems="flex-end" marginTop={1}>
+        {queued.map((entry, position) => (
+          <box key={entry.operationId} flexDirection="column" alignItems="flex-end" marginTop={1}>
             <box maxWidth="75%">
-              <text fg={color.you}>{safe(outgoing.text)}</text>
+              <text fg={color.you}>{safe(entry.text)}</text>
             </box>
-            {outgoing.error ? (
+            {entry.error && !entry.sending ? (
               <>
                 <DeliveryLine text="Not delivered" />
-                <text fg={color.muted}>{safe(outgoing.error)} · Ctrl-R retry · Ctrl-X edit</text>
+                {entry === undelivered[undelivered.length - 1] ? (
+                  <text fg={color.muted}>{safe(entry.error)} · Ctrl-R retry · Ctrl-X edit</text>
+                ) : null}
               </>
-            ) : (
+            ) : position === queued.length - 1 ? (
               <text fg={color.faint}>Sending…</text>
-            )}
+            ) : null}
           </box>
-        ) : null}
+        ))}
       </scrollbox>
       {unseen > 0 ? (
         <text fg={color.accent} flexShrink={0}>
@@ -342,9 +363,10 @@ export function ConversationPane({
       ) : null}
       <box border borderColor={focused ? color.focus : color.border} height={3} flexShrink={0}>
         <input
+          onPaste={pasteOnOneLine}
           key={composer}
           focused={focused}
-          placeholder={outgoing ? "Sending…" : `Message ${safe(name)}`}
+          placeholder={`Message ${safe(name)}`}
           value={draft}
           onInput={(value: string) => {
             if (value === "/" && draft === "") {

@@ -89,6 +89,16 @@ export interface GatewayEntry {
   available: boolean;
 }
 
+/** The add form's fields, filled from a Gateway to save or change. */
+export interface GatewayDraft {
+  name: string;
+  url: string;
+  token: string;
+  serverCaFile: string;
+  clientCertFile: string;
+  clientKeyFile: string;
+}
+
 /** A saved or launch Gateway with its credential: never shown, never cached. */
 interface Credentialed {
   entry: GatewayEntry;
@@ -269,6 +279,37 @@ export class Connections {
     const origin = gatewayOrigin(item.url);
     const tls = item.files ? await tlsOf(item.files) : (this.options.launchUrl?.tls ?? {});
     return { shown: origin, gateway: origin, url: item.url, token: item.token, tls };
+  }
+
+  /**
+   * What the add form starts from to save the launch Gateway (`s`) or change a saved one's
+   * credential (`e`): its name, URL, credential and TLS files. Local has none: its token is
+   * read at every connect and never saved.
+   */
+  async draft(id: string): Promise<GatewayDraft | undefined> {
+    if (id.startsWith("url:")) {
+      const launch = this.options.launchUrl;
+      if (!launch) return undefined;
+      const env = this.options.env;
+      return {
+        name: "",
+        url: launch.url,
+        token: launch.token,
+        serverCaFile: env["SUPERTAG_SERVER_CA_FILE"] ?? "",
+        clientCertFile: env["SUPERTAG_CLIENT_CERT_FILE"] ?? "",
+        clientKeyFile: env["SUPERTAG_CLIENT_KEY_FILE"] ?? "",
+      };
+    }
+    const item = (await this.saved()).find((candidate) => candidate.entry.id === id);
+    if (!item) return undefined;
+    return {
+      name: item.entry.name,
+      url: item.url,
+      token: item.token,
+      serverCaFile: item.files?.serverCaFile ?? "",
+      clientCertFile: item.files?.clientCertFile ?? "",
+      clientKeyFile: item.files?.clientKeyFile ?? "",
+    };
   }
 
   /** Saves a Gateway with `supertag connect`; returns the entry it is listed under. */

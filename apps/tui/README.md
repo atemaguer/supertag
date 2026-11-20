@@ -16,7 +16,8 @@ client, transcript rules and React hooks with the desktop app through `@supertag
   the inbox items an operator decides, `?` a question, `!` an approval request. **Teams**, with
   their member count. Only what fits is mounted; the list scrolls to keep the selected row in
   view. Ctrl-B folds it to the Tags' initials (`★` lead, `•` unread, `…` working); `[` and `]`
-  resize it from the list. Both are remembered.
+  resize it from the list. Both are remembered. In a narrow terminal it takes at most 40% of the
+  width.
 - **The conversation**: messages only, never activity. Your messages on the right, the Tag's on
   the left as Markdown with highlighted code; the text a running turn writes streams in place;
   `···` while the Tag works; why a queued turn waits for a Worker Host; time dividers where 15
@@ -26,9 +27,11 @@ client, transcript rules and React hooks with the desktop app through `@supertag
   reads earlier ones. Scrolled up, a line counts new messages until End. Under the reply that
   created an Objective (`Created Objective ID: …`), a line says when it is ready for review,
   complete, or cancelled.
-- **The composer**: Enter sends. A draft is kept per Tag across Tag switches and launches. A
+- **The composer**: one line; Enter sends, and pasted lines join with spaces. A draft is kept per
+  Tag across Tag switches and launches. A
   message sent waits in the outbox, on disk, until the Gateway accepts it, and is sent again at
-  the next launch. `/goal OUTCOME` goes to the conversation like any message, and the Gateway
+  the next launch; another can be sent meanwhile, and Ctrl-R sends every one not delivered
+  again, oldest first. `/goal OUTCOME` goes to the conversation like any message, and the Gateway
   creates an Objective the Tag owns; `/goal` alone opens the new Objective form. ↑ on an empty
   message opens Work Sessions.
 - **An Objective** (selected in the list): what `supertag describe objective` shows, kept current.
@@ -52,16 +55,23 @@ client, transcript rules and React hooks with the desktop app through `@supertag
   and Web access, on unless the harness's hosts have no network (the desktop app's rules, from
   `@supertag/client`). On Local, "Choose a folder…" adds a folder of this machine with
   `supertag workspace add`. Operators only.
-- **The palette** (Ctrl-K, or `/` on an empty message): Tags with their Alt-N keys, and commands:
+- **The palette** (Ctrl-K, or `/` on an empty message): Tags with their Alt-N keys (which open
+  one at once, there too), found by name, ID or latest message, and commands:
   New Tag, `/goal` · Create Objective (typing `/goal OUTCOME` there sends it), Work Sessions,
   Activity, Notes (`x` deletes one), Network (operators only), Schedules (`p` pauses or resumes,
-  `x` deletes), Open inbox, Gateways, Keyboard shortcuts.
+  `x` deletes), Open inbox, Gateways, Keyboard shortcuts. Esc or Ctrl-K closes it.
 - **Gateways** (Ctrl-P): Local, and the Gateways saved with `supertag connect` or in the desktop
   app. `a` adds one with `supertag connect`: a name, the URL, an Operator Token or a client Auth
-  Key (which enrolls this device as `client:HOSTNAME`), and optional TLS files. `d` forgets a
-  saved one and its cache: with `supertag disconnect`, or from the desktop app's store.
-- **The status line**: the Gateway, its connection, its Worker Hosts by phase (operators only),
-  and unread replies outside the conversation in front.
+  Key (which enrolls this device as `client:HOSTNAME`), and optional TLS files (Ctrl-U clears the
+  masked credential). `s` saves the Gateway the launch named (`--gateway URL`) the same way, and
+  `e` changes a saved one's credential or TLS files (one saved in the desktop app is changed
+  there). `d` forgets a saved one and its cache: with `supertag disconnect`, or from the desktop
+  app's store.
+- **The status line**: the Gateway, its connection (`not answering, reconnecting…` while its
+  Watch is down; the follow and the Watch reopen on their own), its Worker Hosts by phase
+  (operators only), and unread replies outside the conversation in front. When connecting fails
+  while the cache shows, why (such as a Gateway on another SuperTag protocol, naming both
+  releases and which to upgrade) shows in full above the list, and it keeps trying.
 - **Notifications**: a reply or question in a conversation that is not in front, or while the
   terminal is unfocused, writes OSC 9 (through tmux passthrough inside tmux; tmux needs
   `allow-passthrough on`). `SUPERTAG_TUI_NOTIFY=all|questions|bell|off`.
@@ -113,7 +123,8 @@ launcher passes the environment through.
 
 ## Keys
 
-Enter send · Ctrl-K or `/` palette · Ctrl-N New Tag · Ctrl-P Gateways · Alt-1…9 the nth Tag ·
+Enter send · Ctrl-K or `/` palette · Ctrl-N New Tag · Ctrl-P Gateways · Alt-1…9 (or Ctrl-1…9
+where the terminal reports it) the nth Tag ·
 Alt-↑/↓ (Alt-k/j) previous or next Tag · Tab between the list and the pane · ↑/↓ (k/j) in the
 list · ↑ on an empty message Work Sessions · `m` message an Objective's owner · `a`/`d` approve or
 deny · Ctrl-B fold · `[` `]` resize · PgUp/PgDn scroll · End or Ctrl-End latest · Ctrl-R retry ·
@@ -146,15 +157,18 @@ fixture adapter, which answers every message. `stack.sh tag ID LABEL` picks one 
 turn, keeps a note and schedules a wake-up; `ask` asks the operator when an Objective's turn says
 "Ask which branch to release"; `approve` posts to its Team's Workstream and waits for an
 approval. It never touches `~/.supertag`. `stack.sh tui` runs Bun with a short `PATH`; set
-`BUN=/tmp/bun/bin/bun` when Bun is elsewhere.
+`BUN=/tmp/bun/bin/bun` when Bun is elsewhere. With `SUPERTAG_TUI_BINARY` set, `stack.sh tui` and
+`tmux-e2e.sh` run that compiled binary through the CLI's launcher (`supertag tui`) instead, as the
+`tui-e2e` CI job does on Linux.
 
 ```sh
 (cd ../../core && cargo build -p supertag-cli --features test-fixtures \
   --bin supertag --bin supertag-fixture-adapter)
 sh scripts/stack.sh up && sh scripts/stack.sh tag engineer && sh scripts/stack.sh tag lead
 sh scripts/stack.sh tui --gateway local   # try it
-sh scripts/tmux-e2e.sh engineer           # send, paste, Alt-2, notify, inbox, /goal, Work Sessions,
-                                          # Notes, Schedules, a Team, New Tag, save and forget a Gateway
+sh scripts/tmux-e2e.sh engineer           # send, paste, Alt-2, notify, the Gateway restarting, inbox,
+                                          # /goal, Work Sessions, Notes, Schedules, a Team, New Tag,
+                                          # save and forget a Gateway
 TUI_BINARY=/tmp/supertag-tui/dist/supertag-tui-darwin-arm64 SUPERTAG_CLI=../../core/target/debug/supertag \
   bun bench/first-paint.ts 10             # first paint in a PTY, 30 ms round trip
 sh scripts/stack.sh down

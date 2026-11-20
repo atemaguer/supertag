@@ -8,7 +8,7 @@ export const SHORTCUTS: readonly { keys: string; does: string }[] = [
   { keys: "Ctrl-K, / on an empty message", does: "Search Tags and commands" },
   { keys: "Ctrl-N", does: "Create a Tag" },
   { keys: "Ctrl-P", does: "Choose a Gateway (d forgets a saved one)" },
-  { keys: "Alt-1…9", does: "Open the nth Tag (the lead is first)" },
+  { keys: "Alt-1…9 (Ctrl-1…9)", does: "Open the nth Tag (the lead is first), also in the palette" },
   { keys: "Alt-↑ Alt-↓, Alt-k Alt-j", does: "Open the previous or next Tag" },
   { keys: "Tab", does: "Move between the list and the pane" },
   { keys: "↑ ↓, k j", does: "Move in the list: Tags, Objectives, the inbox, Teams" },
@@ -21,7 +21,7 @@ export const SHORTCUTS: readonly { keys: string; does: string }[] = [
   { keys: "End, Ctrl-End", does: "Jump to the latest message" },
   { keys: "Ctrl-R", does: "Retry a message that was not delivered" },
   { keys: "Ctrl-X", does: "Edit a message that was not delivered" },
-  { keys: "Esc", does: "Close a panel" },
+  { keys: "Esc, Ctrl-K", does: "Close a panel; Ctrl-K also closes the palette" },
   { keys: "Ctrl-C", does: "Quit" },
 ];
 

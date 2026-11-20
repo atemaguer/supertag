@@ -104,13 +104,20 @@ interface Turn {
 class Queue<T> {
   private items: T[] = [];
   private wake: (() => void) | undefined;
+  private failure: Error | undefined;
   push(item: T) {
     this.items.push(item);
+    this.wake?.();
+  }
+  /** Ends the stream with `error`, as a Gateway that went away does. */
+  fail(error: Error) {
+    this.failure = error;
     this.wake?.();
   }
   async *drain(signal: AbortSignal): AsyncGenerator<T> {
     for (;;) {
       while (this.items.length) yield this.items.shift() as T;
+      if (this.failure) throw this.failure;
       if (signal.aborted) return;
       await new Promise<void>((resolve) => {
         this.wake = resolve;
@@ -128,6 +135,8 @@ export class FakeGateway {
   private follows = new Map<string, Set<Queue<Init<FollowConversationResponse>>>>();
   private watches = new Set<Queue<Init<WatchEvent>>>();
   private nextTask = 0;
+  /** While true, the Watch fails as a Gateway that stopped answering does. */
+  private watchDown = false;
   /** Messages the Gateway accepted, in order. */
   readonly sent: { tagId: string; text: string; operationId: string }[] = [];
   /** When set, `SendMessage` fails with this message. */
@@ -266,6 +275,13 @@ export class FakeGateway {
         },
       } as never);
     }
+  }
+
+  /** The Gateway stops answering the Watch (`true`), or answers again (`false`). */
+  watchUnavailable(down: boolean) {
+    this.watchDown = down;
+    if (down)
+      for (const watch of this.watches) watch.fail(new ConnectError("gone", Code.Unavailable));
   }
 
   /** Tells every Watch that `kind` changed, as an Objective, Team or Work Session change does. */
@@ -771,6 +787,7 @@ export class FakeGateway {
       } as never);
       router.service(OperatorEvents, {
         async *watch(_request: unknown, context: { signal: AbortSignal }) {
+          if (fake.watchDown) throw new ConnectError("gone", Code.Unavailable);
           const queue = new Queue<Init<WatchEvent>>();
           fake.watches.add(queue);
           try {

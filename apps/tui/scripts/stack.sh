@@ -9,6 +9,8 @@
 # binaries first, in core/:
 #   cargo build -p supertag-cli --features test-fixtures --bin supertag --bin supertag-fixture-adapter
 #   stack.sh up | tag [ID [LABEL [TAG PUT ARGS...]]] | down | cli ARGS... | tui [ARGS...]
+# `tui` runs the checkout's source with Bun; with SUPERTAG_TUI_BINARY set it runs that compiled
+# binary through the CLI's launcher (`supertag tui`), as plain `supertag` starts it.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../.." && pwd)
@@ -76,11 +78,18 @@ EOF
     ;;
   tui)
     shift
+    if [ -n "${SUPERTAG_TUI_BINARY:-}" ]; then
+      set -- "$cli" tui "$@"
+    else
+      set -- "$bun" run "$here/../src/main.tsx" "$@"
+    fi
     exec env -i PATH=/usr/bin:/bin:/opt/homebrew/bin HOME="$home" SUPERTAG_STATE_DIR="$state" \
       SUPERTAG_CLI="$cli" TERM="${TERM:-xterm-256color}" ${COLORTERM:+COLORTERM=$COLORTERM} \
       ${TERM_PROGRAM:+TERM_PROGRAM=$TERM_PROGRAM} ${TMUX:+TMUX=$TMUX} TMPDIR=/tmp \
       ${SUPERTAG_TUI_TIMING:+SUPERTAG_TUI_TIMING=$SUPERTAG_TUI_TIMING} \
-      ${SUPERTAG_TUI_BINARY:-$bun run "$here/../src/main.tsx"} "$@"
+      ${SUPERTAG_TUI_NOTIFY:+SUPERTAG_TUI_NOTIFY=$SUPERTAG_TUI_NOTIFY} \
+      ${SUPERTAG_OPERATOR_TOKEN:+SUPERTAG_OPERATOR_TOKEN=$SUPERTAG_OPERATOR_TOKEN} \
+      ${SUPERTAG_TUI_BINARY:+SUPERTAG_TUI_BINARY=$SUPERTAG_TUI_BINARY} "$@"
     ;;
   *)
     echo "usage: stack.sh up | tag [ID [LABEL [TAG PUT ARGS...]]] | down | cli ARGS... | tui [ARGS...]" >&2
