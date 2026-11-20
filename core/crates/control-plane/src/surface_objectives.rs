@@ -260,11 +260,11 @@ pub(crate) async fn handle_in(
                 create_in(tx, order, &message, surface, &outcome, now_ms).await
             }
             _ => Ok(Handled::Status(
-                status_in(
+                message_status_in(
                     tx,
                     order,
+                    &message,
                     message.origin.tag_id,
-                    message.prompt,
                     "Say which outcome the Objective should achieve: @SuperTag /goal <outcome>.",
                     now_ms,
                 )
@@ -293,6 +293,7 @@ pub(crate) async fn handle_in(
                 order,
                 origin,
                 &home.session_id,
+                message.event_id,
                 message.prompt,
                 now_ms,
             )
@@ -326,7 +327,7 @@ pub(crate) async fn handle_in(
         }
     };
     Ok(Handled::Status(
-        status_in(tx, order, &home.tag_id, message.prompt, &text, now_ms).await?,
+        message_status_in(tx, order, &message, &home.tag_id, &text, now_ms).await?,
     ))
 }
 
@@ -375,6 +376,16 @@ async fn create_in(
     crate::artifact_context::resolve_in(tx, &mut task, now_ms).await?;
     objectives::objective_link_task_in(tx, &task).await?;
     objectives::set_starting_task_in(tx, &objective_id, &task.task_id).await?;
+    // The person's `/goal` message is the new Objective Session's first input.
+    crate::surface_policy::surface_input_in(
+        tx,
+        &task,
+        &message.origin,
+        message.event_id,
+        false,
+        now_ms,
+    )
+    .await?;
     sqlx::query("INSERT INTO supertag_v2_surface_objectives (account_id,conversation_id,thread_id,objective_id,tag_id,started_by_event_id) VALUES ($1,$2,$3,$4,$5,$6)")
         .bind(message.origin.connector_account_id).bind(message.conversation_id).bind(message.thread_id)
         .bind(&objective_id).bind(tag).bind(message.event_id).execute(&mut **tx).await?;
@@ -475,7 +486,31 @@ async fn directive_in(
 
 /// The Control Plane answered this message itself. Record it as a settled Task
 /// in its own Session so the message is deduplicated like any other and its
-/// answer reaches the thread through the durable reply outbox.
+/// answer reaches the thread through the durable reply outbox. The message is
+/// that Task's input, bound to it at once.
+async fn message_status_in(
+    tx: &mut Transaction<'_, Any>,
+    order: i64,
+    message: &Message<'_>,
+    tag_id: &str,
+    answer: &str,
+    now_ms: i64,
+) -> Result<Task> {
+    let task = status_task_in(tx, order, tag_id, message.prompt).await?;
+    crate::surface_policy::surface_input_in(
+        tx,
+        &task,
+        &message.origin,
+        message.event_id,
+        true,
+        now_ms,
+    )
+    .await?;
+    settle_in(tx, &task.task_id, answer, now_ms).await
+}
+
+/// A Control Plane report posted in a thread, recorded as a settled Task in its own Session. It
+/// answers no message, so it is no Session's input.
 async fn status_in(
     tx: &mut Transaction<'_, Any>,
     order: i64,
@@ -484,9 +519,18 @@ async fn status_in(
     answer: &str,
     now_ms: i64,
 ) -> Result<Task> {
-    let session = format!("surface-status:{}", Uuid::new_v4());
-    let task = Box::pin(insert_task(tx, order, tag_id, &session, prompt)).await?;
+    let task = status_task_in(tx, order, tag_id, prompt).await?;
     settle_in(tx, &task.task_id, answer, now_ms).await
+}
+
+async fn status_task_in(
+    tx: &mut Transaction<'_, Any>,
+    order: i64,
+    tag_id: &str,
+    prompt: &str,
+) -> Result<Task> {
+    let session = format!("surface-status:{}", Uuid::new_v4());
+    Box::pin(insert_task(tx, order, tag_id, &session, prompt)).await
 }
 
 /// Settles a just-accepted Task with the Control Plane's own answer: it never runs.

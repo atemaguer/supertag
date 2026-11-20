@@ -314,7 +314,8 @@ async fn admit(
         Some(admission) => admission,
         None => Admission::Admitted(
             Box::new(
-                admit_connector_task_in(tx, order, origin, session, &input.prompt, now_ms).await?,
+                admit_connector_task_in(tx, order, origin, session, event, &input.prompt, now_ms)
+                    .await?,
             ),
             false,
         ),

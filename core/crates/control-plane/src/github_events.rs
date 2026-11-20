@@ -159,6 +159,7 @@ impl Store {
                 },
             },
             &session,
+            &input.delivery_id,
             &input.prompt,
             self.execution_now_ms(),
         )

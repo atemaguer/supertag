@@ -160,6 +160,7 @@ impl Store {
                 },
             },
             &session,
+            &input.event_id,
             &input.prompt,
             now_ms,
         )

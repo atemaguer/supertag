@@ -253,9 +253,22 @@ impl Store {
         )
         .await?
         .ok_or_else(|| StoreError::NotFound("Conversation was not found".into()))?;
+        // The message is the next input of the person's Session: it acts for them, and they see
+        // the reply.
+        let own = crate::session_inputs::NewInput {
+            kind: crate::session_inputs::InputKind::Person,
+            source_key: crate::session_inputs::key(&[
+                "conversation",
+                principal,
+                &input.operation_id,
+            ]),
+            requester: principal,
+            audience: principal,
+        };
         // `/goal <outcome>` creates the Objective here: the Tag owns it, this conversation is its
         // home, and the Control Plane answers the message itself.
         if let Some(goal) = goal_command(&input.text) {
+            crate::session_inputs::admit_bound_in(&mut tx, &task, own, now).await?;
             let answer = goal_in(&mut tx, principal, &task, goal.as_deref(), now).await?;
             crate::surface_objectives::settle_in(&mut tx, &task.task_id, &answer, now).await?;
             let entry = HistoryEntry {
@@ -267,8 +280,8 @@ impl Store {
             tx.commit().await?;
             return Ok(message);
         }
-        let operation = format!("conversation/{}", task.task_id);
-        let live_input = crate::inputs::fold_in(&mut tx, principal, &operation, &task, now).await?;
+        let own = crate::session_inputs::admit_in(&mut tx, &task, own, now).await?;
+        let live_input = crate::inputs::fold_in(&mut tx, &task, &own, now).await?;
         tx.commit().await?;
         Ok(sent(task, live_input, seq, sent_at))
     }

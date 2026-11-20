@@ -382,9 +382,10 @@ for a thread in Slack, Microsoft Teams or Lark. When the active harness advertis
 support, SuperTag delivers the message to that exact Task Attempt using the harness's queue or
 steering behavior. An accepted input is not also executed as a separate Task, unless the harness
 withdraws it unread at the final result, as described below. Messages with different execution
-requirements or authority wait for a separate execution. A `/goal` message never reaches a turn:
-the Control Plane creates its Objective and answers it. SuperTag never interrupts a running turn
-for a new message.
+requirements or authority wait for a separate execution, and so does input queued by someone
+other than the person the running turn answers: it waits for its own turn. A `/goal` message never
+reaches a turn: the Control Plane creates its Objective and answers it. SuperTag never interrupts a
+running turn for a new message.
 
 An uncertain acknowledgement holds the message to avoid duplicate delivery. If the same Task
 Attempt later confirms that it withdrew the unread message, SuperTag clears that uncertainty.
@@ -433,9 +434,10 @@ joined message settles as input that Task accepted, so it gets no reply of its o
 in at most 10 messages and 16 KiB of joined text. The Tag's own turns end the run of messages it
 takes in, which keeps them in order: a Schedule firing, a notice, a Mailbox delivery or a report.
 So does a message from someone else, or with a different audience or execution requirements: it
-waits for its own turn. GitHub and Linear events always run as their own turns. The first claim of
-a turn fixes the messages it answers: a retry or a replayed claim presents the same ones, and the
-messages a lost Task Attempt took in.
+waits for its own turn. In a Slack, Microsoft Teams or Lark thread, everyone's messages count as
+the thread's, so one turn can take in several people's messages. GitHub and Linear events always
+run as their own turns. The first claim of a turn fixes the messages it answers: a retry or a
+replayed claim presents the same ones, and the messages a lost Task Attempt took in.
 
 ### When delivery is uncertain
 

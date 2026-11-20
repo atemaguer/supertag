@@ -191,6 +191,7 @@ pub(crate) async fn admit_connector_task_in(
     order: i64,
     verified: VerifiedConnectorOrigin<'_>,
     session_id: &str,
+    event_id: &str,
     prompt: &str,
     now_ms: i64,
 ) -> Result<Option<Task>> {
@@ -209,14 +210,46 @@ pub(crate) async fn admit_connector_task_in(
     .await?;
     crate::artifact_context::resolve_in(tx, &mut task, now_ms).await?;
     objectives::objective_link_task_in(tx, &task).await?;
+    let own = surface_input_in(tx, &task, &verified, event_id, false, now_ms).await?;
     // A chat message sent while its thread's Session runs goes into that run. GitHub and Linear
     // events are separate events with their own context, so each keeps its own turn.
     if verified.scope.is_chat() {
-        let principal = format!("connector:{}", verified.connector_account_id);
-        let operation = format!("surface/{}", task.task_id);
-        crate::inputs::fold_in(tx, &principal, &operation, &task, now_ms).await?;
+        crate::inputs::fold_in(tx, &task, &own, now_ms).await?;
     }
     Ok(Some(task))
+}
+
+/// Records a verified surface message as the next input of `task`'s Session: a person's message
+/// in a chat thread, or a GitHub or Linear event. It acts for the connector account that admitted
+/// it, since surface policy is the account's, and its reply goes to the Task's audience (none for
+/// a thread). `bound` binds it to `task` at once, for an answer the Control Plane settled itself.
+pub(crate) async fn surface_input_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &Task,
+    verified: &VerifiedConnectorOrigin<'_>,
+    event_id: &str,
+    bound: bool,
+    now_ms: i64,
+) -> Result<crate::session_inputs::InputRow> {
+    use crate::session_inputs::{InputKind, NewInput};
+    let account = verified.connector_account_id;
+    let requester = format!("connector:{account}");
+    let (_, audience) = crate::session_inputs::requester_of_in(tx, &task.task_id).await?;
+    let input = NewInput {
+        kind: if verified.scope.is_chat() {
+            InputKind::Person
+        } else {
+            InputKind::SurfaceEvent
+        },
+        source_key: crate::session_inputs::key(&["surface", account, event_id]),
+        requester: &requester,
+        audience: &audience,
+    };
+    if bound {
+        crate::session_inputs::admit_bound_in(tx, task, input, now_ms).await
+    } else {
+        crate::session_inputs::admit_in(tx, task, input, now_ms).await
+    }
 }
 
 /// A chat message's admission: its Task (`None` when the surface admits no new work) and whether

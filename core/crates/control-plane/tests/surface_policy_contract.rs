@@ -1,6 +1,6 @@
 mod support;
 
-use sqlx::{Connection, Executor};
+use sqlx::{AnyPool, Connection, Executor, Row};
 use supertag_control_plane::{Store, StoreError};
 use supertag_protocol::v2::{
     surface_account_identity::Provider as Identity, surface_location_scope::Provider as Scope, *,
@@ -90,6 +90,8 @@ async fn put_permission(store: &Store, id: &str, action: &str) {
 
 async fn contract(url: &str) {
     let store = Store::open(url).await.unwrap();
+    sqlx::any::install_default_drivers();
+    let pool = AnyPool::connect(url).await.unwrap();
     for id in ["engineer", "other"] {
         store.put_tag(id, "Review requests", vec![]).await.unwrap();
     }
@@ -209,6 +211,15 @@ async fn contract(url: &str) {
         .task
         .unwrap();
     assert_eq!(admitted.allowed_actions, ["files:read", "files:write"]);
+    // A chat message is a person's message in its thread's Session, acting for the account.
+    assert_input(
+        &pool,
+        &admitted,
+        2,
+        "surface\nediting\ndelivery-1",
+        "connector:editing",
+    )
+    .await;
     let snapshot = admitted.policy_snapshot.as_ref().unwrap();
     assert_eq!(snapshot.permission_sets.len(), 2);
     assert_eq!(snapshot.context_sets.len(), 1);
@@ -450,7 +461,7 @@ async fn contract(url: &str) {
         sessions.push(task.session_id);
     }
     assert_ne!(sessions[0], sessions[1]);
-    verify_other_providers(&reopened).await;
+    verify_other_providers(&reopened, &pool).await;
     reopened.close().await;
 }
 
@@ -499,13 +510,42 @@ async fn bind_provider(store: &Store, alias: &str, identity: Identity, scope: Sc
         .unwrap();
 }
 
-fn assert_origin(task: Option<Task>, alias: &str) {
-    let policy = task.unwrap().policy_snapshot.unwrap();
+/// The admitted Task's own Session input: its kind (2 a person's message, 3 a surface event), its
+/// source key (or its start), and who it acts for. A thread's reply goes to no audience.
+async fn assert_input(pool: &AnyPool, task: &Task, kind: i64, key: &str, requester: &str) {
+    let row = sqlx::query(
+        "SELECT kind,source_key,requester,audience,task_id FROM supertag_v2_session_inputs
+         WHERE admitted_task_id=$1",
+    )
+    .bind(&task.task_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(row.get::<i64, _>("kind"), kind);
+    let source_key: String = row.get("source_key");
+    assert!(source_key.starts_with(key), "{source_key:?}");
+    assert_eq!(row.get::<String, _>("requester"), requester);
+    assert_eq!(row.get::<String, _>("audience"), "");
+    assert_eq!(row.get::<Option<String>, _>("task_id"), None, "pending");
+}
+
+/// `event` is the provider event's ID; a Teams activity is keyed by a digest of its IDs.
+async fn assert_origin(pool: &AnyPool, task: Option<Task>, alias: &str, kind: i64, event: &str) {
+    let task = task.unwrap();
+    assert_input(
+        pool,
+        &task,
+        kind,
+        &format!("surface\n{alias}\n{event}"),
+        &format!("connector:{alias}"),
+    )
+    .await;
+    let policy = task.policy_snapshot.unwrap();
     assert_eq!(policy.origin.unwrap().connector_account_id, alias);
     assert_eq!(policy.context_sets[0].set_id, "runbook");
 }
 
-async fn verify_other_providers(store: &Store) {
+async fn verify_other_providers(store: &Store, pool: &AnyPool) {
     let github = "github/surface";
     bind_provider(
         store,
@@ -537,13 +577,17 @@ async fn verify_other_providers(store: &Store) {
     ));
     issue.repository_id = 123;
     assert_origin(
+        pool,
         store
             .accept_github_event("connector:github/surface", &issue)
             .await
             .unwrap()
             .task,
         github,
-    );
+        3,
+        "delivery",
+    )
+    .await;
 
     const FIRST: &str = "11111111-1111-4111-8111-111111111111";
     const SECOND: &str = "22222222-2222-4222-8222-222222222222";
@@ -581,13 +625,17 @@ async fn verify_other_providers(store: &Store) {
     ));
     issue.workspace_id = FIRST.into();
     assert_origin(
+        pool,
         store
             .accept_linear_event("connector:linear/surface", &issue)
             .await
             .unwrap()
             .task,
         linear,
-    );
+        3,
+        "delivery",
+    )
+    .await;
 
     let lark = "lark/surface";
     let mut message = AcceptLarkEventRequest {
@@ -625,13 +673,17 @@ async fn verify_other_providers(store: &Store) {
     ));
     message.domain = LarkDomain::Feishu.into();
     assert_origin(
+        pool,
         store
             .accept_lark_event("connector:lark/surface", &message)
             .await
             .unwrap()
             .task,
         lark,
-    );
+        2,
+        "delivery",
+    )
+    .await;
 
     let teams = "teams/surface";
     let mut activity = AcceptMicrosoftTeamsActivityRequest {
@@ -669,13 +721,17 @@ async fn verify_other_providers(store: &Store) {
     ));
     activity.team_id = THIRD.into();
     assert_origin(
+        pool,
         store
             .accept_microsoft_teams_activity("connector:teams/surface", &activity)
             .await
             .unwrap()
             .task,
         teams,
-    );
+        2,
+        "",
+    )
+    .await;
 }
 
 #[tokio::test]
