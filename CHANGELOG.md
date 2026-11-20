@@ -62,6 +62,11 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- The terminal UI starts this machine's local services when they are set up but stopped, as the
+  desktop app does, offers to restart an older local release, and says to run `supertag init` when
+  the machine isn't set up. Its Gateway chooser no longer waits on "Looking for Gateways…": saved
+  Gateways list at once and the local row says whether the services are stopped or not set up.
+
 - `supertag up` no longer fails when another program takes the local Gateway's port while the
   Gateway starts. It binds the port itself and hands the open socket to the Gateway, so the port is
   never free in between; a remembered port that is taken gets a new one.
