@@ -151,8 +151,9 @@ messages it was given. Hours are fixed clock hours.
 Over a limit, SuperTag stores the message and drops nothing:
 
 - A note, evidence, or decision wakes no one. The recipient sees it in its next turn.
-- A question or blocker is delivered late: when the hour ends, or an hour later for the limit
-  between two Tags. The turn says why it waited.
+- A question or blocker is delivered late: when the hour ends. For the limit between two Tags,
+  it comes when the originating Task ends, or an hour later at most. The turn says why it
+  waited.
 - The sender's `send_message` result says why in `wake_deferred`, for example `Tag reviewer was
   already woken 20 times this hour by other Tags; Tag reviewer will see this message in its next
   turn.`

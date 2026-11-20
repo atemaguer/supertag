@@ -8,10 +8,11 @@
 //! per hour. A wake counts only when it would start an activation, meaning the Tag has no pending
 //! wake already; coalesced wakes are free. Over a limit, a note, evidence, or decision gets no wake
 //! and waits for the Tag's next turn; a question, blocker, or review request gets a deferred wake.
-//! Nothing is dropped, the sender is told why, and the operator gets one Inbox item per limit and
-//! window.
+//! A wake the pair limit deferred while its originating Task still runs is released when that Task
+//! ends, and after an hour at the latest. Nothing is dropped, the sender is told why, and the
+//! operator gets one Inbox item per limit and window.
 use sqlx::{Any, Transaction};
-use supertag_protocol::v2::MessageKind;
+use supertag_protocol::v2::{MessageKind, TaskState};
 use uuid::Uuid;
 
 use crate::{StoreError, store::Result};
@@ -139,8 +140,10 @@ struct Trip {
     scope_id: String,
     window_start_ms: i64,
     limit: i64,
-    /// When a deferred wake comes due.
+    /// When a deferred wake comes due at the latest.
     until_ms: i64,
+    /// The running Task whose end releases a deferred wake sooner.
+    release_task_id: Option<String>,
     /// Why the wake waits, without what happens next.
     reason: String,
 }
@@ -200,12 +203,20 @@ async fn trip_in(
         .fetch_optional(&mut **tx)
         .await?;
         if wakes.unwrap_or(0) >= limits.mutual_per_task {
+            // The limit is per originating Task: once that Task ends, its exchange is over.
+            let state: Option<i64> =
+                sqlx::query_scalar("SELECT state FROM supertag_v2_tasks WHERE task_id=$1")
+                    .bind(origin)
+                    .fetch_optional(&mut **tx)
+                    .await?;
+            let running = state.is_some_and(|state| !ENDED.contains(&state));
             return Ok(Some(Trip {
                 scope: LIMIT_PAIR,
                 scope_id: format!("{origin}\n{a}\n{b}"),
                 window_start_ms: 0,
                 limit: limits.mutual_per_task,
                 until_ms: now + HOUR_MS,
+                release_task_id: running.then(|| origin.to_owned()),
                 reason: format!(
                     "{a} and {b} already woke each other {} for Task {origin}",
                     times(limits.mutual_per_task)
@@ -221,6 +232,7 @@ async fn trip_in(
             window_start_ms: window,
             limit: limits.per_tag_per_hour,
             until_ms: window + HOUR_MS,
+            release_task_id: None,
             reason: format!(
                 "Tag {} was already woken {} this hour by other Tags",
                 request.tag_id,
@@ -238,6 +250,7 @@ async fn trip_in(
             window_start_ms: window,
             limit: limits.per_objective_per_hour,
             until_ms: window + HOUR_MS,
+            release_task_id: None,
             reason: format!(
                 "Objective {objective} already woke its Tags {} this hour",
                 times(limits.per_objective_per_hour)
@@ -352,6 +365,7 @@ pub(crate) async fn wake_in(
         request.now + DEBOUNCE_MS
     };
     let mut deferred_reason = None;
+    let mut release_task_id = None;
     let mut notice = None;
     // A Tag with a pending wake takes a turn anyway: this wake starts nothing and is free.
     if active == 0 {
@@ -369,13 +383,18 @@ pub(crate) async fn wake_in(
                         )),
                     });
                 }
+                let when = match &trip.release_task_id {
+                    Some(task) => format!("when Task {task} ends"),
+                    None => "when the limit resets".to_owned(),
+                };
                 notice = Some(format!(
-                    "{}; Tag {tag} gets this {} when the limit resets, within the hour.",
+                    "{}; Tag {tag} gets this {} {when}, within the hour.",
                     trip.reason,
                     kind_word(request.message_kind)
                 ));
                 not_before = trip.until_ms;
                 deferred_reason = Some(trip.reason);
+                release_task_id = trip.release_task_id;
             }
             None => count_in(tx, request).await?,
         }
@@ -383,8 +402,9 @@ pub(crate) async fn wake_in(
     sqlx::query(
         "INSERT INTO supertag_v2_wakes
             (wake_id,tag_id,conversation_id,reasons,priority,first_seq,last_seq,hops,
-             origin_task_id,objective_id,not_before_ms,deferred_reason,created_at_ms)
-         VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10,$11,$12)
+             origin_task_id,objective_id,not_before_ms,deferred_reason,release_task_id,
+             created_at_ms)
+         VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10,$11,$12,$13)
          ON CONFLICT(tag_id,conversation_id) WHERE task_id IS NULL DO UPDATE SET
             reasons=supertag_v2_wakes.reasons | excluded.reasons,
             priority=CASE WHEN excluded.priority>supertag_v2_wakes.priority
@@ -395,6 +415,8 @@ pub(crate) async fn wake_in(
                 THEN excluded.hops ELSE supertag_v2_wakes.hops END,
             deferred_reason=CASE WHEN excluded.not_before_ms<supertag_v2_wakes.not_before_ms
                 THEN excluded.deferred_reason ELSE supertag_v2_wakes.deferred_reason END,
+            release_task_id=CASE WHEN excluded.not_before_ms<supertag_v2_wakes.not_before_ms
+                THEN excluded.release_task_id ELSE supertag_v2_wakes.release_task_id END,
             not_before_ms=CASE WHEN excluded.not_before_ms<supertag_v2_wakes.not_before_ms
                 THEN excluded.not_before_ms ELSE supertag_v2_wakes.not_before_ms END",
     )
@@ -409,6 +431,7 @@ pub(crate) async fn wake_in(
     .bind(request.objective_id)
     .bind(not_before)
     .bind(deferred_reason)
+    .bind(release_task_id)
     .bind(request.now)
     .execute(&mut **tx)
     .await?;
@@ -416,6 +439,52 @@ pub(crate) async fn wake_in(
         woke: true,
         deferred: notice,
     })
+}
+
+/// The states in which a Task has ended.
+const ENDED: [i64; 3] = [
+    TaskState::Succeeded as i64,
+    TaskState::Failed as i64,
+    TaskState::Cancelled as i64,
+];
+
+/// Releases the wakes the pair limit deferred until `task_id` ends: they are due now, and keep
+/// the reason they waited. Returns how many it released. Called in the transaction that ends the
+/// Task.
+pub(crate) async fn release_in(
+    tx: &mut Transaction<'_, Any>,
+    task_id: &str,
+    now: i64,
+) -> Result<u64> {
+    Ok(sqlx::query(
+        "UPDATE supertag_v2_wakes SET release_task_id=NULL,
+            not_before_ms=CASE WHEN not_before_ms>$1 THEN $1 ELSE not_before_ms END
+         WHERE task_id IS NULL AND release_task_id=$2",
+    )
+    .bind(now)
+    .bind(task_id)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected())
+}
+
+/// Releases the deferred wakes of every originating Task that has ended, for a Task that ended
+/// without passing through [`release_in`], such as one its Objective cancelled.
+pub(crate) async fn release_ended_in(tx: &mut Transaction<'_, Any>, now: i64) -> Result<()> {
+    sqlx::query(
+        "UPDATE supertag_v2_wakes SET release_task_id=NULL,
+            not_before_ms=CASE WHEN not_before_ms>$1 THEN $1 ELSE not_before_ms END
+         WHERE task_id IS NULL AND release_task_id IS NOT NULL AND EXISTS (
+            SELECT 1 FROM supertag_v2_tasks t
+            WHERE t.task_id=supertag_v2_wakes.release_task_id AND t.state IN ($2,$3,$4))",
+    )
+    .bind(now)
+    .bind(ENDED[0])
+    .bind(ENDED[1])
+    .bind(ENDED[2])
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }
 
 /// The hops and originating Task of a message the Task sends. An inbox turn, or an approval

@@ -85,6 +85,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- A question, blocker, or review request the mutual wake limit held back now arrives when its
+  originating Task ends, instead of always an hour later; an hour stays the longest it waits.
 - A Workstream post wakes nobody, not even the Tags it addresses: addressing a Tag counts as a
   mention and puts the post first in that Tag's next digest. Posts have no type. The `post` tool
   says so and points Tags to `send_message` for questions and blockers, and the Mailbox shows an

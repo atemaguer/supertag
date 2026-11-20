@@ -103,9 +103,24 @@ impl Store {
     }
 }
 
+/// Releases the wakes the pair limit deferred until this Task ended, in the transaction that ends
+/// it, and starts their inbox turns.
+pub(crate) async fn task_ended_in(
+    tx: &mut Transaction<'_, Any>,
+    task_id: &str,
+    now: i64,
+) -> Result<()> {
+    if wakes::release_in(tx, task_id, now).await? > 0 {
+        sweep_in(tx, now).await?;
+    }
+    Ok(())
+}
+
 /// Keep a single waiting turn per recipient, created once its wake is due. A running turn keeps
 /// its immutable bound messages; later mail gets a successor in the same serialized Session.
 pub(crate) async fn sweep_in(tx: &mut Transaction<'_, Any>, now: i64) -> Result<()> {
+    // Tasks also end outside finish and cancel, such as when their Objective is cancelled.
+    wakes::release_ended_in(tx, now).await?;
     for recipient in wakes::due_recipients_in(tx, now, 128).await? {
         let order = increment_order(tx).await?;
         let task = match insert_task(

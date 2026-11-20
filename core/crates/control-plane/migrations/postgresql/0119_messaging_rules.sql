@@ -19,4 +19,10 @@ DELETE FROM supertag_v2_wakes
 WHERE task_id IS NULL
   AND conversation_id IN (SELECT conversation_id FROM supertag_v2_conversations WHERE kind = 2);
 
+-- A wake the pair limit deferred waits for its originating Task to end, an hour at most
+-- (operator decision, 2026-11-19): the Task whose end releases it.
+ALTER TABLE supertag_v2_wakes ADD COLUMN release_task_id TEXT;
+CREATE INDEX supertag_v2_wakes_release ON supertag_v2_wakes(release_task_id)
+    WHERE task_id IS NULL AND release_task_id IS NOT NULL;
+
 UPDATE supertag_v2_schema SET version=119 WHERE version=118;

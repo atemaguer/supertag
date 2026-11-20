@@ -237,8 +237,9 @@ supertag get message --mailbox RECIPIENT
   chain of messages stops after 4 inbox turns. The Tag must answer in its reply instead.
 - **The message is stored but its recipient did not wake.** The sender's result carried
   `wake_deferred`, and `supertag get inbox-item --kind wake-limit` shows the limit that held it.
-  A note waits for the recipient's next turn. A question or blocker arrives when the hour ends,
-  or an hour later when two Tags kept waking each other. Nothing is dropped. If the Tags loop,
+  A note waits for the recipient's next turn. A question or blocker arrives when the hour ends.
+  When two Tags kept waking each other, it arrives when the originating Task ends, or an hour
+  later at most. Nothing is dropped. If the Tags loop,
   give the work to one of them; if the traffic is expected, raise the Team's `spec.wakeLimits`.
   See [Wake limits](tag-messaging.md#wake-limits).
 - **The message stays `TAG_MESSAGE_STATE_PENDING` with no wake limit.** A note waits about 3

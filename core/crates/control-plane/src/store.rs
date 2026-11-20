@@ -938,8 +938,11 @@ impl Store {
                 .await?;
         }
         let task = task_in(&mut transaction, task_id).await?;
-        crate::work_sessions::reports::settle_in(&mut transaction, &task, self.execution_now_ms())
-            .await?;
+        let now = self.execution_now_ms();
+        crate::work_sessions::reports::settle_in(&mut transaction, &task, now).await?;
+        if task.state() == TaskState::Cancelled {
+            crate::mailbox::task_ended_in(&mut transaction, task_id, now).await?;
+        }
         transaction.commit().await?;
         self.text_finished(task_id);
         Ok(task)
@@ -1722,6 +1725,12 @@ impl Store {
             crate::workspace_landings::finish_in(&mut transaction, &task).await?;
         } else if matches!(task.state(), TaskState::Failed | TaskState::Cancelled) {
             crate::reply_progress::after_reply_in(&mut transaction, &task).await?;
+        }
+        if matches!(
+            task.state(),
+            TaskState::Succeeded | TaskState::Failed | TaskState::Cancelled
+        ) {
+            crate::mailbox::task_ended_in(&mut transaction, &task.task_id, now).await?;
         }
         crate::objectives::objective_sweep_in(&mut transaction, now).await?;
         if state == TaskState::Running {

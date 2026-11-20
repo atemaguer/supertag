@@ -863,8 +863,10 @@ defaults apply.
 Over a limit, the message is stored and never dropped:
 
 - A note, evidence, or decision gets no wake. The recipient sees it in its next turn.
-- A question, blocker, or review request gets a deferred wake, due when the hour ends, or an hour
-  later for the mutual limit. Its turn says why it waited.
+- A question, blocker, or review request gets a deferred wake, due when the hour ends. For the
+  mutual limit it is due an hour later, or sooner when the originating Task ends: the transaction
+  that ends that Task releases it. A wake deferred after the originating Task ended waits the
+  hour. Its turn says why it waited.
 - The response's `wake_deferred` tells the sender why. It is empty when the message woke its
   recipient or joined a waiting turn.
 - The operator Inbox shows one `wake-limit` item (`INBOX_ITEM_KIND_WAKE_LIMIT`) per tripped

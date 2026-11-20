@@ -185,6 +185,7 @@ async fn contract(url: &str) {
     mutual_limit(&fixture).await;
     hourly_limit_and_held_notes(&fixture).await;
     every_type_wakes(&fixture).await;
+    pair_release(&fixture).await;
     team_overrides(&fixture).await;
     objective_limit(&fixture).await;
     fixture.store.close().await;
@@ -453,6 +454,95 @@ async fn every_type_wakes(f: &Fixture) {
         assert!(prompt.contains(text), "{prompt}");
         f.finish(&turn).await;
     }
+}
+
+/// A wake the pair limit deferred while its originating Task runs is released when that Task
+/// ends, in the same transaction; an hour stays the ceiling.
+async fn pair_release(f: &Fixture) {
+    f.set_limits(
+        "pair-release",
+        TeamWakeLimits {
+            mutual_per_task: Some(1),
+            ..Default::default()
+        },
+    )
+    .await;
+    f.settle(HOUR_MS).await;
+
+    // Released when the originating Task ends.
+    let a0 = f.ordinary("a").await;
+    let first = f
+        .send(&a0, "b", "Please check the parser", MessageKind::Note)
+        .await
+        .unwrap();
+    assert_eq!(first.wake_deferred, "");
+    f.settle(DEBOUNCE_MS).await;
+    let b1 = f.claim("b").await;
+    let held = f
+        .send(&b1, "a", "Which branch ships?", MessageKind::Question)
+        .await
+        .unwrap();
+    let origin = &a0.task_id;
+    assert_eq!(
+        held.wake_deferred,
+        format!(
+            "a and b already woke each other once for Task {origin}; Tag a gets this question when Task {origin} ends, within the hour."
+        )
+    );
+    f.finish(&b1).await;
+    f.settle(DEBOUNCE_MS).await;
+    assert!(
+        f.try_claim().await.is_none(),
+        "the question waits for Task {origin}"
+    );
+    f.finish(&a0).await;
+    let a1 = f.claim("a").await;
+    let prompt = f.prompt(&a1).await;
+    assert!(
+        prompt.contains("These messages waited for a wake limit: a and b already woke"),
+        "{prompt}"
+    );
+    assert!(prompt.contains("Which branch ships?"), "{prompt}");
+    f.finish(&a1).await;
+
+    // Released by the ceiling while the originating Task still runs. It runs in a Session of its
+    // own: its lease lapses within the hour, and its Session stays held after that.
+    f.store
+        .submit_task(
+            OPERATOR,
+            &SubmitTaskRequest {
+                tag_id: "c".into(),
+                session_id: "ceiling".into(),
+                operation_id: Uuid::new_v4().to_string(),
+                prompt: "Coordinate".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let c0 = f.claim("c").await;
+    f.send(&c0, "d", "Please review the parser", MessageKind::Note)
+        .await
+        .unwrap();
+    f.settle(DEBOUNCE_MS).await;
+    let d1 = f.claim("d").await;
+    let held = f
+        .send(&d1, "c", "Is the review urgent?", MessageKind::Question)
+        .await
+        .unwrap();
+    assert!(
+        held.wake_deferred
+            .ends_with(&format!("when Task {} ends, within the hour.", c0.task_id)),
+        "{}",
+        held.wake_deferred
+    );
+    f.finish(&d1).await;
+    f.settle(DEBOUNCE_MS).await;
+    assert!(f.try_claim().await.is_none(), "the question waits");
+    f.settle(HOUR_MS).await;
+    let c1 = f.claim("c").await;
+    assert!(f.prompt(&c1).await.contains("Is the review urgent?"));
+    f.finish(&c1).await;
 }
 
 /// The Objective limit counts every Tag the Objective's Tags wake.
