@@ -4,7 +4,10 @@ name: Release SuperTag
 # amd64), the desktop app's macOS disk image and Linux Debian packages, and attaches them, their
 # SHA256SUMS, and an install.sh pinned to the release to a draft GitHub Release. The archives hold
 # the supertag CLI, the supertag-tui terminal UI, the shared execution provider, and the Node.js
-# bridges; the Mac app carries the macOS archive's contents, so it needs no separate install. A maintainer publishes the draft
+# bridges; the Mac app carries the macOS archive's contents, so it needs no separate install. The
+# terminal UI's native library statically links FFmpeg (LGPL-2.1), so the release also attaches the
+# exact FFmpeg source tarball it was built from, verified against the SHA-256 that OpenTUI's
+# FFMPEG-SOURCE.md in the archives records (scripts/ffmpeg_source.py). A maintainer publishes the draft
 # once every asset is attached; publishing runs the installer check and the SDK publish
 # workflows, so the README's latest installer URL never points at a release without its archives.
 on:
@@ -291,6 +294,9 @@ jobs:
         with:
           ref: ${{ needs.source.outputs.commit }}
           persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.9'
       - uses: actions/download-artifact@v4
         with:
           pattern: supertag-native-*
@@ -328,6 +334,20 @@ jobs:
             cat "$archive.sha256" >> SHA256SUMS
           done
           test "$(wc -l < SHA256SUMS)" -eq 3
+          # The FFmpeg source the terminal UI's native library links, as every archive's
+          # licenses/opentui/FFMPEG-SOURCE.md names it; the script fails unless the download
+          # matches the SHA-256 recorded there. The LGPL asks for it beside the binaries.
+          source=$(python ../scripts/ffmpeg_source.py --output . \
+            supertag-"$VERSION"-{darwin-arm64,linux-arm64,linux-amd64}-complete.tar.gz)
+          echo "$source"
+          ffmpeg=$(printf '%s' "$source" | python -c 'import json, sys; print(json.load(sys.stdin)["name"])')
+          sha256sum --check "$ffmpeg.sha256"
+          cat "$ffmpeg.sha256" >> SHA256SUMS
+          rm "$ffmpeg.sha256"
+          test "$(wc -l < SHA256SUMS)" -eq 4
+          unexpected=$(find . -maxdepth 1 -type f -name 'ffmpeg-*' ! -name "$ffmpeg")
+          [ -z "$unexpected" ] || { echo "::error::unexpected FFmpeg source files: $unexpected"; exit 1; }
+          echo "FFMPEG_SOURCE=$ffmpeg" >> "$GITHUB_ENV"
           # The desktop app: the dmg and the two debs, whichever built.
           for image in SuperTag-"$VERSION"-darwin-arm64.dmg SuperTag-"$VERSION"-linux-amd64.deb \
             SuperTag-"$VERSION"-linux-arm64.deb; do
@@ -366,7 +386,10 @@ jobs:
             true) ;;
             *) echo "::error::$RELEASE_TAG is already published; publish a new version instead"; exit 1 ;;
           esac
-          assets=(install.sh SHA256SUMS ./*-complete.tar.gz)
+          assets=(install.sh SHA256SUMS ./*-complete.tar.gz "./$FFMPEG_SOURCE")
           for image in ./*.dmg ./*.deb; do [ -f "$image" ] && assets+=("$image"); done
           gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
-          echo "Review the draft $RELEASE_TAG release notes, then publish it." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "Attached $FFMPEG_SOURCE, the FFmpeg source that supertag-tui's libopentui links (see NOTICE)."
+            echo "Review the draft $RELEASE_TAG release notes, then publish it."
+          } >> "$GITHUB_STEP_SUMMARY"

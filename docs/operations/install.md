@@ -32,7 +32,7 @@ supertag --version
 ```
 
 It downloads your platform's archive and checks it against the release's `SHA256SUMS` before
-unpacking it. It checks that `supertag` reports the release's version, then
+unpacking it. It checks that `supertag` and `supertag-tui` report the release's version, then
 installs the release under `~/.local/share/supertag` and links `supertag` into `~/.local/bin`.
 It never starts services or reads existing SuperTag state. Add the `export` line to your shell
 startup file to use the command in new terminals.
@@ -49,11 +49,23 @@ Installing a newer release keeps the older one beside it and switches the `super
 after the new release passes its checks. The script replaces a symbolic link at
 `~/.local/bin/supertag` and refuses to replace any other file there.
 
+### What the archive holds
+
+- `supertag`, the CLI, which also runs the Control Plane, the Gateway, and the Worklet.
+- `supertag-tui`, the terminal UI. Plain `supertag` in a terminal opens it; see
+  [Open the terminal UI](cli.md#open-the-terminal-ui).
+- `supertag-shared-execution` and `node-bridges/`, which Worker Hosts use to run harnesses.
+- `LICENSE`, `NOTICE`, and `licenses/opentui/`, the licenses of the OpenTUI library the terminal
+  UI embeds. That library links FFmpeg under the GNU LGPL 2.1, and each release attaches the exact
+  FFmpeg source it was built from, such as `ffmpeg-9.0.2.tar.xz`, listed in the same
+  `SHA256SUMS`. `NOTICE` says where OpenTUI's source and build scripts are.
+
 ### Build an archive from a checkout
 
 To install a commit that has no release, build the archive for your machine from a clean
 checkout. The build needs the Rust toolchain pinned in `core/rust-toolchain.toml`, Go, Node.js
-with pnpm, Python 3.13, and [uv](https://docs.astral.sh/uv/):
+with pnpm, [Bun](https://bun.sh) at the version in `.bun-version`, Python 3.13, and
+[uv](https://docs.astral.sh/uv/):
 
 ```sh
 git clone https://github.com/atemaguer/supertag.git

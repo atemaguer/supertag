@@ -98,11 +98,19 @@ connection itself, and the local Gateway with `$SUPERTAG_CLI __local-gateway`. T
 in `core/crates/cli/src/tui.rs`. `python3 scripts/smoke_native_archive.py --terminal-ui PATH`
 starts a build in a pseudo-terminal and quits it, as the release smoke does.
 
-Releases don't ship the terminal UI yet. `SHIP_TUI = False` in `scripts/native_archive.py` is the
-one switch: set it to `True` to put `supertag-tui` and `licenses/opentui/` in the release archives
-and the Mac app, and to make the installer and release smoke check them. CI builds and tests the
-terminal UI either way. To try a release archive with it before then, set
-`SUPERTAG_RELEASE_TUI=1` for one `native_release.py package` run.
+Releases ship the terminal UI: `SHIP_TUI = True` in `scripts/native_archive.py` puts
+`supertag-tui` and `licenses/opentui/` (OpenTUI's licenses and `FFMPEG-SOURCE.md`) in the release
+archives and the Mac app, and makes the installer and release smoke check them. Set it to `False`,
+or `SUPERTAG_RELEASE_TUI=0` for one run, to build archives with only the CLI; CI builds and tests
+the terminal UI either way, and the script tests run in both states.
+
+OpenTUI's native library statically links FFmpeg, under the LGPL 2.1, so every release must carry
+the exact FFmpeg source. The release workflow's publish job runs `scripts/ffmpeg_source.py` on the
+three archives: it reads the source URL and SHA-256 from each archive's
+`licenses/opentui/FFMPEG-SOURCE.md`, requires them to agree, downloads the tarball, and fails the
+release unless its SHA-256 matches. The tarball is listed in `SHA256SUMS` and attached as a
+release asset. When you upgrade `@opentui/core`, update the OpenTUI version, tag, and FFmpeg
+version in `NOTICE`; `scripts/test_ffmpeg_source.py` checks the version and tag.
 
 ### Protobuf contracts
 

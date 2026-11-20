@@ -1,11 +1,12 @@
 # Verify native release platforms
 
-The native archive includes the Rust CLI, the shared execution provider, all five private Node
-helpers, and, once releases ship it, the terminal UI (`supertag-tui`, compiled by the Bun version in
-`.bun-version`). `SHIP_TUI` in `scripts/native_archive.py` is that switch, off for now: with it off,
+The native archive includes the Rust CLI, the terminal UI (`supertag-tui`, compiled by the Bun
+version in `.bun-version`) with the licenses of the native library it embeds in
+`licenses/opentui/`, the shared execution provider, and all five private Node helpers.
+`SHIP_TUI` in `scripts/native_archive.py` is the terminal UI's release switch, on: set to `False`,
 the archive, the installer checks, the smoke, and the desktop app carry no `supertag-tui` and no
 `licenses/opentui/`, and the smoke checks that plain `supertag` says the terminal UI isn't
-installed. Set `SUPERTAG_RELEASE_TUI=1` (or `0`) to override it for one local build; CI builds and
+installed. Set `SUPERTAG_RELEASE_TUI=0` (or `1`) to override it for one local build; CI builds and
 tests the terminal UI either way. These contributor commands build and execute local archives without publishing them or changing an installed command.
 Optional model credentials remain external and are not used by these checks.
 
@@ -63,7 +64,7 @@ build receipt records `cargo_cache`. The release workflow restores and saves `DI
 
 `--install-smoke` includes the extracted smoke and verifies a fresh installation and an
 idempotent reinstall through the normal managed command symlink. It tests a
-packaged `supertag message` round trip; when the terminal UI ships, its version, its embedded OpenTUI library
+packaged `supertag message` round trip; the terminal UI's version, its embedded OpenTUI library
 loading without a terminal, and, on Linux, that it needs no glibc newer than 2.17; plain
 `supertag` starting the terminal UI beside it in a pseudo-terminal, which must draw and quit on
 Ctrl-C; a synthetic OpenCode Task, the shared provider's file

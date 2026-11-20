@@ -11,6 +11,11 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- The terminal UI ships in releases: each release archive, the installer, and the macOS desktop
+  app's bundled CLI carry `supertag-tui`, and plain `supertag` in a terminal opens it. The archive's
+  `licenses/opentui/` holds the licenses of the OpenTUI library it embeds, which links FFmpeg under
+  the LGPL 2.1, and every release attaches that exact FFmpeg source, `ffmpeg-9.0.2.tar.xz`, listed
+  in its `SHA256SUMS`.
 - OpenCode and Cursor Tags keep memory. Neither harness keeps any of its own, so the Worker Host
   keeps a folder for each in Claude Code's format (`MEMORY.md` and one Markdown file per memory)
   in the same store and audiences as the others. Each turn loads the first 200 lines or 25 KB of
@@ -113,9 +118,7 @@ within the pre-1.0 compatibility policy described in
   start the terminal UI `supertag-tui` installed beside the CLI, after checking it is from the same
   release, and pass it no credential: it finds its connection itself, from the same saved Gateways
   and variables as the CLI, and the local services through `supertag __local-gateway`. The terminal
-  UI, rebuilt on OpenTUI and React and compiled with Bun to replace the removed Go one, ships in a
-  later release; until then plain `supertag` prints the help and says the terminal UI isn't
-  installed.
+  UI is rebuilt on OpenTUI and React and compiled with Bun, replacing the removed Go one.
 - `sandbox-commands: [claude-code]` on a host service (`supertag worker-host --sandbox-commands`)
   runs Claude Code's commands in Claude Code's own operating-system sandbox: they write only the
   Workspace, never its `.git` or read-only and hidden paths, cannot read hidden paths or the home's

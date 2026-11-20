@@ -31,11 +31,12 @@ MAX_BINARY_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024
 MAX_MANIFEST_BYTES = 16 * 1024
 PLATFORMS = {"linux-arm64", "linux-amd64", "darwin-arm64"}
-# The release switch for the terminal UI. While it is False, release archives, the installer
-# checks, the release smoke, and the desktop app carry only the CLI; CI still builds and tests the
-# terminal UI (`native_archive.py tui`). Set it to True to ship supertag-tui. For a local check,
-# SUPERTAG_RELEASE_TUI=1 (or 0) overrides it for every script of one run.
-SHIP_TUI = False
+# The release switch for the terminal UI. While it is True, release archives, the installer
+# checks, the release smoke, and the desktop app carry supertag-tui and licenses/opentui/, and the
+# release attaches the FFmpeg source it links (scripts/ffmpeg_source.py). Set to False, they carry
+# only the CLI; CI still builds and tests the terminal UI (`native_archive.py tui`). For a local
+# check, SUPERTAG_RELEASE_TUI=1 (or 0) overrides it for every script of one run.
+SHIP_TUI = True
 SHIP_TUI = {"1": True, "0": False}.get(os.environ.get("SUPERTAG_RELEASE_TUI", ""), SHIP_TUI)
 BINARIES = ("supertag", "supertag-tui") if SHIP_TUI else ("supertag",)
 REPO = Path(__file__).resolve().parents[1]

@@ -3,14 +3,17 @@ Copyright 2026 SuperTag contributors
 
 This product is licensed under the Apache License, Version 2.0.
 
-In a release that includes it, the terminal UI, supertag-tui, embeds OpenTUI's native library
-(libopentui, from the @opentui/core-PLATFORM 0.9.4 packages, https://github.com/anomalyco/opentui;
-MIT). That library statically links a decode-only build of FFmpeg 9.0.2 (https://ffmpeg.org),
-licensed under the GNU Lesser General Public License, version 2.1 or later, and zlib. OpenTUI's
-package also carries the licenses of the other components it names (Ghostty, Yoga, libwebp,
-lcms2, stb, wuffs, gdtoa, Zig, LLVM, and others). Those licenses, and FFMPEG-SOURCE.md, which
-names the exact FFmpeg source and its SHA-256, are in licenses/opentui/ of such a release archive.
-FFmpeg's source is available from https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz, and OpenTUI's
-source and build scripts, which rebuild and relink libopentui with a modified FFmpeg, from
-https://github.com/anomalyco/opentui. supertag-tui loads a replacement library from the file that
-OPENTUI_LIB_PATH names.
+The terminal UI, supertag-tui, embeds OpenTUI's native library (libopentui, from the
+@opentui/core-PLATFORM 0.9.4 packages, https://github.com/anomalyco/opentui at tag v0.9.4; MIT).
+That library statically links a decode-only build of FFmpeg 9.0.2 (https://ffmpeg.org), licensed
+under the GNU Lesser General Public License, version 2.1 or later, and zlib. OpenTUI's package
+also carries the licenses of the other components it names (Ghostty, Yoga, libwebp, lcms2, stb,
+wuffs, gdtoa, Zig, LLVM, and others). Those licenses, and FFMPEG-SOURCE.md, which names the exact
+FFmpeg source and its SHA-256, are in licenses/opentui/ of the release archive.
+
+The exact FFmpeg source that library was built from, ffmpeg-9.0.2.tar.xz, is attached to the same
+GitHub release as this archive (https://github.com/atemaguer/supertag/releases), and listed in
+that release's SHA256SUMS; it is also at https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz. OpenTUI's
+source at tag v0.9.4 holds the build configuration, packages/native/scripts/build-ffmpeg.ts, and
+the build scripts that rebuild and relink libopentui with a modified FFmpeg. supertag-tui loads a
+replacement library from the file that OPENTUI_LIB_PATH names.

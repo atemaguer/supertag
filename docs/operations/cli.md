@@ -236,9 +236,8 @@ conversations a window of their own.
 ### Open the terminal UI
 
 `supertag tui`, and plain `supertag` in a terminal, open `supertag-tui`, a full-screen terminal
-UI for your conversations with Tags, when it is installed beside `supertag`. Releases don't
-include it yet, so plain `supertag` prints the help, ending with a line that says the terminal UI
-isn't installed; it ships in a later release.
+UI for your conversations with Tags. The release archive and the installer put it beside
+`supertag`, and the desktop app's bundled CLI carries it too.
 
 ```sh
 supertag
