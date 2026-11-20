@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { Tag } from "@supertag/client/model";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -76,4 +77,11 @@ it("offers New Tag in the sidebar only to a connection that may create Tags", ()
     /aria-label="New Tag" aria-description="Only an operator can create Tags." aria-disabled="true"/,
   );
   expect(render({})).not.toContain("New Tag");
+});
+
+it("keeps the side pane under the top strip out of the window's drag region", () => {
+  // A drag region takes clicks whatever is drawn above it, so without this the Task activity
+  // and Tag details close buttons, under the top strip, move the window instead.
+  const css = readFileSync(new URL("../style.css", import.meta.url), "utf8");
+  expect(css).toMatch(/\.activity-frame \{\n\s+-webkit-app-region: no-drag;/);
 });

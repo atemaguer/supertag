@@ -1293,7 +1293,12 @@ button:disabled {
   font-size: 20px;
   line-height: 1;
 }
+/*
+ * The pane sits under the top strip's drag region, and a drag region takes clicks whatever is
+ * drawn above it, so the pane opts out: its close button and resize handle stay clickable.
+ */
 .activity-frame {
+  -webkit-app-region: no-drag;
   position: relative;
   z-index: 3;
   display: flex;
