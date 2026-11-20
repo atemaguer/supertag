@@ -184,6 +184,7 @@ async fn contract(url: &str) {
     typed_and_debounced(&fixture).await;
     mutual_limit(&fixture).await;
     hourly_limit_and_held_notes(&fixture).await;
+    every_type_wakes(&fixture).await;
     team_overrides(&fixture).await;
     objective_limit(&fixture).await;
     fixture.store.close().await;
@@ -415,6 +416,43 @@ async fn hourly_limit_and_held_notes(f: &Fixture) {
             .iter()
             .all(|m| m.state() == TagMessageState::Handled)
     );
+}
+
+/// A direct message always wakes its recipient, within the limits, whatever its type: each type
+/// writes a wake and starts an inbox turn that shows the type.
+async fn every_type_wakes(f: &Fixture) {
+    f.set_limits("every-type", TeamWakeLimits::default()).await;
+    f.settle(HOUR_MS).await;
+    let sent: [(&str, MessageKind, &str); 3] = [
+        ("b", MessageKind::Evidence, "The parser tests pass"),
+        ("c", MessageKind::Decision, "We ship on Friday"),
+        ("d", MessageKind::Note, "The changelog is updated"),
+    ];
+    let a = f.ordinary("a").await;
+    for (to, kind, text) in sent {
+        let response = f.send(&a, to, text, kind).await.unwrap();
+        assert_eq!(response.wake_deferred, "", "{to}");
+        assert_eq!(response.message.unwrap().kind(), kind);
+    }
+    f.finish(&a).await;
+    let pending = f.store.metrics().await.unwrap().mailbox.unwrap().pending;
+    assert_eq!(pending, 3, "one wake per recipient");
+    f.settle(DEBOUNCE_MS).await;
+    for (to, kind, text) in sent {
+        let turn = f.claim(to).await;
+        let prompt = f.prompt(&turn).await;
+        let name = match kind {
+            MessageKind::Evidence => "evidence",
+            MessageKind::Decision => "decision",
+            _ => "note",
+        };
+        assert!(
+            prompt.contains(&format!("type=\"{name}\" via=\"direct message\"")),
+            "{prompt}"
+        );
+        assert!(prompt.contains(text), "{prompt}");
+        f.finish(&turn).await;
+    }
 }
 
 /// The Objective limit counts every Tag the Objective's Tags wake.
