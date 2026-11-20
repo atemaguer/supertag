@@ -181,7 +181,8 @@ describe.skipIf(CLI === undefined)(
         const page = await client.messages(id, { tagId: "engineer" });
         expect(page.messages).toHaveLength(1);
         expect(page.nextCursor).toBe("");
-        expect(page.conversationId).toBe(sent.task.sessionId);
+        // The conversation's own ID, which the app sends back to read only what changed.
+        expect(page.conversationId).toMatch(/^direct\//u);
         // The copy the app keeps is current: nothing changed after its latest message.
         const changes = await client.messages(id, {
           tagId: "engineer",

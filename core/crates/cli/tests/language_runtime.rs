@@ -2990,6 +2990,9 @@ async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn(
     let approval = services.operator(&["get", "approval", approval_id]).await?;
     assert!(approval["consumed_at_ms"].is_i64());
 
+    // The addressed post wakes its recipient once its 3 s debounce passes and the Control Plane's
+    // next sweep, at most a second later, queues the inbox turn.
+    tokio::time::sleep(Duration::from_millis(4_500)).await;
     success(worker("recipient-host")).await?;
     let mailbox = services
         .operator(&["get", "messages", "--mailbox", "recipient"])
