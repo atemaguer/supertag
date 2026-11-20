@@ -9,6 +9,8 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-11-20
+
 ### Added
 
 - The terminal UI ships in releases: each release archive, the installer, and the macOS desktop
@@ -1546,7 +1548,8 @@ within the pre-1.0 compatibility policy described in
 - Gateway control-plane support and Slack, GitHub, Linear, Microsoft Teams,
   and Lark Surfaces.
 
-[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/atemaguer/supertag/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/atemaguer/supertag/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/atemaguer/supertag/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/atemaguer/supertag/compare/v0.3.0...v0.3.1

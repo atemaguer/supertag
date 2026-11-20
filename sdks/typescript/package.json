@@ -1,6 +1,6 @@
 {
   "name": "supertag-ai",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "TypeScript SDK for SuperTag: a Gateway client and the harness adapter client for Worker Hosts.",
   "type": "module",
   "license": "Apache-2.0",
