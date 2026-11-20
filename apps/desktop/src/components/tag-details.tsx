@@ -12,8 +12,10 @@ import { describe } from "@supertag/client/model";
 import { useWatchRefresh, type WatchFeed } from "@supertag/client/react";
 import { Lock, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { type AvatarEditing, AvatarEditorDialog } from "./avatar-editor";
 import { ScheduleList } from "./schedules";
 import { relativeTime } from "./sidebar";
+import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
 
 /**
@@ -25,11 +27,14 @@ export function TagDetails({
   gateway,
   watch,
   tag,
+  avatar,
   onClose,
 }: {
   gateway: Gateway;
   watch?: WatchFeed;
   tag: Tag;
+  /** Changes the Tag's portrait, when this connection may manage Tags. */
+  avatar?: AvatarEditing;
   onClose(): void;
 }) {
   const close = useRef<HTMLButtonElement>(null);
@@ -75,11 +80,48 @@ export function TagDetails({
           <X size={16} aria-hidden />
         </Button>
       </div>
+      <AvatarSection tag={tag} editing={avatar} />
       <ActivitySection gateway={gateway} watch={watch} tag={tag} />
       <MemorySection gateway={gateway} watch={watch} tag={tag} />
       <ScheduleList gateway={gateway} watch={watch} tagId={tag.tagId} />
       <NetworkSection gateway={gateway} watch={watch} tag={tag} />
     </aside>
+  );
+}
+
+/**
+ * The Tag's portrait, which everyone who can see the Tag sees, and the way into its editor for a
+ * principal that may manage Tags. The name in the panel's heading names it.
+ */
+function AvatarSection({ tag, editing }: { tag: Tag; editing?: AvatarEditing }) {
+  const [open, setOpen] = useState(false);
+  const opener = useRef<HTMLButtonElement>(null);
+  const name = tag.name ?? tag.tagId;
+  return (
+    <section className="details-section details-avatar" aria-label="Avatar">
+      <TagAvatar tag={tag} large />
+      {editing ? (
+        <>
+          <Button
+            ref={opener}
+            variant="outline"
+            className="secondary"
+            onClick={() => setOpen(true)}
+          >
+            Edit avatar
+          </Button>
+          <AvatarEditorDialog
+            tag={tag}
+            editing={editing}
+            open={open}
+            onOpenChange={setOpen}
+            opener={opener}
+          />
+        </>
+      ) : (
+        <p className="tag-details-intro">Only an operator can change {name}'s avatar.</p>
+      )}
+    </section>
   );
 }
 

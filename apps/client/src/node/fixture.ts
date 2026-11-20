@@ -94,6 +94,8 @@ export interface StackOptions {
   readonly token: string;
   /** TLS for the Gateway's own listeners, natively and inside its tunnel. */
   readonly tls?: { cert: string; key: string };
+  /** The Control Plane's database; a SQLite file under `root` by default. */
+  readonly databaseUrl?: string;
 }
 
 /** One disposable deployment: a Control Plane on its own database, and its Gateway. */
@@ -136,7 +138,7 @@ export class Stack {
       ["control-plane"],
       {
         ...this.env(),
-        SUPERTAG_DATABASE_URL: `sqlite://${database}?mode=rwc`,
+        SUPERTAG_DATABASE_URL: this.options.databaseUrl ?? `sqlite://${database}?mode=rwc`,
         SUPERTAG_OPERATOR_TOKEN: this.options.token,
         SUPERTAG_BOOTSTRAP_HOST_TOKEN: this.hostToken,
         SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL: this.gatewayCredential,

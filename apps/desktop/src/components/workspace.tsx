@@ -32,6 +32,7 @@ import {
 import mascot from "../../../../assets/images/supertag-mascot-round.png";
 import { nativeGateway } from "../gateway";
 import { nativeNotifier, silentNotifier, useDesktopNotifications } from "../lib/notifications";
+import type { AvatarEditing } from "./avatar-editor";
 import {
   CommandPalette,
   commandKeyLabel,
@@ -177,12 +178,12 @@ export function WorkspaceShell({
                 title={detailsOpen ? "Hide Tag details" : "Show Tag details and memory"}
                 onClick={() => onTagDetails()}
               >
-                <TagAvatar tagId={tag.tagId} />
+                <TagAvatar tag={tag} />
                 <span className="tag-name">{tag.name ?? tag.tagId}</span>
               </button>
             ) : (
               <div className="identity-pill">
-                <TagAvatar tagId={tag.tagId} />
+                <TagAvatar tag={tag} />
                 <span className="tag-name">{tag.name ?? tag.tagId}</span>
               </div>
             ))}
@@ -386,6 +387,25 @@ export function Workspace({
     [gateway],
   );
   useWatchRefresh(refreshTags, rosterInterval, watch, rosterChanged);
+  // A portrait saved here shows at once in every view of this connection; the watch tells the
+  // others. A reply that arrives after the window left this connection reaches nothing, as this
+  // workspace is gone, and one older than what the list holds changes nothing.
+  const avatar = useMemo<AvatarEditing | undefined>(
+    () =>
+      tagAdmin && {
+        admin: tagAdmin,
+        onTagChanged: (changed) =>
+          setTags((prior) =>
+            prior.map((entry) =>
+              entry.tagId === changed.tagId &&
+              (changed.appearanceRevision ?? 0) >= (entry.appearanceRevision ?? 0)
+                ? changed
+                : entry,
+            ),
+          ),
+      },
+    [tagAdmin],
+  );
   // Search reads the conversations the app keeps cached, without asking the Gateway.
   const messageTexts = useCallback(
     (tagId: string) => cachedMessageTexts(gateway, tagId),
@@ -426,6 +446,7 @@ export function Workspace({
       updateDraft={(update) => updateDraft(tag.tagId, update)}
       onSummary={reportSummary}
       onWriteChange={onWriteChange}
+      avatar={avatar}
     />
   ) : (
     <WorkspaceShell {...shell}>
@@ -504,6 +525,7 @@ function TagWorkspace({
   updateDraft,
   onSummary,
   onWriteChange,
+  avatar,
 }: {
   gateway: Gateway;
   watch?: WatchFeed;
@@ -513,6 +535,7 @@ function TagWorkspace({
   updateDraft(update: (draft: Draft) => Draft): void;
   onSummary(tagId: string, summary: TagSummary): void;
   onWriteChange(delta: 1 | -1): void;
+  avatar?: AvatarEditing;
 }) {
   const tagId = tag.tagId;
   const [details, setDetails] = useState(false);
@@ -530,6 +553,7 @@ function TagWorkspace({
         onWriteChange={onWriteChange}
         details={details}
         onCloseDetails={() => setDetails(false)}
+        avatar={avatar}
       />
     </WorkspaceShell>
   );

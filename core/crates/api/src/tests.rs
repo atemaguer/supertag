@@ -243,6 +243,10 @@ async fn the_authorization_layer_admits_each_role_only_where_the_table_allows() 
         ("Operator", "PutTag", CLIENT, false),
         ("Operator", "PutTag", HOST, false),
         ("Operator", "PutTag", GATEWAY, false),
+        // A Tag's portrait is written with the authority that writes the Tag.
+        ("Operator", "SetTagAppearance", TOKEN, true),
+        ("Operator", "SetTagAppearance", CLIENT, false),
+        ("Operator", "GetTag", CLIENT, true),
         (
             "OperatorAccess",
             "CreateOperatorToken",

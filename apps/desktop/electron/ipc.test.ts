@@ -98,7 +98,7 @@ it("registers exactly the table's channels", () => {
       .sort(),
   );
   // 40 app commands, and the shell's notification, badge and link channels.
-  expect(registered).toHaveLength(43);
+  expect(registered).toHaveLength(45);
 });
 
 function shell() {

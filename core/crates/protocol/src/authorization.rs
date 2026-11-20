@@ -298,6 +298,7 @@ mod tests {
         assert_eq!(roles("OperatorAccess/CreateOperatorToken"), ["admin"]);
         assert_eq!(roles("OperatorAccess/ListAuditEntries"), ["operator"]);
         assert_eq!(roles("Operator/PutTag"), ["operator"]);
+        assert_eq!(roles("Operator/SetTagAppearance"), ["operator"]);
         assert_eq!(roles("Operator/SubmitTask"), ["operator"]);
         assert_eq!(roles("Operator/ListHosts"), ["operator"]);
         assert_eq!(roles("Operator/GetTag"), ["operator", "client"]);

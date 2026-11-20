@@ -171,7 +171,7 @@ export function CommandPalette({
                   className="palette-row"
                   onSelect={() => openTag(tag.tagId)}
                 >
-                  <TagAvatar tagId={tag.tagId} />
+                  <TagAvatar tag={tag} />
                   <span className="palette-text">
                     <span className="palette-label">{name}</span>
                     {caption && <span className="palette-caption">{caption}</span>}

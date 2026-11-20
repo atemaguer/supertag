@@ -11,6 +11,13 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- Tag avatars: every Tag wears a felt mascot portrait in the desktop app, in place of the colored
+  mark, the same in the sidebar, the rail, the ⌘K search, the conversation, and its details. An
+  operator chooses one with **Edit avatar** in the Tag details: presets, Shape, Color,
+  Expression, Accessories, and Randomize. It is saved on the Control Plane, so every teammate sees
+  it; a Tag without one wears a default derived from its ID. `Tag` gains `appearance` and
+  `appearance_revision`, and `Operator.SetTagAppearance` saves one at an expected revision.
+
 - Left and Right move between the terminal UI's Tag list and the conversation: → in the list
   moves to the composer (or the Objective, inbox item, or Team in front), and ← moves back when
   the field is empty or its cursor is at the start, otherwise it moves the cursor. ← also closes

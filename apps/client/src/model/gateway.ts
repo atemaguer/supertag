@@ -26,6 +26,28 @@ export interface Tag {
   /** How many Work Sessions the Tag may have open at once, and has open. */
   maxWorkSessions?: number;
   openWorkSessions?: number;
+  /** Its saved portrait; absent until someone gives it one, when apps draw a default. */
+  appearance?: TagAppearance;
+  /** How many times its portrait was saved: 0 before the first save. A save names it. */
+  appearanceRevision?: number;
+}
+
+/**
+ * A Tag's portrait as a recipe: one component of each kind from an art catalog the apps bundle.
+ * The Control Plane checks the IDs and keeps the recipe; each app draws it from its own assets.
+ */
+export interface TagAppearance {
+  /** The recipe's schema version: 1. */
+  version: number;
+  /** The art catalog the IDs come from, such as `felt-v1`. */
+  catalog: string;
+  head: string;
+  color: string;
+  expression: string;
+  /** Each accessory, or `null` for none. */
+  hat: string | null;
+  glasses: string | null;
+  headphones: string | null;
 }
 
 export interface Task {

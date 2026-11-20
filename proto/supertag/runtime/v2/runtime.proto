@@ -29,6 +29,10 @@ service Operator {
   rpc ResolveAttempt(ResolveAttemptRequest) returns (AttemptResolution);
   rpc GetTag(GetTagRequest) returns (Tag);
   rpc RetireTag(RetireTagRequest) returns (RetireTagResponse);
+  // Saves a Tag's portrait and nothing else: its instructions, execution settings, revision and
+  // accepted work stay as they were. Whoever may write the Tag with PutTag may. A different
+  // `expected_revision` than the stored one is refused with ALREADY_EXISTS.
+  rpc SetTagAppearance(SetTagAppearanceRequest) returns (Tag);
   rpc GetReplyDelivery(GetReplyDeliveryRequest) returns (ReplyDelivery);
   rpc ListReplyDeliveries(ListReplyDeliveriesRequest) returns (ListReplyDeliveriesResponse);
   rpc ResolveReply(ResolveReplyRequest) returns (ReplyDelivery);
@@ -1860,6 +1864,39 @@ message Tag {
   repeated NativeMemoryStore native_memory = 7200;
   // Its working Objectives that sit idle, which the caller may see; read with GetTag.
   repeated IdleObjective idle_objectives = 7300;
+  // The Tag's saved portrait. Absent for a Tag nobody gave one: clients draw a default they
+  // derive from the Tag ID.
+  TagAppearance appearance = 7400;
+  // How many times its portrait was saved; 0 before the first save. Separate from `revision`,
+  // which appearance writes leave alone.
+  uint64 appearance_revision = 7401;
+}
+
+// A Tag's portrait as a recipe: one component of each kind from an art catalog the clients
+// bundle and draw. The Control Plane stores and checks the IDs; it never stores images.
+message TagAppearance {
+  // The recipe's schema version: 1.
+  uint32 version = 1;
+  // The art catalog the IDs come from, such as `felt-v1`.
+  string catalog = 2;
+  // The head shape, such as `pear` or `bean`.
+  string head = 3;
+  // The felt color, such as `moss`.
+  string color = 4;
+  // The face, such as `cheerful`.
+  string expression = 5;
+  // Each accessory, or empty for none.
+  string hat = 6;
+  string glasses = 7;
+  string headphones = 8;
+}
+
+message SetTagAppearanceRequest {
+  string tag_id = 1;
+  // The portrait to save; absent returns the Tag to its default portrait.
+  TagAppearance appearance = 2;
+  // The `appearance_revision` the caller read: 0 for a Tag never given a portrait.
+  uint64 expected_revision = 3;
 }
 
 // A working Objective whose owner's last turn left nothing running and asked nothing.

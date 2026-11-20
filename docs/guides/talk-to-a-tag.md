@@ -107,6 +107,25 @@ not read. Choose **All messages**, **Questions only**, or **Off** under **Notifi
 Gateway menu; the choice is kept on this device. Your own messages, the Tag's activity, and
 checks that stayed quiet never notify.
 
+## Give a Tag a face
+
+Each Tag wears a felt mascot portrait in the desktop app: in the sidebar, the collapsed rail, the
+lead Tag's place, the ⌘K search, the pill above the conversation, and its details. Until someone
+chooses one, a Tag wears a default the app derives from its permanent ID, so it looks the same
+every day.
+
+To choose one, select the Tag's name above the conversation to open its details, then choose
+**Edit avatar**. Start from a preset, or change one feature at a time under **Shape**, **Color**,
+**Expression**, and **Accessories**. A hat, glasses, and headphones each have a **None** choice.
+The beanie and the headphones both sit on the crown, so the editor offers to swap one for the
+other. **Randomize** tries a new look. The previews show the portrait at conversation and sidebar
+sizes. Nothing is saved until you choose **Save avatar**; **Cancel** or Esc drops the draft.
+
+The portrait is saved on the Control Plane, so everyone who can see the Tag sees the same face,
+on every machine. Renaming the Tag keeps it. Only an operator can change it; a client device
+shows it read-only. When someone else saved a portrait while you were editing, the editor asks
+you to load theirs before saving again. See [Tag portraits](../reference/control-plane-api.md#tag-portraits).
+
 ## See what a Tag remembers
 
 A Tag keeps a memory between turns, such as your preferences and decisions: what its harness,
@@ -122,7 +141,7 @@ whose Worker Host keeps it. From a terminal, `supertag get memories --tag TAG` l
 
 ## See how a Tag's messages land
 
-A Tag's details in the desktop app open with **Activity**: over the last 30 days, how many of the
+A Tag's details in the desktop app show its portrait, then **Activity**: over the last 30 days, how many of the
 messages it sent without being asked (Schedule wake-ups and Objective notices) were posted, read,
 and answered, and how many checks stayed quiet, and its start rate, if it has one. See
 [Quiet results](../reference/coordination.md#quiet-results).

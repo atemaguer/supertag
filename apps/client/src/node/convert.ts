@@ -12,6 +12,7 @@ import {
   type LiveInput,
   LiveInputState,
   type Tag,
+  type TagAppearance,
   type Task,
   type TaskEvent,
   TaskEventKind,
@@ -24,6 +25,7 @@ import type {
   TaskEvent as WindowEvent,
   Message as WindowMessage,
   Tag as WindowTag,
+  TagAppearance as WindowTagAppearance,
   Task as WindowTask,
 } from "../model/gateway";
 
@@ -63,6 +65,22 @@ export function tag(value: Tag): WindowTag {
     lead: value.lead,
     maxWorkSessions: value.maxWorkSessions,
     openWorkSessions: value.openWorkSessions,
+    ...(value.appearance && { appearance: appearance(value.appearance) }),
+    appearanceRevision: num(value.appearanceRevision),
+  };
+}
+
+export function appearance(value: TagAppearance): WindowTagAppearance {
+  const accessory = (id: string) => (id === "" ? null : id);
+  return {
+    version: value.version,
+    catalog: value.catalog,
+    head: value.head,
+    color: value.color,
+    expression: value.expression,
+    hat: accessory(value.hat),
+    glasses: accessory(value.glasses),
+    headphones: accessory(value.headphones),
   };
 }
 

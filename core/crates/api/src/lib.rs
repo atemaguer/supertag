@@ -701,6 +701,16 @@ impl Operator for Api {
         .await
     }
 
+    async fn set_tag_appearance(
+        &self,
+        request: Request<SetTagAppearanceRequest>,
+    ) -> Result<Response<Tag>, Status> {
+        self.forward(request, |channel, request| async {
+            operator_client(channel).set_tag_appearance(request).await
+        })
+        .await
+    }
+
     async fn retire_tag(
         &self,
         request: Request<RetireTagRequest>,

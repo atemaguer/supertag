@@ -52,6 +52,7 @@ mod start_rates;
 mod store;
 mod surface_objectives;
 mod surface_policy;
+mod tag_appearance;
 mod tag_sessions;
 mod tags;
 mod task_artifact_inputs;
@@ -438,6 +439,17 @@ impl operator_server::Operator for ControlPlane {
         tag.native_memory = self.store.native_memory_stores(&principal, &tag_id).await?;
         tag.idle_objectives = self.store.idle_objectives(&principal, &tag_id).await?;
         Ok(Response::new(tag))
+    }
+
+    async fn set_tag_appearance(
+        &self,
+        request: Request<SetTagAppearanceRequest>,
+    ) -> Result<Response<Tag>, Status> {
+        // The authority that writes a Tag with PutTag; a client may only read its portrait.
+        self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store.set_tag_appearance(request.into_inner()).await?,
+        ))
     }
 
     async fn retire_tag(

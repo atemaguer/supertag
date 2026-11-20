@@ -1,4 +1,4 @@
 # The SuperTag wire protocol version and a digest of proto/ (comments and layout aside).
 # core/crates/protocol/tests/protocol_lock.rs fails when they drift. See AGENTS.md, "Changing proto/".
 protocol 7
-sha256 2b74ac71f490cf34853dc3b36db7083895a948c8f956e10784ce6dd766312c21
+sha256 d41d1ad0970ae3f226cdbe23c300271580d5241f8e737b59fe8096d885c39bf9
