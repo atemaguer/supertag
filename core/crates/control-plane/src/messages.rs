@@ -3,8 +3,9 @@
 //! A conversation is a direct conversation between two members, a Team's channel, or a thread
 //! under a message. Each conversation numbers its own messages (`seq`) inside the inserting
 //! transaction, so writers to different conversations never wait on a shared counter. Member rows
-//! hold permission to read and the read and delivery positions; wake rows ([`wakes`]) record which
-//! Tag must take a turn for which messages.
+//! hold permission to read and the read and delivery positions; a Tag's undelivered direct
+//! messages wait in its inbox Session's input queue ([`wakes`]), which records which Tag must take
+//! a turn for which messages.
 //!
 //! "Mailbox" and "Workstream" stay the names users and Tags see: a direct conversation between
 //! Tags is the Mailbox, and a Team's channel is its Workstream. "direct" and "channel" are storage

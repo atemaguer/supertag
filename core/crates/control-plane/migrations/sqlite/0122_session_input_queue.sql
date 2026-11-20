@@ -198,9 +198,9 @@ SELECT t.task_id, t.tag_id, t.session_id, t.accepted_order,
        (SELECT d.principal FROM supertag_v2_admissions d WHERE d.task_id = t.task_id)
            AS request_requester,
        (SELECT 'objective-home' || char(10) || o.objective_id FROM supertag_v2_objectives o
-        WHERE o.home_task_id = t.task_id) AS home_key,
+        WHERE o.starting_task_id = t.task_id) AS home_key,
        (SELECT COALESCE(NULLIF(o.created_by, ''), 'objective:' || o.objective_id)
-        FROM supertag_v2_objectives o WHERE o.home_task_id = t.task_id) AS home_requester
+        FROM supertag_v2_objectives o WHERE o.starting_task_id = t.task_id) AS home_requester
 FROM supertag_v2_tasks t
 LEFT JOIN supertag_v2_task_audience a ON a.task_id = t.task_id
 WHERE t.state IN (1, 2, 6, 7) AND t.session_id NOT LIKE 'inbox:%'

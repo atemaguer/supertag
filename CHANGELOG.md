@@ -28,7 +28,6 @@ within the pre-1.0 compatibility policy described in
   same turn as other Tags' messages. A later message in its conversation that wakes the Tag brings
   it along. Held messages count toward neither the backlog of 64 nor the wake limits. An inbox
   turn run again after a lost Worker shows the same messages and takes in nothing new.
-
 - A Tag's memory is its harness's own memory. The daily memory review now keeps that memory
   current: it corrects it against the Tag's Sessions, merges duplicates, dates time-relative
   facts, drops what the repository already records, and merges or drops Work Session proposals,

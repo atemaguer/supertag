@@ -119,7 +119,7 @@ async fn seed_prior_version(url: &str) {
          INSERT INTO supertag_v2_objectives (objective_id,owner_tag_id,session_id,outcome,ongoing,status,revision,limit_state,created_at_ms,updated_at_ms)
          VALUES ('o1','alpha','objective/o1','Ship',0,1,1,'{}',1,1),
                 ('o2','alpha','objective/o2','Ship more',0,1,1,'{}',1,1);
-         UPDATE supertag_v2_objectives SET created_by='client:bob',home_task_id='q-home' WHERE objective_id='o2';
+         UPDATE supertag_v2_objectives SET created_by='client:bob',starting_task_id='q-home' WHERE objective_id='o2';
          INSERT INTO supertag_v2_objective_tasks (task_id,objective_id,kind)
          VALUES ('q-notice','o1','notice'),('q-review','o1','work');
          INSERT INTO supertag_v2_objective_notices (objective_id,notice_key,task_id)

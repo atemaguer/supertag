@@ -450,7 +450,9 @@ the uncertain Task still never runs again on its own (see
 [Uncertain Task Attempts](../reference/scheduling-and-recovery.md#uncertain-task-attempts)). The durable delivery
 record retains the exact target Task Attempt. If that Task Attempt later withdraws the input as
 unread before SuperTag queues a recovery notice, the message returns to the Session's next turn
-automatically. Do not resend it while that execution is active.
+automatically. Do not resend it while that execution is active. When SuperTag runs the Task
+again after a lost Worker, the new Task Attempt answers the message instead, and no one needs to
+decide (see [Redelivery](../reference/scheduling-and-recovery.md#redelivery)).
 
 If the target Task Attempt ends without resolving delivery, SuperTag sends a recovery notice.
 This includes deliveries left waiting for acknowledgement when the Control Plane crashes.

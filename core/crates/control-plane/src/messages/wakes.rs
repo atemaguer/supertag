@@ -1,4 +1,4 @@
-//! Wake rows: which Tag must take an inbox turn for which messages. A wake is a Tag message input
+//! Wakes: which Tag must take an inbox turn for which messages. A wake is a Tag message input
 //! of the Tag's inbox Session (`crate::session_inputs`, kind 4), and the input queue is the only
 //! record of a Tag message its recipient has not been given. A pending row (no Task yet) is
 //! coalesced per Tag and conversation, so a burst of messages makes one turn; the inbox Task that

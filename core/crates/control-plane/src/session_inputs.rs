@@ -27,7 +27,7 @@ use crate::{StoreError, store::Result};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(i64)]
 pub(crate) enum InputKind {
-    /// A SubmitTask request, or an Objective's home Task.
+    /// A SubmitTask request, or an Objective's starting Task.
     Request = 1,
     /// A person's message: in a conversation, in a chat thread, or as live input.
     Person = 2,
@@ -131,8 +131,6 @@ pub(crate) async fn admit_in(
 
 /// [`admit_in`] for a Task settled at admission, such as a `/goal` command the Control Plane
 /// answers itself: the input is bound to it at once.
-// The sources that admit person messages and settled answers call it (stage 2 slices b-d).
-#[allow(dead_code)]
 pub(crate) async fn admit_bound_in(
     tx: &mut Transaction<'_, Any>,
     task: &Task,
@@ -277,8 +275,6 @@ pub(crate) async fn requester_of_in(
 
 /// Whether a run headed by `head` may bind `input`: both act for the same requester and reply to
 /// the same audience. The inbox exception does not use this rule.
-// The sources that admit person messages and settled answers call it (stage 2 slices b-d).
-#[allow(dead_code)]
 pub(crate) fn shares_with(head: &InputRow, input: &InputRow) -> bool {
     head.requester == input.requester && head.audience == input.audience
 }
@@ -335,8 +331,7 @@ pub(crate) async fn unbind_in(tx: &mut Transaction<'_, Any>, input_id: &str) -> 
 }
 
 /// Everything `task_id` bound, in Session order.
-// The sources that admit person messages and settled answers call it (stage 2 slices b-d).
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) async fn bound_in(
     tx: &mut Transaction<'_, Any>,
     task_id: &str,
