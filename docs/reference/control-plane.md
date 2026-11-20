@@ -103,8 +103,8 @@ the WebSocket tunnel behind platforms that forward only HTTP, or `http://` on lo
 reach it through a Gateway, which takes the same kinds of URL. Every
 connection first negotiates a protocol version. See [Control Plane API](control-plane-api.md).
 
-`supertag connect URL --name NAME` saves a Gateway, and `--gateway NAME` uses it or one the
-desktop app saved. `--state-directory` reaches the local
+`supertag connect URL --name NAME` saves a Gateway, `--gateway NAME` uses it or one the
+desktop app saved, and `supertag disconnect NAME` forgets it. `--state-directory` reaches the local
 services that `supertag up` runs.
 
 Every client finds the local Gateway the same way. The state directory

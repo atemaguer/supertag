@@ -9,6 +9,7 @@
 import { execFile } from "node:child_process";
 import { constants, promises as fs } from "node:fs";
 import path from "node:path";
+import type { AddedWorkspace } from "../model/tag-admin";
 import type { Tls } from "./session";
 
 const MAX_STORE_BYTES = 16 * 1024 * 1024;
@@ -214,4 +215,76 @@ export function saveWithCli(
     );
     child.stdin?.end();
   });
+}
+
+/** Runs the CLI and settles with its stdout, or rejects with its error line (never a credential). */
+function runCli(
+  cli: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number,
+  failed: string,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      cli,
+      args,
+      { env, timeout: timeoutMs, encoding: "utf8" },
+      (error, stdout, stderr) => {
+        if (!error) {
+          resolve(stdout);
+          return;
+        }
+        const reason = stderr
+          .replace(/^Error:\s*/u, "")
+          .replace(/\p{Cc}+/gu, " ")
+          .trim()
+          .slice(0, 400);
+        reject(reason === "" ? failed : reason);
+      },
+    );
+    child.stdin?.end();
+  });
+}
+
+/** Forgets the Gateway saved under `name` with `supertag disconnect`, the CLI's own store. */
+export async function forgetWithCli(
+  cli: string,
+  name: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  await runCli(cli, ["disconnect", name], env, SAVE_TIMEOUT_MS, "supertag disconnect failed.");
+}
+
+/** How long `supertag workspace add` may take: it restarts the changed services, as `up` does. */
+const ADD_WORKSPACE_TIMEOUT_MS = 180_000;
+
+/** Adds the repository at `folder` as a Workspace of the local services in `state`. */
+export async function addWorkspaceWithCli(
+  cli: string,
+  state: string,
+  folder: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AddedWorkspace> {
+  const out = await runCli(
+    cli,
+    ["workspace", "add", "--json", "--state-directory", state, folder],
+    env,
+    ADD_WORKSPACE_TIMEOUT_MS,
+    "supertag workspace add failed.",
+  );
+  let value: Record<string, unknown> | undefined;
+  try {
+    value = JSON.parse(out.trim().split("\n").at(-1) ?? "") as Record<string, unknown>;
+  } catch {
+    value = undefined;
+  }
+  const workspace = value?.["workspace"];
+  if (typeof workspace !== "string") {
+    throw "This version of the supertag CLI can't add a folder here. Update it, then try again.";
+  }
+  const added: AddedWorkspace = { workspace };
+  if (typeof value?.["ref"] === "string") added.workspaceRef = value["ref"];
+  if (typeof value?.["baseCommit"] === "string") added.workspaceCommit = value["baseCommit"];
+  return added;
 }

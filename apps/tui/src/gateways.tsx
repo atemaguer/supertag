@@ -1,7 +1,8 @@
 /**
  * The Gateway chooser (Ctrl-P): Local, as `supertag up` runs it (its token is read at every
  * connect and never saved), and the Gateways saved with `supertag connect` or in the desktop
- * app. Enter switches, which ends every call and stream of the current one; `a` adds one. Adding
+ * app. Enter switches, which ends every call and stream of the current one; `a` adds one; `d`
+ * forgets a saved one (`supertag disconnect`, or the desktop app's store) and its cache. Adding
  * takes a name, the URL, an Operator Token or a client Auth Key (which enrolls this device), and
  * optional TLS files, and saves with `supertag connect`, the CLI's own store.
  */
@@ -27,17 +28,37 @@ export function Gateways({
   width,
   onOpen,
   onClose,
+  onForgot,
 }: {
   connections: Connections;
   current: string | undefined;
   width: number;
   onOpen(entry: GatewayEntry): void;
   onClose(): void;
+  /** A saved Gateway was forgotten: the current one, if it was. */
+  onForgot?(entry: GatewayEntry): void;
 }) {
   const [entries, setEntries] = useState<GatewayEntry[] | undefined>();
   const [index, setIndex] = useState(0);
   const [adding, setAdding] = useState(false);
   const [problem, setProblem] = useState("");
+  const [forgetting, setForgetting] = useState<GatewayEntry | undefined>();
+  const [busy, setBusy] = useState(false);
+  async function forget(entry: GatewayEntry) {
+    setBusy(true);
+    setProblem("");
+    try {
+      await connections.forget(entry);
+      setEntries(await connections.entries());
+      setIndex(0);
+      onForgot?.(entry);
+    } catch (error) {
+      setProblem(describe(error));
+    } finally {
+      setBusy(false);
+      setForgetting(undefined);
+    }
+  }
   useEffect(() => {
     let stopped = false;
     void connections.entries().then((listed) => {
@@ -52,13 +73,22 @@ export function Gateways({
   }, [connections, current]);
   const list = entries ?? [];
   useKeyboard((key: KeyEvent) => {
-    if (adding) return;
+    if (adding || busy) return;
+    if (forgetting) {
+      if (key.name === "return" || key.name === "enter") void forget(forgetting);
+      else if (key.name === "escape") setForgetting(undefined);
+      return;
+    }
     if (key.name === "escape") onClose();
     else if (key.name === "down" || key.name === "j")
       setIndex((i) => Math.min(i + 1, list.length - 1));
     else if (key.name === "up" || key.name === "k") setIndex((i) => Math.max(i - 1, 0));
     else if (key.name === "a" && !key.ctrl) setAdding(true);
-    else if (key.name === "return" || key.name === "enter") {
+    else if (key.name === "d" && !key.ctrl) {
+      const entry = list[index];
+      if (entry?.kind === "saved") setForgetting(entry);
+      else if (entry) setProblem(`${entry.name} is not saved, so there is nothing to forget.`);
+    } else if (key.name === "return" || key.name === "enter") {
       const entry = list[index];
       if (!entry) return;
       if (!entry.available) {
@@ -113,7 +143,16 @@ export function Gateways({
             </text>
           ))}
           {problem ? <text fg={color.warning}>{safe(problem)}</text> : null}
-          <text fg={color.faint}>Enter connect · a add a Gateway · Esc close</text>
+          {forgetting ? (
+            <text fg={color.warning}>
+              Forget {safe(forgetting.name)} and its cache on this device? Enter forgets · Esc keeps
+              it
+            </text>
+          ) : (
+            <text fg={color.faint}>
+              {busy ? "Forgetting…" : "Enter connect · a add a Gateway · d forget · Esc close"}
+            </text>
+          )}
         </>
       )}
     </box>

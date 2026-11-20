@@ -1,8 +1,10 @@
 /**
- * The terminal UI's screen: the Tag list, the selected Tag's conversation and composer, the
- * status line, and the palette, Gateway chooser, and Keyboard shortcuts over them. Everything
- * of one Gateway lives under one `Workspace`, keyed by its cache scope, so switching Gateways
- * starts from that Gateway's own cache and nothing of one shows on another.
+ * The terminal UI's screen: the rail (Tags, Objectives, the inbox, Teams), the selected row's
+ * pane (a Tag's conversation and composer, an Objective, an inbox item, a Team), the status
+ * line, and the panels over them: the palette, Gateways, Keyboard shortcuts, New Tag, the new
+ * Objective form, Work Sessions, and the selected Tag's Notes, Schedules, Network and Activity.
+ * Everything of one Gateway lives under one `Workspace`, keyed by its cache scope, so switching
+ * Gateways starts from that Gateway's own cache and nothing of one shows on another.
  */
 import {
   type Alert,
@@ -10,6 +12,8 @@ import {
   type Conversation,
   describe,
   hostLine,
+  objectiveHomeLine,
+  objectiveOpen,
   orderTags,
   rowSummary,
   type Tag,
@@ -20,11 +24,13 @@ import {
 import {
   cachedRoster,
   cacheRoster,
+  send as queue,
   stored,
   storedRoster,
   storedValue,
   useConversationList,
   useConversationPrefetch,
+  useCoordination,
   useGatewayWatch,
   useWatchRefresh,
 } from "@supertag/client/react";
@@ -33,12 +39,17 @@ import type { TuiGateway } from "./connection";
 import type { Controller } from "./controller";
 import { ConversationPane } from "./conversation";
 import { Gateways } from "./gateways";
+import { InboxView } from "./inbox";
 import { alt, SHORTCUTS } from "./keys";
 import type { NotifyLevel } from "./launch";
+import { NewTagForm } from "./newtag";
 import { alertLevel } from "./notify";
-import { Palette, type PaletteItem } from "./palette";
+import { ObjectiveForm, ObjectiveView } from "./objective";
+import { GOAL_ITEM, Palette, type PaletteItem } from "./palette";
+import { PANEL_TITLES, PANELS, type PanelKind } from "./panels";
 import { RAIL } from "./preferences";
-import { Rail, type RailRow } from "./rail";
+import { Rail, type RailItem, type RailRow, railItems, railKey } from "./rail";
+import { TeamView } from "./team";
 import { clip, safe } from "./text";
 import {
   color,
@@ -49,6 +60,7 @@ import {
   useKeyboard,
   useTerminalDimensions,
 } from "./ui";
+import { WorkSessions } from "./work";
 
 export interface AppProps {
   controller: Controller;
@@ -58,7 +70,7 @@ export interface AppProps {
   notifyLevel: NotifyLevel;
 }
 
-type Overlay = "palette" | "gateways" | "help" | undefined;
+type Overlay = "palette" | "gateways" | "help" | "newTag" | "goal" | "work" | PanelKind | undefined;
 
 export function App(props: AppProps) {
   const { controller } = props;
@@ -96,6 +108,7 @@ export function App(props: AppProps) {
                 void controller.open(entry.id, entry);
               }}
               onClose={() => (gateway ? setOverlay(undefined) : undefined)}
+              onForgot={(entry) => controller.forgot(entry.id)}
             />
           </Centered>
         ) : null}
@@ -261,14 +274,67 @@ function Workspace({
     });
   }, [tags, summaries, byTag]);
   const tag = rows.find((row) => row.tag.tagId === selected)?.tag ?? rows[0]?.tag;
+  /** The rail row in front when it is not a Tag: an Objective, an inbox item, or a Team. */
+  const [view, setView] = useState<string | undefined>();
   const select = useCallback(
     (tagId: string) => {
       chosen.current = true;
       setSelected(tagId);
+      setView(undefined);
       cacheRoster(gateway, { selectedTag: tagId });
     },
     [gateway],
   );
+
+  // Objectives, the inbox, Teams.
+  const coordination = useCoordination(gateway, watch, connectionId !== undefined);
+  const openObjectives = useMemo(
+    () => coordination.objectives.filter(objectiveOpen),
+    [coordination.objectives],
+  );
+  const items = useMemo(
+    () => railItems(rows, openObjectives, coordination.inbox, coordination.teams),
+    [rows, openObjectives, coordination.inbox, coordination.teams],
+  );
+  // What a row showed stays in front after it leaves the rail, as an answered question does.
+  const shownItem = useRef<RailItem | undefined>(undefined);
+  const viewItem = view
+    ? (items.find((item) => item.key === view) ?? shownItem.current)
+    : undefined;
+  if (viewItem?.key === view) shownItem.current = viewItem;
+  const railSelected = viewItem ? viewItem.key : tag ? railKey.tag(tag.tagId) : undefined;
+  const choose = useCallback(
+    (item: RailItem) => {
+      if (item.kind === "tag") select(item.row.tag.tagId);
+      else setView(item.key);
+    },
+    [select],
+  );
+  const tagName = useCallback(
+    (tagId: string) => tags.find((entry) => entry.tagId === tagId)?.name ?? tagId,
+    [tags],
+  );
+  const objectivesById = useMemo(
+    () => new Map(coordination.objectives.map((entry) => [entry.objectiveId, entry])),
+    [coordination.objectives],
+  );
+  const homeLine = useCallback(
+    (objectiveId: string) => {
+      const found = objectivesById.get(objectiveId);
+      return found ? objectiveHomeLine(found) : undefined;
+    },
+    [objectivesById],
+  );
+  /** The Sessions each Tag's conversation ran in, whose Work Sessions ↑ lists. */
+  const [sessionsOf, setSessionsOf] = useState<Record<string, string[]>>({});
+  const onSessions = useCallback(
+    (tagId: string, ids: string[]) => setSessionsOf((prior) => ({ ...prior, [tagId]: ids })),
+    [],
+  );
+  /** The palette was opened by `/` on an empty message, so `/goal` typed there counts. */
+  const [slash, setSlash] = useState(false);
+  const principal =
+    controller.status.kind === "connected" ? controller.status.principal : undefined;
   useConversationPrefetch(
     gateway,
     rows.map((row) => row.tag.tagId),
@@ -350,6 +416,21 @@ function Workspace({
   const [focus, setFocus] = useState<"composer" | "rail">("composer");
   const [railWidth, setRailWidth] = useState(controller.preferences.railWidth);
   const [folded, setFolded] = useState(controller.preferences.railFolded);
+  /** Moves the rail's cursor over every row: Tags, Objectives, the inbox, Teams. */
+  const lastAt = useRef(0);
+  const move = useCallback(
+    (by: number) => {
+      const shown = folded ? items.filter((item) => item.kind === "tag") : items;
+      let at = shown.findIndex((item) => item.key === railSelected);
+      // The row in front left the rail (an answered question): move from where it was.
+      if (at < 0) at = lastAt.current - (by > 0 ? 1 : 0);
+      const next = shown[Math.max(0, Math.min(shown.length - 1, at + by))];
+      if (next) choose(next);
+    },
+    [items, folded, railSelected, choose],
+  );
+  const selectedAt = items.findIndex((item) => item.key === railSelected);
+  if (selectedAt >= 0) lastAt.current = selectedAt;
   const step = useCallback(
     (by: number) => {
       const at = rows.findIndex((row) => row.tag.tagId === tag?.tagId);
@@ -360,8 +441,11 @@ function Workspace({
   );
   useKeyboard((key: KeyEvent) => {
     if (overlay) return;
-    if (key.ctrl && key.name === "k") setOverlay("palette");
-    else if (key.ctrl && key.name === "p") setOverlay("gateways");
+    if (key.ctrl && key.name === "k") {
+      setSlash(false);
+      setOverlay("palette");
+    } else if (key.ctrl && key.name === "p") setOverlay("gateways");
+    else if (key.ctrl && key.name === "n") setOverlay("newTag");
     else if (key.ctrl && key.name === "b") {
       setFolded((prior) => {
         controller.savePreferences({ railFolded: !prior });
@@ -375,8 +459,8 @@ function Workspace({
     } else if (alt(key) && (key.name === "down" || key.name === "j")) step(1);
     else if (alt(key) && (key.name === "up" || key.name === "k")) step(-1);
     else if (focus === "rail") {
-      if (key.name === "down" || key.name === "j") step(1);
-      else if (key.name === "up" || key.name === "k") step(-1);
+      if (key.name === "down" || key.name === "j") move(1);
+      else if (key.name === "up" || key.name === "k") move(-1);
       else if (key.name === "return" || key.name === "enter" || key.name === "escape")
         setFocus("composer");
       else if (key.sequence === "[" || key.sequence === "]") {
@@ -402,8 +486,50 @@ function Workspace({
         run: () => select(row.tag.tagId),
       })),
       {
+        id: "new-tag",
+        label: "New Tag",
+        hint: "Ctrl-N",
+        section: "Commands" as const,
+        run: () => setOverlay("newTag"),
+      },
+      ...(tag
+        ? [
+            {
+              id: GOAL_ITEM,
+              label: "/goal · Create Objective",
+              section: "Commands" as const,
+              run: () => setOverlay("goal"),
+            },
+            {
+              id: "work",
+              label: "Work Sessions",
+              hint: "↑",
+              section: "Commands" as const,
+              run: () => setOverlay("work"),
+            },
+            ...(["activity", "notes", "network", "schedules"] as const).map((kind) => ({
+              id: kind,
+              label: PANEL_TITLES[kind],
+              section: "Commands" as const,
+              run: () => setOverlay(kind),
+            })),
+          ]
+        : []),
+      {
+        id: "inbox",
+        label: "Open inbox",
+        section: "Commands" as const,
+        run: () => {
+          const first = coordination.inbox[0];
+          if (first) {
+            setView(railKey.inbox(first.key));
+            setFocus("composer");
+          }
+        },
+      },
+      {
         id: "gateways",
-        label: "Gateways",
+        label: "Gateways · add or switch",
         hint: "Ctrl-P",
         section: "Commands" as const,
         run: () => setOverlay("gateways"),
@@ -427,42 +553,96 @@ function Workspace({
       },
       { id: "quit", label: "Quit", hint: "Ctrl-C", section: "Commands" as const, run: onQuit },
     ],
-    [rows, folded, select, setOverlay, controller, onQuit],
+    [rows, tag, folded, select, setOverlay, controller, onQuit, coordination.inbox],
   );
 
   const unread = unreadTotal(conversations, tag?.tagId);
   const shownWidth = folded ? 6 : railWidth;
+  const { height } = useTerminalDimensions();
+  const paneFocused = focus === "composer" && !overlay;
+  const panelWidth = Math.min(100, Math.max(40, width - 4));
+  const closeOverlay = () => setOverlay(undefined);
+  let pane: React.ReactNode;
+  if (viewItem?.kind === "objective") {
+    pane = (
+      <ObjectiveView
+        key={viewItem.key}
+        gateway={gateway}
+        watch={watch}
+        objective={viewItem.objective}
+        focused={paneFocused}
+        tagName={tagName}
+        onChanged={coordination.refresh}
+      />
+    );
+  } else if (viewItem?.kind === "inbox") {
+    pane = (
+      <InboxView
+        key={viewItem.key}
+        gateway={gateway}
+        item={viewItem.item}
+        focused={paneFocused}
+        tagName={tagName}
+        onDone={coordination.refresh}
+      />
+    );
+  } else if (viewItem?.kind === "team") {
+    pane = (
+      <TeamView
+        key={viewItem.key}
+        gateway={gateway}
+        watch={watch}
+        team={viewItem.team}
+        tagName={tagName}
+      />
+    );
+  } else if (tag) {
+    pane = (
+      <ConversationPane
+        key={tag.tagId}
+        gateway={gateway}
+        watch={watch}
+        tag={tag}
+        draft={drafts[tag.tagId] ?? ""}
+        onDraft={(text) => setDraft(tag.tagId, text)}
+        focused={paneFocused}
+        onPalette={() => {
+          setSlash(true);
+          setOverlay("palette");
+        }}
+        onSummary={onSummary}
+        onWork={() => setOverlay("work")}
+        onSessions={onSessions}
+        onGoal={() => setOverlay("goal")}
+        homeLine={homeLine}
+      />
+    );
+  } else {
+    pane = (
+      <box flexGrow={1} padding={1}>
+        <text fg={color.muted}>
+          {gateway.connectionId
+            ? gateway.local
+              ? "No Tags yet. Set SuperTag up with supertag init, or Ctrl-N creates one."
+              : "No Tags yet. Ctrl-N creates one, or supertag tag put."
+            : "Loading Tags…"}
+        </text>
+      </box>
+    );
+  }
+  const Panel = overlay && overlay in PANELS ? PANELS[overlay as PanelKind] : undefined;
   return (
     <>
       <box flexDirection="row" flexGrow={1} minHeight={0}>
         <Rail
-          rows={rows}
-          selected={tag?.tagId}
+          items={items}
+          selected={railSelected}
           focused={focus === "rail" && !overlay}
           folded={folded}
           width={shownWidth}
+          height={Math.max(3, height - 1)}
         />
-        {tag ? (
-          <ConversationPane
-            key={tag.tagId}
-            gateway={gateway}
-            watch={watch}
-            tag={tag}
-            draft={drafts[tag.tagId] ?? ""}
-            onDraft={(text) => setDraft(tag.tagId, text)}
-            focused={focus === "composer" && !overlay}
-            onPalette={() => setOverlay("palette")}
-            onSummary={onSummary}
-          />
-        ) : (
-          <box flexGrow={1} padding={1}>
-            <text fg={color.muted}>
-              {gateway.connectionId
-                ? "No Tags yet. Create one with supertag tag put."
-                : "Loading Tags…"}
-            </text>
-          </box>
-        )}
+        {pane}
       </box>
       <StatusLine controller={controller} hosts={hosts} unread={unread} />
       {overlay === "palette" ? (
@@ -471,9 +651,72 @@ function Workspace({
             <Palette
               items={paletteItems}
               width={Math.min(72, Math.max(30, width - 4))}
-              onClose={() => setOverlay(undefined)}
+              slash={slash}
+              onGoal={(outcome) => {
+                if (tag) void queue(gateway, tag.tagId, `/goal ${outcome}`);
+              }}
+              onClose={closeOverlay}
             />
           </box>
+        </Centered>
+      ) : null}
+      {overlay === "newTag" ? (
+        <Centered>
+          <NewTagForm
+            gateway={gateway}
+            principal={principal}
+            width={Math.min(84, Math.max(40, width - 4))}
+            onClose={closeOverlay}
+            onCreated={(created) => {
+              setOverlay(undefined);
+              setTags((prior) =>
+                prior.some((entry) => entry.tagId === created.tagId) ? prior : [...prior, created],
+              );
+              select(created.tagId);
+            }}
+          />
+        </Centered>
+      ) : null}
+      {overlay === "goal" && tag ? (
+        <Centered>
+          <ObjectiveForm
+            gateway={gateway}
+            owner={tag.tagId}
+            ownerName={tag.name ?? tag.tagId}
+            teams={coordination.teams}
+            width={Math.min(84, Math.max(40, width - 4))}
+            onClose={closeOverlay}
+            onShow={(objectiveId) => {
+              coordination.refresh();
+              setView(railKey.objective(objectiveId));
+            }}
+          />
+        </Centered>
+      ) : null}
+      {overlay === "work" && tag ? (
+        <Centered>
+          <WorkSessions
+            gateway={gateway}
+            watch={watch}
+            tagId={tag.tagId}
+            sessionIds={sessionsOf[tag.tagId] ?? []}
+            width={panelWidth}
+            height={Math.max(8, height - 3)}
+            onClose={closeOverlay}
+          />
+        </Centered>
+      ) : null}
+      {Panel && tag ? (
+        <Centered>
+          <Panel
+            gateway={gateway}
+            watch={watch}
+            tagId={tag.tagId}
+            tagName={tag.name ?? tag.tagId}
+            width={panelWidth}
+            height={Math.max(8, height - 4)}
+            onClose={closeOverlay}
+          />
         </Centered>
       ) : null}
     </>

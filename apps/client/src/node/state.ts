@@ -10,6 +10,16 @@ import {
   type WorkerHostStatus,
 } from "../../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/runtime_pb";
 import type {
+  ApprovalDetails,
+  InboxItem,
+  NewObjective,
+  Objective,
+  Team,
+  WorkBranch,
+  WorkSession,
+  WorkstreamPost,
+} from "../model/coordination";
+import type {
   Conversation,
   FollowUpdate,
   GatewayActivation,
@@ -31,6 +41,7 @@ import type {
 import type { NewTag, TagOptions } from "../model/tag-admin";
 import { CACHE_ERROR, type CacheScope, entryPath, readEntry, validKey, writeEntry } from "./cache";
 import { conversation, event, message, messages, tag } from "./convert";
+import * as coordination from "./coordination";
 import { activity, networkLog, note, schedule } from "./details";
 import { endpoint, gatewayOrigin, type Target } from "./endpoint";
 import { CONNECT_FIRST, CONNECTION_CHANGED, checkBearer, rpc, rpcError, statusOf } from "./errors";
@@ -585,6 +596,108 @@ export class GatewayState {
       if (change === undefined) throw "Choose pause, resume, or delete.";
       return schedule(await rpc(change));
     });
+  }
+
+  // Objectives, the inbox, Teams, Work Sessions
+
+  /** Every Objective the caller can see, open and closed. */
+  objectives(connectionId: string): Promise<Objective[]> {
+    return this.call(connectionId, (session) => coordination.listObjectives(session.client));
+  }
+
+  objective(connectionId: string, objectiveId: string): Promise<Objective> {
+    return this.call(connectionId, (session) =>
+      coordination.getObjective(session.client, objectiveId),
+    );
+  }
+
+  /** Creates an Objective; the same ID again starts one that could not start. */
+  createObjective(connectionId: string, created: NewObjective): Promise<Objective> {
+    return this.call(connectionId, (session) =>
+      coordination.createObjective(session.client, created),
+    );
+  }
+
+  /** Sends a follow-up to the Objective's owner in its Session; returns the Task it queued. */
+  messageObjective(
+    connectionId: string,
+    objectiveId: string,
+    text: string,
+  ): Promise<{ taskId: string; tagId: string }> {
+    return this.call(connectionId, (session) =>
+      coordination.messageObjective(session.client, objectiveId, text),
+    );
+  }
+
+  reviewObjective(
+    connectionId: string,
+    objectiveId: string,
+    approved: boolean,
+    feedback: string,
+  ): Promise<Objective> {
+    return this.call(connectionId, (session) =>
+      coordination.reviewObjective(session.client, objectiveId, approved, feedback),
+    );
+  }
+
+  /** A Task's state and result, as a follow-up's reply is read. */
+  taskResult(connectionId: string, taskId: string): Promise<{ state: string; result: string }> {
+    return this.call(connectionId, (session) => coordination.taskResult(session.client, taskId));
+  }
+
+  /** The inbox items an operator decides. */
+  inbox(connectionId: string): Promise<InboxItem[]> {
+    return this.call(connectionId, (session) => coordination.listInbox(session.client));
+  }
+
+  approval(connectionId: string, approvalId: string): Promise<ApprovalDetails> {
+    return this.call(connectionId, (session) =>
+      coordination.getApproval(session.client, approvalId),
+    );
+  }
+
+  answerQuestion(connectionId: string, taskId: string, text: string): Promise<{ taskId: string }> {
+    return this.call(connectionId, (session) =>
+      coordination.answerQuestion(session.client, taskId, text),
+    );
+  }
+
+  decideApproval(
+    connectionId: string,
+    approvalId: string,
+    approve: boolean,
+    reason: string,
+  ): Promise<ApprovalDetails> {
+    return this.call(connectionId, (session) =>
+      coordination.decideApproval(session.client, approvalId, approve, reason),
+    );
+  }
+
+  teams(connectionId: string): Promise<Team[]> {
+    return this.call(connectionId, (session) => coordination.listTeams(session.client));
+  }
+
+  workstreamPosts(connectionId: string, teamId: string): Promise<WorkstreamPost[]> {
+    return this.call(connectionId, (session) =>
+      coordination.workstreamPosts(session.client, teamId),
+    );
+  }
+
+  /** The Work Sessions the turns of the Tag's Session started. */
+  workSessions(connectionId: string, tagId: string, sessionId: string): Promise<WorkSession[]> {
+    return this.call(connectionId, (session) =>
+      coordination.listWorkSessions(session.client, tagId, sessionId),
+    );
+  }
+
+  /** Where a Work Session's delivery is, to review it; nothing before it delivered a commit. */
+  workBranch(connectionId: string, work: WorkSession): Promise<WorkBranch | undefined> {
+    return this.call(connectionId, (session) => coordination.workBranch(session.client, work));
+  }
+
+  /** The commands and tools a Task ran. */
+  taskActivity(connectionId: string, taskId: string): Promise<string[]> {
+    return this.call(connectionId, (session) => coordination.taskActivity(session.client, taskId));
   }
 
   // Task files

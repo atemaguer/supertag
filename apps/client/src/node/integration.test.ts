@@ -688,6 +688,9 @@ describe("the Watch against a scripted Gateway", () => {
             WatchKind.TASK,
             WatchKind.SCHEDULE,
             WatchKind.MEMORY,
+            WatchKind.OBJECTIVE,
+            WatchKind.TEAM,
+            WatchKind.WORKSTREAM_POST,
           ]);
           tokens.push(request.resumeToken);
           if (request.resumeToken === "") {
@@ -747,6 +750,14 @@ describe("the Watch against a scripted Gateway", () => {
               reason: WatchReason.CHANGED,
             }),
           );
+          yield frame(
+            "objective",
+            change({ kind: WatchKind.OBJECTIVE, id: "ship-sso", objectiveId: "ship-sso" }),
+          );
+          yield frame(
+            "post",
+            change({ kind: WatchKind.WORKSTREAM_POST, id: "p1", teamId: "release" }),
+          );
           for (const [token, tag] of [
             ["note", "engineer"],
             ["tagless-note", ""],
@@ -796,7 +807,10 @@ describe("the Watch against a scripted Gateway", () => {
         { kind: "lost" },
         { kind: "resync" },
         { kind: "conversation", tagId: "engineer" },
+        { kind: "work", tagId: "engineer", sessionId: "slack:T1/C1/1.0" },
         { kind: "conversation", tagId: "engineer" },
+        { kind: "objective", objectiveId: "ship-sso" },
+        { kind: "team", teamId: "release" },
         { kind: "memory", tagId: "engineer" },
       ];
       for (let waited = 0; received.length < expected.length && waited < 200; waited++) {

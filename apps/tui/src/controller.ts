@@ -132,6 +132,20 @@ export class Controller {
     }
   }
 
+  /** A saved Gateway was forgotten: its scope goes, and if it was open, the chooser shows. */
+  forgot(id: string) {
+    const { [id]: _, ...scopes } = this.preferences.scopes;
+    this.savePreferences({
+      scopes,
+      ...(this.preferences.lastGateway === id ? { lastGateway: undefined } : {}),
+    });
+    if (this.entry?.id !== id) return;
+    this.close();
+    this.gateway = undefined;
+    this.entry = undefined;
+    this.choose();
+  }
+
   close() {
     clearTimeout(this.retryTimer);
     this.attempt++;

@@ -74,3 +74,67 @@ export function tagAdminRefusal(principal?: string): string | undefined {
   if (!principal || principal.startsWith("operator:")) return undefined;
   return `Only an operator can create Tags. This app is connected as ${principal}.`;
 }
+
+/** The harnesses a form offers: the hosts' own, Codex and Claude Code first; every one with no host. */
+export function offeredHarnesses(options: TagOptions | undefined): string[] {
+  const known = Object.keys(HARNESSES);
+  const rank = (kind: string) => (known.includes(kind) ? known.indexOf(kind) : known.length);
+  return options?.harnesses.length
+    ? [...options.harnesses].sort((a, b) => rank(a) - rank(b))
+    : known;
+}
+
+/** What the New Tag form says and decides for a harness and the person's Web access choice. */
+export interface NewTagRules {
+  /** No host here runs commands for the harness: the Tag reads and edits files only. */
+  noCommands: boolean;
+  /** Every host of the harness runs Tasks in a sandbox without network. */
+  noWeb: boolean;
+  /** Cursor has no tool for reading web pages, so it never gets Web access. */
+  webless: boolean;
+  /** Whether the Tag gets Web access: the person's choice, else on unless its hosts have no network. */
+  webAccess: boolean;
+}
+
+/** Web access, as the New Tag form explains it. */
+export const WEB_ACCESS_HINT =
+  "The Tag can read web pages, and its commands can reach the network. Web pages can carry instructions, so leave this off for a Tag that handles secrets.";
+
+export function newTagRules(
+  options: TagOptions | undefined,
+  harness: string,
+  webChoice: boolean | undefined,
+): NewTagRules {
+  const noCommands = options?.noCommands?.includes(harness) ?? false;
+  const noWeb = options?.noWeb?.includes(harness) ?? false;
+  const webless = harness === "cursor";
+  return { noCommands, noWeb, webless, webAccess: !webless && (webChoice ?? !noWeb) };
+}
+
+/** The notes the New Tag form shows under its fields for `rules`, in order. */
+export function newTagNotes(
+  options: TagOptions | undefined,
+  harness: string,
+  rules: NewTagRules,
+): string[] {
+  const label = harnessLabel(harness) ?? harness;
+  const notes: string[] = [];
+  if (options && options.harnesses.length === 0) {
+    notes.push("No Worker Host is connected. Choose the harness its host will run.");
+  }
+  if (rules.noCommands) {
+    notes.push(
+      `${label} has no sandbox of its own, and no host here lets it run commands, so this Tag reads and edits files only.`,
+    );
+  }
+  if (rules.webless) notes.push("Cursor has no tool for reading web pages.");
+  else if (rules.noWeb) {
+    notes.push(
+      `${label} runs here only in sandboxes without network, which run no Tag with web access.`,
+    );
+  }
+  if (!rules.webAccess && harness === "codex") {
+    notes.push("Current Codex models may not run commands without web access.");
+  }
+  return notes;
+}

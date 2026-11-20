@@ -537,6 +537,34 @@ async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Re
     ensure!(saved, "{stderr}");
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
     assert_eq!(profiles["gateways"].as_array().map(Vec::len), Some(1));
+
+    // `supertag disconnect` forgets it, and a second one says nothing is saved under that name.
+    let disconnect = || {
+        let mut command = binary(&["disconnect", "prod"]);
+        command.env("HOME", home.path());
+        async move {
+            let output = timeout(WAIT, command.output()).await??;
+            anyhow::Ok((
+                output.status.success(),
+                String::from_utf8_lossy(&output.stderr).into_owned(),
+            ))
+        }
+    };
+    let (removed, stderr) = disconnect().await?;
+    ensure!(removed, "{stderr}");
+    let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
+    assert_eq!(profiles["gateways"].as_array().map(Vec::len), Some(0));
+    assert_eq!(
+        std::fs::metadata(&store)?.permissions().mode() & 0o777,
+        0o600
+    );
+    let (removed, stderr) = disconnect().await?;
+    ensure!(
+        !removed && stderr.contains("no Gateway is saved"),
+        "{stderr}"
+    );
+    let (saved, stderr) = connect(&token, "prod", &services.public, false).await?;
+    ensure!(saved, "{stderr}");
     // A URL that cannot be saved is refused before the token is sent anywhere.
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
     listener.set_nonblocking(true)?;

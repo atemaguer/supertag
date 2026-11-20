@@ -1,7 +1,8 @@
 //! Resolve a saved Gateway by name from the CLI's store and the desktop app's,
-//! and save one in the CLI's store for `supertag connect`. Saving takes an
-//! exclusive non-blocking lock on `gateways.json.lock` and renames a private
-//! staged file into place. The desktop app owns its own store.
+//! save one in the CLI's store for `supertag connect`, and remove one for
+//! `supertag disconnect`. Both take an exclusive non-blocking lock on
+//! `gateways.json.lock` and rename a private staged file into place. The
+//! desktop app owns its own store.
 use std::{
     fs::{File, OpenOptions},
     io::Read,
@@ -381,16 +382,79 @@ pub fn save(saved: &NewGateway, replace: bool) -> Result<PathBuf> {
         client_cert,
         client_key,
     } = check(saved)?;
+    let mut entry = serde_json::json!({"url": url, "token": saved.token, "name": name});
+    for (field, value) in [
+        ("server_ca_file", server_ca),
+        ("client_cert_file", client_cert),
+        ("client_key_file", client_key),
+    ] {
+        if !value.is_empty() {
+            entry[field] = value.into();
+        }
+    }
+    update_store(true, |gateways| {
+        match gateways.iter_mut().find(|saved| saved["name"] == name) {
+            Some(saved) => {
+                let origin = saved["url"].as_str().map(gateway_origin);
+                ensure!(
+                    matches!(origin, Some(Ok(ref origin)) if origin == &url),
+                    "this name belongs to another Gateway URL"
+                );
+                ensure!(
+                    replace,
+                    "Gateway {name:?} is already saved; pass --replace to replace it"
+                );
+                *saved = entry;
+            }
+            None => gateways.push(entry),
+        }
+        Ok(true)
+    })
+    .map(|(path, _)| path)
+}
+
+/// Removes the Gateway saved under `name` from the CLI's store, for `supertag disconnect`.
+/// Returns the store and whether a Gateway was saved under that name. The desktop app's store
+/// is its own; a name saved only there is not removed.
+pub fn remove(name: &str) -> Result<(PathBuf, bool)> {
+    ensure!(
+        !name.trim().is_empty() && !name.chars().any(char::is_control),
+        "enter the name of a saved Gateway"
+    );
+    update_store(false, |gateways| {
+        let before = gateways.len();
+        gateways.retain(|saved| saved["name"] != name);
+        Ok(gateways.len() != before)
+    })
+}
+
+/// Changes the CLI's saved Gateways under their lock: reads them, lets `change` edit the list,
+/// and when it reports a change, writes a private staged file and renames it into place.
+/// `create` makes the store's directory when it is missing; otherwise a missing directory is an
+/// empty store and is left alone.
+fn update_store(
+    create: bool,
+    change: impl FnOnce(&mut Vec<serde_json::Value>) -> Result<bool>,
+) -> Result<(PathBuf, bool)> {
     let path = cli_store()?;
     let directory = path
         .parent()
         .context("saved Gateway store has no directory")?;
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(directory)
-        .context("could not create the saved Gateway directory")?;
-    let metadata = std::fs::symlink_metadata(directory)?;
+    if create {
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(directory)
+            .context("could not create the saved Gateway directory")?;
+    }
+    let metadata = match std::fs::symlink_metadata(directory) {
+        Ok(metadata) => metadata,
+        Err(error) if !create && error.kind() == std::io::ErrorKind::NotFound => {
+            let changed = change(&mut Vec::new())?;
+            return Ok((path, changed));
+        }
+        Err(error) => return Err(error.into()),
+    };
     // SAFETY: geteuid takes no arguments and cannot fail.
     let uid = unsafe { libc::geteuid() };
     ensure!(
@@ -425,33 +489,11 @@ pub fn save(saved: &NewGateway, replace: bool) -> Result<PathBuf> {
         }
         None => serde_json::json!({"version": 1, "gateways": []}),
     };
-    let mut entry = serde_json::json!({"url": url, "token": saved.token, "name": name});
-    for (field, value) in [
-        ("server_ca_file", server_ca),
-        ("client_cert_file", client_cert),
-        ("client_key_file", client_key),
-    ] {
-        if !value.is_empty() {
-            entry[field] = value.into();
-        }
-    }
     let gateways = profiles["gateways"]
         .as_array_mut()
         .context("saved Gateway file has an unsupported format")?;
-    match gateways.iter_mut().find(|saved| saved["name"] == name) {
-        Some(saved) => {
-            let origin = saved["url"].as_str().map(gateway_origin);
-            ensure!(
-                matches!(origin, Some(Ok(ref origin)) if origin == &url),
-                "this name belongs to another Gateway URL"
-            );
-            ensure!(
-                replace,
-                "Gateway {name:?} is already saved; pass --replace to replace it"
-            );
-            *saved = entry;
-        }
-        None => gateways.push(entry),
+    if !change(gateways)? {
+        return Ok((path, false));
     }
     let mut data = serde_json::to_vec(&profiles)?;
     data.push(b'\n');
@@ -477,7 +519,7 @@ pub fn save(saved: &NewGateway, replace: bool) -> Result<PathBuf> {
     }
     written.context("could not save Gateway connections")?;
     drop(lock);
-    Ok(path)
+    Ok((path, true))
 }
 
 /// Replaces the credential of a Gateway saved by name, as after a client credential

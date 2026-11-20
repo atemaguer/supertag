@@ -4,6 +4,7 @@
  * through `PlatformProvider`, never from `window` or `document`.
  */
 export * from "./conversation-cache";
+export * from "./coordination";
 export * from "./follow";
 export * from "./outbox";
 export * from "./platform";

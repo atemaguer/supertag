@@ -3,6 +3,7 @@
  * types and the `Gateway` interface, conversation history, how a transcript reads, which
  * replies notify, and Tag creation rules.
  */
+export * from "./coordination";
 export * from "./errors";
 export * from "./gateway";
 export * from "./history";

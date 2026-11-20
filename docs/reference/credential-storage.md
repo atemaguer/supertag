@@ -70,7 +70,9 @@ Plane joins with an Auth Key instead. See [supertag.yaml and local state](supert
 `supertag connect` saves a remote Gateway and its Operator Token or client device credential in
 `supertag/gateways.json` in the user configuration directory (`~/Library/Application Support` on
 macOS, `~/.config` on Linux). The desktop app saves its own in `ai.supertag.desktop/gateways.json`
-there, and `--gateway NAME` reads both stores. Neither store ever holds the local operator token:
+there, and `--gateway NAME` reads both stores. `supertag disconnect NAME` removes a Gateway
+and its credential from the CLI's store; an enrolled client device stays enrolled until an
+operator revokes it. Neither store ever holds the local operator token:
 the CLI and the desktop app read it from `credentials.json` each time they connect to the local
 Gateway.
 

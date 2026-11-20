@@ -423,7 +423,8 @@ supertag get objective --gateway team
 ```
 
 Commands also read the names the desktop app saves. Add `--server-ca-file` when the
-Control Plane's certificate comes from a private CA. See
+Control Plane's certificate comes from a private CA. `supertag disconnect team` forgets the
+Gateway and its credential on this device. See
 [Manage a remote Control Plane](control-plane.md#manage-a-remote-control-plane).
 
 ## Output and errors

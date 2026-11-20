@@ -53,6 +53,7 @@ Commands:
   client                Revoke client devices and rotate their credentials
   auth-key              Create and revoke Auth Keys that enroll Worker Hosts, Gateways, and clients
   connect               Save a Gateway under a name for `--gateway NAME`. Reads one secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a masked prompt in a terminal: an operator token is checked and saved; a client Auth Key (stak_...) enrolls this device as client:NAME and saves only the resulting credential
+  disconnect            Forget a Gateway saved with `supertag connect`: remove it and its credential from this device. Its enrolled client stays until an operator revokes it. A Gateway saved in the desktop app is removed there
   tag                   Set up and retire Tags
   task                  Submit, cancel, and steer Tasks, and read their events, usage, and published results
   artifact-publication  Publish completed artifact files for named destination Objectives, and withdraw them
@@ -2658,6 +2659,20 @@ Options:
           PEM private key of the client certificate
   -h, --help
           Print help
+```
+
+## `supertag disconnect`
+
+```text
+Forget a Gateway saved with `supertag connect`: remove it and its credential from this device. Its enrolled client stays until an operator revokes it. A Gateway saved in the desktop app is removed there
+
+Usage: supertag disconnect <NAME>
+
+Arguments:
+  <NAME>  The name the Gateway is saved under
+
+Options:
+  -h, --help  Print help
 ```
 
 ## `supertag tag`

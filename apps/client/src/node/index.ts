@@ -5,10 +5,12 @@
  */
 export * from "./cache";
 export * from "./cli-store";
+export { operationId, sessionBranch } from "./coordination";
 export * from "./endpoint";
 export * from "./errors";
 export * from "./local";
 export * from "./profiles";
+export * from "./review";
 export {
   Code,
   ConnectError,

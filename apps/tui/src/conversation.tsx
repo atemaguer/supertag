@@ -7,11 +7,13 @@
  */
 import {
   conversationSummary,
+  createdObjectiveId,
   deliveryStatus,
   describe,
   earlierHistory,
   emptyHistory,
   type Gateway,
+  goalOutcome,
   type History,
   joinedReplies,
   lastOperatorMessage,
@@ -60,6 +62,14 @@ export interface ConversationProps {
   /** `/` typed on an empty message: open the palette. */
   onPalette(): void;
   onSummary?(tagId: string, summary: TagSummary): void;
+  /** ↑ on an empty message: the Work Sessions the turns of the conversation's Sessions started. */
+  onWork?(): void;
+  /** The Sessions the conversation's turns ran in, as they change. */
+  onSessions?(tagId: string, sessionIds: string[]): void;
+  /** `/goal` alone: open the new Objective form. */
+  onGoal?(): void;
+  /** The line under the reply that created an Objective, once it needs a person or ended. */
+  homeLine?(objectiveId: string): string | undefined;
 }
 
 export function ConversationPane({
@@ -71,6 +81,10 @@ export function ConversationPane({
   focused,
   onPalette,
   onSummary,
+  onWork,
+  onSessions,
+  onGoal,
+  homeLine,
 }: ConversationProps) {
   const tagId = tag.tagId;
   const platform = usePlatform();
@@ -83,6 +97,7 @@ export function ConversationPane({
   const [window, setWindow] = useState(WINDOW);
   const [paging, setPaging] = useState(false);
   const [unseen, setUnseen] = useState(0);
+  const [composer, setComposer] = useState(0);
   const revision = useRef(0);
   const active = useRef(true);
   const scroll = useRef<ScrollBoxRenderable>(null);
@@ -152,6 +167,16 @@ export function ConversationPane({
   const messages = useMemo(() => shownMessages(history.messages), [history.messages]);
   const dividers = useMemo(() => timeDividers(messages), [messages]);
   const joined = useMemo(() => joinedReplies(messages), [messages]);
+  const sessionIds = useMemo(
+    () =>
+      [...new Set(messages.map((message) => message.task.sessionId).filter(Boolean))].join("\n"),
+    [messages],
+  );
+  const reportSessions = useRef(onSessions);
+  reportSessions.current = onSessions;
+  useEffect(() => {
+    reportSessions.current?.(tagId, sessionIds ? sessionIds.split("\n") : []);
+  }, [tagId, sessionIds]);
   const reportSummary = useRef(onSummary);
   reportSummary.current = onSummary;
   useEffect(() => {
@@ -177,6 +202,11 @@ export function ConversationPane({
 
   function submit(value: string) {
     const text = value.trim();
+    if (goalOutcome(text) === "" && onGoal) {
+      onDraft("");
+      onGoal();
+      return;
+    }
     if (!text || outgoing) return;
     onDraft("");
     jumpToLatest();
@@ -222,6 +252,8 @@ export function ConversationPane({
       if (atBottom(box)) setUnseen(0);
     } else if (key.name === "end" && (key.ctrl || !focused || draft === "")) {
       jumpToLatest();
+    } else if (key.name === "up" && focused && draft === "" && !key.meta && !key.option && onWork) {
+      onWork();
     } else if (key.ctrl && key.name === "r" && outgoing?.error) {
       void deliver(retry(gateway, outgoing.operationId));
     } else if (key.ctrl && key.name === "x" && outgoing?.error) {
@@ -271,6 +303,7 @@ export function ConversationPane({
         {mounted.map((message) => {
           const answers = joined.answeredBy.get(message.task.taskId);
           const turnId = (answers ?? message).task.taskId;
+          const created = createdObjectiveId((answers ?? message).task.result ?? "");
           return (
             <Entry
               key={message.task.taskId}
@@ -282,6 +315,7 @@ export function ConversationPane({
               writing={follow.texts.get(turnId)}
               delivery={message.task.taskId === lastSent ? deliveryStatus(message) : undefined}
               divider={dividers.get(message.task.taskId)}
+              home={created ? homeLine?.(created) : undefined}
             />
           );
         })}
@@ -308,11 +342,14 @@ export function ConversationPane({
       ) : null}
       <box border borderColor={focused ? color.focus : color.border} height={3} flexShrink={0}>
         <input
+          key={composer}
           focused={focused}
           placeholder={outgoing ? "Sending…" : `Message ${safe(name)}`}
           value={draft}
           onInput={(value: string) => {
             if (value === "/" && draft === "") {
+              // The palette takes the `/`: a new field shows the message empty.
+              setComposer((n) => n + 1);
               onPalette();
               return;
             }

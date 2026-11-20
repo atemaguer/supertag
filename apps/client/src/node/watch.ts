@@ -1,7 +1,7 @@
 /**
  * The Gateway Watch: tells the window which views to read again as Tags, conversations,
- * Schedules and notes change. It resumes from its last token after the stream drops, and starts
- * over when the Gateway no longer knows the token.
+ * Schedules, notes, Objectives, Teams and Work Sessions change. It resumes from its last token
+ * after the stream drops, and starts over when the Gateway no longer knows the token.
  */
 
 import {
@@ -31,6 +31,9 @@ const KINDS = [
   WatchKind.TASK,
   WatchKind.SCHEDULE,
   WatchKind.MEMORY,
+  WatchKind.OBJECTIVE,
+  WatchKind.TEAM,
+  WatchKind.WORKSTREAM_POST,
 ];
 
 /** The view a change invalidates, if any. */
@@ -42,17 +45,25 @@ export function invalidation(change: WatchChange): WatchUpdate | undefined {
       return change.tagId === "" ? undefined : { kind: "schedule", tagId: change.tagId };
     case WatchKind.MEMORY:
       return change.tagId === "" ? undefined : { kind: "memory", tagId: change.tagId };
+    case WatchKind.OBJECTIVE:
+      return change.objectiveId === "" && change.id === ""
+        ? undefined
+        : { kind: "objective", objectiveId: change.objectiveId || change.id };
+    case WatchKind.TEAM:
+    case WatchKind.WORKSTREAM_POST:
+      return change.teamId === "" ? undefined : { kind: "team", teamId: change.teamId };
     case WatchKind.CONVERSATION_MESSAGE:
       break;
     case WatchKind.TASK:
+      // A Task outside a conversation is a Work Session's or an Objective's turn.
+      if (!change.sessionId.startsWith(CONVERSATION_SESSION)) {
+        return change.tagId === "" || change.sessionId === ""
+          ? undefined
+          : { kind: "work", tagId: change.tagId, sessionId: change.sessionId };
+      }
       // Message creation has its own notice. Later changes to a conversation's Tasks carry
       // the result and status invalidation for it.
-      if (
-        change.reason === WatchReason.CREATED ||
-        !change.sessionId.startsWith(CONVERSATION_SESSION)
-      ) {
-        return undefined;
-      }
+      if (change.reason === WatchReason.CREATED) return undefined;
       break;
     default:
       return undefined;

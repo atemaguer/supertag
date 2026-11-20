@@ -2,11 +2,13 @@ import type { Tag } from "@supertag/client/model";
 import {
   type AddedWorkspace,
   describe,
-  HARNESSES,
   harnessLabel,
+  newTagRules,
+  offeredHarnesses,
   type TagAdmin,
   type TagOptions,
   tagIdFor,
+  WEB_ACCESS_HINT,
 } from "@supertag/client/model";
 import { useEffect, useState } from "react";
 import { Button } from "./ui/button";
@@ -84,11 +86,7 @@ function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag)
       (offered) => {
         if (!live) return;
         setOptions(offered);
-        setHarness(
-          Object.keys(HARNESSES).find((kind) => offered.harnesses.includes(kind)) ??
-            offered.harnesses[0] ??
-            "codex",
-        );
+        setHarness(offeredHarnesses(offered)[0] ?? "codex");
         if (offered.workspaces.length === 1) setWorkspace(offered.workspaces[0] ?? "");
       },
       () => {
@@ -104,19 +102,11 @@ function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag)
   }, [admin]);
 
   const tagId = tagIdFor(name);
-  const known = Object.keys(HARNESSES);
-  const rank = (kind: string) => (known.includes(kind) ? known.indexOf(kind) : known.length);
-  const harnesses = options?.harnesses.length
-    ? [...options.harnesses].sort((a, b) => rank(a) - rank(b))
-    : known;
+  const harnesses = offeredHarnesses(options);
   const workspaces = options
     ? [...new Set([...options.workspaces, ...Object.keys(added)])].sort()
     : [];
-  const noCommands = options?.noCommands?.includes(harness) ?? false;
-  const noWeb = options?.noWeb?.includes(harness) ?? false;
-  /** Cursor has no web fetch tool, and runs no Tag that may use one. */
-  const webless = harness === "cursor";
-  const webAccess = !webless && (webChoice ?? !noWeb);
+  const { noCommands, noWeb, webless, webAccess } = newTagRules(options, harness, webChoice);
 
   /** Asks for a folder, adds it as a Workspace of this machine, and selects it. */
   async function addFolder() {
@@ -266,8 +256,7 @@ function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag)
         Web access
       </label>
       <small id="tag-web-access-hint" className="field-hint">
-        The Tag can read web pages, and its commands can reach the network. Web pages can carry
-        instructions, so leave this off for a Tag that handles secrets.
+        {WEB_ACCESS_HINT}
       </small>
       {webless && <small className="field-hint">Cursor has no tool for reading web pages.</small>}
       {noWeb && !webless && (

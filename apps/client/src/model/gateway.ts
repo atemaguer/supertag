@@ -3,6 +3,16 @@
  * Schedules, and the saved Gateways, as the desktop window and the terminal UI receive them.
  * `Gateway` is one connection as a view uses it. No DOM and no Node.js here.
  */
+import type {
+  ApprovalDetails,
+  InboxItem,
+  NewObjective,
+  Objective,
+  Team,
+  WorkBranch,
+  WorkSession,
+  WorkstreamPost,
+} from "./coordination";
 
 export interface Tag {
   tagId: string;
@@ -145,6 +155,32 @@ export interface Gateway {
   schedules?(tagId: string): Promise<Schedule[]>;
   /** Pauses, resumes, or deletes a Schedule. A deleted Schedule never fires again. */
   changeSchedule?(scheduleId: string, action: ScheduleAction): Promise<Schedule>;
+  /** Every Objective the caller can see, open and closed. */
+  objectives?(): Promise<Objective[]>;
+  objective?(objectiveId: string): Promise<Objective>;
+  /** Creates an Objective, which starts its owner's first turn; the same ID again retries it. */
+  createObjective?(created: NewObjective): Promise<Objective>;
+  /** Sends a follow-up to an Objective's owner in its Session. */
+  messageObjective?(objectiveId: string, text: string): Promise<{ taskId: string; tagId: string }>;
+  /** Approves an Objective ready for review, or asks for changes. */
+  reviewObjective?(objectiveId: string, approved: boolean, feedback: string): Promise<Objective>;
+  /** A Task's state and, once finished, its result. */
+  taskResult?(taskId: string): Promise<{ state: string; result: string }>;
+  /** The inbox items an operator decides. */
+  inbox?(): Promise<InboxItem[]>;
+  approval?(approvalId: string): Promise<ApprovalDetails>;
+  answerQuestion?(taskId: string, text: string): Promise<{ taskId: string }>;
+  /** Approves an approval request once, or denies it with a reason. */
+  decideApproval?(approvalId: string, approve: boolean, reason: string): Promise<ApprovalDetails>;
+  teams?(): Promise<Team[]>;
+  /** A Team's newest Workstream posts, oldest first. */
+  workstreamPosts?(teamId: string): Promise<WorkstreamPost[]>;
+  /** The Work Sessions the turns of a Tag's Session started. */
+  workSessions?(tagId: string, sessionId: string): Promise<WorkSession[]>;
+  /** Where a Work Session's delivery is; nothing before it delivered a commit. */
+  workBranch?(work: WorkSession): Promise<WorkBranch | undefined>;
+  /** The commands and tools a Task ran, oldest first. */
+  taskActivity?(taskId: string): Promise<string[]>;
   /**
    * The Gateway and principal this connection acts as. What is cached under one scope is
    * never shown under another.
@@ -191,7 +227,13 @@ export type WatchUpdate =
   /** One of the Tag's notes the caller sees was kept, rewritten, or deleted. */
   | { kind: "memory"; tagId: string }
   /** One of the Tag's Schedules was created, changed, or fired. */
-  | { kind: "schedule"; tagId: string };
+  | { kind: "schedule"; tagId: string }
+  /** An Objective was created or changed: its status, limits, or spend. */
+  | { kind: "objective"; objectiveId: string }
+  /** A Team changed, or its Workstream has a new post. */
+  | { kind: "team"; teamId: string }
+  /** A Task outside a conversation changed: a Work Session's or an Objective's turn. */
+  | { kind: "work"; tagId: string; sessionId: string };
 
 /** One of a Tag's notes: something it keeps of what it cannot look up again. */
 export interface Note {

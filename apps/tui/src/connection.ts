@@ -8,6 +8,8 @@
 import os from "node:os";
 import path from "node:path";
 import {
+  type AddedWorkspace,
+  type ApprovalDetails,
   type CacheKey,
   type Conversation,
   cacheScope,
@@ -15,26 +17,46 @@ import {
   type FollowUpdate,
   type Gateway,
   type HostPhases,
+  type InboxItem,
   LOCAL_GATEWAY,
   type Message,
   type MessagePage,
+  type NetworkLog,
+  type NewObjective,
+  type NewTag,
+  type Note,
+  type Objective,
   type ReadMessages,
+  type Schedule,
+  type ScheduleAction,
   type Tag,
+  type TagActivity,
+  type TagOptions,
   type TaskEvent,
+  type Team,
   type WatchUpdate,
+  type WorkBranch,
+  type WorkDiff,
+  type WorkSession,
+  type WorkstreamPost,
 } from "@supertag/client/model";
 import {
+  addWorkspaceWithCli,
   type CacheScope,
   type CliGateway,
   cliStore,
   type DirectConnection,
+  deliveryDiff,
   desktopStore,
   entryPath,
+  forget,
+  forgetWithCli,
   GatewayState,
   gatewayOrigin,
   type LocalDiscovery,
   loadCliGateways,
   loadProfiles,
+  openUrl,
   readEntry,
   readLocalGateway,
   type Subscriber,
@@ -267,6 +289,23 @@ export class Connections {
     );
     return `saved:${origin}`;
   }
+
+  /**
+   * Forgets a saved Gateway and deletes its cache: one saved with `supertag connect` with
+   * `supertag disconnect`, one saved in the desktop app from the desktop's store.
+   */
+  async forget(entry: GatewayEntry): Promise<void> {
+    if (entry.kind !== "saved") throw "Only a saved Gateway can be forgotten.";
+    const origin = entry.id.replace(/^saved:/u, "");
+    if (entry.source === "cli") await forgetWithCli(this.options.cli, entry.name, this.options.env);
+    else await this.state.clearGateway(origin);
+    await forget(this.cache, origin);
+  }
+
+  /** Adds a folder of this machine as a Workspace of the local services, with `supertag workspace add`. */
+  addFolder(state: string, folder: string): Promise<AddedWorkspace> {
+    return addWorkspaceWithCli(this.options.cli, state, folder, this.options.env);
+  }
 }
 
 type Waiting = { resolve: (id: string) => void; reject: (error: unknown) => void };
@@ -337,6 +376,101 @@ export class TuiGateway implements Gateway {
     this.state.events(await this.ready(), taskId, afterSequence);
   async hostPhases(): Promise<HostPhases> {
     return this.state.hostPhases(await this.ready());
+  }
+
+  // Tags: creating one, and what the palette shows of one
+
+  async tagOptions(): Promise<TagOptions> {
+    return this.state.tagOptions(await this.ready());
+  }
+  async createTag(tag: NewTag): Promise<Tag> {
+    return this.state.createTag(await this.ready(), tag);
+  }
+  /** Whether this connection reaches the local services, which can add a folder as a Workspace. */
+  get local(): boolean {
+    return this.entryId === "local";
+  }
+  /** Adds the folder at `path` as a Workspace of the local services; only Local has them. */
+  async addFolder(folder: string): Promise<AddedWorkspace> {
+    const state = await this.state.localStateOf(await this.ready());
+    return this.connections.addFolder(state, folder);
+  }
+  async notes(tagId: string): Promise<Note[]> {
+    return this.state.notes(await this.ready(), tagId);
+  }
+  async deleteNote(memoryId: string): Promise<Note> {
+    return this.state.deleteNote(await this.ready(), memoryId);
+  }
+  async schedules(tagId: string): Promise<Schedule[]> {
+    return this.state.schedules(await this.ready(), tagId);
+  }
+  async changeSchedule(scheduleId: string, action: ScheduleAction): Promise<Schedule> {
+    return this.state.changeSchedule(await this.ready(), scheduleId, action);
+  }
+  async networkLogs(tagId: string): Promise<NetworkLog[]> {
+    return this.state.networkLogs(await this.ready(), tagId);
+  }
+  async tagActivity(tagId: string): Promise<TagActivity> {
+    return this.state.tagActivity(await this.ready(), tagId);
+  }
+
+  // Objectives, the inbox, Teams, Work Sessions
+
+  async objectives(): Promise<Objective[]> {
+    return this.state.objectives(await this.ready());
+  }
+  async objective(objectiveId: string): Promise<Objective> {
+    return this.state.objective(await this.ready(), objectiveId);
+  }
+  async createObjective(created: NewObjective): Promise<Objective> {
+    return this.state.createObjective(await this.ready(), created);
+  }
+  async messageObjective(objectiveId: string, text: string) {
+    return this.state.messageObjective(await this.ready(), objectiveId, text);
+  }
+  async reviewObjective(objectiveId: string, approved: boolean, feedback: string) {
+    return this.state.reviewObjective(await this.ready(), objectiveId, approved, feedback);
+  }
+  async taskResult(taskId: string) {
+    return this.state.taskResult(await this.ready(), taskId);
+  }
+  async inbox(): Promise<InboxItem[]> {
+    return this.state.inbox(await this.ready());
+  }
+  async approval(approvalId: string): Promise<ApprovalDetails> {
+    return this.state.approval(await this.ready(), approvalId);
+  }
+  async answerQuestion(taskId: string, text: string) {
+    return this.state.answerQuestion(await this.ready(), taskId, text);
+  }
+  async decideApproval(approvalId: string, approve: boolean, reason: string) {
+    return this.state.decideApproval(await this.ready(), approvalId, approve, reason);
+  }
+  async teams(): Promise<Team[]> {
+    return this.state.teams(await this.ready());
+  }
+  async workstreamPosts(teamId: string): Promise<WorkstreamPost[]> {
+    return this.state.workstreamPosts(await this.ready(), teamId);
+  }
+  async workSessions(tagId: string, sessionId: string): Promise<WorkSession[]> {
+    return this.state.workSessions(await this.ready(), tagId, sessionId);
+  }
+  async workBranch(work: WorkSession): Promise<WorkBranch | undefined> {
+    return this.state.workBranch(await this.ready(), work);
+  }
+  async taskActivity(taskId: string): Promise<string[]> {
+    return this.state.taskActivity(await this.ready(), taskId);
+  }
+  /** Where a delivery's diff is computed: the directory the terminal UI was started in. */
+  workDirectory = process.cwd();
+  /** Opens a web address in the browser; tests replace it. */
+  opener: (url: string) => void = openUrl;
+  diff(branch: WorkBranch): Promise<WorkDiff> {
+    return deliveryDiff(this.workDirectory, branch);
+  }
+  /** Opens a pull request in the browser. */
+  open(url: string): void {
+    this.opener(url);
   }
 
   /** An own property, as the follow hook calls it unbound. */

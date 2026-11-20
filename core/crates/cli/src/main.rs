@@ -512,6 +512,13 @@ enum Command {
         #[arg(long, requires = "client_cert_file")]
         client_key_file: Option<PathBuf>,
     },
+    /// Forget a Gateway saved with `supertag connect`: remove it and its credential from this
+    /// device. Its enrolled client stays until an operator revokes it. A Gateway saved in the
+    /// desktop app is removed there.
+    Disconnect {
+        /// The name the Gateway is saved under.
+        name: String,
+    },
     #[command(name = "__codex-adapter", hide = true)]
     CodexAdapter(CodexAdapterArgs),
     /// Codex's executor program on a remote Workspace: carries stdin and stdout to the Attempt's
@@ -1061,6 +1068,17 @@ async fn run(command: Command) -> Result<()> {
                 replace,
             )
             .await?;
+        }
+        Command::Disconnect { name } => {
+            let (store, removed) = profiles::remove(&name)?;
+            ensure!(
+                removed,
+                "no Gateway is saved under {name:?} with supertag connect; a Gateway saved in the desktop app is removed there"
+            );
+            crate::terminal::print_json(&json!({
+                "name": name,
+                "removed_from": store.display().to_string(),
+            }))?;
         }
         Command::AdapterGuardian { .. } => unreachable!("guardian runs outside Tokio"),
         Command::LocalGateway => unreachable!("local discovery runs outside Tokio"),

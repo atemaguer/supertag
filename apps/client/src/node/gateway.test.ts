@@ -646,10 +646,20 @@ it("tells the window which views a Watch change invalidates", () => {
       reason: WatchReason.CHANGED,
     }),
   ).toEqual({ kind: "conversation", tagId: "engineer" });
-  // A surface thread's Task is not a conversation's.
-  expect(
-    change({ kind: WatchKind.TASK, tagId: "engineer", sessionId: "slack:T1/C1/1.0" }),
-  ).toBeUndefined();
+  // A Task outside a conversation (a Work Session's, an Objective's, a surface thread's) is work.
+  expect(change({ kind: WatchKind.TASK, tagId: "engineer", sessionId: "slack:T1/C1/1.0" })).toEqual(
+    { kind: "work", tagId: "engineer", sessionId: "slack:T1/C1/1.0" },
+  );
+  expect(change({ kind: WatchKind.TASK, tagId: "engineer", sessionId: "" })).toBeUndefined();
+  expect(change({ kind: WatchKind.OBJECTIVE, id: "ship", objectiveId: "ship" })).toEqual({
+    kind: "objective",
+    objectiveId: "ship",
+  });
+  expect(change({ kind: WatchKind.WORKSTREAM_POST, id: "p", teamId: "release" })).toEqual({
+    kind: "team",
+    teamId: "release",
+  });
+  expect(change({ kind: WatchKind.TEAM, teamId: "" })).toBeUndefined();
   expect(change({ kind: WatchKind.MEMORY, tagId: "engineer" })).toEqual({
     kind: "memory",
     tagId: "engineer",

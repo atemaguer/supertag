@@ -1,7 +1,8 @@
 /**
  * The performance budgets, on the real screen tree against the in-memory Gateway, in OpenTUI's
  * test renderer (native layout and cell diffing, no terminal write):
- *   keystroke: 30 Tags, the lead's conversation of 300 Markdown turns; one key → committed frame.
+ *   keystroke: 30 Tags, 20 Objectives, 15 inbox items, 3 Teams, the lead's conversation of 300
+ *     Markdown turns; one key → committed frame.
  *     Budget p95 ≤ 8 ms at 250×70.
  *   streaming: the running turn's follow pushes pages of 32 text updates; the longest the event
  *     loop is blocked while a page lands and draws. Budget ≤ 16 ms. Keys typed between pages
@@ -13,6 +14,7 @@
  */
 import { testRender } from "@opentui/react/test-utils";
 import { act } from "react";
+import { InboxItemKind } from "../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/runtime_pb";
 import { App } from "../src/app";
 import { FakeGateway, type FakeTag } from "../test/fake-gateway";
 import { reset, setup } from "../test/harness";
@@ -40,6 +42,27 @@ function gateway(turns: number) {
   }
   for (let i = 1; i < 30; i++)
     fake.addTurn(tags[i]?.tagId as string, "status?", `All good on ${i}.`);
+  fake.objectives = Array.from({ length: 20 }, (_, i) => ({
+    objectiveId: `objective-${i}`,
+    ownerTagId: tags[i % 30]?.tagId as string,
+    outcome: `Ship part ${i} of the plan`,
+    budgetLimitMinor: 30_000n,
+    budgetCurrency: "USD",
+    reportedSpendMinor: BigInt(i * 100),
+    startingTaskId: `start-${i}`,
+  }));
+  fake.inbox = Array.from({ length: 15 }, (_, i) => ({
+    key: `question/${i}`,
+    kind: i % 2 ? InboxItemKind.APPROVAL : InboxItemKind.QUESTION,
+    taskId: `task-q${i}`,
+    objectiveId: `objective-${i}`,
+    question: `Which branch should part ${i} use?`,
+  }));
+  fake.teams = Array.from({ length: 3 }, (_, i) => ({
+    teamId: `team-${i}`,
+    name: `Team ${i}`,
+    memberTagIds: tags.slice(0, 5).map((tag) => tag.tagId),
+  }));
   return fake;
 }
 

@@ -1,8 +1,10 @@
 /**
  * The palette (Ctrl-K, or `/` on an empty message): "Search Tags, conversations, settings…".
  * Tags first, with their Alt-N keys, then commands; typing narrows both by name, letters in
- * order. ↑ ↓ move, Enter runs, Esc closes.
+ * order. ↑ ↓ move, Enter runs, Esc closes. `/goal OUTCOME` typed here (the `/` that opened it
+ * counts) leaves only Create Objective, and Enter sends it to the conversation on screen.
  */
+import { goalOutcome } from "@supertag/client/model";
 import { useState } from "react";
 import { clip } from "./text";
 import { color, type KeyEvent, useKeyboard } from "./ui";
@@ -27,18 +29,31 @@ export function matches(text: string, query: string): boolean {
   return true;
 }
 
+/** The palette item that creates an Objective, which inline `/goal` text selects. */
+export const GOAL_ITEM = "goal";
+
 export function Palette({
   items,
   width,
+  slash = false,
+  onGoal,
   onClose,
 }: {
   items: readonly PaletteItem[];
   width: number;
+  /** `/` on an empty message opened it, so what is typed follows that `/`. */
+  slash?: boolean;
+  /** `/goal OUTCOME` was chosen: send it to the conversation on screen. */
+  onGoal?(outcome: string): void;
   onClose(): void;
 }) {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
-  const shown = items.filter((item) => matches(item.label, query));
+  const goal = goalOutcome(slash && !query.startsWith("/") ? `/${query}` : query);
+  const shown =
+    goal !== undefined
+      ? items.filter((item) => item.id === GOAL_ITEM)
+      : items.filter((item) => matches(item.label, query));
   const selected = Math.min(index, Math.max(0, shown.length - 1));
   useKeyboard((key: KeyEvent) => {
     if (key.name === "escape") onClose();
@@ -70,7 +85,8 @@ export function Palette({
           const item = shown[selected];
           if (item) {
             onClose();
-            item.run();
+            if (item.id === GOAL_ITEM && goal && onGoal) onGoal(goal);
+            else item.run();
           }
         }}
       />
