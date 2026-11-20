@@ -24,6 +24,7 @@ const RECORDED_SECONDS = {
   cursor_runtime: 144,
   crash_durability: 87,
   placement_runtime: 74,
+  memory_eval_runtime: 70,
   tunnel_runtime: 67,
   split_runtime: 50,
   replicas_runtime: 46,

@@ -344,7 +344,12 @@ narrow it, and `--cursor` with the `next_cursor` it returns reads the next page.
 follows one Objective as a timeline until it closes. `supertag metrics` prints counts of Tasks,
 usage, Worker Host capacity, backlogs, and how long recent Task Attempts took from start to a ready
 Workspace, an attached harness, and the harness's first event, and from the harness finishing to
-the result being reported.
+the result being reported. With a Worker Host running on this machine, it also prints how each
+Tag's memory is used there: memories, turns that loaded memory and how much, reads of memory
+files, what turns and daily reviews changed, and what became of proposals. These are counts kept
+by the Worker Host, never memory text; `supertag describe tag TAG` shows one Tag's as
+`memory_use`. [Seeing how memory is used](../reference/coordination.md#seeing-how-memory-is-used)
+lists the counters.
 
 ## Organize Tags
 

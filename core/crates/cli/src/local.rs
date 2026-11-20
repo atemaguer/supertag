@@ -349,6 +349,11 @@ impl Children {
                 &credentials.gateway,
             )
             .env("SUPERTAG_OPERATOR_TOKEN", &credentials.operator);
+        // A test build's Control Plane clock may run ahead, so a daily review falls due at once.
+        #[cfg(feature = "test-fixtures")]
+        if let Some(value) = std::env::var_os("SUPERTAG_TEST_CLOCK_OFFSET_FILE") {
+            plane.env("SUPERTAG_TEST_CLOCK_OFFSET_FILE", value);
+        }
         match &self.database {
             None => {
                 let database = directory.join("runtime.sqlite3");

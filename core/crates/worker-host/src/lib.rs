@@ -8,6 +8,7 @@ pub mod environment;
 mod failures;
 mod local;
 pub mod memory;
+pub mod memory_stats;
 mod worker;
 mod worklet;
 mod workspace_mounts;

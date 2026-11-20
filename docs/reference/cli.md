@@ -65,7 +65,7 @@ Commands:
   input                 Resolve a message whose delivery to a running Task is uncertain
   test                  Check operator settings by sending a sample
   spend                 Report recorded spend by Objective, Tag, or day
-  metrics               Read an operational snapshot: resource and Task counts, usage, Worker Host capacity, and Mailbox and reply backlogs
+  metrics               Read an operational snapshot: resource and Task counts, usage, Worker Host capacity, Mailbox and reply backlogs, and how Tags' memory is used on this machine's Worker Hosts
   get                   Read one resource by kind and ID, or list a kind, as JSON
   describe              Describe one resource in readable text
   delete                Delete one resource by kind and ID
@@ -3573,7 +3573,7 @@ Options:
 ## `supertag metrics`
 
 ```text
-Read an operational snapshot: resource and Task counts, usage, Worker Host capacity, and Mailbox and reply backlogs
+Read an operational snapshot: resource and Task counts, usage, Worker Host capacity, Mailbox and reply backlogs, and how Tags' memory is used on this machine's Worker Hosts
 
 Usage: supertag metrics [OPTIONS]
 

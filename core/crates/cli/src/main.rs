@@ -618,8 +618,8 @@ enum Command {
         #[command(flatten)]
         args: observe::SpendArgs,
     },
-    /// Read an operational snapshot: resource and Task counts, usage, Worker Host capacity, and
-    /// Mailbox and reply backlogs.
+    /// Read an operational snapshot: resource and Task counts, usage, Worker Host capacity,
+    /// Mailbox and reply backlogs, and how Tags' memory is used on this machine's Worker Hosts.
     Metrics {
         #[command(flatten)]
         connection: Connection,

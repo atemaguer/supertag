@@ -4,6 +4,7 @@ mod checkpoints;
 mod commit_reviews;
 mod coordination;
 mod journey;
+mod memory_eval;
 mod partition_calls;
 mod tag_sessions;
 
@@ -792,6 +793,11 @@ async fn main() -> Result<()> {
         result.push_str(&input.text);
     }
     let mut sequence = 2;
+    if let Some(summary) =
+        memory_eval::exercise(&bootstrap, &run, &task, (&mut harness, &mut sequence)).await?
+    {
+        result = summary;
+    }
     if std::env::args().any(|arg| arg == "--progress-fixture") {
         // A structured plan update, then hold the turn open until the test has observed it.
         harness

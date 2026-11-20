@@ -873,6 +873,7 @@ pub async fn describe(connection: Connection, args: DescribeArgs) -> Result<()> 
         }
         return Ok(());
     }
+    let state = crate::local_state_of(&connection)?;
     let (channel, token) = connect_operator(connection).await?;
     if args.kind == Kind::Objective {
         let view = ObjectiveOverviewsClient::new(channel)
@@ -893,7 +894,13 @@ pub async fn describe(connection: Connection, args: DescribeArgs) -> Result<()> 
         }
         return Ok(());
     }
-    let value = fetch(channel, &token, args.kind, args.id).await?;
+    let mut value = fetch(channel, &token, args.kind, args.id.clone()).await?;
+    // How the Tag's memory is used, from the Worker Hosts on this machine: counts only.
+    if args.kind == Kind::Tag
+        && let Some(stores) = memories::local_stats(state.as_deref(), Some(&args.id)).await?
+    {
+        value["memory_use"] = stores;
+    }
     match args.output {
         Output::Json => crate::terminal::print_json(&value)?,
         Output::Text => out!("{}", describe_text(spec(args.kind).title, &value)),

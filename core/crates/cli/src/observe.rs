@@ -89,6 +89,7 @@ pub struct MetricsArgs {
 }
 
 pub async fn metrics(connection: Connection, args: MetricsArgs) -> Result<()> {
+    let state = crate::local_state_of(&connection)?;
     let (channel, token) = connect_operator(connection).await?;
     let snapshot = MetricsClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -96,9 +97,25 @@ pub async fn metrics(connection: Connection, args: MetricsArgs) -> Result<()> {
         .get_metrics(request(GetMetricsRequest {}, &token)?)
         .await?
         .into_inner();
+    // Memory is counted by the Worker Hosts on this machine, never by the Control Plane.
+    let memory = crate::memories::local_stats(state.as_deref(), None).await?;
     match args.output {
-        Output::Json => crate::terminal::print_json(&metrics_json(&snapshot))?,
-        Output::Text => out!("{}{}", metrics_text(&snapshot), admission_text(&snapshot)),
+        Output::Json => {
+            let mut value = metrics_json(&snapshot);
+            if let Some(memory) = &memory {
+                value["memory"] = memory.clone();
+            }
+            crate::terminal::print_json(&value)?
+        }
+        Output::Text => out!(
+            "{}{}{}",
+            metrics_text(&snapshot),
+            admission_text(&snapshot),
+            memory
+                .as_ref()
+                .map(crate::memories::stats_text)
+                .unwrap_or_default()
+        ),
     }
     Ok(())
 }

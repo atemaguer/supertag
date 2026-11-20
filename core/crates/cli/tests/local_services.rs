@@ -2870,6 +2870,36 @@ async fn local_hosts_serve_harness_memory_to_the_cli(database: String) -> Result
     );
     let all = cli(&["get", "memories"])?;
     assert_eq!(all["memories"].as_array().map(Vec::len), Some(3), "{all}");
+    // The host's counters of each store reach `metrics` and `describe tag`, as numbers only.
+    let metrics = cli(&["metrics", "--output", "json"])?;
+    let stores = metrics["memory"].as_array().context("memory counters")?;
+    let mut counted: Vec<(&str, u64)> = stores
+        .iter()
+        .map(|store| {
+            (
+                store["harness"].as_str().unwrap_or_default(),
+                store["memories"].as_u64().unwrap_or_default(),
+            )
+        })
+        .collect();
+    counted.sort();
+    assert_eq!(counted, [("claude-code", 1), ("codex", 2)], "{metrics}");
+    assert!(
+        stores
+            .iter()
+            .all(|store| store["host_id"] == "keeper" && store["shared"] == true)
+    );
+    assert!(!metrics.to_string().contains("squash"), "{metrics}");
+    let described = cli(&["describe", "tag", "lead", "--output", "json"])?;
+    assert_eq!(
+        described["memory_use"].as_array().map(Vec::len),
+        Some(2),
+        "{described}"
+    );
+    assert_eq!(
+        described["memory_use"][0]["loaded"]["lines"], 1,
+        "{described}"
+    );
 
     let deleted = cli(&["delete", "memory", id])?;
     assert_eq!(deleted["memory_id"], id, "{deleted}");

@@ -24,6 +24,12 @@ within the pre-1.0 compatibility policy described in
   like Claude Code's, follows the same rules for Work Session proposals, the daily review, and
   outside events, is listed by `supertag get memories` and the desktop and terminal apps, and
   takes the notes these Tags kept before. A remote Workspace's turn gets none.
+- Each Worker Host counts how a Tag's memory is used, per Tag, harness, and audience, as numbers
+  only: turns that loaded memory and how much of the index (and when it was cut short), reads and
+  edits of memory files reported by the harness's activity, memories written, updated, and
+  deleted by turns and by daily reviews, proposals created, merged, dropped, and expired, and
+  seeds written. `supertag metrics` shows them for the Worker Hosts on this machine, and
+  `supertag describe tag` shows one Tag's as `memory_use`.
 
 ### Changed
 
