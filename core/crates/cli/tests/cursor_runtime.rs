@@ -681,6 +681,8 @@ database_tests! {
     #[tokio::test]
     cursor_streams_scoped_tools_and_resumes_after_services_restart;
     #[tokio::test]
+    cursor_keeps_the_tags_memory_folder_across_tasks;
+    #[tokio::test]
     cursor_cancellation_reaps_native_descendant_and_keeps_prior_checkpoint;
     #[tokio::test]
     cursor_provider_failure_reaches_the_task_result_redacted;
@@ -2135,6 +2137,69 @@ async fn cursor_streams_scoped_tools_and_resumes_after_services_restart(
     assert_eq!(
         std::fs::read_to_string(fixture.source.join("workspace.txt"))?,
         "initial-content\n"
+    );
+    runtime.stop().await
+}
+
+/// Cursor keeps no memory of its own, so its Worker Host keeps a folder in Claude Code's format for
+/// the Tag. A read-only turn writes it with the local file tools, which reach that folder and no
+/// more; the host merges it into its store and derives its records; a turn in another Session
+/// loads its index and reads the memory on demand.
+async fn cursor_keeps_the_tags_memory_folder_across_tasks(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let fixture = Fixture::prepare(directory.path()).await?;
+    let credentials = Credentials::new();
+    let mut runtime = Runtime::start(&fixture.root, &credentials, &database).await?;
+    runtime
+        .tag(&fixture, TAG, HarnessKind::Cursor, &["files:read"])
+        .await?;
+    let first = runtime.submit(TAG, "memory").await?;
+    worker_finished(runtime.worker(&fixture, "memory", false)?, &fixture).await?;
+    runtime.assert_success(&first.task_id, "memory").await?;
+    let tag = format!(
+        "{:x}",
+        <sha2::Sha256 as sha2::Digest>::digest(TAG.as_bytes())
+    );
+    let harness = fixture
+        .root
+        .join(format!("host-artifacts/tags/{tag}/native-memory/cursor"));
+    let scopes: Vec<_> = std::fs::read_dir(&harness)
+        .with_context(|| format!("no Cursor memory store in {}", harness.display()))?
+        .collect::<std::io::Result<_>>()?;
+    ensure!(scopes.len() == 1, "one audience's store: {scopes:?}");
+    let store = scopes[0].path();
+    let current = store.join("current");
+    ensure!(
+        std::fs::read_to_string(current.join("MEMORY.md"))?
+            == "- [Fixture memory](feedback_fixture.md) — kept by Cursor\n"
+    );
+    ensure!(!current.join("denied.txt").exists() && !store.join("outside.md").exists());
+    let records: Value = serde_json::from_slice(&std::fs::read(store.join("records.json"))?)?;
+    let records = records["records"].as_array().context("records")?;
+    ensure!(
+        records.len() == 1
+            && records[0]["harness"] == "cursor"
+            && records[0]["native_id"] == "cursor:feedback_fixture.md"
+            && records[0]["kind"] == "feedback"
+            && records[0]["trust"] == "trusted",
+        "{records:?}"
+    );
+    let second = runtime
+        .submit_in(TAG, "another-session", "memory-recall")
+        .await?;
+    worker_finished(runtime.worker(&fixture, "memory-recall", false)?, &fixture).await?;
+    runtime
+        .assert_success(&second.task_id, "memory-recall")
+        .await?;
+    let traced: Vec<Value> = fixture
+        .trace()?
+        .into_iter()
+        .filter(|call| call["type"] == "memory")
+        .collect();
+    ensure!(traced.len() == 2, "{traced:?}");
+    ensure!(
+        traced[0]["memory"] != traced[1]["memory"],
+        "each Attempt has its own copy"
     );
     runtime.stop().await
 }

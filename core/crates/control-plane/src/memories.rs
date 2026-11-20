@@ -1,6 +1,7 @@
 //! A Tag's memory and the daily review that keeps it current.
 //!
-//! A Tag's memory is its harness's own (Claude Code's auto-memory, Codex's memories folder),
+//! A Tag's memory is its harness's own (Claude Code's auto-memory, Codex's memories folder, or
+//! for OpenCode and Cursor, which keep none, a folder in Claude Code's format),
 //! which Worker Hosts keep, one store per Tag, harness, and audience ([`crate::native_memory`]).
 //! The Control Plane never holds it. It decides which turns' changes are the Tag's own
 //! ([`trusted_in`]): a root turn or the review, when an outside event did not start it. Any other

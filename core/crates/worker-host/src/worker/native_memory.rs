@@ -1,5 +1,7 @@
 //! A Tag's harness-native memory on this Worker Host: the files a harness keeps itself, such as
-//! Claude Code's auto-memory.
+//! Claude Code's auto-memory. OpenCode and Cursor keep no memory of their own, so the host keeps a
+//! folder in Claude Code's format for them ([`claude_format`]), which their adapters load into
+//! each turn and let the harness edit with its file tools, confined to the folder.
 //!
 //! One store per Tag, harness, and scope (the Control Plane's grant: shared, or one person's)
 //! lives in the host's artifact storage, which every lane of the host shares, at
@@ -47,8 +49,20 @@ pub(crate) fn harness_directory(harness: HarnessKind) -> Option<&'static str> {
     match harness {
         HarnessKind::ClaudeCode => Some("claude-code"),
         HarnessKind::Codex => Some("codex"),
+        HarnessKind::Opencode => Some("opencode"),
+        HarnessKind::Cursor => Some("cursor"),
         _ => None,
     }
+}
+
+/// Every harness directory a store may be in.
+pub(crate) const HARNESS_DIRECTORIES: &[&str] = &["claude-code", "codex", "opencode", "cursor"];
+
+/// Whether a harness's memory folder is in Claude Code's format: a `MEMORY.md` index and one
+/// Markdown file per memory. Claude Code's own, and the folder the host keeps for OpenCode and
+/// Cursor, which keep no memory of their own.
+pub(crate) fn claude_format(harness: &str) -> bool {
+    matches!(harness, "claude-code" | "opencode" | "cursor")
 }
 
 pub(crate) fn component(kind: &str, value: &str) -> Result<()> {
@@ -144,9 +158,9 @@ fn one_line(text: &str, limit: usize) -> String {
     short
 }
 
-/// `files` with `seeds` written into them as `harness`'s own memory: a Claude Code memory file
-/// each, linked from `MEMORY.md`, or a Codex ad hoc note each. A seed whose file is there already
-/// is left as it is.
+/// `files` with `seeds` written into them as `harness`'s own memory: a memory file each, linked
+/// from `MEMORY.md`, in a folder in Claude Code's format, or a Codex ad hoc note each. A seed
+/// whose file is there already is left as it is.
 pub(crate) fn seeded(harness: &str, files: &Files, seeds: &[NativeMemorySeed]) -> Files {
     let mut files = files.clone();
     for seed in seeds {
@@ -156,7 +170,7 @@ pub(crate) fn seeded(harness: &str, files: &Files, seeds: &[NativeMemorySeed]) -
             continue;
         }
         match harness {
-            "claude-code" => {
+            harness if claude_format(harness) => {
                 let path = format!("supertag_note_{name}.md");
                 if files.contains_key(&path) {
                     continue;

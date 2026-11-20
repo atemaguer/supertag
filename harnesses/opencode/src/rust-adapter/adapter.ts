@@ -11,6 +11,7 @@ import {
   type HarnessRun,
   harnessClient,
   memoryContext,
+  memoryFolder,
   receipt,
   redact,
   resolveOutsideDirectories,
@@ -264,6 +265,8 @@ export async function nativeRequest(
   reread = false,
   /** A remote Workspace: the host directory is empty, and every tool is an MCP server's. */
   remote = false,
+  /** The Tag's memory folder ([`openCodeMemory`]), which OpenCode may always read and edit. */
+  memory?: string,
 ) {
   const environment = configuration.environment ?? process.env;
   const scratchPath = environment["SUPERTAG_ADAPTER_STATE_DIRECTORY"] ?? "";
@@ -405,6 +408,7 @@ export async function nativeRequest(
                   copies,
                   workspace,
                   scope,
+                  memory,
                 ),
                 provider,
                 proxyUrl,
@@ -434,6 +438,23 @@ async function workspaceCopies(task: Task): Promise<OpenCodeCopy[]> {
     copies.push({ destination, readWrite });
   }
   return copies;
+}
+
+/**
+ * The Tag's memory folder for this turn, which the Worker Host keeps because OpenCode keeps no
+ * memory of its own, or `undefined` when it granted none. A remote Workspace's turn gets none:
+ * every built-in tool is off there, so OpenCode could not reach the folder on this host. A folder
+ * whose access the adapter cannot confine refuses the turn.
+ */
+export async function openCodeMemory(environment: NodeJS.ProcessEnv, remote: boolean) {
+  if (remote) return undefined;
+  try {
+    return await memoryFolder(environment, environment["SUPERTAG_WORKSPACE_DIRECTORY"] ?? "");
+  } catch {
+    throw new SafeOpenCodeFailure(
+      "OpenCode cannot confine the Tag's memory folder. Native execution did not start.",
+    );
+  }
 }
 
 function coordinationSecrets(tools: readonly OpenCodeMcpTool[]): string[] {
@@ -487,6 +508,10 @@ export async function runAdapter(
     const { model } = taskModel(run, configuration);
     const cancellation = AbortSignal.any([signal, AbortSignal.timeout(configuration.timeoutMs)]);
     cancellation.throwIfAborted();
+    const memory = await openCodeMemory(
+      configuration.environment ?? process.env,
+      run.remoteWorkspace,
+    );
     const native = await nativeRequest(
       task,
       model,
@@ -494,9 +519,12 @@ export async function runAdapter(
       run.history,
       [bootstrap.token],
       cancellation,
-      [memoryContext(run), tagPortfolio(run)].filter(Boolean).join("\n\n"),
+      [memoryContext(run, memory ? "opencode" : undefined), memory?.context, tagPortfolio(run)]
+        .filter(Boolean)
+        .join("\n\n"),
       (run.coordination?.mayReadTagSessions || run.coordination?.mayReadOwnSession) ?? false,
       run.remoteWorkspace,
+      memory?.directory,
     );
     secrets.push(...native.secrets);
     const coordination = await startCoordination(bridge, run, {

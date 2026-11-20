@@ -9,6 +9,7 @@ import {
   fileScopeRefusal,
   harnessClient,
   memoryContext,
+  memoryFolder,
   type ObjectiveSignal,
   receipt,
   redact,
@@ -181,6 +182,17 @@ export async function runAdapter(
     if (invalidModel) throw new Error("Cursor model is outside the accepted policy");
 
     secrets.push(apiKey);
+    // Cursor keeps no memory of its own; the Worker Host keeps a folder for it, which only the
+    // local file tools reach. A folder they cannot confine refuses the turn.
+    const memory = run.remoteWorkspace
+      ? undefined
+      : await memoryFolder(process.env, process.env["SUPERTAG_WORKSPACE_DIRECTORY"] ?? "").catch(
+          () => {
+            throw new CursorProtocolError(
+              "Cursor cannot confine the Tag's memory folder. Native execution did not start.",
+            );
+          },
+        );
     const context = await createWorkspace(
       task.allowedActions,
       configuration.timeoutMs,
@@ -194,6 +206,7 @@ export async function runAdapter(
         : undefined,
       // A remote Workspace's copies are in its sandbox, reached through the remote tools.
       run.remoteWorkspace ? [] : (task.workspace?.mounts ?? []),
+      memory?.directory,
     );
     const { executor, home, nativeWorkspace, runtime, storeDirectory, workspace } = context;
     const workspaceMode = run.remoteWorkspace ? "remote" : "local";
@@ -232,7 +245,8 @@ export async function runAdapter(
           CURSOR_WORKER_POLICY,
           safeText(task.instructions, secrets),
           TURN_GUIDANCE,
-          memoryContext(run),
+          memoryContext(run, memory ? "cursor" : undefined),
+          memory ? safeText(memory.context, secrets) : "",
           safeText(tagPortfolio(run), secrets),
           shared
             ? "Use paths relative to the fixed shared root in the admitted file tools."

@@ -71,6 +71,9 @@ it("says whose harness keeps a memory, who sees it, and whether it waits for rev
   expect(memoryCaption(memory("c", { status: "proposed", trust: "proposed-only" }), now)).toMatch(
     /^Codex · fact · Shared · waits for the daily memory review · kept /,
   );
+  // OpenCode and Cursor keep the folder the Worker Host keeps for them.
+  expect(memoryCaption(memory("d", { harness: "opencode" }), now)).toMatch(/^OpenCode · fact /);
+  expect(memoryCaption(memory("e", { harness: "cursor" }), now)).toMatch(/^Cursor · fact /);
 });
 
 it("lists the Tag's memory on this Mac, marks proposals, and deletes one", async () => {

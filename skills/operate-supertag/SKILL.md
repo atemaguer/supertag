@@ -80,7 +80,8 @@ this thread; `supertag get schedules` lists them. See
 [Schedules](../../docs/reference/coordination.md#schedules).
 
 A Tag keeps a [Memory](../../docs/reference/coordination.md#memory) of what a person tells it to
-remember: its harness's own (Claude Code's auto-memory, Codex's notes), read from the Worker Hosts
+remember: its harness's own (Claude Code's auto-memory, Codex's notes, or the folder the Worker
+Host keeps for OpenCode and Cursor), read from the Worker Hosts
 on this machine, never through the Control Plane. `supertag get memories --tag TAG` lists it, with
 Work Session proposals marked `"status": "proposed"`, and `supertag delete memory ID` removes one
 (IDs start `hmem_`); to change one, tell the Tag.

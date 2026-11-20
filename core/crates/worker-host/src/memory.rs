@@ -6,8 +6,9 @@
 //! model call, and rebuilt from them whenever it is missing or older than the files. Only what
 //! the files can't say is lost with it: which turn last changed each memory, and when.
 //!
-//! - Claude Code: each Markdown file but `MEMORY.md` is a memory; its frontmatter gives its
-//!   title, description, and type. A line of `MEMORY.md` that links no file is a memory too.
+//! - Claude Code, and the folder in its format the host keeps for OpenCode and Cursor: each
+//!   Markdown file but `MEMORY.md` is a memory; its frontmatter gives its title, description,
+//!   and type. A line of `MEMORY.md` that links no file is a memory too.
 //! - Codex: each ad hoc note (`extensions/ad_hoc/notes/`) is a memory, and each bullet or
 //!   paragraph of `memory_summary.md`, typed by its heading. Task groups (`MEMORY.md`), rollout
 //!   summaries, and skills are Codex's own working files and are not listed.
@@ -55,7 +56,7 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(20);
 /// What starts a harness memory's ID; a note's starts `mem_`.
 pub const ID_PREFIX: &str = "hmem_";
 
-/// One store: its Tag, harness directory (`claude-code`, `codex`), and scope (`shared`, or
+/// One store: its Tag, harness directory (`claude-code`, `codex`, `opencode`, `cursor`), and scope (`shared`, or
 /// `person-` and a digest of the person's principal).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct StoreKey {
@@ -123,7 +124,7 @@ pub struct Record {
     /// `hmem_` and 24 hex digits, from its Tag, harness, scope, and native ID.
     pub memory_id: String,
     pub tag_id: String,
-    /// `claude-code` or `codex`.
+    /// `claude-code`, `codex`, `opencode`, or `cursor`.
     pub harness: String,
     /// `shared`, or `person-` and a digest of the person's principal.
     pub scope: String,
@@ -363,7 +364,8 @@ fn claude_kind(kind: Option<&String>) -> Kind {
     }
 }
 
-fn claude_code(files: &Files) -> Vec<Found> {
+/// The memories of a folder in Claude Code's format, kept by `harness`.
+fn claude_code(harness: &str, files: &Files) -> Vec<Found> {
     let index = files
         .get("MEMORY.md")
         .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
@@ -378,7 +380,7 @@ fn claude_code(files: &Files) -> Vec<Found> {
         let (fields, body) = frontmatter(&text);
         let link = links.get(path);
         found.push(Found {
-            native_id: format!("claude-code:{path}"),
+            native_id: format!("{harness}:{path}"),
             path: path.clone(),
             title: fields
                 .get("name")
@@ -396,10 +398,7 @@ fn claude_code(files: &Files) -> Vec<Found> {
     }
     // A memory written straight into the index, linking no file.
     let lines = blocks(&index, |line| index_link(line).is_some());
-    for (block, native_id) in lines
-        .iter()
-        .zip(block_ids("claude-code", "MEMORY.md", &lines))
-    {
+    for (block, native_id) in lines.iter().zip(block_ids(harness, "MEMORY.md", &lines)) {
         found.push(Found {
             native_id,
             path: "MEMORY.md".into(),
@@ -478,8 +477,8 @@ fn codex(files: &Files) -> Vec<Found> {
 /// The memories in a harness's files. Never a model call.
 fn read(harness: &str, files: &Files) -> Vec<Found> {
     match harness {
-        "claude-code" => claude_code(files),
         "codex" => codex(files),
+        harness if native_memory::claude_format(harness) => claude_code(harness, files),
         _ => vec![],
     }
 }
@@ -856,7 +855,7 @@ fn load_all(store: &Path, key: &StoreKey) -> Result<Vec<Record>> {
 fn stores_of(storage: &Path, tag: &str) -> Result<Vec<(PathBuf, StoreKey)>> {
     let root = crate::worklet::checkpoints::tag_directory(storage, tag).join("native-memory");
     let mut stores = vec![];
-    for harness in ["claude-code", "codex"] {
+    for harness in native_memory::HARNESS_DIRECTORIES {
         let entries = match fs::read_dir(root.join(harness)) {
             Ok(entries) => entries,
             Err(error) if error.kind() == ErrorKind::NotFound => continue,
@@ -874,7 +873,7 @@ fn stores_of(storage: &Path, tag: &str) -> Result<Vec<(PathBuf, StoreKey)>> {
                 entry.path(),
                 StoreKey {
                     tag: tag.to_owned(),
-                    harness: harness.to_owned(),
+                    harness: (*harness).to_owned(),
                     scope,
                 },
             ));
@@ -898,7 +897,7 @@ fn stores(storage: &Path, tag: Option<&str>) -> Result<Vec<(PathBuf, StoreKey)>>
     let mut tags = BTreeSet::new();
     for entry in entries {
         let root = entry?.path().join("native-memory");
-        for harness in ["claude-code", "codex"] {
+        for harness in native_memory::HARNESS_DIRECTORIES {
             let Ok(scopes) = fs::read_dir(root.join(harness)) else {
                 continue;
             };
@@ -1002,7 +1001,7 @@ fn without(files: &Files, record: &Record) -> Result<Files> {
             "{} is no longer in the memory folder",
             record.path
         );
-        if record.harness == "claude-code"
+        if native_memory::claude_format(&record.harness)
             && let Some(index) = files.get("MEMORY.md")
         {
             let index = String::from_utf8_lossy(index).into_owned();
@@ -1311,11 +1310,14 @@ mod tests {
 
     #[test]
     fn claude_code_files_and_index_lines_are_records() {
-        let found = claude_code(&files(&[
-            ("MEMORY.md", CLAUDE_INDEX),
-            ("feedback_squash.md", SQUASH),
-            ("reference_deploys.md", DEPLOYS),
-        ]));
+        let found = claude_code(
+            "claude-code",
+            &files(&[
+                ("MEMORY.md", CLAUDE_INDEX),
+                ("feedback_squash.md", SQUASH),
+                ("reference_deploys.md", DEPLOYS),
+            ]),
+        );
         assert_eq!(found.len(), 3, "{found:#?}");
         let squash = found
             .iter()
@@ -1894,7 +1896,9 @@ mod tests {
             ],
             ..grant()
         };
-        for harness in ["claude-code", "codex"] {
+        // OpenCode and Cursor keep none of their own: the seeds go into the folder the host keeps
+        // for them, as Claude Code's.
+        for harness in ["claude-code", "codex", "opencode", "cursor"] {
             let turn = native_memory::Prepared::prepare(
                 (dir.path(), dir.path()),
                 "tag",
@@ -1949,6 +1953,16 @@ mod tests {
             "{index}"
         );
         assert!(!index.contains("supertag_note_mem_a.md"), "{index}");
+        for folder in ["opencode", "cursor"] {
+            let current = crate::worklet::checkpoints::tag_directory(dir.path(), "tag")
+                .join(format!("native-memory/{folder}/shared/current"));
+            assert_eq!(
+                fs::read_to_string(current.join("supertag_note_mem_b.md"))?,
+                file,
+                "{folder}"
+            );
+            assert_eq!(fs::read_to_string(current.join("MEMORY.md"))?, index);
+        }
         let codex = crate::worklet::checkpoints::tag_directory(dir.path(), "tag")
             .join("native-memory/codex/shared/current/extensions/ad_hoc/notes");
         assert!(
@@ -1956,6 +1970,134 @@ mod tests {
                 .join("2025-11-13T02-13-20-supertag-note-mem_b.md")
                 .is_file()
         );
+        Ok(())
+    }
+
+    /// OpenCode and Cursor keep no memory of their own: the host keeps a folder in Claude Code's
+    /// format for each, merges it back as Claude Code's, lists it with the same reader, deletes
+    /// from it, and keeps a Work Session turn's changes as proposals.
+    #[test]
+    fn opencode_and_cursor_keep_a_claude_format_folder_like_claude_codes() -> Result<()> {
+        for harness in ["opencode", "cursor"] {
+            let dir = tempfile::tempdir()?;
+            let prepare = |attempt: &str| {
+                native_memory::Prepared::prepare(
+                    (dir.path(), dir.path()),
+                    "tag",
+                    harness,
+                    attempt,
+                    &grant(),
+                )
+            };
+            let writer = |attempt: &str, session: &str, trusted| Writer {
+                task_id: format!("task-{attempt}"),
+                session_id: session.into(),
+                attempt_id: attempt.into(),
+                trusted: Some(trusted),
+            };
+            let first = prepare("attempt-1")?;
+            fs::write(first.working_directory().join("MEMORY.md"), CLAUDE_INDEX)?;
+            fs::write(first.working_directory().join("feedback_squash.md"), SQUASH)?;
+            fs::write(
+                first.working_directory().join("reference_deploys.md"),
+                DEPLOYS,
+            )?;
+            assert_eq!(
+                first
+                    .finish(Some(writer("attempt-1", "s1", true)))?
+                    .revision,
+                1
+            );
+
+            // Two parallel turns change the same memory and each add an index line: the later
+            // keeps its text, the earlier's stays beside it, and the index has both lines.
+            let (left, right) = (prepare("attempt-left")?, prepare("attempt-right")?);
+            for (turn, word, line) in [
+                (&left, "left", "- [Left](user_left.md) — left\n"),
+                (&right, "right", "- [Right](user_right.md) — right\n"),
+            ] {
+                let work = turn.working_directory();
+                fs::write(
+                    work.join("feedback_squash.md"),
+                    SQUASH.replace("bisect", word),
+                )?;
+                fs::write(work.join("MEMORY.md"), format!("{CLAUDE_INDEX}{line}"))?;
+                fs::write(
+                    work.join(format!("user_{word}.md")),
+                    format!("---\nname: {word}\ntype: user\n---\n{word} side\n"),
+                )?;
+            }
+            left.finish(Some(writer("attempt-left", "s2", true)))?;
+            let summary = right.finish(Some(writer("attempt-right", "s3", true)))?;
+            assert_eq!(summary.revision, 3);
+            let current = crate::worklet::checkpoints::tag_directory(dir.path(), "tag")
+                .join(format!("native-memory/{harness}/shared/current"));
+            assert!(fs::read_to_string(current.join("feedback_squash.md"))?.contains("right"));
+            assert!(
+                fs::read_to_string(current.join("feedback_squash.conflict-attempt-.md"))?
+                    .contains("left"),
+                "the conflicting side is kept as NAME.conflict-ATTEMPT.md"
+            );
+            let index = fs::read_to_string(current.join("MEMORY.md"))?;
+            assert!(
+                index.contains("(user_left.md)") && index.contains("(user_right.md)"),
+                "{index}"
+            );
+
+            // The A1 reader lists the folder as the harness's own memory.
+            let listed = list(dir.path(), Some("tag"), None)?;
+            assert!(listed.iter().all(|record| record.harness == harness));
+            let squash = listed
+                .iter()
+                .find(|record| record.path == "feedback_squash.md")
+                .unwrap();
+            assert_eq!(squash.native_id, format!("{harness}:feedback_squash.md"));
+            assert_eq!(
+                (squash.kind, squash.title.as_str()),
+                (Kind::Feedback, "Prefer squash merges")
+            );
+            assert_eq!(squash.trust, Some(Trust::Trusted));
+            assert_eq!(squash.provenance.as_ref().unwrap().session_id, "s3");
+            let left_record = listed
+                .iter()
+                .find(|record| record.path == "user_left.md")
+                .unwrap();
+            assert_eq!(left_record.kind, Kind::Preference);
+            assert!(
+                listed.iter().any(|record| record
+                    .native_id
+                    .starts_with(&format!("{harness}:MEMORY.md#"))
+                    && record.title == "The staging database is read-only on Fridays."),
+                "an index line that links no file is a memory"
+            );
+
+            // Deleting removes the file and its index line.
+            delete(dir.path(), &left_record.memory_id, (None, None), false)?;
+            assert!(!current.join("user_left.md").exists());
+            assert!(!fs::read_to_string(current.join("MEMORY.md"))?.contains("user_left.md"));
+
+            // A Work Session turn leaves the folder as it was and proposes what it wrote.
+            let work = prepare("attempt-w")?;
+            fs::write(work.working_directory().join("project_ci.md"), DEPLOYS)?;
+            let before = fs::read_to_string(current.join("MEMORY.md"))?;
+            work.finish(Some(writer("attempt-w", "work/abc", false)))?;
+            assert!(!current.join("project_ci.md").exists());
+            assert_eq!(fs::read_to_string(current.join("MEMORY.md"))?, before);
+            let proposed: Vec<Record> = list(dir.path(), Some("tag"), None)?
+                .into_iter()
+                .filter(|record| record.status == Status::Proposed)
+                .collect();
+            assert_eq!(proposed.len(), 1, "{proposed:#?}");
+            assert_eq!(proposed[0].harness, harness);
+            assert_eq!(
+                proposed[0].provenance.as_ref().unwrap().session_id,
+                "work/abc"
+            );
+            let review = prepare("attempt-r")?;
+            let (section, shown) = review.review_proposals(true)?;
+            assert_eq!(shown, [proposed[0].memory_id.clone()]);
+            assert!(section.contains("Deploys run from the ops repository."));
+        }
         Ok(())
     }
 }

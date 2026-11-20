@@ -100,7 +100,8 @@ reasoning; the recap and `read_turn` recover what matters.
 
 A Tag also keeps a memory: what a person told it to remember, corrections, decisions and their
 reasons, and pointers to where things live. It is the memory its harness keeps itself, such as
-Claude Code's auto-memory, which the Worker Host keeps for the Tag. What a person's conversation
+Claude Code's auto-memory, which the Worker Host keeps for the Tag; for OpenCode and Cursor, which
+keep none of their own, the Worker Host keeps a folder in the same format. What a person's conversation
 keeps stays private to that person. A Work Session's own turn can only propose changes. Once a
 day, after enough work, the Tag rereads its shared Sessions in a quiet review turn, corrects its
 memory against them, and merges or drops what was proposed. People list and delete memories on

@@ -629,8 +629,9 @@ A Tag's memory is what it keeps of what it cannot look up again: a person's pref
 corrections, decisions and their reasons, and pointers to where things live. It is the memory its
 harness, the coding agent that runs its turns, keeps itself. Claude Code's auto-memory, for example, is a folder
 of Markdown files with a `MEMORY.md` index, which Claude Code reads at the start of each turn and
-updates with its file tools. The Tag's Sessions stay the record; memory is a convenience on top of
-them. The Tag's own instructions still rule.
+updates with its file tools. OpenCode and Cursor keep no memory of their own, so the Worker Host
+keeps a folder in the same format for them. The Tag's Sessions stay the record; memory is a
+convenience on top of them. The Tag's own instructions still rule.
 
 Every turn, a Work Session's own turns included, on every harness, starts with one short paragraph
 on how its memory works: where it is, who sees it, whether this turn's changes are the Tag's own,
@@ -648,9 +649,10 @@ hears that it keeps none.
   issue or pull request may hold text someone outside wrote. Otherwise, asking the Tag for work
   and teaching it are the same trust. Anyone on a surface location's `allowed-users` may do both;
   the Gateway drops everyone else's messages before the Control Plane sees them.
-- **Which harnesses.** Claude Code and Codex keep memory under SuperTag; OpenCode and Cursor keep
-  none on the Worker Host yet. Only the Tag's turns on the same harness share it: a Work Session on
-  another harness doesn't see it yet.
+- **Which harnesses.** Claude Code and Codex keep their own memory under SuperTag, and OpenCode
+  and Cursor keep the folder the Worker Host keeps for them; OpenAI Agents and custom adapters keep
+  none yet. Only the Tag's turns on the same harness share it: a Work Session on another harness
+  doesn't see it yet.
 
 ### The daily review
 
@@ -702,9 +704,9 @@ manifest) keeps no memory and never reviews.
   objects a turn wrote but never kept, once that turn has ended and an hour has passed since it
   wrote them. A Work Session's changes to memory on a Volume are kept as the Tag's own for now.
 
-### Claude Code and Codex memory
+### Memory on each harness
 
-Claude Code and Codex keep their [memory](#memory) this way:
+Each harness keeps its [memory](#memory) this way:
 
 - **Claude Code** keeps its auto-memory folder. A read-only turn may still write to its memory
   folder, and nowhere else. The folder belongs to the store, not to the checkout, so a turn in
@@ -726,6 +728,19 @@ Claude Code and Codex keep their [memory](#memory) this way:
   summary without searching. Codex doesn't report the consolidation's tokens, so a Codex review
   turn is reported unpriced, with only its own tokens counted. Codex doesn't run in remote
   Workspaces.
+- **OpenCode and Cursor** keep no memory of their own, so the Worker Host keeps a folder for each
+  in Claude Code's format: a `MEMORY.md` index and one Markdown file per memory, whose frontmatter
+  gives its `name`, `description`, and `type` (`user`, `feedback`, `project`, or `reference`).
+  Each turn is told where the folder is, with the first 200 lines or 25 KB of `MEMORY.md` as the
+  turn started; it reads any other file there when it needs it, and keeps the folder with its file
+  tools. Those tools may always read and write the folder, even in a read-only turn such as the
+  daily review, and reach nothing more than the Task's actions allow: OpenCode's permissions add
+  only the folder (as an outside directory it may read and edit), and Cursor's file tools,
+  SuperTag's own, add it as one more root. A folder whose access the adapter can't confine, such as
+  one that isn't private to the Worker Host's user, overlaps the Workspace, or has a wildcard
+  character in its path, stops the turn before the harness starts. The folder merges back,
+  conflicts and all, as Claude Code's does. A turn in a remote Workspace gets no memory folder:
+  OpenCode's and Cursor's file tools run in the sandbox there, which never reaches it.
 
 `supertag describe tag` lists the copies Worker Hosts hold (`native_memory`), and
 `supertag delete memory --tag TAG` drops all of them: the Worker Hosts on this machine delete
@@ -737,8 +752,9 @@ Tasks.
 A Tag's [memory](#memory) is read on the machine whose Worker Host keeps it. The Worker Host keeps
 one record for each memory beside each store, read from the harness's own files with no model
 call, and rebuilds the records from the files whenever they are missing or older. In Claude Code's
-folder, each Markdown file but `MEMORY.md` is a memory, with the title, description, and type its
-frontmatter names, and so is each line of `MEMORY.md` that links no file. In Codex's folder, each
+folder, and the folder OpenCode and Cursor keep, each Markdown file but `MEMORY.md` is a memory,
+with the title, description, and type its frontmatter names, and so is each line of `MEMORY.md`
+that links no file. In Codex's folder, each
 note it saved (`extensions/ad_hoc/notes/`) is a memory, and so is each bullet or paragraph of its
 summary (`memory_summary.md`). Codex's task groups (`MEMORY.md`), rollout summaries, and skills
 are its own working files and are not listed. Each proposal is listed beside the store's own
@@ -761,7 +777,7 @@ serves its records to programs of the same user on the same machine, over a sock
 directory (`memory.sock`, readable only by that user). `supertag get memories` lists them, and
 `--tag TAG` one Tag's. `supertag describe memory ID` and `supertag get memory ID` read one, and
 `supertag delete memory ID` deletes it: the host removes it from the harness's files (a file, and
-its line in Claude Code's `MEMORY.md`, or one bullet of Codex's summary) as the store's next
+its line in `MEMORY.md`, or one bullet of Codex's summary) as the store's next
 revision, so a turn that started earlier keeps it only if that turn changed it. Deleting a
 proposal drops it before any review sees it. The desktop app shows a Tag's memory in the Tag's
 details panel, opened from the Tag's name above the conversation, and the terminal app in its

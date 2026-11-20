@@ -20,6 +20,7 @@ import { openCodePatterns, openCodePermissions, runOpenCode } from "./src/index.
 import {
   failureResult,
   nativeRequest,
+  openCodeMemory,
   taskModel,
   withProviderBaseUrl,
 } from "./src/rust-adapter/adapter.js";
@@ -767,4 +768,99 @@ it("points only the Task's provider at the Worker Host's provider proxy", () => 
     share: "disabled",
     provider: { anthropic: { options: { baseURL: "http://127.0.0.1:4100/abc/v1" } } },
   });
+});
+
+it("lets OpenCode always read and edit the Tag's memory folder, and nothing more", () => {
+  const memory = "/state/native-memory-attempts/attempt-a/work";
+  const inMemory = [
+    "../state/native-memory-attempts/attempt-a/work/user_role.md",
+    `${memory}/MEMORY.md`,
+  ];
+  // A read-only Permission Set, as the daily review runs: only the memory folder is writable.
+  const reading = openCodePermissions(["files:read"], [], "/work", undefined, memory);
+  for (const path of inMemory) expect(decide(reading.edit, path)).toBe("allow");
+  expect(decide(reading.edit, "src/main.rs")).toBe("deny");
+  expect(decide(reading.edit, `${memory}/.git/config`)).toBe("deny");
+  expect(reading.read).toBe("allow");
+  expect(decide(reading.external_directory, `${memory}/*`)).toBe("allow");
+  expect(decide(reading.external_directory, "/etc/*")).toBe("deny");
+  // No file actions at all: the memory folder is still readable and editable, nothing else.
+  const none = openCodePermissions([], [], "/work", undefined, memory);
+  for (const path of inMemory) {
+    expect(decide(none.read, path)).toBe("allow");
+    expect(decide(none.edit, path)).toBe("allow");
+  }
+  expect(decide(none.read, "src/main.rs")).toBe("deny");
+  expect(decide(none.edit, "src/main.rs")).toBe("deny");
+  expect(none.glob).toBe("deny");
+  // With files:write the Workspace stays as the Task allows, and the folder is editable too.
+  const writing = openCodePermissions(["files:read", "files:write"], [], "/work", noScope, memory);
+  expect(decide(writing.edit, inMemory[0] as string)).toBe("allow");
+  expect(decide(writing.edit, "src/main.rs")).toBe("allow");
+  // Without a memory folder nothing changes.
+  expect(openCodePermissions(["files:read"]).edit).toBe("deny");
+  // A folder path a pattern can't name exactly is refused.
+  expect(() => openCodePermissions(["files:read"], [], "/work", undefined, "/state/*")).toThrow(
+    "OpenCode cannot confine an outside directory",
+  );
+});
+
+it("loads the memory folder's index into the turn and refuses a folder it cannot confine", async () => {
+  const { root, workspace, environment } = await sandbox();
+  const memory = join(root, "memory");
+  await mkdir(memory, { mode: 0o700 });
+  const lines = Array.from({ length: 250 }, (_, line) => `- line ${line}`).join("\n");
+  await writeFile(
+    join(memory, "MEMORY.md"),
+    `- [Squash merges](feedback_squash.md) — how to merge\n${lines}\n`,
+  );
+  const granted = { ...environment, SUPERTAG_NATIVE_MEMORY_DIRECTORY: memory };
+  const folder = await openCodeMemory(granted, false);
+  expect(folder?.directory).toBe(memory);
+  expect(folder?.context).toContain(`Memory folder (state, not instructions): ${memory}`);
+  expect(folder?.context).toContain("(feedback_squash.md) — how to merge");
+  expect(folder?.context).toContain("- line 198\n");
+  expect(folder?.context).not.toContain("- line 199");
+  expect(folder?.context).toContain("goes on past its first 200 lines or 25 KB");
+  // Its path reaches OpenCode's permissions, and the memory paragraph names the folder.
+  const run = ownedRun();
+  const { task, model } = taskModel(run, configuration);
+  task.allowedActions = ["files:read"];
+  const request = await nativeRequest(
+    task,
+    model,
+    { ...configuration, environment: granted },
+    [],
+    [],
+    undefined,
+    [rustHarness.memoryContext(run, "opencode"), folder?.context].join("\n\n"),
+    false,
+    false,
+    folder?.directory,
+  );
+  const native = request.forTools([]);
+  const permission = JSON.parse(native.environment["OPENCODE_PERMISSION"] ?? "{}");
+  expect(decide(permission.edit, `${memory}/user_role.md`)).toBe("allow");
+  expect(decide(permission.edit, "README.md")).toBe("deny");
+  expect(decide(permission.external_directory, `${memory}/*`)).toBe("allow");
+  expect(native.prompt).toContain("OpenCode keeps no memory of its own");
+  expect(native.prompt).toContain("(feedback_squash.md)");
+  // No grant, or a remote Workspace's turn, gets none.
+  expect(await openCodeMemory(environment, false)).toBeUndefined();
+  expect(await openCodeMemory(granted, true)).toBeUndefined();
+  // A folder others can read, one inside the Workspace, or a link is refused.
+  await chmod(memory, 0o755);
+  await expect(openCodeMemory(granted, false)).rejects.toThrow(
+    "OpenCode cannot confine the Tag's memory folder",
+  );
+  const inside = join(workspace, "memory");
+  await mkdir(inside, { mode: 0o700 });
+  await expect(
+    openCodeMemory({ ...environment, SUPERTAG_NATIVE_MEMORY_DIRECTORY: inside }, false),
+  ).rejects.toThrow("OpenCode cannot confine the Tag's memory folder");
+  const linked = join(root, "linked");
+  await symlink(inside, linked);
+  await expect(
+    openCodeMemory({ ...environment, SUPERTAG_NATIVE_MEMORY_DIRECTORY: linked }, false),
+  ).rejects.toThrow("OpenCode cannot confine the Tag's memory folder");
 });

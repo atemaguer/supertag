@@ -86,7 +86,12 @@ export function TagDetails({
 /** How often the Tag's memory is read again; a turn that changes it is also a conversation change. */
 const MEMORY_INTERVAL = 30_000;
 
-const HARNESS_NAMES: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex" };
+const HARNESS_NAMES: Record<string, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  opencode: "OpenCode",
+  cursor: "Cursor",
+};
 
 /**
  * What the details panel says of a memory: whose harness keeps it, what it is about, who sees it,

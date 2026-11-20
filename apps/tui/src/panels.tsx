@@ -114,7 +114,12 @@ function useList(count: number, onClose: () => void, act: (key: KeyEvent, at: nu
 
 const when = (ms: number | undefined) => (ms ? shortTime(ms) : "never");
 
-const HARNESS_NAMES: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex" };
+const HARNESS_NAMES: Record<string, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  opencode: "OpenCode",
+  cursor: "Cursor",
+};
 
 /**
  * Whose harness keeps a memory, who sees it, whether it waits for the Tag's daily memory review

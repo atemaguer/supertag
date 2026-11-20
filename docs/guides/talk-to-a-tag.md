@@ -109,7 +109,8 @@ checks that stayed quiet never notify.
 ## See what a Tag remembers
 
 A Tag keeps a memory between turns, such as your preferences and decisions: what its harness,
-such as Claude Code or Codex, keeps itself, read from the Worker Host on your Mac. In the desktop
+such as Claude Code or Codex, keeps itself, or for OpenCode and Cursor, a memory folder the Worker
+Host keeps for them, read from the Worker Host on your Mac. In the desktop
 app, select the Tag's name above the conversation, or choose **Memory** in the ⌘K search, to open
 its details: each memory, its harness, what it is about, and who sees it. One marked **Proposed**
 is a change a Work Session suggested, which the Tag's daily review merges or drops. Delete one to

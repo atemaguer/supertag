@@ -37,6 +37,32 @@ fn every_turn_hears_where_its_memory_is_who_sees_it_and_the_review() {
         )
     );
     assert!(memory_text::PROPOSED.contains("proposal"));
+    // OpenCode and Cursor keep none of their own: the folder SuperTag keeps for them, how to keep
+    // it, and the rest as for every harness.
+    for (harness, opening) in [
+        (HarnessMemory::OpenCode, memory_text::OPENCODE),
+        (HarnessMemory::Cursor, memory_text::CURSOR),
+    ] {
+        let text = memory_context(true, Some(harness));
+        assert_eq!(
+            text,
+            format!(
+                "{opening} {} {} {}",
+                memory_text::FOLDER,
+                memory_text::KEPT,
+                memory_text::TRUSTED
+            )
+        );
+        for needed in [
+            "MEMORY.md",
+            "Claude Code's format",
+            "frontmatter",
+            "review turn",
+        ] {
+            assert!(text.contains(needed), "{needed}");
+        }
+        assert!(memory_context(false, Some(harness)).ends_with(memory_text::PROPOSED));
+    }
     assert_eq!(memory_context(false, None), memory_text::NO_MEMORY);
     assert_eq!(memory_context(true, None), memory_text::NO_MEMORY);
 }
@@ -51,6 +77,9 @@ fn the_typescript_copy_matches() {
     .expect("the harness SDK source is in this checkout");
     for sentence in [
         memory_text::CLAUDE_CODE,
+        memory_text::OPENCODE,
+        memory_text::CURSOR,
+        memory_text::FOLDER,
         memory_text::KEPT,
         memory_text::TRUSTED,
         memory_text::PROPOSED,

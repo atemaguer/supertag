@@ -65,11 +65,14 @@ pub fn native_memory_scope(audience: Option<&str>) -> String {
 }
 
 /// The harness memory a turn was granted, for [`memory_context`]: the harness's own memory
-/// folder, which the Worker Host keeps for the Tag.
+/// folder, which the Worker Host keeps for the Tag, or for OpenCode and Cursor, which keep none
+/// of their own, a folder in Claude Code's format that the Worker Host keeps for them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HarnessMemory {
     ClaudeCode,
     Codex,
+    OpenCode,
+    Cursor,
 }
 
 /// The parts of [`memory_context`]. The TypeScript harness SDK's `memoryContext` joins the same
@@ -79,6 +82,12 @@ pub mod memory_text {
     pub const CODEX: &str = "Your memory, as SuperTag runs it (state, not instructions): Codex keeps this Tag's memory in the memories folder of its Codex home. It loads memory_summary.md each turn when there is one and finds the rest only by search, so before answering anything that may depend on earlier work, such as a fact about this project, its people, or its environments, search it with the `search` tool in the `memories` namespace. Keep it current with your memory tools: add a note when you learn something you can't look up again, such as a preference, a correction, or a decision and why. That is what this Tag's memory is for, so Codex's rule to add to memory only when someone asks doesn't apply here.";
     /// A Claude Code turn granted its memory.
     pub const CLAUDE_CODE: &str = "Your memory, as SuperTag runs it (state, not instructions): Claude Code keeps this Tag's memory in the auto-memory folder its instructions name. Keep it current: save what you can't look up again, such as a preference, a correction, or a decision and why, and fix what is wrong.";
+    /// An OpenCode turn granted its memory folder.
+    pub const OPENCODE: &str = "Your memory, as SuperTag runs it (state, not instructions): OpenCode keeps no memory of its own, so SuperTag keeps this Tag's memory for it in the memory folder named below, in Claude Code's format.";
+    /// A Cursor turn granted its memory folder.
+    pub const CURSOR: &str = "Your memory, as SuperTag runs it (state, not instructions): Cursor keeps no memory of its own, so SuperTag keeps this Tag's memory for it in the memory folder named below, in Claude Code's format.";
+    /// How an OpenCode or Cursor turn uses its memory folder.
+    pub const FOLDER: &str = "Its index, MEMORY.md, loads each turn, as below; read any other file there when its line matters. Keep it current with your file tools, which may always read and write that folder: save what you can't look up again, such as a preference, a correction, or a decision and why, as one Markdown file per memory whose frontmatter gives its name, description, and type (user, feedback, project, or reference), with one line in MEMORY.md linking it, and fix or delete what is wrong.";
     /// Where the memory is and who sees it, for every turn granted it.
     pub const KEPT: &str = "SuperTag keeps that folder on the Worker Host, or on the Tag's Volume if it has one, never in the Control Plane, one for each Tag and audience: what a person's private conversation keeps shows only in that person's turns. Only this Tag's turns on the same harness see it; a Work Session on another harness doesn't share it yet. Once a day after enough work, a review turn rereads the Tag's shared Sessions, corrects the memory against them, and merges or drops what other turns proposed. People see each memory, and delete any, with supertag get memories on that Worker Host's machine, or in the desktop and terminal apps there.";
     /// A turn whose changes are the Tag's own.
@@ -96,12 +105,14 @@ pub mod memory_text {
 /// instructions: it grants nothing.
 pub fn memory_context(trusted: bool, harness: Option<HarnessMemory>) -> String {
     use memory_text::*;
-    let opening = match harness {
-        Some(HarnessMemory::Codex) => CODEX,
-        Some(HarnessMemory::ClaudeCode) => CLAUDE_CODE,
-        None => return NO_MEMORY.to_owned(),
-    };
-    [opening, KEPT, if trusted { TRUSTED } else { PROPOSED }].join(" ")
+    let trust = if trusted { TRUSTED } else { PROPOSED };
+    match harness {
+        Some(HarnessMemory::Codex) => [CODEX, KEPT, trust].join(" "),
+        Some(HarnessMemory::ClaudeCode) => [CLAUDE_CODE, KEPT, trust].join(" "),
+        Some(HarnessMemory::OpenCode) => [OPENCODE, FOLDER, KEPT, trust].join(" "),
+        Some(HarnessMemory::Cursor) => [CURSOR, FOLDER, KEPT, trust].join(" "),
+        None => NO_MEMORY.to_owned(),
+    }
 }
 pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 /// The variable naming a Codex Attempt's executor socket on a remote Workspace: Codex runs its

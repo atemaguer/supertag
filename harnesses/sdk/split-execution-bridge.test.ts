@@ -164,3 +164,103 @@ it("applies the Task's path scope to every file tool after symlinks resolve", as
   expect(listing.text).toContain("README.md");
   expect((await bridge.call("ls", { path: "apps/web" })).text).not.toContain(".env");
 }, 30_000);
+
+it("always reaches the Tag's memory folder, and the Workspace only as the Task allows", async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "supertag-bridge-memory-")));
+  cleanups.push(() => rm(directory, { recursive: true, force: true }));
+  const workspace = join(directory, "workspace");
+  const memory = join(directory, "memory");
+  for (const path of [workspace, memory, join(directory, "outside")]) await mkdir(path);
+  await writeFile(join(workspace, "README.md"), "workspace text\n");
+  await writeFile(join(memory, "MEMORY.md"), "- [Squash](feedback_squash.md) — merges\n");
+  await writeFile(join(directory, "outside", "secret.txt"), "outside secret\n");
+  await symlink(join(directory, "outside"), join(memory, "escape"));
+  const bridge = (filesRead: boolean, filesWrite: boolean) => {
+    const created = createWorkspaceToolBridge({
+      environment: {
+        rootDirectory: "/",
+        resolvePath: (path) => resolve(workspace, path),
+        read: (path) => readFile(path, "utf8"),
+        spawn: (spec, signal) =>
+          spawnOwnedProcess({
+            spec,
+            cwd: spec.cwd ?? workspace,
+            environment: { PATH: "/usr/bin:/bin" },
+            ...(signal ? { signal } : {}),
+            maximumOutput: 64 * 1024,
+            record: async () => {},
+          }),
+      },
+      workspaceRoot: workspace,
+      memoryRoot: memory,
+      permissions: { filesRead, filesWrite, commandsExecute: false },
+    });
+    cleanups.push(() => created.dispose());
+    return created;
+  };
+  const ok = (result: Promise<{ isError: boolean }>) =>
+    result.then(
+      (value) => !value.isError,
+      () => false,
+    );
+  // No file actions at all, as a review whose Tag reads no files: only the memory folder.
+  const none = bridge(false, false);
+  expect(none.tools.map(({ name }) => name).sort()).toEqual([
+    "edit",
+    "glob",
+    "grep",
+    "ls",
+    "read",
+    "write",
+  ]);
+  expect((await none.call("read", { file_path: join(memory, "MEMORY.md") })).text).toContain(
+    "feedback_squash.md",
+  );
+  expect(
+    await ok(none.call("write", { file_path: join(memory, "user_a.md"), content: "a\n" })),
+  ).toBe(true);
+  expect(
+    await ok(
+      none.call("edit", {
+        file_path: join(memory, "MEMORY.md"),
+        old_string: "- [Squash]",
+        new_string: "- [A](user_a.md) — a\n- [Squash]",
+      }),
+    ),
+  ).toBe(true);
+  expect(await readFile(join(memory, "MEMORY.md"), "utf8")).toContain("(user_a.md)");
+  expect(await ok(none.call("ls", { path: memory }))).toBe(true);
+  for (const refused of [
+    () => none.call("read", { file_path: "README.md" }),
+    () => none.call("write", { file_path: "new.txt", content: "no\n" }),
+    () => none.call("ls", {}),
+    () => none.call("grep", { pattern: "text" }),
+    // A link out of the folder reaches nothing.
+    () => none.call("read", { file_path: join(memory, "escape", "secret.txt") }),
+    () => none.call("write", { file_path: join(memory, "escape", "planted.txt"), content: "no\n" }),
+    () =>
+      none.call("write", { file_path: join(directory, "outside", "planted.txt"), content: "no\n" }),
+  ])
+    expect(await ok(refused())).toBe(false);
+  expect(await exists(join(workspace, "new.txt"))).toBe(false);
+  expect(await exists(join(directory, "outside", "planted.txt"))).toBe(false);
+  // A read-only Task reads the Workspace and still writes only the memory folder.
+  const reading = bridge(true, false);
+  expect(await ok(reading.call("read", { file_path: "README.md" }))).toBe(true);
+  expect(await ok(reading.call("write", { file_path: "new.txt", content: "no\n" }))).toBe(false);
+  expect(
+    await ok(reading.call("write", { file_path: join(memory, "user_b.md"), content: "b\n" })),
+  ).toBe(true);
+  // Without a memory folder, the tools are the Task's own, as before.
+  const plain = createWorkspaceToolBridge({
+    environment: {
+      rootDirectory: workspace,
+      resolvePath: (path) => resolve(workspace, path),
+      read: (path) => readFile(path, "utf8"),
+      spawn: () => Promise.reject(new Error("unused")),
+    },
+    workspaceRoot: workspace,
+    permissions: { filesWrite: false, commandsExecute: false },
+  });
+  expect(plain.tools.map(({ name }) => name).sort()).toEqual(["glob", "grep", "ls", "read"]);
+}, 30_000);

@@ -127,11 +127,18 @@ export function openCodePatterns(entry: string, fold: boolean): string[] {
   return [...new Set(spelled.flatMap((form) => (form === "*" ? ["*"] : [form, `${form}/*`])))];
 }
 
+/**
+ * OpenCode's permissions for a Task: its allowed actions, Workspace Volume copies, and path scope,
+ * and `memory`, the Tag's memory folder the Worker Host keeps outside the worktree, which OpenCode
+ * may always read and edit, whatever the Task's file actions. The folder must be a canonical
+ * directory without wildcard characters, so its patterns name exactly that directory.
+ */
 export function openCodePermissions(
   actions: readonly string[],
   copies: readonly OpenCodeCopy[] = [],
   worktree?: string,
   scope?: OpenCodeScope,
+  memory?: string,
 ): Record<string, OpenCodeRule> {
   const allow = (action: string): OpenCodeAction => (actions.includes(action) ? "allow" : "deny");
   const readOnly = copies.filter(({ readWrite }) => !readWrite);
@@ -144,6 +151,10 @@ export function openCodePermissions(
   const rules = (patterns: readonly string[], action: OpenCodeAction) =>
     patterns.map((pattern) => [pattern, action] as const);
   const scopedWrite = scope !== undefined && scope.write.length > 0;
+  const memoryPatterns = memory === undefined ? [] : outside(memory);
+  const gitDenials = GIT_NAMES.flatMap((name) =>
+    rules([name, `${name}/*`, `*/${name}`, `*/${name}/*`], "deny"),
+  );
   // SuperTag runs `git` in the worktree and copies outside any sandbox, so their Git metadata is
   // never editable. The last matching rule wins, so denials follow the allows.
   const edit: OpenCodeRule =
@@ -171,12 +182,11 @@ export function openCodePermissions(
               ]
             : []),
           ...rules(scope?.outsideWrite.flatMap(outside) ?? [], "allow"),
+          ...rules(memoryPatterns, "allow"),
           ...rules(scope?.outsideRead.flatMap(outside) ?? [], "deny"),
           ...rules(scope?.readOnly.flatMap((entry) => openCodePatterns(entry, true)) ?? [], "deny"),
           ...rules(scope?.hidden.flatMap((entry) => openCodePatterns(entry, true)) ?? [], "deny"),
-          ...GIT_NAMES.flatMap((name) =>
-            rules([name, `${name}/*`, `*/${name}`, `*/${name}/*`], "deny"),
-          ),
+          ...gitDenials,
           ...(worktree === undefined
             ? []
             : readOnly.flatMap(({ destination }) => [
@@ -184,15 +194,21 @@ export function openCodePermissions(
                 [`${destination}/*`, "deny"] as const,
               ])),
         ])
-      : "deny";
+      : memoryPatterns.length
+        ? Object.fromEntries([["*", "deny"], ...rules(memoryPatterns, "allow"), ...gitDenials])
+        : "deny";
   const hidden = scope?.hidden.flatMap((entry) => openCodePatterns(entry, true)) ?? [];
   // A file:read grant always restates "*": "allow", which also overrides OpenCode's built-in
   // `*.env` ask rule, and then hides the scope's entries.
+  // Without files:read, only the memory folder is readable.
   const read: OpenCodeRule =
     allow("files:read") === "allow" && hidden.length
       ? Object.fromEntries([["*", "allow"], ...rules(hidden, "deny")])
-      : allow("files:read");
+      : allow("files:read") === "deny" && memoryPatterns.length
+        ? Object.fromEntries([["*", "deny"], ...rules(memoryPatterns, "allow")])
+        : allow("files:read");
   const external = [
+    ...(memory === undefined ? [] : [memory]),
     ...copies.map(({ destination }) => destination),
     ...(scope?.outsideWrite ?? []),
     ...(scope?.outsideRead ?? []),
@@ -245,8 +261,10 @@ export function openCodeConfigurationEnvironment(
   copies: readonly OpenCodeCopy[] = [],
   worktree?: string,
   scope?: OpenCodeScope,
+  /** The Tag's memory folder, which OpenCode may always read and edit. */
+  memory?: string,
 ): Readonly<Record<string, string>> {
-  const admittedPermission = openCodePermissions(actions, copies, worktree, scope);
+  const admittedPermission = openCodePermissions(actions, copies, worktree, scope, memory);
   const permission: Record<string, unknown> = {
     ...admittedPermission,
     task: { "*": "deny", general: "allow", explore: "allow" },

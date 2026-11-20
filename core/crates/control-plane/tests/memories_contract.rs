@@ -194,7 +194,7 @@ async fn contract(url: &str) {
     .await;
 
     // A conversation turn's changes are the Tag's own; its context lists no notes any more.
-    let (custom, assignment) = say(&store, &host, ALICE, "Hello", HarnessKind::Opencode).await;
+    let (custom, assignment) = say(&store, &host, ALICE, "Hello", HarnessKind::OpenaiAgents).await;
     let caps = capabilities(&store, &host, &custom).await;
     assert!(caps.memory_trusted);
     assert!(
@@ -202,9 +202,30 @@ async fn contract(url: &str) {
         "{}",
         caps.tag_portfolio
     );
-    // A harness that keeps no memory of its own gets no seeds: they wait for one that does.
+    // A harness whose Worker Host keeps no memory for it gets no seeds: they wait for one that
+    // does.
     assert!(seeds(&assignment).is_empty());
     finish(&store, &host, &custom, true).await;
+    // OpenCode and Cursor keep none of their own, but the Worker Host keeps a memory folder for
+    // each, so their turns get the seeds too; unacknowledged, they are granted again.
+    for harness in [HarnessKind::Opencode, HarnessKind::Cursor] {
+        let (turn, assignment) = say(&store, &host, ALICE, "Hello there", harness).await;
+        assert!(
+            assignment
+                .native_memory
+                .as_ref()
+                .is_some_and(|grant| grant.trusted)
+        );
+        assert_eq!(
+            seeds(&assignment),
+            [(
+                "mem_alice".to_owned(),
+                "Alice prefers squash merges.".to_owned()
+            )],
+            "{harness:?}"
+        );
+        finish(&store, &host, &turn, true).await;
+    }
 
     // Alice's turn on Codex gets her note to write into her store, the operator's turn only
     // theirs, and Bob's conversation none.

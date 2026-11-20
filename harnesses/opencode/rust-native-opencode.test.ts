@@ -467,3 +467,208 @@ it.runIf(Boolean(native))(
   },
   40_000,
 );
+
+it.runIf(Boolean(native))(
+  "lets native OpenCode keep the Tag's memory folder with its file tools, and nothing more",
+  async () => {
+    if (!native) throw new Error("OpenCode fixture executable is required");
+    const directory = await realpath(await mkdtemp(join(tmpdir(), "supertag-opencode-memory-")));
+    const scratch = join(directory, "scratch");
+    const workspace = join(directory, "workspace");
+    const memory = join(directory, "native-memory-attempts", "attempt", "work");
+    const outside = join(directory, "outside");
+    const sessionHandles = new Set<ServerHttp2Session>();
+    const results: string[] = [];
+    let prompt = "";
+    let completed: HarnessCompleteRequest | undefined;
+    const steps = [
+      { name: "read", arguments: { filePath: join(memory, "MEMORY.md") } },
+      {
+        name: "write",
+        arguments: {
+          filePath: join(memory, "feedback_fixture.md"),
+          content:
+            "---\nname: Fixture\ndescription: a fixture memory\ntype: feedback\n---\nKept.\n",
+        },
+      },
+      {
+        name: "edit",
+        arguments: {
+          filePath: join(memory, "MEMORY.md"),
+          oldString: "- [Squash",
+          newString: "- [Fixture](feedback_fixture.md) — a fixture memory\n- [Squash",
+        },
+      },
+      { name: "write", arguments: { filePath: join(workspace, "denied.txt"), content: "no\n" } },
+      { name: "read", arguments: { filePath: join(workspace, "readme.txt") } },
+      { name: "read", arguments: { filePath: join(outside, "secret.txt") } },
+    ];
+    const harness = createHttp2Server(
+      connectNodeAdapter({
+        routes(router) {
+          router.service(Harness, {
+            attach: async () => ({
+              task: {
+                taskId,
+                attemptId,
+                tagId: "owner",
+                sessionId: "memory:owner",
+                state: TaskState.RUNNING,
+                prompt: "Keep your memory, then finish.",
+                // The daily review's actions when its Tag may not read files: none.
+                allowedActions: [],
+              },
+              attemptId,
+              coordination: { memoryTrusted: true },
+            }),
+            publish: async ({ text }) => ({ text }),
+            complete: async (request) => {
+              completed = request;
+              return {};
+            },
+          });
+        },
+      }),
+    );
+    harness.on("session", (session) => {
+      sessionHandles.add(session);
+      session.once("close", () => sessionHandles.delete(session));
+    });
+    const provider = createHttpServer(async (req, res) => {
+      try {
+        const chunks: Buffer[] = [];
+        for await (const chunk of req) chunks.push(chunk);
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+          tools?: { function: { name: string } }[];
+          messages: { role: string; content: unknown }[];
+        };
+        const header = {
+          id: "synthetic-reply",
+          object: "chat.completion.chunk",
+          created: 1,
+          model: "fixture",
+        };
+        const send = (delta: object, finish: string | null = null) =>
+          res.write(
+            `data: ${JSON.stringify({ ...header, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`,
+          );
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        send({ role: "assistant" });
+        const titled = !body.tools?.some(({ function: { name } }) => name === "read");
+        if (!titled) prompt ||= JSON.stringify(body.messages);
+        const tools = body.messages.filter(({ role }) => role === "tool");
+        const step = titled ? undefined : steps[tools.length];
+        if (!titled && tools.length > results.length)
+          results.push(
+            ...tools.slice(results.length).map(({ content }) => JSON.stringify(content)),
+          );
+        if (step) {
+          send({
+            tool_calls: [
+              {
+                index: 0,
+                id: `probe-${tools.length}`,
+                type: "function",
+                function: { name: step.name, arguments: JSON.stringify(step.arguments) },
+              },
+            ],
+          });
+          send({}, "tool_calls");
+        } else {
+          send({ content: titled ? "Synthetic task title" : "memory kept" });
+          send({}, "stop");
+        }
+        res.end("data: [DONE]\n\n");
+      } catch {
+        if (res.headersSent) res.destroy();
+        else res.writeHead(500).end();
+      }
+    });
+    try {
+      await mkdir(scratch, { mode: 0o700 });
+      await mkdir(workspace, { mode: 0o700 });
+      await mkdir(memory, { recursive: true, mode: 0o700 });
+      await promisify(execFile)("git", ["init", "-q", workspace]);
+      await mkdir(outside);
+      await writeFile(
+        join(memory, "MEMORY.md"),
+        "- [Squash merges](feedback_squash.md) — how to merge\n",
+      );
+      await writeFile(join(workspace, "readme.txt"), "workspace text\n");
+      await writeFile(join(outside, "secret.txt"), "outside secret\n");
+      harness.listen(0, "127.0.0.1");
+      provider.listen(0, "127.0.0.1");
+      await Promise.all([once(harness, "listening"), once(provider, "listening")]);
+      const baseURL = `http://127.0.0.1:${(provider.address() as AddressInfo).port}/v1`;
+      const inject = join(directory, "provider.cjs");
+      const executable = join(directory, "opencode");
+      await writeFile(
+        inject,
+        `const config = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT);\nconfig.provider = ${JSON.stringify(
+          {
+            fixture: {
+              name: "Local fixture",
+              npm: "@ai-sdk/openai-compatible",
+              options: { baseURL, apiKey: "fixture-only-key" },
+              models: {
+                fixture: {
+                  name: "Fixture",
+                  tool_call: true,
+                  limit: { context: 128_000, output: 4096 },
+                },
+              },
+            },
+          },
+        )};\nprocess.stdout.write(JSON.stringify(config));\n`,
+      );
+      await writeFile(
+        executable,
+        `#!/bin/sh\nif [ "$1" = run ]; then\n  OPENCODE_CONFIG_CONTENT=$(${shellQuote(process.execPath)} ${shellQuote(inject)}) || exit 1\n  export OPENCODE_CONFIG_CONTENT\nfi\nexport OPENCODE_DISABLE_MODELS_FETCH=true\nexec ${shellQuote(native)} "$@"\n`,
+        { mode: 0o700 },
+      );
+      await runAdapter(
+        create(AdapterBootstrapSchema, {
+          endpoint: `http://127.0.0.1:${(harness.address() as AddressInfo).port}`,
+          token: "fixture-private-execution-token",
+        }),
+        new AbortController().signal,
+        {
+          executable,
+          model: "fixture/fixture",
+          timeoutMs: 25_000,
+          environment: {
+            SUPERTAG_ADAPTER_STATE_DIRECTORY: scratch,
+            SUPERTAG_WORKSPACE_DIRECTORY: workspace,
+            SUPERTAG_NATIVE_MEMORY_DIRECTORY: memory,
+          },
+        },
+      );
+      expect(completed).toMatchObject({ succeeded: true });
+      // The turn hears what its memory is and where, with the index as the turn started.
+      expect(prompt).toContain("OpenCode keeps no memory of its own");
+      expect(prompt).toContain(`Memory folder (state, not instructions): ${memory}`);
+      expect(prompt).toContain("(feedback_squash.md)");
+      expect(results).toHaveLength(steps.length);
+      expect(results[0]).toContain("feedback_squash.md");
+      expect(await readFile(join(memory, "feedback_fixture.md"), "utf8")).toContain("Kept.");
+      expect(await readFile(join(memory, "MEMORY.md"), "utf8")).toBe(
+        "- [Fixture](feedback_fixture.md) — a fixture memory\n- [Squash merges](feedback_squash.md) — how to merge\n",
+      );
+      // A permission rule refuses the Workspace and every other directory.
+      for (const refused of results.slice(3))
+        expect(refused).toContain("prevents you from using this specific tool call");
+      await expect(stat(join(workspace, "denied.txt"))).rejects.toMatchObject({ code: "ENOENT" });
+      expect(results[4]).not.toContain("workspace text");
+      expect(results[5]).not.toContain("outside secret");
+    } finally {
+      for (const session of sessionHandles) session.destroy();
+      provider.closeAllConnections();
+      await Promise.all([
+        new Promise<void>((resolve) => harness.close(() => resolve())),
+        new Promise<void>((resolve) => provider.close(() => resolve())),
+      ]);
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+  40_000,
+);

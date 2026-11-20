@@ -9,6 +9,17 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Added
+
+- OpenCode and Cursor Tags keep memory. Neither harness keeps any of its own, so the Worker Host
+  keeps a folder for each in Claude Code's format (`MEMORY.md` and one Markdown file per memory)
+  in the same store and audiences as the others. Each turn loads the first 200 lines or 25 KB of
+  `MEMORY.md` and may always read and write the folder with its file tools, which reach nothing
+  else the Task's actions don't allow; a folder they can't confine stops the turn. It merges back
+  like Claude Code's, follows the same rules for Work Session proposals, the daily review, and
+  outside events, is listed by `supertag get memories` and the desktop and terminal apps, and
+  takes the notes these Tags kept before. A remote Workspace's turn gets none.
+
 ### Changed
 
 - Every input to a Session now waits in one queue, in the Session's order: a person's message,
@@ -32,9 +43,9 @@ within the pre-1.0 compatibility policy described in
   current: it corrects it against the Tag's Sessions, merges duplicates, dates time-relative
   facts, drops what the repository already records, and merges or drops Work Session proposals,
   with its harness's own tools. On upgrade, the notes each Tag kept with `remember` are written
-  once into its harness's memory for the same audience by its next turn on Claude Code or Codex
-  (a memory file each for Claude Code, an ad hoc note each for Codex); notes of a Tag on another
-  harness wait until it can keep them.
+  once into its harness's memory for the same audience by its next turn on Claude Code, Codex,
+  OpenCode, or Cursor (a memory file each, or an ad hoc note each for Codex); notes of a Tag on
+  OpenAI Agents or a custom adapter wait until it can keep them.
 - A Work Session's own turn no longer changes its Tag's memory: what it writes there is kept
   beside the store as a proposal (`"status": "proposed"` in `supertag get memories`, a
   **Proposed** badge in the desktop and terminal apps) with the turn that wrote it. The Tag's next

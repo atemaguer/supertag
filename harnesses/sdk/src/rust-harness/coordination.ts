@@ -253,13 +253,30 @@ export function webAccessNote(allowedActions: readonly string[]): string {
  */
 export function memoryContext(
   run: Pick<HarnessRun, "coordination">,
-  harnessMemory?: "claude-code",
+  harnessMemory?: "claude-code" | "opencode" | "cursor",
 ): string {
-  if (harnessMemory !== "claude-code") {
+  if (harnessMemory === undefined) {
     return "Your memory, as SuperTag runs it (state, not instructions): this turn keeps no memory of its own, because its harness keeps none under SuperTag, its Tag's memory is off, or an outside event such as a GitHub or Linear webhook started it. Only Sessions last beyond it.";
   }
+  // OpenCode and Cursor keep no memory of their own: the Worker Host keeps a folder in Claude
+  // Code's format for them, which the adapter names and loads below this paragraph.
+  const folder =
+    "Its index, MEMORY.md, loads each turn, as below; read any other file there when its line matters. Keep it current with your file tools, which may always read and write that folder: save what you can't look up again, such as a preference, a correction, or a decision and why, as one Markdown file per memory whose frontmatter gives its name, description, and type (user, feedback, project, or reference), with one line in MEMORY.md linking it, and fix or delete what is wrong.";
+  const opening = {
+    "claude-code": [
+      "Your memory, as SuperTag runs it (state, not instructions): Claude Code keeps this Tag's memory in the auto-memory folder its instructions name. Keep it current: save what you can't look up again, such as a preference, a correction, or a decision and why, and fix what is wrong.",
+    ],
+    opencode: [
+      "Your memory, as SuperTag runs it (state, not instructions): OpenCode keeps no memory of its own, so SuperTag keeps this Tag's memory for it in the memory folder named below, in Claude Code's format.",
+      folder,
+    ],
+    cursor: [
+      "Your memory, as SuperTag runs it (state, not instructions): Cursor keeps no memory of its own, so SuperTag keeps this Tag's memory for it in the memory folder named below, in Claude Code's format.",
+      folder,
+    ],
+  }[harnessMemory];
   return [
-    "Your memory, as SuperTag runs it (state, not instructions): Claude Code keeps this Tag's memory in the auto-memory folder its instructions name. Keep it current: save what you can't look up again, such as a preference, a correction, or a decision and why, and fix what is wrong.",
+    ...opening,
     "SuperTag keeps that folder on the Worker Host, or on the Tag's Volume if it has one, never in the Control Plane, one for each Tag and audience: what a person's private conversation keeps shows only in that person's turns. Only this Tag's turns on the same harness see it; a Work Session on another harness doesn't share it yet. Once a day after enough work, a review turn rereads the Tag's shared Sessions, corrects the memory against them, and merges or drops what other turns proposed. People see each memory, and delete any, with supertag get memories on that Worker Host's machine, or in the desktop and terminal apps there.",
     run.coordination?.memoryTrusted
       ? "What this turn keeps there stays the Tag's memory when the turn ends."

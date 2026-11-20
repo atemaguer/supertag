@@ -379,6 +379,18 @@ it("reads the Tag's Sessions and Objectives, refuses an unasked Objective, and c
   expect(writer).toContain("What this turn keeps there stays the Tag's memory when the turn ends.");
   expect(writer).toContain("a Work Session on another harness doesn't share it yet.");
   expect(memoryContext(run, "claude-code")).toContain("kept as a proposal for the daily review");
+  // OpenCode and Cursor keep none of their own: the folder SuperTag keeps for them, and how.
+  for (const [harness, name] of [
+    ["opencode", "OpenCode"],
+    ["cursor", "Cursor"],
+  ] as const) {
+    const folder = memoryContext(run, harness);
+    expect(folder).toContain(`${name} keeps no memory of its own, so SuperTag keeps this Tag's`);
+    expect(folder).toContain("Its index, MEMORY.md, loads each turn");
+    expect(folder).toContain("type (user, feedback, project, or reference)");
+    expect(folder).toContain("a review turn rereads the Tag's shared Sessions");
+    expect(folder).toMatch(/kept as a proposal for the daily review .*\.$/u);
+  }
   for (const text of [none, writer]) expect(text).not.toMatch(/remember|notes/u);
   // A Task without web:fetch hears so; the line grants nothing.
   expect(webAccessNote(["files:read", "web:fetch"])).toBe("");

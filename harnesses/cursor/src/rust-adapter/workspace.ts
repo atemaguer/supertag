@@ -45,6 +45,12 @@ export async function createWorkspace(
   runnerEntrypoint?: string,
   remote?: CursorSplitExecutor,
   copies: readonly WorkspaceCopy[] = [],
+  /**
+   * The Tag's memory folder the Worker Host keeps for Cursor, which keeps no memory of its own:
+   * one more root of the file tools, always readable and writable, whatever the Task's file
+   * actions. Only local tools reach it, so a remote Workspace's turn gets none.
+   */
+  memory?: string,
 ) {
   const environment = process.env;
   const scratchPath = environment["SUPERTAG_ADAPTER_STATE_DIRECTORY"] ?? "";
@@ -101,7 +107,7 @@ export async function createWorkspace(
     environment: {
       // Every root must be inside the environment root, so copies widen it to the filesystem
       // root; each root is then checked against its own canonical path.
-      rootDirectory: copies.length ? "/" : workspace,
+      rootDirectory: copies.length || memory !== undefined ? "/" : workspace,
       resolvePath: (path) => resolve(workspace, path),
       async read(path) {
         // Used for edit. Refuse oversized files and FIFOs before reading their contents.
@@ -123,7 +129,12 @@ export async function createWorkspace(
     workspaceRoot: workspace,
     readOnlyRoots: copies.filter((copy) => !copy.readWrite).map((copy) => copy.destination),
     writableRoots: copies.filter((copy) => copy.readWrite).map((copy) => copy.destination),
-    permissions: { filesWrite: actions.includes("files:write"), commandsExecute: false },
+    ...(memory === undefined ? {} : { memoryRoot: memory }),
+    permissions: {
+      filesRead: actions.includes("files:read"),
+      filesWrite: actions.includes("files:write"),
+      commandsExecute: false,
+    },
   });
   // The local command adapter has a credential-free HOME and invokes a non-login shell.
   const commands = actions.includes("commands:execute")
@@ -131,7 +142,8 @@ export async function createWorkspace(
     : undefined;
   const tools = [
     ...files.tools.filter(
-      ({ name }) => !FILE_READ_TOOLS.has(name) || actions.includes("files:read"),
+      ({ name }) =>
+        !FILE_READ_TOOLS.has(name) || actions.includes("files:read") || memory !== undefined,
     ),
     ...(commands?.tools ?? []),
   ];

@@ -451,6 +451,8 @@ database_tests! {
     opencode_manager_coordination_uses_real_private_harness_with_child_denials;
     #[tokio::test]
     opencode_runs_commands_in_a_local_vm_container;
+    #[tokio::test]
+    opencode_keeps_the_tags_memory_folder_across_tasks;
 }
 
 /// OpenCode on a local-vm host: no built-in tool, and its workspace MCP tools reach a container on
@@ -635,6 +637,69 @@ async fn opencode_runs_commands_in_a_local_vm_container(database: String) -> Res
         left.stdout.is_empty(),
         "the Task's container was left running"
     );
+    Ok(())
+}
+
+/// OpenCode keeps no memory of its own, so its Worker Host keeps a folder in Claude Code's format
+/// for the Tag: a read-only turn writes it (only that folder is editable), the host merges it into
+/// its store and derives its records, and a later turn in another Session loads its index.
+async fn opencode_keeps_the_tags_memory_folder_across_tasks(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let mut runtime = Runtime::start(directory.path(), database).await?;
+    runtime
+        .tag("keeper", HarnessKind::Opencode, &["files:read"])
+        .await?;
+    let mut run = async |session: &str, mode: &str| -> Result<Task> {
+        let task = runtime.submit("keeper", session, mode, None).await?;
+        runtime.host(directory.path())?.success().await?;
+        let task = runtime.task(&task.task_id).await?;
+        ensure!(
+            task.state() == TaskState::Succeeded,
+            "{mode} failed: {:?}; fixture: {}",
+            task.result,
+            runtime.native_errors()
+        );
+        Ok(task)
+    };
+    run("first", "memory-write").await?;
+    let tag = format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(b"keeper"));
+    let harness = directory
+        .path()
+        .join(format!("host/artifacts/tags/{tag}/native-memory/opencode"));
+    let scopes: Vec<_> = std::fs::read_dir(&harness)
+        .with_context(|| format!("no OpenCode memory store in {}", harness.display()))?
+        .collect::<std::io::Result<_>>()?;
+    ensure!(scopes.len() == 1, "one audience's store: {scopes:?}");
+    let store = scopes[0].path();
+    let current = store.join("current");
+    ensure!(
+        std::fs::read_to_string(current.join("MEMORY.md"))?
+            == "- [Fixture memory](feedback_fixture.md) — kept by OpenCode\n"
+    );
+    ensure!(std::fs::read_to_string(current.join("feedback_fixture.md"))?.contains("Keep fixture"));
+    // The host's records, which supertag get memories lists, read the folder as Claude Code's.
+    let records: Value = serde_json::from_slice(&std::fs::read(store.join("records.json"))?)?;
+    let records = records["records"].as_array().context("records")?;
+    ensure!(records.len() == 1, "{records:?}");
+    ensure!(
+        records[0]["harness"] == "opencode"
+            && records[0]["native_id"] == "opencode:feedback_fixture.md"
+            && records[0]["kind"] == "feedback"
+            && records[0]["title"] == "Fixture memory"
+            && records[0]["trust"] == "trusted",
+        "{records:?}"
+    );
+    let recalled = run("second", "memory-recall").await?;
+    ensure!(
+        recalled
+            .result
+            .as_deref()
+            .is_some_and(|result| result.contains("native-memory-recalled")),
+        "{:?}",
+        recalled.result
+    );
+    let calls = runtime.calls()?;
+    ensure!(calls.len() == 2 && calls[0]["cwd"] != calls[1]["cwd"]);
     Ok(())
 }
 

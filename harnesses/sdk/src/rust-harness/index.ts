@@ -44,6 +44,13 @@ export * from "./gen/supertag/runtime/v2/policy_pb.js";
 export * from "./gen/supertag/runtime/v2/runtime_pb.js";
 export * from "./gen/supertag/runtime/v2/schedules_pb.js";
 export * from "./gen/supertag/runtime/v2/tag_sessions_pb.js";
+export {
+  MEMORY_INDEX_MAX_BYTES,
+  MEMORY_INDEX_MAX_LINES,
+  type MemoryFolder,
+  memoryFolder,
+  NATIVE_MEMORY_DIRECTORY,
+} from "./memory-folder.js";
 export { sessionRecap } from "./recap.js";
 export { redact } from "./redact.js";
 export { createRemoteWorkspaceExecutor } from "./remote-workspace.js";

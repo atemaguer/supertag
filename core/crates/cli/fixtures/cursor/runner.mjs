@@ -114,6 +114,8 @@ async function runFixture() {
         "remote-mcp",
         "copy",
         "remote-copy",
+        "memory",
+        "memory-recall",
         "shared-first",
         "shared-resume",
         "shared-command",
@@ -153,14 +155,18 @@ async function runFixture() {
       sandboxLost ||
       (output && mode !== "remote-output-readonly");
     const resumes = mode === "resume" || mode === "remote-resume" || mode === "shared-resume";
+    // The Tag's memory folder the Worker Host keeps for Cursor: the local file tools may always
+    // write it, so a local turn granted it has write and edit tools whatever its actions.
+    const memory = /Memory folder \(state, not instructions\): (\/\S+)/u.exec(current)?.[1];
+    assert.equal(memory !== undefined, current.includes("Cursor keeps no memory of its own"));
     assert.deepEqual(request.tools, ["mcp"]);
     for (const name of ["read", "edit", "shell", "grep", "glob", "ls", "task"])
       assert.ok(request.disallowedTools.includes(name), `native SDK tool ${name} is not denied`);
     assert.equal(request.localCommandTool, undefined);
     const toolNames = request.splitTools.map(({ name }) => name);
     assert.ok(toolNames.includes("read"));
-    assert.equal(toolNames.includes("write"), writable);
-    assert.equal(toolNames.includes("edit"), writable && !shared);
+    assert.equal(toolNames.includes("write"), writable || memory !== undefined);
+    assert.equal(toolNames.includes("edit"), (writable && !shared) || memory !== undefined);
     const commands = mode === "first" || sharedCommand || remoteCommand;
     assert.equal(toolNames.includes("command"), commands);
     if (shared)
@@ -347,6 +353,39 @@ async function runFixture() {
         hidden,
         again,
       });
+    } else if (mode === "memory" || mode === "memory-recall") {
+      assert.ok(memory, "the prompt names no memory folder");
+      if (mode === "memory") {
+        for (const [file, content] of [
+          [
+            "feedback_fixture.md",
+            "---\nname: Fixture memory\ndescription: kept by Cursor\ntype: feedback\n---\nKeep fixture turns short.\n",
+          ],
+          ["MEMORY.md", "- [Fixture memory](feedback_fixture.md) — kept by Cursor\n"],
+        ]) {
+          const write = await call("write", { file_path: `${memory}/${file}`, content });
+          assert.equal(write.isError, false, write.text);
+        }
+        // Only the memory folder: a read-only Tag still cannot write its Workspace, nor
+        // anything else.
+        const workspace = await call("write", { file_path: "denied.txt", content: "no\n" });
+        assert.equal(workspace.isError, true, "a read-only Tag wrote its Workspace");
+        const outside = await call("write", {
+          file_path: `${dirname(memory)}/outside.md`,
+          content: "no\n",
+        });
+        assert.equal(outside.isError, true, "a write left the memory folder");
+      } else {
+        assert.ok(
+          current.includes(
+            "MEMORY.md as this turn started:\n- [Fixture memory](feedback_fixture.md) — kept by Cursor",
+          ),
+          "the turn did not load its memory index",
+        );
+        const read = await call("read", { file_path: `${memory}/feedback_fixture.md` });
+        assert.ok(!read.isError && read.text.includes("Keep fixture turns short."), read.text);
+      }
+      await trace({ type: "memory", mode, memory });
     } else if (copies) {
       // The Worker Host names each staged Workspace Volume copy in the Task instructions.
       const named = (access) =>

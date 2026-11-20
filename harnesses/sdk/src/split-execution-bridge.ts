@@ -21,7 +21,13 @@ export interface SplitExecutionBridgeOptions {
   writableRoots?: readonly string[];
   /** Worker-managed Task output directory, writable with files:write. */
   outputDirectory?: string;
-  permissions: { filesWrite: boolean; commandsExecute: boolean };
+  /**
+   * The Tag's memory folder the Worker Host keeps for a harness with no memory of its own, outside
+   * the checkout: always readable and writable, whatever `permissions` say of the Workspace.
+   */
+  memoryRoot?: string;
+  /** `filesRead: false` refuses reads outside the memory folder; reads are allowed by default. */
+  permissions: { filesRead?: boolean; filesWrite: boolean; commandsExecute: boolean };
   /**
    * The Task's path scope over the Workspace root, applied after symlinks resolve. Workspace
    * copies, staged inputs, and the output directory keep their own access.
@@ -248,8 +254,11 @@ export function createWorkspaceToolBridge(
   const { environment, permissions } = options;
   const root = environment.resolvePath(options.workspaceRoot);
   const environmentRoot = environment.resolvePath(environment.rootDirectory);
+  const memoryRoot =
+    options.memoryRoot === undefined ? undefined : environment.resolvePath(options.memoryRoot);
   const roots = [
     { path: root, writable: true },
+    ...(memoryRoot === undefined ? [] : [{ path: memoryRoot, writable: true }]),
     ...(options.outputDirectory === undefined
       ? []
       : [{ path: environment.resolvePath(options.outputDirectory), writable: true }]),
@@ -290,9 +299,12 @@ export function createWorkspaceToolBridge(
   const physicalRoots = new Map<string, Promise<string>>();
   let physicalEnvironmentRoot: Promise<string> | undefined;
   let disposed = false;
+  const filesRead = permissions.filesRead !== false;
+  const memory = memoryRoot !== undefined;
   const available = workspaceToolDefinitions.filter(
     ({ name }) =>
-      ((name !== "write" && name !== "edit") || permissions.filesWrite) &&
+      ((name !== "write" && name !== "edit") || permissions.filesWrite || memory) &&
+      (!["read", "glob", "grep", "ls"].includes(name) || filesRead || memory) &&
       (name !== "command" || (permissions.filesWrite && permissions.commandsExecute)),
   );
 
@@ -387,6 +399,11 @@ export function createWorkspaceToolBridge(
     const selected = roots.find(({ path }) => contained(path, candidate));
     if (!selected)
       throw new Error(`Execution path escapes workspace or allowed roots: ${inputPath}`);
+    // The memory folder is the Tag's own; everything else follows the Task's file permissions.
+    if (selected.path !== memoryRoot) {
+      if (write && !permissions.filesWrite) throw new Error("files:write permission is required");
+      if (!write && !filesRead) throw new Error("files:read permission is required");
+    }
     if (write && !selected.writable) throw new Error(`Execution path is read-only: ${inputPath}`);
     if (!contained(environmentRoot, selected.path))
       throw new Error(`Execution root escapes environment: ${selected.path}`);
@@ -464,7 +481,7 @@ export function createWorkspaceToolBridge(
     signal?.throwIfAborted();
     if (!workspaceToolDefinitions.some((definition) => definition.name === name))
       throw new Error(`Unknown split execution tool: ${name}`);
-    if ((name === "write" || name === "edit") && !permissions.filesWrite)
+    if ((name === "write" || name === "edit") && !permissions.filesWrite && !memory)
       throw new Error("files:write permission is required");
     if (name === "command" && (!permissions.filesWrite || !permissions.commandsExecute))
       throw new Error("files:write and commands:execute permissions are required");

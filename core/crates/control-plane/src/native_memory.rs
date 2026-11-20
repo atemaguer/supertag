@@ -103,9 +103,14 @@ pub(crate) async fn grant_in(
         .await?
         .and_then(|(_, head)| head);
     let trusted = crate::memories::trusted_turn_in(tx, task).await?;
-    // The notes the Tag kept before go into the store of a harness that keeps one, by a turn
-    // whose changes are the Tag's own.
-    let seeds = if trusted && matches!(store_harness(task), Some("claude-code" | "codex")) {
+    // The notes the Tag kept before go into the store of a harness that keeps one (its own
+    // memory, or the folder the Worker Host keeps for OpenCode and Cursor), by a turn whose
+    // changes are the Tag's own.
+    let seeds = if trusted
+        && matches!(
+            store_harness(task),
+            Some("claude-code" | "codex" | "opencode" | "cursor")
+        ) {
         crate::memories::seeds_in(tx, task, audience.as_deref()).await?
     } else {
         vec![]

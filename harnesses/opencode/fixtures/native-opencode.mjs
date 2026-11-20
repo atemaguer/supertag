@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
-import { access, appendFile, readFile, stat } from "node:fs/promises";
+import { access, appendFile, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -132,6 +132,14 @@ assert.deepEqual(config.plugin, []);
 assert.equal(config.share, "disabled");
 assert.equal(config.autoupdate, false);
 assert.equal(config.permission["*"], "deny");
+let prompt = "";
+for await (const chunk of process.stdin) prompt += chunk.toString("utf8");
+assert.ok(prompt.includes("fixture:"));
+assert.ok(!prompt.includes("synthetic-opencode-provider-key"));
+const currentPrompt = prompt.replace(/<supertag-history>[\s\S]*?<\/supertag-history>/gu, "");
+const mode = /fixture:([a-z-]+)/u.exec(currentPrompt)?.[1];
+// The Tag's memory folder, which the Worker Host keeps because OpenCode keeps none of its own.
+const memory = /Memory folder \(state, not instructions\): (\/\S+)/u.exec(currentPrompt)?.[1];
 // A remote Workspace turns every built-in tool off; its tools are the workspace MCP server's.
 const remote = config.mcp?.workspace !== undefined;
 if (remote) {
@@ -140,23 +148,48 @@ if (remote) {
     assert.equal(config.permission[tool], undefined, `remote Workspace offered ${tool}`);
   for (const agent of ["general", "explore", "plan"])
     assert.equal(config.agent[agent].disable, true, `remote Workspace kept ${agent}`);
+} else if (memory) {
+  // The memory folder is the one directory outside the worktree OpenCode reaches, and the only
+  // one it edits under a read-only Permission Set.
+  assert.ok(currentPrompt.includes("OpenCode keeps no memory of its own"));
+  assert.deepEqual(config.permission.external_directory, { "*": "deny", [`${memory}/*`]: "allow" });
+  assert.equal(config.permission.read, "allow");
+  assert.equal(config.permission.edit["*"], "deny");
+  assert.equal(config.permission.edit[`${memory}/*`], "allow");
+  assert.equal(config.agent.explore.permission.edit, "deny");
 } else {
   assert.equal(config.permission.external_directory, "deny");
   assert.equal(config.permission.read, "allow");
   assert.equal(config.permission.edit, "deny");
 }
-let prompt = "";
-for await (const chunk of process.stdin) prompt += chunk.toString("utf8");
-assert.ok(prompt.includes("fixture:"));
-assert.ok(!prompt.includes("synthetic-opencode-provider-key"));
-const currentPrompt = prompt.replace(/<supertag-history>[\s\S]*?<\/supertag-history>/gu, "");
-const mode = /fixture:([a-z-]+)/u.exec(currentPrompt)?.[1];
 await appendFile(
   join(root, "calls.jsonl"),
   `${JSON.stringify({ pid: process.pid, args, cwd: process.cwd(), home: process.env.HOME, credentialSource, proxyAnswer, leaked, xdg: [process.env.XDG_CONFIG_HOME, process.env.XDG_DATA_HOME, process.env.XDG_CACHE_HOME], mode, priorPrompt: prompt.includes("fixture:stream"), priorResult: prompt.includes("native-complete:"), permissions: config.permission, agents: config.agent, mcpNames: Object.keys(config.mcp ?? {}) })}\n`,
   { mode: 0o600 },
 );
 const emit = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
+if (mode === "memory-write") {
+  // As OpenCode's write and edit tools would, under the permissions above.
+  assert.ok(memory, "the turn names no memory folder");
+  await writeFile(
+    join(memory, "feedback_fixture.md"),
+    "---\nname: Fixture memory\ndescription: kept by OpenCode\ntype: feedback\n---\nKeep fixture turns short.\n",
+  );
+  await writeFile(
+    join(memory, "MEMORY.md"),
+    "- [Fixture memory](feedback_fixture.md) — kept by OpenCode\n",
+  );
+}
+if (mode === "memory-recall") {
+  assert.ok(memory, "the turn names no memory folder");
+  assert.ok(
+    currentPrompt.includes(
+      "MEMORY.md as this turn started:\n- [Fixture memory](feedback_fixture.md) — kept by OpenCode",
+    ),
+    "the turn did not load its memory index",
+  );
+  emit({ type: "text", part: { text: "native-memory-recalled" } });
+}
 if (mode === "bad-json") {
   process.stdout.write("malformed fixture line\n");
   process.exit(0);
