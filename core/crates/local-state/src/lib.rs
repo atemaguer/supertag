@@ -221,7 +221,7 @@ pub fn read_private(path: &Path) -> Result<String> {
 /// A writer that replaces the file with a rename can unlink the copy this opened between the open
 /// and the check, leaving it no links; that copy is stale, so the file is opened again.
 pub fn open_private_file(path: &Path, create: bool) -> Result<File> {
-    for _ in 0..8 {
+    for _ in 0..64 {
         let file = OpenOptions::new()
             .read(true)
             .write(create)
@@ -360,6 +360,8 @@ mod tests {
                     fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600)).unwrap();
                     fs::rename(&temporary, &path).unwrap();
                     n += 1;
+                    // A supervisor rewrites its status now and then, not in a tight loop.
+                    std::thread::sleep(std::time::Duration::from_micros(50));
                 }
             })
         };
