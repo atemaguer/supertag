@@ -201,9 +201,15 @@ try {
     child.kill("SIGTERM");
   });
   const output = log.join("");
-  const sandboxErrors = output
-    .split("\n")
-    .filter((line) => /sandbox/i.test(line) && /fatal|error|no usable/i.test(line));
+  // Chromium's sandbox failures are a Linux concern (the user-namespace or setuid helper). On
+  // macOS the app logs unrelated lines that mention a sandbox, such as Time Machine's
+  // `com.apple.backupd.sandbox.xpc` connection, so only Linux output is checked.
+  const sandboxErrors =
+    process.platform === "linux"
+      ? output
+          .split("\n")
+          .filter((line) => /sandbox/i.test(line) && /fatal|error|no usable/i.test(line))
+      : [];
   if (sandboxErrors.length > 0) {
     console.error(`the app logged sandbox errors:\n${sandboxErrors.join("\n")}`);
     failed = true;
