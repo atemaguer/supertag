@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use serde_json::Value;
 
 /// The local Control Plane's endpoint, written once it listens and removed when it stops.
@@ -217,23 +217,32 @@ pub fn read_private(path: &Path) -> Result<String> {
 
 /// Opens, and with `create` creates, a private regular file owned by this user without following
 /// a link.
+///
+/// A writer that replaces the file with a rename can unlink the copy this opened between the open
+/// and the check, leaving it no links; that copy is stale, so the file is opened again.
 pub fn open_private_file(path: &Path, create: bool) -> Result<File> {
-    let file = OpenOptions::new()
-        .read(true)
-        .write(create)
-        .create(create)
-        .truncate(false)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)
-        .with_context(|| format!("open {}", path.display()))?;
-    let metadata = file.metadata()?;
-    ensure!(
-        metadata.is_file() && metadata.nlink() == 1 && private(&metadata),
-        "{} must be a private regular file owned by this user",
-        path.display()
-    );
-    Ok(file)
+    for _ in 0..8 {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(create)
+            .create(create)
+            .truncate(false)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path)
+            .with_context(|| format!("open {}", path.display()))?;
+        let metadata = file.metadata()?;
+        if metadata.is_file() && metadata.nlink() == 0 && private(&metadata) {
+            continue;
+        }
+        ensure!(
+            metadata.is_file() && metadata.nlink() == 1 && private(&metadata),
+            "{} must be a private regular file owned by this user",
+            path.display()
+        );
+        return Ok(file);
+    }
+    bail!("{} kept being replaced while it was read", path.display())
 }
 
 /// Checks that `path` is a private directory owned by this user, not a link, and resolves it.
@@ -325,6 +334,41 @@ pub fn machine_id() -> Result<String> {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt as _;
+
+    #[test]
+    fn a_file_replaced_by_rename_while_it_is_read_is_read_again() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let path = directory.path().join("supervisor.json");
+        let write = |name: &str| {
+            let temporary = directory.path().join(name);
+            fs::write(&temporary, b"{}").unwrap();
+            fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600)).unwrap();
+            fs::rename(&temporary, &path).unwrap();
+        };
+        write(".first.tmp");
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let writer = {
+            let stop = stop.clone();
+            let directory = directory.path().to_owned();
+            let path = path.clone();
+            std::thread::spawn(move || {
+                let mut n = 0u64;
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let temporary = directory.join(format!(".{n}.tmp"));
+                    fs::write(&temporary, b"{}").unwrap();
+                    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600)).unwrap();
+                    fs::rename(&temporary, &path).unwrap();
+                    n += 1;
+                }
+            })
+        };
+        for _ in 0..5_000 {
+            read_private(&path).unwrap();
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        writer.join().unwrap();
+    }
 
     // packages/store/paths.test.ts
     #[test]
