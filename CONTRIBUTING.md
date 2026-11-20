@@ -263,8 +263,9 @@ Contributor workflows, test procedures, simulation reports, repository internals
 proposals belong outside it. Keep contributor guidance in this file, the protocol contract in
 `proto/`, and generated test reports in the chosen output directory. The one exception is
 `docs/development/`: tracked contributor records of the Rust port (the cutover runbook, the
-capability ledger, the TypeScript removal inventory, and Control Plane replica notes), which no
-user page links to.
+capability ledger, the TypeScript removal inventory, Control Plane replica notes, and the
+[messaging migration benchmark](docs/development/messaging-migration-benchmark.md)), which no user
+page links to.
 
 ### Execution lifecycle conformance
 

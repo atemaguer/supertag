@@ -95,6 +95,10 @@ within the pre-1.0 compatibility policy described in
   terminal UI, the desktop app, and other clients read each conversation again once. Your read
   mark is kept once per conversation for all of your clients, and `ListConversations` counts
   unread replies from that mark and ranks conversations by when they were last active.
+- Upgrading moves Mailbox, Workstream, and conversation history onto the new message tables in
+  one transaction when the Control Plane starts. With 100,000 messages this took about 2 seconds
+  on SQLite and 7 seconds on PostgreSQL, and needed free disk of up to three times the database's
+  size until it committed.
 - A Gateway no longer polls for replies once a second. `ClaimReply` takes `wait_ms`, and the
   Control Plane holds a claim that finds no due reply until one is due, for at most 8 seconds,
   then answers empty. A held claim writes nothing while it waits, so an idle Surface account no
