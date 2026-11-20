@@ -13,7 +13,6 @@ import {
   earlierHistory,
   emptyHistory,
   type Gateway,
-  goalOutcome,
   type History,
   joinedReplies,
   lastOperatorMessage,
@@ -43,11 +42,14 @@ import {
   type WatchFeed,
 } from "@supertag/client/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type Command, namedCommand } from "./commands";
 import { DeliveryLine, Entry } from "./entry";
+import { ArgumentHint, SlashPopup, useSlash } from "./slash";
 import { safe } from "./text";
 import {
   atBottom,
   color,
+  type InputRenderable,
   type KeyEvent,
   pasteOnOneLine,
   type ScrollBoxRenderable,
@@ -66,15 +68,15 @@ export interface ConversationProps {
   onDraft(text: string): void;
   /** The composer has the keyboard. */
   focused: boolean;
-  /** `/` typed on an empty message: open the palette. */
-  onPalette(): void;
+  /** The commands available now, which `/` at the start of a message lists. */
+  commands: readonly Command[];
+  /** Runs a command chosen in the popup or sent as `/name`. */
+  onCommand(command: Command, argument?: string): void;
   onSummary?(tagId: string, summary: TagSummary): void;
   /** ↑ on an empty message: the Work Sessions the turns of the conversation's Sessions started. */
   onWork?(): void;
   /** The Sessions the conversation's turns ran in, as they change. */
   onSessions?(tagId: string, sessionIds: string[]): void;
-  /** `/goal` alone: open the new Objective form. */
-  onGoal?(): void;
   /** The line under the reply that created an Objective, once it needs a person or ended. */
   homeLine?(objectiveId: string): string | undefined;
   /** Connecting failed and the screen says so already: a read's own error is not repeated. */
@@ -88,11 +90,11 @@ export function ConversationPane({
   draft,
   onDraft,
   focused,
-  onPalette,
+  commands,
+  onCommand,
   onSummary,
   onWork,
   onSessions,
-  onGoal,
   homeLine,
   offline = false,
 }: ConversationProps) {
@@ -111,7 +113,6 @@ export function ConversationPane({
   const [window, setWindow] = useState(WINDOW);
   const [paging, setPaging] = useState(false);
   const [unseen, setUnseen] = useState(0);
-  const [composer, setComposer] = useState(0);
   const revision = useRef(0);
   const active = useRef(true);
   const scroll = useRef<ScrollBoxRenderable>(null);
@@ -214,15 +215,30 @@ export function ConversationPane({
     }
   }
 
+  // The field shows what it is given even when the draft it had was never rendered (keys that
+  // land together, then a command clears it).
+  const field = useRef<InputRenderable>(null);
+  const setText = (text: string) => {
+    if (field.current && field.current.value !== text) field.current.value = text;
+    onDraft(text);
+  };
+  const slash = useSlash({ text: draft, focused, commands, setText, run: onCommand });
+
   function submit(value: string) {
+    // The popup is open (it takes Enter itself, unless keys landed together): never send.
+    if (slash.submit(value)) return;
     const text = value.trim();
-    if (goalOutcome(text) === "" && onGoal) {
-      onDraft("");
-      onGoal();
+    // `/name` runs the command; `/goal OUTCOME` is a message the Gateway reads. A command that
+    // takes no argument, given one (`/help me with this`), and `/anything else` are messages.
+    const named = namedCommand(text, commands);
+    const argument = named?.command.slash?.argument;
+    if (named && (argument ? !(named.argument && argument.message) : !named.argument)) {
+      setText("");
+      onCommand(named.command, named.argument);
       return;
     }
     if (!text) return;
-    onDraft("");
+    setText("");
     jumpToLatest();
     void deliver(queue(gateway, tagId, text));
   }
@@ -407,25 +423,22 @@ export function ConversationPane({
           ↓ {unseen} new {unseen === 1 ? "message" : "messages"} · End
         </text>
       ) : null}
+      {slash.awaiting && focused ? <ArgumentHint command={slash.awaiting} /> : null}
       <box border borderColor={focused ? color.focus : color.border} height={3} flexShrink={0}>
         <input
+          ref={field}
           onPaste={pasteOnOneLine}
-          key={composer}
           focused={focused}
-          placeholder={`Message ${safe(name)}`}
+          placeholder={`Message ${safe(name)} · / for commands`}
           value={draft}
           onInput={(value: string) => {
-            if (value === "/" && draft === "") {
-              // The palette takes the `/`: a new field shows the message empty.
-              setComposer((n) => n + 1);
-              onPalette();
-              return;
-            }
+            slash.input(value);
             onDraft(value);
           }}
           onSubmit={(value: string) => submit(String(value))}
         />
       </box>
+      {slash.open ? <SlashPopup slash={slash} /> : null}
     </box>
   );
 }

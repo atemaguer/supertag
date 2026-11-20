@@ -1,11 +1,12 @@
 /**
- * The palette (Ctrl-K, or `/` on an empty message): "Search Tags, conversations, settings…".
- * Tags first, with their Alt-N keys, then commands; typing narrows both by name, letters in
- * order. ↑ ↓ move, Enter runs, Esc closes. `/goal OUTCOME` typed here (the `/` that opened it
- * counts) leaves only Create Objective, and Enter sends it to the conversation on screen.
+ * The palette (Ctrl-K): "Search Tags, conversations, settings…". Tags first, with their Alt-N
+ * keys, then the registry's commands with their keys and `/` names; typing narrows both by name,
+ * letters in order. ↑ ↓ move, Enter runs, Esc closes. `/name ARGUMENT` typed here leaves only
+ * that command, and Enter runs it with the argument: `/goal OUTCOME` sends it to the
+ * conversation on screen.
  */
-import { goalOutcome } from "@supertag/client/model";
 import { useRef, useState } from "react";
+import { type Command, keyLabel, slashHead, slashNames } from "./commands";
 import { alt } from "./keys";
 import { clip } from "./text";
 import { color, type KeyEvent, pasteOnOneLine, useKeyboard } from "./ui";
@@ -18,7 +19,28 @@ export interface PaletteItem {
   hint?: string;
   /** The last only lists Tags found by their ID or latest message, after every name match. */
   section: "Tags" | "Commands" | "Tags by ID or message";
-  run(): void;
+  /** A command's `/` names, which match as its label does; with an argument, `/name ARG`. */
+  slash?: { names: readonly string[]; argument: boolean };
+  run(argument?: string): void;
+}
+
+/** A registry command as a palette item: its key and `/` name as the hint. */
+export function paletteCommand(
+  entry: Command,
+  run: (entry: Command, argument?: string) => void,
+): PaletteItem {
+  const names = slashNames(entry);
+  const hint = [entry.key ? keyLabel(entry.key) : "", names[0] ? `/${names[0]}` : ""]
+    .filter(Boolean)
+    .join("  ");
+  return {
+    id: entry.id,
+    label: entry.title,
+    section: "Commands",
+    ...(hint ? { hint } : {}),
+    ...(names.length ? { slash: { names, argument: entry.slash?.argument !== undefined } } : {}),
+    run: (argument) => run(entry, argument),
+  };
 }
 
 /** Whether every character of `query` appears in `text`, in order, ignoring case. */
@@ -38,38 +60,37 @@ function matchesWords(text: string, query: string): boolean {
   return text.toLowerCase().includes(query.trim().toLowerCase());
 }
 
+/** What an item matches by name: its label, and a command's `/` names. */
+function byName(item: PaletteItem, query: string): boolean {
+  return (
+    matches(item.label, query) ||
+    (item.slash?.names.some((name) => matches(`/${name}`, query)) ?? false)
+  );
+}
+
 /**
  * The items `query` matches: those whose name matches, in their sections, then the Tags only an
  * ID or latest message matches, so a command typed by name is never behind a Tag's message.
  */
 function narrowed(items: readonly PaletteItem[], query: string): PaletteItem[] {
-  const byName = items.filter((item) => matches(item.label, query));
-  if (query.trim() === "") return byName;
+  const named = items.filter((item) => byName(item, query));
+  if (query.trim() === "") return named;
   const byWords = items
     .filter(
       (item) =>
-        !byName.includes(item) && item.keywords !== undefined && matchesWords(item.keywords, query),
+        !named.includes(item) && item.keywords !== undefined && matchesWords(item.keywords, query),
     )
     .map((item) => ({ ...item, section: "Tags by ID or message" as const }));
-  return [...byName, ...byWords];
+  return [...named, ...byWords];
 }
-
-/** The palette item that creates an Objective, which inline `/goal` text selects. */
-export const GOAL_ITEM = "goal";
 
 export function Palette({
   items,
   width,
-  slash = false,
-  onGoal,
   onClose,
 }: {
   items: readonly PaletteItem[];
   width: number;
-  /** `/` on an empty message opened it, so what is typed follows that `/`. */
-  slash?: boolean;
-  /** `/goal OUTCOME` was chosen: send it to the conversation on screen. */
-  onGoal?(outcome: string): void;
   onClose(): void;
 }) {
   const [query, setQuery] = useState("");
@@ -78,10 +99,17 @@ export function Palette({
   // the next render, so Enter and the arrows read these, not what the last render showed.
   const latest = useRef({ query, index });
   const choices = (typed: string, at: number) => {
-    const goal = goalOutcome(slash && !typed.startsWith("/") ? `/${typed}` : typed);
-    const shown =
-      goal !== undefined ? items.filter((item) => item.id === GOAL_ITEM) : narrowed(items, typed);
-    return { goal, shown, selected: Math.min(at, Math.max(0, shown.length - 1)) };
+    // `/name ARGUMENT` of a command that takes one: only that command, with the argument.
+    const head = slashHead(typed);
+    const named =
+      head?.argument &&
+      items.find((item) => item.slash?.argument && item.slash.names.includes(head.name));
+    const shown = named ? [named] : narrowed(items, typed);
+    return {
+      argument: named ? head.argument : undefined,
+      shown,
+      selected: Math.min(at, Math.max(0, shown.length - 1)),
+    };
   };
   const select = (at: number) => {
     latest.current = { ...latest.current, index: at };
@@ -127,12 +155,11 @@ export function Palette({
           setIndex(0);
         }}
         onSubmit={() => {
-          const { goal, shown, selected } = choices(latest.current.query, latest.current.index);
+          const { argument, shown, selected } = choices(latest.current.query, latest.current.index);
           const item = shown[selected];
           if (item) {
             onClose();
-            if (item.id === GOAL_ITEM && goal && onGoal) onGoal(goal);
-            else item.run();
+            item.run(argument);
           }
         }}
       />

@@ -31,14 +31,15 @@ client, transcript rules and React hooks with the desktop app through `@supertag
   Tag across Tag switches and launches. A
   message sent waits in the outbox, on disk, until the Gateway accepts it, and is sent again at
   the next launch; another can be sent meanwhile, and Ctrl-R sends every one not delivered
-  again, oldest first. `/goal OUTCOME` goes to the conversation like any message, and the Gateway
-  creates an Objective the Tag owns; `/goal` alone opens the new Objective form. ↑ on an empty
-  message opens Work Sessions.
+  again, oldest first. `/` as a message's first character lists the commands above the composer
+  (see [Commands](#commands)). `/goal OUTCOME` goes to the conversation like any message, and
+  the Gateway creates an Objective the Tag owns; `/goal` alone opens the new Objective form. ↑ on
+  an empty message opens Work Sessions.
 - **An Objective** (selected in the list): what `supertag describe objective` shows, kept current.
   `m` sends its owner a follow-up in the Objective's Session and shows the reply (Esc keeps the
   draft); while it is ready for review, `a` approves it and `c` asks for changes.
-- **The new Objective form**: the outcome, the Team its owner may hand work to (← →; none: it
-  works alone), and a budget such as `300 USD` or `$12.50` (empty: none). It starts the owner's
+- **The new Objective form**: the outcome and a budget such as `300 USD` or `$12.50` (empty:
+  none). It starts the owner's
   first turn; when that could not start, `r` starts it once the cause is fixed, with the same ID.
 - **An inbox item**, opened in place: type the answer to a question and press Enter; on an
   approval request, `a` then Enter approves it once, `d` denies it with a reason. Esc cancels.
@@ -55,12 +56,12 @@ client, transcript rules and React hooks with the desktop app through `@supertag
   and Web access, on unless the harness's hosts have no network (the desktop app's rules, from
   `@supertag/client`). On Local, "Choose a folder…" adds a folder of this machine with
   `supertag workspace add`. Operators only.
-- **The palette** (Ctrl-K, or `/` on an empty message): Tags with their Alt-N keys (which open
-  one at once, there too), found by name, ID or latest message, and commands:
-  New Tag, `/goal` · Create Objective (typing `/goal OUTCOME` there sends it), Work Sessions,
-  Activity, Memory (what the Tag's harness keeps on this machine, with the changes Work Sessions
-  proposed to it; `x` deletes one), Network (operators only), Schedules (`p` pauses or resumes,
-  `x` deletes), Open inbox, Gateways, Keyboard shortcuts. Esc or Ctrl-K closes it.
+- **The palette** (Ctrl-K): Tags with their Alt-N keys (which open one at once, there too),
+  found by name, ID or latest message, then every [command](#commands) with its key and `/`
+  name: Create Objective (typing `/goal OUTCOME` there sends it), New Tag, Open inbox, Work
+  Sessions, Memory (what the Tag's harness keeps on this machine, with the changes Work Sessions
+  proposed to it; `x` deletes one), Schedules (`p` pauses or resumes, `x` deletes), Network
+  (operators only), Activity, Gateways, Fold, Keyboard shortcuts, Quit. Esc or Ctrl-K closes it.
 - **Gateways** (Ctrl-P): Local, and the Gateways saved with `supertag connect` or in the desktop
   app. The saved ones list at once; Local's row says where it runs, that it is stopped (Enter
   starts it), that SuperTag is not set up here, or why the CLI could not say (it gives up after
@@ -134,15 +135,47 @@ launcher passes the environment through.
 | `<config>/supertag/tui.json` | The Gateway used last, whom each Gateway's credential acted as (so a launch paints that Gateway's cache before connecting), the Tag list's width and fold. Never a credential |
 | `<user cache>/supertag/tui/` | Per Gateway and principal, owner-only: the Tags and conversation list, each conversation's latest 50 messages, the outbox, drafts. Never a credential. `<user cache>` is `~/Library/Caches` on macOS, else `$XDG_CACHE_HOME` or `~/.cache` |
 
+## Commands
+
+One registry, `src/commands.ts`, holds every command: its ID, title, one-line description,
+`/` name and aliases, argument hint, key, when it is available, and what it does. The slash
+popup, the palette, the keys outside a panel, and the Keyboard shortcuts screen all read it.
+
+| Command | Key | Does |
+| --- | --- | --- |
+| `/goal <outcome>` | | With an outcome, sends `/goal OUTCOME` to the conversation; alone, opens the new Objective form |
+| `/new` | Ctrl-N | New Tag |
+| `/inbox` | | Opens the first inbox item |
+| `/work` | ↑ on an empty message | Work Sessions |
+| `/memory`, `/schedules`, `/network`, `/activity` | | The Tag's panels |
+| `/gateways` (`/gateway`) | Ctrl-P | Gateways |
+| `/fold` | Ctrl-B | Folds the Tag list to initials, or expands it |
+| `/help` | | Keyboard shortcuts |
+| `/quit` (`/exit`, `/q`) | Ctrl-C | Quit |
+| | Ctrl-K | The palette |
+
+`/` as the first character of a message opens the popup above the composer, and the `/` stays in
+the composer. It lists every command by name with its description; typing narrows them (the start
+of a name first, then within it, then a word of the description; at most 10). ↑ ↓ (Ctrl-P
+Ctrl-N) choose, wrapping around; Tab completes the name; Enter runs a command that takes no
+argument and empties the composer, and writes one that takes an argument as `/goal ` to type it
+after (a line over the composer shows its hint). Esc closes the popup and keeps the text (typing
+opens it again); Ctrl-C closes it and drops the text. A space after the name closes it. Enter never
+sends while it is open. A `/` later in a message, a path such as `/usr/bin` (a second `/`), and a
+name no command has are sent as text. Sent in full, `/name` runs the command, and `/goal OUTCOME`
+goes to the conversation; a command that takes no argument, given one (`/help me with this`), is a
+message.
+
 ## Keys
 
-Enter send · Ctrl-K or `/` palette · Ctrl-N New Tag · Ctrl-P Gateways · Alt-1…9 (or Ctrl-1…9
+Enter send · `/` commands · Ctrl-K palette · Ctrl-N New Tag · Ctrl-P Gateways · Alt-1…9 (or Ctrl-1…9
 where the terminal reports it) the nth Tag ·
 Alt-↑/↓ (Alt-k/j) previous or next Tag · → from the list to the pane · ← from the pane to the
 list · Tab between the list and the pane · ↑/↓ (k/j) in the list · ↑ on an empty message Work
 Sessions · `m` message an Objective's owner · `a`/`d` approve or
 deny · Ctrl-B fold · `[` `]` resize · PgUp/PgDn scroll · End or Ctrl-End latest · Ctrl-R retry ·
-Ctrl-X edit · Esc close · Ctrl-C quit. The Keyboard shortcuts screen (in the palette) lists them from `src/keys.ts`.
+Ctrl-X edit · Esc close · Ctrl-C quit. The Keyboard shortcuts screen (`/help`, or in the palette)
+lists the commands from `src/commands.ts`, then the keys no command runs from `src/keys.ts`.
 
 ← and → never take a key a field needs. → in the list moves the keys to the pane in front: the
 composer, or the Objective, inbox item, or Team the list selected. ← in the pane moves them back

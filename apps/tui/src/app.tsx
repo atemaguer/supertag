@@ -35,6 +35,19 @@ import {
   useWatchRefresh,
 } from "@supertag/client/react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  availableCommands,
+  COMMANDS,
+  type Command,
+  type CommandActions,
+  command,
+  commandForKey,
+  isKey,
+  keyLabel,
+  runCommand,
+  slashLabel,
+  slashNames,
+} from "./commands";
 import type { TuiGateway } from "./connection";
 import { type Controller, LOCAL_STATES } from "./controller";
 import { ConversationPane } from "./conversation";
@@ -46,8 +59,8 @@ import { LocalPanel } from "./local";
 import { NewTagForm } from "./newtag";
 import { alertLevel } from "./notify";
 import { ObjectiveForm, ObjectiveView } from "./objective";
-import { GOAL_ITEM, Palette, type PaletteItem } from "./palette";
-import { PANEL_TITLES, PANELS, type PanelKind } from "./panels";
+import { Palette, type PaletteItem, paletteCommand } from "./palette";
+import { PANELS, type PanelKind } from "./panels";
 import { RAIL } from "./preferences";
 import { Rail, type RailItem, type RailRow, railItems, railKey } from "./rail";
 import { TeamView } from "./team";
@@ -84,6 +97,10 @@ type Overlay =
   | PanelKind
   | undefined;
 
+// The keys `App` and `Waiting` answer before a Gateway's Workspace does, from the registry.
+const QUIT_KEY = command("quit").key as NonNullable<Command["key"]>;
+const GATEWAYS_KEY = command("gateways").key as NonNullable<Command["key"]>;
+
 export function App(props: AppProps) {
   const { controller } = props;
   useSyncExternalStore(controller.subscribe, controller.snapshot);
@@ -91,7 +108,7 @@ export function App(props: AppProps) {
     controller.status.kind === "choosing" ? "gateways" : undefined,
   );
   useKeyboard((key: KeyEvent) => {
-    if (key.ctrl && key.name === "c") props.onQuit();
+    if (isKey(QUIT_KEY, key)) props.onQuit();
   });
   const gateway = controller.gateway;
   const status = controller.status;
@@ -160,7 +177,7 @@ function Waiting({
 }) {
   useKeyboard((key: KeyEvent) => {
     if (overlay) return;
-    if (key.ctrl && key.name === "p") setOverlay("gateways");
+    if (isKey(GATEWAYS_KEY, key)) setOverlay("gateways");
   });
   const status = controller.status;
   return (
@@ -201,23 +218,42 @@ function Centered({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** How a command shows on the Keyboard shortcuts screen: its names, then its key. */
+export function shortcutKeys(entry: Command): string {
+  const names = slashNames(entry);
+  const slash = names.length
+    ? [slashLabel(entry), ...names.slice(1).map((name) => `/${name}`)].join(" ")
+    : "";
+  return [slash, entry.key ? keyLabel(entry.key) : ""].filter(Boolean).join("  ");
+}
+
+/** Keyboard shortcuts: every command of the registry, then the keys no command runs. */
 function Help({ onClose }: { onClose(): void }) {
+  const { width } = useTerminalDimensions();
   useKeyboard((key: KeyEvent) => {
     if (key.name === "escape" || key.name === "return" || key.name === "q") onClose();
   });
   return (
     <box
-      width={72}
+      width={Math.min(100, Math.max(40, width - 4))}
       flexDirection="column"
       border
       borderColor={color.focus}
       backgroundColor="#151515"
       title="Keyboard shortcuts"
-      marginTop={2}
+      marginTop={1}
     >
+      <text fg={color.faint}>Commands</text>
+      {COMMANDS.map((entry) => (
+        <text key={entry.id}>
+          <span fg={color.accent}>{shortcutKeys(entry).padEnd(31)}</span>
+          {entry.description}
+        </text>
+      ))}
+      <text fg={color.faint}>Keys</text>
       {SHORTCUTS.map((shortcut) => (
         <text key={shortcut.keys}>
-          <span fg={color.accent}>{shortcut.keys.padEnd(28)}</span>
+          <span fg={color.accent}>{shortcut.keys.padEnd(31)}</span>
           {shortcut.does}
         </text>
       ))}
@@ -360,8 +396,6 @@ function Workspace({
     (tagId: string, ids: string[]) => setSessionsOf((prior) => ({ ...prior, [tagId]: ids })),
     [],
   );
-  /** The palette was opened by `/` on an empty message, so `/goal` typed there counts. */
-  const [slash, setSlash] = useState(false);
   const principal =
     controller.status.kind === "connected" ? controller.status.principal : undefined;
   useConversationPrefetch(
@@ -482,6 +516,39 @@ function Workspace({
     },
     [rows, tag, select],
   );
+  // What the registry's commands do here. They read the screen as it is when they run.
+  const now = useRef({ tag, inbox: coordination.inbox });
+  now.current = { tag, inbox: coordination.inbox };
+  const actions: CommandActions = useMemo(
+    () => ({
+      open: (panel) => setOverlay(panel),
+      inbox: () => {
+        const first = now.current.inbox[0];
+        if (first) {
+          setView(railKey.inbox(first.key));
+          setFocus("composer");
+        }
+      },
+      fold: () =>
+        setFolded((prior) => {
+          controller.savePreferences({ railFolded: !prior });
+          return !prior;
+        }),
+      quit: onQuit,
+      send: (text) => {
+        const front = now.current.tag;
+        if (front) void queue(gateway, front.tagId, text);
+      },
+    }),
+    [setOverlay, controller, onQuit, gateway],
+  );
+  const hasTag = tag !== undefined;
+  const commands = useMemo(() => availableCommands({ tag: hasTag }), [hasTag]);
+  const onCommand = useCallback(
+    (entry: Command, argument?: string) => runCommand(entry, actions, argument),
+    [actions],
+  );
+
   const renderer = useRenderer();
   useKeyboard((key: KeyEvent) => {
     // ← and → with nothing held: Ctrl, Alt and Shift with them move and select by words.
@@ -494,17 +561,9 @@ function Workspace({
       }
       return;
     }
-    if (key.ctrl && key.name === "k") {
-      setSlash(false);
-      setOverlay("palette");
-    } else if (key.ctrl && key.name === "p") setOverlay("gateways");
-    else if (key.ctrl && key.name === "n") setOverlay("newTag");
-    else if (key.ctrl && key.name === "b") {
-      setFolded((prior) => {
-        controller.savePreferences({ railFolded: !prior });
-        return !prior;
-      });
-    } else if (key.name === "tab" && !key.ctrl)
+    const bound = commandForKey(key, { tag: hasTag });
+    if (bound) runCommand(bound, actions);
+    else if (key.name === "tab" && !key.ctrl)
       setFocus((prior) => (prior === "rail" ? "composer" : "rail"));
     else if ((alt(key) || key.ctrl) && /^[1-9]$/u.test(key.name)) {
       const row = rows[Number(key.name) - 1];
@@ -539,6 +598,7 @@ function Workspace({
     }
   });
 
+  // The palette: the Tags, then the registry's commands (not the palette's own).
   const paletteItems: PaletteItem[] = useMemo(
     () => [
       ...rows.map((row, index) => ({
@@ -549,75 +609,11 @@ function Workspace({
         ...(index < 9 ? { hint: `Alt-${index + 1}` } : {}),
         run: () => select(row.tag.tagId),
       })),
-      {
-        id: "new-tag",
-        label: "New Tag",
-        hint: "Ctrl-N",
-        section: "Commands" as const,
-        run: () => setOverlay("newTag"),
-      },
-      ...(tag
-        ? [
-            {
-              id: GOAL_ITEM,
-              label: "/goal · Create Objective",
-              section: "Commands" as const,
-              run: () => setOverlay("goal"),
-            },
-            {
-              id: "work",
-              label: "Work Sessions",
-              hint: "↑",
-              section: "Commands" as const,
-              run: () => setOverlay("work"),
-            },
-            ...(["activity", "memory", "network", "schedules"] as const).map((kind) => ({
-              id: kind,
-              label: PANEL_TITLES[kind],
-              section: "Commands" as const,
-              run: () => setOverlay(kind),
-            })),
-          ]
-        : []),
-      {
-        id: "inbox",
-        label: "Open inbox",
-        section: "Commands" as const,
-        run: () => {
-          const first = coordination.inbox[0];
-          if (first) {
-            setView(railKey.inbox(first.key));
-            setFocus("composer");
-          }
-        },
-      },
-      {
-        id: "gateways",
-        label: "Gateways · add or switch",
-        hint: "Ctrl-P",
-        section: "Commands" as const,
-        run: () => setOverlay("gateways"),
-      },
-      {
-        id: "fold",
-        label: folded ? "Expand the Tag list" : "Fold the Tag list",
-        hint: "Ctrl-B",
-        section: "Commands" as const,
-        run: () =>
-          setFolded((prior) => {
-            controller.savePreferences({ railFolded: !prior });
-            return !prior;
-          }),
-      },
-      {
-        id: "help",
-        label: "Keyboard shortcuts",
-        section: "Commands" as const,
-        run: () => setOverlay("help"),
-      },
-      { id: "quit", label: "Quit", hint: "Ctrl-C", section: "Commands" as const, run: onQuit },
+      ...commands
+        .filter((entry) => entry.palette !== false)
+        .map((entry) => paletteCommand(entry, onCommand)),
     ],
-    [rows, tag, folded, select, setOverlay, controller, onQuit, coordination.inbox],
+    [rows, commands, select, onCommand],
   );
 
   const unread = unreadTotal(conversations, tag?.tagId);
@@ -671,14 +667,11 @@ function Workspace({
         draft={drafts[tag.tagId] ?? ""}
         onDraft={(text) => setDraft(tag.tagId, text)}
         focused={paneFocused}
-        onPalette={() => {
-          setSlash(true);
-          setOverlay("palette");
-        }}
+        commands={commands}
+        onCommand={onCommand}
         onSummary={onSummary}
         onWork={() => setOverlay("work")}
         onSessions={onSessions}
-        onGoal={() => setOverlay("goal")}
         homeLine={homeLine}
         offline={controller.status.kind === "failed"}
       />
@@ -728,10 +721,6 @@ function Workspace({
             <Palette
               items={paletteItems}
               width={Math.min(72, Math.max(30, width - 4))}
-              slash={slash}
-              onGoal={(outcome) => {
-                if (tag) void queue(gateway, tag.tagId, `/goal ${outcome}`);
-              }}
               onClose={closeOverlay}
             />
           </box>

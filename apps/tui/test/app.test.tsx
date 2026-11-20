@@ -114,13 +114,12 @@ test("the palette finds a Tag by name and opens it", async () => {
   await screen.close();
 });
 
-test("/ on an empty message opens the palette, and Keyboard shortcuts lists the keys", async () => {
+test("/help from the composer opens Keyboard shortcuts, which lists the keys", async () => {
   current = setup();
   const screen = await render(current);
   await screen.waitFor("Message lead");
-  await screen.type("/");
-  await screen.waitFor("Search Tags, conversations, settings");
-  await screen.type("keyboard");
+  await screen.type("/hel");
+  await screen.waitFor("Every command and key");
   await screen.press("RETURN");
   await screen.waitFor("Fold the Tag list to initials");
   await screen.press("ESCAPE");

@@ -155,17 +155,19 @@ for _ in 1 2; do
   fi
   sleep 0.5
 done
-# /goal from the palette opens the form; the Objective starts and m messages its owner.
+# /goal from the composer's commands: Enter writes `/goal `, and Enter with no outcome opens
+# the form; the Objective starts and m messages its owner.
 palette planner
 wait_for "Message planner"
-t send-keys -t e2e -l "/"
-wait_for "Search Tags"
-t send-keys -t e2e -l "goal"
-wait_for "/goal · Create Objective"
+t send-keys -t e2e -l "/go"
+wait_for "/goal <outcome>"
+t send-keys -t e2e Enter
+wait_for "/goal <outcome> · "
 t send-keys -t e2e Enter
 wait_for "New Objective for planner"
 t send-keys -t e2e -l "Check the e2e $$"
-t send-keys -t e2e Enter Enter
+# Enter moves from the outcome to the budget, and Enter there creates the Objective.
+t send-keys -t e2e Enter
 t send-keys -t e2e -l "\$12.50"
 t send-keys -t e2e Enter
 wait_for "took its first turn"

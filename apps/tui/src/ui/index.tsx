@@ -5,6 +5,7 @@
 import type {
   CliRenderer,
   EditBufferRenderable,
+  InputRenderable,
   KeyEvent,
   Renderable,
   ScrollBoxRenderable,
@@ -12,7 +13,7 @@ import type {
 } from "@opentui/core";
 import { decodePasteBytes, PasteEvent } from "@opentui/core";
 import { useKeyboard, usePaste, useRenderer } from "@opentui/react";
-import { createContext, memo, useContext, useMemo } from "react";
+import { createContext, memo, useContext, useEffect, useMemo, useRef } from "react";
 import { safe } from "../text";
 import { color, syntaxStyle } from "./theme";
 
@@ -24,7 +25,7 @@ export {
   useRenderer,
   useTerminalDimensions,
 } from "@opentui/react";
-export type { KeyEvent, Renderable, ScrollBoxRenderable };
+export type { InputRenderable, KeyEvent, Renderable, ScrollBoxRenderable };
 export { color };
 
 const StyleContext = createContext<SyntaxStyle | undefined>(undefined);
@@ -74,6 +75,26 @@ export function textBeforeCursor(renderer: CliRenderer): boolean {
     | null;
   if (!field || field.isDestroyed || !field.focused) return false;
   return typeof field.cursorOffset === "number" && field.cursorOffset > 0;
+}
+
+/**
+ * A key layer over every other handler while `enabled`: it hears each key before the other
+ * `useKeyboard` hooks and the focused field, whatever order they mounted in, and a key it takes
+ * (`stopPropagation`) reaches none of them. The slash popup takes ↑ ↓ Tab Enter Esc this way.
+ */
+export function useKeyLayer(enabled: boolean, handler: (key: KeyEvent) => void) {
+  const renderer = useRenderer();
+  const latest = useRef(handler);
+  latest.current = handler;
+  useEffect(() => {
+    if (!enabled) return;
+    const keys = renderer.keyInput;
+    const listener = (key: KeyEvent) => latest.current(key);
+    keys.prependListener("keypress", listener);
+    return () => {
+      keys.off("keypress", listener);
+    };
+  }, [renderer, enabled]);
 }
 
 /** Whether a scroll view shows its end. */

@@ -15,6 +15,19 @@ within the pre-1.0 compatibility policy described in
   moves to the composer (or the Objective, inbox item, or Team in front), and ← moves back when
   the field is empty or its cursor is at the start, otherwise it moves the cursor. ← also closes
   Work Sessions and the Tag panels. The list's selected row is brighter while it has the keys.
+- Slash commands in the terminal UI's composer: `/` as a message's first character lists the
+  commands above the composer with their descriptions and argument hints, narrowed as you type.
+  ↑ ↓ choose, Tab completes the name, Enter runs it (`/goal` waits for an outcome; Enter with none
+  opens the new Objective form), Esc closes the list and keeps the text. The commands are `/goal`,
+  `/new`, `/inbox`, `/work`, `/memory`, `/schedules`, `/network`, `/activity`, `/gateways`,
+  `/fold`, `/help`, and `/quit`. The palette (Ctrl-K) and the Keyboard shortcuts screen list the
+  same commands with their keys.
+
+### Changed
+
+- In the terminal UI, `/` on an empty message no longer opens the palette (Ctrl-K does), so a
+  message can start with `/`: a path such as `/usr/bin`, or a `/` later in a message, is sent as
+  text.
 
 ## [0.3.4] - 2026-11-20
 

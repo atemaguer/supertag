@@ -169,12 +169,13 @@ test("/goal alone opens the form; it creates with a budget, and r starts one tha
   current = setup(fake);
   const screen = await render(current, { width: 120, height: 40 });
   await screen.waitFor("Message lead");
-  // `/` on an empty message opens the palette; `goal` after it leaves only Create Objective.
-  await screen.type("/");
-  await screen.waitFor("Search Tags");
-  await screen.type("goal");
-  const palette = await screen.waitFor("/goal · Create Objective");
-  expect(palette).not.toContain("Keyboard shortcuts");
+  // `/goal` in the popup takes an outcome: Enter writes `/goal `, and Enter with none opens the
+  // form.
+  await screen.type("/goal");
+  const popup = await screen.waitFor("/goal <outcome>");
+  expect(popup).not.toContain("/help");
+  await screen.press("RETURN");
+  await screen.waitFor("/goal <outcome> · An Objective the Tag owns");
   await screen.press("RETURN");
   await screen.waitFor("New Objective for lead");
   expect(fake.sent).toEqual([]);
@@ -223,12 +224,18 @@ test("/goal with an outcome goes to the conversation like any message", async ()
   current = setup(coordinated());
   const screen = await render(current);
   await screen.waitFor("Message lead");
-  await screen.type("/");
-  await screen.waitFor("Search Tags");
-  await screen.type("goal Ship it");
+  await screen.type("/goal Ship it");
   await screen.press("RETURN");
   await screen.waitFor("Process requests: /goal Ship it");
-  expect(current.fake.sent.map((sent) => sent.text)).toEqual(["/goal Ship it"]);
+  // From the palette too: `/goal OUTCOME` there leaves only Create Objective, and sends it.
+  await screen.press("k", { ctrl: true });
+  await screen.waitFor("Search Tags");
+  await screen.type("/goal Ship that");
+  const palette = await screen.waitFor("Create Objective");
+  expect(palette).not.toContain("Keyboard shortcuts");
+  await screen.press("RETURN");
+  await screen.waitFor("Process requests: /goal Ship that");
+  expect(current.fake.sent.map((sent) => sent.text)).toEqual(["/goal Ship it", "/goal Ship that"]);
   await screen.close();
 });
 

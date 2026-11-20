@@ -6,6 +6,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, it } from "vitest";
+import { availableCommands, COMMANDS, slashHead, slashMatches, slashQuery } from "./commands";
 import { cliPath, notifyLevel, parseArguments } from "./launch";
 import { alertLevel, notificationBytes } from "./notify";
 import { loadPreferences, RAIL, savePreferences } from "./preferences";
@@ -78,4 +79,28 @@ it("keeps preferences owner-only and ignores a bad file", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+it("opens commands only for a / at the start, with no space or second / after it", () => {
+  expect(slashQuery("/")).toBe("");
+  expect(slashQuery("/go")).toBe("go");
+  expect(slashQuery("/goal ship")).toBeUndefined();
+  expect(slashQuery("/usr/bin")).toBeUndefined();
+  expect(slashQuery("fix /etc/hosts")).toBeUndefined();
+  expect(slashHead("/goal  Ship it ")).toEqual({ name: "goal", argument: "Ship it" });
+  expect(slashHead("/usr/bin")).toBeUndefined();
+});
+
+it("ranks commands by the start of a name, then within it, then by description", () => {
+  const all = availableCommands({ tag: true });
+  const names = (query: string) => slashMatches(query, all).map((match) => match.name);
+  expect(names("")).toEqual([...names("")].sort());
+  expect(names("ne")[0]).toBe("new");
+  expect(names("ne")).toContain("network");
+  // An alias typed shows as itself.
+  expect(names("exi")).toEqual(["exit"]);
+  expect(names("wake")).toEqual(["schedules"]);
+  expect(names("zzz")).toEqual([]);
+  expect(availableCommands({ tag: false }).map((entry) => entry.id)).not.toContain("goal");
+  expect(new Set(COMMANDS.map((entry) => entry.id)).size).toBe(COMMANDS.length);
 });
