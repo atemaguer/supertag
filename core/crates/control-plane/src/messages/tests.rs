@@ -28,6 +28,26 @@ async fn postgres_inserts_in_two_conversations_do_not_wait_on_each_other() {
     on_postgres("message_seq", |url| async move { independent(&url).await }).await;
 }
 
+#[tokio::test]
+async fn sqlite_held_rows_and_backlog() {
+    let directory = tempfile::tempdir().unwrap();
+    held_rows_and_backlog(&format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("backlog.db").display()
+    ))
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_held_rows_and_backlog() {
+    on_postgres(
+        "backlog",
+        |url| async move { held_rows_and_backlog(&url).await },
+    )
+    .await;
+}
+
 async fn on_postgres<F: std::future::Future<Output = ()> + 'static>(
     label: &str,
     run: impl FnOnce(String) -> F + 'static,
@@ -570,4 +590,147 @@ async fn independent(url: &str) {
     assert_eq!(next.seq, 2);
     tx.commit().await.unwrap();
     store.close().await;
+}
+
+/// Past the backlog a note is held: written as a row with no due time that wakes nobody. A later
+/// message of the conversation that wakes pulls it forward. Held rows count toward neither the
+/// backlog nor the wake limits.
+async fn held_rows_and_backlog(url: &str) {
+    let store = Store::open(url).await.unwrap();
+    store.put_tag("bob", "Coordinate", vec![]).await.unwrap();
+    let (mut tx, _) = store.write().await.unwrap();
+    let woken = |deferred: Option<&str>| WakeOutcome {
+        woke: deferred.is_none(),
+        deferred: deferred.map(str::to_owned),
+    };
+    let behind = Some("Tag bob is behind; it sees this in its next turn.");
+    let senders: Vec<String> = (0..BACKLOG).map(|i| format!("s{i:02}")).collect();
+    for sender in &senders {
+        let conversation =
+            direct_conversation_in(&mut tx, Member::Tag(sender), Member::Tag("bob"), 1_000)
+                .await
+                .unwrap();
+        let outcome = wake_in(
+            &mut tx,
+            &request(&conversation, sender, 1, MessageKind::Note, 1_000),
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome, woken(None));
+    }
+    assert_eq!(
+        counted(&mut tx).await,
+        1,
+        "only the first wake starts a turn"
+    );
+
+    let late = direct_conversation_in(&mut tx, Member::Tag("late"), Member::Tag("bob"), 1_000)
+        .await
+        .unwrap();
+    for seq in [1, 2] {
+        let outcome = wake_in(
+            &mut tx,
+            &request(&late, "late", seq, MessageKind::Note, 1_000 + seq),
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome, woken(behind));
+    }
+    assert_eq!(
+        pending_rows(&mut tx, &late).await,
+        [("inbox:bob".into(), "tag:late".into(), 1, 1, 2, None)],
+        "the held notes coalesce into one row with no due time"
+    );
+
+    // A question is never held for the backlog: it pulls the held row forward, for free.
+    let outcome = wake_in(
+        &mut tx,
+        &request(&late, "late", 3, MessageKind::Question, 2_000),
+    )
+    .await
+    .unwrap();
+    assert_eq!(outcome, woken(None));
+    assert_eq!(
+        pending_rows(&mut tx, &late).await,
+        [(
+            "inbox:bob".into(),
+            "tag:late".into(),
+            2,
+            1,
+            3,
+            Some(2_000 + DEBOUNCE_MS)
+        )]
+    );
+    assert_eq!(counted(&mut tx).await, 1);
+
+    // Held rows are neither pending wakes for the backlog nor a turn already coming: with every
+    // other row held, a note wakes the Tag and counts.
+    sqlx::query(
+        "UPDATE supertag_v2_session_inputs SET not_before_ms=NULL
+         WHERE tag_id='bob' AND task_id IS NULL",
+    )
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    let fresh = direct_conversation_in(&mut tx, Member::Tag("fresh"), Member::Tag("bob"), 1_000)
+        .await
+        .unwrap();
+    let outcome = wake_in(
+        &mut tx,
+        &request(&fresh, "fresh", 1, MessageKind::Note, 3_000),
+    )
+    .await
+    .unwrap();
+    assert_eq!(outcome, woken(None));
+    assert_eq!(counted(&mut tx).await, 2);
+    assert!(
+        due_recipients_in(&mut tx, 3_000 + DEBOUNCE_MS - 1, 10)
+            .await
+            .unwrap()
+            .is_empty(),
+        "a held row is never due"
+    );
+    tx.rollback().await.unwrap();
+    store.close().await;
+}
+
+async fn counted(tx: &mut Transaction<'_, Any>) -> i64 {
+    sqlx::query_scalar("SELECT wakes FROM supertag_v2_wake_counts WHERE scope=1 AND scope_id='bob'")
+        .fetch_one(&mut **tx)
+        .await
+        .unwrap()
+}
+
+type PendingRow = (String, String, i64, i64, i64, Option<i64>);
+
+async fn pending_rows(tx: &mut Transaction<'_, Any>, conversation: &str) -> Vec<PendingRow> {
+    sqlx::query_as(
+        "SELECT session_id,requester,priority,first_seq,last_seq,not_before_ms
+         FROM supertag_v2_session_inputs WHERE conversation_id=$1 AND task_id IS NULL",
+    )
+    .bind(conversation)
+    .fetch_all(&mut **tx)
+    .await
+    .unwrap()
+}
+
+fn request<'a>(
+    conversation_id: &'a str,
+    sender_tag_id: &'a str,
+    seq: i64,
+    message_kind: MessageKind,
+    now: i64,
+) -> WakeRequest<'a> {
+    WakeRequest {
+        tag_id: "bob",
+        conversation_id,
+        message_kind,
+        sender_tag_id,
+        seq,
+        hops: 0,
+        origin_task_id: None,
+        objective_id: None,
+        team_id: None,
+        now,
+    }
 }

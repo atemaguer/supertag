@@ -1,18 +1,23 @@
 //! Wake rows: which Tag must take an inbox turn for which messages. A wake is a Tag message input
-//! of the Tag's inbox Session (`crate::session_inputs`, kind 4). A pending wake (no Task yet) is
+//! of the Tag's inbox Session (`crate::session_inputs`, kind 4), and the input queue is the only
+//! record of a Tag message its recipient has not been given. A pending row (no Task yet) is
 //! coalesced per Tag and conversation, so a burst of messages makes one turn; the inbox Task that
-//! delivers it binds the wake and records the seqs it delivered. A held row (no due time) waits
-//! for the Tag's next inbox turn and wakes nobody. Only direct messages wake a
-//! Tag: a Workstream post wakes nobody and reaches its members in the digest of their next turn.
+//! delivers it binds the row and records the seqs it delivered. A row with a due time wakes the
+//! Tag; a held row (no due time) wakes nobody and is bound by the Tag's next inbox turn. An inbox
+//! turn binds the rows of several sending Tags at once: the inbox exception to "a run binds only
+//! inputs that share its requester and reply audience", under the receiving Tag's own policy
+//! (`crate::mailbox`). Only direct messages make rows: a Workstream post wakes nobody and reaches
+//! its members in the digest of their next turn.
 //!
 //! Only Tags' messages come through here, so only they count toward the wake limits: mutual wakes
 //! per pair of Tags per originating Task, and Tag-originated wakes per woken Tag and per Objective
 //! per hour. A wake counts only when it would start an activation, meaning the Tag has no pending
-//! wake already; coalesced wakes are free. Over a limit, a note, evidence, or decision gets no wake
-//! and waits for the Tag's next turn; a question, blocker, or review request gets a deferred wake.
-//! A wake the pair limit deferred while its originating Task still runs is released when that Task
-//! ends, and after an hour at the latest. Nothing is dropped, the sender is told why, and the
-//! operator gets one Inbox item per limit and window.
+//! wake already; coalesced wakes are free, and held rows count toward neither the limits nor the
+//! backlog. Over a limit, or past the backlog, a note, evidence, or decision is held for the Tag's
+//! next turn; a question, blocker, or review request gets a deferred wake, and pulls a held row
+//! of its conversation forward. A wake the pair limit deferred while its originating Task still
+//! runs is released when that Task ends, and after an hour at the latest. Nothing is dropped, the
+//! sender is told why, and the operator gets one Inbox item per limit and window.
 use sqlx::{Any, Transaction};
 use supertag_protocol::v2::{MessageKind, TaskState};
 use uuid::Uuid;
@@ -65,7 +70,8 @@ pub(crate) struct WakeRequest<'a> {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct WakeOutcome {
-    /// A wake row was written or coalesced, due now or deferred.
+    /// The message's row is due, now or deferred: the Tag takes a turn for it. False when a wake
+    /// limit or the backlog held it for the Tag's next turn.
     pub woke: bool,
     /// Why the recipient was not woken now; the sender is told.
     pub deferred: Option<String>,
@@ -329,10 +335,12 @@ async fn record_trip_in(
 
 /// Wakes the Tag for a Tag's message, within the wake limits, and says why when it waits.
 ///
-/// The Tag's pending wake for the conversation is written or coalesced: it keeps its first seq
+/// The Tag's pending row for the conversation is written or coalesced: it keeps its first seq
 /// and origin, and takes the highest priority and hops, the latest seq, and the earliest due time.
 /// A note or question is due after [`DEBOUNCE_MS`], so a burst lands in one turn; a blocker or
-/// review request is due now and pulls an existing wake forward.
+/// review request is due now and pulls an existing wake forward. A note, evidence, or decision
+/// over a wake limit or the backlog is written as a held row instead (`woke: false`), which the
+/// Tag's next inbox turn binds.
 pub(crate) async fn wake_in(
     tx: &mut Transaction<'_, Any>,
     request: &WakeRequest<'_>,
@@ -354,58 +362,57 @@ pub(crate) async fn wake_in(
     .bind(request.conversation_id)
     .fetch_one(&mut **tx)
     .await?;
-    if priority == 1 && same == 0 && pending >= BACKLOG {
-        return Ok(WakeOutcome {
-            woke: false,
-            deferred: Some(format!(
-                "Tag {} is behind; it sees this in its next turn.",
-                request.tag_id
-            )),
-        });
-    }
-    let mut not_before = if urgent {
+    // `None` holds the message: it waits for the Tag's next inbox turn and wakes nobody.
+    let mut not_before = Some(if urgent {
         request.now
     } else {
         request.now + DEBOUNCE_MS
-    };
+    });
     let mut deferred_reason = None;
     let mut release_task_id = None;
     let mut notice = None;
-    // A Tag with a pending wake takes a turn anyway: this wake starts nothing and is free.
-    if active == 0 {
+    if priority == 1 && same == 0 && pending >= BACKLOG {
+        not_before = None;
+        notice = Some(format!(
+            "Tag {} is behind; it sees this in its next turn.",
+            request.tag_id
+        ));
+    } else if active == 0 {
+        // A Tag with a pending wake takes a turn anyway: this wake starts nothing and is free.
         let limits = limits_in(tx, request.team_id).await?;
         match trip_in(tx, request, limits).await? {
             Some(trip) => {
                 record_trip_in(tx, request, &trip).await?;
                 let tag = request.tag_id;
                 if priority == 1 {
-                    return Ok(WakeOutcome {
-                        woke: false,
-                        deferred: Some(format!(
-                            "{}; Tag {tag} will see this message in its next turn.",
-                            trip.reason
-                        )),
-                    });
+                    not_before = None;
+                    notice = Some(format!(
+                        "{}; Tag {tag} will see this message in its next turn.",
+                        trip.reason
+                    ));
+                } else {
+                    let when = match &trip.release_task_id {
+                        Some(task) => format!("when Task {task} ends"),
+                        None => "when the limit resets".to_owned(),
+                    };
+                    notice = Some(format!(
+                        "{}; Tag {tag} gets this {} {when}, within the hour.",
+                        trip.reason,
+                        kind_word(request.message_kind)
+                    ));
+                    not_before = Some(trip.until_ms);
+                    deferred_reason = Some(trip.reason);
+                    release_task_id = trip.release_task_id;
                 }
-                let when = match &trip.release_task_id {
-                    Some(task) => format!("when Task {task} ends"),
-                    None => "when the limit resets".to_owned(),
-                };
-                notice = Some(format!(
-                    "{}; Tag {tag} gets this {} {when}, within the hour.",
-                    trip.reason,
-                    kind_word(request.message_kind)
-                ));
-                not_before = trip.until_ms;
-                deferred_reason = Some(trip.reason);
-                release_task_id = trip.release_task_id;
             }
             None => count_in(tx, request).await?,
         }
     }
     let position = crate::store::increment_order(tx).await?;
     let wake_id = Uuid::new_v4().simple().to_string();
-    // A due time wins over held (none); the earlier due time wins over a later one.
+    // A due time wins over held (none), and the earlier due time over a later one; the reason it
+    // waits and the Task that releases it follow the winning due time. A held message coalesced
+    // into a pending wake is delivered with it.
     sqlx::query(
         "INSERT INTO supertag_v2_session_inputs
             (input_id,tag_id,session_id,position,kind,source_key,requester,audience,
@@ -455,7 +462,7 @@ pub(crate) async fn wake_in(
     .execute(&mut **tx)
     .await?;
     Ok(WakeOutcome {
-        woke: true,
+        woke: not_before.is_some(),
         deferred: notice,
     })
 }

@@ -19,6 +19,11 @@ within the pre-1.0 compatibility policy described in
   from the same person for the same audience: live input queued by someone else now runs as its
   own turn. On upgrade, waiting messages, live inputs, and Tag messages a wake limit held move into
   the queue; a waiting inbox turn with nothing left to deliver is cancelled.
+- A Tag's message that a wake limit or the backlog holds now waits in its recipient's inbox queue,
+  wakes no one, and arrives in the next inbox turn, after the messages that woke the Tag, in the
+  same turn as other Tags' messages. A later message in its conversation that wakes the Tag brings
+  it along. Held messages count toward neither the backlog of 64 nor the wake limits. An inbox
+  turn run again after a lost Worker shows the same messages and takes in nothing new.
 
 - A Tag's memory is its harness's own memory. The daily memory review now keeps that memory
   current: it corrects it against the Tag's Sessions, merges duplicates, dates time-relative

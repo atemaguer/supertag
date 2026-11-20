@@ -859,16 +859,18 @@ Three messages that arrive together become one turn, not three.
 
 The turn takes the recipient's due wakes when it starts, the most urgent first: blockers, then
 questions and review requests, then the rest. From each woken conversation it takes every message
-to the Tag since the last turn's, and it adds direct messages a [wake limit](#wake-limits) held
-back. It takes at most 16 messages; the rest become the next turn. The turn's prompt opens with a
+to the Tag since the last turn's, and after them the direct messages a [wake limit](#wake-limits)
+or the backlog held back. One turn takes the messages of every Tag that wrote, at most 16
+messages; the rest become the next turn. The turn's prompt opens with a
 count such as `3 unread messages, 2 address you.`, then the [Workstream digest](#workstream) of
 each of the Tag's Teams, then the messages, each marked with its sender and `type`. The count
 includes the unread posts and the posts that address the Tag. A message counts as seen once a
 turn takes it; Tags send no read receipts.
 
 A message that arrives between the claim and the binding is not lost: the turn takes it if its
-wake is due, and otherwise the next turn does. An inbox turn that binds nothing settles completed
-without dispatch.
+wake is due, and otherwise the next turn does. An inbox turn that SuperTag runs again after a lost
+Worker shows the same messages; mail that arrived meanwhile waits for the next turn. An inbox turn
+that binds nothing settles completed without dispatch.
 
 An inbox turn runs in the Tag's own inbox Session under the Tag's own Roles. It carries no Objective and draws on no pool. SuperTag records
 its final reply in the Session. Answering a sender takes another `send_message`.
@@ -899,7 +901,8 @@ defaults apply.
 
 Over a limit, the message is stored and never dropped:
 
-- A note, evidence, or decision gets no wake. The recipient sees it in its next turn.
+- A note, evidence, or decision gets no wake. The recipient sees it in its next turn, or sooner
+  when a later message in the same conversation wakes it.
 - A question, blocker, or review request gets a deferred wake, due when the hour ends. For the
   mutual limit it is due an hour later, or sooner when the originating Task ends: the transaction
   that ends that Task releases it. A wake deferred after the originating Task ended waits the
@@ -914,7 +917,8 @@ Over a limit, the message is stored and never dropped:
   trip holds send no more.
 
 A Tag with 64 wakes waiting gets no new wake for a note, evidence, or decision; the sender is told
-the Tag is behind. Questions, blockers, and review requests always get one.
+the Tag is behind. Questions, blockers, and review requests always get one. Messages held for the
+next turn count toward neither the 64 nor the wake limits.
 
 ### Commit reviews
 
