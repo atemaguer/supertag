@@ -156,6 +156,21 @@ reason under the execution report's `failure_detail`: at most eight lines, secre
 to operators only and never in a reply, conversation, or client's view of the Task. A reply whose delivery is uncertain waits for
 `supertag reply resolve REPLY_ID --decision ... --evidence ...` after you check the thread.
 
+## A Task was interrupted and not run again
+
+When a Worker dies mid-turn and its host proves the Task Attempt's processes stopped, SuperTag
+usually runs the Task again from a fresh checkout. It does not when the lost run may have done
+something that repeating would do twice, or when the Task already had three Task Attempts. The
+Task then fails with an unknown outcome, and the inbox shows a `task-attention` item naming the
+Task, its Tag, and the reason. See what the Task did before you ask again:
+
+```sh
+supertag get inbox-items --kind task-attention
+supertag task events TASK_ID
+```
+
+See [Redelivery](../reference/scheduling-and-recovery.md#redelivery) for the rules.
+
 ## A Task Attempt is uncertain
 
 A Worklet that was killed or lost its execution lease while running a **Task Attempt**, one

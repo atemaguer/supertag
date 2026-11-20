@@ -162,8 +162,11 @@ which fences their Task Attempts.
 
 When a Worker dies while its harness runs, or a Worklet restarts after it was killed then, the
 Worklet checks the processes recorded for the interrupted Task Attempt, the Worker's own included. When every one is gone, it
-records the Task Attempt as failed with an unknown outcome and does not run it again. Otherwise, and always for a Task Attempt that used a remote sandbox or
-shared execution, it waits for `supertag task resolve-attempt`. With `--wait-for-recovery`, the
+reclaims the Task Attempt with `WorkerHost.ReclaimAttempt` and discards its checkout. The Control
+Plane then runs the Task again as a new Task Attempt from a fresh checkout, at most three Task
+Attempts in all, or fails it with an unknown outcome when repeating it might repeat an effect. See
+[Redelivery](scheduling-and-recovery.md#redelivery). When a recorded process may still run, and always for a Task Attempt
+that used a remote sandbox or shared execution, the Worklet waits for `supertag task resolve-attempt`. With `--wait-for-recovery`, the
 host stays connected while it waits. See [Scheduling and interrupted execution](scheduling-and-recovery.md).
 
 ## Process supervision

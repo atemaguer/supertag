@@ -327,9 +327,13 @@ host, a new read fails as busy rather than as offline; retry it.
 ## Recover an interrupted Task Attempt
 
 A Worklet restarted after it was killed checks the processes it recorded for an interrupted Task
-Attempt. When all of them are gone, it records the Task Attempt as failed with an unknown outcome
-and takes new work. Otherwise, and always for a Task Attempt that used a remote sandbox or shared
-execution, an operator decides:
+Attempt. When all of them are gone, it reclaims the Task Attempt and takes new work. SuperTag runs
+the Task again from a fresh checkout when repeating it is safe, up to three Task Attempts in all.
+Otherwise the Task fails with an unknown outcome, and the inbox shows a `task-attention` item with
+the reason. See [Redelivery](../reference/scheduling-and-recovery.md#redelivery).
+
+When a recorded process may still run, and always for a Task Attempt that used a remote sandbox
+or shared execution, an operator decides:
 
 ```sh
 supertag task resolve-attempt TASK_ID ATTEMPT_ID --decision failed \

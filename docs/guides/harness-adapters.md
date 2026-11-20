@@ -36,6 +36,9 @@ Worklet ── claims Task ── starts Worker ── starts adapter ── wri
 4. `Attach` returns a `HarnessRun`: the Task and its prompt, the Session checkpoint to resume
    from, a recap of the Session's last finished turns (`history`: each request, result, and the
    messages the agent wrote), the Skills its Context Sets resolved, and what the Task may do.
+   When an earlier Task Attempt of the Task was interrupted and the Task was
+   [redelivered](../reference/scheduling-and-recovery.md#redelivery), the prompt already says so
+   and quotes what that run said to the person; the checkout is fresh.
 5. While the agent works, the adapter reports what it does with `Publish`, token usage with
    `ReportUsage`, and the limits it enforces with `ConfirmExecutionLimits`. Each `Publish` names
    its `kind`:

@@ -269,6 +269,29 @@ Attempt, but a retry after a disconnect or temporary failure creates another.
 Task Attempts stream lifecycle events and output while the Task remains the
 stable unit users inspect.
 
+### When a Task Attempt is interrupted
+
+A Worker, the process that runs a Task Attempt on its host, can die mid-turn, for example when
+the laptop running it restarts. When the host proves every process of that Task Attempt stopped,
+SuperTag runs the Task again on its own, as long as repeating it cannot do something twice:
+
+```text
+you   check why CI is red on #412
+Tag   Looking at CI now.
+      (the host restarts; the Task Attempt is lost)
+Tag   Two jobs failed: lint and the cursor test. ...
+      (a new Task Attempt of the same Task, told what it already said)
+```
+
+The new Task Attempt starts from a fresh checkout, so half-made edits are gone. It continues the
+Session from its last saved state and is told what the lost run already said, so it doesn't
+repeat itself. SuperTag does not run the Task again when the lost run left an external write in
+doubt, started delivering changes, published an artifact, already sent its reply, ran an action
+that needed approval, or may have run a command that reached the network outside a sandbox. A
+Task gets at most three Task Attempts. Otherwise the Task fails with an unknown outcome, and the
+operator inbox says which Task, which Tag, and why. See
+[Redelivery](../reference/scheduling-and-recovery.md#redelivery).
+
 Only a successful Task Attempt completes the Task. Ordinary failed Task Attempts do not advance
 reusable harness state or same-Session continuity. A confirmed budget stop is a narrow exception:
 a successfully archived native Session can resume the same Task after an authorized allocation
@@ -416,7 +439,7 @@ or a replayed claim presents the same ones.
 If delivery or execution completion is uncertain, SuperTag blocks further execution in that
 Session rather than retrying the message or resuming an older session state. Uncertain execution
 blocks the Session only while it may still run: once its Worklet records that it stopped, the
-Session's next turns run, and the uncertain Task still never runs again. The durable delivery
+Session's next turns run, and the uncertain Task still never runs again on its own. The durable delivery
 record retains the exact target Task Attempt. If that Task Attempt later withdraws the input as
 unread before SuperTag queues a recovery notice, the message returns to the Session's next turn
 automatically. Do not resend it while that execution is active.

@@ -172,6 +172,9 @@ whole system rather than another first-class resource.
 - <a id="connection-generation"></a>**Task Attempt generation** — an increasing number that fences a Task Attempt's lease.
   SuperTag rejects reports from a Worklet that lost the lease. See
   [Leases and unknown outcomes](scheduling-and-recovery.md#leases-and-unknown-outcomes).
+- <a id="redelivery"></a>**redelivery** — running a Task again as a new Task Attempt after its host reclaimed a lost one,
+  when repeating it is safe; at most three Task Attempts per Task. See
+  [Redelivery](scheduling-and-recovery.md#redelivery).
 - <a id="git-delivery"></a>**git delivery** — the part of the Control Plane that talks to remote Workspaces' git servers: it
   reads each Session's source and opens review pull requests. Worklets push the changes. See
   [Landing](resource-model.md#landing).

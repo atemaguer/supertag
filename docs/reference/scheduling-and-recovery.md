@@ -108,22 +108,70 @@ A host's Worklet holds a lease on each running Task Attempt and renews it while 
 runs. Each lease is fenced by the Task Attempt's generation: once a lease is lost, the Worklet can no longer
 record events, results, or deliveries for that Task Attempt.
 
-### Uncertain Task Attempts
+### Interrupted Task Attempts
 
 When a host or its Worklet stops or loses contact while a Task Attempt runs, the Control Plane cannot know
-whether the work finished or changed anything outside SuperTag. It does not run the Task again on
-its own:
+whether the work finished or changed anything outside SuperTag:
 
 - A [Worker](glossary.md#worker), the process that runs one Task Attempt, dies with its Worklet. A Worklet restarted after it was killed, or one whose Worker
   died, checks the processes it recorded for the Task Attempt, the Worker's own included. When
-  every one is gone, it records the Task Attempt as failed with an unknown outcome and takes new
-  work. A Task Attempt whose harness had finished is not interrupted: a new Worker resumes
-  capturing what it produced, and the Worklet finishes it.
+  every one is gone, it reclaims the Task Attempt and takes new work. The Control Plane then
+  either [redelivers the Task](#redelivery) or fails it. A Task Attempt whose harness had
+  finished is not interrupted: a new Worker resumes capturing what it produced, and the Worklet
+  finishes it.
 - Otherwise, and always for a Task Attempt that used a remote sandbox or shared execution, the
   Task Attempt is **uncertain**. It appears in the operator inbox as `task-attention` and in
-  `supertag metrics` under recovery.
+  `supertag metrics` under recovery. An uncertain Task Attempt is never redelivered; an operator
+  decides.
 
-Check what the Task Attempt did, then record a decision:
+### Redelivery
+
+When a Worklet reclaims a lost Task Attempt, the Control Plane decides in the same transaction
+whether the Task runs again. It redelivers the Task unless the lost Task Attempt:
+
+1. left an external write in doubt: an effect receipt that started and never reported its
+   outcome, or an MCP call the Control Plane brokered that was never confirmed;
+2. started a delivery of the Session's changes, published an artifact, or already sent its reply;
+3. ran an action that needed approval;
+4. could have run a command with the network reachable outside a sandbox.
+
+The Worker records no exact network activity for a command, so the fourth rule reads what the Task
+was admitted with and how the host runs commands. A Task without `commands:execute` runs no
+commands and passes. A Task with it passes only when every command runs in a sandbox without
+network: Codex's own sandbox, or Claude Code with `sandbox-commands`, and only when the Task was
+not also admitted with `web:fetch`, which opens that sandbox's network. Commands that run with
+`allow-unsandboxed-commands`, in a remote Workspace sandbox, or through shared execution count as
+reaching the network, as do OpenCode, Cursor, and custom harness adapters.
+
+A redelivered Task keeps its ID and gets a new Task Attempt. A Task gets at most three Task
+Attempts whose harness started, so at most two redeliveries. The first redelivery waits 5 seconds
+before a host can claim the Task, the second 30 seconds. The Session's later turns wait behind it.
+Redelivery is on for every Tag; there is no setting.
+
+The new Task Attempt starts from a fresh checkout, so the lost Task Attempt's partial edits are
+discarded. It resumes the Session from its last durable checkpoint, or from the recap when there is
+none. Its prompt says that an earlier run was interrupted and its file changes discarded. It also
+quotes the messages that run already sent to the person, the 20 most recent up to 32 KiB, so the
+Tag does not say them twice.
+
+```text
+Check CI
+
+A previous run of this request was interrupted before finishing. Any file changes it made were
+discarded, so check the current state before continuing. It had already said this to the person
+(oldest first):
+> Looking at CI now.
+Do not repeat what it already said; continue from there.
+```
+
+When a rule above applies, or the Task already had three Task Attempts, the Task fails. Its result
+says the outcome is unknown and why SuperTag did not run it again. For a week, the operator inbox
+shows one `task-attention` item that names the Task, its Tag, and the reason. Operator
+notifications carry it too, with `supertag task events TASK_ID` to see what the Task did.
+
+### Uncertain Task Attempts
+
+An uncertain Task Attempt waits for an operator. Check what it did, then record a decision:
 
 ```sh
 supertag task resolve-attempt TASK_ID ATTEMPT_ID --decision failed \
@@ -150,8 +198,9 @@ A Task Attempt that ends, is cancelled, or is resolved frees its host slot. On a
 
 ## Automatic retries
 
-Apart from the Task Attempts of a removed [ephemeral host](#ephemeral-hosts), SuperTag does not
-run a Task again on its own. Claude Code retries retryable API errors
+SuperTag runs a Task again on its own in two cases: a [redelivery](#redelivery) after its Worklet
+reclaimed a lost Task Attempt, and the Task Attempts of a removed
+[ephemeral host](#ephemeral-hosts). Claude Code retries retryable API errors
 itself, such as overload, server, and connection errors, inside the same request before it produces
 output, and SuperTag records each retry as Task progress. Rate and usage limits end the Task
 Attempt.

@@ -1132,7 +1132,7 @@ inbox and returns prints again.
 | `question` | An Objective's latest turn called `ask` and waits on the answer |
 | `budget` | The Objective's budget pool is used up |
 | `limit` | A budget warning, budget exhaustion, deadline warning or deadline passage |
-| `task-attention` | A Task needs an operator, such as an uncertain Task Attempt |
+| `task-attention` | A Task needs an operator: an uncertain Task Attempt, or for a week, a Task that was interrupted and not [redelivered](scheduling-and-recovery.md#redelivery) |
 | `mcp-login` | A queued Task needs an MCP server whose login lapsed on every Worker Host serving it |
 | `wake-limit` | A [wake limit](#wake-limits) held a Tag's messages in the last 24 hours |
 
@@ -1165,6 +1165,8 @@ in [Operator notifications](../operations/control-plane.md#operator-notification
 - A Worklet keeps running its Task Attempts while it reconnects, and it records their events,
   results and deliveries only while it still holds their leases. A Task Attempt whose host lost
   its lease is never run again on its own: it becomes uncertain and needs an operator decision.
+  A Task Attempt its host reclaimed after proving its processes stopped may be
+  [redelivered](scheduling-and-recovery.md#redelivery).
   See [Leases and unknown outcomes](scheduling-and-recovery.md#leases-and-unknown-outcomes).
 - Inspect results and any external effects before starting the work again. Successful recovery is
   not proof that an external action did not happen.

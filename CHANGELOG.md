@@ -89,6 +89,15 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- A Task whose Worker was lost mid-turn now runs again on its own. When the restarted host proves
+  every process of the lost Task Attempt stopped, the Control Plane redelivers the Task, keeping
+  its ID, as a new Task Attempt after 5 seconds, then 30: from a fresh checkout, resuming the
+  Session's last checkpoint or recap, with a prompt that quotes what the lost run already said.
+  It does not when the lost run left an external write in doubt, started a delivery, published an
+  artifact, sent its reply, ran an action that needed approval, or may have run a command with the
+  network reachable outside a sandbox, nor after three Task Attempts. The Task then fails with an
+  unknown outcome that says why, and the operator inbox shows a `task-attention` item naming the
+  Task, its Tag, and the reason. Before, every reclaimed Task Attempt failed and never ran again.
 - Every turn, a Work Session's own turns included, now starts with one short paragraph on how the
   Tag's memory works: notes and who sees them, the daily review, whether the turn can change
   notes, and its harness memory, where that lives and that a Work Session on another harness

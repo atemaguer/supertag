@@ -137,6 +137,12 @@ supertag task resolve-attempt TASK_ID ATTEMPT_ID --decision failed \
 
 `--decision retry` runs it again.
 
+When the restarted host proves every process of the Task Attempt stopped, it reclaims it instead,
+and the Control Plane redelivers the Task from a fresh checkout, up to three Task Attempts, unless
+the lost run may have repeated an effect. A Task that was not redelivered failed with an unknown
+outcome and shows as a `task-attention` item whose reason says why. Read `supertag task events
+TASK_ID` before asking the Tag again. Rules: `docs/reference/scheduling-and-recovery.md#redelivery`.
+
 ## Cancelling
 
 ```sh
