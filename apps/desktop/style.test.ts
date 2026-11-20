@@ -12,3 +12,9 @@ it("centres the command palette through the dialog's translate variables, which 
   expect(rule).toContain("--tw-translate-y: 0;");
   expect(rule).not.toMatch(/^\s*(translate|transform):/mu);
 });
+
+it("keeps the side pane under the top strip out of the window's drag region", () => {
+  // A drag region takes clicks whatever is drawn above it, so without this the Task activity
+  // and Tag details close buttons, under the top strip, move the window instead.
+  expect(css).toMatch(/\.activity-frame \{\n\s+-webkit-app-region: no-drag;/);
+});
