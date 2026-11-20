@@ -183,6 +183,12 @@ impl Bus {
             .store(poll.as_millis() as u64, Ordering::Relaxed);
     }
 
+    /// The position of the last notice the running tail delivered, for tests that wait for it.
+    #[cfg(test)]
+    pub(crate) fn tail_position(&self) -> Option<i64> {
+        self.state.lock().unwrap().tail
+    }
+
     /// The text a running turn of `tag_id` is writing changed: wakes the follows of that Tag's
     /// conversations on this replica. Text is an ephemeral signal: it never touches the store and
     /// reaches no other replica, where the recorded message arrives on commit instead.

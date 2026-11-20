@@ -161,10 +161,35 @@ async fn contract(url: &str) -> anyhow::Result<()> {
             .bind(format!("bulk-{number}")).execute(&mut *tx).await?;
     }
     tx.commit().await?;
+    // Let the tail deliver them all before the Watch takes any, so the Watch's queue overflows
+    // whatever the scheduling. A Watch that took them as the tail delivered could keep up, and
+    // would then rightly never resync below.
+    let head = page.head + bulk;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while store.live.bus.tail_position() < Some(head) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await?;
+    let reads = store
+        .live
+        .bus
+        .stream_reads
+        .load(std::sync::atomic::Ordering::Relaxed);
     assert!(matches!(
         slow.next().await.transpose()?.unwrap().update,
         Some(Update::Change(_))
     ));
+    assert!(
+        store
+            .live
+            .bus
+            .stream_reads
+            .load(std::sync::atomic::Ordering::Relaxed)
+            > reads,
+        "the lagging Watch reads the store"
+    );
+    // Its next read of the store finds the notices it has not shown pruned.
     store.retain_watch(1).await?;
     let resynced = tokio::time::timeout(Duration::from_secs(5), async {
         while let Some(event) = slow.next().await.transpose()? {
@@ -175,10 +200,7 @@ async fn contract(url: &str) -> anyhow::Result<()> {
         Ok(None)
     })
     .await??;
-    assert_eq!(
-        resynced,
-        Some(format!("v1.{}.{}", page.feed_id, page.head + bulk))
-    );
+    assert_eq!(resynced, Some(format!("v1.{}.{head}", page.feed_id)));
     private_work_sessions(&watch, SECRET, parent).await?;
     Ok(())
 }
