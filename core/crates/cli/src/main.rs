@@ -2895,7 +2895,7 @@ mod tests {
 
     /// Top-level commands that act on this machine, a deployment, or a report rather than on one
     /// resource kind. `connect` is the one verb: it saves a Control Plane on this machine.
-    const OPERATIONS: [&str; 18] = [
+    const OPERATIONS: [&str; 19] = [
         "message",
         "health",
         "init",
@@ -2911,6 +2911,7 @@ mod tests {
         "tui",
         "worklet",
         "connect",
+        "disconnect",
         "spend",
         "metrics",
         "audit",
