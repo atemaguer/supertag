@@ -298,6 +298,36 @@ async fn contract(url: &str) {
         next.prompt
     );
     assert_eq!(Some(next.task_id.clone()), answer_message.task_id);
+    // It never reads the inbox Session, where the messages to other Tags are.
+    let next_access = AttemptAccess::new(&host, &next_attempt);
+    assert!(
+        store
+            .read_tag_session(
+                &next_access,
+                &ReadTagSessionRequest {
+                    session_id: "inbox:lead".into(),
+                    limit: 10,
+                    before: None,
+                },
+            )
+            .await
+            .is_err()
+    );
+    let hits = store
+        .search_tag_sessions(
+            &next_access,
+            &SearchTagSessionsRequest {
+                query: "schema".into(),
+                limit: 0,
+            },
+        )
+        .await
+        .unwrap()
+        .matches;
+    assert!(
+        hits.iter().all(|hit| !hit.session_id.starts_with("inbox:")),
+        "{hits:?}"
+    );
     finish(&store, &host, &next_attempt).await;
     // With the answer in and nothing asked, the next quiet turn is idle again.
     let idle = store.get_objective(OPERATOR, "goal").await.unwrap();

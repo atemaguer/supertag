@@ -99,6 +99,9 @@ impl Viewer {
     pub(crate) fn sees(&self, session: &str, audience: &Audience) -> bool {
         session == self.session()
             || self.turn != Turn::Work
+                // Only the inbox Session knows other Tags; an Objective's Session asks it with
+                // `ask_tag` and never reads its history.
+                && !(self.objective.is_some() && crate::mailbox::private_session(session))
                 && match audience {
                     Audience::Shared => true,
                     Audience::Private(Some(requester)) => {
