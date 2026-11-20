@@ -53,7 +53,7 @@ To move 12 services to short-lived credentials, give `lead` the rollout Objectiv
 Tags that update trust policy and service code, review tests and telemetry, and rehearse the
 cutover. You approve production cutovers and decide when to retire the shared keys.
 
-![The lead Tag owns the migration and delegates to identity, migration, verification, and rollout Tags. A person approves production cutovers and retirement of shared keys.](assets/images/supertag-team-migration.png)
+![The lead Tag owns the migration and messages the identity, migration, verification, and rollout Tags for their parts. A person approves production cutovers and retirement of shared keys.](assets/images/supertag-team-migration.png)
 
 Give each Tag its own job and permissions. You could let `lead` coordinate, give a builder
 permission to edit the repository, and give a reviewer read-only access.

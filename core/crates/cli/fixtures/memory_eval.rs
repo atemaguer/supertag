@@ -370,7 +370,6 @@ pub async fn exercise(
                     operation_id: format!("memory-eval-{}", slug(child)),
                     title: format!("Memory eval {}", child.trim()),
                     instruction,
-                    target_tag_id: None,
                     harness: None,
                 },
                 token,
