@@ -42,7 +42,9 @@ within the pre-1.0 compatibility policy described in
   an Objective can't start work on another Tag. Objectives no longer name a Team (`--team`, the
   manifest's `team`, and the overview's Team and posts are gone), and a Team's `maxConcurrency`
   and `--max-concurrency` are removed. A cross-Tag work Session open at the upgrade keeps running
-  and still reports to its Objective.
+  and still reports to its Objective. The `files:delegate-write` action now grants nothing and
+  has no special handling; approval-gated Tasks accepted before the upgrade may refuse to take
+  new live input.
 - Every input to a Session now waits in one queue, in the Session's order: a person's message,
   another Tag's direct message, a Schedule firing, a work Session's report, a decision, a notice.
   A redelivered Task answers the messages its lost Task Attempt took in or was being given,

@@ -1572,10 +1572,6 @@ pub(crate) async fn admission_in(
     Ok(policy)
 }
 
-// The delegated-write grant went with delegation to another Tag: a Permission Set that still
-// names it grants nothing, and the effective digest keeps counting it so the digests of Tasks
-// accepted before compare unchanged.
-const DELEGATE_WRITE: &str = "files:delegate-write";
 const FILES_WRITE: &str = "files:write";
 
 fn base_runtime_requirement(rule: &ApprovalRule) -> RuntimeApprovalRequirement {
@@ -1639,15 +1635,14 @@ fn project_runtime(
         .actions
         .iter()
         .filter(|action| {
-            action.as_str() != DELEGATE_WRITE
-                && requirements.get(action.as_str()).is_none_or(|requirement| {
-                    supported_runtime_gate(action)
-                        && (requirement.approvers.is_empty()
-                            || requirement
-                                .approvers
-                                .iter()
-                                .any(|id| id.starts_with("operator:")))
-                })
+            requirements.get(action.as_str()).is_none_or(|requirement| {
+                supported_runtime_gate(action)
+                    && (requirement.approvers.is_empty()
+                        || requirement
+                            .approvers
+                            .iter()
+                            .any(|id| id.starts_with("operator:")))
+            })
         })
         .cloned()
         .collect();
@@ -1809,13 +1804,9 @@ pub(crate) fn effective_digest(snapshot: &TaskPolicySnapshot) -> Result<String> 
     });
     let shared_environment = supertag_protocol::shared_execution::environment(Some(snapshot));
     let runtime = snapshot.runtime_authority.as_ref().and_then(|authority| {
-        // Executable actions are already compared on the Task. The marker and
-        // typed gates are additional authority a live-input join must match.
-        let delegate_write = authority
-            .actions
-            .iter()
-            .any(|action| action == DELEGATE_WRITE);
-        if !delegate_write && authority.approvals.is_empty() {
+        // Executable actions are already compared on the Task. Typed gates are
+        // additional authority a live-input join must match.
+        if authority.approvals.is_empty() {
             return None;
         }
         let approvals: Vec<_> = authority
@@ -1823,7 +1814,7 @@ pub(crate) fn effective_digest(snapshot: &TaskPolicySnapshot) -> Result<String> 
             .iter()
             .map(|requirement| (&requirement.action, &requirement.approvers))
             .collect();
-        Some((delegate_write, approvals))
+        Some(approvals)
     });
     // A path scope is authority a live-input join must match too.
     let files = snapshot

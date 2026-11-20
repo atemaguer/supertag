@@ -408,6 +408,85 @@ async fn approved_effect(store: &Store, host: &HostAuthority) {
     finish(store, host, &resumed, vec![]).await;
 }
 
+/// Only an MCP effect can be gated inside an Objective now: an Objective's Session has no
+/// Workstream post or Tag message to gate. Its turn waits on the approval, the Objective is
+/// not idle while it waits, and the approval continues the same Objective's Session, where
+/// the approved effect dispatches once.
+async fn objective_effect(store: &Store, host: &HostAuthority) {
+    let objective = store
+        .create_objective(
+            OPERATOR,
+            &CreateObjectiveRequest {
+                operation_id: "release-goal".into(),
+                objective_id: "release-goal".into(),
+                owner_tag_id: TAG.into(),
+                outcome: "Publish the release entry".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let first = start(store, host, 'a').await;
+    let turn = store.get_task(&first.task_id).await.unwrap();
+    assert_eq!(turn.session_id, objective.session_id);
+    let access = supertag_control_plane::AttemptAccess::new(host, &first);
+    let pending = store
+        .reserve_mcp_effect(&access, &request("objective-effect", ARGUMENTS))
+        .await
+        .unwrap();
+    assert!(pending.dispatch_id.is_none());
+    let approval = pending.approval.unwrap();
+    assert_eq!(approval.state(), ApprovalState::Pending);
+    finish(store, host, &first, vec![approval.approval_id.clone()]).await;
+    let waiting = store.get_objective(OPERATOR, "release-goal").await.unwrap();
+    assert!(waiting.idle_since_ms.is_none(), "{waiting:?}");
+    decide(store, OPERATOR, &approval, true).await.unwrap();
+
+    let resumed = start(store, host, 'a').await;
+    assert_ne!(resumed.task_id, first.task_id);
+    let continuation = store.get_task(&resumed.task_id).await.unwrap();
+    assert_eq!(continuation.session_id, objective.session_id);
+    let access = supertag_control_plane::AttemptAccess::new(host, &resumed);
+    let reserved = store
+        .reserve_mcp_effect(&access, &request("objective-effect-approved", REORDERED))
+        .await
+        .unwrap();
+    assert_eq!(reserved.approval.unwrap().approval_id, approval.approval_id);
+    let dispatch = reserved
+        .dispatch_id
+        .expect("the approved effect dispatches");
+    store
+        .settle_mcp_effect(
+            &access,
+            &SettleMcpEffectRequest {
+                operation_id: "objective-effect-approved".into(),
+                dispatch_id: dispatch,
+                result_json: Some(r#"{"content":[]}"#.into()),
+            },
+        )
+        .await
+        .unwrap();
+    let again = store
+        .reserve_mcp_effect(&access, &request("objective-effect-again", ARGUMENTS))
+        .await
+        .unwrap();
+    assert!(again.dispatch_id.is_none());
+    assert_eq!(again.approval.unwrap().state(), ApprovalState::Pending);
+    finish(store, host, &resumed, vec![]).await;
+    // End it, so its idle wake does not take the next claim.
+    store
+        .cancel_objective(
+            OPERATOR,
+            &ObjectiveActionRequest {
+                objective_id: "release-goal".into(),
+                operation_id: "release-goal-cancel".into(),
+                reason: "Published".into(),
+            },
+        )
+        .await
+        .unwrap();
+}
+
 async fn denied_and_changed_provider(store: &Store, host: &HostAuthority) {
     submit(store, "denial").await;
     let denied = start(store, host, 'a').await;
@@ -476,6 +555,7 @@ async fn contract(url: &str) {
     store.close().await;
     let store = Store::open(url).await.unwrap();
     Box::pin(approved_effect(&store, &host)).await;
+    Box::pin(objective_effect(&store, &host)).await;
     Box::pin(denied_and_changed_provider(&store, &host)).await;
     store.close().await;
     Box::pin(lost_dispatch_after_restart(url)).await;

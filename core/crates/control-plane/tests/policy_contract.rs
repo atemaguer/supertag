@@ -550,11 +550,6 @@ async fn path_scopes(store: &Store) {
             "takes no paths",
         ),
         (
-            "files:delegate-write",
-            (&[], &["src/"], &[]),
-            "takes no paths",
-        ),
-        (
             "files:read",
             (&["src/"], &[], &[]),
             "files:read takes no paths",
