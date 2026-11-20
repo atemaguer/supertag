@@ -1444,6 +1444,22 @@ impl SharedHost {
             .collect())
     }
 
+    /// What `supertag ps --output json` reports for the shared Host's state.
+    fn ps(&self) -> Result<Value> {
+        let output = reaped(Command::new(BIN))
+            .args(["ps", "--output", "json", "--state-directory"])
+            .arg(&self.state)
+            .env_clear()
+            .envs(self.environment.iter().map(|(name, value)| (*name, value)))
+            .output()?;
+        ensure!(
+            output.status.success(),
+            "supertag ps failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&output.stdout)?)
+    }
+
     /// The Host credential the Worklet enrolled with.
     fn credential(&self) -> Result<String> {
         let enrollment: Value =
@@ -1941,24 +1957,52 @@ async fn replaced_shared_host_fences_every_slot(database: String) -> Result<()> 
         let fenced = task(&mut operator, &token, id).await?;
         assert_eq!(fenced.state(), TaskState::Uncertain);
     }
-    // The stale registration can no longer report presence or run work: the supervisor stops.
-    let status = timeout(WAIT, async {
+    // The stale registration can no longer report presence or run work: its Worklet stops, and
+    // only it. The supervisor runs on and does not start it again, which would fence the
+    // registration that replaced it in turn.
+    gone(&processes).await?;
+    let ps = timeout(WAIT, async {
         loop {
-            if let Some(status) = shared.supervisor.child.try_wait()? {
-                break Ok::<_, anyhow::Error>(status);
+            let ps = shared.ps()?;
+            if ps["services"][0]["state"] == "fenced" {
+                break Ok::<_, anyhow::Error>(ps);
             }
             sleep(Duration::from_millis(50)).await;
         }
     })
     .await
-    .context("supervisor kept a fenced Host running")??;
-    assert!(!status.success());
+    .with_context(|| {
+        format!(
+            "ps never showed the Host fenced: {}",
+            fs::read_to_string(&shared.supervisor.log).unwrap_or_default()
+        )
+    })??;
+    assert!(
+        ps["services"][0]["fenced"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("is no longer current")),
+        "{ps}"
+    );
+    assert!(ps["services"][0].get("pid").is_none(), "{ps}");
+    sleep(Duration::from_secs(2)).await;
+    assert!(
+        shared.supervisor.child.try_wait()?.is_none(),
+        "a fenced Host took the supervisor down: {}",
+        fs::read_to_string(&shared.supervisor.log)?
+    );
+    ensure!(
+        shared.worklet().is_err(),
+        "the supervisor started the fenced Host again"
+    );
     // The Worklet's presence names the fenced registration, whichever slot or report noticed
     // first, and the supervisor reports that.
     let log = fs::read_to_string(&shared.supervisor.log)?;
     assert!(log.contains("is no longer current"), "{log}");
+    assert!(
+        log.contains("Another process registered this Worker Host"),
+        "{log}"
+    );
     assert!(!log.contains("exited unexpectedly"), "{log}");
-    gone(&processes).await?;
     // No stale Worker completed or renewed its Attempt under the old generation.
     for id in &ids {
         assert_eq!(
@@ -1966,6 +2010,118 @@ async fn replaced_shared_host_fences_every_slot(database: String) -> Result<()> 
             TaskState::Uncertain
         );
     }
+    // The supervisor still stops cleanly.
+    shared.supervisor.stop().await?;
+    Ok(())
+}
+
+async fn a_client_stream_through_the_gateway_does_not_hold_up_shutdown(
+    database: String,
+) -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let state = temp.path().join("state");
+    let file = temp.path().join("supertag.yaml");
+    yaml(
+        &file,
+        &serde_json::json!({"services":{"control-plane":{"type":"control-plane","ports":["127.0.0.1:0"]}}}),
+    )?;
+    let mut supervisor = Process::spawn(&state, Some(&file), &database_env(&database))?;
+    supervisor.ready()?;
+    uses_database(&state, &database)?;
+    // A desktop app or TUI follows the operator's events through the Gateway, a stream that
+    // never ends on its own.
+    let gateway = fs::read_to_string(state.join("gateway-endpoint"))?;
+    let mut events =
+        operator_events_client::OperatorEventsClient::new(protocol::dial(gateway.trim()).await?);
+    let mut watch = events
+        .watch(authenticated_request(
+            WatchRequest::default(),
+            &token(&state)?,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    timeout(WAIT, watch.message())
+        .await??
+        .context("the Watch handshake")?;
+    // The Gateway ends the stream and stops well within the twelve seconds the supervisor gives
+    // it, so stopping succeeds and kills nothing.
+    let started = std::time::Instant::now();
+    supervisor.stop().await?;
+    let took = started.elapsed();
+    let log = fs::read_to_string(&supervisor.log)?;
+    assert!(
+        took < Duration::from_secs(6),
+        "stopping took {took:?}: {log}"
+    );
+    assert!(!log.contains("did not stop"), "{log}");
+    // The client sees UNAVAILABLE, or the connection closing, and reconnects.
+    match timeout(WAIT, watch.message()).await? {
+        Err(status) => assert_eq!(status.code(), tonic::Code::Unavailable, "{status}"),
+        Ok(message) => panic!("the stream went on after the Gateway stopped: {message:?}"),
+    }
+    Ok(())
+}
+
+async fn a_host_that_cannot_record_presence_keeps_running_and_is_not_called_fenced(
+    database: String,
+) -> Result<()> {
+    let central = Central::start(&database)?;
+    let token = central.operator.clone();
+    let mut operator = client(&central.public).await?;
+    let mut shared = SharedHost::start(&central, 1).await?;
+    host_until(&mut operator, &token, |status| {
+        status.phase() == HostPhase::Ready
+    })
+    .await?;
+    let (worklet, _) = shared.worklet()?;
+    let host_log = shared.state.join("logs/hosts/shared.log");
+    // The host's state directory takes no new files, as with a full disk: its presence
+    // sequence can't be recorded.
+    let directory = shared.state.join("hosts/shared");
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o500))?;
+    let unrecorded = timeout(WAIT, async {
+        loop {
+            let log = fs::read_to_string(&host_log).unwrap_or_default();
+            if log.contains("could not record its next presence report") {
+                break Ok::<_, anyhow::Error>(log);
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+    let log = unrecorded.with_context(|| {
+        format!(
+            "the Worklet never said it could not record presence: {}",
+            fs::read_to_string(&host_log).unwrap_or_default()
+        )
+    })??;
+    assert!(!log.contains("is no longer current"), "{log}");
+    // The Worklet kept running under the same registration and reports again.
+    timeout(WAIT, async {
+        loop {
+            let log = fs::read_to_string(&host_log).unwrap_or_default();
+            if log.contains("records its presence reports again") {
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .context("the Worklet did not report again")?;
+    assert_eq!(shared.worklet()?.0, worklet);
+    assert!(shared.supervisor.child.try_wait()?.is_none());
+    host_until(&mut operator, &token, |status| {
+        status.phase() == HostPhase::Ready
+    })
+    .await?;
+    let supervisor_log = fs::read_to_string(&shared.supervisor.log)?;
+    assert!(
+        !supervisor_log.contains("is no longer current"),
+        "{supervisor_log}"
+    );
+    shared.supervisor.stop().await?;
     Ok(())
 }
 
@@ -2459,6 +2615,44 @@ async fn sqlite_replaced_shared_host_generation_fences_every_slot() -> Result<()
 #[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
 async fn postgres_replaced_shared_host_generation_fences_every_slot() -> Result<()> {
     with_database(true, replaced_shared_host_fences_every_slot).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_a_client_stream_through_the_gateway_does_not_hold_up_shutdown() -> Result<()> {
+    with_database(
+        false,
+        a_client_stream_through_the_gateway_does_not_hold_up_shutdown,
+    )
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_a_client_stream_through_the_gateway_does_not_hold_up_shutdown() -> Result<()> {
+    with_database(
+        true,
+        a_client_stream_through_the_gateway_does_not_hold_up_shutdown,
+    )
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_a_host_that_cannot_record_presence_keeps_running() -> Result<()> {
+    with_database(
+        false,
+        a_host_that_cannot_record_presence_keeps_running_and_is_not_called_fenced,
+    )
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_a_host_that_cannot_record_presence_keeps_running() -> Result<()> {
+    with_database(
+        true,
+        a_host_that_cannot_record_presence_keeps_running_and_is_not_called_fenced,
+    )
+    .await
 }
 
 /// One recorded webhook POST: its Authorization header and JSON body.

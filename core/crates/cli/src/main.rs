@@ -1673,6 +1673,9 @@ struct GatewayConnectors {
 /// Connections a Gateway keeps to the Control Plane for client calls, so one connection's
 /// concurrent stream limit cannot cap how many clients follow conversations at once.
 const CLIENT_CONNECTIONS: usize = 8;
+/// How long a stopping Gateway waits for its connections and connectors to finish: less than
+/// the twelve seconds `supertag up` gives it before it kills it.
+const GATEWAY_DRAIN: Duration = Duration::from_secs(8);
 
 async fn gateway(
     listen: GatewayListen,
@@ -1695,7 +1698,10 @@ async fn gateway(
         );
     }
     let channel = channels.pop().expect("a Control Plane channel");
-    let client_api = supertag_gateway::client_api::ClientApi::new(channels);
+    // Cancelled on SIGTERM: ends relayed client streams, then the listeners and connectors.
+    let shutdown = CancellationToken::new();
+    let client_api =
+        supertag_gateway::client_api::ClientApi::new(channels).ending_calls_on(shutdown.clone());
     #[cfg(feature = "test-fixtures")]
     let client_api = if std::env::var_os("SUPERTAG_TEST_GATEWAY_FORWARD_EVERY_CALL").is_some() {
         client_api.forwarding_every_call()
@@ -1812,7 +1818,6 @@ async fn gateway(
     if let Some((_, listener)) = &microsoft_teams {
         outln!("{}", listener.local_addr()?);
     }
-    let shutdown = CancellationToken::new();
     let router = builder
         .add_service(health_service)
         // Clients, and Worker Hosts' Workers sending a Task Attempt's data calls.
@@ -1911,8 +1916,18 @@ async fn gateway(
         result = &mut services => result,
         _ = termination_signal() => {
             shutdown.cancel();
-            tokio::time::timeout(Duration::from_secs(15), services)
-                .await.context("Gateway shutdown timed out")?
+            // Relayed streams end at once; a connection still open after the drain is dropped,
+            // well within the deadline a supervisor gives this process before it kills it.
+            match tokio::time::timeout(GATEWAY_DRAIN, services).await {
+                Ok(result) => result,
+                Err(_) => {
+                    errln!(
+                        "Gateway closed the connections still open {} seconds after it was asked to stop",
+                        GATEWAY_DRAIN.as_secs()
+                    );
+                    Ok(())
+                }
+            }
         }
     }
 }

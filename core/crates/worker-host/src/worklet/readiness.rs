@@ -348,6 +348,8 @@ impl Presence {
         };
         reporter.task = Some(tokio::spawn(async move {
             let mut client = client;
+            // Why the last report could not be recorded, until one is again.
+            let mut unrecorded: Option<String> = None;
             let mut ticker = tokio::time::interval(Duration::from_secs(5));
             ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
@@ -358,10 +360,30 @@ impl Presence {
                     _ = ticker.tick() => {},
                 }
                 let report = match build(false) {
-                    Ok(report) => report,
+                    Ok(report) => {
+                        if unrecorded.take().is_some() {
+                            supertag_protocol::terminal_text::warn(
+                                "This Worker Host records its presence reports again.",
+                            );
+                        }
+                        report
+                    }
+                    // A full disk, or another I/O failure in the state directory, passes: the
+                    // sequence file keeps its last value, so a later report retries it, and the
+                    // Control Plane sees the host go offline meanwhile. Nothing fenced it.
+                    Err(error) if transient(&error) => {
+                        let reason = format!("{error:#}");
+                        if unrecorded.as_deref() != Some(reason.as_str()) {
+                            supertag_protocol::terminal_text::warn(&format!(
+                                "This Worker Host could not record its next presence report, so it sends none until it can: {reason}"
+                            ));
+                        }
+                        unrecorded = Some(reason);
+                        continue;
+                    }
                     Err(error) => {
                         shutdown.cancel();
-                        return Err(error);
+                        return Err(error.context("record this Worker Host's presence report"));
                     }
                 };
                 let response = tokio::select! {
@@ -377,7 +399,7 @@ impl Presence {
                     // Fencing/revocation also stops new local work. Native execution
                     // remains separately bounded by its own monotonic authority.
                     shutdown.cancel();
-                    return Err(error.into());
+                    return Err(anyhow::Error::new(Refused(error)));
                 }
             }
         }));
@@ -396,12 +418,36 @@ impl Presence {
             Some(task) => task.await?,
             None => Ok(()),
         };
-        let report = (self.report)(true)?;
-        // Best effort: on a partition the last observation naturally expires. Never
-        // prevent journal cleanup or treat a presence reply as execution authority.
-        let _ = self.client.report_host(request(report, &self.token)?).await;
+        // Best effort: on a partition, or with no room to record its sequence, the last
+        // observation naturally expires. Never prevent journal cleanup or treat a presence
+        // reply as execution authority.
+        if let Ok(report) = (self.report)(true)
+            && let Ok(report) = request(report, &self.token)
+        {
+            let _ = self.client.report_host(report).await;
+        }
         result
     }
+}
+
+/// The Control Plane refused a presence report for good: it fenced or revoked this registration.
+#[derive(Debug)]
+pub(crate) struct Refused(pub(crate) tonic::Status);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.0.message())
+    }
+}
+
+impl std::error::Error for Refused {}
+
+/// A failure to record a report that a later report can retry: an I/O error in the state
+/// directory, such as a full disk, rather than a corrupt sequence.
+fn transient(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.downcast_ref::<std::io::Error>().is_some())
 }
 
 impl Drop for Presence {

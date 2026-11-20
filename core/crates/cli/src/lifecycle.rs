@@ -175,6 +175,10 @@ pub struct ServiceStatus {
     /// A host's state directory, where its Worklet lists the Workers it runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state_directory: Option<PathBuf>,
+    /// Why a host's Worklet stopped for good while the supervisor runs on: the Control Plane
+    /// fenced its registration, because another process registered the host, or revoked it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fenced: Option<String>,
 }
 
 fn now_ms() -> u64 {
@@ -446,13 +450,26 @@ pub async fn up(options: Background) -> Result<()> {
                 (None, _) => true,
                 (Some(_), Err(_)) => false,
             };
-            if status.fingerprint == fingerprint && unit_current {
+            // A host the Control Plane fenced stays stopped until the supervisor starts again.
+            let fenced: Vec<&str> = status
+                .services
+                .iter()
+                .filter(|service| service.kind == HOST && service.fenced.is_some())
+                .map(|service| service.name.as_str())
+                .collect();
+            if !fenced.is_empty() {
+                outln!(
+                    "Worker Host {} stopped because another process registered it, so SuperTag restarts to start it again.",
+                    crate::terminal::text(&fenced.join(", "))
+                );
+            } else if status.fingerprint == fingerprint && unit_current {
                 outln!("SuperTag already runs with these settings, so it was left alone.");
                 summary(&options.state, &status);
                 retire_removed_hosts(&options.state, options.config.as_ref()).await;
                 return Ok(());
             }
             if let Some(config) = &options.config
+                && fenced.is_empty()
                 && unit_current
                 && !status.shape.is_empty()
                 && status.shape == config.shape
@@ -461,7 +478,9 @@ pub async fn up(options: Background) -> Result<()> {
                 retire_removed_hosts(&options.state, Some(config)).await;
                 return Ok(());
             }
-            outln!("SuperTag's settings changed, so it restarts.");
+            if fenced.is_empty() {
+                outln!("SuperTag's settings changed, so it restarts.");
+            }
             if let Some(undrained) = stop(&options.state, Some(&status), options.force).await? {
                 outln!("{}", undrained.notice(&status));
             }
@@ -1207,6 +1226,9 @@ struct Row {
     /// A laptop power risk to the host's running Task Attempts.
     #[serde(skip_serializing_if = "Option::is_none")]
     power_warning: Option<String>,
+    /// Why a host stopped for good: the Control Plane fenced or revoked its registration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fenced: Option<String>,
     /// The host's running Worker processes, one per Task Attempt, as its Worklet lists them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     workers: Vec<WorkerRow>,
@@ -1373,6 +1395,9 @@ pub async fn ps(args: PsArgs) -> Result<()> {
                     service: service.name.clone(),
                     kind: service.kind.clone(),
                     state: match (running, connected) {
+                        // Its Worklet stopped for good; the Control Plane's status, if any, is
+                        // the other registration's.
+                        (false, _) if service.fenced.is_some() => "fenced",
                         (false, _) => "stopped",
                         (true, Some(false)) => "unhealthy",
                         (true, _) => "running",
@@ -1396,6 +1421,7 @@ pub async fn ps(args: PsArgs) -> Result<()> {
                         .map(|host| host.total_uncertain_attempts)
                         .filter(|total| *total > 0),
                     power_warning: None,
+                    fenced: service.fenced.clone().filter(|_| !running),
                     workers: if service.kind == HOST {
                         worker_rows(service, running)
                     } else {
@@ -1465,6 +1491,7 @@ fn stopped_row(name: &str, kind: &str, state: &'static str) -> Row {
         uncertain_attempts: Vec::new(),
         uncertain_total: None,
         power_warning: None,
+        fenced: None,
         workers: Vec::new(),
     }
 }
@@ -1605,6 +1632,12 @@ fn format_ps(report: &PsReport, supervisor: &Supervisor) -> String {
         out.push_str(&line([&row[0], &row[1], &row[2], &row[3], &row[4]]));
         if let Some(warning) = &service.power_warning {
             out.push_str(&format!("  {}\n", text(warning)));
+        }
+        if let Some(reason) = &service.fenced {
+            out.push_str(&format!(
+                "  Stopped for good: {}. Another process registered this Worker Host with its credential, or it was revoked. Stop the other process, then run supertag up.\n",
+                text(reason)
+            ));
         }
         for worker in &service.workers {
             let tag = if worker.tag_id.is_empty() {
@@ -1864,6 +1897,7 @@ mod tests {
             uncertain_attempts: Vec::new(),
             uncertain_total: None,
             power_warning: None,
+            fenced: None,
             workers: Vec::new(),
         };
         let report = PsReport {
@@ -1918,6 +1952,7 @@ mod tests {
             ],
             uncertain_total: Some(3),
             power_warning: None,
+            fenced: None,
             workers: Vec::new(),
         };
         let report = PsReport {
@@ -1979,6 +2014,7 @@ mod tests {
                 uncertain_attempts: Vec::new(),
                 uncertain_total: None,
                 power_warning: None,
+                fenced: None,
                 workers: Vec::new(),
             }],
         };
@@ -2012,6 +2048,7 @@ mod tests {
                 power_warning: Some(
                     "warning: Task Attempts are running, but closing the lid will sleep it.".into(),
                 ),
+                fenced: None,
                 workers: Vec::new(),
             }],
         };
@@ -2022,6 +2059,34 @@ mod tests {
             ),
             "{text}"
         );
+    }
+
+    #[test]
+    fn ps_says_why_a_fenced_host_stopped_and_what_to_do() {
+        let mut row = stopped_row("laptop", HOST, "fenced");
+        row.fenced =
+            Some("Worker Host registration generation 2 is no longer current: \x1b[31mred".into());
+        let report = PsReport {
+            state_directory: "/tmp/state".into(),
+            supervisor: None,
+            services: vec![row],
+        };
+        let text = format_ps(&report, &Supervisor::Stopped);
+        assert!(text.contains("laptop   host  fenced"), "{text}");
+        assert!(
+            text.contains(
+                "  Stopped for good: Worker Host registration generation 2 is no longer current: "
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("Stop the other process, then run supertag up."),
+            "{text}"
+        );
+        assert!(!text.contains('\x1b'), "{text}");
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["services"][0]["state"], "fenced");
+        assert!(json["services"][0]["fenced"].is_string());
     }
 
     #[test]
@@ -2053,6 +2118,7 @@ mod tests {
                 uncertain_attempts: Vec::new(),
                 uncertain_total: None,
                 power_warning: None,
+                fenced: None,
                 workers: vec![WorkerRow::from(worker, 1_000 + 754_000)],
             }],
         };

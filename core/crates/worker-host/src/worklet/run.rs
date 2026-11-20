@@ -574,9 +574,16 @@ pub(crate) async fn run(
         cleanup_failure::report(&mut host, attempt, &token, error).await;
     }
     let generation = worklet_generation;
-    // A fenced or revoked registration stopped presence, and so the Worklet.
-    let stopped = presence.stop().await.with_context(|| {
-        format!("Worker Host registration generation {generation} is no longer current")
+    // A fenced or revoked registration stopped presence, and so the Worklet. Only the Control
+    // Plane's refusal says that: a local failure, such as a full disk, is reported as itself.
+    let stopped = presence.stop().await.map_err(|error| {
+        if error.downcast_ref::<readiness::Refused>().is_some() {
+            error.context(format!(
+                "Worker Host registration generation {generation} is no longer current"
+            ))
+        } else {
+            error
+        }
     });
     // A fenced registration explains whatever its slots then failed with.
     match stopped {

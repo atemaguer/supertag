@@ -31,7 +31,13 @@ the supervisor stops the rest and exits too, so `ps` shows them all stopped and
 run `supertag up` to start them all again. The desktop app shows **Not connected** meanwhile and
 reconnects on its own, and messages you sent in the meantime are sent once SuperTag runs again.
 To have SuperTag started again after a failure without you, set `restart: unless-stopped`; see
-[Run as a service](../operations/cli.md#run-as-a-service).
+[Run as a service](../operations/cli.md#run-as-a-service). With it, a host whose Worklet exits
+starts again after 1 second, then after waits that double up to a minute while it keeps exiting.
+
+A host that `ps` shows as `fenced` stopped because another process registered it with the same
+credential, or it was revoked. The other services keep running. Stop that process, then run
+`supertag up`. When SuperTag stops, a service that has not stopped 12 seconds after it was asked
+to is killed, and the supervisor's log says so.
 
 If a command says `no local Gateway is running`, start the local services with
 `supertag up`, or pass `--gateway URL` or the `--gateway NAME` of a saved

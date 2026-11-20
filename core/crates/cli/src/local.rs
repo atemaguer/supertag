@@ -178,6 +178,7 @@ pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Re
                     remote: false,
                     concurrency: None,
                     state_directory: Some(directory.join("host")),
+                    fenced: None,
                 });
             }
             lifecycle::record(
@@ -540,6 +541,7 @@ impl Children {
                 remote: false,
                 concurrency: None,
                 state_directory: None,
+                fenced: None,
             });
         }
         if let Some(service) = &self.gateway {
@@ -552,6 +554,7 @@ impl Children {
                 remote: false,
                 concurrency: None,
                 state_directory: None,
+                fenced: None,
             });
         }
         services
@@ -592,7 +595,7 @@ impl Children {
             ("Control Plane", self.control_plane.as_mut()),
         ] {
             if let Some(child) = child
-                && let Err(error) = stop_child(&mut child.process).await
+                && let Err(error) = stop_child(&mut child.process, name).await
             {
                 failures.push(format!("{name}: {error:#}"));
             }
@@ -775,7 +778,13 @@ async fn copy_log(
     let _ = file.flush().await;
 }
 
-async fn stop_child(child: &mut Child) -> Result<()> {
+/// Stop a service: SIGTERM, then SIGKILL once it has had [`STOP_TIMEOUT`] to stop. A service
+/// killed this way still counts as stopped, since nothing of it runs; the supervisor's log says so.
+async fn stop_child(child: &mut Child, name: &str) -> Result<()> {
+    stop_child_within(child, name, STOP_TIMEOUT).await
+}
+
+async fn stop_child_within(child: &mut Child, name: &str, deadline: Duration) -> Result<()> {
     if child.try_wait()?.is_some() {
         return Ok(());
     }
@@ -790,13 +799,17 @@ async fn stop_child(child: &mut Child) -> Result<()> {
             return Err(error).context("send SIGTERM");
         }
     }
-    match time::timeout(STOP_TIMEOUT, child.wait()).await {
+    match time::timeout(deadline, child.wait()).await {
         Ok(exit) => successful_exit(exit?),
         Err(_) => {
             force_reap(child)
                 .await
                 .context("kill child after shutdown timeout")?;
-            bail!("child did not stop gracefully before the shutdown deadline");
+            supervisor_log(&format!(
+                "{name} did not stop within {} seconds of SIGTERM, so it was killed",
+                deadline.as_secs_f32()
+            ));
+            Ok(())
         }
     }
 }
@@ -944,6 +957,14 @@ struct ManagedHost {
     service: Option<Service>,
     /// Where the running Worklet's output starts in the host's log.
     log_offset: u64,
+    /// Why the host stopped for good: the Control Plane fenced or revoked its registration.
+    fenced: Option<String>,
+    /// Unexpected exits since the Worklet last ran for [`STABLE_RUN`], which space out restarts.
+    failures: u32,
+    /// When the Worklet last became ready.
+    started_at: Option<time::Instant>,
+    /// When a Worklet that exited unexpectedly starts again.
+    restart_at: Option<time::Instant>,
 }
 
 impl ManagedHost {
@@ -962,6 +983,10 @@ impl ManagedHost {
             directory,
             service: None,
             log_offset: 0,
+            fenced: None,
+            failures: 0,
+            started_at: None,
+            restart_at: None,
         }
     }
 
@@ -1107,6 +1132,7 @@ impl ManagedHost {
         match started {
             Ok(ready) => {
                 ensure!(ready == "ready", "invalid Worklet readiness signal");
+                self.started_at = Some(time::Instant::now());
                 Ok(())
             }
             Err(error) => {
@@ -1349,6 +1375,7 @@ pub async fn configured(
                 remote: host.definition.control_plane.is_some(),
                 concurrency: Some(host.definition.concurrency),
                 state_directory: Some(host.directory.clone()),
+                fenced: host.fenced.clone(),
             });
         }
         lifecycle::record(
@@ -1381,7 +1408,7 @@ pub async fn configured(
         if let Some(mut service) = host.service.take() {
             let name = host.definition.name.clone();
             stops.spawn(async move {
-                stop_child(&mut service.process)
+                stop_child(&mut service.process, &format!("Worklet {name}"))
                     .await
                     .with_context(|| format!("stop Worklet {name}"))
             });
@@ -1612,36 +1639,102 @@ async fn wait_configured(
             }
         }
         for host in hosts.iter_mut() {
-            let Some(service) = host.service.as_mut() else {
-                continue;
-            };
-            let Some(status) = service.process.try_wait()? else {
-                continue;
-            };
-            host.service.take();
-            // A fenced or revoked registration stops the Worklet; say that, not that it exited.
-            time::sleep(Duration::from_millis(200)).await;
-            let log = lifecycle::log_path(&host.logs.state, &host.definition.name);
-            if let Some(reason) = last_error_since(&log, host.log_offset)
-                .filter(|reason| reason.contains("is no longer current"))
-            {
-                bail!("Worker Host {}: {reason}", host.definition.name);
-            }
-            // The Worklet's Workers died with it; its next start recovers their Attempts.
-            ensure!(
-                host.definition.restart == crate::local_config::Restart::UnlessStopped,
-                "Worklet {} exited unexpectedly with {status}",
-                host.definition.name
-            );
-            time::sleep(Duration::from_secs(1)).await;
-            host.start(executable).await?;
-            restarted = true;
+            restarted |= supervise_host(host, executable).await?;
         }
         if restarted {
             status(base, hosts, &fingerprint)?;
         }
         time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+/// A Worklet that ran this long counts as healthy again, so its next exit restarts it at once.
+const STABLE_RUN: Duration = Duration::from_secs(60);
+/// The longest wait before a Worklet that keeps exiting starts again.
+const MAX_RESTART_DELAY: Duration = Duration::from_secs(60);
+
+/// The wait before the restart that follows `failures` unexpected exits in a row: one second,
+/// doubling up to [`MAX_RESTART_DELAY`].
+fn restart_delay(failures: u32) -> Duration {
+    Duration::from_secs(1u64 << failures.saturating_sub(1).min(6)).min(MAX_RESTART_DELAY)
+}
+
+/// The words a Worklet's error starts with when the Control Plane fenced or revoked its
+/// registration.
+const FENCED: &str = "is no longer current";
+
+/// One pass over a configured host: notice that its Worklet exited, and start it again when
+/// that is due. Returns whether the host's status changed. A fenced or revoked registration
+/// stops only this host; any other exit stops the supervisor unless the host restarts.
+async fn supervise_host(host: &mut ManagedHost, executable: &Path) -> Result<bool> {
+    let name = host.definition.name.clone();
+    if let Some(due) = host.restart_at {
+        if time::Instant::now() < due {
+            return Ok(false);
+        }
+        host.restart_at = None;
+        if let Err(error) = host.start(executable).await {
+            // Whatever stopped it, such as a full disk, may pass: try again later.
+            if let Some(mut service) = host.service.take() {
+                let _ = stop_child(&mut service.process, &format!("Worklet {name}")).await;
+            }
+            host.failures += 1;
+            let delay = restart_delay(host.failures);
+            let line = format!(
+                "Worklet {name} could not start again, so it tries in {} seconds: {error:#}",
+                delay.as_secs()
+            );
+            supervisor_log(&line);
+            let _ = note_line(&host.logs, &name, &line);
+            host.restart_at = Some(time::Instant::now() + delay);
+        }
+        return Ok(true);
+    }
+    let Some(service) = host.service.as_mut() else {
+        return Ok(false);
+    };
+    let Some(status) = service.process.try_wait()? else {
+        if host
+            .started_at
+            .is_some_and(|started| started.elapsed() >= STABLE_RUN)
+        {
+            host.failures = 0;
+        }
+        return Ok(false);
+    };
+    host.service.take();
+    // The copy of its output into the log may lag the exit by a moment.
+    time::sleep(Duration::from_millis(200)).await;
+    let log = lifecycle::log_path(&host.logs.state, &name);
+    let reason = last_error_since(&log, host.log_offset);
+    if let Some(reason) = reason.as_ref().filter(|reason| reason.contains(FENCED)) {
+        // Another registration of this host is current now, or the host was revoked. Starting
+        // the Worklet again would fence that registration in turn, and the two would keep
+        // replacing each other: only this host stops, and the other services keep running.
+        let line = format!(
+            "Worker Host {name} stopped: {reason}. Another process registered this Worker Host with its credential, or the host was revoked, so it does not start again. Stop the other process, then run supertag up"
+        );
+        supervisor_log(&line);
+        let _ = note_line(&host.logs, &name, &line);
+        host.fenced = Some(reason.clone());
+        return Ok(true);
+    }
+    let reason = reason
+        .map(|reason| format!(": {reason}"))
+        .unwrap_or_default();
+    // The Worklet's Workers died with it; its next start recovers their Attempts.
+    ensure!(
+        host.definition.restart == crate::local_config::Restart::UnlessStopped,
+        "Worklet {name} exited unexpectedly with {status}{reason}"
+    );
+    host.failures += 1;
+    let delay = restart_delay(host.failures);
+    supervisor_log(&format!(
+        "Worklet {name} exited unexpectedly with {status}{reason}; it starts again in {} seconds",
+        delay.as_secs()
+    ));
+    host.restart_at = Some(time::Instant::now() + delay);
+    Ok(true)
 }
 
 /// Return Worker Hosts that `supertag down` drained to service. An operator's own drain, made
@@ -1713,6 +1806,46 @@ async fn undrain(directory: &Path, endpoint: &str, operator: &str) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_service_that_ignores_sigterm_is_killed_and_counts_as_stopped() {
+        let mut child = Command::new("/bin/sh")
+            .args([
+                "-c",
+                "trap '' TERM; echo ready; while :; do sleep 0.05; done",
+            ])
+            .stdout(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        // Its trap is set once it says so.
+        let mut ready = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut ready)
+            .await
+            .unwrap();
+        assert_eq!(ready, "ready\n");
+        stop_child_within(&mut child, "Gateway", Duration::from_millis(300))
+            .await
+            .unwrap();
+        assert!(child.try_wait().unwrap().is_some());
+        // A service that stops on SIGTERM stops within the deadline as before.
+        let mut quick = Command::new("/bin/sleep")
+            .arg("60")
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        stop_child_within(&mut quick, "Control Plane", Duration::from_secs(5))
+            .await
+            .unwrap();
+    }
+
+    #[test]
+    fn a_worklet_that_keeps_exiting_restarts_ever_later_up_to_a_minute() {
+        let delays: Vec<u64> = (1..=9).map(|n| restart_delay(n).as_secs()).collect();
+        assert_eq!(delays, [1, 2, 4, 8, 16, 32, 60, 60, 60]);
+        assert_eq!(restart_delay(u32::MAX), MAX_RESTART_DELAY);
+    }
 
     #[test]
     fn a_lane_failure_names_only_the_error_it_logged() {

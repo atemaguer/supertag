@@ -15,7 +15,9 @@
 //! to this Gateway's own router, which does not serve them. A Worker Host's host credential
 //! therefore never crosses a Gateway, and no host generation header does either.
 //! Request metadata is rebuilt from an allowlist, and streams and downloads are relayed as they
-//! arrive, with no deadline added and nothing written to disk.
+//! arrive, with no deadline added and nothing written to disk. When the Gateway shuts down, a
+//! relayed stream still open, such as a client's Watch, ends with UNAVAILABLE, so the client
+//! reconnects and the Gateway's graceful shutdown does not wait on it.
 
 use std::{
     future::{Future, poll_fn},
@@ -36,6 +38,7 @@ use supertag_protocol::{
     negotiation::ProtocolChannel,
     v2::{EnrollRequest, PrincipalRole},
 };
+use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
 use tonic::{Status, body::Body};
 use tower_layer::Layer;
 use tower_service::Service;
@@ -63,6 +66,8 @@ pub struct ClientApi {
     channels: Arc<[ProtocolChannel]>,
     next: Arc<AtomicUsize>,
     every_call: bool,
+    /// Ends every relayed response when cancelled.
+    stopping: CancellationToken,
 }
 
 impl ClientApi {
@@ -74,7 +79,15 @@ impl ClientApi {
             channels: channels.into(),
             next: Arc::new(AtomicUsize::new(0)),
             every_call: false,
+            stopping: CancellationToken::new(),
         }
+    }
+
+    /// Ends the calls still relayed when `shutdown` is cancelled, with UNAVAILABLE, so a client's
+    /// open stream cannot hold this Gateway's graceful shutdown past its deadline.
+    pub fn ending_calls_on(mut self, shutdown: CancellationToken) -> Self {
+        self.stopping = shutdown;
+        self
     }
 
     /// Only for tests that prove the Control Plane, not this allowlist, refuses a call: forwards
@@ -140,7 +153,74 @@ where
             return Box::pin(async move { inner.call(request).await });
         }
         let channel = self.api.channel();
-        Box::pin(async move { Ok(forward(channel, request).await) })
+        let stopping = self.api.stopping.clone();
+        Box::pin(async move {
+            let response = forward(channel, request).await;
+            Ok(response.map(|body| Body::new(UntilShutdown::new(body, stopping))))
+        })
+    }
+}
+
+/// A relayed response body that ends with UNAVAILABLE once the Gateway shuts down.
+struct UntilShutdown {
+    inner: Body,
+    stopping: Pin<Box<WaitForCancellationFutureOwned>>,
+    ended: bool,
+}
+
+impl UntilShutdown {
+    fn new(inner: Body, stopping: CancellationToken) -> Self {
+        Self {
+            inner,
+            stopping: Box::pin(stopping.cancelled_owned()),
+            ended: false,
+        }
+    }
+}
+
+impl http_body::Body for UntilShutdown {
+    type Data = Bytes;
+    type Error = Status;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<Option<Result<http_body::Frame<Bytes>, Status>>> {
+        let this = &mut *self;
+        if this.ended {
+            return Poll::Ready(None);
+        }
+        // What the Control Plane already sent goes first, its own end included.
+        if let Poll::Ready(frame) = Pin::new(&mut this.inner).poll_frame(context) {
+            this.ended = frame.is_none();
+            return Poll::Ready(frame);
+        }
+        if this.stopping.as_mut().poll(context).is_ready() {
+            this.ended = true;
+            let mut trailers = HeaderMap::new();
+            trailers.insert(
+                "grpc-status",
+                HeaderValue::from(tonic::Code::Unavailable as i32),
+            );
+            trailers.insert(
+                "grpc-message",
+                HeaderValue::from_static("this%20Gateway%20is%20shutting%20down"),
+            );
+            return Poll::Ready(Some(Ok(http_body::Frame::trailers(trailers))));
+        }
+        Poll::Pending
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.ended || self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        if self.ended {
+            http_body::SizeHint::with_exact(0)
+        } else {
+            self.inner.size_hint()
+        }
     }
 }
 
@@ -370,5 +450,44 @@ mod tests {
         let every = api.forwarding_every_call();
         assert!(every.forwards(&path("Connector/ClaimConnector")));
         assert!(!every.forwards(&path("ProtocolNegotiation/Negotiate")));
+    }
+
+    #[tokio::test]
+    async fn a_relayed_stream_ends_unavailable_when_the_gateway_shuts_down() {
+        // A Watch the Control Plane keeps open: one message, then nothing until it is dropped.
+        let (sender, receiver) =
+            tokio::sync::mpsc::channel::<Result<http_body::Frame<Bytes>, Status>>(1);
+        let stream =
+            http_body_util::StreamBody::new(tokio_stream::wrappers::ReceiverStream::new(receiver));
+        sender
+            .send(Ok(http_body::Frame::data(Bytes::from_static(b"event"))))
+            .await
+            .unwrap();
+        let shutdown = CancellationToken::new();
+        let mut body = UntilShutdown::new(Body::new(stream), shutdown.clone());
+        let first = body.frame().await.unwrap().unwrap();
+        assert_eq!(first.into_data().unwrap(), Bytes::from_static(b"event"));
+        let pending =
+            tokio::time::timeout(std::time::Duration::from_millis(50), body.frame()).await;
+        assert!(pending.is_err(), "the open stream ended before shutdown");
+        shutdown.cancel();
+        let trailers = body
+            .frame()
+            .await
+            .unwrap()
+            .unwrap()
+            .into_trailers()
+            .unwrap();
+        assert_eq!(trailers["grpc-status"], "14");
+        assert!(body.frame().await.is_none());
+        assert!(http_body::Body::is_end_stream(&body));
+        drop(sender);
+
+        // A call the Control Plane already finished keeps its own end, even after shutdown.
+        let mut finished =
+            UntilShutdown::new(Body::new(Full::new(Bytes::from_static(b"reply"))), shutdown);
+        let reply = finished.frame().await.unwrap().unwrap();
+        assert_eq!(reply.into_data().unwrap(), Bytes::from_static(b"reply"));
+        assert!(finished.frame().await.is_none());
     }
 }
