@@ -110,7 +110,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 123;
+        const SCHEMA_VERSION: i64 = 124;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -357,7 +357,8 @@ impl Store {
                 include_str!("../migrations/sqlite/0120_redelivery.sql"),
                 include_str!("../migrations/sqlite/0121_native_memory_seeds.sql"),
                 include_str!("../migrations/sqlite/0122_session_input_queue.sql"),
-                include_str!("../migrations/sqlite/0123_tag_session_boundaries.sql"),
+                include_str!("../migrations/sqlite/0123_memory_reviews.sql"),
+                include_str!("../migrations/sqlite/0124_tag_session_boundaries.sql"),
             ]
         } else {
             [
@@ -485,7 +486,8 @@ impl Store {
                 include_str!("../migrations/postgresql/0120_redelivery.sql"),
                 include_str!("../migrations/postgresql/0121_native_memory_seeds.sql"),
                 include_str!("../migrations/postgresql/0122_session_input_queue.sql"),
-                include_str!("../migrations/postgresql/0123_tag_session_boundaries.sql"),
+                include_str!("../migrations/postgresql/0123_memory_reviews.sql"),
+                include_str!("../migrations/postgresql/0124_tag_session_boundaries.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -1745,6 +1747,7 @@ impl Store {
                 .await?;
             crate::checkpoints::finish_in(&mut transaction, &task, input).await?;
             crate::inbox::finish_in(&mut transaction, &task, input.objective_signal, now).await?;
+            crate::memories::finish_in(&mut transaction, &task, now).await?;
         }
         crate::work_sessions::reports::settle_in(&mut transaction, &task, now).await?;
         if state == TaskState::Running && task.state() == TaskState::Succeeded {

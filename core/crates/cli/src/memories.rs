@@ -65,8 +65,13 @@ struct LocalHost {
     socket: PathBuf,
 }
 
-/// The Worker Hosts the local services in `state` run whose memory endpoint is listening.
-fn local_hosts(state: Option<&Path>) -> Result<Vec<LocalHost>> {
+/// A local Worker Host's ID, and its memory socket or why it has none.
+type HostEndpoint = (Option<String>, std::result::Result<PathBuf, String>);
+
+/// Each Worker Host the local services in `state` run, and its memory socket, or why it has
+/// none: the reason its Worklet recorded when the endpoint could not listen, or that it has not
+/// started listening yet.
+fn host_endpoints(state: Option<&Path>) -> Result<Vec<HostEndpoint>> {
     let Some(state) = state else {
         return Ok(vec![]);
     };
@@ -77,24 +82,61 @@ fn local_hosts(state: Option<&Path>) -> Result<Vec<LocalHost>> {
         .services
         .into_iter()
         .filter(|service| service.kind == crate::lifecycle::HOST)
+        .filter(|service| service.pid.is_some_and(crate::lifecycle::alive))
         .filter_map(|service| {
-            let socket = service.state_directory?.join(native::SOCKET);
-            socket.exists().then_some(LocalHost {
-                host_id: service.host_id,
-                socket,
-            })
+            let directory = service.state_directory?;
+            let endpoint = match native::Endpoint::read(&directory) {
+                Some(native::Endpoint::Listening { socket }) if socket.exists() => Ok(socket),
+                Some(native::Endpoint::Failed { error }) => {
+                    Err(format!("its memory endpoint did not start: {error}"))
+                }
+                _ => Err("its memory endpoint is not listening yet".to_owned()),
+            };
+            Some((service.host_id, endpoint))
         })
         .collect())
+}
+
+/// The Worker Hosts the local services in `state` run whose memory endpoint is listening.
+fn local_hosts(state: Option<&Path>) -> Result<Vec<LocalHost>> {
+    Ok(host_endpoints(state)?
+        .into_iter()
+        .filter_map(|(host_id, endpoint)| endpoint.ok().map(|socket| LocalHost { host_id, socket }))
+        .collect())
+}
+
+/// Each Worker Host running here whose memory endpoint isn't listening, and why, for
+/// `supertag status` and the memory commands.
+pub(crate) fn endpoint_problems(state: Option<&Path>) -> Vec<String> {
+    host_endpoints(state)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(host_id, endpoint)| {
+            endpoint.err().map(|problem| {
+                format!(
+                    "Worker Host {} runs here, but {problem}",
+                    host_id.as_deref().unwrap_or("that is starting")
+                )
+            })
+        })
+        .collect()
 }
 
 /// Why a command finds no harness memory on this machine, when it can't look.
 fn no_local_hosts(state: Option<&Path>) -> String {
     match state {
         None => "A Tag's memory is kept by the Worker Host that ran its turns and is read only on that machine; this command reaches a shared Gateway, so it lists none.".into(),
-        Some(state) => format!(
-            "No Worker Host runs from {}, so no memory is listed; it is read only on the machine whose Worker Host keeps it.",
-            state.display()
-        ),
+        Some(state) => {
+            let problems = endpoint_problems(Some(state));
+            if problems.is_empty() {
+                format!(
+                    "No Worker Host runs from {}, so no memory is listed; it is read only on the machine whose Worker Host keeps it.",
+                    state.display()
+                )
+            } else {
+                format!("{}, so no memory is listed from it.", problems.join("; "))
+            }
+        }
     }
 }
 
@@ -219,6 +261,14 @@ async fn list_native(
     );
     if hosts.is_empty() {
         out.insert("unavailable".into(), no_local_hosts(state).into());
+    } else {
+        let problems = endpoint_problems(state);
+        if !problems.is_empty() {
+            out.insert(
+                "unavailable".into(),
+                format!("{}, so no memory is listed from it.", problems.join("; ")).into(),
+            );
+        }
     }
     // The hosts the Control Plane says hold some of the Tag's memory that don't run here.
     if let Some(tag) = tag {

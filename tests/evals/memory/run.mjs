@@ -8,16 +8,18 @@
 //
 // The fixture mode (the default) runs the fixture adapter as each harness and checks the
 // plumbing: what one Session taught is in a later Session's context, in the right store; a Work
-// Session only proposes, and the turn that merges proposals merges or drops them. The live mode
-// runs the real harnesses and scores their replies. Both need a CLI built with
-// `--features test-fixtures`, whose Control Plane clock the eval moves a day ahead so the daily
-// review runs at once.
+// Session only proposes, and each store's daily review merges or drops its proposals; two people's
+// stores stay apart. The live mode runs the real harnesses and scores their replies. Both need a
+// CLI built with `--features test-fixtures`, whose Control Plane clock the eval moves a day ahead
+// so the daily reviews run at once.
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -28,22 +30,32 @@ import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 export const HARNESSES = ["claude-code", "codex", "opencode", "cursor"];
-/** The live mode's turns per harness, at most: the scenario's, its Work Sessions', the review. */
-export const LIVE_TURN_CAP = 20;
+/** The live mode's turns per harness, at most: the scenario's, its Work Sessions', the padding
+ * each store's review waits for, and the reviews. */
+export const LIVE_TURN_CAP = 48;
 /** The live mode's limit on each submitted turn's reported tokens. */
 export const LIVE_TURN_TOKENS = 400_000;
-/** The daily review waits for this many finished turns, and a day after the Tag's first. */
+/** Each store's daily review waits for this many of its turns, and a day after its first. */
 const REVIEW_AFTER_TURNS = 10;
 const DAY_AND_AN_HOUR_MS = 25 * 60 * 60 * 1000;
+/** The second person, a client device enrolled with an Auth Key. */
+const SECOND_PERSON = "bob-eval";
+
+/** The scope the Worker Host names a person's store by. */
+export function personScope(principal) {
+  return `person-${createHash("sha256").update(principal).digest("hex").slice(0, 32)}`;
+}
 
 /**
  * The scenario, in order. A step runs in a Session of its own the operator starts (`session`),
- * in the operator's conversation (`conversation`), or as an Objective (`objective`), whose
- * Session is shared. In single-player local, the operator's Sessions and conversation share one
- * store, private to the operator; an Objective's Sessions share the Tag's shared store, which
- * the daily review keeps. `fixture` is the fixture's script and `live` what a person says;
- * `expect` checks the memory the turn started with (fixture) or its reply (live). `{h}` is the
- * harness.
+ * in the operator's conversation (`conversation`), in the second person's conversation
+ * (`second`), or as an Objective (`objective`), whose Session is shared. In single-player local,
+ * the operator's Sessions and conversation share one store, private to the operator; the second
+ * person's conversation has a store private to them; an Objective's Sessions share the Tag's
+ * shared store. Each store's daily review keeps it. `fixture` is the fixture's script and `live`
+ * what a person says; `expect` checks the memory the turn started with (fixture) or its reply
+ * (live). `proposals` waits for a Work Session's proposals in a store (`shared`, `operator`, or
+ * `second`). `{h}` is the harness.
  */
 export const STEPS = [
   {
@@ -91,28 +103,15 @@ export const STEPS = [
       "work {h}-work-child :: remember staging-region | project | Staging moved to us-east-1 on 2026-11-20 ;; remember ci-cache | project | (unverified) The CI cache is flaky",
     ],
     live: "Start a Work Session on yourself whose instruction is: note in your memory that staging moved to us-east-1 on 2026-11-20. Then tell me you started it.",
-    proposals: { shared: false, count: 2 },
+    proposals: { store: "operator", count: 2 },
   },
   {
-    // No turn of its own: the person's next turn whose changes are the Tag's own (here the Work
-    // Session's report turn) is shown the proposals and merges or drops them.
-    id: "merge",
-    merged: { shared: false, count: 2 },
-    expect: [
-      { check: "a Work Session's change waited as a proposal", lacks: "us-east-1" },
-      { check: "the person's next turn was shown both proposals", proposals: 2 },
-    ],
-  },
-  {
-    id: "recall-merged",
+    id: "proposed-only",
     session: true,
     fixture: ["recall"],
     live: "Which region does staging run in? Answer in one line.",
     expect: [
-      { check: "the merged proposal fixed the stale fact", has: "us-east-1" },
-      { check: "the stale fact is gone", lacks: "eu-north-1" },
-      { check: "the unverified proposal was dropped", lacks: "CI cache" },
-      { check: "the merged fact loads with the turn", loaded: "us-east-1", codex: false },
+      { check: "a Work Session's change waits as a proposal for the review", lacks: "us-east-1" },
     ],
   },
   {
@@ -131,7 +130,7 @@ export const STEPS = [
     ],
     live: "Record in your memory that the team channel is #releases. Then start a Work Session on yourself whose instruction is: note in your memory that the team channel moved to #payments-eng. Report the Objective done once the Work Session has reported.",
     expect: [{ check: "a person's memory stays out of shared Sessions", lacks: "rebase" }],
-    proposals: { shared: true, count: 2 },
+    proposals: { store: "shared", count: 2 },
   },
   {
     id: "person-recall",
@@ -140,7 +139,44 @@ export const STEPS = [
     live: "What is the team channel? If you don't know, say unknown.",
     expect: [{ check: "shared memory stays out of a person's Sessions", lacks: "#releases" }],
   },
+  {
+    id: "second-teach",
+    second: true,
+    fixture: ["remember editor | user | I edit code in Helix"],
+    live: "Please remember for future conversations that I edit code in Helix. Save it to your memory now.",
+  },
+  {
+    id: "second-recall",
+    second: true,
+    fixture: ["recall"],
+    live: "Which editor do I use, and which merge style do I prefer? Say unknown for what you don't know.",
+    expect: [
+      { check: "the second person's conversation has their memory", has: "Helix" },
+      { check: "the operator's memory stays out of the second person's", lacks: "rebase" },
+      { check: "shared memory stays out of the second person's", lacks: "#releases" },
+    ],
+  },
+  {
+    id: "operator-recall-second",
+    session: true,
+    fixture: ["recall"],
+    live: "Which editor do I use? If you don't know, say unknown.",
+    expect: [{ check: "the second person's memory stays out of the operator's", lacks: "Helix" }],
+  },
   { id: "review", review: true },
+  {
+    id: "recall-merged",
+    session: true,
+    fixture: ["recall"],
+    live: "Which region does staging run in? Answer in one line.",
+    expect: [
+      { check: "the private review fixed the stale fact", has: "us-east-1" },
+      { check: "the stale fact is gone", lacks: "eu-north-1" },
+      { check: "the unverified proposal was dropped", lacks: "CI cache" },
+      // Codex loads only its summary, which its review consolidates: here a private one.
+      { check: "the merged fact loads with the turn", loaded: "us-east-1" },
+    ],
+  },
   {
     id: "shared-recall",
     objective: true,
@@ -151,6 +187,17 @@ export const STEPS = [
       { check: "the stale shared fact is gone", lacks: "#releases" },
       { check: "the review dropped the unverified proposal", lacks: "login test" },
       { check: "the reviewed fact loads with the turn", loaded: "#payments-eng" },
+    ],
+  },
+  {
+    id: "second-recall-after",
+    second: true,
+    fixture: ["recall"],
+    live: "Which editor do I use, and where does staging run? Say unknown for what you don't know.",
+    expect: [
+      { check: "the second person's review kept their memory", has: "Helix" },
+      { check: "their review took nothing from the operator's", lacks: "us-east-1" },
+      { check: "the second person's reviewed memory loads with the turn", loaded: "Helix" },
     ],
   },
 ];
@@ -233,13 +280,18 @@ async function waitFor(what, deadlineMs, probe) {
 const FINISHED = ["TASK_STATE_SUCCEEDED", "TASK_STATE_FAILED", "TASK_STATE_CANCELLED"];
 
 class Deployment {
-  constructor(options) {
+  /**
+   * `stateName` names the state directory under the deployment's root. By default it is longer
+   * than a socket address holds, so the Worker Host must serve its memory from a short socket
+   * elsewhere: every memory read below goes through it.
+   */
+  constructor(options, { stateName = `state-${"d".repeat(96)}`, prepare } = {}) {
     this.options = options;
-    // A short, real path: the CLI refuses a state directory reached through a link (such as
-    // macOS's /var), and a Worker Host's memory socket path must fit in 104 bytes.
+    // A real path: the CLI refuses a state directory reached through a link (such as macOS's
+    // /var).
     const parent = existsSync("/tmp") ? "/tmp" : tmpdir();
     this.root = mkdtempSync(join(realpathSync(parent), "stmem-"));
-    this.state = join(this.root, "state");
+    this.state = join(this.root, stateName);
     this.reports = join(this.root, "reports");
     this.offset = join(this.root, "clock-offset");
     const home = join(this.root, "home");
@@ -248,9 +300,11 @@ class Deployment {
       mkdirSync(directory, { recursive: true });
       chmodSync(directory, 0o700);
     }
+    prepare?.(this.state);
     writeFileSync(this.offset, "0");
     // Only what the CLI needs: no credentials from this shell, and a home of its own, so no
-    // harness finds the operator's own login, configuration, or keychain entries.
+    // harness finds the operator's own login, configuration, or keychain entries, and the second
+    // person's saved Gateway stays in it.
     this.environment = {
       PATH: process.env.PATH ?? "/usr/bin:/bin",
       HOME: home,
@@ -321,6 +375,38 @@ class Deployment {
     return JSON.parse(await this.cli(args));
   }
 
+  /**
+   * Enrolls the second person: a client device joined with a client Auth Key that may talk to
+   * every eval Tag, saved as the Gateway `second` in this deployment's home.
+   */
+  async enrollSecondPerson(tags) {
+    const ps = await this.json(["ps", "--output", "json"]);
+    const service =
+      ps.services.find((row) => row.type === "gateway" && row.address) ??
+      ps.services.find((row) => row.type === "control-plane" && row.address);
+    if (!service) throw new Error("no local Gateway or Control Plane address to connect to");
+    const url = /^[a-z]+:\/\//.test(service.address)
+      ? service.address
+      : `http://${service.address}`;
+    const issued = await this.json([
+      "auth-key",
+      "create",
+      "second-person",
+      "--role",
+      "client",
+      ...tags.flatMap((tag) => ["--tag", tag]),
+    ]);
+    const joined = JSON.parse(
+      await run(
+        this.options.cli,
+        ["connect", url, "--name", "second", "--client-name", SECOND_PERSON],
+        { ...this.environment, SUPERTAG_OPERATOR_TOKEN: issued.auth_key },
+      ),
+    );
+    this.secondPrincipal = joined.connected_as;
+    this.secondScope = personScope(this.secondPrincipal);
+  }
+
   count(harness) {
     const turns = (this.turns.get(harness) ?? 0) + 1;
     if (this.options.live && turns > LIVE_TURN_CAP)
@@ -360,6 +446,17 @@ class Deployment {
     return this.cli(["message", `memeval-${harness}`, text], { timeoutMs: this.wait });
   }
 
+  /** One message in the second person's conversation, from their device; the reply. */
+  second(harness, text) {
+    this.count(harness);
+    return run(
+      this.options.cli,
+      ["message", `memeval-${harness}`, text, "--gateway", "second"],
+      this.environment,
+      { timeoutMs: this.wait },
+    );
+  }
+
   /** An Objective whose owner is the Tag; its first turn's result. */
   async objective(harness, id, outcome) {
     this.count(harness);
@@ -388,13 +485,27 @@ class Deployment {
     return (metrics.memory ?? []).filter((store) => store.tag_id === `memeval-${harness}`);
   }
 
-  async store(harness, shared) {
-    return (await this.memoryStats(harness)).find((store) => store.shared === shared);
+  /** One of the harness's stores: `shared`, the `second` person's, or the `operator`'s. */
+  async store(harness, which) {
+    return storeOf(await this.memoryStats(harness), which, this.secondScope);
   }
 
   report(label) {
     const path = join(this.reports, `${label}.json`);
     return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : undefined;
+  }
+
+  /** The first review report of the harness's store `which`. */
+  review(harness, which) {
+    const scope = which === "shared" ? "shared" : which === "second" ? this.secondScope : undefined;
+    const prefix = `${harness}-review-`;
+    const name = readdirSync(this.reports)
+      .filter((file) => file.startsWith(prefix) && file.endsWith("-1.json"))
+      .find((file) => {
+        const of = file.slice(prefix.length, -"-1.json".length);
+        return scope ? of === scope : of !== "shared" && of !== this.secondScope;
+      });
+    return name ? JSON.parse(readFileSync(join(this.reports, name), "utf8")) : undefined;
   }
 
   async stop() {
@@ -413,6 +524,17 @@ class Deployment {
     }
     if (!this.options.keep) rmSync(this.root, { recursive: true, force: true });
   }
+}
+
+/** One of a harness's stores in `supertag metrics`: `shared`, `second`, or `operator`. */
+function storeOf(stores, which, secondScope) {
+  return stores.find((store) =>
+    which === "shared"
+      ? store.shared
+      : which === "second"
+        ? store.scope === secondScope
+        : !store.shared && store.scope !== secondScope,
+  );
 }
 
 /** Scores one step: the memory its turn started with (fixture), or its reply (live). */
@@ -451,32 +573,19 @@ function script(step, harness) {
 }
 
 async function runStep(deployment, harness, step, live) {
-  if (step.merged) {
-    const wanted = live ? 1 : step.merged.count;
-    const waited = waitFor(`${harness}'s merged proposals`, deployment.wait, async () => {
-      const store = await deployment.store(harness, step.merged.shared);
-      return (store?.counters?.proposals_reviewed ?? 0) >= wanted;
-    });
-    if (live) {
-      await waited.catch(() => {});
-      return { step: step.id, checks: [] };
-    }
-    await waited;
-    const report = deployment.report(`${harness}-merge-1`);
-    if (!report) throw new Error(`${harness}: no turn merged the proposals`);
-    return { step: step.id, checks: score(step, harness, { report }, live) };
-  }
   const prompt = live ? step.live : script(step, harness);
   const reply = step.conversation
     ? await deployment.message(harness, prompt)
-    : step.objective
-      ? await deployment.objective(harness, step.id, prompt)
-      : await deployment.submit(harness, step.id, prompt);
+    : step.second
+      ? await deployment.second(harness, prompt)
+      : step.objective
+        ? await deployment.objective(harness, step.id, prompt)
+        : await deployment.submit(harness, step.id, prompt);
   if (step.proposals) {
     // The Work Session's own turn runs after its parent's: wait for what it proposed.
     const wanted = live ? 1 : step.proposals.count;
     const waited = waitFor(`${harness}'s Work Session proposals`, deployment.wait, async () => {
-      const store = await deployment.store(harness, step.proposals.shared);
+      const store = await deployment.store(harness, step.proposals.store);
       return (store?.counters?.proposals_created ?? 0) >= wanted;
     });
     // A live harness may not start the Work Session; the counters will say so.
@@ -491,49 +600,92 @@ async function runStep(deployment, harness, step, live) {
   return { step: step.id, checks: score(step, harness, observation, live), reply };
 }
 
-/** One harness's scenario up to the review, padded to the turns the review waits for. */
+/**
+ * One harness's scenario up to the review, then turns enough in each store (the operator's, the
+ * second person's, and the shared one) for its review.
+ */
 async function beforeReview(deployment, harness, live) {
   const results = [];
   for (const step of STEPS) {
     if (step.review) break;
     results.push(await runStep(deployment, harness, step, live));
   }
-  // Two Work Sessions' report turns count too; one short turn more for good measure.
-  for (let index = results.length + 2; index <= REVIEW_AFTER_TURNS; index++)
-    await deployment.submit(
-      harness,
-      `pad-${index}`,
-      live ? "Reply with OK." : `memory-eval ${harness}-pad-${index}`,
-    );
-  await deployment.submit(harness, "pad", live ? "Reply with OK." : `memory-eval ${harness}-pad`);
+  const pad = (index) => (live ? "Reply with OK." : `memory-eval ${harness}-pad-${index}`);
+  // The steps count some turns of each store, and the Work Sessions' report turns count in
+  // theirs; pad each store to the turns its review waits for, and one more for good measure.
+  for (let index = 0; index < REVIEW_AFTER_TURNS - 6; index++)
+    await deployment.submit(harness, `pad-${index}`, pad(index));
+  for (let index = 0; index < REVIEW_AFTER_TURNS - 1; index++)
+    await deployment.second(harness, pad(`second-${index}`));
+  for (let index = 0; index < REVIEW_AFTER_TURNS - 1; index++)
+    await deployment.objective(harness, `pad-shared-${index}`, pad(`shared-${index}`));
   return results;
 }
 
-/** The daily review of the shared store, then the steps after it. */
-async function afterReview(deployment, harness, live) {
-  const reviewed = await waitFor(
-    `${harness}'s daily review`,
-    live ? 900_000 : 150_000,
-    async () => {
-      const store = await deployment.store(harness, true);
-      return (store?.counters?.review_turns ?? 0) >= 1 ? store : undefined;
-    },
-  );
-  if (live) deployment.count(harness);
+/** The fixture's checks of one store's review. */
+function reviewChecks(deployment, harness, which, counters, others) {
+  const report = deployment.review(harness, which);
+  if (!report) return [{ check: `the ${which} store was reviewed`, pass: false }];
+  const listed = report.listed ?? [];
   const checks = [
-    { check: "the review merged a proposal", pass: (reviewed.counters.proposals_merged ?? 0) >= 1 },
+    {
+      check: `the ${which} review listed only its own Sessions`,
+      pass: listed.length > 0 && listed.every((session) => !others.includes(session)),
+    },
   ];
-  if (!live) {
-    const report = deployment.report(`${harness}-review-1`);
+  if (which !== "second")
     checks.push(
       {
-        check: "the review's request listed both proposals",
-        pass: (report?.proposals ?? []).length === 2,
+        check: `the ${which} review's request listed both proposals`,
+        pass: (report.proposals ?? []).length === 2,
       },
       {
-        check: "the review dropped a proposal",
-        pass: (reviewed.counters.proposals_dropped ?? 0) >= 1,
+        check: `the ${which} review merged one proposal and dropped one`,
+        pass: (counters.proposals_merged ?? 0) >= 1 && (counters.proposals_dropped ?? 0) >= 1,
       },
+    );
+  if (harness === "codex")
+    checks.push({
+      check: `the ${which} review consolidated Codex's notes`,
+      pass: (report.did ?? []).includes("consolidate"),
+    });
+  return checks;
+}
+
+/** Each store's daily review, then the steps after it. */
+async function afterReview(deployment, harness, live) {
+  const stores = await waitFor(`${harness}'s daily reviews`, live ? 900_000 : 150_000, async () => {
+    const stores = await deployment.memoryStats(harness);
+    return ["shared", "operator", "second"].every(
+      (which) => (storeOf(stores, which, deployment.secondScope)?.counters?.review_turns ?? 0) >= 1,
+    )
+      ? stores
+      : undefined;
+  });
+  if (live) for (let index = 0; index < 3; index++) deployment.count(harness);
+  const counters = (which) => storeOf(stores, which, deployment.secondScope).counters;
+  const checks = [
+    {
+      check: "each review with proposals merged one",
+      pass: ["shared", "operator"].every((which) => (counters(which).proposals_merged ?? 0) >= 1),
+    },
+  ];
+  if (!live) {
+    // Which Sessions are whose, from the reports of the turns that ran in them.
+    const sessionsOf = (filter) =>
+      STEPS.filter(filter)
+        .map((step) => deployment.report(`${harness}-${step.id}`)?.session_id)
+        .filter(Boolean);
+    const operator = sessionsOf((step) => step.session || step.conversation);
+    const second = sessionsOf((step) => step.second);
+    const shared = sessionsOf((step) => step.objective);
+    checks.push(
+      ...reviewChecks(deployment, harness, "operator", counters("operator"), [
+        ...second,
+        ...shared,
+      ]),
+      ...reviewChecks(deployment, harness, "second", counters("second"), [...operator, ...shared]),
+      ...reviewChecks(deployment, harness, "shared", counters("shared"), [...operator, ...second]),
     );
   }
   const results = [{ step: "review", checks }];
@@ -542,21 +694,24 @@ async function afterReview(deployment, harness, live) {
   return results;
 }
 
-function counterChecks(harness, stores, live) {
-  const person = stores.find((store) => !store.shared)?.counters ?? {};
-  const shared = stores.find((store) => store.shared)?.counters ?? {};
-  // Codex loads only its summary, which only the daily review consolidates, and the review keeps
-  // only the shared store: a person's Codex notes never load with a turn.
-  const codex = harness === "codex";
+function counterChecks(stores, secondScope, live) {
+  const person = storeOf(stores, "operator", secondScope)?.counters ?? {};
+  const second = storeOf(stores, "second", secondScope)?.counters ?? {};
+  const shared = storeOf(stores, "shared", secondScope)?.counters ?? {};
   const checks = [
-    codex
-      ? {
-          check: "Codex turns loaded the shared store's summary only after its review",
-          pass: (person.turns_loaded ?? 0) === 0 && (shared.turns_loaded ?? 0) >= 1,
-        }
-      : { check: "turns that loaded memory were counted", pass: (person.turns_loaded ?? 0) >= 1 },
+    // Codex loads only its summary, which only a review consolidates: its turns load a store's
+    // memory once that store was reviewed, private stores too.
+    { check: "turns that loaded memory were counted", pass: (person.turns_loaded ?? 0) >= 1 },
+    {
+      check: "the second person's turns loaded their memory",
+      pass: (second.turns_loaded ?? 0) >= 1,
+    },
     { check: "memories written were counted", pass: (person.written ?? 0) >= 1 },
     { check: "the shared store is counted apart", pass: (shared.turns ?? 0) >= 1 },
+    {
+      check: "each store was reviewed",
+      pass: [person, second, shared].every((counters) => (counters.review_turns ?? 0) >= 1),
+    },
   ];
   if (!live)
     checks.push(
@@ -574,6 +729,45 @@ function counterChecks(harness, stores, live) {
   return checks;
 }
 
+/**
+ * A Worker Host whose memory endpoint can't listen says why, in `supertag get memories` and
+ * `supertag status`, rather than that no Worker Host runs: here a file that isn't a socket sits
+ * where its socket goes.
+ */
+async function endpointFailureChecks(options) {
+  const deployment = new Deployment(options, {
+    stateName: "state",
+    prepare: (state) => {
+      mkdirSync(join(state, "hosts", "eval"), { recursive: true });
+      writeFileSync(join(state, "hosts", "eval", "memory.sock"), "not a socket");
+    },
+  });
+  try {
+    await deployment.start();
+    const listed = await waitFor("the memory endpoint's failure", deployment.wait, async () => {
+      const listed = await deployment.json(["get", "memories"]);
+      return /did not start/.test(listed.unavailable ?? "") ? listed : undefined;
+    });
+    const status = await deployment.cli(["status"]);
+    return [
+      {
+        check: "get memories says the memory endpoint did not start, and why",
+        pass:
+          /is not a socket/.test(listed.unavailable) &&
+          !/No Worker Host runs/.test(listed.unavailable),
+      },
+      {
+        check: "supertag status says the memory endpoint did not start",
+        pass: /memory endpoint did not start/.test(status),
+      },
+    ];
+  } catch (error) {
+    return [{ check: `the memory endpoint's failure is visible: ${error.message}`, pass: false }];
+  } finally {
+    await deployment.stop();
+  }
+}
+
 export async function evaluate(options) {
   const deployment = new Deployment(options);
   const outcome = { mode: options.live ? "live" : "fixture", harnesses: {} };
@@ -588,10 +782,11 @@ export async function evaluate(options) {
         "Memory eval Tag. Keep your memory current.",
         ...(options.live ? ["--harness", harness] : []),
       ]);
+    await deployment.enrollSecondPerson(options.harnesses.map((harness) => `memeval-${harness}`));
     const before = await Promise.allSettled(
       options.harnesses.map((harness) => beforeReview(deployment, harness, options.live)),
     );
-    // Move the Control Plane's clock past a day: its maintenance sweep queues each Tag's
+    // Move the Control Plane's clock past a day: its maintenance sweep queues each store's
     // review within the next minute.
     writeFileSync(deployment.offset, String(DAY_AND_AN_HOUR_MS));
     const after = await Promise.allSettled(
@@ -606,7 +801,10 @@ export async function evaluate(options) {
       const steps = runs.flatMap((run) => (run.status === "fulfilled" ? run.value : []));
       const failure = runs.find((run) => run.status === "rejected")?.reason;
       const stores = await deployment.memoryStats(harness).catch(() => []);
-      steps.push({ step: "counters", checks: counterChecks(harness, stores, options.live) });
+      steps.push({
+        step: "counters",
+        checks: counterChecks(stores, deployment.secondScope, options.live),
+      });
       outcome.harnesses[harness] = {
         steps: steps.map(({ step, checks, reply }) => ({
           step,
@@ -621,14 +819,30 @@ export async function evaluate(options) {
   } finally {
     await deployment.stop();
   }
-  outcome.passed = Object.values(outcome.harnesses).every(
+  // Every memory read above went through the Worker Host's short socket, as its state
+  // directory is too deep for one beside it.
+  outcome.endpoint = {
+    steps: [
+      {
+        step: "endpoint",
+        checks: [
+          {
+            check: "a state directory too deep for a socket still serves its memory",
+            pass: Object.values(outcome.harnesses).some((result) => result.counters.length > 0),
+          },
+          ...(options.live ? [] : await endpointFailureChecks(options)),
+        ],
+      },
+    ],
+  };
+  outcome.passed = [...Object.values(outcome.harnesses), outcome.endpoint].every(
     (result) =>
       !result.error && result.steps.every((step) => step.checks.every((check) => check.pass)),
   );
   return outcome;
 }
 
-/** The report: each harness's checks, then its counters. */
+/** The report: each harness's checks, then its counters, then the memory endpoint's. */
 export function text(outcome) {
   const lines = [`Memory eval (${outcome.mode})`];
   for (const [harness, result] of Object.entries(outcome.harnesses)) {
@@ -643,12 +857,17 @@ export function text(outcome) {
     for (const store of result.counters) {
       const c = store.counters;
       lines.push(
-        `  ${store.shared ? "shared" : "private"} store: ${store.memories} memories, ${store.proposals_waiting} proposals waiting, index ${store.loaded.lines} lines; ` +
+        `  ${store.shared ? "shared" : `private (${store.scope})`} store: ${store.memories} memories, ${store.proposals_waiting} proposals waiting, index ${store.loaded.lines} lines; ` +
           `${c.turns} turns (${c.review_turns} reviews, ${c.proposing_turns} proposing), ${c.turns_loaded} loaded memory (${c.loaded_lines} lines, ${c.truncated_turns} cut short), ${c.recalls} memory reads; ` +
           `written ${c.written}, updated ${c.updated}, deleted ${c.deleted}; reviews wrote ${c.review_written}, updated ${c.review_updated}, deleted ${c.review_deleted}; ` +
           `proposals ${c.proposals_created} created, ${c.proposals_merged} merged, ${c.proposals_dropped} dropped, ${c.proposals_expired} expired; ${c.seeds_delivered} seeds`,
       );
     }
+  }
+  if (outcome.endpoint) {
+    lines.push("", "memory endpoint:");
+    for (const check of outcome.endpoint.steps.flatMap((step) => step.checks))
+      lines.push(`  ${check.pass ? "pass" : "FAIL"}  ${check.check}`);
   }
   lines.push("", outcome.passed ? "All checks passed." : "Some checks failed.");
   return `${lines.join("\n")}\n`;

@@ -658,12 +658,13 @@ hears that it keeps none.
 
 - **Who sees it.** A Tag keeps one store for its shared turns and one for each person's
   conversations, so one person's conversation never feeds another's. A turn in a surface thread,
-  an operator's Objective, the inbox, or the review uses the shared store. This is the rule that
-  decides which [Sessions a turn sees](#recalling-other-sessions).
+  an operator's Objective, the inbox, or the shared store's review uses the shared store; a
+  person's conversation, a Session they started, and their store's review use theirs. This is the
+  rule that decides which [Sessions a turn sees](#recalling-other-sessions).
 - **Whose changes count.** What a root turn or the daily review keeps in its memory is the Tag's
   own. A Work Session's own turn reads the Tag's memory as it was and can't change it: what it
   writes or changes there is kept beside the store as a proposal, with the turn that wrote it, for
-  the review to merge or drop. A turn a GitHub or Linear event started gets no memory at all: an
+  that store's review to merge or drop. A turn a GitHub or Linear event started gets no memory at all: an
   issue or pull request may hold text someone outside wrote. Otherwise, asking the Tag for work
   and teaching it are the same trust. Anyone on a surface location's `allowed-users` may do both;
   the Gateway drops everyone else's messages before the Control Plane sees them.
@@ -674,22 +675,35 @@ hears that it keeps none.
 
 ### The daily review
 
-Once a day, after at least ten finished turns since the last one, the Tag
-gets a review turn in its reserved Session `memory:TAG`. The turn lists the shared Sessions with
-work since the last review. The Tag rereads them with `read_session` and `read_turn` and keeps its
-own memory current with its harness's tools: it corrects what the Sessions contradict, merges
-duplicates, rewrites time-relative facts with their dates, and drops what the repository or the
-Sessions already record. Its Worker Host adds the proposals waiting in the shared store to the
-review's request, oldest first, as state rather than instructions; the review writes what is right
-into its memory in its own words, and the proposals it was shown go once it finishes. The review
-reads only shared work, so a person's store has none: its proposals go, up to 8 KiB of them, into
-that person's next conversation turn whose changes are the Tag's own, which merges them the same
-way as part of its work. A proposal no turn takes goes after 14 days. The review has only the Session reads and `stay_quiet`: it
-cannot message anyone, start work, or schedule. It runs read-only in the Tag's Workspace: of the
-Tag's actions it keeps only `files:read`, so it cannot change files or run commands, whatever the
-Tag may do in other turns; its harness's memory folder stays writable. It ends with `stay_quiet`,
-so it posts nothing and raises nothing unread. A review is never queued while another is still
-queued or running. `supertag describe tag` shows when the Tag last reviewed.
+Each of a Tag's memory stores is reviewed on its own: the shared store from the Tag's shared work,
+and each person's store from that person's own Sessions. Once a day, after at least ten finished
+turns of a store since its last review (turns whose changes are the Tag's own; a Work Session's own
+turns don't count), the Tag gets a review turn for that store in a reserved Session: `memory:TAG`
+for the shared store, and `memory:TAG:SCOPE` for a person's, where `SCOPE` is the name the Worker
+Host gives that person's store. A person's review Session is that person's, like their
+conversation: only they see it, and no other turn reads it. A store never reviewed waits a day
+from its first counted turn. A review of a store is never queued while another review of the same
+store is still queued or running.
+
+The review turn lists the Sessions of its store with work since its last review: the shared review
+lists only shared Sessions, and a person's review only that person's own, never another person's
+or the shared ones, and it can read no others. The Tag rereads them with `read_session` and
+`read_turn` and keeps that store current with its harness's tools: it corrects what the Sessions
+contradict, merges duplicates, rewrites time-relative facts with their dates, and drops what the
+repository or the Sessions already record. Its Worker Host adds the proposals waiting in that store
+to the review's request, oldest first, up to 32 KiB of them, as state rather than instructions;
+the review writes what is right into its memory in its own words, and the proposals it was shown go
+once it finishes. A proposal no review takes goes after 14 days. For a Codex Tag, each store's
+review is also where Codex folds that store's notes into the summary its later turns load (see
+[Memory on each harness](#memory-on-each-harness)), so a person's notes load at the start of
+their turns once their store has been reviewed.
+
+The review has only the Session reads and `stay_quiet`: it cannot message anyone, start work, or
+schedule. It runs read-only in the Tag's Workspace: of the Tag's actions it keeps only
+`files:read`, so it cannot change files or run commands, whatever the Tag may do in other turns;
+its harness's memory folder stays writable. It ends with `stay_quiet`, so it posts nothing and
+raises nothing unread. `supertag describe tag` shows when the Tag last queued a review of any of
+its stores (`memory_reviewed_at_ms`).
 
 A Tag with `memory: false` (`supertag tag put TAG --memory false`, or `spec.memory` in a Tag
 manifest) keeps no memory and never reviews.
@@ -736,8 +750,8 @@ Each harness keeps its [memory](#memory) this way:
   reads at the start of each turn. Each turn is told to search its memory before answering
   anything that may depend on earlier work, and to add a note when it learns something lasting,
   whatever Codex's own rule to add to memory only when someone asks. Codex's own consolidation,
-  which folds the notes into that summary with extra model calls, runs only in the Tag's daily
-  review turn. It consolidates what changed since its last consolidation, so the store keeps the
+  which folds the notes into that summary with extra model calls, runs only in the daily review
+  turn of the notes' store, shared or one person's. It consolidates what changed since its last consolidation, so the store keeps the
   folder as Codex last consolidated it (`.supertag-consolidated`), and the review starts Codex
   from that baseline; Codex's git repository inside the folder is not kept. Codex starts its
   consolidation agent at every turn, so in other turns SuperTag names a model that doesn't exist
@@ -785,14 +799,17 @@ memories. Each record has:
 | `kind` | `preference`, `feedback`, `fact`, `reference`, or `procedure`, from Claude Code's memory type or the heading in Codex's summary. |
 | `shared`, `audience`, `scope` | Its store's audience: shared, or one person's conversations. |
 | `trust` | `trusted` when the turn that last changed it may change the Tag's memory; `proposed-only` when that turn could only propose, such as a Work Session's own turn; unset when no recorded turn did. |
-| `status` | `owned`: the Tag's own memory. `proposed`: a change waiting for the daily review. |
+| `status` | `owned`: the Tag's own memory. `proposed`: a change waiting for its store's daily review. |
 | `source` | The Worker Host, the file, the memory's place in it (`native_id`), and the store's revision. |
 | `source_task_id`, `source_session_id` | The turn that last changed it, when known. |
 | `content_hash` | The SHA-256 of its whole text. |
 
 The memory never passes through the Control Plane. Each Worker Host that `supertag up` runs
-serves its records to programs of the same user on the same machine, over a socket in its state
-directory (`memory.sock`, readable only by that user). `supertag get memories` lists them, and
+serves its records to programs of the same user on the same machine, over a socket readable only
+by that user: `memory.sock` in its state directory, or, when that path is too long for a socket
+address (104 bytes on macOS), a short name hashed from the state directory in `/tmp/supertag-UID`,
+a directory only that user may use. The Worker Host records which, or why its socket could not
+listen, in `memory-endpoint.json` in its state directory. `supertag get memories` lists them, and
 `--tag TAG` one Tag's. `supertag describe memory ID` and `supertag get memory ID` read one, and
 `supertag delete memory ID` deletes it: the host removes it from the harness's files (a file, and
 its line in `MEMORY.md`, or one bullet of Codex's summary) as the store's next
@@ -801,7 +818,9 @@ proposal drops it before any review sees it. The desktop app shows a Tag's memor
 details panel, opened from the Tag's name above the conversation, and the terminal app in its
 Memory panel, both with delete. They read it through the CLI too, so only the local Gateway's
 connection shows it. With no Worker Host running on this machine, or a command that reaches a
-shared Gateway, nothing is listed and the output says why (`unavailable`); when the Control Plane
+shared Gateway, nothing is listed and the output says why (`unavailable`); so it does when a
+Worker Host runs here but its memory socket could not listen, naming the reason, which
+`supertag status` shows under Worker Hosts too; when the Control Plane
 records part of the Tag's memory on a Worker Host elsewhere, `kept_on` names it. Memory on a
 Volume isn't listed yet. People never write memory directly: they tell the Tag ("remember that I
 prefer squash merges", "forget that").

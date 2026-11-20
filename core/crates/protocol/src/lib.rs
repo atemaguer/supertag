@@ -89,7 +89,7 @@ pub mod memory_text {
     /// How an OpenCode or Cursor turn uses its memory folder.
     pub const FOLDER: &str = "Its index, MEMORY.md, loads each turn, as below; read any other file there when its line matters. Keep it current with your file tools, which may always read and write that folder: save what you can't look up again, such as a preference, a correction, or a decision and why, as one Markdown file per memory whose frontmatter gives its name, description, and type (user, feedback, project, or reference), with one line in MEMORY.md linking it, and fix or delete what is wrong.";
     /// Where the memory is and who sees it, for every turn granted it.
-    pub const KEPT: &str = "SuperTag keeps that folder on the Worker Host, or on the Tag's Volume if it has one, never in the Control Plane, one for each Tag and audience: what a person's private conversation keeps shows only in that person's turns. Only this Tag's turns on the same harness see it; a Work Session on another harness doesn't share it yet. Once a day after enough work, a review turn rereads the Tag's shared Sessions, corrects the memory against them, and merges or drops what other turns proposed. People see each memory, and delete any, with supertag get memories on that Worker Host's machine, or in the desktop and terminal apps there.";
+    pub const KEPT: &str = "SuperTag keeps that folder on the Worker Host, or on the Tag's Volume if it has one, never in the Control Plane, one for each Tag and audience: what a person's private conversation keeps shows only in that person's turns. Only this Tag's turns on the same harness see it; a Work Session on another harness doesn't share it yet. Once a day after enough work in it, each store gets a review turn that rereads that store's Sessions (the Tag's shared Sessions, or the person's own), corrects the memory against them, and merges or drops what other turns proposed. People see each memory, and delete any, with supertag get memories on that Worker Host's machine, or in the desktop and terminal apps there.";
     /// A turn whose changes are the Tag's own.
     pub const TRUSTED: &str =
         "What this turn keeps there stays the Tag's memory when the turn ends.";
@@ -117,7 +117,8 @@ pub fn memory_context(trusted: bool, harness: Option<HarnessMemory>) -> String {
 pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 /// The variable naming a Codex Attempt's executor socket on a remote Workspace: Codex runs its
 /// commands and file operations in the sandbox through it.
-/// The start of a Tag's reserved Session for its daily memory review, `memory:TAG`.
+/// The start of a Tag's reserved Sessions for its daily memory reviews: `memory:TAG` for its
+/// shared store, `memory:TAG:SCOPE` for one person's.
 pub const MEMORY_REVIEW_SESSION_PREFIX: &str = "memory:";
 
 pub const CODEX_EXEC_SOCKET: &str = "SUPERTAG_CODEX_EXEC_SOCKET";

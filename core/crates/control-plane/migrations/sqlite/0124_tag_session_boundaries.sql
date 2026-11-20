@@ -2,14 +2,20 @@
 -- own Tag's inbox Session instead of delegating work to another Tag or posting to a Workstream.
 -- A Work Session delegated to another Tag before this upgrade keeps running and still reports to
 -- its Objective; nothing new can start one.
+PRAGMA defer_foreign_keys = ON;
 
 -- 1. The Objective's Team goes, with its index and the watch trigger that compared it.
-DROP TRIGGER supertag_v2_watch_objective_changed ON supertag_v2_objectives;
+DROP TRIGGER supertag_v2_watch_objective_changed;
 DROP INDEX supertag_v2_objectives_team;
 ALTER TABLE supertag_v2_objectives DROP COLUMN team_id;
 CREATE TRIGGER supertag_v2_watch_objective_changed AFTER UPDATE ON supertag_v2_objectives
-FOR EACH ROW WHEN (NEW.revision <> OLD.revision OR NEW.status <> OLD.status
-    OR NEW.limit_state <> OLD.limit_state) EXECUTE FUNCTION supertag_v2_watch_objective_changed();
+WHEN NEW.revision <> OLD.revision OR NEW.status <> OLD.status
+    OR NEW.limit_state <> OLD.limit_state
+BEGIN
+    INSERT INTO supertag_v2_watch_append
+        SELECT 4, 2, NEW.objective_id, NEW.owner_tag_id, '', NEW.objective_id, '', '',
+               CASE WHEN substr(NEW.created_by, 1, 7) = 'client:' THEN NEW.created_by ELSE '' END;
+END;
 
 -- 2. A Team's concurrency limit counted the Tasks of the Objectives that named it; nothing is
 -- left for it to count.
@@ -32,4 +38,4 @@ CREATE TABLE supertag_v2_objective_asks (
 CREATE INDEX supertag_v2_objective_asks_open
     ON supertag_v2_objective_asks(objective_id) WHERE answered_at_ms IS NULL;
 
-UPDATE supertag_v2_schema SET version=123 WHERE version=122;
+UPDATE supertag_v2_schema SET version=124 WHERE version=123;

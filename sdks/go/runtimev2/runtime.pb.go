@@ -12782,7 +12782,7 @@ type Tag struct {
 	OpenWorkSessions uint32 `protobuf:"varint,6701,opt,name=open_work_sessions,json=openWorkSessions,proto3" json:"open_work_sessions,omitempty"`
 	// Whether the Tag keeps memory (see PutTagRequest.memory).
 	Memory bool `protobuf:"varint,6800,opt,name=memory,proto3" json:"memory,omitempty"`
-	// When the Tag last queued the daily review of its work and memory.
+	// When the Tag last queued a daily review of one of its memory stores.
 	MemoryReviewedAtMs *int64 `protobuf:"varint,6801,opt,name=memory_reviewed_at_ms,json=memoryReviewedAtMs,proto3,oneof" json:"memory_reviewed_at_ms,omitempty"`
 	// How the Tag's unprompted messages were received over the last `window_days`; read with GetTag.
 	Attention *AttentionSummary `protobuf:"bytes,6900,opt,name=attention,proto3" json:"attention,omitempty"`
@@ -18179,7 +18179,7 @@ type NativeMemoryGrant struct {
 	Seeds []*NativeMemorySeed `protobuf:"bytes,4,rep,name=seeds,proto3" json:"seeds,omitempty"`
 	// Whether what the turn changes in the store is the Tag's own (AttemptCapabilities.memory_trusted).
 	// Otherwise the host keeps the turn's changes beside the store as proposals, which the Tag's
-	// daily review, or for a person's store that person's next such turn, merges or drops.
+	// review of that store merges or drops.
 	Trusted       bool `protobuf:"varint,5,opt,name=trusted,proto3" json:"trusted,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

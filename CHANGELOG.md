@@ -69,10 +69,17 @@ within the pre-1.0 compatibility policy described in
   OpenAI Agents or a custom adapter wait until it can keep them.
 - A Work Session's own turn no longer changes its Tag's memory: what it writes there is kept
   beside the store as a proposal (`"status": "proposed"` in `supertag get memories`, a
-  **Proposed** badge in the desktop and terminal apps) with the turn that wrote it. The Tag's next
-  daily review gets the shared store's proposals in its request and merges or drops them; a
-  person's go to that person's next conversation turn instead. Proposals no turn takes go after
-  14 days. `NativeMemoryGrant.trusted` tells the Worker Host which turns only propose.
+  **Proposed** badge in the desktop and terminal apps) with the turn that wrote it. The next daily
+  review of that store gets its proposals in its request and merges or drops them. Proposals no
+  review takes go after 14 days. `NativeMemoryGrant.trusted` tells the Worker Host which turns
+  only propose.
+- Each of a Tag's memory stores gets its own daily review: the shared store from the Tag's shared
+  work, as before, and each person's store from that person's own Sessions, once a day after ten
+  of that store's turns, never two of one store at once. A person's review runs in a reserved
+  Session `memory:TAG:SCOPE` that only they see, reads only their own Sessions, merges their
+  store's proposals, and, on Codex, folds their notes into the summary their later turns load, so
+  a person's Codex memory now loads at the start of their turns. Migration 123 keeps each store's
+  review state, and `memory_reviewed_at_ms` on a Tag says when it last queued any of its reviews.
 - Every turn's memory paragraph now describes the harness's memory as the Tag's memory: where it
   is and who sees it, whether the turn's changes are the Tag's own or proposals, the daily review,
   and where people see and delete it. A Codex turn is told to keep its memory current, whatever
@@ -83,6 +90,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- A Worker Host whose state directory is too deep for a socket address (104 bytes on macOS) serves
+  its memory from a short socket in `/tmp/supertag-UID` instead of failing to listen, and a memory
+  socket that can't listen is named, with the reason, by `supertag get memories` and
+  `supertag status` rather than reported as no Worker Host running.
 - The terminal UI starts this machine's local services when they are set up but stopped, as the
   desktop app does, offers to restart an older local release, and says to run `supertag init` when
   the machine isn't set up. Its Gateway chooser no longer waits on "Looking for Gateways…": saved

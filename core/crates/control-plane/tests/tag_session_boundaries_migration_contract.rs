@@ -8,8 +8,8 @@ use supertag_control_plane::Store;
 use supertag_protocol::v2::TaskState;
 use uuid::Uuid;
 
-/// The schema version just before `0123_tag_session_boundaries`.
-const PRIOR: u32 = 122;
+/// The schema version just before `0124_tag_session_boundaries`.
+const PRIOR: u32 = 123;
 const OPERATOR: &str = "operator:alice";
 const WORK: &str = "work/8f0a54b2-36a5-4d5c-9b0e-3d6f2a1c7e90";
 
@@ -76,7 +76,7 @@ async fn seed_prior_version(url: &str) {
 async fn contract(url: String) {
     seed_prior_version(&url).await;
     let store = Store::open(&url).await.unwrap();
-    assert_eq!(store.migrated(), Some((i64::from(PRIOR), 123)));
+    assert_eq!(store.migrated(), Some((i64::from(PRIOR), 124)));
     let pool = AnyPool::connect(&url).await.unwrap();
     // The Objective names no Team, and a Team has no concurrency limit.
     assert!(

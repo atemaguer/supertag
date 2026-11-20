@@ -15,10 +15,10 @@
 //! - `work LABEL :: DIRECTIVE ;; DIRECTIVE` starts a Work Session on the same Tag that runs those
 //!   directives under LABEL.
 //!
-//! A turn whose request lists proposals (the Tag's daily review, in its `memory:` Session, or a
-//! person's next turn after a Work Session, reported as `HARNESS-merge-N`) merges each one unless
-//! its text says `(unverified)`. The review also folds Codex's ad hoc notes into
-//! `memory_summary.md`, as Codex's consolidation does.
+//! A store's daily review, in its `memory:` Session, is reported as `HARNESS-review-SCOPE-N`
+//! (`shared`, or the person's store's scope), with the Sessions its request lists. It merges each
+//! proposal its request lists unless its text says `(unverified)`, and folds Codex's ad hoc notes
+//! into `memory_summary.md`, as Codex's consolidation does.
 use std::{
     collections::BTreeMap,
     fs,
@@ -168,8 +168,19 @@ fn consolidate(folder: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The proposals a turn's request lists for it to merge, as the review's or a person's next turn
-/// after a Work Session: each one's title and text.
+/// The Sessions a review's request lists for it to reread.
+fn listed_sessions(prompt: &str) -> Vec<String> {
+    let Some((_, list)) = prompt.split_once("\nSessions:") else {
+        return vec![];
+    };
+    list.lines()
+        .skip(1)
+        .map_while(|line| line.strip_prefix("- "))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The proposals a review's request lists for it to merge: each one's title and text.
 fn proposals(prompt: &str) -> Vec<(String, String)> {
     let Some((_, section)) = prompt.split_once("\n\nProposals ") else {
         return vec![];
@@ -233,7 +244,11 @@ pub async fn exercise(
     };
     let review = task
         .session_id
-        .starts_with(supertag_protocol::MEMORY_REVIEW_SESSION_PREFIX);
+        .strip_prefix(supertag_protocol::MEMORY_REVIEW_SESSION_PREFIX)
+        .map(|rest| match rest.rsplit_once(':') {
+            Some((_, scope)) if scope.starts_with("person-") => scope.to_owned(),
+            _ => "shared".to_owned(),
+        });
     let next = |kind: &str| {
         let mut index = 1;
         while reports
@@ -251,13 +266,11 @@ pub async fn exercise(
         .map(slug)
         .filter(|label| !reports.join(format!("{label}.json")).exists());
     // A turn with no script of its own, such as a Work Session's report turn quoting its
-    // parent's, or a retry, runs none; it still merges the proposals its request lists.
-    let (label, lines): (String, Vec<&str>) = if review {
-        (next("review"), vec![])
+    // parent's, or a retry, runs none.
+    let (label, lines): (String, Vec<&str>) = if let Some(scope) = &review {
+        (next(&format!("review-{scope}")), vec![])
     } else if let Some(label) = scripted {
         (label, task.prompt.lines().map(str::trim).collect())
-    } else if !proposals(&task.prompt).is_empty() {
-        (next("merge"), vec![])
     } else {
         return Ok(Some(format!(
             "memory eval: nothing to do in {}",
@@ -279,6 +292,7 @@ pub async fn exercise(
             .iter()
             .map(|(title, text)| json!({"title": title, "text": text}))
             .collect::<Vec<_>>(),
+        "listed": if review.is_some() { listed_sessions(&task.prompt) } else { vec![] },
     });
     let mut did: Vec<Value> = vec![];
     if let Some(folder) = &folder {
@@ -321,8 +335,14 @@ pub async fn exercise(
                 did.push(json!("recall"));
             }
         }
-        // Merge what the request proposes, unless unverified, in the harness's own words.
-        for (title, text) in proposals(&task.prompt) {
+        // A review merges what its request proposes, unless unverified, in the harness's own
+        // words.
+        let proposed = if review.is_some() {
+            proposals(&task.prompt)
+        } else {
+            vec![]
+        };
+        for (title, text) in proposed {
             let name = title
                 .split(':')
                 .next()
@@ -341,7 +361,7 @@ pub async fn exercise(
             remember(harness, folder, &name, "project", body)?;
             did.push(json!({"merge": slug(&name)}));
         }
-        if review && harness == "codex" {
+        if review.is_some() && harness == "codex" {
             consolidate(folder)?;
             did.push(json!("consolidate"));
         }

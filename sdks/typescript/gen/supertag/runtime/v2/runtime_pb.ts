@@ -5083,7 +5083,7 @@ export type Tag = Message<"supertag.runtime.v2.Tag"> & {
   memory: boolean;
 
   /**
-   * When the Tag last queued the daily review of its work and memory.
+   * When the Tag last queued a daily review of one of its memory stores.
    *
    * @generated from field: optional int64 memory_reviewed_at_ms = 6801;
    */
@@ -7782,7 +7782,7 @@ export type NativeMemoryGrant = Message<"supertag.runtime.v2.NativeMemoryGrant">
   /**
    * Whether what the turn changes in the store is the Tag's own (AttemptCapabilities.memory_trusted).
    * Otherwise the host keeps the turn's changes beside the store as proposals, which the Tag's
-   * daily review, or for a person's store that person's next such turn, merges or drops.
+   * review of that store merges or drops.
    *
    * @generated from field: bool trusted = 5;
    */

@@ -357,7 +357,7 @@ fn missing(error: &anyhow::Error) -> bool {
     })
 }
 
-fn alive(pid: u32) -> bool {
+pub(crate) fn alive(pid: u32) -> bool {
     let Ok(pid) = i32::try_from(pid) else {
         return false;
     };

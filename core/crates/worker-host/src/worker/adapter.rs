@@ -621,9 +621,8 @@ async fn run(
         attempt_token,
     )
     .await;
-    // What other turns proposed goes in the request of a turn that merges it: the Tag's review
-    // for its shared store, and for a person's store, which no review reads, that person's next
-    // turn whose changes are the Tag's own.
+    // What other turns proposed goes in the request of the review of its store, shared or one
+    // person's, which merges or drops it.
     let trusted = assignment
         .native_memory
         .as_ref()
@@ -631,12 +630,11 @@ async fn run(
     let shown_proposals = match (&native_memory, assignment.task.as_mut()) {
         (Some(NativeMemory::Host(prepared)), Some(task))
             if trusted
-                && (task
+                && task
                     .session_id
-                    .starts_with(supertag_protocol::MEMORY_REVIEW_SESSION_PREFIX)
-                    || !prepared.shared()) =>
+                    .starts_with(supertag_protocol::MEMORY_REVIEW_SESSION_PREFIX) =>
         {
-            match prepared.review_proposals(prepared.shared()) {
+            match prepared.review_proposals() {
                 Ok((section, shown)) => {
                     task.prompt.push_str(&section);
                     shown

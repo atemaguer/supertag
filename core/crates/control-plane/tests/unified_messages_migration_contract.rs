@@ -135,7 +135,8 @@ fn table(expected: &[&[&str]]) -> Vec<Vec<String>> {
 async fn contract(url: String) {
     let head = seed_prior_version(&url).await;
     let store = Store::open(&url).await.unwrap();
-    assert_eq!(store.migrated(), Some((116, 123)));
+    let (from, to) = store.migrated().unwrap();
+    assert!(from == 116 && to >= 123, "migrated {from} to {to}");
     let pool = AnyPool::connect(&url).await.unwrap();
 
     // Conversations: the Team's channel continues its sequence; the deleted Team's copy lives in
