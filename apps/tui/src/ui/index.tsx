@@ -5,6 +5,7 @@
 import type {
   EditBufferRenderable,
   KeyEvent,
+  Renderable,
   ScrollBoxRenderable,
   SyntaxStyle,
 } from "@opentui/core";
@@ -22,7 +23,7 @@ export {
   useRenderer,
   useTerminalDimensions,
 } from "@opentui/react";
-export type { KeyEvent, ScrollBoxRenderable };
+export type { KeyEvent, Renderable, ScrollBoxRenderable };
 export { color };
 
 const StyleContext = createContext<SyntaxStyle | undefined>(undefined);
@@ -70,7 +71,7 @@ export function atBottom(box: ScrollBoxRenderable | null): boolean {
 
 /**
  * A field whose text shows as dots, for a credential: it takes typed and pasted text while
- * `focused`, Backspace, and Ctrl-U to clear it.
+ * `focused()`, Backspace, and Ctrl-U to clear it.
  */
 export function MaskedField({
   focused,
@@ -78,14 +79,15 @@ export function MaskedField({
   onChange,
   placeholder,
 }: {
-  focused: boolean;
+  /** Whether it takes keys now, asked at each key: Tab and the text after it can land together. */
+  focused(): boolean;
   value: string;
   /** Takes how the text changes, as several keys can land before the next render. */
   onChange(change: (value: string) => string): void;
   placeholder: string;
 }) {
   useKeyboard((key: KeyEvent) => {
-    if (!focused) return;
+    if (!focused()) return;
     if (key.ctrl && key.name === "u") onChange(() => "");
     if (key.ctrl || key.meta) return;
     if (key.name === "backspace") onChange((prior) => prior.slice(0, -1));
@@ -94,12 +96,12 @@ export function MaskedField({
   });
   usePaste((event) => {
     const pasted = decodePasteBytes(event.bytes).replace(/\s+/gu, "");
-    if (focused) onChange((prior) => prior + pasted);
+    if (focused()) onChange((prior) => prior + pasted);
   });
   return (
     <text fg={value ? color.text : color.faint}>
       {value ? "•".repeat(Math.min(value.length, 40)) : placeholder}
-      {focused ? "▏" : ""}
+      {focused() ? "▏" : ""}
     </text>
   );
 }

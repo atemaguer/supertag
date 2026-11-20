@@ -623,6 +623,145 @@ test("d in Gateways forgets a Gateway saved in the desktop app, and its cache", 
   await screen.close();
 });
 
+test("Gateways offers its keys only once the list is read, and keys before it do nothing", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "supertag-tui-test-"));
+  const desktop = path.join(root, "config/desktop");
+  mkdirSync(desktop, { recursive: true, mode: 0o700 });
+  chmodSync(desktop, 0o700);
+  writeFileSync(
+    path.join(desktop, "gateways.json"),
+    JSON.stringify({
+      active: null,
+      gateways: [{ profile: { name: "work", origin: "https://gw.example.com" }, token: "stcr_x" }],
+    }),
+    { mode: 0o600 },
+  );
+  current = setup(new FakeGateway(TAGS), { root });
+  const connections = current.controller.connections;
+  // Connected to the saved Gateway, so the list starts on it once it is read.
+  current.controller.entry = {
+    id: "saved:https://gw.example.com",
+    name: "work",
+    detail: "",
+    kind: "saved",
+    available: true,
+  };
+  const read = connections.entries.bind(connections);
+  let release = () => {};
+  const listed = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  connections.entries = async () => {
+    await listed;
+    return read();
+  };
+  const screen = await render(current, { width: 120, height: 40 });
+  await screen.waitFor("Message lead");
+  await screen.press("p", { ctrl: true });
+  const loading = await screen.waitFor("Looking for Gateways…");
+  expect(loading).not.toContain("d forget");
+  await screen.press("j");
+  await screen.press("d");
+  expect(screen.frame()).not.toContain("Forget work");
+  release();
+  const shown = await screen.waitFor("d forget");
+  expect(shown).not.toContain("Forget work");
+  expect(shown).toContain("● work");
+  await screen.press("d");
+  await screen.waitFor("Forget work and its cache on this device?");
+  await screen.close();
+});
+
+test("Ctrl-S in the same read as the token's last keys saves the whole token", async () => {
+  current = setup();
+  const connections = current.controller.connections;
+  const saved: { name: string; url: string; token: string }[] = [];
+  connections.save = async (gateway) => {
+    saved.push(gateway);
+    return "saved:https://gw.example.com";
+  };
+  const screen = await render(current, { width: 120, height: 40 });
+  await screen.waitFor("Message lead");
+  await screen.press("p", { ctrl: true });
+  await screen.waitFor("d forget");
+  await screen.press("a");
+  await screen.waitFor("Tab next field");
+  await screen.type("work");
+  await screen.press("TAB");
+  await screen.type("https://gw.example.com");
+  await screen.press("TAB");
+  // The token and Ctrl-S land before the next render, as from a busy terminal.
+  await screen.inAct(async () => {
+    await screen.view.mockInput.typeText("stcr_secret");
+    screen.view.mockInput.pressKey("s", { ctrl: true });
+  });
+  for (let i = 0; i < 100 && saved.length === 0; i++) await screen.settle(1);
+  expect(screen.frame()).not.toContain("Enter a name, the URL, and a token");
+  expect(saved).toEqual([{ name: "work", url: "https://gw.example.com", token: "stcr_secret" }]);
+  await screen.close();
+});
+
+test("text typed right after Tab lands in the next field, never the URL field", async () => {
+  current = setup();
+  const connections = current.controller.connections;
+  const saved: { name: string; url: string; token: string }[] = [];
+  connections.save = async (gateway) => {
+    saved.push(gateway);
+    return "saved:https://gw.example.com";
+  };
+  const screen = await render(current, { width: 120, height: 40 });
+  await screen.waitFor("Message lead");
+  await screen.press("p", { ctrl: true });
+  await screen.waitFor("d forget");
+  await screen.press("a");
+  await screen.waitFor("Tab next field");
+  // Every key of the form in one read, as a busy terminal delivers them.
+  await screen.inAct(async () => {
+    const input = screen.view.mockInput;
+    await input.typeText("work");
+    input.pressTab();
+    await input.typeText("https://gw.example.com");
+    input.pressTab();
+    await input.typeText("stcr_secret");
+    input.pressKey("s", { ctrl: true });
+  });
+  for (let i = 0; i < 100 && saved.length === 0; i++) await screen.settle(1);
+  expect(screen.frame()).not.toContain("stcr_secret");
+  expect(saved).toEqual([{ name: "work", url: "https://gw.example.com", token: "stcr_secret" }]);
+  await screen.close();
+});
+
+test("a name and Enter in one read open that Tag from the palette", async () => {
+  current = setup();
+  const screen = await render(current, { width: 120, height: 40 });
+  await screen.waitFor("Message lead");
+  await screen.press("k", { ctrl: true });
+  await screen.waitFor("Search Tags");
+  await screen.inAct(async () => {
+    await screen.view.mockInput.typeText("reviewer");
+    screen.view.mockInput.pressEnter();
+  });
+  await screen.waitFor("Message reviewer");
+  await screen.close();
+});
+
+test("a name and Ctrl-S in one read create the Tag with that name", async () => {
+  const fake = new FakeGateway(TAGS);
+  fake.hosts = [{ hostId: "laptop", harnesses: [HarnessKind.CODEX], workspaces: [] }];
+  current = setup(fake);
+  const screen = await render(current, { width: 120, height: 40 });
+  await screen.waitFor("Message lead");
+  await screen.press("n", { ctrl: true });
+  await screen.waitFor("‹ Codex ›");
+  await screen.inAct(async () => {
+    await screen.view.mockInput.typeText("Release Bot");
+    screen.view.mockInput.pressKey("s", { ctrl: true });
+  });
+  await screen.waitFor("Message Release Bot");
+  expect(fake.putTags[0]).toMatchObject({ tagId: "release-bot", name: "Release Bot" });
+  await screen.close();
+});
+
 test("Keyboard shortcuts lists the new keys", async () => {
   current = setup();
   const screen = await render(current, { width: 120, height: 40 });

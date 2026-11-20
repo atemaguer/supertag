@@ -22,11 +22,17 @@ t() { tmux -S "$socket" "$@"; }
 esc() { t send-keys -t e2e Escape; sleep 0.3; }
 shows() { t capture-pane -p -t e2e | grep -qF -- "$1"; }
 cli() { sh "$here/stack.sh" cli "$@" --state-directory "$root/state" >/dev/null; }
+# Opens what the palette finds for $1. Enter waits for the query to show with a match: just
+# after launch the Tags are still being read, and Enter on "Nothing matches." does nothing. Then
+# it waits for the palette to close, so the keys after it reach what it opened.
 palette() {
   t send-keys -t e2e C-k
   wait_for "Search Tags"
   t send-keys -t e2e -l "$1"
+  wait_for "│$1"
+  wait_gone "Nothing matches."
   t send-keys -t e2e Enter
+  wait_gone "─Commands─"
 }
 wait_for() {
   i=0
@@ -40,6 +46,19 @@ wait_for() {
     sleep 0.05
   done
 }
+# Waits until the pane no longer shows the text.
+wait_gone() {
+  i=0
+  while t capture-pane -p -t e2e | grep -qF -- "$1"; do
+    i=$((i + 1))
+    if [ $i -gt 600 ]; then
+      echo "timed out waiting for this to go: $1" >&2
+      t capture-pane -p -t e2e >&2
+      return 1
+    fi
+    sleep 0.05
+  done
+}
 t kill-server 2>/dev/null || true
 rm -f "$log"
 t -f /dev/null new-session -d -s e2e -x 160 -y 45 "sh $here/stack.sh tui --gateway local; echo exited \$?; sleep 30"
@@ -47,10 +66,7 @@ t set-option -t e2e allow-passthrough on
 t pipe-pane -t e2e -o "cat >> $log"
 wait_for "Local · connected"
 # The palette opens the Tag, whichever the last launch left open.
-t send-keys -t e2e C-k
-wait_for "Search Tags"
-t send-keys -t e2e -l "$tag"
-t send-keys -t e2e Enter
+palette "$tag"
 wait_for "Message $tag"
 text="tmux round trip $$"
 t send-keys -t e2e -l "$text"
@@ -85,10 +101,7 @@ echo "notification ok: $(grep -ao ']9;[^[:cntrl:]]*' "$log" | head -1)"
 grep -aq "$(printf '\033Ptmux;')" "$log" && echo "notification wrapped for tmux passthrough"
 # A message from another client (the CLI) shows in the open conversation.
 sh "$here/stack.sh" cli message "$tag" "from the CLI $$" >/dev/null 2>&1 || true
-t send-keys -t e2e C-k
-wait_for "Search Tags"
-t send-keys -t e2e -l "$tag"
-t send-keys -t e2e Enter
+palette "$tag"
 wait_for "from the CLI $$"
 echo "from another client ok"
 # The Gateway stops and starts again: the status line says so, and the conversation goes on.
@@ -152,7 +165,7 @@ t send-keys -t e2e Enter
 wait_for "New Objective for planner"
 t send-keys -t e2e -l "Check the e2e $$"
 t send-keys -t e2e Enter Enter
-t send-keys -t e2e -l '$12.50'
+t send-keys -t e2e -l "\$12.50"
 t send-keys -t e2e Enter
 wait_for "took its first turn"
 t send-keys -t e2e Enter
@@ -202,25 +215,33 @@ echo "Team ok"
 # Ctrl-N creates a Tag from the hosts' harnesses.
 t send-keys -t e2e C-n
 wait_for "New Tag"
+# Ctrl-S creates once the hosts have said what they offer, which the hint waits for.
+wait_for "Ctrl-S creates"
 wait_for "Web access  [x] on"
 t send-keys -t e2e -l "e2e helper $$"
 t send-keys -t e2e C-s
 wait_for "Message e2e helper $$"
 echo "New Tag ok"
 # Save the same local Gateway as a named one with `supertag connect`, through the chooser, and
-# switch to it; then back to Local.
+# switch to it; then back to Local. Each field shows what was typed before the next key, so a
+# busy terminal cannot carry text into the wrong field.
 local=$(sh "$here/stack.sh" cli __local-gateway)
 url=$(printf '%s' "$local" | sed 's/.*"url":"\([^"]*\)".*/\1/')
 token=$(printf '%s' "$local" | sed 's/.*"token":"\([^"]*\)".*/\1/')
+dots=$(printf '%s' "$token" | cut -c1-40 | sed 's/./•/g')
+# The chooser lists its keys once it has read the Gateways.
 t send-keys -t e2e C-p
 wait_for "Enter connect"
 t send-keys -t e2e a
 wait_for "Tab next field"
 t send-keys -t e2e -l "second"
+wait_for "Name         second"
 t send-keys -t e2e Tab
 t send-keys -t e2e -l "$url"
+wait_for "URL          $url"
 t send-keys -t e2e Tab
 t send-keys -t e2e -l "$token"
+wait_for "Token        $dots"
 t send-keys -t e2e C-s
 wait_for "second · connected"
 echo "saved Gateway ok"
@@ -230,13 +251,16 @@ wait_for "d forget"
 t send-keys -t e2e j d
 wait_for "Forget second and its cache on this device?"
 t send-keys -t e2e Enter
-sleep 1
+# Forgotten: the chooser lists its keys again, without second.
+wait_gone "Forget second"
+wait_gone "Forgetting…"
+wait_for "Enter connect"
+wait_gone "second  "
 if sh "$here/stack.sh" cli get tags --gateway second >/dev/null 2>&1; then
   echo "second is still saved" >&2
   exit 1
 fi
 echo "forgot the saved Gateway ok"
-wait_for "Local"
 t send-keys -t e2e Enter
 wait_for "Local · connected"
 echo "--- frame"

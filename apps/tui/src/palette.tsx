@@ -5,7 +5,7 @@
  * counts) leaves only Create Objective, and Enter sends it to the conversation on screen.
  */
 import { goalOutcome } from "@supertag/client/model";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { alt } from "./keys";
 import { clip } from "./text";
 import { color, type KeyEvent, pasteOnOneLine, useKeyboard } from "./ui";
@@ -74,10 +74,20 @@ export function Palette({
 }) {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
-  const goal = goalOutcome(slash && !query.startsWith("/") ? `/${query}` : query);
-  const shown =
-    goal !== undefined ? items.filter((item) => item.id === GOAL_ITEM) : narrowed(items, query);
-  const selected = Math.min(index, Math.max(0, shown.length - 1));
+  // What is typed and selected now: keys that land together (a name, then Enter) arrive before
+  // the next render, so Enter and the arrows read these, not what the last render showed.
+  const latest = useRef({ query, index });
+  const choices = (typed: string, at: number) => {
+    const goal = goalOutcome(slash && !typed.startsWith("/") ? `/${typed}` : typed);
+    const shown =
+      goal !== undefined ? items.filter((item) => item.id === GOAL_ITEM) : narrowed(items, typed);
+    return { goal, shown, selected: Math.min(at, Math.max(0, shown.length - 1)) };
+  };
+  const select = (at: number) => {
+    latest.current = { ...latest.current, index: at };
+    setIndex(at);
+  };
+  const { shown, selected } = choices(query, index);
   useKeyboard((key: KeyEvent) => {
     if (key.name === "escape" || (key.ctrl && key.name === "k")) onClose();
     else if ((alt(key) || key.ctrl) && /^[1-9]$/u.test(key.name)) {
@@ -87,10 +97,13 @@ export function Palette({
         onClose();
         tag.run();
       }
-    } else if (key.name === "down" || (key.ctrl && key.name === "n"))
-      setIndex(Math.min(selected + 1, shown.length - 1));
-    else if (key.name === "up" || (key.ctrl && key.name === "p"))
-      setIndex(Math.max(selected - 1, 0));
+    } else if (key.name === "down" || (key.ctrl && key.name === "n")) {
+      const now = choices(latest.current.query, latest.current.index);
+      select(Math.min(now.selected + 1, now.shown.length - 1));
+    } else if (key.name === "up" || (key.ctrl && key.name === "p")) {
+      const now = choices(latest.current.query, latest.current.index);
+      select(Math.max(now.selected - 1, 0));
+    }
   });
   const inner = Math.max(10, width - 4);
   let section: string | undefined;
@@ -109,10 +122,12 @@ export function Palette({
         placeholder="Search Tags, conversations, settings…"
         value={query}
         onInput={(value: string) => {
+          latest.current = { query: value, index: 0 };
           setQuery(value);
           setIndex(0);
         }}
         onSubmit={() => {
+          const { goal, shown, selected } = choices(latest.current.query, latest.current.index);
           const item = shown[selected];
           if (item) {
             onClose();

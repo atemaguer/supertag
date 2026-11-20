@@ -50,12 +50,22 @@ export function NewTagForm({
     at.current = Math.max(0, Math.min(FIELDS.length - 1, next));
     showField(at.current);
   };
-  const [name, setName] = useState("");
+  // The typed fields, also as refs: Ctrl-S can land with the last keys typed, before a render.
+  const [name, showName] = useState("");
+  const typed = useRef({ name: "", sessions: "8" });
+  const setName = (value: string) => {
+    typed.current = { ...typed.current, name: value };
+    showName(value);
+  };
   const [harness, setHarness] = useState("");
   const [workspace, setWorkspace] = useState("");
   const [added, setAdded] = useState<Record<string, AddedWorkspace>>({});
   const [folder, setFolder] = useState<string | undefined>();
-  const [sessions, setSessions] = useState("8");
+  const [sessions, showSessions] = useState("8");
+  const setSessions = (value: string) => {
+    typed.current = { ...typed.current, sessions: value };
+    showSessions(value);
+  };
   const [webChoice, setWebChoice] = useState<boolean>();
   const [busy, setBusy] = useState<string | undefined>();
   const [problem, setProblem] = useState("");
@@ -110,6 +120,8 @@ export function NewTagForm({
 
   async function create() {
     if (busy || !options) return;
+    const { name, sessions } = typed.current;
+    const tagId = tagIdFor(name);
     if (!tagId) {
       setProblem("Use letters or digits in the name.");
       setField(0);

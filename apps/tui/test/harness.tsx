@@ -123,7 +123,7 @@ export async function render(
     given.controller.close();
     await view.dispose();
   };
-  return { view, settle, frame, waitFor, press, type, close };
+  return { view, settle, frame, waitFor, press, type, close, inAct };
 }
 
 export function reset(given?: Setup) {

@@ -7,10 +7,17 @@
  * optional TLS files, and saves with `supertag connect`, the CLI's own store.
  */
 import { describe } from "@supertag/client/model";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Connections, GatewayDraft, GatewayEntry } from "./connection";
 import { clip, safe } from "./text";
-import { color, type KeyEvent, MaskedField, pasteOnOneLine, useKeyboard } from "./ui";
+import {
+  color,
+  type KeyEvent,
+  MaskedField,
+  pasteOnOneLine,
+  type Renderable,
+  useKeyboard,
+} from "./ui";
 
 const FIELDS = [
   { key: "name", label: "Name", placeholder: "work" },
@@ -75,6 +82,11 @@ export function Gateways({
   const list = entries ?? [];
   useKeyboard((key: KeyEvent) => {
     if (adding || busy) return;
+    // Until the list is read there is nothing to move to, open or forget.
+    if (entries === undefined) {
+      if (key.name === "escape") onClose();
+      return;
+    }
     if (forgetting) {
       if (key.name === "return" || key.name === "enter") void forget(forgetting);
       else if (key.name === "escape") setForgetting(undefined);
@@ -174,7 +186,9 @@ export function Gateways({
             <text fg={color.faint}>
               {busy
                 ? "Forgetting…"
-                : "Enter connect · a add · s save launch · e edit · d forget · Esc close"}
+                : entries === undefined
+                  ? "Esc close"
+                  : "Enter connect · a add · s save launch · e edit · d forget · Esc close"}
             </text>
           )}
         </>
@@ -196,7 +210,7 @@ function AddGateway({
   onSaved(id: string): void;
   onCancel(): void;
 }) {
-  const [values, setValues] = useState<Record<Field, string>>({
+  const [values, setValues] = useState<Record<Field, string>>(() => ({
     name: "",
     url: "",
     token: "",
@@ -204,14 +218,33 @@ function AddGateway({
     clientCertFile: "",
     clientKeyFile: "",
     ...initial,
-  });
+  }));
+  // Keys that land together (a field's text, then Tab or Ctrl-S) all arrive before the next
+  // render. So what the fields hold and which one has focus are kept here, changed at each key:
+  // saving reads these, and Tab moves the focus at once, so the text after it lands in the next
+  // field (a token typed after Tab never shows in the URL field).
+  const latest = useRef(values);
   // A saved Gateway's form starts on its credential, the launch Gateway's on its name.
-  const [at, setAt] = useState(initial.name ? 2 : 0);
+  const focus = useRef(initial.name ? 2 : 0);
+  const [at, setAt] = useState(focus.current);
+  const inputs = useRef(new Map<number, Renderable>());
+  const move = (to: number) => {
+    focus.current = Math.max(0, Math.min(to, FIELDS.length - 1));
+    for (const [position, input] of inputs.current) {
+      if (position === focus.current) input.focus();
+      else input.blur();
+    }
+    setAt(focus.current);
+  };
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState("");
-  const set = (field: Field, value: string) => setValues((prior) => ({ ...prior, [field]: value }));
+  const change = (field: Field, how: (value: string) => string) => {
+    latest.current = { ...latest.current, [field]: how(latest.current[field]) };
+    setValues(latest.current);
+  };
   async function save() {
     if (saving) return;
+    const values = latest.current;
     if (!values.name.trim() || !values.url.trim() || !values.token) {
       setProblem("Enter a name, the URL, and a token or Auth Key.");
       return;
@@ -240,11 +273,13 @@ function AddGateway({
   useKeyboard((key: KeyEvent) => {
     if (key.name === "escape") onCancel();
     else if (key.ctrl && key.name === "s") void save();
-    else if (key.name === "tab" || key.name === "down")
-      setAt((i) => (key.shift ? Math.max(i - 1, 0) : Math.min(i + 1, FIELDS.length - 1)));
-    else if (key.name === "up") setAt((i) => Math.max(i - 1, 0));
-    else if (FIELDS[at]?.key === "token" && (key.name === "return" || key.name === "enter"))
-      setAt((i) => i + 1);
+    else if (key.name === "tab" || key.name === "down") move(focus.current + (key.shift ? -1 : 1));
+    else if (key.name === "up") move(focus.current - 1);
+    else if (
+      FIELDS[focus.current]?.key === "token" &&
+      (key.name === "return" || key.name === "enter")
+    )
+      move(focus.current + 1);
   });
   return (
     <box flexDirection="column">
@@ -257,23 +292,23 @@ function AddGateway({
           <box width={Math.max(10, width - 13)} height={1}>
             {field.key === "token" ? (
               <MaskedField
-                focused={position === at}
+                focused={() => position === focus.current}
                 value={values.token}
-                onChange={(change) =>
-                  setValues((prior) => ({ ...prior, token: change(prior.token) }))
-                }
+                onChange={(how) => change("token", how)}
                 placeholder={field.placeholder}
               />
             ) : (
               <input
+                ref={(input: Renderable | null) => {
+                  if (input) inputs.current.set(position, input);
+                  else inputs.current.delete(position);
+                }}
                 onPaste={pasteOnOneLine}
                 focused={position === at}
                 placeholder={field.placeholder}
                 value={values[field.key]}
-                onInput={(value: string) => set(field.key, value)}
-                onSubmit={() =>
-                  position === FIELDS.length - 1 ? void save() : setAt(position + 1)
-                }
+                onInput={(value: string) => change(field.key, () => value)}
+                onSubmit={() => (position === FIELDS.length - 1 ? void save() : move(position + 1))}
               />
             )}
           </box>
