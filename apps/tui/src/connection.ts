@@ -10,6 +10,7 @@ import path from "node:path";
 import {
   type AddedWorkspace,
   type ApprovalDetails,
+  type AttemptDecisionName,
   type CacheKey,
   type Conversation,
   cacheScope,
@@ -516,6 +517,15 @@ export class TuiGateway implements Gateway {
   }
   async decideApproval(approvalId: string, approve: boolean, reason: string) {
     return this.state.decideApproval(await this.ready(), approvalId, approve, reason);
+  }
+  async resolveAttempt(taskId: string, attemptId: string, decision: AttemptDecisionName) {
+    return this.state.resolveAttempt(
+      await this.ready(),
+      taskId,
+      attemptId,
+      decision,
+      "terminal UI",
+    );
   }
   async teams(): Promise<Team[]> {
     return this.state.teams(await this.ready());

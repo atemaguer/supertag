@@ -380,6 +380,7 @@ pub(crate) async fn inbox_page_in(
                 }),
                 approval: None,
                 notification: None,
+                uncertain_attempt: None,
             });
         }
     }
@@ -441,24 +442,17 @@ pub(crate) async fn inbox_page_in(
                     question: None,
                     approval: None,
                     notification: None,
+                    uncertain_attempt: None,
                 });
             }
         }
     }
-    if creator.is_empty() && wants(&cursor, InboxItemKind::TaskAttention) {
-        // Preserve the legacy Objective scope; personal conversation text and
-        // another operator's private Sessions never enter this projection.
-        let rows = sqlx::query("SELECT t.task_id,t.attempt_id,t.lease_expires_at_ms,t.host_principal,o.objective_id FROM supertag_v2_tasks t JOIN supertag_v2_objective_tasks link ON link.task_id=t.task_id JOIN supertag_v2_objectives o ON o.objective_id=link.objective_id WHERE t.state=$1 AND o.status NOT IN ($2,$3) AND ($4='' OR o.objective_id=$4) AND t.lease_expires_at_ms<=$5 ORDER BY t.lease_expires_at_ms,t.task_id LIMIT $6")
-            .bind(TaskState::Uncertain as i64).bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).bind(&cursor.objective_id).bind(cursor.as_of_ms).bind((SCAN + 1) as i64).fetch_all(&mut **tx).await?;
-        if rows.len() > SCAN {
+    if wants(&cursor, InboxItemKind::TaskAttention) {
+        let (uncertain, more) = uncertain_attempts_in(tx, &cursor, principal).await?;
+        if more {
             truncated.push(InboxItemKind::TaskAttention as i32);
         }
-        for row in rows.iter().take(SCAN) {
-            let task_id: String = row.try_get("task_id")?;
-            let attempt_id: Option<String> = row.try_get("attempt_id")?;
-            let key = format!("task_attention:{task_id}");
-            items.push(InboxItem { key: key.clone(), occurrence: format!("{key}:{}", attempt_id.as_deref().unwrap_or("")), kind: InboxItemKind::TaskAttention as i32, objective_id: row.try_get("objective_id")?, task_id, attempt_id, operator_eligible: true, actionable_since_ms: row.try_get("lease_expires_at_ms")?, reason: "Execution is uncertain. Confirm cleanup on the Worker Host before resolving this Attempt.".into(), question: None, approval: None, notification: None });
-        }
+        items.extend(uncertain);
     }
     if creator.is_empty() && wants(&cursor, InboxItemKind::TaskAttention) {
         let (interrupted, more) = not_redelivered_in(tx, &cursor, principal).await?;
@@ -525,6 +519,107 @@ pub(crate) async fn inbox_page_in(
     })
 }
 
+/// Uncertain Task Attempts of every Task the caller sees: a conversation turn, an Objective's or a
+/// Work Session's. Each blocks its Session's later turns until it is resolved, by a person or,
+/// when its host confirmed it stopped and it recorded no effect, by SuperTag after a short grace
+/// period; the item goes when the Attempt is resolved. A client sees only its own Tasks. The item
+/// names no prompt or reply text.
+async fn uncertain_attempts_in(
+    tx: &mut Transaction<'_, Any>,
+    cursor: &Cursor,
+    principal: &str,
+) -> Result<(Vec<InboxItem>, bool)> {
+    let rows = sqlx::query(
+        "SELECT t.*, COALESCE((SELECT MIN(link.objective_id) FROM supertag_v2_objective_tasks link
+                               WHERE link.task_id=t.task_id),'') AS inbox_objective_id
+         FROM supertag_v2_tasks t
+         WHERE t.state=$1 AND t.lease_expires_at_ms<=$2
+           AND ($3='' OR EXISTS (SELECT 1 FROM supertag_v2_objective_tasks link
+                                 WHERE link.task_id=t.task_id AND link.objective_id=$3))
+           AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks link
+                           JOIN supertag_v2_objectives o ON o.objective_id=link.objective_id
+                           WHERE link.task_id=t.task_id AND o.status IN ($4,$5))
+         ORDER BY t.lease_expires_at_ms,t.task_id LIMIT $6",
+    )
+    .bind(TaskState::Uncertain as i64)
+    .bind(cursor.as_of_ms)
+    .bind(&cursor.objective_id)
+    .bind(ObjectiveStatus::Completed as i64)
+    .bind(ObjectiveStatus::Cancelled as i64)
+    .bind((SCAN + 1) as i64)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut items = Vec::new();
+    for row in rows.iter().take(SCAN) {
+        let task = crate::store::task_row(row)?;
+        if !crate::conversations::task_access_in(tx, principal, &task.task_id).await? {
+            continue;
+        }
+        let blocked: i64 = sqlx::query_scalar(
+            "SELECT CAST(COUNT(*) AS BIGINT) FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 AND state=$3 AND accepted_order>$4",
+        )
+        .bind(&task.tag_id)
+        .bind(&task.session_id)
+        .bind(TaskState::Queued as i64)
+        .bind(row.try_get::<i64, _>("accepted_order")?)
+        .fetch_one(&mut **tx)
+        .await?;
+        let report =
+            crate::execution_report::report_in(tx, row, &task, cursor.as_of_ms, principal).await?;
+        let held = crate::store::held_for_person_in(tx, &task).await?;
+        let auto_resolve_at = crate::store::auto_resolve_at(row, held.is_some())?;
+        let held_reason = match (&auto_resolve_at, held) {
+            (Some(_), _) => String::new(),
+            (None, Some(effect)) => {
+                format!("SuperTag cannot settle it on its own because {effect}.")
+            }
+            (None, None) => "Its Worker Host has not confirmed that execution stopped.".into(),
+        };
+        let lease_expired: i64 = row
+            .try_get::<Option<i64>, _>("lease_expires_at_ms")?
+            .unwrap_or(0);
+        let key = format!("task_attention:{}", task.task_id);
+        let blocked_text = match blocked {
+            0 => String::new(),
+            1 => " One later turn of its Session waits for it.".into(),
+            count => format!(" {count} later turns of its Session wait for it."),
+        };
+        let reason = match auto_resolve_at {
+            Some(_) => format!(
+                "Execution of Task {} of Tag {} is uncertain. Its Worker Host confirmed it stopped and it recorded no effect, so SuperTag records it as failed shortly.{blocked_text}",
+                task.task_id, task.tag_id
+            ),
+            None => format!(
+                "Execution of Task {} of Tag {} is uncertain. {held_reason} Check what it did, then retry it or mark it failed.{blocked_text}",
+                task.task_id, task.tag_id
+            ),
+        };
+        items.push(InboxItem {
+            occurrence: format!("{key}:{}", task.attempt_id.as_deref().unwrap_or("")),
+            key,
+            kind: InboxItemKind::TaskAttention as i32,
+            objective_id: row.try_get("inbox_objective_id")?,
+            task_id: task.task_id.clone(),
+            attempt_id: task.attempt_id.clone(),
+            operator_eligible: true,
+            actionable_since_ms: lease_expired,
+            reason,
+            question: None,
+            approval: None,
+            notification: None,
+            uncertain_attempt: Some(InboxUncertainAttempt {
+                tag_id: task.tag_id.clone(),
+                session_id: task.session_id.clone(),
+                blocked_tasks: u32::try_from(blocked).unwrap_or(u32::MAX),
+                execution_report: Some(report),
+                auto_resolve_at_ms: auto_resolve_at.unwrap_or(0),
+                held_reason,
+            }),
+        });
+    }
+    Ok((items, rows.len() > SCAN))
+}
+
 /// Tasks whose Worker was lost and that the Control Plane did not run again (see
 /// `store::authority::not_redelivered_in`), for a week after it decided, each once. Only the
 /// Tasks the operator sees are shown.
@@ -572,6 +667,7 @@ async fn not_redelivered_in(
             question: None,
             approval: None,
             notification: None,
+            uncertain_attempt: None,
         });
     }
     Ok((items, rows.len() > SCAN))
@@ -680,7 +776,7 @@ async fn mcp_logins_in(
                 ),
                 question: None,
                 approval: None,
-                notification: None,
+                notification: None, uncertain_attempt: None,
             });
         }
     }
@@ -770,7 +866,7 @@ async fn wake_limits_in(
             ),
             question: None,
             approval: None,
-            notification: None,
+            notification: None, uncertain_attempt: None,
         });
     }
     Ok((items, rows.len() > SCAN))

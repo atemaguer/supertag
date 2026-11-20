@@ -70,6 +70,17 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- A conversation turn whose Task Attempt became uncertain no longer leaves the conversation stuck
+  with nothing to do about it. The operator inbox showed only an Objective's uncertain Task
+  Attempts; it now shows any Task's, conversation and Work Session turns included, as a
+  `task-attention` item that names the Tag and Session, how many later turns wait, and the
+  execution report's cleanup and completeness, and leaves when the Task Attempt is resolved. The
+  desktop app's and terminal UI's "Interrupted: needs attention" turn, and the terminal UI's
+  inbox, offer Retry and Mark failed once the Worker Host confirmed the turn stopped; a client may
+  decide for its own turns (retrying only one that recorded no effect). SuperTag records an
+  uncertain Task Attempt as failed on its own a minute after its lease lapsed when its host
+  confirmed it stopped and it recorded no reply, message, delivery, artifact, or other effect,
+  audited as `control-plane`, so the Session's next turn runs.
 - A Codex Tag's ordinary turns no longer start Codex's memory consolidation agent in the
   background. Codex 0.163.0 started it at every turn until the Tag's memory had been consolidated,
   whatever `generate_memories` said, and spent unreported tokens on it, about nine times the turn's

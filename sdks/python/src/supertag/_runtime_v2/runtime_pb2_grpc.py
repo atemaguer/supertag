@@ -220,7 +220,9 @@ class OperatorServicer:
         raise NotImplementedError('Method not implemented!')
 
     def ResolveAttempt(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """Records a decision for an uncertain Task Attempt. An operator decides for any Task it sees;
+        a client only for its own conversation's turn once the host confirmed execution stopped.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')

@@ -26,7 +26,9 @@ mod sqlite_files;
 pub use attempt_credentials::{AttemptAccess, AttemptCall};
 pub(crate) use authority::ClaimScope;
 pub(crate) use authority::lease_is_live;
-pub(crate) use authority::{NOT_REDELIVERED_SHOWN_MS, not_redelivered_notice};
+pub(crate) use authority::{
+    NOT_REDELIVERED_SHOWN_MS, auto_resolve_at, held_for_person_in, not_redelivered_notice,
+};
 pub use enrollments::Role;
 pub(crate) use enrollments::{client_tags_in, enrollee_name};
 pub(crate) use execution::lane_requirement;

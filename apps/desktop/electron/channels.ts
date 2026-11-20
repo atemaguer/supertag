@@ -10,6 +10,7 @@
  */
 import type {
   AddedWorkspace,
+  AttemptDecisionName,
   Conversation,
   FollowUpdate,
   GatewayActivation,
@@ -106,6 +107,11 @@ export interface Commands {
   // Schedules
   listSchedules: Call<Connected & { tagId: string }, Schedule[]>;
   changeSchedule: Call<Connected & { scheduleId: string; action: ScheduleAction }, Schedule>;
+  // Uncertain turns
+  resolveAttempt: Call<
+    Connected & { taskId: string; attemptId: string; decision: AttemptDecisionName },
+    { state: string }
+  >;
   // Task files
   locateTaskFiles: Call<Connected & { taskId: string }, TaskFilesPlace>;
   listTaskFiles: Call<Connected & { taskId: string; path: string }, TaskFileEntry[]>;
@@ -174,6 +180,7 @@ export const CHANNELS = {
   listNetworkLogs: "call",
   listSchedules: "call",
   changeSchedule: "call",
+  resolveAttempt: "call",
   locateTaskFiles: "call",
   listTaskFiles: "call",
   readTaskFile: "call",

@@ -8,6 +8,8 @@ import { Memories } from "../../../harnesses/sdk/src/rust-harness/gen/supertag/r
 import { Enrollments } from "../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/placement_pb";
 import {
   ApprovalState,
+  AttemptCleanup,
+  AttemptDecision,
   type ConversationMessage,
   Conversations,
   type FollowConversationResponse,
@@ -75,6 +77,15 @@ export interface FakeInboxItem {
     resource: string;
     summary: string;
   };
+  attemptId?: string;
+  uncertainAttempt?: {
+    tagId: string;
+    sessionId: string;
+    blockedTasks: number;
+    executionReport: { cleanup: AttemptCleanup; complete: boolean };
+    autoResolveAtMs?: bigint;
+    heldReason?: string;
+  };
 }
 
 export interface FakeWorkSession {
@@ -98,6 +109,8 @@ interface Turn {
   result?: string;
   sentAtMs: number;
   events: { sequence: number; kind: TaskEventKind; text: string }[];
+  /** An uncertain turn's Attempt, which a decision names. */
+  attemptId?: string;
 }
 
 /** Waits until a value is pushed or `signal` aborts. */
@@ -151,6 +164,16 @@ export class FakeGateway {
   inbox: FakeInboxItem[] = [];
   readonly answers: { taskId: string; text: string }[] = [];
   readonly decisions: { approvalId: string; approve: boolean; reason: string }[] = [];
+  /** Decisions about uncertain Task Attempts, in order. */
+  readonly resolutions: {
+    taskId: string;
+    attemptId: string;
+    decision: AttemptDecision;
+    evidence: string;
+    confirmedStopped: boolean;
+  }[] = [];
+  /** What the execution report of an uncertain Task says of cleanup. */
+  uncertainCleanup = AttemptCleanup.CONFIRMED;
   readonly reviews: { objectiveId: string; approved: boolean; feedback: string }[] = [];
   teams: { teamId: string; name: string; memberTagIds: string[]; maxConcurrency?: number }[] = [];
   posts: { postId: string; teamId: string; authorTagId: string; body: string; sequence: number }[] =
@@ -217,6 +240,7 @@ export class FakeGateway {
         prompt: turn.prompt,
         state: turn.state,
         ...(turn.result !== undefined ? { result: turn.result } : {}),
+        ...(turn.attemptId !== undefined ? { attemptId: turn.attemptId } : {}),
       } as never,
       order: BigInt(turn.order),
       sentAtMs: BigInt(turn.sentAtMs),
@@ -366,6 +390,15 @@ export class FakeGateway {
     this.changed(tagId, turn, [{ taskId, text: "" }]);
   }
 
+  /** The Attempt of `taskId` while its turn or inbox item is uncertain. */
+  uncertainTask(taskId: string): string | undefined {
+    for (const turns of this.turns.values()) {
+      const turn = turns.find((each) => each.taskId === taskId);
+      if (turn?.state === TaskState.UNCERTAIN) return turn.attemptId;
+    }
+    return this.inbox.find((item) => item.taskId === taskId && item.uncertainAttempt)?.attemptId;
+  }
+
   /** A `GatewayClient` over this fake. */
   client(): GatewayClient {
     const fake = this;
@@ -427,6 +460,36 @@ export class FakeGateway {
           attention: { windowDays: 7, posted: 4, read: 3, answered: 1, quiet: 2 },
           idleObjectives: [],
         }),
+        resolveAttempt: (request: {
+          taskId: string;
+          attemptId: string;
+          decision: AttemptDecision;
+          evidence: string;
+          confirmedStopped: boolean;
+        }) => {
+          fake.resolutions.push({
+            taskId: request.taskId,
+            attemptId: request.attemptId,
+            decision: request.decision,
+            evidence: request.evidence,
+            confirmedStopped: request.confirmedStopped,
+          });
+          fake.inbox = fake.inbox.filter((item) => item.taskId !== request.taskId);
+          for (const [tagId, turns] of fake.turns) {
+            const turn = turns.find((each) => each.taskId === request.taskId);
+            if (!turn) continue;
+            turn.state =
+              request.decision === AttemptDecision.RETRY ? TaskState.QUEUED : TaskState.FAILED;
+            delete turn.attemptId;
+            fake.changed(tagId, turn);
+          }
+          return {
+            taskId: request.taskId,
+            attemptId: request.attemptId,
+            decision: request.decision,
+            evidence: request.evidence,
+          };
+        },
         submitTask: (request: { tagId: string; sessionId: string; prompt: string }) => {
           const taskId = `task-${++fake.nextTask}`;
           fake.submitted.push({ ...request, taskId });
@@ -438,6 +501,14 @@ export class FakeGateway {
           };
         },
         getTask: (request: { taskId: string }) => {
+          const uncertain = fake.uncertainTask(request.taskId);
+          if (uncertain)
+            return {
+              taskId: request.taskId,
+              state: TaskState.UNCERTAIN,
+              attemptId: uncertain,
+              executionReport: { cleanup: fake.uncertainCleanup, complete: true },
+            };
           const submitted = fake.submitted.find((task) => task.taskId === request.taskId);
           if (submitted)
             return {
@@ -536,6 +607,8 @@ export class FakeGateway {
                 }
               : {}),
             ...(item.approval ? { approval: item.approval } : {}),
+            ...(item.attemptId ? { attemptId: item.attemptId } : {}),
+            ...(item.uncertainAttempt ? { uncertainAttempt: item.uncertainAttempt } : {}),
           })),
           nextCursor: "",
         }),

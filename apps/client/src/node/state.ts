@@ -20,6 +20,7 @@ import type {
   WorkstreamPost,
 } from "../model/coordination";
 import type {
+  AttemptDecisionName,
   Conversation,
   FollowUpdate,
   GatewayActivation,
@@ -659,6 +660,26 @@ export class GatewayState {
   answerQuestion(connectionId: string, taskId: string, text: string): Promise<{ taskId: string }> {
     return this.call(connectionId, (session) =>
       coordination.answerQuestion(session.client, taskId, text),
+    );
+  }
+
+  /** Decides about an uncertain turn from `app`, such as `desktop app`; see `resolveAttempt`. */
+  resolveAttempt(
+    connectionId: string,
+    taskId: string,
+    attemptId: string,
+    decision: AttemptDecisionName,
+    app: string,
+  ): Promise<{ state: string }> {
+    return this.call(connectionId, async (session) =>
+      coordination.resolveAttempt(
+        session.client,
+        taskId,
+        attemptId,
+        decision,
+        app,
+        await session.principal(),
+      ),
     );
   }
 

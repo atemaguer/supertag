@@ -1171,14 +1171,18 @@ inbox and returns prints again.
 | `question` | An Objective's latest turn called `ask` and waits on the answer |
 | `budget` | The Objective's budget pool is used up |
 | `limit` | A budget warning, budget exhaustion, deadline warning or deadline passage |
-| `task-attention` | A Task needs an operator: an uncertain Task Attempt, or for a week, a Task that was interrupted and not [redelivered](scheduling-and-recovery.md#redelivery) |
+| `task-attention` | A Task needs a person: an [uncertain Task Attempt](scheduling-and-recovery.md#uncertain-task-attempts) of any Task, a conversation turn included, or for a week, a Task that was interrupted and not [redelivered](scheduling-and-recovery.md#redelivery) |
 | `mcp-login` | A queued Task needs an MCP server whose login lapsed on every Worker Host serving it |
 | `wake-limit` | A [wake limit](#wake-limits) held a Tag's messages in the last 24 hours |
 
 - Each item carries `key`, `occurrence`, `kind`, `objective_id`, `task_id`, `reason`, and
   `operator_eligible`, which is false for an item only a Tag can act on. A `question` item
   carries the question, an `approval` item the approval's ID, requesting Tag, action, resource
-  and summary.
+  and summary. A `task-attention` item for an uncertain Task Attempt carries `uncertain_attempt`:
+  its Tag and Session, `blocked_tasks` (the Session's later turns that wait), the execution
+  report's `cleanup` and `complete`, and `auto_resolve_at_ms` when SuperTag will record it as
+  failed on its own, else `held_reason`, why a person must decide. A client sees these items for
+  its own Tasks only.
 - To answer a `question` item, use `supertag question answer TASK_ID TEXT`; pass `-` as the text to read the answer from standard
   input, which keeps it out of the process list. Decide an approval with
   `supertag approval approve APPROVAL_ID` or `supertag approval deny APPROVAL_ID --reason TEXT`.

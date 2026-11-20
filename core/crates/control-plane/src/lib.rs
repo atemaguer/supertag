@@ -551,7 +551,8 @@ impl operator_server::Operator for ControlPlane {
         &self,
         request: Request<ResolveAttemptRequest>,
     ) -> Result<Response<AttemptResolution>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        // An operator, or a client for its own Task; the store checks which.
+        let principal = self.actor(&request)?;
         let input = request.into_inner();
         self.store
             .ensure_task_access(&principal, &input.task_id)

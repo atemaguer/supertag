@@ -40,7 +40,9 @@ records the result when the call returns. A dispatch that never recorded a resul
 the provider may already have changed. The proxy refuses to send the same tool call with the same
 arguments again in that Tag's Session, so an operator must reconcile the action first. Separately,
 a Task whose Task Attempt stopped without reporting is `uncertain`, and SuperTag never retries it on its
-own; an operator decides with `supertag task resolve-attempt`. This prevents blind duplication,
+own; a person decides with `supertag task resolve-attempt`. SuperTag records one as failed itself
+only when its host confirmed it stopped and it recorded no effect (see
+[Uncertain Task Attempts](scheduling-and-recovery.md#uncertain-task-attempts)). This prevents blind duplication,
 but it is not exactly-once execution.
 
 ## Inspect an uncertain action

@@ -41,6 +41,8 @@ export interface Task {
   quiet?: boolean;
   /** The Worker Host holding the Session's last delivery, which the running turn waits for. */
   waitingForHolder?: string;
+  /** The turn's current Task Attempt, which an uncertain turn's decision names. */
+  attemptId?: string;
 }
 
 export interface Message {
@@ -176,6 +178,15 @@ export interface Gateway {
   answerQuestion?(taskId: string, text: string): Promise<{ taskId: string }>;
   /** Approves an approval request once, or denies it with a reason. */
   decideApproval?(approvalId: string, approve: boolean, reason: string): Promise<ApprovalDetails>;
+  /**
+   * Decides about an uncertain turn whose Worker Host confirmed it stopped: run it again, or
+   * record it as failed so the Session's next turn runs. The app writes the audited evidence.
+   */
+  resolveAttempt?(
+    taskId: string,
+    attemptId: string,
+    decision: AttemptDecisionName,
+  ): Promise<{ state: string }>;
   teams?(): Promise<Team[]>;
   /** A Team's newest Workstream posts, oldest first. */
   workstreamPosts?(teamId: string): Promise<WorkstreamPost[]>;
@@ -199,6 +210,9 @@ export interface Gateway {
 }
 
 export type CacheKey = "roster" | "outbox" | "drafts" | `tag:${string}`;
+
+/** A decision about an uncertain Task Attempt: run its Task again, or record it as failed. */
+export type AttemptDecisionName = "retry" | "failed";
 
 /** Why a queued turn still waits for a Worker Host; an empty reason clears an earlier one. */
 export interface TurnWait {

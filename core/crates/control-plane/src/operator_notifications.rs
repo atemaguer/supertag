@@ -244,7 +244,12 @@ async fn inbox_in(
             },
         )
         .await?;
-        items.extend(page.items);
+        // An uncertain Task Attempt SuperTag settles on its own in a minute is not worth a notice.
+        items.extend(page.items.into_iter().filter(|item| {
+            item.uncertain_attempt
+                .as_ref()
+                .is_none_or(|attempt| attempt.auto_resolve_at_ms == 0)
+        }));
         if page.next_cursor.is_empty() {
             return Ok((items, page.truncated_kinds.is_empty()));
         }

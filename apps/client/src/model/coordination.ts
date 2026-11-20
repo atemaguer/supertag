@@ -260,6 +260,36 @@ export interface InboxItem {
   actionableSinceMs: number;
   question?: { text: string; askedAtMs: number; truncated: boolean };
   approval?: { approvalId: string; tagId: string; summary: string };
+  /** For an uncertain Task Attempt: what it blocks and what its Worker Host confirmed. */
+  uncertain?: UncertainAttempt;
+}
+
+/** An uncertain Task Attempt waiting for a decision; its Session runs no later turn until then. */
+export interface UncertainAttempt {
+  tagId: string;
+  sessionId: string;
+  /** The Session's queued turns that wait for the decision. */
+  blockedTasks: number;
+  /** What the execution report says of cleanup: `confirmed` once the host saw it stop. */
+  cleanup: string;
+  /** The execution report classifies every limited dimension of the Attempt. */
+  complete: boolean;
+  /** When SuperTag records it as failed on its own; absent when a person must decide. */
+  autoResolveAtMs?: number;
+  /** Why a person must decide, such as a message it already sent. */
+  heldReason?: string;
+}
+
+/**
+ * The audited evidence an app records with its decision about an uncertain turn: where and by
+ * whom it was made, and what the execution report said.
+ */
+export function resolutionEvidence(
+  app: string,
+  principal: string,
+  report: { cleanup: string; complete: boolean },
+): string {
+  return `Resolved from the ${app} by ${principal}: cleanup ${report.cleanup}, complete ${report.complete} per execution report.`;
 }
 
 /** The mark before an inbox item: `?` a question, `!` an approval request, `·` anything else. */

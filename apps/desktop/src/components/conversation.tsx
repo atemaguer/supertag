@@ -378,6 +378,7 @@ export function ConversationPane({
                       }
                       divider={dividers.get(message.task.taskId)}
                       onActivity={viewActivity}
+                      resolveAttempt={gateway.resolveAttempt}
                     />
                   );
                 })}

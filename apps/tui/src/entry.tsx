@@ -32,10 +32,12 @@ export interface EntryProps {
   divider?: number | undefined;
   /** Under the reply that created an Objective: how it stands, once it needs a person or ended. */
   home?: string | undefined;
+  /** Under an uncertain turn: what it waits for and the keys that decide about it. */
+  decide?: string | undefined;
 }
 
 export const Entry = memo(function Entry(props: EntryProps) {
-  const { message, answers, replyLater, wait, writing, delivery, divider, home } = props;
+  const { message, answers, replyLater, wait, writing, delivery, divider, home, decide } = props;
   const own = fromOperator(message);
   const joined = own && message.liveInput?.state === "accepted";
   const turn = answers ?? (joined ? undefined : message);
@@ -88,6 +90,7 @@ export const Entry = memo(function Entry(props: EntryProps) {
           {notice && !typing && notice.tone !== "muted" ? (
             <text fg={notice.tone === "error" ? color.error : color.warning}>{notice.text}</text>
           ) : null}
+          {decide && !typing ? <text fg={color.muted}>{safe(decide)}</text> : null}
           {home ? <text fg={color.accent}>· {safe(home)}</text> : null}
         </box>
       ) : null}

@@ -511,6 +511,8 @@ type OperatorClient interface {
 	ListNativeUsage(context.Context, *connect.Request[runtimev2.ListNativeUsageRequest]) (*connect.Response[runtimev2.ListNativeUsageResponse], error)
 	ListEvents(context.Context, *connect.Request[runtimev2.ListEventsRequest]) (*connect.Response[runtimev2.ListEventsResponse], error)
 	CancelTask(context.Context, *connect.Request[runtimev2.CancelTaskRequest]) (*connect.Response[runtimev2.Task], error)
+	// Records a decision for an uncertain Task Attempt. An operator decides for any Task it sees;
+	// a client only for its own conversation's turn once the host confirmed execution stopped.
 	ResolveAttempt(context.Context, *connect.Request[runtimev2.ResolveAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error)
 	GetTag(context.Context, *connect.Request[runtimev2.GetTagRequest]) (*connect.Response[runtimev2.Tag], error)
 	RetireTag(context.Context, *connect.Request[runtimev2.RetireTagRequest]) (*connect.Response[runtimev2.RetireTagResponse], error)
@@ -781,6 +783,8 @@ type OperatorHandler interface {
 	ListNativeUsage(context.Context, *connect.Request[runtimev2.ListNativeUsageRequest]) (*connect.Response[runtimev2.ListNativeUsageResponse], error)
 	ListEvents(context.Context, *connect.Request[runtimev2.ListEventsRequest]) (*connect.Response[runtimev2.ListEventsResponse], error)
 	CancelTask(context.Context, *connect.Request[runtimev2.CancelTaskRequest]) (*connect.Response[runtimev2.Task], error)
+	// Records a decision for an uncertain Task Attempt. An operator decides for any Task it sees;
+	// a client only for its own conversation's turn once the host confirmed execution stopped.
 	ResolveAttempt(context.Context, *connect.Request[runtimev2.ResolveAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error)
 	GetTag(context.Context, *connect.Request[runtimev2.GetTagRequest]) (*connect.Response[runtimev2.Tag], error)
 	RetireTag(context.Context, *connect.Request[runtimev2.RetireTagRequest]) (*connect.Response[runtimev2.RetireTagResponse], error)

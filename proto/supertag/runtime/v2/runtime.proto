@@ -24,6 +24,8 @@ service Operator {
   rpc ListNativeUsage(ListNativeUsageRequest) returns (ListNativeUsageResponse);
   rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
   rpc CancelTask(CancelTaskRequest) returns (Task);
+  // Records a decision for an uncertain Task Attempt. An operator decides for any Task it sees;
+  // a client only for its own conversation's turn once the host confirmed execution stopped.
   rpc ResolveAttempt(ResolveAttemptRequest) returns (AttemptResolution);
   rpc GetTag(GetTagRequest) returns (Tag);
   rpc RetireTag(RetireTagRequest) returns (RetireTagResponse);
@@ -326,6 +328,25 @@ message InboxItem {
   // Whether the operator heard about this item: through this operator's notify
   // destinations or, for a budget or limit item, the Objective's notice thread.
   InboxNotification notification = 5300;
+  // For a TASK_ATTENTION item about an uncertain Task Attempt: what it blocks, what its Worker
+  // Host confirmed, and whether SuperTag settles it on its own.
+  InboxUncertainAttempt uncertain_attempt = 5400;
+}
+
+// An uncertain Task Attempt waiting for a decision. Its Session runs no later turn until then.
+message InboxUncertainAttempt {
+  string tag_id = 1;
+  string session_id = 2;
+  // The Session's queued Tasks that wait for this decision.
+  uint32 blocked_tasks = 3;
+  // The Task execution report of the Attempt, as the caller may read it.
+  TaskExecutionReport execution_report = 4;
+  // When SuperTag will record it as failed on its own: its host confirmed it stopped and it
+  // recorded no effect a person must judge. Zero when a person must decide.
+  int64 auto_resolve_at_ms = 5;
+  // Why a person must decide, such as an effect the Attempt recorded. Empty when it is settled
+  // automatically.
+  string held_reason = 6;
 }
 
 enum InboxNotificationStatus {
@@ -2649,12 +2670,17 @@ message AttemptResolution {
   string task_id = 1;
   string attempt_id = 2;
   AttemptDecision decision = 3;
-  // Empty when the Attempt's own Worker Host reclaimed it; see worker_host_id.
+  // Set when an operator decided; see worker_host_id, client_id, and automatic for the others.
   string operator_id = 4;
   string evidence = 5;
   int64 resolved_at_ms = 6;
   // Set when the Attempt's restarted Worker Host proved its execution stopped.
   string worker_host_id = 5000;
+  // Set when the person who owns the conversation decided about their own turn.
+  string client_id = 5001;
+  // The Control Plane decided on its own: the host confirmed execution stopped and the Attempt
+  // recorded no effect a person must judge.
+  bool automatic = 5002;
 }
 
 message ReclaimAttemptRequest {

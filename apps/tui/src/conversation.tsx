@@ -233,6 +233,35 @@ export function ConversationPane({
     setUnseen(0);
   }
 
+  // The first uncertain turn holds every later one: Ctrl-R runs it again, Ctrl-X records it as
+  // failed, once no undelivered message has those keys.
+  const uncertain = messages.find(
+    (message) => message.task.state === "uncertain" && message.task.attemptId,
+  );
+  const [deciding, setDeciding] = useState<
+    { taskId: string; text: string; busy: boolean } | undefined
+  >();
+  function decide(decision: "retry" | "failed") {
+    const task = uncertain?.task;
+    if (!task?.attemptId || !gateway.resolveAttempt || deciding?.busy) return;
+    const taskId = task.taskId;
+    setDeciding({
+      taskId,
+      text: decision === "retry" ? "Retrying…" : "Marking it failed…",
+      busy: true,
+    });
+    gateway.resolveAttempt(taskId, task.attemptId, decision).then(
+      () => {
+        if (!active.current) return;
+        setDeciding(undefined);
+        requestHistory();
+      },
+      (problem: unknown) => {
+        if (active.current) setDeciding({ taskId, text: describe(problem), busy: false });
+      },
+    );
+  }
+
   async function earlier() {
     if (window < messages.length) {
       setWindow((size) => size + WINDOW);
@@ -278,6 +307,16 @@ export function ConversationPane({
       const latest = undelivered[undelivered.length - 1] as (typeof undelivered)[number];
       discard(gateway, latest.operationId);
       onDraft(latest.text);
+    } else if (key.ctrl && key.name === "r" && uncertain && gateway.resolveAttempt) {
+      decide("retry");
+    } else if (
+      key.ctrl &&
+      key.name === "x" &&
+      uncertain &&
+      gateway.resolveAttempt &&
+      !draft.trim()
+    ) {
+      decide("failed");
     }
   });
 
@@ -335,6 +374,13 @@ export function ConversationPane({
               delivery={message.task.taskId === lastSent ? deliveryStatus(message) : undefined}
               divider={dividers.get(message.task.taskId)}
               home={created ? homeLine?.(created) : undefined}
+              decide={
+                message === uncertain && gateway.resolveAttempt
+                  ? deciding?.taskId === message.task.taskId
+                    ? deciding.text
+                    : "Later messages wait for a decision · Ctrl-R retry · Ctrl-X mark failed"
+                  : undefined
+              }
             />
           );
         })}

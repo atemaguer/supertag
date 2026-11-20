@@ -1,4 +1,9 @@
-import type { Gateway, Message as TagMessage, TaskEvent } from "@supertag/client/model";
+import type {
+  AttemptDecisionName,
+  Gateway,
+  Message as TagMessage,
+  TaskEvent,
+} from "@supertag/client/model";
 import { dividerLabel, fromOperator, RUNNING, turnNotice, turnView } from "@supertag/client/model";
 import { useTurnEvents } from "@supertag/client/react";
 import { Check, Copy, ListTree } from "lucide-react";
@@ -65,6 +70,7 @@ export function ConversationEntry({
   delivery,
   divider,
   onActivity,
+  resolveAttempt,
 }: {
   message: TagMessage;
   /**
@@ -86,6 +92,8 @@ export function ConversationEntry({
   divider?: number;
   activeTask?: string;
   onActivity(taskId: string, trigger: HTMLButtonElement): void;
+  /** Decides about the turn when it is uncertain: run it again, or record it as failed. */
+  resolveAttempt?: Gateway["resolveAttempt"];
 }) {
   const prompt = message.task.prompt;
   const own = fromOperator(message);
@@ -206,10 +214,78 @@ export function ConversationEntry({
                 </Button>
               </div>
             )}
+            {task.state === "uncertain" && task.attemptId && resolveAttempt && (
+              <UncertainTurn
+                taskId={task.taskId}
+                attemptId={task.attemptId}
+                resolve={resolveAttempt}
+              />
+            )}
           </Message>
         )}
       </article>
     </>
+  );
+}
+
+/**
+ * What an uncertain turn offers its owner: the Session runs no later turn until someone decides,
+ * so the turn can run again or be recorded as failed. The Gateway accepts either only once the
+ * Worker Host confirmed the turn stopped, and says so otherwise.
+ */
+export function UncertainTurn({
+  taskId,
+  attemptId,
+  resolve,
+}: {
+  taskId: string;
+  attemptId: string;
+  resolve: NonNullable<Gateway["resolveAttempt"]>;
+}) {
+  const [busy, setBusy] = useState<AttemptDecisionName | undefined>();
+  const [problem, setProblem] = useState("");
+  const decide = (decision: AttemptDecisionName) => {
+    if (busy) return;
+    setBusy(decision);
+    setProblem("");
+    resolve(taskId, attemptId, decision).then(
+      () => setBusy(undefined),
+      (error: unknown) => {
+        setBusy(undefined);
+        setProblem(typeof error === "string" ? error : "Could not record the decision.");
+      },
+    );
+  };
+  return (
+    <div className="turn-meta uncertain-turn">
+      <p className="uncertain-help">
+        SuperTag lost track of this turn, so it doesn't know whether it finished. Your next messages
+        wait until you decide.
+      </p>
+      <div className="uncertain-actions">
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy !== undefined}
+          onClick={() => decide("retry")}
+        >
+          {busy === "retry" ? "Retrying…" : "Retry"}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={busy !== undefined}
+          onClick={() => decide("failed")}
+        >
+          {busy === "failed" ? "Marking failed…" : "Mark failed"}
+        </Button>
+      </div>
+      {problem && (
+        <p className="uncertain-problem" role="alert">
+          {problem}
+        </p>
+      )}
+    </div>
   );
 }
 

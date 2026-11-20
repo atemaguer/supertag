@@ -97,6 +97,7 @@ type GatewayChannels =
   | "listNetworkLogs"
   | "listSchedules"
   | "changeSchedule"
+  | "resolveAttempt"
   | "locateTaskFiles"
   | "listTaskFiles"
   | "readTaskFile"
@@ -177,6 +178,17 @@ export function gatewayHandlers(
         text(args.scheduleId),
         text(args.action) as ScheduleAction,
       ),
+    resolveAttempt(args) {
+      const decision = text(args.decision);
+      if (decision !== "retry" && decision !== "failed") throw "Choose retry or failed.";
+      return state.resolveAttempt(
+        text(args.connectionId),
+        text(args.taskId),
+        text(args.attemptId),
+        decision,
+        "desktop app",
+      );
+    },
     locateTaskFiles: (args) => state.locateTaskFiles(text(args.connectionId), text(args.taskId)),
     listTaskFiles: (args) =>
       taskFiles.list(text(args.connectionId), text(args.taskId), text(args.path)),

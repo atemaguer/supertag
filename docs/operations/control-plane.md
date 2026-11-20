@@ -130,7 +130,7 @@ The operator inbox lists what needs a person:
 | `question` | An Objective asked you a question |
 | `budget` | An Objective's budget is used up |
 | `limit` | A budget reached 80% or its limit, or a deadline is near or passed |
-| `task-attention` | A Task Attempt is uncertain and needs `supertag task resolve-attempt`, or a Task needs you for another reason |
+| `task-attention` | A Task Attempt of any Task, a conversation turn included, is uncertain and needs `supertag task resolve-attempt`, or a Task needs you for another reason |
 | `approval` | An action that requires approval |
 | `mcp-login` | A Task is held until an MCP server is logged in on a Worker Host |
 

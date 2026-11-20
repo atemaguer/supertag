@@ -351,6 +351,18 @@ fn item_json(item: InboxItem) -> Value {
             "status": notification_status(notification.status()),
             "reason": (!notification.reason.is_empty()).then_some(notification.reason),
         })),
+        "uncertain_attempt": item.uncertain_attempt.map(|attempt| {
+            let report = attempt.execution_report.unwrap_or_default();
+            json!({
+                "tag_id": attempt.tag_id,
+                "session_id": attempt.session_id,
+                "blocked_tasks": attempt.blocked_tasks,
+                "cleanup": report.cleanup().as_str_name().trim_start_matches("ATTEMPT_CLEANUP_").to_ascii_lowercase(),
+                "complete": report.complete,
+                "auto_resolve_at_ms": (attempt.auto_resolve_at_ms > 0).then_some(attempt.auto_resolve_at_ms),
+                "held_reason": (!attempt.held_reason.is_empty()).then_some(attempt.held_reason),
+            })
+        }),
     })
 }
 

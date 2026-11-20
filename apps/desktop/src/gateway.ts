@@ -32,6 +32,8 @@ export function gatewaySession(connectionId: string, scope: string): Gateway {
     schedules: (tagId) => api.listSchedules({ connectionId, tagId }),
     changeSchedule: (scheduleId, action) =>
       api.changeSchedule({ connectionId, scheduleId, action }),
+    resolveAttempt: (taskId, attemptId, decision) =>
+      api.resolveAttempt({ connectionId, taskId, attemptId, decision }),
     readCache: (key) => api.readCache({ connectionId, key }),
     writeCache: (key, value) => api.writeCache({ connectionId, key, value }),
   };

@@ -7,6 +7,8 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   ApprovalScope,
   ApprovalState,
+  AttemptCleanup,
+  AttemptDecision,
   InboxItemKind,
   ObjectiveStatus,
   type Approval as ProtoApproval,
@@ -26,10 +28,13 @@ import type {
   NewObjective,
   Objective,
   Team,
+  UncertainAttempt,
   WorkBranch,
   WorkSession,
   WorkstreamPost,
 } from "../model/coordination";
+import { resolutionEvidence } from "../model/coordination";
+import type { AttemptDecisionName } from "../model/gateway";
 import { compact, enumName, num, optionalNum } from "./convert";
 import { rpc, rpcError, statusOf } from "./errors";
 import { Code, type GatewayClient } from "./sdk";
@@ -76,6 +81,26 @@ const KINDS: Record<number, InboxKind> = {
   [InboxItemKind.MCP_LOGIN]: "mcp_login",
 };
 
+/** What the execution report says of an Attempt's cleanup, as one word: `confirmed`. */
+function cleanupWord(value: AttemptCleanup | undefined): string {
+  return enumName(AttemptCleanup, value ?? AttemptCleanup.UNSPECIFIED);
+}
+
+function uncertainAttempt(
+  value: NonNullable<ProtoInboxItem["uncertainAttempt"]>,
+): UncertainAttempt {
+  const autoResolveAtMs = num(value.autoResolveAtMs);
+  return compact({
+    tagId: value.tagId,
+    sessionId: value.sessionId,
+    blockedTasks: value.blockedTasks,
+    cleanup: cleanupWord(value.executionReport?.cleanup),
+    complete: value.executionReport?.complete ?? false,
+    autoResolveAtMs: autoResolveAtMs > 0 ? autoResolveAtMs : undefined,
+    heldReason: value.heldReason || undefined,
+  } as UncertainAttempt);
+}
+
 export function inboxItem(item: ProtoInboxItem): InboxItem {
   const approval = item.approval;
   let summary = approval?.action ?? "";
@@ -99,6 +124,7 @@ export function inboxItem(item: ProtoInboxItem): InboxItem {
     approval: approval
       ? { approvalId: approval.approvalId, tagId: approval.tagId, summary }
       : undefined,
+    uncertain: item.uncertainAttempt ? uncertainAttempt(item.uncertainAttempt) : undefined,
   } as InboxItem);
 }
 
@@ -333,6 +359,48 @@ export async function answerQuestion(client: GatewayClient, taskId: string, text
     said,
   );
   return { taskId: task.taskId };
+}
+
+/**
+ * Decides about an uncertain Task Attempt from `app`, as `principal`, once its Worker Host
+ * confirmed it stopped: the Gateway refuses a decision without that confirmation from anyone but
+ * an operator who checked the host, so the app never claims it. The evidence names the app, the
+ * caller, and the execution report's cleanup and completeness.
+ */
+export async function resolveAttempt(
+  client: GatewayClient,
+  taskId: string,
+  attemptId: string,
+  decision: AttemptDecisionName,
+  app: string,
+  principal: string,
+): Promise<{ state: string }> {
+  const task = await rpc(() => client.operator.getTask({ taskId }, CALL));
+  if (enumName(TaskState, task.state) !== "uncertain" || task.attemptId !== attemptId)
+    throw "This turn no longer waits for a decision.";
+  const report = task.executionReport;
+  if (report?.cleanup !== AttemptCleanup.CONFIRMED)
+    throw `Its Worker Host has not confirmed this turn stopped. An operator who checked the host can resolve it: supertag task resolve-attempt ${taskId} ${attemptId} --decision ${decision} --confirmed-stopped --evidence TEXT`;
+  const evidence = resolutionEvidence(app, principal, {
+    cleanup: cleanupWord(report.cleanup),
+    complete: report.complete,
+  });
+  await rpc(
+    () =>
+      client.operator.resolveAttempt(
+        {
+          taskId,
+          attemptId,
+          operationId: operationId(),
+          decision: decision === "retry" ? AttemptDecision.RETRY : AttemptDecision.FAILED,
+          evidence,
+          confirmedStopped: false,
+        },
+        CALL,
+      ),
+    said,
+  );
+  return { state: decision === "retry" ? "queued" : "failed" };
 }
 
 /** Approves an approval request once, or denies it with a reason. */

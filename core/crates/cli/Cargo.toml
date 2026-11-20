@@ -95,6 +95,11 @@ path = "tests/worklet_kill_runtime.rs"
 required-features = ["test-fixtures"]
 
 [[test]]
+name = "uncertain_turn_runtime"
+path = "tests/uncertain_turn_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
 name = "two_gateways"
 path = "tests/two_gateways.rs"
 required-features = ["test-fixtures"]

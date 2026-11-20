@@ -438,8 +438,11 @@ or a replayed claim presents the same ones.
 
 If delivery or execution completion is uncertain, SuperTag blocks further execution in that
 Session rather than retrying the message or resuming an older session state. Uncertain execution
-blocks the Session only while it may still run: once its Worklet records that it stopped, the
-Session's next turns run, and the uncertain Task still never runs again on its own. The durable delivery
+blocks the Session until someone decides about it, from the inbox, the conversation, or
+`supertag task resolve-attempt`. When its Worklet confirmed that it stopped and it recorded no
+effect, SuperTag records it as failed on its own a minute later and the Session's next turns run;
+the uncertain Task still never runs again on its own (see
+[Uncertain Task Attempts](../reference/scheduling-and-recovery.md#uncertain-task-attempts)). The durable delivery
 record retains the exact target Task Attempt. If that Task Attempt later withdraws the input as
 unread before SuperTag queues a recovery notice, the message returns to the Session's next turn
 automatically. Do not resend it while that execution is active.

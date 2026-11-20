@@ -11,6 +11,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { HarnessMemory } from "@supertag/client/model";
 import {
+  AttemptCleanup,
+  AttemptDecision,
   HarnessKind,
   InboxItemKind,
   ObjectiveStatus,
@@ -292,6 +294,82 @@ test("an approval request is approved once with a then Enter, or denied with a r
     { approvalId: "ap-1", approve: true, reason: "" },
     { approvalId: "ap-2", approve: false, reason: "Not before the freeze ends" },
   ]);
+  await screen.close();
+});
+
+test("an interrupted turn in the inbox runs again with r", async () => {
+  const fake = new FakeGateway(TAGS);
+  fake.inbox = [
+    {
+      key: "task_attention:task-u",
+      kind: InboxItemKind.TASK_ATTENTION,
+      taskId: "task-u",
+      attemptId: "attempt-u",
+      reason: "Execution of Task task-u of Tag lead is uncertain.",
+      uncertainAttempt: {
+        tagId: "lead",
+        sessionId: "conversation/lead",
+        blockedTasks: 2,
+        executionReport: { cleanup: AttemptCleanup.CONFIRMED, complete: true },
+        heldReason: "SuperTag cannot settle it on its own because it already said something.",
+      },
+    },
+  ];
+  current = setup(fake);
+  const screen = await render(current, { width: 120, height: 40 });
+  await screen.waitFor("Waiting on you (1)");
+  await railDown(screen, 3);
+  const frame = await screen.waitFor("An interrupted turn");
+  expect(frame).toContain("lead · cleanup confirmed · report complete · 2 later turns wait");
+  expect(frame).toContain("r retry · f mark failed");
+  await screen.press("TAB");
+  await screen.press("r");
+  await screen.waitFor("It runs again; the later turns follow.");
+  expect(fake.resolutions).toEqual([
+    {
+      taskId: "task-u",
+      attemptId: "attempt-u",
+      decision: AttemptDecision.RETRY,
+      evidence:
+        "Resolved from the terminal UI by operator:local: cleanup confirmed, complete true per execution report.",
+      confirmedStopped: false,
+    },
+  ]);
+  await screen.close();
+});
+
+test("an interrupted conversation turn is marked failed with Ctrl-X", async () => {
+  const fake = new FakeGateway(TAGS);
+  const turn = fake.addTurn("lead", "Check CI", "");
+  turn.state = TaskState.UNCERTAIN;
+  delete turn.result;
+  turn.attemptId = "attempt-1";
+  current = setup(fake);
+  const screen = await render(current, { width: 120, height: 40 });
+  const frame = await screen.waitFor("Ctrl-R retry · Ctrl-X mark failed");
+  expect(frame).toContain("Interrupted: needs attention");
+  await screen.press("x", { ctrl: true });
+  await screen.waitFor("Failed");
+  expect(fake.resolutions).toMatchObject([
+    { taskId: turn.taskId, attemptId: "attempt-1", decision: AttemptDecision.FAILED },
+  ]);
+  expect(await screen.frame()).not.toContain("Ctrl-X mark failed");
+  await screen.close();
+});
+
+test("an interrupted turn its host did not confirm stopped says who can decide", async () => {
+  const fake = new FakeGateway(TAGS);
+  fake.uncertainCleanup = AttemptCleanup.UNKNOWN;
+  const turn = fake.addTurn("lead", "Check CI", "");
+  turn.state = TaskState.UNCERTAIN;
+  delete turn.result;
+  turn.attemptId = "attempt-1";
+  current = setup(fake);
+  const screen = await render(current, { width: 120, height: 40 });
+  await screen.waitFor("Ctrl-R retry · Ctrl-X mark failed");
+  await screen.press("r", { ctrl: true });
+  await screen.waitFor("has not confirmed this turn stopped");
+  expect(fake.resolutions).toEqual([]);
   await screen.close();
 });
 

@@ -127,8 +127,11 @@ resolve REPLY_ID --decision failed --evidence TEXT`, or `--decision delivered` w
 
 ## Uncertain Task Attempts
 
-A host killed mid-run may leave a Task Attempt uncertain. It appears in the inbox as
-`task-attention` and in `supertag metrics` under recovery. After checking what it did:
+A host killed mid-run may leave a Task Attempt uncertain, and its Session's later turns wait. It
+appears in the inbox as `task-attention`, conversation turns included, and in `supertag metrics`
+under recovery. The desktop app and terminal UI offer Retry and Mark failed on the turn once its
+host confirmed it stopped; SuperTag marks such a turn failed itself after a minute when it recorded
+no effect. Otherwise, after checking what it did:
 
 ```sh
 supertag task resolve-attempt TASK_ID ATTEMPT_ID --decision failed \

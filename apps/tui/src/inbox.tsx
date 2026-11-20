@@ -1,8 +1,9 @@
 /**
  * An inbox item, opened in place: type the answer to a question and press Enter, and the owner
  * reads it in the same Session; on an approval request, `a` then Enter approves it once, `d`
- * denies it with a reason. Esc cancels either. Other items say what holds them and the command
- * that shows them in full.
+ * denies it with a reason. Esc cancels either. On an uncertain Task Attempt, `r` runs its Task
+ * again and `f` records it as failed. Other items say what holds them and the command that shows
+ * them in full.
  */
 import { type ApprovalDetails, describe, type InboxItem, inboxMark } from "@supertag/client/model";
 import { useEffect, useState } from "react";
@@ -80,10 +81,27 @@ export function InboxView({
     });
   };
 
+  const uncertain = item.uncertain && item.attemptId ? item.uncertain : undefined;
+  const resolve = (decision: "retry" | "failed") => {
+    const attemptId = item.attemptId;
+    if (!attemptId || !gateway.resolveAttempt) return;
+    void act(async () => {
+      await gateway.resolveAttempt?.(item.taskId, attemptId, decision);
+      return decision === "retry"
+        ? "It runs again; the later turns follow."
+        : "Marked failed; the later turns run.";
+    });
+  };
+
   useKeyboard((key: KeyEvent) => {
     if (!focused || key.ctrl || key.meta || busy) return;
     if (key.name === "escape" && mode !== "view") {
       setMode("view");
+      return;
+    }
+    if (uncertain && !done) {
+      if (key.name === "r") resolve("retry");
+      else if (key.name === "f") resolve("failed");
       return;
     }
     if (item.kind !== "approval" || done) return;
@@ -108,7 +126,9 @@ export function InboxView({
           ? "A question"
           : item.kind === "approval"
             ? "An approval request"
-            : "Waiting on you"}
+            : uncertain
+              ? "An interrupted turn"
+              : "Waiting on you"}
         {item.objectiveId ? ` · Objective ${safe(item.objectiveId)}` : ""}
       </text>
       {asked ? (
@@ -132,6 +152,23 @@ export function InboxView({
                 <text fg={color.muted}>{safe(details.arguments)}</text>
               ) : null}
             </>
+          ) : null}
+        </box>
+      ) : null}
+      {uncertain ? (
+        <box flexDirection="column" marginTop={1}>
+          <text fg={color.muted}>
+            {safe(tagName(uncertain.tagId))} · cleanup {safe(uncertain.cleanup)}
+            {uncertain.complete ? " · report complete" : ""}
+            {uncertain.blockedTasks > 0
+              ? ` · ${uncertain.blockedTasks} later ${uncertain.blockedTasks === 1 ? "turn waits" : "turns wait"}`
+              : ""}
+          </text>
+          {uncertain.autoResolveAtMs ? (
+            <text fg={color.muted}>
+              SuperTag marks it failed on its own at{" "}
+              {new Date(uncertain.autoResolveAtMs).toLocaleTimeString()}.
+            </text>
           ) : null}
         </box>
       ) : null}
@@ -195,7 +232,9 @@ export function InboxView({
                 : mode === "deny"
                   ? "Enter denies it · Esc cancels"
                   : "a approve once · d deny"
-              : ""}
+              : uncertain && !done
+                ? "r retry · f mark failed"
+                : ""}
       </text>
     </box>
   );

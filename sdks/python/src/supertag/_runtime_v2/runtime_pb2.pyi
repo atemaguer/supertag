@@ -780,7 +780,7 @@ class ListInboxItemsResponse(_message.Message):
     def __init__(self, as_of_ms: _Optional[int] = ..., items: _Optional[_Iterable[_Union[InboxItem, _Mapping]]] = ..., next_cursor: _Optional[str] = ..., truncated_kinds: _Optional[_Iterable[_Union[InboxItemKind, str]]] = ...) -> None: ...
 
 class InboxItem(_message.Message):
-    __slots__ = ("key", "occurrence", "kind", "objective_id", "task_id", "attempt_id", "operator_eligible", "actionable_since_ms", "reason", "question", "approval", "notification")
+    __slots__ = ("key", "occurrence", "kind", "objective_id", "task_id", "attempt_id", "operator_eligible", "actionable_since_ms", "reason", "question", "approval", "notification", "uncertain_attempt")
     KEY_FIELD_NUMBER: _ClassVar[int]
     OCCURRENCE_FIELD_NUMBER: _ClassVar[int]
     KIND_FIELD_NUMBER: _ClassVar[int]
@@ -793,6 +793,7 @@ class InboxItem(_message.Message):
     QUESTION_FIELD_NUMBER: _ClassVar[int]
     APPROVAL_FIELD_NUMBER: _ClassVar[int]
     NOTIFICATION_FIELD_NUMBER: _ClassVar[int]
+    UNCERTAIN_ATTEMPT_FIELD_NUMBER: _ClassVar[int]
     key: str
     occurrence: str
     kind: InboxItemKind
@@ -805,7 +806,24 @@ class InboxItem(_message.Message):
     question: InboxQuestion
     approval: InboxApproval
     notification: InboxNotification
-    def __init__(self, key: _Optional[str] = ..., occurrence: _Optional[str] = ..., kind: _Optional[_Union[InboxItemKind, str]] = ..., objective_id: _Optional[str] = ..., task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., operator_eligible: _Optional[bool] = ..., actionable_since_ms: _Optional[int] = ..., reason: _Optional[str] = ..., question: _Optional[_Union[InboxQuestion, _Mapping]] = ..., approval: _Optional[_Union[InboxApproval, _Mapping]] = ..., notification: _Optional[_Union[InboxNotification, _Mapping]] = ...) -> None: ...
+    uncertain_attempt: InboxUncertainAttempt
+    def __init__(self, key: _Optional[str] = ..., occurrence: _Optional[str] = ..., kind: _Optional[_Union[InboxItemKind, str]] = ..., objective_id: _Optional[str] = ..., task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., operator_eligible: _Optional[bool] = ..., actionable_since_ms: _Optional[int] = ..., reason: _Optional[str] = ..., question: _Optional[_Union[InboxQuestion, _Mapping]] = ..., approval: _Optional[_Union[InboxApproval, _Mapping]] = ..., notification: _Optional[_Union[InboxNotification, _Mapping]] = ..., uncertain_attempt: _Optional[_Union[InboxUncertainAttempt, _Mapping]] = ...) -> None: ...
+
+class InboxUncertainAttempt(_message.Message):
+    __slots__ = ("tag_id", "session_id", "blocked_tasks", "execution_report", "auto_resolve_at_ms", "held_reason")
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    BLOCKED_TASKS_FIELD_NUMBER: _ClassVar[int]
+    EXECUTION_REPORT_FIELD_NUMBER: _ClassVar[int]
+    AUTO_RESOLVE_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    HELD_REASON_FIELD_NUMBER: _ClassVar[int]
+    tag_id: str
+    session_id: str
+    blocked_tasks: int
+    execution_report: TaskExecutionReport
+    auto_resolve_at_ms: int
+    held_reason: str
+    def __init__(self, tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., blocked_tasks: _Optional[int] = ..., execution_report: _Optional[_Union[TaskExecutionReport, _Mapping]] = ..., auto_resolve_at_ms: _Optional[int] = ..., held_reason: _Optional[str] = ...) -> None: ...
 
 class InboxNotification(_message.Message):
     __slots__ = ("status", "reason")
@@ -3235,7 +3253,7 @@ class ResolveAttemptRequest(_message.Message):
     def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., decision: _Optional[_Union[AttemptDecision, str]] = ..., evidence: _Optional[str] = ..., confirmed_stopped: _Optional[bool] = ...) -> None: ...
 
 class AttemptResolution(_message.Message):
-    __slots__ = ("task_id", "attempt_id", "decision", "operator_id", "evidence", "resolved_at_ms", "worker_host_id")
+    __slots__ = ("task_id", "attempt_id", "decision", "operator_id", "evidence", "resolved_at_ms", "worker_host_id", "client_id", "automatic")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     DECISION_FIELD_NUMBER: _ClassVar[int]
@@ -3243,6 +3261,8 @@ class AttemptResolution(_message.Message):
     EVIDENCE_FIELD_NUMBER: _ClassVar[int]
     RESOLVED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     WORKER_HOST_ID_FIELD_NUMBER: _ClassVar[int]
+    CLIENT_ID_FIELD_NUMBER: _ClassVar[int]
+    AUTOMATIC_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     attempt_id: str
     decision: AttemptDecision
@@ -3250,7 +3270,9 @@ class AttemptResolution(_message.Message):
     evidence: str
     resolved_at_ms: int
     worker_host_id: str
-    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., decision: _Optional[_Union[AttemptDecision, str]] = ..., operator_id: _Optional[str] = ..., evidence: _Optional[str] = ..., resolved_at_ms: _Optional[int] = ..., worker_host_id: _Optional[str] = ...) -> None: ...
+    client_id: str
+    automatic: bool
+    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., decision: _Optional[_Union[AttemptDecision, str]] = ..., operator_id: _Optional[str] = ..., evidence: _Optional[str] = ..., resolved_at_ms: _Optional[int] = ..., worker_host_id: _Optional[str] = ..., client_id: _Optional[str] = ..., automatic: _Optional[bool] = ...) -> None: ...
 
 class ReclaimAttemptRequest(_message.Message):
     __slots__ = ("attempt", "evidence")

@@ -176,8 +176,12 @@ See [Redelivery](../reference/scheduling-and-recovery.md#redelivery) for the rul
 A Worklet that was killed or lost its execution lease while running a **Task Attempt**, one
 execution of a Task, may not know whether the work finished. It shows in the inbox as
 `task-attention`, in `supertag metrics` under recovery, and in `supertag ps`. The Worklet's log
-names it, and one of the host's slots stays taken until you decide, so later messages to Tags on
-that host may wait. Check what the Task Attempt did, then record a decision:
+names it, and one of the host's slots stays taken until you decide. The Task's Session runs no
+later turn until then, so a person's next messages to that Tag wait. In the desktop app and the
+terminal UI the turn says **Interrupted: needs attention** with **Retry** and **Mark failed**,
+which work once the host confirmed the turn stopped. When it also recorded no reply, message, or
+other effect, SuperTag marks it failed on its own a minute after its lease lapsed. Otherwise check
+what the Task Attempt did, then record a decision:
 
 ```sh
 supertag task resolve-attempt TASK_ID ATTEMPT_ID --decision failed \

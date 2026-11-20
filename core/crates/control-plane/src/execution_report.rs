@@ -11,7 +11,7 @@
 //! not reached once the Attempt ends). Rust usage carries no completeness flag: usage is final
 //! when the host itself finished the Attempt, since usage reports are accepted only while it
 //! runs. An operator's audited `resolve-attempt --confirmed-stopped` counts as confirmed cleanup.
-use sqlx::{Any, Pool, Row, any::AnyRow};
+use sqlx::{AnyConnection, Row, any::AnyRow};
 use supertag_protocol::{
     redaction::redact_text,
     v2::{
@@ -46,11 +46,15 @@ impl Store {
             .fetch_optional(&self.pool)
             .await?
             .ok_or_else(|| StoreError::NotFound("Task was not found".into()))?;
-        let mut report = report_for(&self.pool, &row, task, self.execution_now_ms()).await?;
-        if !principal.starts_with("operator:") {
-            report.failure_detail.clear();
-        }
-        Ok(report)
+        let mut connection = self.pool.acquire().await?;
+        report_in(
+            &mut connection,
+            &row,
+            task,
+            self.execution_now_ms(),
+            principal,
+        )
+        .await
     }
 
     /// Records why the host could not confirm the current Attempt's cleanup. The host redacts
@@ -146,9 +150,25 @@ struct Observed {
     host_finished: bool,
 }
 
+/// The report for a Task row as `principal` may read it: the host's failure detail can name
+/// paths and native output, so only an operator reads it.
+pub(crate) async fn report_in(
+    connection: &mut AnyConnection,
+    row: &AnyRow,
+    task: &Task,
+    now: i64,
+    principal: &str,
+) -> Result<TaskExecutionReport> {
+    let mut report = report_for(connection, row, task, now).await?;
+    if !principal.starts_with("operator:") {
+        report.failure_detail.clear();
+    }
+    Ok(report)
+}
+
 /// The report for a Task row read by `GetTask`.
 async fn report_for(
-    pool: &Pool<Any>,
+    connection: &mut AnyConnection,
     row: &AnyRow,
     task: &Task,
     now: i64,
@@ -197,18 +217,18 @@ async fn report_for(
         "SELECT operator_principal FROM supertag_v2_attempt_resolutions WHERE attempt_id=$1",
     )
     .bind(attempt_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *connection)
     .await?;
     let observed = Observed {
         tokens: sqlx::query("SELECT * FROM supertag_v2_native_usage WHERE attempt_id=$1 ORDER BY sequence DESC LIMIT 1")
             .bind(attempt_id)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *connection)
             .await?
             .map(|row| usage_row(&row).and_then(|usage| effective_total(&usage)))
             .transpose()?,
         cost: sqlx::query("SELECT amount_minor, currency FROM supertag_v2_attempt_usage WHERE attempt_id=$1")
             .bind(attempt_id)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *connection)
             .await?
             .map(|row| -> Result<_> {
                 Ok(row

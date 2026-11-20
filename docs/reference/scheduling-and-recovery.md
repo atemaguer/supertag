@@ -120,9 +120,10 @@ whether the work finished or changed anything outside SuperTag:
   finished is not interrupted: a new Worker resumes capturing what it produced, and the Worklet
   finishes it.
 - Otherwise, and always for a Task Attempt that used a remote sandbox or shared execution, the
-  Task Attempt is **uncertain**. It appears in the operator inbox as `task-attention` and in
-  `supertag metrics` under recovery. An uncertain Task Attempt is never redelivered; an operator
-  decides.
+  Task Attempt is **uncertain**. It appears in the operator inbox as `task-attention`, whatever
+  started it: a conversation turn, an Objective's turn, or a Work Session's. It also appears in
+  `supertag metrics` under recovery. An uncertain Task Attempt is never redelivered; a person
+  decides, or SuperTag records it as failed when it can [settle it alone](#settled-automatically).
 
 ### Redelivery
 
@@ -171,7 +172,12 @@ notifications carry it too, with `supertag task events TASK_ID` to see what the 
 
 ### Uncertain Task Attempts
 
-An uncertain Task Attempt waits for an operator. Check what it did, then record a decision:
+An uncertain Task Attempt waits for a decision. Its `task-attention` inbox item names the Task,
+the Task Attempt, its Tag and Session, how many of the Session's later turns wait behind it, and
+what the Task execution report says: whether its Worker Host confirmed cleanup, and whether the
+report is complete. The item leaves the inbox once the Task Attempt is resolved.
+
+Check what it did, then record a decision:
 
 ```sh
 supertag task resolve-attempt TASK_ID ATTEMPT_ID --decision failed \
@@ -180,6 +186,42 @@ supertag task resolve-attempt TASK_ID ATTEMPT_ID --decision failed \
 ```
 
 `--decision retry` runs the Task again. The decision and its evidence are audited.
+
+#### From the conversation
+
+In the desktop app and the terminal UI, a conversation turn that is uncertain says
+**Interrupted: needs attention** and offers **Retry** and **Mark failed**. The terminal UI's inbox
+offers the same two decisions on the item. The app records the decision with evidence naming
+itself, the person, and the execution report, for example `Resolved from the desktop app by
+operator:local: cleanup confirmed, complete true per execution report.` It never claims that
+execution stopped: the decision is accepted only once the Worker Host confirmed it, and otherwise
+the app says that an operator who checked the host must use `supertag task resolve-attempt`.
+
+An operator may decide for any Task it sees. A client, a person enrolled with a client Auth Key,
+may decide only for its own Task, such as its own conversation's turn, and only after the Worker
+Host confirmed the Task Attempt stopped, so two executions of the Session cannot overlap. A client
+may mark such a turn failed, and run it again only when SuperTag recorded no effect for it (see
+below); otherwise only an operator may run it again.
+
+#### Settled automatically
+
+SuperTag records an uncertain Task Attempt as failed on its own, 60 seconds after its lease lapsed,
+when both hold:
+
+1. Its Worker Host confirmed that execution stopped and reported no cleanup failure. The host's
+   late report that the Task Attempt ended counts, as does the removal of an ephemeral host.
+2. SuperTag recorded no effect for the Task that a person must judge: no reply, no message the Tag
+   wrote to the person, and no post to a conversation or collaboration surface; no external write,
+   MCP call, or approved action; no delivery of the Session's changes, Volume write, or published
+   artifact; no message to another Tag or a Team; and no Work Session, Schedule, question, commit
+   review, or note it started.
+
+The decision is recorded and audited as `control-plane`, and the Task's result says that the
+outcome is unknown and that anything the Task Attempt changed outside SuperTag, such as files or
+commands, is not undone. Failing runs nothing again, so it cannot repeat an effect, and the
+Session's next turn runs. Every other uncertain Task Attempt, including one whose host never
+confirmed it stopped, waits for a person. Until then its inbox item says why, or when SuperTag will
+settle it.
 
 #### The Session waits while execution may run
 

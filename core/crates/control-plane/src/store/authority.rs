@@ -29,6 +29,13 @@ const ALREADY_SAID_MESSAGES: i64 = 20;
 const ALREADY_SAID_BYTES: usize = 32 * 1024;
 /// How long the operator Inbox shows a Task that was not redelivered.
 pub(crate) const NOT_REDELIVERED_SHOWN_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+/// How long after an uncertain Task Attempt's lease lapsed SuperTag waits before it records one
+/// as failed on its own (see [`settle_stopped_uncertain_in`]).
+pub(crate) const AUTO_RESOLVE_GRACE_MS: i64 = 60_000;
+/// Who an automatic decision is recorded as, in the decision and in the audit log.
+pub(crate) const AUTOMATIC_PRINCIPAL: &str = "control-plane";
+/// The result of a Task whose uncertain Attempt SuperTag recorded as failed on its own.
+const AUTO_FAILED_RESULT: &str = "Execution was interrupted before SuperTag heard how it ended, so the outcome is unknown. Its Worker Host confirmed it stopped, and it had sent no reply or message, delivered no changes, and published nothing, so SuperTag recorded it as failed and let the Session's next turn run. Anything it changed outside SuperTag, such as files or commands, is not undone. Send the request again to run it.";
 
 /// The result a reclaimed Attempt's Task records when it is not redelivered and has none, as
 /// TypeScript's `InterruptedExecutionOutcomeUnknown` failure says, with why it was not retried.
@@ -54,7 +61,9 @@ impl Store {
     pub async fn sweep_expired_attempts(&self) -> Result<u64> {
         let _wake = self.hint_after_commit();
         let (mut transaction, _) = self.write().await?;
-        let changed = expire_due_attempts(&mut transaction, self.execution_now_ms()).await?;
+        let now = self.execution_now_ms();
+        let changed = expire_due_attempts(&mut transaction, now).await?
+            + settle_stopped_uncertain_in(&mut transaction, now).await?;
         if changed > 0 {
             transaction.commit().await?;
         } else {
@@ -120,10 +129,17 @@ impl Store {
     ) -> Result<AttemptResolution> {
         let _wake = self.hint_after_commit();
         name("principal", principal)?;
-        let operator_id = principal
-            .strip_prefix("operator:")
-            .ok_or(StoreError::PermissionDenied)?;
-        name("operator ID", operator_id)?;
+        // An operator decides for any Task it sees. A client decides only for a Task it owns, its
+        // own conversation's turn, once the host confirmed execution stopped (checked below).
+        let client = principal.strip_prefix("client:");
+        let operator_id = principal.strip_prefix("operator:");
+        let caller_id = operator_id.or(client).ok_or(StoreError::PermissionDenied)?;
+        name("caller ID", caller_id)?;
+        if client.is_some() && input.confirmed_stopped {
+            return Err(StoreError::FailedPrecondition(
+                "only an operator can confirm that execution stopped".into(),
+            ));
+        }
         name("Task ID", &input.task_id)?;
         name("Task Attempt ID", &input.attempt_id)?;
         name("operation ID", &input.operation_id)?;
@@ -168,6 +184,7 @@ impl Store {
                     Some(host) => format!(
                         "Worker Host {host} reclaimed this Task Attempt after it proved the Attempt's processes stopped"
                     ),
+                    None if principal == AUTOMATIC_PRINCIPAL => "SuperTag already recorded this Task Attempt as failed: its host confirmed it stopped and it recorded no effect".into(),
                     None => "Task Attempt already has a recovery decision".into(),
                 },
             ));
@@ -206,6 +223,29 @@ impl Store {
                 "execution cleanup must be confirmed before recovery".into(),
             ));
         }
+        if client.is_some() {
+            // Only the owner, and only once its host confirmed execution stopped, so two
+            // executions of the Session cannot overlap. Running it again could repeat what it
+            // did, so a client retries only an Attempt that recorded no effect.
+            let owner =
+                crate::conversations::task_owner_in(&mut transaction, &input.task_id).await?;
+            if owner.as_deref() != Some(principal) {
+                return Err(StoreError::PermissionDenied);
+            }
+            if !host_confirmed_stop(&row)? {
+                return Err(StoreError::FailedPrecondition(
+                    "the Worker Host has not confirmed this Task Attempt stopped; ask an operator"
+                        .into(),
+                ));
+            }
+            if decision == AttemptDecision::Retry
+                && let Some(effect) = held_for_person_in(&mut transaction, &task).await?
+            {
+                return Err(StoreError::FailedPrecondition(format!(
+                    "only an operator can run this Task again, because {effect}"
+                )));
+            }
+        }
 
         sqlx::query("INSERT INTO supertag_v2_attempt_resolutions (attempt_id, task_id, operator_principal, operation_id, decision, evidence, confirmed_stopped, resolved_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)")
             .bind(&input.attempt_id).bind(&input.task_id).bind(principal).bind(&input.operation_id)
@@ -229,10 +269,11 @@ impl Store {
             task_id: input.task_id.clone(),
             attempt_id: input.attempt_id.clone(),
             decision: input.decision,
-            operator_id: operator_id.into(),
+            operator_id: operator_id.unwrap_or_default().into(),
             evidence: input.evidence.clone(),
             resolved_at_ms: now,
-            worker_host_id: String::new(),
+            client_id: client.unwrap_or_default().into(),
+            ..Default::default()
         })
     }
 
@@ -362,6 +403,7 @@ impl Store {
             evidence: input.evidence.clone(),
             resolved_at_ms: now,
             worker_host_id: host.id().into(),
+            ..Default::default()
         })
     }
 
@@ -947,6 +989,202 @@ pub(crate) async fn redelivery_in(
     }))
 }
 
+/// The first effect SuperTag recorded for `task` that a person must judge before its uncertain
+/// Attempt is settled, in plain words, or `None` when it recorded none. Any Attempt of the Task
+/// counts, so this is conservative: a reply, a message it already said, or a post to the person
+/// or a collaboration surface; an external write or an MCP call; an approved action; a delivery,
+/// a Volume write, or a published artifact; a message to another Tag or a Team; or a
+/// Work Session, Schedule, question, commit review, or note it started. Commands and files a
+/// harness touched outside SuperTag leave no record; a failed decision never runs them again.
+pub(crate) async fn held_for_person_in(
+    transaction: &mut Transaction<'_, Any>,
+    task: &Task,
+) -> Result<Option<String>> {
+    if task.result.is_some() {
+        return Ok(Some("its reply was already sent".into()));
+    }
+    // Kind 1 is `TaskEventKind::Message`, a message the Tag wrote to the person.
+    const EFFECTS: &[(&str, &str)] = &[
+        (
+            "SELECT 1 FROM supertag_v2_task_events WHERE task_id=$1 AND kind=1",
+            "it already said something to the person",
+        ),
+        (
+            "SELECT 1 FROM supertag_v2_proactive_posts WHERE task_id=$1",
+            "it already posted to the conversation",
+        ),
+        (
+            "SELECT 1 FROM supertag_v2_replies WHERE task_id=$1",
+            "its reply to a collaboration surface was queued",
+        ),
+        (
+            "SELECT 1 FROM supertag_v2_reply_progress WHERE task_id=$1 AND revision>1",
+            "it posted progress to a collaboration surface",
+        ),
+        (
+            "SELECT 1 FROM supertag_v2_effect_receipts WHERE task_id=$1",
+            "it made an external write",
+        ),
+        (
+            "SELECT 1 FROM supertag_v2_mcp_effects WHERE task_id=$1",
+            "it called an MCP tool that needed approval",
+        ),
+        (
+            "SELECT 1 FROM supertag_v2_approval_operations WHERE granted=1 AND attempt_id IN (SELECT attempt_id FROM supertag_v2_claims WHERE task_id=$1)",
+            "it ran an action that needed approval",
+        ),
+        (
+            "SELECT 1 FROM supertag_v2_workspace_deliveries WHERE task_id=$1",
+            "it started delivering the Session's changes",
+        ),
+        (
+            "SELECT 1 FROM supertag_v2_workspace_landings WHERE task_id=$1",
+            "it started delivering the Session's changes",
+        ),
+        (
+            "SELECT 1 FROM supertag_v2_workspace_mount_writes WHERE task_id=$1",
+            "it wrote to a Volume",
+        ),
+        (
+            "SELECT 1 FROM supertag_v2_artifact_captures WHERE task_id=$1",
+            "it published an artifact",
+        ),
+        (
+            "SELECT 1 FROM supertag_v2_messages WHERE source_task_id=$1",
+            "it sent a message to another Tag, a Team, or the person",
+        ),
+        (
+            "SELECT 1 FROM supertag_v2_work_session_starts WHERE starter_task_id=$1",
+            "it started a Work Session",
+        ),
+        (
+            "SELECT 1 FROM supertag_v2_schedules WHERE origin_task_id=$1",
+            "it created a Schedule",
+        ),
+        (
+            "SELECT 1 FROM supertag_v2_objective_questions WHERE task_id=$1",
+            "it asked a question",
+        ),
+        (
+            "SELECT 1 FROM supertag_v2_work_session_questions WHERE task_id=$1",
+            "it asked a question",
+        ),
+        (
+            "SELECT 1 FROM supertag_v2_commit_reviews WHERE source_task_id=$1",
+            "it requested a commit review",
+        ),
+        (
+            "SELECT 1 FROM supertag_v2_tag_memories WHERE source_task_id=$1",
+            "it kept a note",
+        ),
+    ];
+    for (sql, reason) in EFFECTS {
+        let found: Option<i64> =
+            sqlx::query_scalar(&format!("SELECT CAST(1 AS BIGINT) WHERE EXISTS ({sql})"))
+                .bind(&task.task_id)
+                .fetch_optional(&mut **transaction)
+                .await?;
+        if found.is_some() {
+            return Ok(Some((*reason).into()));
+        }
+    }
+    Ok(None)
+}
+
+/// Whether the host of the uncertain Attempt in `row` confirmed its execution stopped (a Finish
+/// after its lease lapsed, or the removal of an ephemeral host) and reported no cleanup failure.
+pub(crate) fn host_confirmed_stop(row: &AnyRow) -> Result<bool> {
+    Ok(
+        row.try_get::<i64, _>("state")? == TaskState::Uncertain as i64
+            && row.try_get::<i64, _>("cleanup_observed")? == 1
+            && row
+                .try_get::<Option<String>, _>("cleanup_failure")?
+                .is_none(),
+    )
+}
+
+/// When SuperTag records the uncertain Attempt in `row` as failed on its own, or `None` when a
+/// person must decide: its host confirmed it stopped, and `held`, whether the Task recorded an
+/// effect (see [`held_for_person_in`]), is false.
+pub(crate) fn auto_resolve_at(row: &AnyRow, held: bool) -> Result<Option<i64>> {
+    if held || !host_confirmed_stop(row)? {
+        return Ok(None);
+    }
+    Ok(Some(
+        row.try_get::<Option<i64>, _>("lease_expires_at_ms")?
+            .unwrap_or(0)
+            .saturating_add(AUTO_RESOLVE_GRACE_MS),
+    ))
+}
+
+/// Records as failed each uncertain Task Attempt whose host confirmed it stopped, once
+/// [`AUTO_RESOLVE_GRACE_MS`] passed since its lease lapsed, when the Task recorded nothing a
+/// person must judge (see [`held_for_person_in`]). The decision is recorded and audited as
+/// [`AUTOMATIC_PRINCIPAL`], the Task's result says why, and the Session's next turn may run.
+/// Every other uncertain Attempt waits for a person. Failing runs nothing again, so it cannot
+/// repeat an effect.
+pub(super) async fn settle_stopped_uncertain_in(
+    transaction: &mut Transaction<'_, Any>,
+    now: i64,
+) -> Result<u64> {
+    let rows = sqlx::query("SELECT * FROM supertag_v2_tasks WHERE state=$1 AND cleanup_observed=1 AND cleanup_failure IS NULL AND attempt_id IS NOT NULL AND lease_expires_at_ms<=$2 ORDER BY lease_expires_at_ms,task_id LIMIT 100")
+        .bind(TaskState::Uncertain as i64)
+        .bind(now.saturating_sub(AUTO_RESOLVE_GRACE_MS))
+        .fetch_all(&mut **transaction)
+        .await?;
+    let mut settled = 0;
+    for row in rows {
+        let task = task_row(&row)?;
+        let Some(attempt_id) = task.attempt_id.clone() else {
+            continue;
+        };
+        let held = held_for_person_in(transaction, &task).await?.is_some();
+        if auto_resolve_at(&row, held)?.is_none_or(|at| at > now) {
+            continue;
+        }
+        let decided: Option<i64> = sqlx::query_scalar(
+            "SELECT CAST(1 AS BIGINT) FROM supertag_v2_attempt_resolutions WHERE attempt_id=$1",
+        )
+        .bind(&attempt_id)
+        .fetch_optional(&mut **transaction)
+        .await?;
+        if decided.is_some() {
+            continue;
+        }
+        let evidence = format!(
+            "Recorded as failed by SuperTag {} s after the lease lapsed: the Worker Host confirmed execution stopped, and the Task recorded no reply, message, delivery, artifact, or other effect.",
+            AUTO_RESOLVE_GRACE_MS / 1000
+        );
+        sqlx::query("INSERT INTO supertag_v2_attempt_resolutions (attempt_id, task_id, operator_principal, operation_id, decision, evidence, confirmed_stopped, resolved_at_ms) VALUES ($1,$2,$3,$4,$5,$6,1,$7)")
+            .bind(&attempt_id).bind(&task.task_id).bind(AUTOMATIC_PRINCIPAL).bind(&attempt_id)
+            .bind(AttemptDecision::Failed as i64).bind(&evidence).bind(now)
+            .execute(&mut **transaction).await?;
+        sqlx::query("UPDATE supertag_v2_tasks SET state=$1, result=COALESCE(result,$2), cleanup_pending=0, cleanup_observed=1 WHERE task_id=$3 AND state=$4")
+            .bind(TaskState::Failed as i64).bind(AUTO_FAILED_RESULT).bind(&task.task_id).bind(TaskState::Uncertain as i64)
+            .execute(&mut **transaction).await?;
+        crate::audit::insert_in(
+            transaction,
+            None,
+            now,
+            crate::operator_access::AuditRecord {
+                actor: AUTOMATIC_PRINCIPAL.into(),
+                action: "attempt.resolve".into(),
+                target: format!("Task/{}", task.task_id),
+                succeeded: true,
+                code: "OK".into(),
+                method: "automatic".into(),
+            },
+            "Task",
+        )
+        .await?;
+        settled += 1;
+    }
+    if settled > 0 {
+        crate::objectives::objective_sweep_in(transaction, now).await?;
+    }
+    Ok(settled)
+}
+
 /// The operator Inbox's reason for a Task that was not redelivered.
 pub(crate) fn not_redelivered_notice(task_id: &str, tag_id: &str, reason: &str) -> String {
     format!(
@@ -963,23 +1201,26 @@ pub(crate) fn system_now_ms() -> i64 {
 
 fn resolution_row(row: &AnyRow) -> Result<AttemptResolution> {
     let principal: String = row.try_get("operator_principal")?;
-    let (operator_id, worker_host_id) = match (
-        principal.strip_prefix("operator:"),
-        principal.strip_prefix("host:"),
-    ) {
-        (Some(operator), _) => (operator, ""),
-        (None, Some(host)) => ("", host),
-        (None, None) => return Err(StoreError::PermissionDenied),
-    };
-    Ok(AttemptResolution {
+    let mut resolution = AttemptResolution {
         task_id: row.try_get("task_id")?,
         attempt_id: row.try_get("attempt_id")?,
         decision: row.try_get::<i64, _>("decision")? as i32,
-        operator_id: operator_id.into(),
         evidence: row.try_get("evidence")?,
         resolved_at_ms: row.try_get("resolved_at_ms")?,
-        worker_host_id: worker_host_id.into(),
-    })
+        ..Default::default()
+    };
+    if let Some(operator) = principal.strip_prefix("operator:") {
+        resolution.operator_id = operator.into();
+    } else if let Some(host) = principal.strip_prefix("host:") {
+        resolution.worker_host_id = host.into();
+    } else if let Some(client) = principal.strip_prefix("client:") {
+        resolution.client_id = client.into();
+    } else if principal == AUTOMATIC_PRINCIPAL {
+        resolution.automatic = true;
+    } else {
+        return Err(StoreError::PermissionDenied);
+    }
+    Ok(resolution)
 }
 
 #[cfg(test)]
