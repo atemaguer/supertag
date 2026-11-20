@@ -5,6 +5,7 @@ import {
   deliveryStatus,
   dividerLabel,
   lastOperatorMessage,
+  rowSummary,
   timeDividers,
 } from "./transcript";
 
@@ -88,4 +89,29 @@ it("treats a Schedule's turn as the Tag's: no delivery, never the operator's las
       message("c", { state: "queued", prompt: "Hidden" }, { scheduleId: "sch_1" }),
     ]),
   ).toEqual({ working: true });
+});
+
+it("carries a row's working, unread, and unanswered question from the Gateway's listing", () => {
+  const conversation = {
+    tagId: "wren",
+    conversationId: "c1",
+    preview: "Close #812, or keep both open?",
+    previewFromTag: true,
+    lastActivityAtMs: 5,
+    latestOrder: 2,
+    readOrder: 1,
+    unreadCount: 1,
+    working: false,
+  };
+  expect(rowSummary({ ...conversation, asking: true })).toEqual({
+    preview: "Close #812, or keep both open?",
+    lastActivityMs: 5,
+    unread: true,
+    asking: true,
+  });
+  expect(rowSummary({ ...conversation, unreadCount: 0, working: true })).toEqual({
+    preview: "Close #812, or keep both open?",
+    lastActivityMs: 5,
+    working: true,
+  });
 });

@@ -44,6 +44,13 @@ const tags: Tag[] = [
     revision: 1,
     harnessKind: "codex",
   },
+  {
+    tagId: "wren",
+    instructions: "Triage new issues and label them.",
+    allowedActions: ["Read repositories"],
+    revision: 1,
+    harnessKind: "claude_code",
+  },
 ];
 
 let order = 0;
@@ -87,7 +94,22 @@ const messages = new Map<string, Message[]>([
     "moss",
     [sample("moss-1", "Review the deadline fix for missing coverage.", undefined, 1, "moss")],
   ],
+  [
+    "wren",
+    [
+      sample(
+        "wren-1",
+        "Triage this morning’s new issues.",
+        "I labelled nine. #812 reads like a duplicate of #790: should I close it, or keep both open?",
+        12,
+        "wren",
+      ),
+    ],
+  ],
 ]);
+
+/** Conversations whose latest message is the Tag's question, still unanswered. */
+const asking = new Set(["wren"]);
 
 function conversationFor(tagId: string): Message[] {
   let entries = messages.get(tagId);
@@ -232,9 +254,10 @@ export const previewGateway: Gateway = {
           previewFromTag: reply !== undefined,
           lastActivityAtMs: latest.task.createdAtMs ?? 0,
           latestOrder: latest.order,
-          readOrder: latest.order,
-          unreadCount: 0,
+          readOrder: asking.has(tagId) ? latest.order - 1 : latest.order,
+          unreadCount: asking.has(tagId) ? 1 : 0,
           working: latest.task.state === "running",
+          ...(asking.has(tagId) ? { asking: true } : {}),
         },
       ];
     });
@@ -287,8 +310,8 @@ export const previewGateway: Gateway = {
 };
 
 function previewEvents(taskId: string): TaskEvent[] {
-  // Moss has not written anything yet, so it shows as typing.
-  if (taskId.startsWith("moss")) return [];
+  // Moss has not written anything yet, so it shows as typing; wren only asked its question.
+  if (taskId.startsWith("moss") || taskId.startsWith("wren")) return [];
   return [
     {
       sequence: 1,

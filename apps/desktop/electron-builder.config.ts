@@ -19,6 +19,15 @@ const config: Configuration = {
   copyright: "Copyright © SuperTag contributors",
   directories: { output: "release", buildResources: "build" },
   files: ["dist/**/*", "dist-electron/*.js", "dist-electron/*.cjs", "package.json"],
+  // The renderer bundles Geist and Bricolage Grotesque, under the SIL Open Font License 1.1, which
+  // travels with the fonts: Resources/licenses/ of the app (NOTICE names them).
+  extraResources: [
+    { from: "node_modules/@fontsource-variable/geist/LICENSE", to: "licenses/geist/OFL.txt" },
+    {
+      from: "node_modules/@fontsource-variable/bricolage-grotesque/LICENSE",
+      to: "licenses/bricolage-grotesque/OFL.txt",
+    },
+  ],
   asar: true,
   // There are no native modules to rebuild for Electron's Node.
   npmRebuild: false,

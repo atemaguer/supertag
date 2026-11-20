@@ -113,6 +113,59 @@ export function layers(appearance: TagAppearance): string[] | undefined {
   return urls;
 }
 
+/**
+ * Where each head shape's art sits on the 512 × 512 canvas, in percent `[left, top, right,
+ * bottom]`: the head, and the headwear that reaches past it. Measured from the layers' opaque
+ * pixels. Glasses sit inside the head, so they never widen a crop.
+ */
+const BOUNDS: Record<string, Record<"head" | "hat" | "headphones", readonly number[]>> = {
+  pear: {
+    head: [23.2, 20.3, 76.6, 85.9],
+    hat: [27.5, 8.6, 72.3, 38.3],
+    headphones: [18.2, 17, 81.6, 68.6],
+  },
+  bean: {
+    head: [15.4, 34.2, 84.4, 78.3],
+    hat: [23.4, 17, 76.4, 44.9],
+    headphones: [12.1, 30.5, 87.9, 72.9],
+  },
+};
+/** The room around the art inside the crop, as a share of its larger side. */
+const CROP_ROOM = 0.08;
+
+/**
+ * Where a round portrait crops its canvas, so every head fills its circle alike whatever its
+ * shape: a square around the head and whatever it wears, centred on them. Returned as the
+ * canvas's size and offset inside the frame, in percent of the frame.
+ */
+export function portraitCrop(appearance: TagAppearance): {
+  size: number;
+  left: number;
+  top: number;
+} {
+  const bounds = BOUNDS[appearance.head];
+  if (!bounds) return { size: 108, left: -4, top: -4 };
+  const worn = [
+    bounds.head,
+    ...(appearance.hat ? [bounds.hat] : []),
+    ...(appearance.headphones ? [bounds.headphones] : []),
+  ];
+  const [left, top, right, bottom] = [
+    Math.min(...worn.map((box) => box[0] ?? 0)),
+    Math.min(...worn.map((box) => box[1] ?? 0)),
+    Math.max(...worn.map((box) => box[2] ?? 100)),
+    Math.max(...worn.map((box) => box[3] ?? 100)),
+  ];
+  const side = Math.min(100, Math.max(right - left, bottom - top) * (1 + CROP_ROOM));
+  const scale = 100 / side;
+  const round = (value: number) => Math.round(value * 10) / 10;
+  return {
+    size: round(100 * scale),
+    left: round(-((left + right) / 2 - side / 2) * scale),
+    top: round(-((top + bottom) / 2 - side / 2) * scale),
+  };
+}
+
 /** Pairs of accessories the catalog says can't be worn together, as `[kind, id]` pairs. */
 const INCOMPATIBLE: readonly [Accessory, string, Accessory, string][] = catalog.incompatible.map(
   ({ hat, headphones }) => ["hat", hat, "headphones", headphones],

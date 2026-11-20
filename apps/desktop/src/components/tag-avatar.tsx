@@ -1,11 +1,12 @@
 import type { Tag, TagAppearance } from "@supertag/client/model";
-import { useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import {
   appearanceKey,
   defaultAppearance,
   describeAppearance,
   drawable,
   layers,
+  portraitCrop,
 } from "../avatars/felt";
 
 /**
@@ -103,6 +104,14 @@ export function Portrait({
   const urls = layersOf(key, appearance);
   const image = useComposed(key, urls);
   const known = urls !== undefined;
+  // Each head shape is cropped to fill the circle alike.
+  const crop = portraitCrop(appearance);
+  const placed: CSSProperties = {
+    left: `${crop.left}%`,
+    top: `${crop.top}%`,
+    width: `${crop.size}%`,
+    height: `${crop.size}%`,
+  };
   return (
     <span
       className={`avatar portrait${className ? ` ${className}` : ""}`}
@@ -113,10 +122,17 @@ export function Portrait({
       {!known ? (
         <span className="portrait-fallback">{fallback.slice(0, 1).toUpperCase()}</span>
       ) : image ? (
-        <img className="portrait-layer" src={image} alt="" draggable={false} />
+        <img className="portrait-layer" src={image} alt="" draggable={false} style={placed} />
       ) : (
         urls.map((url) => (
-          <img key={url} className="portrait-layer" src={url} alt="" draggable={false} />
+          <img
+            key={url}
+            className="portrait-layer"
+            src={url}
+            alt=""
+            draggable={false}
+            style={placed}
+          />
         ))
       )}
     </span>

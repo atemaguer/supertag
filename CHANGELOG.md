@@ -36,6 +36,15 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- The desktop app sets Tag names and headings (the sidebar, the name at the top of a
+  conversation, Tag details, Task activity, dialogs, and the empty conversation) in Bricolage
+  Grotesque; messages, the composer, and code keep Geist. Times show in tabular figures.
+- The desktop sidebar's Tag list names each Tag's state beside it: **Working** while one of its
+  Tasks is queued or running, and **Needs you** while its latest message is a question you have
+  not answered. Screen readers hear the state with the name ("moss, Working"), and the collapsed
+  rail keeps a dot. The open Tag's row is a soft fill instead of a bordered card, rows sit on an
+  even 4px rhythm with the unread dot under the time, and each portrait is cropped to its head
+  shape so every Tag fills its circle alike.
 - In the terminal UI, `/` on an empty message no longer opens the palette (Ctrl-K does), so a
   message can start with `/`: a path such as `/usr/bin`, or a `/` later in a message, is sent as
   text.

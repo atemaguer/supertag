@@ -15,6 +15,8 @@ export interface TagSummary {
   unread?: boolean;
   /** Whether the Tag is working on a Task in this conversation. */
   working?: boolean;
+  /** Whether the conversation's latest message is the Tag's question, still unanswered. */
+  asking?: boolean;
 }
 
 /** Tasks a Worker Host has not finished: the Tag is still working on them. */
@@ -201,5 +203,6 @@ export function rowSummary(conversation: Conversation): TagSummary {
     ...(conversation.lastActivityAtMs ? { lastActivityMs: conversation.lastActivityAtMs } : {}),
     ...(conversation.unreadCount > 0 ? { unread: true } : {}),
     ...(conversation.working ? { working: true } : {}),
+    ...(conversation.asking ? { asking: true } : {}),
   };
 }

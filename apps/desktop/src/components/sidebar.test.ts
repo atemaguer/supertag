@@ -215,16 +215,49 @@ it("shows a row's preview, time, unread, and working state when it has them", ()
       moss: { working: true, lastActivityMs: now },
     },
   });
-  // The newest activity first, below the lead.
-  expect(rows()).toEqual(["moss", "finch"]);
+  // The newest activity first, below the lead; a state is announced with the name.
+  expect(rows()).toEqual(["moss, Working", "finch"]);
   const [moss, finch] = [...host.querySelectorAll(".tag-row")] as HTMLElement[];
   expect(finch?.dataset.status).toBe("unread");
   expect(finch?.querySelector(".tag-row-preview")?.textContent).toBe("The lockfile is current.");
   expect(finch?.querySelector(".tag-row-time")?.textContent).toBeTruthy();
   expect(finch?.querySelector(".tag-row-unread")).not.toBeNull();
+  expect(finch?.getAttribute("aria-description")).toBe("Unread messages");
   expect(moss?.dataset.status).toBe("working");
-  expect(moss?.querySelector(".working-dots")).not.toBeNull();
-  expect(moss?.getAttribute("aria-description")).toBe("Working");
+  expect(moss?.querySelector(".tag-state")?.textContent).toBe("Working");
+  expect(moss?.querySelector(".tag-state")?.getAttribute("aria-hidden")).toBe("true");
+});
+
+it("says a Tag needs you while its question is unanswered, before that it is working", () => {
+  render({
+    summaries: {
+      finch: { asking: true, working: true, unread: true, preview: "Close #812?" },
+      moss: { unread: true, preview: "Done." },
+    },
+  });
+  const [finch, moss] = [...host.querySelectorAll(".tag-row")] as HTMLElement[];
+  expect(finch?.getAttribute("aria-label")).toBe("finch, Needs you");
+  expect(finch?.dataset.status).toBe("asking");
+  expect(finch?.querySelector(".tag-state")?.textContent).toBe("Needs you");
+  expect(finch?.querySelector(".tag-row-unread")).not.toBeNull();
+  // Unread replies alone are not a question: no state word, only the dot.
+  expect(moss?.getAttribute("aria-label")).toBe("moss");
+  expect(moss?.querySelector(".tag-state")).toBeNull();
+  expect(moss?.querySelector(".tag-row-unread")).not.toBeNull();
+});
+
+it("names the lead Tag's state with it, and keeps a dot for each state on the rail", () => {
+  render({ summaries: { lead: { working: true }, moss: { asking: true } } });
+  const lead = host.querySelector(".lead-tag") as HTMLElement;
+  expect(lead.getAttribute("aria-label")).toBe("Lead, lead Tag, Working");
+  expect(lead.querySelector(".tag-state")?.textContent).toBe("Working");
+  act(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", ctrlKey: true }));
+  });
+  const moss = host.querySelector('.tag-row[aria-label="moss, Needs you"]') as HTMLElement;
+  expect(moss.querySelector(".tag-row-badge")).not.toBeNull();
+  expect(moss.querySelector(".tag-state")).toBeNull();
+  expect(moss.getAttribute("title")).toBe("moss: Needs you");
 });
 
 it("has no search field of its own: the search button beside New Tag opens the palette", () => {
@@ -305,11 +338,11 @@ it("opens Tags with Ctrl+1…9 and Ctrl+↑/↓, and New Tag with Ctrl+N", () =>
   });
 });
 
-it("shows a working Tag's row as typing dots, never a line of its activity", () => {
+it("shows a working Tag's row by its state word, never a line of its activity", () => {
   render({ summaries: { moss: { working: true, preview: "You: Run the tests" } } });
   const moss = [...host.querySelectorAll(".tag-row")].find(
-    (row) => row.getAttribute("aria-label") === "moss",
+    (row) => row.getAttribute("aria-label") === "moss, Working",
   ) as HTMLElement;
-  expect(moss.querySelector(".working-dots")).not.toBeNull();
+  expect(moss.querySelector(".tag-state")?.textContent).toBe("Working");
   expect(moss.textContent).not.toMatch(/Run/);
 });

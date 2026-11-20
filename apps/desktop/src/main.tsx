@@ -1,3 +1,4 @@
+import "@fontsource-variable/bricolage-grotesque/standard.css";
 import "@fontsource-variable/geist";
 import {
   cacheScope,

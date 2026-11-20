@@ -7,8 +7,10 @@ import {
   defaultAppearance,
   describeAppearance,
   drawable,
+  HEADS,
   layers,
   PRESETS,
+  portraitCrop,
   randomAppearance,
   withHead,
 } from "./felt";
@@ -23,6 +25,29 @@ const patch: TagAppearance = {
   glasses: "round-charcoal",
   headphones: null,
 };
+
+it("crops each head shape to fill its circle, widening for what it wears", () => {
+  const plain = { ...patch, hat: null, glasses: null };
+  // Every head the catalog offers has a crop of its own, closer than the whole canvas.
+  for (const head of HEADS) expect(portraitCrop({ ...plain, head }).size).toBeGreaterThan(108);
+  const pear = portraitCrop(plain);
+  const bean = portraitCrop({ ...plain, head: "bean" });
+  expect(pear).not.toEqual(bean);
+  // The canvas always covers the frame.
+  for (const crop of [pear, bean]) {
+    expect(crop.left).toBeLessThan(0);
+    expect(crop.left + crop.size).toBeGreaterThan(100);
+  }
+  // A hat reaches above the head, so the crop takes in more of the canvas and sits lower.
+  const hatted = portraitCrop(patch);
+  expect(hatted.size).toBeLessThan(pear.size);
+  expect(hatted.top).toBeGreaterThan(pear.top);
+  expect(portraitCrop({ ...plain, head: "bean", headphones: "navy-over-ear" }).size).toBeLessThan(
+    bean.size,
+  );
+  // A head this app doesn't know keeps the whole canvas.
+  expect(portraitCrop({ ...plain, head: "cube" })).toEqual({ size: 108, left: -4, top: -4 });
+});
 
 it("draws a recipe's layers back to front, each a bundled asset", () => {
   const urls = layers(patch) ?? [];

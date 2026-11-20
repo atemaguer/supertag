@@ -4,6 +4,8 @@
   color-scheme: dark;
   background: #19191c;
   font-synthesis: none;
+  /* Tag names and headings; Geist stays for messages, the composer, and controls. */
+  --display: "Bricolage Grotesque Variable", "Geist Variable", -apple-system, sans-serif;
   --background: #19191c;
   --rail: #202023;
   --panel: #252528;
@@ -167,6 +169,7 @@ button:disabled {
   width: 61px;
   height: 61px;
 }
+/* Where the layer sits is its head shape's crop (avatars/felt.ts), set on the image. */
 .portrait-layer {
   position: absolute;
   inset: -4%;
@@ -276,10 +279,10 @@ button:disabled {
   background: transparent;
   color: var(--text);
 }
+/* The open Tag's row is a soft fill, without a border. */
 .lead-tag[aria-current="true"],
 .tag-row[aria-current="true"] {
   background: var(--selected);
-  border-color: #494045;
 }
 .lead-avatar {
   position: relative;
@@ -307,8 +310,8 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 15px;
-  font-weight: 650;
+  font-size: 16px;
+  line-height: 20px;
 }
 .sidebar-mascot {
   width: 40px;
@@ -329,20 +332,21 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 2px 10px 12px;
+  padding: 4px 8px 12px;
   scrollbar-width: none;
 }
+/* A row on the 4px grid: 8px around a 40px portrait, 12px to the text. */
 .tag-row {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 11px;
+  gap: 12px;
   width: 100%;
   height: auto;
   min-height: 56px;
-  padding: 7px 9px;
+  padding: 8px;
   border: 1px solid transparent;
-  border-radius: 14px;
+  border-radius: 12px;
   background: transparent;
   color: var(--text);
   text-align: left;
@@ -359,14 +363,38 @@ button:disabled {
   display: grid;
   flex: 1;
   min-width: 0;
-  gap: 2px;
+}
+/* The name, and beside it the state in a word: Working, or Needs you. */
+.tag-row-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
 }
 .tag-row-name {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: 15px;
+  line-height: 20px;
+}
+.tag-state {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.tag-state[data-state="asking"] {
+  color: var(--accent);
   font-weight: 650;
+}
+/* Under the lead Tag's name, closer to it than the name is to its portrait. */
+.lead-tag .tag-state {
+  margin-top: -4px;
 }
 .tag-row-preview {
   overflow: hidden;
@@ -375,22 +403,31 @@ button:disabled {
   color: var(--muted);
   font-size: 12px;
   font-weight: 450;
+  line-height: 16px;
 }
 .tag-row[data-status="unread"] .tag-row-preview {
   color: var(--text);
   font-weight: 600;
 }
+/* The time on the name's line, the unread dot under it. */
+.tag-row-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  align-self: stretch;
+  gap: 4px;
+  padding-top: 2px;
+}
 .tag-row-time {
-  align-self: flex-start;
-  margin-top: 4px;
   color: var(--muted);
   font-size: 11px;
+  line-height: 16px;
   white-space: nowrap;
 }
 .tag-row-unread,
 .tag-row-badge {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   flex-shrink: 0;
   border-radius: 50%;
   background: var(--accent);
@@ -709,8 +746,7 @@ button:disabled {
 }
 .tag-name {
   flex-shrink: 0;
-  font-size: 13px;
-  font-weight: 650;
+  font-size: 14px;
 }
 .harness {
   position: absolute;
@@ -804,6 +840,33 @@ button:disabled {
   font-size: 11px;
   font-weight: 700;
 }
+/* Bricolage Grotesque, a little narrowed, for Tag names and headings. Small names use its
+   neutral optical size; the larger headings set their own. */
+.lead-name,
+.tag-row-name,
+.tag-name,
+.empty h2,
+.activity h2,
+[data-slot="dialog-title"] {
+  font-family: var(--display);
+  font-stretch: 92%;
+  font-weight: 600;
+}
+.lead-name,
+.tag-row-name,
+.tag-name,
+.activity h2 {
+  font-variation-settings: "opsz" 14;
+}
+/* Times and counts keep their width as they change. */
+.tag-row-time,
+.time-divider,
+.delivery,
+.unseen-count,
+.tag-activity,
+.details-footer {
+  font-variant-numeric: tabular-nums;
+}
 /* A centred, muted time where a conversation resumes after a pause. */
 .time-divider {
   align-self: center;
@@ -827,10 +890,10 @@ button:disabled {
   border-radius: 50%;
 }
 .empty h2 {
-  margin: 17px 0 0;
-  font-size: clamp(23px, 3.4vw, 32px);
-  letter-spacing: -0.06em;
-  font-weight: 650;
+  margin: 16px 0 0;
+  font-size: clamp(24px, 3.4vw, 32px);
+  font-variation-settings: "opsz" 32;
+  letter-spacing: -0.02em;
 }
 .empty p {
   margin: 9px 0 0;
@@ -1290,8 +1353,8 @@ button:disabled {
 }
 .activity h2 {
   margin: 0;
-  font-size: 13px;
-  font-weight: 650;
+  font-size: 15px;
+  line-height: 20px;
 }
 .activity-status,
 .activity ol {
@@ -1512,7 +1575,8 @@ button.identity-pill[aria-expanded="true"] {
 [data-slot="dialog-title"] {
   margin: 0;
   font-size: 20px;
-  letter-spacing: -0.045em;
+  font-variation-settings: "opsz" 24;
+  letter-spacing: -0.015em;
 }
 [data-slot="dialog-description"] {
   font-size: 13px;

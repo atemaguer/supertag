@@ -201,7 +201,9 @@ export function Sidebar({
           <Button
             variant="ghost"
             className="lead-tag"
-            aria-label={`${tagName(lead)}, lead Tag`}
+            aria-label={[tagName(lead), "lead Tag", stateWord(summaries[lead.tagId])]
+              .filter(Boolean)
+              .join(", ")}
             title={tagName(lead)}
             aria-current={tag?.tagId === lead.tagId}
             onClick={() => onSelectTag?.(lead.tagId)}
@@ -213,6 +215,7 @@ export function Sidebar({
               </span>
             </span>
             {expanded && <span className="lead-name">{tagName(lead)}</span>}
+            {expanded && <TagState summary={summaries[lead.tagId]} />}
           </Button>
         ) : (
           <img className="sidebar-mascot drag-region" src={mascot} alt="SuperTag" />
@@ -259,16 +262,16 @@ function TagRow({
   onSelect(): void;
 }) {
   const name = tagName(tag);
-  const status = summary?.working ? "working" : summary?.unread ? "unread" : undefined;
+  const status = tagStatus(summary);
+  const state = stateWord(summary);
   return (
     <Button
       variant="ghost"
       className="tag-row"
-      aria-label={name}
-      aria-description={
-        summary?.working ? "Working" : summary?.unread ? "Unread messages" : undefined
-      }
-      title={expanded ? undefined : name}
+      // The state is part of the name, so it is announced with it: "moss, Working".
+      aria-label={state ? `${name}, ${state}` : name}
+      aria-description={summary?.unread ? "Unread messages" : undefined}
+      title={expanded ? undefined : state ? `${name}: ${state}` : name}
       aria-current={current}
       data-status={status}
       onClick={onSelect}
@@ -279,23 +282,53 @@ function TagRow({
       </span>
       {expanded && (
         <span className="tag-row-text">
-          <span className="tag-row-name">{name}</span>
-          {summary?.working ? (
-            <span className="tag-row-preview working-dots" aria-hidden>
-              <span />
-              <span />
-              <span />
-            </span>
-          ) : (
-            summary?.preview && <span className="tag-row-preview">{summary.preview}</span>
+          <span className="tag-row-title">
+            <span className="tag-row-name">{name}</span>
+            <TagState summary={summary} />
+          </span>
+          {/* A working Tag's row says so in its state word, never with a line of its activity. */}
+          {!summary?.working && summary?.preview && (
+            <span className="tag-row-preview">{summary.preview}</span>
           )}
         </span>
       )}
-      {expanded && summary?.lastActivityMs !== undefined && (
-        <span className="tag-row-time">{relativeTime(summary.lastActivityMs)}</span>
+      {/* The time, with the unread dot under it, so the name and its state keep the width. */}
+      {expanded && (summary?.lastActivityMs !== undefined || summary?.unread) && (
+        <span className="tag-row-meta">
+          {summary?.lastActivityMs !== undefined && (
+            <span className="tag-row-time">{relativeTime(summary.lastActivityMs)}</span>
+          )}
+          {summary?.unread && <span className="tag-row-unread" aria-hidden />}
+        </span>
       )}
-      {expanded && summary?.unread && <span className="tag-row-unread" aria-hidden />}
     </Button>
+  );
+}
+
+/**
+ * A row's state, from what the Gateway lists for its conversation: an unanswered question
+ * first, because it waits on the person, then a queued or running Task, then unread replies.
+ */
+export function tagStatus(summary?: TagSummary): "asking" | "working" | "unread" | undefined {
+  if (summary?.asking) return "asking";
+  if (summary?.working) return "working";
+  return summary?.unread ? "unread" : undefined;
+}
+
+/** The word beside a Tag's name for its state, when the state has one. */
+export function stateWord(summary?: TagSummary): string | undefined {
+  const status = tagStatus(summary);
+  return status === "asking" ? "Needs you" : status === "working" ? "Working" : undefined;
+}
+
+/** The state word beside the name. It is hidden from assistive technology: the name says it. */
+function TagState({ summary }: { summary?: TagSummary }) {
+  const state = stateWord(summary);
+  if (!state) return null;
+  return (
+    <span className="tag-state" data-state={tagStatus(summary)} aria-hidden>
+      {state}
+    </span>
   );
 }
 

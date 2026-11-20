@@ -18,3 +18,27 @@ it("keeps the side pane under the top strip out of the window's drag region", ()
   // and Tag details close buttons, under the top strip, move the window instead.
   expect(css).toMatch(/\.activity-frame \{\n\s+-webkit-app-region: no-drag;/);
 });
+
+it("sets Tag names and headings in the display face, and leaves messages and code to Geist", () => {
+  const rule = /\n((?:[^{}\n]+,\n)*[^{}\n]+) \{\n\s+font-family: var\(--display\);/u.exec(css);
+  const selectors = (rule?.[1] ?? "").split(",\n").map((selector) => selector.trim());
+  expect(selectors).toEqual([
+    ".lead-name",
+    ".tag-row-name",
+    ".tag-name",
+    ".empty h2",
+    ".activity h2",
+    '[data-slot="dialog-title"]',
+  ]);
+  // Only that rule names the display face.
+  expect(css.match(/var\(--display\)/gu)).toHaveLength(1);
+});
+
+it("marks the open Tag's row with a fill alone, without a border", () => {
+  const rule =
+    /\n\.lead-tag\[aria-current="true"\],\n\.tag-row\[aria-current="true"\] \{([^}]*)\}/u.exec(
+      css,
+    )?.[1];
+  expect(rule).toContain("background: var(--selected);");
+  expect(rule).not.toContain("border");
+});
