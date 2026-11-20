@@ -129,7 +129,7 @@ pub(crate) async fn settle_in(
             .filter(|delivery| delivery.committed)
     {
         prompt.push_str(&format!(
-            "\n\nSuperTag verified this Work Session's Workspace commit {}. You can request review of this commit from a Tag by supplying it to send_message.",
+            "\n\nSuperTag verified this Work Session's Workspace commit {}. To have another Tag review it, ask this Tag with ask_tag and name the commit: its inbox Session requests the review.",
             delivery.head_commit,
         ));
     }

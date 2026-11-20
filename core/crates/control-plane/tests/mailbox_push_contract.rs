@@ -129,6 +129,7 @@ async fn contract(url: &str) {
                     recipient_tag_id: "reviewer".into(),
                     text: "Blocked until the parser is reviewed".into(),
                     review: None,
+                    recipient_objective_id: String::new(),
                 },
             )
             .await

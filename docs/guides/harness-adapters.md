@@ -78,7 +78,11 @@ read the Tag's other Sessions and Objectives or create an Objective a person ask
 The run's capabilities say which of these the Task may use. When the Task reads the Tag's
 Sessions, its capabilities also carry `tag_portfolio`, the Tag's open Objectives, which an adapter
 adds to the turn's context. With `may_start_work_session`, `open_work_sessions` and `max_work_sessions` say how many work
-Sessions the Tag has open of its limit; show them in the `start_session` description. When it may schedule, `may_schedule` is set and `time_zone` names the
+Sessions the Tag has open of its limit; show them in the `start_session` description. An
+Objective's turn has `may_ask_tag` instead of `may_send_tag_message`, `may_read_mailbox`, and
+`may_use_workstream`: offer an `ask_tag` tool that calls `HarnessMailbox.AskTag`. An inbox turn's
+`send_message` may name `recipient_objective_id` instead of a Tag to answer one of its Tag's
+Objectives. When it may schedule, `may_schedule` is set and `time_zone` names the
 zone a time without an offset is read in. When no person waits on the turn, `may_stay_quiet` is
 set: offer a `stay_quiet` tool, and when the agent calls it, `Complete` with `quiet` set so nothing
 is posted ([quiet results](../reference/coordination.md#quiet-results)). The messages are defined in

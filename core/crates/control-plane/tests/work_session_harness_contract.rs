@@ -78,7 +78,6 @@ fn start(operation: &str, harness: &str) -> StartWorkSessionRequest {
         title: "Review on another harness".into(),
         instruction: "Read the fixture".into(),
         harness: Some(harness.into()),
-        ..Default::default()
     }
 }
 

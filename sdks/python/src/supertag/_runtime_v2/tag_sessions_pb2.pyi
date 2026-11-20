@@ -177,9 +177,8 @@ class ReadTagObjectiveRequest(_message.Message):
     def __init__(self, objective_id: _Optional[str] = ...) -> None: ...
 
 class TagObjectiveView(_message.Message):
-    __slots__ = ("objective", "team", "pool", "deadline", "notices", "sessions", "total_sessions", "as_of_ms")
+    __slots__ = ("objective", "pool", "deadline", "notices", "sessions", "total_sessions", "as_of_ms")
     OBJECTIVE_FIELD_NUMBER: _ClassVar[int]
-    TEAM_FIELD_NUMBER: _ClassVar[int]
     POOL_FIELD_NUMBER: _ClassVar[int]
     DEADLINE_FIELD_NUMBER: _ClassVar[int]
     NOTICES_FIELD_NUMBER: _ClassVar[int]
@@ -187,11 +186,10 @@ class TagObjectiveView(_message.Message):
     TOTAL_SESSIONS_FIELD_NUMBER: _ClassVar[int]
     AS_OF_MS_FIELD_NUMBER: _ClassVar[int]
     objective: _runtime_pb2.Objective
-    team: _objective_overview_pb2.ObjectiveOverviewTeam
     pool: _objective_overview_pb2.ObjectiveBudgetPool
     deadline: _objective_overview_pb2.ObjectiveDeadlineView
     notices: _containers.RepeatedCompositeFieldContainer[_objective_overview_pb2.ObjectiveLimitNotice]
     sessions: _containers.RepeatedCompositeFieldContainer[_objective_overview_pb2.ObjectiveSessionView]
     total_sessions: int
     as_of_ms: int
-    def __init__(self, objective: _Optional[_Union[_runtime_pb2.Objective, _Mapping]] = ..., team: _Optional[_Union[_objective_overview_pb2.ObjectiveOverviewTeam, _Mapping]] = ..., pool: _Optional[_Union[_objective_overview_pb2.ObjectiveBudgetPool, _Mapping]] = ..., deadline: _Optional[_Union[_objective_overview_pb2.ObjectiveDeadlineView, _Mapping]] = ..., notices: _Optional[_Iterable[_Union[_objective_overview_pb2.ObjectiveLimitNotice, _Mapping]]] = ..., sessions: _Optional[_Iterable[_Union[_objective_overview_pb2.ObjectiveSessionView, _Mapping]]] = ..., total_sessions: _Optional[int] = ..., as_of_ms: _Optional[int] = ...) -> None: ...
+    def __init__(self, objective: _Optional[_Union[_runtime_pb2.Objective, _Mapping]] = ..., pool: _Optional[_Union[_objective_overview_pb2.ObjectiveBudgetPool, _Mapping]] = ..., deadline: _Optional[_Union[_objective_overview_pb2.ObjectiveDeadlineView, _Mapping]] = ..., notices: _Optional[_Iterable[_Union[_objective_overview_pb2.ObjectiveLimitNotice, _Mapping]]] = ..., sessions: _Optional[_Iterable[_Union[_objective_overview_pb2.ObjectiveSessionView, _Mapping]]] = ..., total_sessions: _Optional[int] = ..., as_of_ms: _Optional[int] = ...) -> None: ...

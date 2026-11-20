@@ -519,11 +519,6 @@ impl Client {
                             "deadline": objective.deadline_ms.map(rfc3339),
                             "pausedAt": objective.paused_at_ms.map(rfc3339),
                             "completionSummary": objective.completion_summary,
-                            "team": view.team.map(|team| json!({
-                                "name": team.name,
-                                "members": team.member_tag_ids,
-                                "maxConcurrency": team.max_concurrency,
-                            })),
                             "budget": view.pool.map(|pool| json!({
                                 "currency": pool.currency,
                                 "limitMinor": pool.limit_minor,

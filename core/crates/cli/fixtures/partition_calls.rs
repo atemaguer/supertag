@@ -11,26 +11,21 @@ use anyhow::{Context, Result, ensure};
 use supertag_protocol::{
     authenticated_request,
     v2::{
-        AdapterBootstrap, HarnessAskQuestionRequest, HarnessPostWorkstreamRequest,
-        HarnessReadMailboxRequest, HarnessReadWorkstreamRequest, HarnessSendTagMessageRequest,
+        AdapterBootstrap, HarnessAskQuestionRequest, HarnessAskTagRequest,
         HarnessSettleLiveInputRequest, HarnessStartWorkSessionRequest, HarnessUsageRequest,
         LiveInputReceipt, LiveInputState, NativeTokenUsage, Task, harness_client::HarnessClient,
         harness_mailbox_client::HarnessMailboxClient,
         harness_questions_client::HarnessQuestionsClient,
         harness_work_sessions_client::HarnessWorkSessionsClient,
-        harness_workstreams_client::HarnessWorkstreamsClient,
     },
 };
 use tokio::time::{Instant, sleep};
 use tonic::transport::Channel;
 
 /// The steps, in order. `take` is not partitioned: a take is never repeated.
-pub const STEPS: [&str; 9] = [
+pub const STEPS: [&str; 6] = [
     "usage",
-    "mailbox-read",
-    "mailbox-send",
-    "workstream-read",
-    "workstream-post",
+    "ask-tag",
     "question",
     "work-session-start",
     "take",
@@ -69,7 +64,6 @@ pub async fn step(base: &Path, name: &str) -> Result<()> {
 
 pub async fn exercise(
     base: &Path,
-    peer: &str,
     bootstrap: &AdapterBootstrap,
     task: &Task,
     harness: &mut HarnessClient<Channel>,
@@ -77,7 +71,6 @@ pub async fn exercise(
     let token = bootstrap.token.as_str();
     let endpoint = bootstrap.endpoint.clone();
     let mut mailbox = HarnessMailboxClient::connect(endpoint.clone()).await?;
-    let mut workstreams = HarnessWorkstreamsClient::connect(endpoint.clone()).await?;
     let mut questions = HarnessQuestionsClient::connect(endpoint.clone()).await?;
     let mut work = HarnessWorkSessionsClient::connect(endpoint).await?;
 
@@ -103,69 +96,21 @@ pub async fn exercise(
         .await
         .context("usage report through a Gateway partition")?;
 
-    step(base, "mailbox-read").await?;
-    mailbox
-        .read(authenticated_request(
-            HarnessReadMailboxRequest {
-                limit: 10,
-                cursor: String::new(),
+    // An Objective's turn asks its own Tag's inbox Session; it reaches no other Tag.
+    step(base, "ask-tag").await?;
+    let asked = mailbox
+        .ask_tag(authenticated_request(
+            HarnessAskTagRequest {
+                operation_id: "partition-ask-tag".into(),
+                text: "Asked through a partition".into(),
             },
             token,
             None,
         )?)
         .await
-        .context("Mailbox read through a Gateway partition")?;
-
-    step(base, "mailbox-send").await?;
-    let sent = mailbox
-        .send_message(authenticated_request(
-            HarnessSendTagMessageRequest {
-                kind: 0,
-                operation_id: "partition-message".into(),
-                recipient_tag_id: peer.into(),
-                text: "Sent through a partition".into(),
-                review: None,
-            },
-            token,
-            None,
-        )?)
-        .await
-        .context("Mailbox send through a Gateway partition")?
+        .context("ask_tag through a Gateway partition")?
         .into_inner();
-    ensure!(
-        sent.message.is_some() && sent.approval.is_none(),
-        "Mailbox send returned no message"
-    );
-
-    step(base, "workstream-read").await?;
-    workstreams
-        .read(authenticated_request(
-            HarnessReadWorkstreamRequest {
-                after_sequence: None,
-                limit: 10,
-                cursor: String::new(),
-            },
-            token,
-            None,
-        )?)
-        .await
-        .context("Workstream read through a Gateway partition")?;
-
-    step(base, "workstream-post").await?;
-    let posted = workstreams
-        .post(authenticated_request(
-            HarnessPostWorkstreamRequest {
-                operation_id: "partition-post".into(),
-                body: "Posted through a partition".into(),
-                to_tag_ids: vec![],
-            },
-            token,
-            None,
-        )?)
-        .await
-        .context("Workstream post through a Gateway partition")?
-        .into_inner();
-    ensure!(posted.post.is_some(), "Workstream post wrote no post");
+    ensure!(!asked.message_id.is_empty(), "ask_tag stored no message");
 
     step(base, "question").await?;
     let asked = questions
@@ -189,7 +134,6 @@ pub async fn exercise(
                 operation_id: "partition-work".into(),
                 title: "Partitioned start".into(),
                 instruction: "Started through a partition".into(),
-                target_tag_id: Some(peer.into()),
                 harness: None,
             },
             token,
@@ -199,7 +143,7 @@ pub async fn exercise(
         .context("Work Session start through a Gateway partition")?
         .into_inner();
     ensure!(
-        started.starter_task_id == task.task_id && started.tag_id == peer,
+        started.starter_task_id == task.task_id && started.tag_id == task.tag_id,
         "Work Session provenance differs"
     );
 

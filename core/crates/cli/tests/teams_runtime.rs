@@ -720,17 +720,17 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
         &operator_token,
     )
     .await?;
-    let objective = cli(
+    // A person conversation's turn posts to the Workstream; an Objective's Session has none.
+    let rollout = cli(
         &[
-            "objective",
+            "task",
+            "submit",
             "--gateway",
             &public,
-            "create",
-            "rollout",
-            "--owner",
+            "--tag",
             "owner",
-            "--team",
-            "release",
+            "--session",
+            "rollout",
             "Verify the rollout",
         ],
         &operator_token,
@@ -776,9 +776,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
         &operator_token,
     )
     .await?;
-    let source_id = objective["starting_task_id"]
-        .as_str()
-        .context("Objective Task ID")?;
+    let source_id = rollout["task_id"].as_str().context("rollout Task ID")?;
     let task = cli(
         &["get", "task", "--gateway", &public, source_id],
         &operator_token,
@@ -798,7 +796,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
             );
         }
     };
-    assert_eq!(item["task_id"], objective["starting_task_id"]);
+    assert_eq!(item["task_id"], rollout["task_id"]);
     assert_eq!(item["operator_eligible"], true);
     assert_eq!(item["approval"]["resource"], "release");
     let detail = cli(
@@ -898,7 +896,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
         .assignment
         .context("approval continuation")?;
     let next = assignment.task.context("continued Task")?;
-    assert_eq!(next.session_id, objective["session_id"]);
+    assert_eq!(next.session_id, rollout["session_id"]);
     assert_eq!(next.task_id, decision["continuation_task_id"]);
     let next = InspectAttemptRequest {
         task_id: next.task_id,
@@ -1008,63 +1006,29 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
             "engineer",
             "--member",
             "reviewer",
-            "--max-concurrency",
-            "2",
         ],
         &operator_token,
     )
     .await?;
     assert_eq!(team["team_id"], "release");
-    assert_eq!(team["max_concurrency"], 2);
-    let update = cli(
+    assert!(team.get("max_concurrency").is_none());
+    // Only the inbox Session and person conversations reach other Tags: the engineer's turn is a
+    // conversation's, not an Objective's.
+    let rollout = cli(
         &[
-            "team",
+            "task",
+            "submit",
             "--gateway",
             &public,
-            "update",
-            "Release review",
-            "--clear-concurrency",
-        ],
-        &operator_token,
-    )
-    .await?;
-    assert!(update["max_concurrency"].is_null());
-    assert_eq!(update["revision"], 2);
-    let objective = cli(
-        &[
-            "objective",
-            "--gateway",
-            &public,
-            "create",
-            "rollout",
-            "--owner",
+            "--tag",
             "engineer",
-            "--team",
-            "Release review",
+            "--session",
+            "rollout",
             "Verify the rollout",
         ],
         &operator_token,
     )
     .await?;
-    assert_eq!(objective["team_id"], "release");
-    // A dry run makes the deletion's checks: it is refused while an open Objective names the Team.
-    let (deleted, _, refusal) = run(
-        &[
-            "delete",
-            "--gateway",
-            &public,
-            "team",
-            "release",
-            "--dry-run",
-        ],
-        &operator_token,
-    )
-    .await?;
-    assert!(!deleted);
-    assert!(
-        refusal.contains("cannot be deleted while Objective rollout names it"),
-        "{refusal}"
-    );
 
     let channel = protocol::negotiated(
         Channel::from_shared(public.clone())?
@@ -1112,9 +1076,9 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
         .await?
         .into_inner()
         .assignment
-        .context("expected Objective's first Task")?;
+        .context("expected the rollout Task")?;
     let task = assignment.task.context("missing claimed Task")?;
-    assert_eq!(task.task_id, objective["starting_task_id"]);
+    assert_eq!(task.task_id, rollout["task_id"]);
     let attempt = InspectAttemptRequest {
         task_id: task.task_id,
         attempt_id: assignment.attempt_id,
@@ -1245,7 +1209,7 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
         message.workstream_post_id,
         Some(addressed.post.context("addressed post")?.post_id)
     );
-    assert_eq!(message.objective_id.as_deref(), Some("rollout"));
+    assert_eq!(message.objective_id, None);
     // The post wakes nobody. A direct question wakes the reviewer after a short debounce, and
     // its inbox turn opens with the Team's digest, which shows the addressed post.
     let direct = attempt_mailbox
@@ -1256,6 +1220,7 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
                 text: "Can you verify the rollback today?".into(),
                 kind: MessageKind::Question as i32,
                 review: None,
+                recipient_objective_id: String::new(),
             },
             &attempt_credential,
             host.generation,

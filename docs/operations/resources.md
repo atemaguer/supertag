@@ -85,7 +85,6 @@ kind: Team
 metadata: { name: core }
 spec:
   members: [lead, builder]
-  maxConcurrency: 2
 ```
 
 ```sh
@@ -154,7 +153,7 @@ a network scope is in [Network scopes](../reference/iam.md#network-scopes).
 | `ContextSet` | Knowledge items a Task may receive, each with an `itemKey`, `type`, `version`, and `config`, and optionally `required` |
 | `Role` | `purpose`, `instructions`, `permissionSets`, `contextSets`, and `execution` |
 | `Tag` | `roles`, `instructions`, `allowedActions`, `execution`, `workspace`, `runsOn`, `acceptsMessagesFrom`, `lead`, `maxWorkSessions`, `memory`, `startRate`, and `volume` |
-| `Team` | `members`, `maxConcurrency`, and `wakeLimits` (`mutualPerTask`, `perTagPerHour`, `perObjectivePerHour`, each 0–1,000); see [Wake limits](../guides/tag-messaging.md#wake-limits) |
+| `Team` | `members` and `wakeLimits` (`mutualPerTask`, `perTagPerHour`, `perObjectivePerHour`, each 0–1,000); see [Wake limits](../guides/tag-messaging.md#wake-limits) |
 | `Objective` | An outcome; see [Declare Objectives](#declare-objectives) |
 | `Schedule` | A recurring wake-up of a Tag: `tag`, `every`, `note`, and optionally `timeZone`; see [Declared Schedules](../reference/resource-model.md#declared-schedules) |
 | `Workspace` | A GitHub repository source: `github` with `accountId`, `repositoryId`, `repository`, and a `revision` or `commitSha`, and optionally `pullRequestBase`. A repository on a Worker Host is not a manifest; map it in the host's `workspaces` in `supertag.yaml` |
@@ -174,7 +173,6 @@ spec:
   ownerTagId: lead
   outcome: Keep dependencies current. Report each upgrade with its test results.
   ongoing: true
-  team: core
   budgetLimitMinor: 5000
   budgetCurrency: USD
 ```
@@ -182,7 +180,7 @@ spec:
 Applying an Objective that does not exist creates it and queues its owner's first turn, as
 `supertag objective create` does. Applying it again updates a changed `deadline` or budget on an
 Objective that is not completed or cancelled, and refuses a changed `ownerTagId`, `outcome`,
-`ongoing`, `team`, or `runtimeActions`. Change a running Objective's state with `objective pause`,
+`ongoing`, or `runtimeActions`. Change a running Objective's state with `objective pause`,
 `resume`, `cancel`, or `complete`. `deadline` takes an
 RFC 3339 time with a time zone, and `runtimeActions` narrows what its turns may do.
 
@@ -265,8 +263,7 @@ supertag delete team core
 ```
 
 `delete` handles Teams, Permission Sets, Context Sets, Volumes, Workspaces, and surface
-locations. It refuses a resource still in use: a Team while an Objective names it, or a Permission
-Set a Role uses. Retire a Tag with `tag retire`, and a Role by putting it with `status: retired`.
+locations. It refuses a resource still in use, such as a Permission Set a Role uses. Retire a Tag with `tag retire`, and a Role by putting it with `status: retired`.
 
 `--dry-run` makes every check the deletion makes and deletes nothing. It prints the deletion as
 `diff` does, such as `delete Team/core`, or fails with the reason the deletion would be refused.

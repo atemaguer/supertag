@@ -70,16 +70,14 @@ class GetObjectiveOverviewRequest(_message.Message):
     def __init__(self, objective_id: _Optional[str] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ...) -> None: ...
 
 class ObjectiveOverview(_message.Message):
-    __slots__ = ("objective", "as_of_ms", "team", "pool", "deadline", "attention", "sessions", "conversation", "posts", "tasks", "total_tasks", "next_offset", "notices", "pending_approvals", "total_sessions", "objective_created_at_ms", "objective_updated_at_ms")
+    __slots__ = ("objective", "as_of_ms", "pool", "deadline", "attention", "sessions", "conversation", "tasks", "total_tasks", "next_offset", "notices", "pending_approvals", "total_sessions", "objective_created_at_ms", "objective_updated_at_ms")
     OBJECTIVE_FIELD_NUMBER: _ClassVar[int]
     AS_OF_MS_FIELD_NUMBER: _ClassVar[int]
-    TEAM_FIELD_NUMBER: _ClassVar[int]
     POOL_FIELD_NUMBER: _ClassVar[int]
     DEADLINE_FIELD_NUMBER: _ClassVar[int]
     ATTENTION_FIELD_NUMBER: _ClassVar[int]
     SESSIONS_FIELD_NUMBER: _ClassVar[int]
     CONVERSATION_FIELD_NUMBER: _ClassVar[int]
-    POSTS_FIELD_NUMBER: _ClassVar[int]
     TASKS_FIELD_NUMBER: _ClassVar[int]
     TOTAL_TASKS_FIELD_NUMBER: _ClassVar[int]
     NEXT_OFFSET_FIELD_NUMBER: _ClassVar[int]
@@ -90,13 +88,11 @@ class ObjectiveOverview(_message.Message):
     OBJECTIVE_UPDATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     objective: _runtime_pb2.Objective
     as_of_ms: int
-    team: ObjectiveOverviewTeam
     pool: ObjectiveBudgetPool
     deadline: ObjectiveDeadlineView
     attention: _containers.RepeatedCompositeFieldContainer[ObjectiveAttention]
     sessions: _containers.RepeatedCompositeFieldContainer[ObjectiveSessionView]
     conversation: _containers.RepeatedCompositeFieldContainer[ObjectiveTurn]
-    posts: _containers.RepeatedCompositeFieldContainer[ObjectiveTeamPost]
     tasks: _containers.RepeatedCompositeFieldContainer[ObjectiveTurn]
     total_tasks: int
     next_offset: int
@@ -105,21 +101,7 @@ class ObjectiveOverview(_message.Message):
     total_sessions: int
     objective_created_at_ms: int
     objective_updated_at_ms: int
-    def __init__(self, objective: _Optional[_Union[_runtime_pb2.Objective, _Mapping]] = ..., as_of_ms: _Optional[int] = ..., team: _Optional[_Union[ObjectiveOverviewTeam, _Mapping]] = ..., pool: _Optional[_Union[ObjectiveBudgetPool, _Mapping]] = ..., deadline: _Optional[_Union[ObjectiveDeadlineView, _Mapping]] = ..., attention: _Optional[_Iterable[_Union[ObjectiveAttention, _Mapping]]] = ..., sessions: _Optional[_Iterable[_Union[ObjectiveSessionView, _Mapping]]] = ..., conversation: _Optional[_Iterable[_Union[ObjectiveTurn, _Mapping]]] = ..., posts: _Optional[_Iterable[_Union[ObjectiveTeamPost, _Mapping]]] = ..., tasks: _Optional[_Iterable[_Union[ObjectiveTurn, _Mapping]]] = ..., total_tasks: _Optional[int] = ..., next_offset: _Optional[int] = ..., notices: _Optional[_Iterable[_Union[ObjectiveLimitNotice, _Mapping]]] = ..., pending_approvals: _Optional[int] = ..., total_sessions: _Optional[int] = ..., objective_created_at_ms: _Optional[int] = ..., objective_updated_at_ms: _Optional[int] = ...) -> None: ...
-
-class ObjectiveOverviewTeam(_message.Message):
-    __slots__ = ("team_id", "name", "member_tag_ids", "max_concurrency", "running_turns")
-    TEAM_ID_FIELD_NUMBER: _ClassVar[int]
-    NAME_FIELD_NUMBER: _ClassVar[int]
-    MEMBER_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
-    MAX_CONCURRENCY_FIELD_NUMBER: _ClassVar[int]
-    RUNNING_TURNS_FIELD_NUMBER: _ClassVar[int]
-    team_id: str
-    name: str
-    member_tag_ids: _containers.RepeatedScalarFieldContainer[str]
-    max_concurrency: int
-    running_turns: int
-    def __init__(self, team_id: _Optional[str] = ..., name: _Optional[str] = ..., member_tag_ids: _Optional[_Iterable[str]] = ..., max_concurrency: _Optional[int] = ..., running_turns: _Optional[int] = ...) -> None: ...
+    def __init__(self, objective: _Optional[_Union[_runtime_pb2.Objective, _Mapping]] = ..., as_of_ms: _Optional[int] = ..., pool: _Optional[_Union[ObjectiveBudgetPool, _Mapping]] = ..., deadline: _Optional[_Union[ObjectiveDeadlineView, _Mapping]] = ..., attention: _Optional[_Iterable[_Union[ObjectiveAttention, _Mapping]]] = ..., sessions: _Optional[_Iterable[_Union[ObjectiveSessionView, _Mapping]]] = ..., conversation: _Optional[_Iterable[_Union[ObjectiveTurn, _Mapping]]] = ..., tasks: _Optional[_Iterable[_Union[ObjectiveTurn, _Mapping]]] = ..., total_tasks: _Optional[int] = ..., next_offset: _Optional[int] = ..., notices: _Optional[_Iterable[_Union[ObjectiveLimitNotice, _Mapping]]] = ..., pending_approvals: _Optional[int] = ..., total_sessions: _Optional[int] = ..., objective_created_at_ms: _Optional[int] = ..., objective_updated_at_ms: _Optional[int] = ...) -> None: ...
 
 class ObjectiveBudgetPool(_message.Message):
     __slots__ = ("measure", "currency", "limit_minor", "spent_minor", "available_minor", "overrun_minor", "exhausted", "unknown_cost_attempts", "estimated_cost_attempts")
@@ -264,17 +246,3 @@ class ObjectiveTurn(_message.Message):
     completed_at_ms: int
     failure: ObjectiveSessionFailure
     def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., state: _Optional[_Union[_runtime_pb2.TaskState, str]] = ..., kind: _Optional[str] = ..., prompt: _Optional[str] = ..., result: _Optional[str] = ..., completed_at_ms: _Optional[int] = ..., failure: _Optional[_Union[ObjectiveSessionFailure, _Mapping]] = ...) -> None: ...
-
-class ObjectiveTeamPost(_message.Message):
-    __slots__ = ("sequence", "author_tag_id", "to_tag_ids", "body", "created_at_ms")
-    SEQUENCE_FIELD_NUMBER: _ClassVar[int]
-    AUTHOR_TAG_ID_FIELD_NUMBER: _ClassVar[int]
-    TO_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
-    BODY_FIELD_NUMBER: _ClassVar[int]
-    CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
-    sequence: int
-    author_tag_id: str
-    to_tag_ids: _containers.RepeatedScalarFieldContainer[str]
-    body: str
-    created_at_ms: int
-    def __init__(self, sequence: _Optional[int] = ..., author_tag_id: _Optional[str] = ..., to_tag_ids: _Optional[_Iterable[str]] = ..., body: _Optional[str] = ..., created_at_ms: _Optional[int] = ...) -> None: ...

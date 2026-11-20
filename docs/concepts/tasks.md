@@ -136,10 +136,6 @@ harness no bound host runs, or one that can't enforce the work Session's permiss
 start. The work Session uses the host's default model for that harness, because the Tag's models
 are for its own harness.
 
-An Objective's turn can also give `start_session` a Tag: that starts a work Session of another
-member of the Objective's Team, with the Objective's conversation as its parent. The target Tag
-must be active and bound to a Worker Host. A delegated work Session runs the target Tag's harness.
-
 When a work Session's Task completes, fails, or is cancelled, the Session that started it gets one
 report turn: a new Task that resumes that Session's native session. It carries
 the work Session's title, status, and result, and the Tag reports it to the person in the
@@ -168,6 +164,13 @@ other in a loop; over a limit a message waits for the next turn and is never dro
 A Tag may message another Tag when the two share a Team, or when the recipient accepts messages
 from the sender. A grant is exactly that: this recipient accepts messages from this sender. See
 [Send messages between Tags](../guides/tag-messaging.md).
+
+The inbox is the Tag's main Session. Only it and the Tag's conversations with people reach other
+Tags. An Objective's conversation and its work Sessions know only their own Tag. When an
+Objective needs something from another Tag, its turn asks its own Tag's inbox with `ask_tag`,
+and goes on working. The inbox turn may message other Tags, then answers the Objective with
+`send_message`. The answer arrives as the Objective's next turn, like a work Session's report.
+While an answer is due, the Objective is waiting, not idle.
 
 ### What a work Session sees
 

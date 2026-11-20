@@ -41,9 +41,9 @@ whole system rather than another first-class resource.
   work, and its result returns there through the Tag. See
   [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-many-conversations) and
   [Session](../concepts/tasks.md#session).
-- <a id="team"></a>**Team** — a flat list of member Tags with an optional concurrency limit. Members
-  message each other and share the Team's Workstream, and an Objective that names the Team may
-  start work Sessions of its members. See [Teams](coordination.md#teams).
+- <a id="team"></a>**Team** — a flat list of member Tags. Members message each other and share the
+  Team's Workstream from their inbox and their conversations with people. See
+  [Teams](coordination.md#teams).
 - <a id="workstream"></a>**Workstream** — a Team's shared record of posts. Every member reads it. See
   [Workstream](coordination.md#workstream).
 - <a id="post"></a>**post** — one append-only entry in a Team's Workstream. It is plain text with

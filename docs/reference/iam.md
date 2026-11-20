@@ -153,7 +153,6 @@ Runtime permissions use the same Permission Set but have a different target:
 | `files:read` | Read files in the Task workspace |
 | `files:write` | Edit files in a writable Task workspace |
 | `commands:execute` | Use command or shell tools |
-| `files:delegate-write` | Let an Objective's owner delegate writes to a Team member whose Role grants `files:write` |
 | `web:fetch` | Fetch a known web resource |
 | `web:search` | Search the web |
 | `browser:use` | Use browser or computer-control tools. No built-in harness supports it yet |
@@ -184,14 +183,10 @@ the actions its owner Tag's Permission Sets allow, resolved once at creation:
 | From a collaboration thread (`@SuperTag /goal`) | The invoking Task's: the Tag's Roles and the Permission Sets activated at that location |
 
 An operator's explicit list narrows the default and never widens it. A Task in the Objective
-receives the actions within the Objective's list and, for delegated work, within its delegating
-Task's. Approval travels with the action: the action stays gated when the Task's own Permission
-Sets, or those of the Task or owner it inherits the action from, mark it `approvalRequired: true`. See
+receives the actions within the Objective's list. Approval travels with the action: the action
+stays gated when the Task's own Permission Sets, or those of the Task or owner it inherits the
+action from, mark it `approvalRequired: true`. See
 [Objective runtime actions](coordination.md#objective-runtime-actions).
-
-When the Objective and the delegating Task include `files:delegate-write`, a different Team
-member can use its own `files:write` permission in the delegated Session. The grant gives
-the lead no direct write access. An approval rule on the grant applies to the delegated write.
 
 Prefer narrow operations over `read`, `write`, or `admin` labels.
 
@@ -435,9 +430,7 @@ cannot reach a hidden or read-only file.
 
 A Task keeps the scope recorded when SuperTag accepted it. `supertag describe task` shows it
 under `file_scope`, for example
-`Writes src/, tests/, ~/.cache/pip · Read-only src/generated/ · Hidden **/.env, secrets/`. When
-an Objective owner delegates a write, the member writes within its own `paths`, and both Tags'
-exclusions apply.
+`Writes src/, tests/, ~/.cache/pip · Read-only src/generated/ · Hidden **/.env, secrets/`.
 
 Path scopes govern the agent's tools and commands, not the harness itself. The harness's private
 home, the Task Attempt's output directory, Skill files, Volume copies, and the temporary

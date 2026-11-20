@@ -552,7 +552,12 @@ pub(crate) async fn portfolio_in(tx: &mut Transaction<'_, Any>, viewer: &Viewer)
     .bind(&inbox)
     .fetch_optional(&mut **tx)
     .await?;
-    if inbox_used.is_some() {
+    if viewer.objective.is_some() {
+        // An Objective's Session reaches no other Tag: its Tag's inbox Session does.
+        footer.push(format!(
+            "To get something from outside this Objective, ask this Tag with ask_tag: its inbox Session, {inbox}, answers in this Objective's next turn."
+        ));
+    } else if inbox_used.is_some() {
         footer.push(format!(
             "This Tag handles the messages other Tags send it in its inbox, Session {inbox}; read_session reads it."
         ));
@@ -1023,7 +1028,6 @@ impl Store {
             .collect();
         Ok(TagObjectiveView {
             objective: overview.objective,
-            team: overview.team,
             pool: overview.pool,
             deadline: overview.deadline,
             notices: overview.notices,

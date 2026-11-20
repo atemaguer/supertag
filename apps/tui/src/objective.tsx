@@ -1,8 +1,8 @@
 /**
  * Objectives: the view of one (what `supertag describe objective` shows, kept current), where
  * `m` sends its owner a follow-up and, while it is ready for review, `a` approves it and `c` asks
- * for changes; and the form `/goal` opens to create one owned by the selected Tag, with a Team
- * and a budget. A created Objective starts its owner's first turn; when it could not start, `r`
+ * for changes; and the form `/goal` opens to create one owned by the selected Tag, with a
+ * budget. A created Objective starts its owner's first turn; when it could not start, `r`
  * starts it once that is fixed.
  */
 import {
@@ -13,7 +13,6 @@ import {
   objectiveHold,
   parseBudget,
   statusLabel,
-  type Team,
   type WatchUpdate,
 } from "@supertag/client/model";
 import { useWatchRefresh, type WatchFeed } from "@supertag/client/react";
@@ -35,7 +34,7 @@ export function objectiveLines(objective: Objective, tagName: (tagId: string) =>
   const hold = objectiveHold(objective);
   const lines = [
     `${objective.objectiveId} · ${statusLabel(objective.status)}${hold && hold !== objective.status && hold !== "review" ? ` · ${hold}` : ""}${objective.ongoing ? " · ongoing" : ""}`,
-    `Owner: ${tagName(objective.ownerTagId)}${objective.teamId ? ` · Team: ${objective.teamId}` : " · works alone"}`,
+    `Owner: ${tagName(objective.ownerTagId)}`,
   ];
   const budget = objective.budget;
   const spent = objective.spentMinor;
@@ -253,18 +252,17 @@ export function ObjectiveView({
   );
 }
 
-const FIELDS = ["Outcome", "Team", "Budget"] as const;
+const FIELDS = ["Outcome", "Budget"] as const;
 
 /**
- * The new Objective form, for an Objective `owner` owns: its outcome, the Team its owner may
- * hand work to (none: it works alone), and a budget such as `300 USD` or `$12.50` (empty: none).
- * ↑ ↓ move between fields, ← → choose the Team, Enter moves on and, on the budget, creates it.
+ * The new Objective form, for an Objective `owner` owns: its outcome and a budget such as
+ * `300 USD` or `$12.50` (empty: none). ↑ ↓ move between fields, Enter moves on and, on the
+ * budget, creates it.
  */
 export function ObjectiveForm({
   gateway,
   owner,
   ownerName,
-  teams,
   width,
   onShow,
   onClose,
@@ -272,7 +270,6 @@ export function ObjectiveForm({
   gateway: TuiGateway;
   owner: string;
   ownerName: string;
-  teams: readonly Team[];
   width: number;
   onShow(objectiveId: string): void;
   onClose(): void;
@@ -281,11 +278,10 @@ export function ObjectiveForm({
   const [field, showField] = useState(0);
   const at = useRef(0);
   const setField = (next: number) => {
-    at.current = Math.max(0, Math.min(2, next));
+    at.current = Math.max(0, Math.min(FIELDS.length - 1, next));
     showField(at.current);
   };
   const [outcome, setOutcome] = useState("");
-  const [team, setTeam] = useState(-1);
   const [budget, setBudget] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
@@ -305,20 +301,18 @@ export function ObjectiveForm({
       money = parseBudget(budget);
     } catch (error) {
       setProblem(String(error));
-      setField(2);
+      setField(1);
       return;
     }
     id.current ??= newObjectiveId(text);
     setBusy(true);
     setProblem("");
     try {
-      const chosen = teams[team];
       setCreated(
         await gateway.createObjective({
           objectiveId: id.current,
           ownerTagId: owner,
           outcome: text,
-          ...(chosen ? { teamId: chosen.teamId } : {}),
           ...(money ? { budget: money } : {}),
         }),
       );
@@ -344,18 +338,12 @@ export function ObjectiveForm({
     }
     if (key.name === "up") setField(at.current - 1);
     else if (key.name === "down" || key.name === "tab") setField(at.current + 1);
-    else if (at.current === 1 && (key.name === "left" || key.name === "right"))
-      setTeam((chosen) => {
-        const next = chosen + (key.name === "right" ? 1 : -1);
-        return next < -1 ? teams.length - 1 : next >= teams.length ? -1 : next;
-      });
     else if (key.name === "return" || key.name === "enter") {
-      if (at.current === 2) void create();
+      if (at.current === FIELDS.length - 1) void create();
       else setField(at.current + 1);
     }
   });
 
-  const chosen = teams[team];
   return (
     <box
       width={width}
@@ -394,35 +382,25 @@ export function ObjectiveForm({
                 {label}
               </text>
               <box width={Math.max(10, width - 13)} height={1}>
-                {position === 1 ? (
-                  <text fg={chosen ? color.text : color.faint}>
-                    {chosen
-                      ? `‹ ${safe(chosen.name)} ›`
-                      : teams.length
-                        ? "‹ none: it works alone ›"
-                        : "none: no Teams"}
-                  </text>
-                ) : (
-                  <input
-                    onPaste={pasteOnOneLine}
-                    focused={position === field}
-                    placeholder={
-                      position === 0
-                        ? "What should be true when it is done"
-                        : "optional: 300 USD or $12.50"
-                    }
-                    value={position === 0 ? outcome : budget}
-                    onInput={(value: string) =>
-                      position === 0 ? setOutcome(value) : setBudget(value)
-                    }
-                  />
-                )}
+                <input
+                  onPaste={pasteOnOneLine}
+                  focused={position === field}
+                  placeholder={
+                    position === 0
+                      ? "What should be true when it is done"
+                      : "optional: 300 USD or $12.50"
+                  }
+                  value={position === 0 ? outcome : budget}
+                  onInput={(value: string) =>
+                    position === 0 ? setOutcome(value) : setBudget(value)
+                  }
+                />
               </box>
             </box>
           ))}
           {problem ? <text fg={color.error}>{safe(problem)}</text> : null}
           <text fg={color.faint}>
-            {busy ? "Creating…" : "↑ ↓ fields · ← → Team · Enter next, then creates · Esc back"}
+            {busy ? "Creating…" : "↑ ↓ fields · Enter next, then creates · Esc back"}
           </text>
         </>
       )}

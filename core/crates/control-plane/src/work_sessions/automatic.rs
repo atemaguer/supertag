@@ -37,13 +37,7 @@ pub(crate) async fn continue_in(
     ))
     .await;
     match current {
-        Ok(current)
-            if continuation::require_unchanged_authority(
-                source,
-                &current,
-                source.tag_id != starter.tag_id,
-            )
-            .is_ok() => {}
+        Ok(current) if continuation::require_unchanged_authority(source, &current).is_ok() => {}
         Ok(_)
         | Err(
             StoreError::PermissionDenied

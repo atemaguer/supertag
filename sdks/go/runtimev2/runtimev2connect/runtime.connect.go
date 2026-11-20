@@ -257,6 +257,8 @@ const (
 	// AttemptMailboxSendMessageProcedure is the fully-qualified name of the AttemptMailbox's
 	// SendMessage RPC.
 	AttemptMailboxSendMessageProcedure = "/supertag.runtime.v2.AttemptMailbox/SendMessage"
+	// AttemptMailboxAskTagProcedure is the fully-qualified name of the AttemptMailbox's AskTag RPC.
+	AttemptMailboxAskTagProcedure = "/supertag.runtime.v2.AttemptMailbox/AskTag"
 	// WorkerHostRegisterHostProcedure is the fully-qualified name of the WorkerHost's RegisterHost RPC.
 	WorkerHostRegisterHostProcedure = "/supertag.runtime.v2.WorkerHost/RegisterHost"
 	// WorkerHostReportHostProcedure is the fully-qualified name of the WorkerHost's ReportHost RPC.
@@ -466,6 +468,8 @@ const (
 	// HarnessMailboxReadReviewPatchProcedure is the fully-qualified name of the HarnessMailbox's
 	// ReadReviewPatch RPC.
 	HarnessMailboxReadReviewPatchProcedure = "/supertag.runtime.v2.HarnessMailbox/ReadReviewPatch"
+	// HarnessMailboxAskTagProcedure is the fully-qualified name of the HarnessMailbox's AskTag RPC.
+	HarnessMailboxAskTagProcedure = "/supertag.runtime.v2.HarnessMailbox/AskTag"
 	// HarnessWorkSessionsStartProcedure is the fully-qualified name of the HarnessWorkSessions's Start
 	// RPC.
 	HarnessWorkSessionsStartProcedure = "/supertag.runtime.v2.HarnessWorkSessions/Start"
@@ -2715,6 +2719,8 @@ func (UnimplementedMailboxHandler) ListGrants(context.Context, *connect.Request[
 type AttemptMailboxClient interface {
 	ReadMailbox(context.Context, *connect.Request[runtimev2.ReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error)
 	SendMessage(context.Context, *connect.Request[runtimev2.SendAttemptTagMessageRequest]) (*connect.Response[runtimev2.SendTagMessageResponse], error)
+	// An Objective's turn asks its own Tag's inbox Session.
+	AskTag(context.Context, *connect.Request[runtimev2.AskAttemptTagRequest]) (*connect.Response[runtimev2.AskTagResponse], error)
 }
 
 // NewAttemptMailboxClient constructs a client for the supertag.runtime.v2.AttemptMailbox service.
@@ -2740,6 +2746,12 @@ func NewAttemptMailboxClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(attemptMailboxMethods.ByName("SendMessage")),
 			connect.WithClientOptions(opts...),
 		),
+		askTag: connect.NewClient[runtimev2.AskAttemptTagRequest, runtimev2.AskTagResponse](
+			httpClient,
+			baseURL+AttemptMailboxAskTagProcedure,
+			connect.WithSchema(attemptMailboxMethods.ByName("AskTag")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -2747,6 +2759,7 @@ func NewAttemptMailboxClient(httpClient connect.HTTPClient, baseURL string, opts
 type attemptMailboxClient struct {
 	readMailbox *connect.Client[runtimev2.ReadMailboxRequest, runtimev2.ListMailboxMessagesResponse]
 	sendMessage *connect.Client[runtimev2.SendAttemptTagMessageRequest, runtimev2.SendTagMessageResponse]
+	askTag      *connect.Client[runtimev2.AskAttemptTagRequest, runtimev2.AskTagResponse]
 }
 
 // ReadMailbox calls supertag.runtime.v2.AttemptMailbox.ReadMailbox.
@@ -2759,10 +2772,17 @@ func (c *attemptMailboxClient) SendMessage(ctx context.Context, req *connect.Req
 	return c.sendMessage.CallUnary(ctx, req)
 }
 
+// AskTag calls supertag.runtime.v2.AttemptMailbox.AskTag.
+func (c *attemptMailboxClient) AskTag(ctx context.Context, req *connect.Request[runtimev2.AskAttemptTagRequest]) (*connect.Response[runtimev2.AskTagResponse], error) {
+	return c.askTag.CallUnary(ctx, req)
+}
+
 // AttemptMailboxHandler is an implementation of the supertag.runtime.v2.AttemptMailbox service.
 type AttemptMailboxHandler interface {
 	ReadMailbox(context.Context, *connect.Request[runtimev2.ReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error)
 	SendMessage(context.Context, *connect.Request[runtimev2.SendAttemptTagMessageRequest]) (*connect.Response[runtimev2.SendTagMessageResponse], error)
+	// An Objective's turn asks its own Tag's inbox Session.
+	AskTag(context.Context, *connect.Request[runtimev2.AskAttemptTagRequest]) (*connect.Response[runtimev2.AskTagResponse], error)
 }
 
 // NewAttemptMailboxHandler builds an HTTP handler from the service implementation. It returns the
@@ -2784,12 +2804,20 @@ func NewAttemptMailboxHandler(svc AttemptMailboxHandler, opts ...connect.Handler
 		connect.WithSchema(attemptMailboxMethods.ByName("SendMessage")),
 		connect.WithHandlerOptions(opts...),
 	)
+	attemptMailboxAskTagHandler := connect.NewUnaryHandler(
+		AttemptMailboxAskTagProcedure,
+		svc.AskTag,
+		connect.WithSchema(attemptMailboxMethods.ByName("AskTag")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.AttemptMailbox/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AttemptMailboxReadMailboxProcedure:
 			attemptMailboxReadMailboxHandler.ServeHTTP(w, r)
 		case AttemptMailboxSendMessageProcedure:
 			attemptMailboxSendMessageHandler.ServeHTTP(w, r)
+		case AttemptMailboxAskTagProcedure:
+			attemptMailboxAskTagHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -2805,6 +2833,10 @@ func (UnimplementedAttemptMailboxHandler) ReadMailbox(context.Context, *connect.
 
 func (UnimplementedAttemptMailboxHandler) SendMessage(context.Context, *connect.Request[runtimev2.SendAttemptTagMessageRequest]) (*connect.Response[runtimev2.SendTagMessageResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptMailbox.SendMessage is not implemented"))
+}
+
+func (UnimplementedAttemptMailboxHandler) AskTag(context.Context, *connect.Request[runtimev2.AskAttemptTagRequest]) (*connect.Response[runtimev2.AskTagResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptMailbox.AskTag is not implemented"))
 }
 
 // WorkerHostClient is a client for the supertag.runtime.v2.WorkerHost service.
@@ -5416,6 +5448,7 @@ type HarnessMailboxClient interface {
 	Read(context.Context, *connect.Request[runtimev2.HarnessReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error)
 	SendMessage(context.Context, *connect.Request[runtimev2.HarnessSendTagMessageRequest]) (*connect.Response[runtimev2.SendTagMessageResponse], error)
 	ReadReviewPatch(context.Context, *connect.Request[runtimev2.HarnessReadReviewPatchRequest]) (*connect.Response[runtimev2.HarnessReviewPatch], error)
+	AskTag(context.Context, *connect.Request[runtimev2.HarnessAskTagRequest]) (*connect.Response[runtimev2.AskTagResponse], error)
 }
 
 // NewHarnessMailboxClient constructs a client for the supertag.runtime.v2.HarnessMailbox service.
@@ -5447,6 +5480,12 @@ func NewHarnessMailboxClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(harnessMailboxMethods.ByName("ReadReviewPatch")),
 			connect.WithClientOptions(opts...),
 		),
+		askTag: connect.NewClient[runtimev2.HarnessAskTagRequest, runtimev2.AskTagResponse](
+			httpClient,
+			baseURL+HarnessMailboxAskTagProcedure,
+			connect.WithSchema(harnessMailboxMethods.ByName("AskTag")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -5455,6 +5494,7 @@ type harnessMailboxClient struct {
 	read            *connect.Client[runtimev2.HarnessReadMailboxRequest, runtimev2.ListMailboxMessagesResponse]
 	sendMessage     *connect.Client[runtimev2.HarnessSendTagMessageRequest, runtimev2.SendTagMessageResponse]
 	readReviewPatch *connect.Client[runtimev2.HarnessReadReviewPatchRequest, runtimev2.HarnessReviewPatch]
+	askTag          *connect.Client[runtimev2.HarnessAskTagRequest, runtimev2.AskTagResponse]
 }
 
 // Read calls supertag.runtime.v2.HarnessMailbox.Read.
@@ -5472,11 +5512,17 @@ func (c *harnessMailboxClient) ReadReviewPatch(ctx context.Context, req *connect
 	return c.readReviewPatch.CallUnary(ctx, req)
 }
 
+// AskTag calls supertag.runtime.v2.HarnessMailbox.AskTag.
+func (c *harnessMailboxClient) AskTag(ctx context.Context, req *connect.Request[runtimev2.HarnessAskTagRequest]) (*connect.Response[runtimev2.AskTagResponse], error) {
+	return c.askTag.CallUnary(ctx, req)
+}
+
 // HarnessMailboxHandler is an implementation of the supertag.runtime.v2.HarnessMailbox service.
 type HarnessMailboxHandler interface {
 	Read(context.Context, *connect.Request[runtimev2.HarnessReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error)
 	SendMessage(context.Context, *connect.Request[runtimev2.HarnessSendTagMessageRequest]) (*connect.Response[runtimev2.SendTagMessageResponse], error)
 	ReadReviewPatch(context.Context, *connect.Request[runtimev2.HarnessReadReviewPatchRequest]) (*connect.Response[runtimev2.HarnessReviewPatch], error)
+	AskTag(context.Context, *connect.Request[runtimev2.HarnessAskTagRequest]) (*connect.Response[runtimev2.AskTagResponse], error)
 }
 
 // NewHarnessMailboxHandler builds an HTTP handler from the service implementation. It returns the
@@ -5504,6 +5550,12 @@ func NewHarnessMailboxHandler(svc HarnessMailboxHandler, opts ...connect.Handler
 		connect.WithSchema(harnessMailboxMethods.ByName("ReadReviewPatch")),
 		connect.WithHandlerOptions(opts...),
 	)
+	harnessMailboxAskTagHandler := connect.NewUnaryHandler(
+		HarnessMailboxAskTagProcedure,
+		svc.AskTag,
+		connect.WithSchema(harnessMailboxMethods.ByName("AskTag")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.HarnessMailbox/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case HarnessMailboxReadProcedure:
@@ -5512,6 +5564,8 @@ func NewHarnessMailboxHandler(svc HarnessMailboxHandler, opts ...connect.Handler
 			harnessMailboxSendMessageHandler.ServeHTTP(w, r)
 		case HarnessMailboxReadReviewPatchProcedure:
 			harnessMailboxReadReviewPatchHandler.ServeHTTP(w, r)
+		case HarnessMailboxAskTagProcedure:
+			harnessMailboxAskTagHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -5531,6 +5585,10 @@ func (UnimplementedHarnessMailboxHandler) SendMessage(context.Context, *connect.
 
 func (UnimplementedHarnessMailboxHandler) ReadReviewPatch(context.Context, *connect.Request[runtimev2.HarnessReadReviewPatchRequest]) (*connect.Response[runtimev2.HarnessReviewPatch], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessMailbox.ReadReviewPatch is not implemented"))
+}
+
+func (UnimplementedHarnessMailboxHandler) AskTag(context.Context, *connect.Request[runtimev2.HarnessAskTagRequest]) (*connect.Response[runtimev2.AskTagResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessMailbox.AskTag is not implemented"))
 }
 
 // HarnessWorkSessionsClient is a client for the supertag.runtime.v2.HarnessWorkSessions service.

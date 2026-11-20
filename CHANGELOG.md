@@ -22,6 +22,16 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- Only a Tag's inbox Session and its conversations with people reach other Tags. An Objective's
+  turns no longer get `send_message`, `read_mailbox`, `post`, or `read_workstream`, and their
+  instructions name no other Tag; they ask their own Tag's inbox with the new `ask_tag` tool and
+  keep working. The inbox turn answers with `send_message` naming the `objective`, and the answer
+  runs as the Objective's next turn; while it is due, the Objective is waiting, not idle. Commit
+  review requests go through the inbox the same way. `start_session` no longer takes a `tag`, so
+  an Objective can't start work on another Tag. Objectives no longer name a Team (`--team`, the
+  manifest's `team`, and the overview's Team and posts are gone), and a Team's `maxConcurrency`
+  and `--max-concurrency` are removed. A cross-Tag work Session open at the upgrade keeps running
+  and still reports to its Objective.
 - Every input to a Session now waits in one queue, in the Session's order: a person's message,
   another Tag's direct message, a Schedule firing, a work Session's report, a decision, a notice.
   A redelivered Task answers the messages its lost Task Attempt took in or was being given,

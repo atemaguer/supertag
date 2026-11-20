@@ -638,6 +638,28 @@ async fn start_host(
     tag: &str,
     adapter_args: &[&str],
 ) -> Result<Host> {
+    start_host_with(
+        operator,
+        tokens,
+        (gateway, directory),
+        index,
+        tag,
+        adapter_args,
+        false,
+    )
+    .await
+}
+
+/// [`start_host`]; with `once`, the Worker Host exits after its first Task.
+async fn start_host_with(
+    operator: &mut OperatorClient<ProtocolChannel>,
+    tokens: &Tokens,
+    (gateway, directory): (SocketAddr, &Path),
+    index: usize,
+    tag: &str,
+    adapter_args: &[&str],
+    once: bool,
+) -> Result<Host> {
     let id = format!("scale-host-{index:02}");
     let proxy = Proxy::start(gateway).await?;
     let secret = supertag_protocol::new_secret(supertag_protocol::AUTH_KEY_SECRET_PREFIX);
@@ -682,6 +704,9 @@ async fn start_host(
     ];
     for argument in adapter_args {
         arguments.push(format!("--adapter-arg={argument}").into());
+    }
+    if once {
+        arguments.push("--once".into());
     }
     let mut command = binary(&[]);
     command.args(&arguments);
@@ -1858,12 +1883,9 @@ async fn postgres_soak_survives_partition_and_service_restarts() -> Result<()> {
 
 /// The steps `--partition-steps` makes, in order (see the fixture's
 /// `partition_calls` module). `take` runs connected: a take is never repeated.
-const PARTITION_STEPS: [&str; 9] = [
+const PARTITION_STEPS: [&str; 6] = [
     "usage",
-    "mailbox-read",
-    "mailbox-send",
-    "workstream-read",
-    "workstream-post",
+    "ask-tag",
     "question",
     "work-session-start",
     "take",
@@ -1917,32 +1939,10 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
     let services = Services::start(&database, root, &tokens).await?;
     let mut operator = OperatorClient::new(services.channel().await?);
     let tag = "partition-calls";
-    let peer = "partition-peer";
-    for id in [tag, peer] {
-        operator_cli(
-            &services,
-            &tokens,
-            &["tag", "put", id, "--instructions", "Relay calls"],
-        )
-        .await?;
-    }
     operator_cli(
         &services,
         &tokens,
-        &[
-            "mailbox-grant",
-            "allow",
-            tag,
-            peer,
-            "--operation-id",
-            "allow-peer",
-        ],
-    )
-    .await?;
-    operator_cli(
-        &services,
-        &tokens,
-        &["team", "create", "relay", "--member", tag, "--member", peer],
+        &["tag", "put", tag, "--instructions", "Relay calls"],
     )
     .await?;
     let objective = operator_cli(
@@ -1954,8 +1954,6 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
             "partition-objective",
             "--owner",
             tag,
-            "--team",
-            "relay",
             "Relay through the partition",
         ],
     )
@@ -1966,21 +1964,18 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
         .to_owned();
     let steps = root.join("partition-steps");
     let steps_argument = format!("--partition-steps={}", steps.display());
-    let peer_argument = format!("--partition-peer={peer}");
-    let host = start_host(
+    // The host runs only the Objective's turn: its Work Session and the inbox turn its ask
+    // wakes stay queued, so the adapter runs once.
+    let host = start_host_with(
         &mut operator,
         &tokens,
-        services.address,
-        root,
+        (services.address, root),
         0,
         tag,
-        &[&steps_argument, &peer_argument],
+        &[&steps_argument],
+        true,
     )
     .await?;
-    // A Work Session may be delegated only to a Tag with a registered Worker
-    // Host. This one holds whatever it claims for the peer and is never released.
-    let _peer_host =
-        start_host(&mut operator, &tokens, services.address, root, 1, peer, &[]).await?;
     std::fs::write(&host.release, "")?;
     let mut input_id = String::new();
     for (index, step) in PARTITION_STEPS.iter().enumerate() {
@@ -2093,32 +2088,6 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
                 .is_some_and(|native| native.total_tokens == Some(5)),
         "usage was not recorded exactly once: {:?}",
         usage.reports
-    );
-    let mailbox = operator_cli(&services, &tokens, &["get", "messages", "--mailbox", peer]).await?;
-    let messages = mailbox["messages"].as_array().context("Mailbox messages")?;
-    ensure!(
-        messages
-            .iter()
-            .filter(|message| message["text"] == "Sent through a partition")
-            .count()
-            == 1,
-        "the Mailbox message was not delivered exactly once: {mailbox}"
-    );
-    let posts = operator_cli(
-        &services,
-        &tokens,
-        &["get", "workstream-posts", "--team", "relay"],
-    )
-    .await?;
-    ensure!(
-        posts["posts"]
-            .as_array()
-            .context("Workstream posts")?
-            .iter()
-            .filter(|post| post["body"] == "Posted through a partition")
-            .count()
-            == 1,
-        "the Workstream post was not written exactly once: {posts}"
     );
     // The live input's follower Task is newer in the same Session, so the
     // question is not listed as actionable; it is still published once.

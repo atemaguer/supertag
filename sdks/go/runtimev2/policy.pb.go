@@ -2537,7 +2537,6 @@ type TaskRuntimeAuthority struct {
 	Approvals         []*RuntimeApprovalRequirement `protobuf:"bytes,2,rep,name=approvals,proto3" json:"approvals,omitempty"`
 	ObjectiveId       *string                       `protobuf:"bytes,3,opt,name=objective_id,json=objectiveId,proto3,oneof" json:"objective_id,omitempty"`
 	ObjectiveRevision *uint64                       `protobuf:"varint,4,opt,name=objective_revision,json=objectiveRevision,proto3,oneof" json:"objective_revision,omitempty"`
-	DelegatingTaskId  *string                       `protobuf:"bytes,5,opt,name=delegating_task_id,json=delegatingTaskId,proto3,oneof" json:"delegating_task_id,omitempty"`
 	// The path scope composed from the accepted Permission Sets. Absent: no restriction beyond
 	// the accepted actions.
 	Files *FileScope `protobuf:"bytes,6,opt,name=files,proto3" json:"files,omitempty"`
@@ -2604,13 +2603,6 @@ func (x *TaskRuntimeAuthority) GetObjectiveRevision() uint64 {
 		return *x.ObjectiveRevision
 	}
 	return 0
-}
-
-func (x *TaskRuntimeAuthority) GetDelegatingTaskId() string {
-	if x != nil && x.DelegatingTaskId != nil {
-		return *x.DelegatingTaskId
-	}
-	return ""
 }
 
 func (x *TaskRuntimeAuthority) GetFiles() *FileScope {
@@ -4009,18 +4001,16 @@ const file_supertag_runtime_v2_policy_proto_rawDesc = "" +
 	"\x1aRuntimeApprovalRequirement\x12\x16\n" +
 	"\x06action\x18\x01 \x01(\tR\x06action\x12,\n" +
 	"\x12permission_set_ids\x18\x02 \x03(\tR\x10permissionSetIds\x12\x1c\n" +
-	"\tapprovers\x18\x03 \x03(\tR\tapprovers\"\xc0\x03\n" +
+	"\tapprovers\x18\x03 \x03(\tR\tapprovers\"\x90\x03\n" +
 	"\x14TaskRuntimeAuthority\x12\x18\n" +
 	"\aactions\x18\x01 \x03(\tR\aactions\x12M\n" +
 	"\tapprovals\x18\x02 \x03(\v2/.supertag.runtime.v2.RuntimeApprovalRequirementR\tapprovals\x12&\n" +
 	"\fobjective_id\x18\x03 \x01(\tH\x00R\vobjectiveId\x88\x01\x01\x122\n" +
-	"\x12objective_revision\x18\x04 \x01(\x04H\x01R\x11objectiveRevision\x88\x01\x01\x121\n" +
-	"\x12delegating_task_id\x18\x05 \x01(\tH\x02R\x10delegatingTaskId\x88\x01\x01\x124\n" +
+	"\x12objective_revision\x18\x04 \x01(\x04H\x01R\x11objectiveRevision\x88\x01\x01\x124\n" +
 	"\x05files\x18\x06 \x01(\v2\x1e.supertag.runtime.v2.FileScopeR\x05files\x12;\n" +
 	"\anetwork\x18\a \x01(\v2!.supertag.runtime.v2.NetworkScopeR\anetworkB\x0f\n" +
 	"\r_objective_idB\x15\n" +
-	"\x13_objective_revisionB\x15\n" +
-	"\x13_delegating_task_id\"\x9e\x01\n" +
+	"\x13_objective_revisionJ\x04\b\x05\x10\x06R\x12delegating_task_id\"\x9e\x01\n" +
 	"\tFileScope\x12\x14\n" +
 	"\x05write\x18\x01 \x03(\tR\x05write\x12\x1b\n" +
 	"\tread_only\x18\x02 \x03(\tR\breadOnly\x12\x16\n" +

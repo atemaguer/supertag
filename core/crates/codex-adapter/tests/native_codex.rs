@@ -35,8 +35,9 @@ use supertag_protocol::v2::{
     harness_workstreams_server::{HarnessWorkstreams, HarnessWorkstreamsServer},
 };
 use supertag_protocol::v2::{
-    HarnessAskWorkSessionQuestionRequest, HarnessContinueWorkSessionRequest,
-    HarnessStartWorkSessionRequest, WorkSession, WorkSessionQuestion,
+    AskTagResponse, HarnessAskTagRequest, HarnessAskWorkSessionQuestionRequest,
+    HarnessContinueWorkSessionRequest, HarnessStartWorkSessionRequest, WorkSession,
+    WorkSessionQuestion,
     harness_work_sessions_server::{HarnessWorkSessions, HarnessWorkSessionsServer},
 };
 use supertag_protocol::v2::{
@@ -499,6 +500,14 @@ impl HarnessWorkstreams for HarnessFixture {
 
 #[tonic::async_trait]
 impl HarnessMailbox for HarnessFixture {
+    async fn ask_tag(
+        &self,
+        request: Request<HarnessAskTagRequest>,
+    ) -> Result<Response<AskTagResponse>, Status> {
+        self.authenticate(&request)?;
+        Err(Status::unimplemented("no Objective in this fixture"))
+    }
+
     async fn send_message(
         &self,
         request: Request<HarnessSendTagMessageRequest>,

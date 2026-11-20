@@ -131,7 +131,6 @@ it("converts Objectives and Work Sessions for the views", () => {
       budgetLimitMinor: 30_000n,
       budgetCurrency: "USD",
       reportedSpendMinor: 125n,
-      teamId: "",
       createdBy: "operator:local",
     } as never),
   ).toEqual({

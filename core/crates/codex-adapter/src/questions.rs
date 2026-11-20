@@ -14,7 +14,7 @@ use supertag_protocol::{
 };
 use tonic::{Code, transport::Channel};
 
-use crate::coordination::{self, Arguments, Inventory};
+use crate::coordination::{self, Arguments, Inventory, Reach};
 
 pub(crate) const NONE: &str = "none-v1";
 pub(crate) const OBJECTIVE_ASK: &str = "objective-ask-text-v1";
@@ -35,6 +35,10 @@ pub(crate) const SCHEDULE_SUFFIX: &str = "+schedule-v1";
 pub(crate) const CLOSE_SESSION_SUFFIX: &str = "+close-session-v1";
 pub(crate) const QUIET_SUFFIX: &str = "+quiet-v1";
 pub(crate) const OBJECTIVE_REPORT_SUFFIX: &str = "+objective-report-v1";
+/// An Objective's Session: `ask_tag`, and none of the tools that reach other Tags.
+pub(crate) const ASK_TAG_SUFFIX: &str = "+ask-tag-v1";
+/// A turn that reaches no Tag: none of the tools that reach other Tags.
+pub(crate) const NO_TAGS_SUFFIX: &str = "+no-tags-v1";
 pub(crate) const ONGOING_OBJECTIVE_REPORT_SUFFIX: &str = "+objective-report-ongoing-v1";
 const ONGOING_COMPLETION_REFUSED: &str = "This Objective is ongoing, so it never completes; only an operator ends it. Report ready_for_review or blocked instead, or finish the turn without a report.";
 const REPORT_SUMMARY_MAX: usize = 16_000;
@@ -43,6 +47,9 @@ const QUIET_NOTE_MAX: usize = 500;
 #[derive(Clone, Copy)]
 pub(crate) struct Tools {
     pub(crate) coordination: Inventory,
+    /// Which Tags the turn reaches: other Tags from the inbox Session or a person conversation,
+    /// its own Tag from an Objective's Session.
+    pub(crate) reach: Reach,
     pub(crate) capture_artifact: bool,
     pub(crate) acquire_artifacts: bool,
     pub(crate) attach_artifacts: bool,
@@ -131,6 +138,14 @@ impl Tools {
             Inventory::WorkSessionLifecycleReview => WORK_SESSION_LIFECYCLE_REVIEW,
         };
         let mut manifest = base.to_owned();
+        match self.reach {
+            Reach::Tags => {}
+            Reach::OwnTag => manifest.push_str(ASK_TAG_SUFFIX),
+            Reach::None if self.coordination >= Inventory::Workstream => {
+                manifest.push_str(NO_TAGS_SUFFIX)
+            }
+            Reach::None => {}
+        }
         if self.capture_artifact {
             manifest.push_str(ARTIFACT_CAPTURE_SUFFIX);
         }
@@ -195,7 +210,7 @@ impl Tools {
         {
             return Ok(Arguments::TagSessions(call));
         }
-        coordination::arguments(params, self.coordination)
+        coordination::arguments(params, self.coordination, self.reach)
     }
 }
 
@@ -305,7 +320,7 @@ impl Bridge {
         self.tools.manifest()
     }
     pub(crate) fn tools(&self) -> Value {
-        let mut specs = tool_specs(self.tools.coordination);
+        let mut specs = tool_specs(self.tools.coordination, self.tools.reach);
         if self.tools.capture_artifact {
             specs[0]["tools"]
                 .as_array_mut()
@@ -331,14 +346,6 @@ impl Bridge {
                 .as_array_mut()
                 .expect("tool specifications")
                 .push(coordination::close_spec());
-        }
-        if !self.capabilities.may_ask_objective_question {
-            for tool in specs[0]["tools"]
-                .as_array_mut()
-                .expect("tool specifications")
-            {
-                without_delegation(tool);
-            }
         }
         // The Tag's open Work Sessions, so the model knows its room before it starts one.
         if self.capabilities.may_start_work_session && self.capabilities.max_work_sessions > 0 {
@@ -473,6 +480,11 @@ impl Bridge {
                     .await?;
                 self.asked |= reply["success"] == true;
                 reply
+            }
+            Arguments::AskTag(text) if self.capabilities.may_ask_tag && !self.asked => {
+                self.coordination
+                    .ask_tag(text, operation_id, &self.token, &self.secrets)
+                    .await?
             }
             Arguments::Post(post) if self.capabilities.may_use_workstream && !self.asked => {
                 self.coordination
@@ -667,23 +679,7 @@ impl Bridge {
     }
 }
 
-/// `start_session` for a turn that doesn't own an Objective: only an Objective's own turn may
-/// delegate to another Tag, so others aren't offered `tag`.
-fn without_delegation(tool: &mut Value) {
-    if tool["name"] != "start_session" {
-        return;
-    }
-    if let Some(properties) = tool["inputSchema"]["properties"].as_object_mut() {
-        properties.remove("tag");
-    }
-    let description = tool["description"].as_str().unwrap_or_default().replace(
-        " To delegate to an eligible Tag on this Objective's Team, name it in tag; omit tag to run the work on this Tag.",
-        "",
-    );
-    tool["description"] = json!(description);
-}
-
-pub(crate) fn tool_specs(inventory: Inventory) -> Value {
+pub(crate) fn tool_specs(inventory: Inventory, reach: Reach) -> Value {
     let (description, max) = if inventory == Inventory::ChildQuestions {
         (
             "Record one question for the parent Session. Finish this turn so the parent can receive it and relay an answer.",
@@ -707,7 +703,9 @@ pub(crate) fn tool_specs(inventory: Inventory) -> Value {
         }));
     }
     if inventory >= Inventory::Workstream {
-        tools.extend(coordination::tool_specs(inventory));
+        tools.extend(coordination::tool_specs(inventory, reach));
+    } else if reach == Reach::OwnTag {
+        tools.push(coordination::ask_tag_spec());
     }
     json!([{
         "type":"namespace", "name":"supertag",
@@ -845,36 +843,68 @@ pub(crate) fn validate_report(params: &Value) -> Result<ObjectiveReport> {
 mod tests {
     use super::*;
 
+    fn names(inventory: Inventory, reach: Reach) -> Vec<String> {
+        tool_specs(inventory, reach)[0]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap().to_owned())
+            .collect()
+    }
+
     #[test]
-    fn only_an_objective_turn_is_offered_tag_and_every_turn_hears_its_harness() {
-        let start = || {
-            tool_specs(Inventory::WorkSessions)[0]["tools"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|tool| tool["name"] == "start_session")
-                .cloned()
-                .unwrap()
-        };
-        let owner = start();
-        assert!(owner["inputSchema"]["properties"].get("tag").is_some());
-        assert!(
-            owner["inputSchema"]["properties"]
-                .get("workspace")
-                .is_none()
-        );
-        let mut conversation = start();
-        without_delegation(&mut conversation);
-        assert!(
-            conversation["inputSchema"]["properties"]
-                .get("tag")
-                .is_none()
-        );
-        let description = conversation["description"].as_str().unwrap();
-        assert!(!description.contains("tag"), "{description}");
+    fn an_objective_turn_asks_its_tag_and_reaches_no_other_tag() {
+        let objective = names(Inventory::WorkSessionLifecycleReview, Reach::OwnTag);
+        for name in ["ask", "ask_tag", "start_session", "continue_session"] {
+            assert!(objective.iter().any(|tool| tool == name), "{objective:?}");
+        }
+        for name in [
+            "send_message",
+            "read_mailbox",
+            "post",
+            "read_workstream",
+            "read_review_patch",
+        ] {
+            assert!(!objective.iter().any(|tool| tool == name), "{objective:?}");
+        }
+        let inbox = names(Inventory::DirectReview, Reach::Tags);
+        for name in ["send_message", "read_mailbox", "post", "read_workstream"] {
+            assert!(inbox.iter().any(|tool| tool == name), "{inbox:?}");
+        }
+        assert!(!inbox.iter().any(|tool| tool == "ask_tag"));
+        // A Work Session always runs on its parent's Tag: start_session names no Tag.
+        let start = tool_specs(Inventory::WorkSessions, Reach::OwnTag)[0]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "start_session")
+            .cloned()
+            .unwrap();
+        assert!(start["inputSchema"]["properties"].get("tag").is_none());
+        let description = start["description"].as_str().unwrap();
         assert!(
             description.contains("Omit harness to keep codex"),
             "{description}"
+        );
+        assert!(!description.contains("Team"), "{description}");
+        // The tools an Objective's Session lacks are refused even when named.
+        let send = json!({"namespace":"supertag","tool":"send_message",
+            "arguments":{"to":"other","text":"hello"}});
+        assert!(
+            coordination::arguments(&send, Inventory::WorkSessionLifecycleReview, Reach::OwnTag)
+                .is_err()
+        );
+        let ask =
+            json!({"namespace":"supertag","tool":"ask_tag","arguments":{"text":"Need review"}});
+        assert!(matches!(
+            coordination::arguments(&ask, Inventory::WorkSessionLifecycleReview, Reach::OwnTag),
+            Ok(Arguments::AskTag(text)) if text == "Need review"
+        ));
+        assert!(coordination::arguments(&ask, Inventory::DirectReview, Reach::Tags).is_err());
+        let delegate = json!({"namespace":"supertag","tool":"start_session",
+            "arguments":{"title":"t","instruction":"i","tag":"other"}});
+        assert!(
+            coordination::arguments(&delegate, Inventory::WorkSessions, Reach::OwnTag).is_err()
         );
     }
 
@@ -923,6 +953,7 @@ mod tests {
     fn report_is_offered_and_parsed_only_when_admitted() -> Result<()> {
         let tools = |report_objective: Reporting| Tools {
             coordination: Inventory::Ask,
+            reach: Reach::None,
             capture_artifact: false,
             acquire_artifacts: false,
             attach_artifacts: false,

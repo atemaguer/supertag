@@ -81,23 +81,12 @@ fn runtime_grants(task: &Task) -> RuntimeGrants {
     )
 }
 
-fn has_typed_runtime(task: &Task) -> bool {
-    task.policy_snapshot
-        .as_ref()
-        .is_some_and(|snapshot| snapshot.runtime_authority.is_some())
-}
-
-pub(super) fn require_unchanged_authority(
-    previous: &Task,
-    next: &Task,
-    delegated: bool,
-) -> Result<()> {
+pub(super) fn require_unchanged_authority(previous: &Task, next: &Task) -> Result<()> {
     if !same_permissions(previous, next)
         || previous.harness_kind != next.harness_kind
         || previous.workspace != next.workspace
         || supertag_protocol::shared_execution::environment(previous.policy_snapshot.as_ref())
             != supertag_protocol::shared_execution::environment(next.policy_snapshot.as_ref())
-        || (delegated && (!has_typed_runtime(previous) || !has_typed_runtime(next)))
         || runtime_grants(previous) != runtime_grants(next)
     {
         return Err(StoreError::FailedPrecondition(
@@ -244,6 +233,13 @@ impl Store {
         super::reopen_in(&mut tx, &parent, &input.work_session_id).await?;
         let previous_id: String = session.try_get("latest_task_id")?;
         let target: String = session.try_get("tag_id")?;
+        // A Work Session delegated to another Tag before Work Sessions always ran on their
+        // parent's Tag finishes and reports, but takes no more work from here.
+        if target != parent.tag_id {
+            return Err(StoreError::FailedPrecondition(format!(
+                "this Work Session ran on Tag {target}, so it cannot be continued; start a new Work Session on this Tag"
+            )));
+        }
         let previous =
             sqlx::query("SELECT * FROM supertag_v2_tasks WHERE task_id=$1 AND tag_id=$2")
                 .bind(&previous_id)
@@ -302,31 +298,18 @@ impl Store {
             serde_json::to_string(&input.work_session_id)?,
             serde_json::json!({"message": message})
         );
-        let mut next = insert_child_in(
+        let mut next =
+            insert_child_in(&mut tx, order, &parent, &input.work_session_id, &prompt).await?;
+        // A Work Session keeps the harness it started on.
+        crate::store::retarget_harness_in(&mut tx, &mut next, child.harness_kind()).await?;
+        require_unchanged_authority(&child, &next)?;
+        let allocation = crate::budget_pool::child_in(
             &mut tx,
-            order,
             &parent,
             objective_id.as_deref(),
-            &target,
-            &input.work_session_id,
-            &prompt,
+            parent.execution_limits.as_ref(),
         )
         .await?;
-        if target == parent.tag_id {
-            // A Work Session keeps the harness it started on.
-            crate::store::retarget_harness_in(&mut tx, &mut next, child.harness_kind()).await?;
-        }
-        require_unchanged_authority(&child, &next, target != parent.tag_id)?;
-        if target != parent.tag_id {
-            crate::store::preserve_execution_in(&mut tx, &mut next, &child).await?;
-        }
-        let base = if target == parent.tag_id {
-            parent.execution_limits.as_ref()
-        } else {
-            child.execution_limits.as_ref()
-        };
-        let allocation =
-            crate::budget_pool::child_in(&mut tx, &parent, objective_id.as_deref(), base).await?;
         crate::budget_pool::set_in(&mut tx, &mut next, allocation).await?;
         sqlx::query("INSERT INTO supertag_v2_work_session_tasks (task_id,work_session_id,kind,starter_task_id) VALUES ($1,$2,$3,$4)")
             .bind(&next.task_id).bind(&input.work_session_id).bind(CHILD).bind(&parent.task_id).execute(&mut *tx).await?;
@@ -370,8 +353,7 @@ mod tests {
             }),
             ..Default::default()
         });
-        assert!(require_unchanged_authority(&historical, &later, false).is_ok());
-        assert!(require_unchanged_authority(&historical, &later, true).is_err());
+        assert!(require_unchanged_authority(&historical, &later).is_ok());
 
         let mut previous = later.clone();
         let runtime = previous
@@ -382,7 +364,7 @@ mod tests {
             .as_mut()
             .unwrap();
         runtime.objective_revision = Some(1);
-        assert!(require_unchanged_authority(&previous, &later, false).is_ok());
+        assert!(require_unchanged_authority(&previous, &later).is_ok());
         previous
             .policy_snapshot
             .as_mut()
@@ -391,61 +373,10 @@ mod tests {
             .as_mut()
             .unwrap()
             .actions
-            .push("files:delegate-write".into());
+            .push("files:write".into());
         assert!(same_permissions(&previous, &later));
         assert!(matches!(
-            require_unchanged_authority(&previous, &later, false),
-            Err(StoreError::FailedPrecondition(_))
-        ));
-    }
-
-    #[test]
-    fn delegated_continuation_fences_gated_authority_without_binding_provenance() {
-        let previous = Task {
-            tag_id: "member".into(),
-            allowed_actions: vec!["files:read".into()],
-            policy_snapshot: Some(TaskPolicySnapshot {
-                runtime_authority: Some(TaskRuntimeAuthority {
-                    actions: vec!["files:write".into(), "files:read".into()],
-                    approvals: vec![RuntimeApprovalRequirement {
-                        action: "files:write".into(),
-                        permission_set_ids: vec!["lead-grant".into(), "member-grant".into()],
-                        approvers: vec!["operator:alice".into(), "operator:bob".into()],
-                    }],
-                    objective_id: Some("goal".into()),
-                    objective_revision: Some(1),
-                    delegating_task_id: Some("first-owner-task".into()),
-                    files: None,
-                    network: None,
-                }),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        let mut next = previous.clone();
-        let runtime = next
-            .policy_snapshot
-            .as_mut()
-            .unwrap()
-            .runtime_authority
-            .as_mut()
-            .unwrap();
-        runtime.objective_revision = Some(2);
-        runtime.delegating_task_id = Some("later-owner-task".into());
-        runtime.actions.reverse();
-        runtime.approvals[0].permission_set_ids.reverse();
-        runtime.approvals[0].approvers.reverse();
-        assert!(require_unchanged_authority(&previous, &next, true).is_ok());
-        next.policy_snapshot
-            .as_mut()
-            .unwrap()
-            .runtime_authority
-            .as_mut()
-            .unwrap()
-            .approvals[0]
-            .approvers = vec!["operator:charlie".into()];
-        assert!(matches!(
-            require_unchanged_authority(&previous, &next, true),
+            require_unchanged_authority(&previous, &later),
             Err(StoreError::FailedPrecondition(_))
         ));
     }

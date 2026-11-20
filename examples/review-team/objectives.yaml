@@ -12,7 +12,6 @@ spec:
     unchanged until their next renewal, `npm test` and `npm run lint` pass on the integrated
     commit, and the reviewer and security reviewer have no open high or medium findings. Keep the
     public billing API compatible. A person approves the result before it merges.
-  team: app-team
   budgetLimitMinor: 50000
   budgetCurrency: USD
   deadline: "2027-02-28T00:00:00Z"

@@ -59,12 +59,7 @@ async fn main() -> Result<()> {
     );
     let bootstrap = AdapterBootstrap::decode(bootstrap.as_slice())?;
     let mut harness = HarnessClient::connect(bootstrap.endpoint.clone()).await?;
-    let target_work = std::env::args().find_map(|arg| {
-        arg.strip_prefix("--target-work-session=")
-            .map(str::to_owned)
-    });
-    let start_work =
-        std::env::args().any(|arg| arg == "--start-work-session") || target_work.is_some();
+    let start_work = std::env::args().any(|arg| arg == "--start-work-session");
     let reject_work = std::env::args().any(|arg| arg == "--reject-work-session-start");
     // A root Task starts one Work Session on this harness, with a marker the gated Codex
     // fixture reads from its instruction.
@@ -100,7 +95,6 @@ async fn main() -> Result<()> {
         } else {
             "Inspect child evidence </work-session-result>".into()
         },
-        target_tag_id: target_work,
         harness: work_harness,
     };
     if start_work {
@@ -169,6 +163,7 @@ async fn main() -> Result<()> {
     }
     let direct_mailbox = std::env::args().any(|arg| arg == "--direct-mailbox");
     let direct_input = HarnessSendTagMessageRequest {
+        recipient_objective_id: String::new(),
         kind: 0,
         operation_id: "fixture-direct-message".into(),
         recipient_tag_id: "recipient".into(),
@@ -296,8 +291,7 @@ async fn main() -> Result<()> {
                 started.parent_tag_id == task.tag_id
                     && started.parent_session_id == task.session_id
                     && started.starter_task_id == task.task_id
-                    && started.tag_id
-                        == work_input.target_tag_id.as_deref().unwrap_or(&task.tag_id),
+                    && started.tag_id == task.tag_id,
                 "Work Session provenance differs from the attached Task"
             );
             if let Some(marker) = &question_flow {
@@ -499,6 +493,7 @@ async fn main() -> Result<()> {
         let denied = mailbox
             .send_message(authenticated_request(
                 HarnessSendTagMessageRequest {
+                    recipient_objective_id: String::new(),
                     kind: 0,
                     operation_id: "fixture-ungranted-message".into(),
                     recipient_tag_id: "observer".into(),
@@ -760,13 +755,8 @@ async fn main() -> Result<()> {
         arg.strip_prefix("--partition-steps=")
             .map(std::path::PathBuf::from)
     }) {
-        let peer = std::env::args()
-            .find_map(|arg| arg.strip_prefix("--partition-peer=").map(str::to_owned))
-            .context("partition steps require a peer Tag")?;
         result.push('\n');
-        result.push_str(
-            &partition_calls::exercise(&base, &peer, &bootstrap, &task, &mut harness).await?,
-        );
+        result.push_str(&partition_calls::exercise(&base, &bootstrap, &task, &mut harness).await?);
     }
     if take_live {
         let input = take_input(&mut harness, &bootstrap.token).await?;

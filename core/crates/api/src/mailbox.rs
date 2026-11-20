@@ -86,4 +86,17 @@ impl attempt_mailbox_server::AttemptMailbox for Api {
         })
         .await
     }
+    async fn ask_tag(
+        &self,
+        request: Request<AskAttemptTagRequest>,
+    ) -> Result<Response<AskTagResponse>, Status> {
+        self.forward_attempt(request, |channel, request| async {
+            attempt_mailbox_client::AttemptMailboxClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                .ask_tag(request)
+                .await
+        })
+        .await
+    }
 }

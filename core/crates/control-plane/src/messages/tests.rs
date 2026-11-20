@@ -395,7 +395,6 @@ async fn contract(url: &str) {
                 team_id: "release".into(),
                 name: "Release".into(),
                 member_tag_ids: vec!["alice".into(), "bob".into()],
-                max_concurrency: None,
             },
         )
         .await

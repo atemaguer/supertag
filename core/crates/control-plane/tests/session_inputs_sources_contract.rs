@@ -251,7 +251,6 @@ async fn contract(url: &str) {
                 team_id: "engineering".into(),
                 name: "Engineering".into(),
                 member_tag_ids: vec!["gate".into()],
-                max_concurrency: None,
             },
         )
         .await

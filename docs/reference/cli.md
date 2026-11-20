@@ -1996,8 +1996,6 @@ Options:
           Member Tag ID. Repeat for each member
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
-      --max-concurrency <MAX_CONCURRENCY>
-          Most Tasks the Team runs at once. Omit for no Team limit
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
   -h, --help
@@ -2023,10 +2021,6 @@ Options:
           Replace the members with these Tag IDs. Repeat for each member
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
-      --max-concurrency <MAX_CONCURRENCY>
-          Most Tasks the Team runs at once
-      --clear-concurrency
-          Remove the Team concurrency limit
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. If given, the change is refused when the resource has changed since
       --operation-id <OPERATION_ID>
@@ -4770,12 +4764,10 @@ Options:
           Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --owner <OWNER>
           Tag that owns the Objective until it is met
-      --state-directory <STATE_DIRECTORY>
-          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
-      --team <TEAM>
-          Optional Team ID or name
       --ongoing
           An ongoing responsibility with no finish, instead of an outcome that completes
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
       --deadline <DEADLINE>
           RFC 3339 time with a time zone by which the outcome is due
       --budget-minor <BUDGET_MINOR>

@@ -7,8 +7,14 @@ pub async fn exercise(
     task: &Task,
     scope: Option<&AttemptCapabilities>,
 ) -> Result<()> {
-    if let Some(commit) = argument("--request-commit-review=") {
-        ensure!(scope.is_some_and(|scope| scope.may_request_commit_review));
+    // An Objective's report asks its Tag to have the commit reviewed; the Tag's inbox turn
+    // requests the review, since only the inbox Session reaches other Tags.
+    if let Some(commit) = argument("--request-commit-review=")
+        && !task.session_id.starts_with("inbox:")
+    {
+        ensure!(scope.is_some_and(|scope| scope.may_ask_tag
+            && !scope.may_request_commit_review
+            && !scope.may_send_tag_message));
         ensure!(
             task.prompt.contains(&commit),
             "report did not expose the verified commit"
@@ -17,18 +23,41 @@ pub async fn exercise(
             harness_mailbox_client::HarnessMailboxClient::connect(bootstrap.endpoint.clone())
                 .await?;
         let plain = HarnessSendTagMessageRequest {
+            recipient_objective_id: String::new(),
             kind: 0,
             operation_id: "report-plain-message".into(),
             recipient_tag_id: "reviewer".into(),
-            text: "This report should only be able to request review".into(),
+            text: "An Objective's Session reaches no other Tag".into(),
             review: None,
         };
         let denied = mailbox
             .send_message(authenticated_request(plain, &bootstrap.token, None)?)
             .await
-            .expect_err("a report cannot send ordinary messages");
+            .expect_err("an Objective's report cannot message another Tag");
         ensure!(denied.code() == Code::PermissionDenied);
+        let asked = mailbox
+            .ask_tag(authenticated_request(
+                HarnessAskTagRequest {
+                    operation_id: "ask-for-review".into(),
+                    text: format!("Have the reviewer review commit {commit}."),
+                },
+                &bootstrap.token,
+                None,
+            )?)
+            .await?
+            .into_inner();
+        ensure!(!asked.message_id.is_empty() && !asked.duplicate);
+    } else if let Some(commit) = argument("--request-commit-review=") {
+        ensure!(scope.is_some_and(|scope| scope.may_request_commit_review));
+        ensure!(
+            task.prompt.contains(&commit) && task.prompt.contains("<objective-message"),
+            "inbox turn did not get the Objective's ask"
+        );
+        let mut mailbox =
+            harness_mailbox_client::HarnessMailboxClient::connect(bootstrap.endpoint.clone())
+                .await?;
         let input = HarnessSendTagMessageRequest {
+            recipient_objective_id: String::new(),
             kind: 0,
             operation_id: "request-work-review".into(),
             recipient_tag_id: "reviewer".into(),
@@ -109,6 +138,7 @@ pub async fn exercise(
         let patch = std::str::from_utf8(&page.data)?;
         ensure!(patch.contains("workspace.txt") && patch.contains("Inspect child evidence"));
         let input = HarnessSendTagMessageRequest {
+            recipient_objective_id: String::new(),
             kind: 0,
             operation_id: "record-work-verdict".into(),
             recipient_tag_id: review.requester_tag_id.clone(),

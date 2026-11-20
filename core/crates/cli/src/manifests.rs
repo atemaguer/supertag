@@ -174,7 +174,6 @@ struct StartRateSpec {
 struct TeamSpec {
     name: Option<String>,
     members: Option<Vec<String>>,
-    max_concurrency: Option<u32>,
     /// Declared limits replace all three; an omitted one keeps its default.
     wake_limits: Option<WakeLimitsSpec>,
 }
@@ -209,7 +208,6 @@ struct ObjectiveSpec {
     deadline: Option<String>,
     budget_limit_minor: Option<u64>,
     budget_currency: Option<String>,
-    team: Option<String>,
     runtime_actions: Option<Vec<String>>,
 }
 

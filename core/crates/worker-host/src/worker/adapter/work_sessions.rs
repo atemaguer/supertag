@@ -92,7 +92,6 @@ impl HarnessWorkSessions for Bridge {
             operation_id: input.operation_id,
             title: self.redact(&input.title),
             instruction: self.redact(&input.instruction),
-            target_tag_id: input.target_tag_id,
             harness: input.harness,
         };
         let response = self

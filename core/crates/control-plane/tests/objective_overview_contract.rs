@@ -1,8 +1,7 @@
-//! Objective completion, its report to the home thread, the operator overview,
-//! and Team concurrency as the overview reports it (TS
+//! Objective completion, its report to the home thread, and the operator overview (TS
 //! `tests/objective-completion-report.test.ts`, `tests/objective-summary.test.ts`,
 //! `packages/control-plane/objective-summary.test.ts`, `tests/objective-overview.test.ts`,
-//! `tests/team-concurrency.test.ts`, `packages/control-plane/budget-notifications.test.ts`).
+//! `packages/control-plane/budget-notifications.test.ts`).
 mod support;
 
 use std::{
@@ -66,7 +65,7 @@ async fn all_objectives(store: &Store) -> Vec<Objective> {
         .unwrap()
 }
 
-async fn create(store: &Store, id: &str, team: Option<&str>, budget: Option<u64>) -> Objective {
+async fn create(store: &Store, id: &str, budget: Option<u64>) -> Objective {
     store
         .create_objective(
             OPERATOR,
@@ -75,7 +74,6 @@ async fn create(store: &Store, id: &str, team: Option<&str>, budget: Option<u64>
                 objective_id: id.into(),
                 owner_tag_id: "owner".into(),
                 outcome: "Deliver a reviewed result".into(),
-                team_id: team.map(Into::into),
                 budget_limit_minor: budget,
                 budget_currency: budget.map(|_| "USD".into()),
                 ..Default::default()
@@ -311,7 +309,7 @@ async fn completion_reports(store: &Store, url: &str, host: &HostAuthority) {
 
     // An Objective without a home thread completes and reports nowhere.
     let before = home_replies(url, "").await.len();
-    let quiet = create(store, "quiet", None, None).await;
+    let quiet = create(store, "quiet", None).await;
     let quiet_turn = claim(store, host, &quiet.starting_task_id).await;
     finish(
         store,
@@ -335,7 +333,7 @@ async fn completion_reports(store: &Store, url: &str, host: &HostAuthority) {
 /// `supertag objective complete`: a required assessment, optimistic revision,
 /// idempotent operation IDs, ongoing Objectives, and closed ones refused.
 async fn operator_completion(store: &Store, host: &HostAuthority) {
-    let objective = create(store, "operator-complete", None, None).await;
+    let objective = create(store, "operator-complete", None).await;
     let id = objective.objective_id.as_str();
     for blank in ["", "   \n"] {
         assert!(matches!(
@@ -443,7 +441,7 @@ async fn operator_completion(store: &Store, host: &HostAuthority) {
     );
 
     // A cancelled Objective stays cancelled.
-    let cancelled = create(store, "cancelled", None, None).await;
+    let cancelled = create(store, "cancelled", None).await;
     store
         .cancel_objective(
             OPERATOR,
@@ -475,24 +473,10 @@ async fn operator_completion(store: &Store, host: &HostAuthority) {
 }
 
 /// The overview leads with the owner's Session, then every Work Session; it
-/// reports one pool for all of them, what needs a person, Team posts, and
-/// pages over every Task while keeping the totals.
+/// reports one pool for all of them, what needs a person, and pages over every
+/// Task while keeping the totals.
 async fn objective_overview(store: &Store, host: &HostAuthority, clock: &AtomicI64) {
-    store
-        .create_team(
-            OPERATOR,
-            &CreateTeamRequest {
-                wake_limits: None,
-                operation_id: "team-delivery".into(),
-                team_id: "delivery".into(),
-                name: "delivery".into(),
-                member_tag_ids: vec!["owner".into(), "helper".into()],
-                max_concurrency: Some(2),
-            },
-        )
-        .await
-        .unwrap();
-    let objective = create(store, "overview", Some("delivery"), Some(1000)).await;
+    let objective = create(store, "overview", Some(1000)).await;
     let id = objective.objective_id.as_str();
     let start = overview(store, id).await;
     assert_eq!(start.sessions.len(), 1);
@@ -500,12 +484,6 @@ async fn objective_overview(store: &Store, host: &HostAuthority, clock: &AtomicI
     assert!(owner.owner);
     assert_eq!(owner.status(), ObjectiveSessionStatus::Queued);
     assert_eq!(owner.latest_task_id, objective.starting_task_id);
-    let team = start.team.as_ref().unwrap();
-    assert_eq!(
-        (team.name.as_str(), team.max_concurrency, team.running_turns),
-        ("delivery", Some(2), 0)
-    );
-    assert_eq!(team.member_tag_ids, ["helper", "owner"]);
     let pool = start.pool.as_ref().unwrap();
     assert_eq!(pool.measure(), ObjectiveBudgetMeasure::ProviderReportedCost);
     assert_eq!(
@@ -517,14 +495,13 @@ async fn objective_overview(store: &Store, host: &HostAuthority, clock: &AtomicI
     assert_eq!(start.conversation[0].kind, "start");
     assert_eq!(start.total_tasks, 1);
 
-    // The owner's turn runs, hands work to the helper, and reports cost.
+    // The owner's turn runs, starts a Work Session on its own Tag, and reports cost.
     let turn = claim(store, host, &objective.starting_task_id).await;
     let running = overview(store, id).await;
     assert_eq!(
         running.sessions[0].status(),
         ObjectiveSessionStatus::Running
     );
-    assert_eq!(running.team.as_ref().unwrap().running_turns, 1);
     let work = store
         .start_work_session(
             &supertag_control_plane::AttemptAccess::new(host, &turn),
@@ -532,19 +509,7 @@ async fn objective_overview(store: &Store, host: &HostAuthority, clock: &AtomicI
                 operation_id: "build".into(),
                 title: "Build the exporter".into(),
                 instruction: "Write the exporter".into(),
-                target_tag_id: Some("helper".into()),
                 ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-    store
-        .post_attempt_workstream(
-            &supertag_control_plane::AttemptAccess::new(host, &turn),
-            &PostAttemptWorkstreamRequest {
-                operation_id: "post".into(),
-                body: "Exporter handed to helper.".into(),
-                to_tag_ids: vec!["helper".into()],
             },
         )
         .await
@@ -594,7 +559,7 @@ async fn objective_overview(store: &Store, host: &HostAuthority, clock: &AtomicI
             .iter()
             .map(|session| (session.owner, session.tag_id.as_str()))
             .collect::<Vec<_>>(),
-        [(true, "owner"), (false, "helper")]
+        [(true, "owner"), (false, "owner")]
     );
     let owner = &view.sessions[0];
     assert_eq!(owner.status(), ObjectiveSessionStatus::Waiting);
@@ -629,17 +594,6 @@ async fn objective_overview(store: &Store, host: &HostAuthority, clock: &AtomicI
     assert_eq!(
         view.conversation[0].result,
         "Handing the build to the helper."
-    );
-    assert_eq!(
-        view.posts
-            .iter()
-            .map(|post| (
-                post.sequence,
-                post.author_tag_id.as_str(),
-                post.body.as_str()
-            ))
-            .collect::<Vec<_>>(),
-        [(1, "owner", "Exporter handed to helper.")]
     );
 
     // Pages cover every Task of every Session while the totals stay whole.
@@ -679,7 +633,7 @@ async fn objective_overview(store: &Store, host: &HostAuthority, clock: &AtomicI
         .unwrap();
     assert_eq!(second.tasks.len(), 1);
     assert_eq!(second.tasks[0].kind, "work");
-    assert_eq!(second.tasks[0].tag_id, "helper");
+    assert_eq!(second.tasks[0].tag_id, "owner");
     assert_eq!(second.next_offset, None);
 
     // A paused Objective says how to resume it.
@@ -917,68 +871,6 @@ async fn skipped_report(store: &Store, url: &str, host: &HostAuthority) {
     );
 }
 
-/// Team concurrency counts every Objective naming the Team, and only those
-/// (TS `tests/team-concurrency.test.ts`).
-async fn team_concurrency(store: &Store, host: &HostAuthority) {
-    let team = |id: &str, limit: Option<u32>| CreateTeamRequest {
-        wake_limits: None,
-        operation_id: format!("team-{id}"),
-        team_id: id.into(),
-        name: id.into(),
-        member_tag_ids: vec!["owner".into()],
-        max_concurrency: limit,
-    };
-    for (id, limit) in [("open", None), ("throttled", Some(1)), ("other", Some(1))] {
-        store.create_team(OPERATOR, &team(id, limit)).await.unwrap();
-    }
-    // Without a limit, every Objective's turn runs at once.
-    let mut open = vec![];
-    for index in 0..3 {
-        open.push(create(store, &format!("open-{index}"), Some("open"), None).await);
-    }
-    let mut running = vec![];
-    for objective in &open {
-        running.push(claim(store, host, &objective.starting_task_id).await);
-    }
-    let view = overview(store, "open-0").await;
-    let team_view = view.team.as_ref().unwrap();
-    assert_eq!(
-        (team_view.max_concurrency, team_view.running_turns),
-        (None, 3)
-    );
-    for attempt in &running {
-        finish(store, host, attempt, "Done", ObjectiveSignal::Completed).await;
-    }
-
-    // A limit of one holds the second Objective's turn until the first ends.
-    let here = create(store, "here", Some("throttled"), None).await;
-    let elsewhere = create(store, "elsewhere", Some("throttled"), None).await;
-    let first = claim(store, host, &here.starting_task_id).await;
-    assert!(
-        store
-            .claim_task(host, "held-by-team")
-            .await
-            .unwrap()
-            .is_none()
-    );
-    // Another Team's limit, and an Objective without a Team, are untouched by it.
-    let unrelated = create(store, "unrelated", Some("other"), None).await;
-    let teamless = create(store, "teamless", None, None).await;
-    let unrelated_turn = claim(store, host, &unrelated.starting_task_id).await;
-    let teamless_turn = claim(store, host, &teamless.starting_task_id).await;
-    let view = overview(store, "here").await;
-    let team_view = view.team.as_ref().unwrap();
-    assert_eq!(
-        (team_view.max_concurrency, team_view.running_turns),
-        (Some(1), 1)
-    );
-    finish(store, host, &first, "Done", ObjectiveSignal::Completed).await;
-    let second = claim(store, host, &elsewhere.starting_task_id).await;
-    for attempt in [&second, &unrelated_turn, &teamless_turn] {
-        finish(store, host, attempt, "Done", ObjectiveSignal::Completed).await;
-    }
-}
-
 /// Each part runs on its own database so no part's queued Tasks reach another's claims.
 async fn contract(url: String, part: usize) {
     let clock = Arc::new(AtomicI64::new(NOW));
@@ -1000,13 +892,12 @@ async fn contract(url: String, part: usize) {
         2 => objective_overview(&store, &host, &clock).await,
         3 => budget_notice(&store, &url, &host).await,
         4 => deadline_notices(&store, &url, &clock).await,
-        5 => skipped_report(&store, &url, &host).await,
-        _ => team_concurrency(&store, &host).await,
+        _ => skipped_report(&store, &url, &host).await,
     }
     store.close().await;
 }
 
-const PARTS: usize = 7;
+const PARTS: usize = 6;
 
 #[tokio::test]
 async fn sqlite_objective_completion_and_overview() {

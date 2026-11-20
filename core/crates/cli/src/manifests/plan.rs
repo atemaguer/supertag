@@ -1209,7 +1209,6 @@ impl<'a> Catalog<'a> {
         let declared = [
             spec.name.is_some(),
             spec.members.is_some(),
-            spec.max_concurrency.is_some(),
             wakes_declared,
             wakes_declared,
             wakes_declared,
@@ -1257,11 +1256,6 @@ impl<'a> Catalog<'a> {
         for member in &members {
             self.require_tag(declarations, member).await?;
         }
-        let limit = spec.max_concurrency.filter(|limit| *limit != 0);
-        ensure!(
-            limit.is_none_or(|value| value <= 1000),
-            "invalid Team concurrency"
-        );
         for reference in [name, &display] {
             let key = (Kind::Team, reference.into());
             ensure!(
@@ -1284,8 +1278,8 @@ impl<'a> Catalog<'a> {
             );
         }
         let old = prior.as_ref();
-        let concurrency =
-            |limit: Option<u32>| limit.map(|limit| number(limit.into())).unwrap_or_default();
+        let limit =
+            |value: Option<u32>| value.map(|value| number(value.into())).unwrap_or_default();
         self.planned_fields = [
             field(
                 "spec.name",
@@ -1298,24 +1292,19 @@ impl<'a> Catalog<'a> {
                 list(&members),
             ),
             field(
-                "spec.maxConcurrency",
-                old.map(|v| concurrency(v.max_concurrency)),
-                concurrency(limit),
-            ),
-            field(
                 "spec.wakeLimits.mutualPerTask",
-                old.map(|v| concurrency(v.wake_limits.and_then(|w| w.mutual_per_task))),
-                concurrency(wakes.mutual_per_task),
+                old.map(|v| limit(v.wake_limits.and_then(|w| w.mutual_per_task))),
+                limit(wakes.mutual_per_task),
             ),
             field(
                 "spec.wakeLimits.perTagPerHour",
-                old.map(|v| concurrency(v.wake_limits.and_then(|w| w.per_tag_per_hour))),
-                concurrency(wakes.per_tag_per_hour),
+                old.map(|v| limit(v.wake_limits.and_then(|w| w.per_tag_per_hour))),
+                limit(wakes.per_tag_per_hour),
             ),
             field(
                 "spec.wakeLimits.perObjectivePerHour",
-                old.map(|v| concurrency(v.wake_limits.and_then(|w| w.per_objective_per_hour))),
-                concurrency(wakes.per_objective_per_hour),
+                old.map(|v| limit(v.wake_limits.and_then(|w| w.per_objective_per_hour))),
+                limit(wakes.per_objective_per_hour),
             ),
         ]
         .into_iter()
@@ -1326,9 +1315,6 @@ impl<'a> Catalog<'a> {
             Some(prior)
                 if prior.name != display
                     || prior.member_tag_ids != members
-                    || spec
-                        .max_concurrency
-                        .is_some_and(|_| prior.max_concurrency != limit)
                     || (wakes_declared && prior.wake_limits != desired_wakes) =>
             {
                 Some((
@@ -1340,7 +1326,6 @@ impl<'a> Catalog<'a> {
                         expected_revision: prior.revision,
                         name: Some(display),
                         members: Some(TeamMembers { tag_ids: members }),
-                        max_concurrency: spec.max_concurrency,
                     }),
                 ))
             }
@@ -1353,7 +1338,6 @@ impl<'a> Catalog<'a> {
                     team_id: name.into(),
                     name: display,
                     member_tag_ids: members,
-                    max_concurrency: limit,
                 }),
             )),
         };
@@ -1386,23 +1370,6 @@ impl<'a> Catalog<'a> {
             .as_deref()
             .map(crate::objectives::deadline)
             .transpose()?);
-        let team = if let Some(team) = spec.team {
-            Some(
-                if let Some(id) = declarations.resource_id(Kind::Team, &team) {
-                    id.into()
-                } else {
-                    lookup(
-                        self.teams
-                            .get_team(request(GetTeamRequest { team: team.clone() }, self.token)?),
-                    )
-                    .await?
-                    .ok_or_else(|| missing(Kind::Team, &team))?
-                    .team_id
-                },
-            )
-        } else {
-            None
-        };
         if let Some(actions) = &mut spec.runtime_actions {
             sorted(actions)?;
         }
@@ -1418,7 +1385,6 @@ impl<'a> Catalog<'a> {
             deadline_ms,
             budget_limit_minor: spec.budget_limit_minor,
             budget_currency: spec.budget_currency,
-            team_id: team,
             runtime_actions: actions,
             notification_task_id: None,
         };
@@ -1428,7 +1394,6 @@ impl<'a> Catalog<'a> {
                 prior.owner_tag_id == value.owner_tag_id
                     && prior.outcome == value.outcome
                     && prior.ongoing == value.ongoing
-                    && prior.team_id == value.team_id
                     && value
                         .runtime_actions
                         .as_ref()

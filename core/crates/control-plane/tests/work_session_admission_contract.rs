@@ -185,6 +185,7 @@ async fn contract(url: String) {
                 recipient_tag_id: "recipient".into(),
                 text: "Read this fixture notice".into(),
                 review: None,
+                recipient_objective_id: String::new(),
             },
         )
         .await
@@ -247,22 +248,6 @@ async fn contract(url: String) {
 
     let first = submit(&store, "owner", "parent").await;
     let first_attempt = claim_start(&store, &host, &first.task_id).await;
-    let mut wrong = request("wrong-target");
-    wrong.target_tag_id = Some("recipient".into());
-    // A conversation's turn can't delegate, and the refusal says so, so a model can recover.
-    match store
-        .start_work_session(
-            &supertag_control_plane::AttemptAccess::new(&host, &first_attempt),
-            &wrong,
-        )
-        .await
-    {
-        Err(StoreError::FailedPrecondition(reason)) => assert!(
-            reason.contains("only an Objective's own turn") && reason.contains("omit tag"),
-            "{reason}"
-        ),
-        other => panic!("{other:?}"),
-    }
     assert!(matches!(
         store
             .start_work_session(
@@ -272,7 +257,7 @@ async fn contract(url: String) {
             .await,
         Err(StoreError::PermissionDenied)
     ));
-    wrong = request("wrong-lease");
+    let wrong = request("wrong-lease");
     let wrong_lease = InspectAttemptRequest {
         lease_token: "wrong".into(),
         ..first_attempt.clone()

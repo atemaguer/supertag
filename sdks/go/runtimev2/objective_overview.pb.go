@@ -274,9 +274,7 @@ type ObjectiveOverview struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Objective *Objective             `protobuf:"bytes,1,opt,name=objective,proto3" json:"objective,omitempty"`
 	AsOfMs    int64                  `protobuf:"varint,2,opt,name=as_of_ms,json=asOfMs,proto3" json:"as_of_ms,omitempty"`
-	// Absent when the Objective names no Team.
-	Team *ObjectiveOverviewTeam `protobuf:"bytes,3,opt,name=team,proto3" json:"team,omitempty"`
-	Pool *ObjectiveBudgetPool   `protobuf:"bytes,4,opt,name=pool,proto3" json:"pool,omitempty"`
+	Pool      *ObjectiveBudgetPool   `protobuf:"bytes,4,opt,name=pool,proto3" json:"pool,omitempty"`
 	// Absent when the Objective has no deadline.
 	Deadline *ObjectiveDeadlineView `protobuf:"bytes,5,opt,name=deadline,proto3" json:"deadline,omitempty"`
 	// What an operator can act on, in the order a person should read them.
@@ -285,8 +283,6 @@ type ObjectiveOverview struct {
 	Sessions []*ObjectiveSessionView `protobuf:"bytes,7,rep,name=sessions,proto3" json:"sessions,omitempty"`
 	// The owner's Session, oldest first: its latest turns, never one page of them.
 	Conversation []*ObjectiveTurn `protobuf:"bytes,8,rep,name=conversation,proto3" json:"conversation,omitempty"`
-	// The Team's latest Workstream posts, oldest first.
-	Posts []*ObjectiveTeamPost `protobuf:"bytes,9,rep,name=posts,proto3" json:"posts,omitempty"`
 	// One page of every Task of the Objective, in acceptance order.
 	Tasks      []*ObjectiveTurn `protobuf:"bytes,10,rep,name=tasks,proto3" json:"tasks,omitempty"`
 	TotalTasks uint32           `protobuf:"varint,11,opt,name=total_tasks,json=totalTasks,proto3" json:"total_tasks,omitempty"`
@@ -347,13 +343,6 @@ func (x *ObjectiveOverview) GetAsOfMs() int64 {
 	return 0
 }
 
-func (x *ObjectiveOverview) GetTeam() *ObjectiveOverviewTeam {
-	if x != nil {
-		return x.Team
-	}
-	return nil
-}
-
 func (x *ObjectiveOverview) GetPool() *ObjectiveBudgetPool {
 	if x != nil {
 		return x.Pool
@@ -385,13 +374,6 @@ func (x *ObjectiveOverview) GetSessions() []*ObjectiveSessionView {
 func (x *ObjectiveOverview) GetConversation() []*ObjectiveTurn {
 	if x != nil {
 		return x.Conversation
-	}
-	return nil
-}
-
-func (x *ObjectiveOverview) GetPosts() []*ObjectiveTeamPost {
-	if x != nil {
-		return x.Posts
 	}
 	return nil
 }
@@ -452,84 +434,6 @@ func (x *ObjectiveOverview) GetObjectiveUpdatedAtMs() int64 {
 	return 0
 }
 
-type ObjectiveOverviewTeam struct {
-	state        protoimpl.MessageState `protogen:"open.v1"`
-	TeamId       string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
-	Name         string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	MemberTagIds []string               `protobuf:"bytes,3,rep,name=member_tag_ids,json=memberTagIds,proto3" json:"member_tag_ids,omitempty"`
-	// Absent when turns are limited only by Worker Host capacity.
-	MaxConcurrency *uint32 `protobuf:"varint,4,opt,name=max_concurrency,json=maxConcurrency,proto3,oneof" json:"max_concurrency,omitempty"`
-	// Turns of this Team's Objectives that hold a slot now.
-	RunningTurns  uint32 `protobuf:"varint,5,opt,name=running_turns,json=runningTurns,proto3" json:"running_turns,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ObjectiveOverviewTeam) Reset() {
-	*x = ObjectiveOverviewTeam{}
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ObjectiveOverviewTeam) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ObjectiveOverviewTeam) ProtoMessage() {}
-
-func (x *ObjectiveOverviewTeam) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ObjectiveOverviewTeam.ProtoReflect.Descriptor instead.
-func (*ObjectiveOverviewTeam) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *ObjectiveOverviewTeam) GetTeamId() string {
-	if x != nil {
-		return x.TeamId
-	}
-	return ""
-}
-
-func (x *ObjectiveOverviewTeam) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *ObjectiveOverviewTeam) GetMemberTagIds() []string {
-	if x != nil {
-		return x.MemberTagIds
-	}
-	return nil
-}
-
-func (x *ObjectiveOverviewTeam) GetMaxConcurrency() uint32 {
-	if x != nil && x.MaxConcurrency != nil {
-		return *x.MaxConcurrency
-	}
-	return 0
-}
-
-func (x *ObjectiveOverviewTeam) GetRunningTurns() uint32 {
-	if x != nil {
-		return x.RunningTurns
-	}
-	return 0
-}
-
 // The Objective's one budget, shared by the owner's turns and every Work
 // Session beneath it.
 type ObjectiveBudgetPool struct {
@@ -552,7 +456,7 @@ type ObjectiveBudgetPool struct {
 
 func (x *ObjectiveBudgetPool) Reset() {
 	*x = ObjectiveBudgetPool{}
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[3]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -564,7 +468,7 @@ func (x *ObjectiveBudgetPool) String() string {
 func (*ObjectiveBudgetPool) ProtoMessage() {}
 
 func (x *ObjectiveBudgetPool) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[3]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -577,7 +481,7 @@ func (x *ObjectiveBudgetPool) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveBudgetPool.ProtoReflect.Descriptor instead.
 func (*ObjectiveBudgetPool) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{3}
+	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ObjectiveBudgetPool) GetMeasure() ObjectiveBudgetMeasure {
@@ -657,7 +561,7 @@ type ObjectiveDeadlineView struct {
 
 func (x *ObjectiveDeadlineView) Reset() {
 	*x = ObjectiveDeadlineView{}
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[4]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -669,7 +573,7 @@ func (x *ObjectiveDeadlineView) String() string {
 func (*ObjectiveDeadlineView) ProtoMessage() {}
 
 func (x *ObjectiveDeadlineView) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[4]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -682,7 +586,7 @@ func (x *ObjectiveDeadlineView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveDeadlineView.ProtoReflect.Descriptor instead.
 func (*ObjectiveDeadlineView) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{4}
+	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ObjectiveDeadlineView) GetAtMs() int64 {
@@ -725,7 +629,7 @@ type ObjectiveLimitNotice struct {
 
 func (x *ObjectiveLimitNotice) Reset() {
 	*x = ObjectiveLimitNotice{}
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[5]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -737,7 +641,7 @@ func (x *ObjectiveLimitNotice) String() string {
 func (*ObjectiveLimitNotice) ProtoMessage() {}
 
 func (x *ObjectiveLimitNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[5]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -750,7 +654,7 @@ func (x *ObjectiveLimitNotice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveLimitNotice.ProtoReflect.Descriptor instead.
 func (*ObjectiveLimitNotice) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{5}
+	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ObjectiveLimitNotice) GetKey() string {
@@ -795,7 +699,7 @@ type ObjectiveAttention struct {
 
 func (x *ObjectiveAttention) Reset() {
 	*x = ObjectiveAttention{}
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[6]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -807,7 +711,7 @@ func (x *ObjectiveAttention) String() string {
 func (*ObjectiveAttention) ProtoMessage() {}
 
 func (x *ObjectiveAttention) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[6]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -820,7 +724,7 @@ func (x *ObjectiveAttention) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveAttention.ProtoReflect.Descriptor instead.
 func (*ObjectiveAttention) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{6}
+	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ObjectiveAttention) GetKind() ObjectiveAttentionKind {
@@ -886,7 +790,7 @@ type ObjectiveSessionView struct {
 
 func (x *ObjectiveSessionView) Reset() {
 	*x = ObjectiveSessionView{}
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[7]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -898,7 +802,7 @@ func (x *ObjectiveSessionView) String() string {
 func (*ObjectiveSessionView) ProtoMessage() {}
 
 func (x *ObjectiveSessionView) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[7]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -911,7 +815,7 @@ func (x *ObjectiveSessionView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveSessionView.ProtoReflect.Descriptor instead.
 func (*ObjectiveSessionView) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{7}
+	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ObjectiveSessionView) GetSessionId() string {
@@ -1021,7 +925,7 @@ type ObjectiveSessionDelivery struct {
 
 func (x *ObjectiveSessionDelivery) Reset() {
 	*x = ObjectiveSessionDelivery{}
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[8]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1033,7 +937,7 @@ func (x *ObjectiveSessionDelivery) String() string {
 func (*ObjectiveSessionDelivery) ProtoMessage() {}
 
 func (x *ObjectiveSessionDelivery) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[8]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1046,7 +950,7 @@ func (x *ObjectiveSessionDelivery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveSessionDelivery.ProtoReflect.Descriptor instead.
 func (*ObjectiveSessionDelivery) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{8}
+	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ObjectiveSessionDelivery) GetTaskId() string {
@@ -1113,7 +1017,7 @@ type ObjectiveSessionFailure struct {
 
 func (x *ObjectiveSessionFailure) Reset() {
 	*x = ObjectiveSessionFailure{}
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[9]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1125,7 +1029,7 @@ func (x *ObjectiveSessionFailure) String() string {
 func (*ObjectiveSessionFailure) ProtoMessage() {}
 
 func (x *ObjectiveSessionFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[9]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1138,7 +1042,7 @@ func (x *ObjectiveSessionFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveSessionFailure.ProtoReflect.Descriptor instead.
 func (*ObjectiveSessionFailure) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{9}
+	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ObjectiveSessionFailure) GetTaskId() string {
@@ -1196,7 +1100,7 @@ type ObjectiveTurn struct {
 
 func (x *ObjectiveTurn) Reset() {
 	*x = ObjectiveTurn{}
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[10]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1208,7 +1112,7 @@ func (x *ObjectiveTurn) String() string {
 func (*ObjectiveTurn) ProtoMessage() {}
 
 func (x *ObjectiveTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[10]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1221,7 +1125,7 @@ func (x *ObjectiveTurn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveTurn.ProtoReflect.Descriptor instead.
 func (*ObjectiveTurn) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{10}
+	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ObjectiveTurn) GetTaskId() string {
@@ -1287,82 +1191,6 @@ func (x *ObjectiveTurn) GetFailure() *ObjectiveSessionFailure {
 	return nil
 }
 
-type ObjectiveTeamPost struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Sequence      uint64                 `protobuf:"varint,1,opt,name=sequence,proto3" json:"sequence,omitempty"`
-	AuthorTagId   string                 `protobuf:"bytes,2,opt,name=author_tag_id,json=authorTagId,proto3" json:"author_tag_id,omitempty"`
-	ToTagIds      []string               `protobuf:"bytes,3,rep,name=to_tag_ids,json=toTagIds,proto3" json:"to_tag_ids,omitempty"`
-	Body          string                 `protobuf:"bytes,4,opt,name=body,proto3" json:"body,omitempty"`
-	CreatedAtMs   int64                  `protobuf:"varint,5,opt,name=created_at_ms,json=createdAtMs,proto3" json:"created_at_ms,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ObjectiveTeamPost) Reset() {
-	*x = ObjectiveTeamPost{}
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[11]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ObjectiveTeamPost) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ObjectiveTeamPost) ProtoMessage() {}
-
-func (x *ObjectiveTeamPost) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[11]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ObjectiveTeamPost.ProtoReflect.Descriptor instead.
-func (*ObjectiveTeamPost) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{11}
-}
-
-func (x *ObjectiveTeamPost) GetSequence() uint64 {
-	if x != nil {
-		return x.Sequence
-	}
-	return 0
-}
-
-func (x *ObjectiveTeamPost) GetAuthorTagId() string {
-	if x != nil {
-		return x.AuthorTagId
-	}
-	return ""
-}
-
-func (x *ObjectiveTeamPost) GetToTagIds() []string {
-	if x != nil {
-		return x.ToTagIds
-	}
-	return nil
-}
-
-func (x *ObjectiveTeamPost) GetBody() string {
-	if x != nil {
-		return x.Body
-	}
-	return ""
-}
-
-func (x *ObjectiveTeamPost) GetCreatedAtMs() int64 {
-	if x != nil {
-		return x.CreatedAtMs
-	}
-	return 0
-}
-
 var File_supertag_runtime_v2_objective_overview_proto protoreflect.FileDescriptor
 
 const file_supertag_runtime_v2_objective_overview_proto_rawDesc = "" +
@@ -1371,17 +1199,15 @@ const file_supertag_runtime_v2_objective_overview_proto_rawDesc = "" +
 	"\x1bGetObjectiveOverviewRequest\x12!\n" +
 	"\fobjective_id\x18\x01 \x01(\tR\vobjectiveId\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\rR\x05limit\x12\x16\n" +
-	"\x06offset\x18\x03 \x01(\rR\x06offset\"\xdf\a\n" +
+	"\x06offset\x18\x03 \x01(\rR\x06offset\"\xfa\x06\n" +
 	"\x11ObjectiveOverview\x12<\n" +
 	"\tobjective\x18\x01 \x01(\v2\x1e.supertag.runtime.v2.ObjectiveR\tobjective\x12\x18\n" +
-	"\bas_of_ms\x18\x02 \x01(\x03R\x06asOfMs\x12>\n" +
-	"\x04team\x18\x03 \x01(\v2*.supertag.runtime.v2.ObjectiveOverviewTeamR\x04team\x12<\n" +
+	"\bas_of_ms\x18\x02 \x01(\x03R\x06asOfMs\x12<\n" +
 	"\x04pool\x18\x04 \x01(\v2(.supertag.runtime.v2.ObjectiveBudgetPoolR\x04pool\x12F\n" +
 	"\bdeadline\x18\x05 \x01(\v2*.supertag.runtime.v2.ObjectiveDeadlineViewR\bdeadline\x12E\n" +
 	"\tattention\x18\x06 \x03(\v2'.supertag.runtime.v2.ObjectiveAttentionR\tattention\x12E\n" +
 	"\bsessions\x18\a \x03(\v2).supertag.runtime.v2.ObjectiveSessionViewR\bsessions\x12F\n" +
-	"\fconversation\x18\b \x03(\v2\".supertag.runtime.v2.ObjectiveTurnR\fconversation\x12<\n" +
-	"\x05posts\x18\t \x03(\v2&.supertag.runtime.v2.ObjectiveTeamPostR\x05posts\x128\n" +
+	"\fconversation\x18\b \x03(\v2\".supertag.runtime.v2.ObjectiveTurnR\fconversation\x128\n" +
 	"\x05tasks\x18\n" +
 	" \x03(\v2\".supertag.runtime.v2.ObjectiveTurnR\x05tasks\x12\x1f\n" +
 	"\vtotal_tasks\x18\v \x01(\rR\n" +
@@ -1393,14 +1219,8 @@ const file_supertag_runtime_v2_objective_overview_proto_rawDesc = "" +
 	"\x0etotal_sessions\x18\x0f \x01(\rR\rtotalSessions\x126\n" +
 	"\x17objective_created_at_ms\x18\x98* \x01(\x03R\x14objectiveCreatedAtMs\x126\n" +
 	"\x17objective_updated_at_ms\x18\x99* \x01(\x03R\x14objectiveUpdatedAtMsB\x0e\n" +
-	"\f_next_offset\"\xd1\x01\n" +
-	"\x15ObjectiveOverviewTeam\x12\x17\n" +
-	"\ateam_id\x18\x01 \x01(\tR\x06teamId\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12$\n" +
-	"\x0emember_tag_ids\x18\x03 \x03(\tR\fmemberTagIds\x12,\n" +
-	"\x0fmax_concurrency\x18\x04 \x01(\rH\x00R\x0emaxConcurrency\x88\x01\x01\x12#\n" +
-	"\rrunning_turns\x18\x05 \x01(\rR\frunningTurnsB\x12\n" +
-	"\x10_max_concurrency\"\xe7\x03\n" +
+	"\f_next_offsetJ\x04\b\x03\x10\x04J\x04\b\t\x10\n" +
+	"R\x04teamR\x05posts\"\xe7\x03\n" +
 	"\x13ObjectiveBudgetPool\x12E\n" +
 	"\ameasure\x18\x01 \x01(\x0e2+.supertag.runtime.v2.ObjectiveBudgetMeasureR\ameasure\x12\x1f\n" +
 	"\bcurrency\x18\x02 \x01(\tH\x00R\bcurrency\x88\x01\x01\x12$\n" +
@@ -1478,14 +1298,7 @@ const file_supertag_runtime_v2_objective_overview_proto_rawDesc = "" +
 	"\x06result\x18\a \x01(\tR\x06result\x12+\n" +
 	"\x0fcompleted_at_ms\x18\b \x01(\x03H\x00R\rcompletedAtMs\x88\x01\x01\x12G\n" +
 	"\afailure\x18\x98* \x01(\v2,.supertag.runtime.v2.ObjectiveSessionFailureR\afailureB\x12\n" +
-	"\x10_completed_at_ms\"\xa9\x01\n" +
-	"\x11ObjectiveTeamPost\x12\x1a\n" +
-	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12\"\n" +
-	"\rauthor_tag_id\x18\x02 \x01(\tR\vauthorTagId\x12\x1c\n" +
-	"\n" +
-	"to_tag_ids\x18\x03 \x03(\tR\btoTagIds\x12\x12\n" +
-	"\x04body\x18\x04 \x01(\tR\x04body\x12\"\n" +
-	"\rcreated_at_ms\x18\x05 \x01(\x03R\vcreatedAtMs*\xc8\x01\n" +
+	"\x10_completed_at_ms*\xc8\x01\n" +
 	"\x16ObjectiveBudgetMeasure\x12(\n" +
 	"$OBJECTIVE_BUDGET_MEASURE_UNSPECIFIED\x10\x00\x12&\n" +
 	"\"OBJECTIVE_BUDGET_MEASURE_UNLIMITED\x10\x01\x12'\n" +
@@ -1526,54 +1339,50 @@ func file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP() []byte {
 }
 
 var file_supertag_runtime_v2_objective_overview_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_supertag_runtime_v2_objective_overview_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_supertag_runtime_v2_objective_overview_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_supertag_runtime_v2_objective_overview_proto_goTypes = []any{
 	(ObjectiveBudgetMeasure)(0),         // 0: supertag.runtime.v2.ObjectiveBudgetMeasure
 	(ObjectiveAttentionKind)(0),         // 1: supertag.runtime.v2.ObjectiveAttentionKind
 	(ObjectiveSessionStatus)(0),         // 2: supertag.runtime.v2.ObjectiveSessionStatus
 	(*GetObjectiveOverviewRequest)(nil), // 3: supertag.runtime.v2.GetObjectiveOverviewRequest
 	(*ObjectiveOverview)(nil),           // 4: supertag.runtime.v2.ObjectiveOverview
-	(*ObjectiveOverviewTeam)(nil),       // 5: supertag.runtime.v2.ObjectiveOverviewTeam
-	(*ObjectiveBudgetPool)(nil),         // 6: supertag.runtime.v2.ObjectiveBudgetPool
-	(*ObjectiveDeadlineView)(nil),       // 7: supertag.runtime.v2.ObjectiveDeadlineView
-	(*ObjectiveLimitNotice)(nil),        // 8: supertag.runtime.v2.ObjectiveLimitNotice
-	(*ObjectiveAttention)(nil),          // 9: supertag.runtime.v2.ObjectiveAttention
-	(*ObjectiveSessionView)(nil),        // 10: supertag.runtime.v2.ObjectiveSessionView
-	(*ObjectiveSessionDelivery)(nil),    // 11: supertag.runtime.v2.ObjectiveSessionDelivery
-	(*ObjectiveSessionFailure)(nil),     // 12: supertag.runtime.v2.ObjectiveSessionFailure
-	(*ObjectiveTurn)(nil),               // 13: supertag.runtime.v2.ObjectiveTurn
-	(*ObjectiveTeamPost)(nil),           // 14: supertag.runtime.v2.ObjectiveTeamPost
-	(*Objective)(nil),                   // 15: supertag.runtime.v2.Objective
-	(TaskState)(0),                      // 16: supertag.runtime.v2.TaskState
-	(HarnessKind)(0),                    // 17: supertag.runtime.v2.HarnessKind
+	(*ObjectiveBudgetPool)(nil),         // 5: supertag.runtime.v2.ObjectiveBudgetPool
+	(*ObjectiveDeadlineView)(nil),       // 6: supertag.runtime.v2.ObjectiveDeadlineView
+	(*ObjectiveLimitNotice)(nil),        // 7: supertag.runtime.v2.ObjectiveLimitNotice
+	(*ObjectiveAttention)(nil),          // 8: supertag.runtime.v2.ObjectiveAttention
+	(*ObjectiveSessionView)(nil),        // 9: supertag.runtime.v2.ObjectiveSessionView
+	(*ObjectiveSessionDelivery)(nil),    // 10: supertag.runtime.v2.ObjectiveSessionDelivery
+	(*ObjectiveSessionFailure)(nil),     // 11: supertag.runtime.v2.ObjectiveSessionFailure
+	(*ObjectiveTurn)(nil),               // 12: supertag.runtime.v2.ObjectiveTurn
+	(*Objective)(nil),                   // 13: supertag.runtime.v2.Objective
+	(TaskState)(0),                      // 14: supertag.runtime.v2.TaskState
+	(HarnessKind)(0),                    // 15: supertag.runtime.v2.HarnessKind
 }
 var file_supertag_runtime_v2_objective_overview_proto_depIdxs = []int32{
-	15, // 0: supertag.runtime.v2.ObjectiveOverview.objective:type_name -> supertag.runtime.v2.Objective
-	5,  // 1: supertag.runtime.v2.ObjectiveOverview.team:type_name -> supertag.runtime.v2.ObjectiveOverviewTeam
-	6,  // 2: supertag.runtime.v2.ObjectiveOverview.pool:type_name -> supertag.runtime.v2.ObjectiveBudgetPool
-	7,  // 3: supertag.runtime.v2.ObjectiveOverview.deadline:type_name -> supertag.runtime.v2.ObjectiveDeadlineView
-	9,  // 4: supertag.runtime.v2.ObjectiveOverview.attention:type_name -> supertag.runtime.v2.ObjectiveAttention
-	10, // 5: supertag.runtime.v2.ObjectiveOverview.sessions:type_name -> supertag.runtime.v2.ObjectiveSessionView
-	13, // 6: supertag.runtime.v2.ObjectiveOverview.conversation:type_name -> supertag.runtime.v2.ObjectiveTurn
-	14, // 7: supertag.runtime.v2.ObjectiveOverview.posts:type_name -> supertag.runtime.v2.ObjectiveTeamPost
-	13, // 8: supertag.runtime.v2.ObjectiveOverview.tasks:type_name -> supertag.runtime.v2.ObjectiveTurn
-	8,  // 9: supertag.runtime.v2.ObjectiveOverview.notices:type_name -> supertag.runtime.v2.ObjectiveLimitNotice
-	0,  // 10: supertag.runtime.v2.ObjectiveBudgetPool.measure:type_name -> supertag.runtime.v2.ObjectiveBudgetMeasure
-	1,  // 11: supertag.runtime.v2.ObjectiveAttention.kind:type_name -> supertag.runtime.v2.ObjectiveAttentionKind
-	2,  // 12: supertag.runtime.v2.ObjectiveSessionView.status:type_name -> supertag.runtime.v2.ObjectiveSessionStatus
-	11, // 13: supertag.runtime.v2.ObjectiveSessionView.delivery:type_name -> supertag.runtime.v2.ObjectiveSessionDelivery
-	12, // 14: supertag.runtime.v2.ObjectiveSessionView.failure:type_name -> supertag.runtime.v2.ObjectiveSessionFailure
-	16, // 15: supertag.runtime.v2.ObjectiveSessionFailure.state:type_name -> supertag.runtime.v2.TaskState
-	17, // 16: supertag.runtime.v2.ObjectiveSessionFailure.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
-	16, // 17: supertag.runtime.v2.ObjectiveTurn.state:type_name -> supertag.runtime.v2.TaskState
-	12, // 18: supertag.runtime.v2.ObjectiveTurn.failure:type_name -> supertag.runtime.v2.ObjectiveSessionFailure
-	3,  // 19: supertag.runtime.v2.ObjectiveOverviews.GetObjectiveOverview:input_type -> supertag.runtime.v2.GetObjectiveOverviewRequest
-	4,  // 20: supertag.runtime.v2.ObjectiveOverviews.GetObjectiveOverview:output_type -> supertag.runtime.v2.ObjectiveOverview
-	20, // [20:21] is the sub-list for method output_type
-	19, // [19:20] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	13, // 0: supertag.runtime.v2.ObjectiveOverview.objective:type_name -> supertag.runtime.v2.Objective
+	5,  // 1: supertag.runtime.v2.ObjectiveOverview.pool:type_name -> supertag.runtime.v2.ObjectiveBudgetPool
+	6,  // 2: supertag.runtime.v2.ObjectiveOverview.deadline:type_name -> supertag.runtime.v2.ObjectiveDeadlineView
+	8,  // 3: supertag.runtime.v2.ObjectiveOverview.attention:type_name -> supertag.runtime.v2.ObjectiveAttention
+	9,  // 4: supertag.runtime.v2.ObjectiveOverview.sessions:type_name -> supertag.runtime.v2.ObjectiveSessionView
+	12, // 5: supertag.runtime.v2.ObjectiveOverview.conversation:type_name -> supertag.runtime.v2.ObjectiveTurn
+	12, // 6: supertag.runtime.v2.ObjectiveOverview.tasks:type_name -> supertag.runtime.v2.ObjectiveTurn
+	7,  // 7: supertag.runtime.v2.ObjectiveOverview.notices:type_name -> supertag.runtime.v2.ObjectiveLimitNotice
+	0,  // 8: supertag.runtime.v2.ObjectiveBudgetPool.measure:type_name -> supertag.runtime.v2.ObjectiveBudgetMeasure
+	1,  // 9: supertag.runtime.v2.ObjectiveAttention.kind:type_name -> supertag.runtime.v2.ObjectiveAttentionKind
+	2,  // 10: supertag.runtime.v2.ObjectiveSessionView.status:type_name -> supertag.runtime.v2.ObjectiveSessionStatus
+	10, // 11: supertag.runtime.v2.ObjectiveSessionView.delivery:type_name -> supertag.runtime.v2.ObjectiveSessionDelivery
+	11, // 12: supertag.runtime.v2.ObjectiveSessionView.failure:type_name -> supertag.runtime.v2.ObjectiveSessionFailure
+	14, // 13: supertag.runtime.v2.ObjectiveSessionFailure.state:type_name -> supertag.runtime.v2.TaskState
+	15, // 14: supertag.runtime.v2.ObjectiveSessionFailure.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
+	14, // 15: supertag.runtime.v2.ObjectiveTurn.state:type_name -> supertag.runtime.v2.TaskState
+	11, // 16: supertag.runtime.v2.ObjectiveTurn.failure:type_name -> supertag.runtime.v2.ObjectiveSessionFailure
+	3,  // 17: supertag.runtime.v2.ObjectiveOverviews.GetObjectiveOverview:input_type -> supertag.runtime.v2.GetObjectiveOverviewRequest
+	4,  // 18: supertag.runtime.v2.ObjectiveOverviews.GetObjectiveOverview:output_type -> supertag.runtime.v2.ObjectiveOverview
+	18, // [18:19] is the sub-list for method output_type
+	17, // [17:18] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_objective_overview_proto_init() }
@@ -1584,16 +1393,15 @@ func file_supertag_runtime_v2_objective_overview_proto_init() {
 	file_supertag_runtime_v2_runtime_proto_init()
 	file_supertag_runtime_v2_objective_overview_proto_msgTypes[1].OneofWrappers = []any{}
 	file_supertag_runtime_v2_objective_overview_proto_msgTypes[2].OneofWrappers = []any{}
-	file_supertag_runtime_v2_objective_overview_proto_msgTypes[3].OneofWrappers = []any{}
-	file_supertag_runtime_v2_objective_overview_proto_msgTypes[7].OneofWrappers = []any{}
-	file_supertag_runtime_v2_objective_overview_proto_msgTypes[10].OneofWrappers = []any{}
+	file_supertag_runtime_v2_objective_overview_proto_msgTypes[6].OneofWrappers = []any{}
+	file_supertag_runtime_v2_objective_overview_proto_msgTypes[9].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_objective_overview_proto_rawDesc), len(file_supertag_runtime_v2_objective_overview_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   12,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

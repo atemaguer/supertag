@@ -1027,13 +1027,12 @@ func (x *ReadTagObjectiveRequest) GetObjectiveId() string {
 	return ""
 }
 
-// What a Tag reads of an Objective: its record, Team, budget pool, deadline,
+// What a Tag reads of an Objective: its record, budget pool, deadline,
 // limit notices, and the status of each of its Sessions. It carries no Task
 // prompts, results, or failure text.
 type TagObjectiveView struct {
 	state         protoimpl.MessageState  `protogen:"open.v1"`
 	Objective     *Objective              `protobuf:"bytes,1,opt,name=objective,proto3" json:"objective,omitempty"`
-	Team          *ObjectiveOverviewTeam  `protobuf:"bytes,2,opt,name=team,proto3" json:"team,omitempty"`
 	Pool          *ObjectiveBudgetPool    `protobuf:"bytes,3,opt,name=pool,proto3" json:"pool,omitempty"`
 	Deadline      *ObjectiveDeadlineView  `protobuf:"bytes,4,opt,name=deadline,proto3" json:"deadline,omitempty"`
 	Notices       []*ObjectiveLimitNotice `protobuf:"bytes,5,rep,name=notices,proto3" json:"notices,omitempty"`
@@ -1077,13 +1076,6 @@ func (*TagObjectiveView) Descriptor() ([]byte, []int) {
 func (x *TagObjectiveView) GetObjective() *Objective {
 	if x != nil {
 		return x.Objective
-	}
-	return nil
-}
-
-func (x *TagObjectiveView) GetTeam() *ObjectiveOverviewTeam {
-	if x != nil {
-		return x.Team
 	}
 	return nil
 }
@@ -1216,16 +1208,15 @@ const file_supertag_runtime_v2_tag_sessions_proto_rawDesc = "" +
 	"\x05total\x18\x02 \x01(\rR\x05total\"a\n" +
 	"\x17ReadTagObjectiveRequest\x12&\n" +
 	"\fobjective_id\x18\x02 \x01(\tH\x00R\vobjectiveId\x88\x01\x01B\x0f\n" +
-	"\r_objective_idJ\x04\b\x01\x10\x02R\aattempt\"\xe3\x03\n" +
+	"\r_objective_idJ\x04\b\x01\x10\x02R\aattempt\"\xaf\x03\n" +
 	"\x10TagObjectiveView\x12<\n" +
-	"\tobjective\x18\x01 \x01(\v2\x1e.supertag.runtime.v2.ObjectiveR\tobjective\x12>\n" +
-	"\x04team\x18\x02 \x01(\v2*.supertag.runtime.v2.ObjectiveOverviewTeamR\x04team\x12<\n" +
+	"\tobjective\x18\x01 \x01(\v2\x1e.supertag.runtime.v2.ObjectiveR\tobjective\x12<\n" +
 	"\x04pool\x18\x03 \x01(\v2(.supertag.runtime.v2.ObjectiveBudgetPoolR\x04pool\x12F\n" +
 	"\bdeadline\x18\x04 \x01(\v2*.supertag.runtime.v2.ObjectiveDeadlineViewR\bdeadline\x12C\n" +
 	"\anotices\x18\x05 \x03(\v2).supertag.runtime.v2.ObjectiveLimitNoticeR\anotices\x12E\n" +
 	"\bsessions\x18\x06 \x03(\v2).supertag.runtime.v2.ObjectiveSessionViewR\bsessions\x12%\n" +
 	"\x0etotal_sessions\x18\a \x01(\rR\rtotalSessions\x12\x18\n" +
-	"\bas_of_ms\x18\b \x01(\x03R\x06asOfMs*}\n" +
+	"\bas_of_ms\x18\b \x01(\x03R\x06asOfMsJ\x04\b\x02\x10\x03R\x04team*}\n" +
 	"\x12TagSessionAudience\x12$\n" +
 	" TAG_SESSION_AUDIENCE_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bTAG_SESSION_AUDIENCE_SHARED\x10\x01\x12 \n" +
@@ -1281,11 +1272,10 @@ var file_supertag_runtime_v2_tag_sessions_proto_goTypes = []any{
 	(*TaskEvent)(nil),                 // 18: supertag.runtime.v2.TaskEvent
 	(ObjectiveStatus)(0),              // 19: supertag.runtime.v2.ObjectiveStatus
 	(*Objective)(nil),                 // 20: supertag.runtime.v2.Objective
-	(*ObjectiveOverviewTeam)(nil),     // 21: supertag.runtime.v2.ObjectiveOverviewTeam
-	(*ObjectiveBudgetPool)(nil),       // 22: supertag.runtime.v2.ObjectiveBudgetPool
-	(*ObjectiveDeadlineView)(nil),     // 23: supertag.runtime.v2.ObjectiveDeadlineView
-	(*ObjectiveLimitNotice)(nil),      // 24: supertag.runtime.v2.ObjectiveLimitNotice
-	(*ObjectiveSessionView)(nil),      // 25: supertag.runtime.v2.ObjectiveSessionView
+	(*ObjectiveBudgetPool)(nil),       // 21: supertag.runtime.v2.ObjectiveBudgetPool
+	(*ObjectiveDeadlineView)(nil),     // 22: supertag.runtime.v2.ObjectiveDeadlineView
+	(*ObjectiveLimitNotice)(nil),      // 23: supertag.runtime.v2.ObjectiveLimitNotice
+	(*ObjectiveSessionView)(nil),      // 24: supertag.runtime.v2.ObjectiveSessionView
 }
 var file_supertag_runtime_v2_tag_sessions_proto_depIdxs = []int32{
 	0,  // 0: supertag.runtime.v2.TagSessionSummary.audience:type_name -> supertag.runtime.v2.TagSessionAudience
@@ -1299,40 +1289,39 @@ var file_supertag_runtime_v2_tag_sessions_proto_depIdxs = []int32{
 	19, // 8: supertag.runtime.v2.TagObjectiveSummary.status:type_name -> supertag.runtime.v2.ObjectiveStatus
 	12, // 9: supertag.runtime.v2.ListTagObjectivesResponse.objectives:type_name -> supertag.runtime.v2.TagObjectiveSummary
 	20, // 10: supertag.runtime.v2.TagObjectiveView.objective:type_name -> supertag.runtime.v2.Objective
-	21, // 11: supertag.runtime.v2.TagObjectiveView.team:type_name -> supertag.runtime.v2.ObjectiveOverviewTeam
-	22, // 12: supertag.runtime.v2.TagObjectiveView.pool:type_name -> supertag.runtime.v2.ObjectiveBudgetPool
-	23, // 13: supertag.runtime.v2.TagObjectiveView.deadline:type_name -> supertag.runtime.v2.ObjectiveDeadlineView
-	24, // 14: supertag.runtime.v2.TagObjectiveView.notices:type_name -> supertag.runtime.v2.ObjectiveLimitNotice
-	25, // 15: supertag.runtime.v2.TagObjectiveView.sessions:type_name -> supertag.runtime.v2.ObjectiveSessionView
-	2,  // 16: supertag.runtime.v2.AttemptTagSessions.ListSessions:input_type -> supertag.runtime.v2.ListTagSessionsRequest
-	4,  // 17: supertag.runtime.v2.AttemptTagSessions.SearchSessions:input_type -> supertag.runtime.v2.SearchTagSessionsRequest
-	7,  // 18: supertag.runtime.v2.AttemptTagSessions.ReadSession:input_type -> supertag.runtime.v2.ReadTagSessionRequest
-	10, // 19: supertag.runtime.v2.AttemptTagSessions.ReadTurn:input_type -> supertag.runtime.v2.ReadTagTurnRequest
-	13, // 20: supertag.runtime.v2.AttemptTagSessions.ListObjectives:input_type -> supertag.runtime.v2.ListTagObjectivesRequest
-	15, // 21: supertag.runtime.v2.AttemptTagSessions.ReadObjective:input_type -> supertag.runtime.v2.ReadTagObjectiveRequest
-	2,  // 22: supertag.runtime.v2.HarnessTagSessions.ListSessions:input_type -> supertag.runtime.v2.ListTagSessionsRequest
-	4,  // 23: supertag.runtime.v2.HarnessTagSessions.SearchSessions:input_type -> supertag.runtime.v2.SearchTagSessionsRequest
-	7,  // 24: supertag.runtime.v2.HarnessTagSessions.ReadSession:input_type -> supertag.runtime.v2.ReadTagSessionRequest
-	10, // 25: supertag.runtime.v2.HarnessTagSessions.ReadTurn:input_type -> supertag.runtime.v2.ReadTagTurnRequest
-	13, // 26: supertag.runtime.v2.HarnessTagSessions.ListObjectives:input_type -> supertag.runtime.v2.ListTagObjectivesRequest
-	15, // 27: supertag.runtime.v2.HarnessTagSessions.ReadObjective:input_type -> supertag.runtime.v2.ReadTagObjectiveRequest
-	3,  // 28: supertag.runtime.v2.AttemptTagSessions.ListSessions:output_type -> supertag.runtime.v2.ListTagSessionsResponse
-	6,  // 29: supertag.runtime.v2.AttemptTagSessions.SearchSessions:output_type -> supertag.runtime.v2.SearchTagSessionsResponse
-	9,  // 30: supertag.runtime.v2.AttemptTagSessions.ReadSession:output_type -> supertag.runtime.v2.ReadTagSessionResponse
-	11, // 31: supertag.runtime.v2.AttemptTagSessions.ReadTurn:output_type -> supertag.runtime.v2.ReadTagTurnResponse
-	14, // 32: supertag.runtime.v2.AttemptTagSessions.ListObjectives:output_type -> supertag.runtime.v2.ListTagObjectivesResponse
-	16, // 33: supertag.runtime.v2.AttemptTagSessions.ReadObjective:output_type -> supertag.runtime.v2.TagObjectiveView
-	3,  // 34: supertag.runtime.v2.HarnessTagSessions.ListSessions:output_type -> supertag.runtime.v2.ListTagSessionsResponse
-	6,  // 35: supertag.runtime.v2.HarnessTagSessions.SearchSessions:output_type -> supertag.runtime.v2.SearchTagSessionsResponse
-	9,  // 36: supertag.runtime.v2.HarnessTagSessions.ReadSession:output_type -> supertag.runtime.v2.ReadTagSessionResponse
-	11, // 37: supertag.runtime.v2.HarnessTagSessions.ReadTurn:output_type -> supertag.runtime.v2.ReadTagTurnResponse
-	14, // 38: supertag.runtime.v2.HarnessTagSessions.ListObjectives:output_type -> supertag.runtime.v2.ListTagObjectivesResponse
-	16, // 39: supertag.runtime.v2.HarnessTagSessions.ReadObjective:output_type -> supertag.runtime.v2.TagObjectiveView
-	28, // [28:40] is the sub-list for method output_type
-	16, // [16:28] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	21, // 11: supertag.runtime.v2.TagObjectiveView.pool:type_name -> supertag.runtime.v2.ObjectiveBudgetPool
+	22, // 12: supertag.runtime.v2.TagObjectiveView.deadline:type_name -> supertag.runtime.v2.ObjectiveDeadlineView
+	23, // 13: supertag.runtime.v2.TagObjectiveView.notices:type_name -> supertag.runtime.v2.ObjectiveLimitNotice
+	24, // 14: supertag.runtime.v2.TagObjectiveView.sessions:type_name -> supertag.runtime.v2.ObjectiveSessionView
+	2,  // 15: supertag.runtime.v2.AttemptTagSessions.ListSessions:input_type -> supertag.runtime.v2.ListTagSessionsRequest
+	4,  // 16: supertag.runtime.v2.AttemptTagSessions.SearchSessions:input_type -> supertag.runtime.v2.SearchTagSessionsRequest
+	7,  // 17: supertag.runtime.v2.AttemptTagSessions.ReadSession:input_type -> supertag.runtime.v2.ReadTagSessionRequest
+	10, // 18: supertag.runtime.v2.AttemptTagSessions.ReadTurn:input_type -> supertag.runtime.v2.ReadTagTurnRequest
+	13, // 19: supertag.runtime.v2.AttemptTagSessions.ListObjectives:input_type -> supertag.runtime.v2.ListTagObjectivesRequest
+	15, // 20: supertag.runtime.v2.AttemptTagSessions.ReadObjective:input_type -> supertag.runtime.v2.ReadTagObjectiveRequest
+	2,  // 21: supertag.runtime.v2.HarnessTagSessions.ListSessions:input_type -> supertag.runtime.v2.ListTagSessionsRequest
+	4,  // 22: supertag.runtime.v2.HarnessTagSessions.SearchSessions:input_type -> supertag.runtime.v2.SearchTagSessionsRequest
+	7,  // 23: supertag.runtime.v2.HarnessTagSessions.ReadSession:input_type -> supertag.runtime.v2.ReadTagSessionRequest
+	10, // 24: supertag.runtime.v2.HarnessTagSessions.ReadTurn:input_type -> supertag.runtime.v2.ReadTagTurnRequest
+	13, // 25: supertag.runtime.v2.HarnessTagSessions.ListObjectives:input_type -> supertag.runtime.v2.ListTagObjectivesRequest
+	15, // 26: supertag.runtime.v2.HarnessTagSessions.ReadObjective:input_type -> supertag.runtime.v2.ReadTagObjectiveRequest
+	3,  // 27: supertag.runtime.v2.AttemptTagSessions.ListSessions:output_type -> supertag.runtime.v2.ListTagSessionsResponse
+	6,  // 28: supertag.runtime.v2.AttemptTagSessions.SearchSessions:output_type -> supertag.runtime.v2.SearchTagSessionsResponse
+	9,  // 29: supertag.runtime.v2.AttemptTagSessions.ReadSession:output_type -> supertag.runtime.v2.ReadTagSessionResponse
+	11, // 30: supertag.runtime.v2.AttemptTagSessions.ReadTurn:output_type -> supertag.runtime.v2.ReadTagTurnResponse
+	14, // 31: supertag.runtime.v2.AttemptTagSessions.ListObjectives:output_type -> supertag.runtime.v2.ListTagObjectivesResponse
+	16, // 32: supertag.runtime.v2.AttemptTagSessions.ReadObjective:output_type -> supertag.runtime.v2.TagObjectiveView
+	3,  // 33: supertag.runtime.v2.HarnessTagSessions.ListSessions:output_type -> supertag.runtime.v2.ListTagSessionsResponse
+	6,  // 34: supertag.runtime.v2.HarnessTagSessions.SearchSessions:output_type -> supertag.runtime.v2.SearchTagSessionsResponse
+	9,  // 35: supertag.runtime.v2.HarnessTagSessions.ReadSession:output_type -> supertag.runtime.v2.ReadTagSessionResponse
+	11, // 36: supertag.runtime.v2.HarnessTagSessions.ReadTurn:output_type -> supertag.runtime.v2.ReadTagTurnResponse
+	14, // 37: supertag.runtime.v2.HarnessTagSessions.ListObjectives:output_type -> supertag.runtime.v2.ListTagObjectivesResponse
+	16, // 38: supertag.runtime.v2.HarnessTagSessions.ReadObjective:output_type -> supertag.runtime.v2.TagObjectiveView
+	27, // [27:39] is the sub-list for method output_type
+	15, // [15:27] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_tag_sessions_proto_init() }

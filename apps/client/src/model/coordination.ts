@@ -31,7 +31,6 @@ export interface Objective {
   ongoing: boolean;
   /** The owner's first turn; empty while it could not start. */
   startingTaskId: string;
-  teamId?: string;
   deadlineMs?: number;
   budget?: Money;
   /** What its work reported spending, in the budget's currency. */
@@ -49,7 +48,6 @@ export interface NewObjective {
   objectiveId: string;
   ownerTagId: string;
   outcome: string;
-  teamId?: string;
   budget?: Money;
 }
 
@@ -320,8 +318,6 @@ export interface Team {
   teamId: string;
   name: string;
   memberTagIds: string[];
-  /** How many of its members' turns may run at once. */
-  maxConcurrency?: number;
   revision: number;
 }
 

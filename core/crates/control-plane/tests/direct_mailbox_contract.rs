@@ -20,6 +20,7 @@ fn send(operation: &str, recipient: &str, text: &str) -> SendAttemptTagMessageRe
         recipient_tag_id: recipient.into(),
         text: text.into(),
         review: None,
+        recipient_objective_id: String::new(),
     }
 }
 fn grant(

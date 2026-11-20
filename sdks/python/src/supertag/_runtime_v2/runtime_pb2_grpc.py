@@ -3201,6 +3201,11 @@ class AttemptMailboxStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendAttemptTagMessageRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendTagMessageResponse.FromString,
                 _registered_method=True)
+        self.AskTag = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptMailbox/AskTag',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskAttemptTagRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskTagResponse.FromString,
+                _registered_method=True)
 
 
 class AttemptMailboxServicer:
@@ -3218,6 +3223,13 @@ class AttemptMailboxServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def AskTag(self, request, context):
+        """An Objective's turn asks its own Tag's inbox Session.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AttemptMailboxServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -3230,6 +3242,11 @@ def add_AttemptMailboxServicer_to_server(servicer, server):
                     servicer.SendMessage,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendAttemptTagMessageRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendTagMessageResponse.SerializeToString,
+            ),
+            'AskTag': grpc.unary_unary_rpc_method_handler(
+                    servicer.AskTag,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskAttemptTagRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskTagResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -3286,6 +3303,33 @@ class AttemptMailbox:
             '/supertag.runtime.v2.AttemptMailbox/SendMessage',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendAttemptTagMessageRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendTagMessageResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AskTag(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptMailbox/AskTag',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskAttemptTagRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskTagResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -7050,6 +7094,11 @@ class HarnessMailboxStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReadReviewPatchRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReviewPatch.FromString,
                 _registered_method=True)
+        self.AskTag = channel.unary_unary(
+                '/supertag.runtime.v2.HarnessMailbox/AskTag',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAskTagRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskTagResponse.FromString,
+                _registered_method=True)
 
 
 class HarnessMailboxServicer:
@@ -7073,6 +7122,12 @@ class HarnessMailboxServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def AskTag(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_HarnessMailboxServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -7090,6 +7145,11 @@ def add_HarnessMailboxServicer_to_server(servicer, server):
                     servicer.ReadReviewPatch,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReadReviewPatchRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReviewPatch.SerializeToString,
+            ),
+            'AskTag': grpc.unary_unary_rpc_method_handler(
+                    servicer.AskTag,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAskTagRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskTagResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -7173,6 +7233,33 @@ class HarnessMailbox:
             '/supertag.runtime.v2.HarnessMailbox/ReadReviewPatch',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReadReviewPatchRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReviewPatch.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AskTag(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HarnessMailbox/AskTag',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAskTagRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskTagResponse.FromString,
             options,
             channel_credentials,
             insecure,

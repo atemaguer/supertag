@@ -161,7 +161,7 @@ export interface TaskAttemptSpec {
     readonly reservation?: import("./execution-selection.js").WorkletPlacementReservation;
     /**
      * A turn of an Objective's conversation or of a surface conversation. It may use the Worker's coordination
-     * slot, one slot beyond maxConcurrency that delegated work and work Sessions never use, so it
+     * slot, one slot beyond maxConcurrency that work Sessions never use, so it
      * starts when they fill the Worker.
      */
     readonly coordinationSlot?: boolean;

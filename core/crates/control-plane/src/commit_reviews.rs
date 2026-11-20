@@ -45,45 +45,37 @@ fn projection(row: &AnyRow) -> Result<CommitReview> {
     })
 }
 
-async fn owner_objective_in(
-    tx: &mut Transaction<'_, Any>,
-    source: &Task,
-) -> Result<Option<String>> {
-    // The immutable Task link plus the Objective's owner Session is the authority.
-    // A child, ordinary conversation, or another Tag's Session cannot request reviews.
-    Ok(sqlx::query_scalar("SELECT o.objective_id FROM supertag_v2_objectives o JOIN supertag_v2_objective_tasks ot ON ot.objective_id=o.objective_id WHERE ot.task_id=$1 AND o.owner_tag_id=$2 AND o.session_id=$3 AND o.status NOT IN ($4,$5)")
-        .bind(&source.task_id).bind(&source.tag_id).bind(&source.session_id)
-        .bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64)
-        .fetch_optional(&mut **tx).await?)
+impl ValidatedRequest {
+    pub(crate) fn objective_id(&self) -> &str {
+        &self.objective_id
+    }
+}
+
+/// Only a Tag's inbox Session reaches other Tags, so it requests reviews for its Tag's
+/// Objectives: an Objective's Session asks it to (`ask_tag`).
+fn requests_reviews(source: &Task) -> bool {
+    crate::mailbox::private_session(&source.session_id)
 }
 
 pub(crate) async fn may_request_in(tx: &mut Transaction<'_, Any>, source: &Task) -> Result<bool> {
-    let Some(objective_id) = owner_objective_in(tx, source).await? else {
-        return Ok(false);
-    };
-    if crate::work_sessions::task_kind_in(tx, &source.task_id).await?
-        == Some(crate::work_sessions::REPORT)
-    {
-        return Ok(!candidate_deliveries_in(tx, source, &objective_id)
+    if !requests_reviews(source)
+        || crate::work_sessions::task_kind_in(tx, &source.task_id)
             .await?
-            .is_empty());
+            .is_some()
+    {
+        return Ok(false);
     }
-    Ok(true)
+    Ok(!candidate_deliveries_in(tx, &source.tag_id)
+        .await?
+        .is_empty())
 }
 
-async fn candidate_deliveries_in(
-    tx: &mut Transaction<'_, Any>,
-    source: &Task,
-    objective_id: &str,
-) -> Result<Vec<AnyRow>> {
-    // An owner report speaks for exactly its child. Ordinary owner turns may
-    // select any current child in the Objective, including a delegated Tag.
-    let report_source = crate::work_sessions::task_scope_in(tx, &source.task_id)
-        .await?
-        .filter(|scope| scope.kind == crate::work_sessions::REPORT)
-        .map(|scope| scope.task_id);
-    Ok(sqlx::query("SELECT t.task_id,t.workspace_delivery,d.reference FROM supertag_v2_work_sessions w JOIN supertag_v2_work_session_tasks k ON k.task_id=w.latest_task_id AND k.work_session_id=w.work_session_id AND k.kind=1 JOIN supertag_v2_tasks t ON t.task_id=k.task_id JOIN supertag_v2_workspace_deliveries d ON d.task_id=t.task_id AND d.attempt_id=t.attempt_id WHERE w.objective_id=$1 AND w.parent_tag_id=$2 AND w.parent_session_id=$3 AND t.state=$4 AND t.cleanup_pending=0 AND d.committed_at_ms IS NOT NULL AND t.workspace_delivery IS NOT NULL AND ($5 IS NULL OR EXISTS (SELECT 1 FROM supertag_v2_work_session_reports r WHERE r.report_task_id=$5 AND r.child_task_id=t.task_id)) ORDER BY t.accepted_order DESC")
-        .bind(objective_id).bind(&source.tag_id).bind(&source.session_id).bind(TaskState::Succeeded as i64).bind(report_source)
+/// The commits a Tag may have reviewed: in each of its open Objectives, the current successful
+/// child Task of each Work Session the Objective's own Session started, with a verified delivery.
+/// A reserved upload, obsolete turn, or late cancelled delivery is not published work.
+async fn candidate_deliveries_in(tx: &mut Transaction<'_, Any>, tag: &str) -> Result<Vec<AnyRow>> {
+    Ok(sqlx::query("SELECT o.objective_id,t.task_id,t.workspace_delivery,d.reference FROM supertag_v2_objectives o JOIN supertag_v2_work_sessions w ON w.objective_id=o.objective_id AND w.parent_tag_id=o.owner_tag_id AND w.parent_session_id=o.session_id JOIN supertag_v2_work_session_tasks k ON k.task_id=w.latest_task_id AND k.work_session_id=w.work_session_id AND k.kind=1 JOIN supertag_v2_tasks t ON t.task_id=k.task_id JOIN supertag_v2_workspace_deliveries d ON d.task_id=t.task_id AND d.attempt_id=t.attempt_id WHERE o.owner_tag_id=$1 AND o.status NOT IN ($2,$3) AND t.state=$4 AND t.cleanup_pending=0 AND d.committed_at_ms IS NOT NULL AND t.workspace_delivery IS NOT NULL ORDER BY t.accepted_order DESC")
+        .bind(tag).bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).bind(TaskState::Succeeded as i64)
         .fetch_all(&mut **tx).await?)
 }
 
@@ -102,15 +94,12 @@ pub(crate) async fn validate_request_in(
     if source.tag_id == reviewer_id {
         return Err(invalid("a Tag cannot review its own request"));
     }
-    let objective_id = owner_objective_in(tx, source)
-        .await?
-        .ok_or(StoreError::PermissionDenied)?;
+    if !requests_reviews(source) {
+        return Err(StoreError::PermissionDenied);
+    }
     crate::tags::require_active(tx, reviewer_id).await?;
     let commit = commit.to_ascii_lowercase();
-    // Each Session contributes only its current successful child Task. A reserved
-    // upload, obsolete turn, or late cancelled delivery is not published work.
-    let rows = candidate_deliveries_in(tx, source, &objective_id).await?;
-    for row in rows {
+    for row in candidate_deliveries_in(tx, &source.tag_id).await? {
         let published: Vec<u8> = row.try_get("workspace_delivery")?;
         let stored: Vec<u8> = row.try_get("reference")?;
         let delivery = WorkspaceDeliveryReference::decode(published.as_slice())
@@ -121,7 +110,7 @@ pub(crate) async fn validate_request_in(
             continue;
         }
         return Ok(ValidatedRequest {
-            objective_id,
+            objective_id: row.try_get("objective_id")?,
             requester_tag_id: source.tag_id.clone(),
             reviewer_tag_id: reviewer_id.into(),
             source_task_id: row.try_get("task_id")?,
@@ -129,7 +118,7 @@ pub(crate) async fn validate_request_in(
         });
     }
     Err(refused(
-        "review commit is not the current successful verified child Workspace delivery",
+        "review commit is not the current successful verified Work Session delivery of one of this Tag's open Objectives",
     ))
 }
 

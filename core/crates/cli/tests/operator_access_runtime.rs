@@ -556,7 +556,6 @@ async fn audit_names_every_changed_resource(database: &str) -> Result<()> {
                 team_id: "core".into(),
                 name: "Core".into(),
                 member_tag_ids: vec![sender.clone()],
-                max_concurrency: Some(1),
             },
             &secret,
         )?)

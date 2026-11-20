@@ -1478,9 +1478,7 @@ it("starts a Work Session through the real Claude SDK with a scoped replay recei
     instruction: "Inspect the pinned checkout [REDACTED]",
     harness: "claude-code",
   });
-  // A Work Session works in its parent Task's Workspace; the tool takes none.
-  // A conversation's turn names no Tag (it can't delegate) and no Workspace.
-  expect(first?.targetTagId).toBeUndefined();
+  // A Work Session works on its parent Task's Tag and in its Workspace; the tool takes neither.
   expect(first?.workspaceId).toBeUndefined();
   expect(retry).toEqual(first);
   expect(second?.operationId).not.toBe(first?.operationId);

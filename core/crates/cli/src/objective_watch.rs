@@ -2,8 +2,7 @@
 //! with its time and actor, until the Objective closes (`tests/objective-watch.test.ts`).
 //!
 //! Each event is the difference between two reads of the Control Plane's Objective overview,
-//! with every Task of the Objective not yet settled and every Team post after the last one
-//! printed, each read a page at a time. Change notices wake the next read; a periodic read
+//! with every Task of the Objective not yet settled, each read a page at a time. Change notices wake the next read; a periodic read
 //! covers a dropped notice stream, and a failed read is retried. Times are the recorded time
 //! where there is one, else the time the change was read; each read's events print in time
 //! order.
@@ -20,12 +19,10 @@ use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     negotiation::ProtocolChannel,
     v2::{
-        GetObjectiveOverviewRequest, ListWorkstreamPostsRequest, ListWorkstreamPostsResponse,
-        ObjectiveOverview, ObjectiveSessionFailure, ObjectiveSessionStatus, ObjectiveStatus,
-        ObjectiveTeamPost, TaskState, WatchKind, WatchRequest,
+        GetObjectiveOverviewRequest, ObjectiveOverview, ObjectiveSessionFailure,
+        ObjectiveSessionStatus, ObjectiveStatus, TaskState, WatchKind, WatchRequest,
         objective_overviews_client::ObjectiveOverviewsClient,
-        operator_events_client::OperatorEventsClient, teams_client::TeamsClient,
-        watch_event::Update,
+        operator_events_client::OperatorEventsClient, watch_event::Update,
     },
 };
 
@@ -70,7 +67,6 @@ pub(crate) struct Timeline {
     started: bool,
     status: i32,
     sessions: BTreeMap<String, SeenSession>,
-    last_post: u64,
     pending_approvals: u32,
     notices: BTreeSet<String>,
     /// Leading Tasks, in acceptance order, that are settled and reported; reads start after.
@@ -155,13 +151,8 @@ impl Timeline {
         self.task_offset
     }
 
-    /// The newest Team post already reported.
-    pub(crate) fn last_post(&self) -> u64 {
-        self.last_post
-    }
-
     /// The events between the previous read and this one, oldest first. `view.tasks` starts at
-    /// [`Timeline::task_offset`] and `view.posts` holds the posts after [`Timeline::last_post`].
+    /// [`Timeline::task_offset`].
     pub(crate) fn events(&mut self, view: &ObjectiveOverview) -> Vec<Event> {
         let mut events = self.changes(view);
         // Closing comes last: the turns it cancels are recorded just after it.
@@ -350,23 +341,6 @@ impl Timeline {
             }
             self.task_offset += 1;
         }
-        let after = self.last_post;
-        for post in view.posts.iter().filter(|post| post.sequence > after) {
-            let to = if post.to_tag_ids.is_empty() {
-                "the Team".to_owned()
-            } else {
-                post.to_tag_ids.join(", ")
-            };
-            let mut entry = event(
-                "team.post",
-                post.created_at_ms,
-                &post.author_tag_id,
-                format!("Posted to {to}: {}", first_line(&post.body)),
-            );
-            entry.fields.insert("sequence", json!(post.sequence));
-            events.push(entry);
-            self.last_post = post.sequence;
-        }
         if view.pending_approvals != self.pending_approvals {
             if view.pending_approvals > 0 {
                 let mut entry = event(
@@ -531,28 +505,6 @@ pub(crate) fn summary(view: &ObjectiveOverview) -> String {
         .join("\n")
 }
 
-/// Every post one read returns, following its cursor a page at a time.
-async fn all_posts(
-    mut page: impl AsyncFnMut(String) -> Result<ListWorkstreamPostsResponse>,
-) -> Result<Vec<ObjectiveTeamPost>> {
-    let mut posts = vec![];
-    let mut cursor = String::new();
-    loop {
-        let next = page(cursor).await?;
-        posts.extend(next.posts.into_iter().map(|post| ObjectiveTeamPost {
-            sequence: post.sequence,
-            author_tag_id: post.author_tag_id,
-            to_tag_ids: post.to_tag_ids,
-            body: post.body,
-            created_at_ms: post.created_at_ms,
-        }));
-        if next.next_cursor.is_empty() {
-            return Ok(posts);
-        }
-        cursor = next.next_cursor;
-    }
-}
-
 /// Wait, then read, until a read succeeds. A failed read is reported once per run of
 /// failures and read again after the next wait instead of ending the watch.
 async fn reread<T>(
@@ -574,15 +526,12 @@ async fn reread<T>(
     }
 }
 
-/// Read the overview with every Task from `task_offset` on and every Team post after
-/// `after_post`, each a page at a time.
+/// Read the overview with every Task from `task_offset` on, a page at a time.
 async fn read(
     overviews: &mut ObjectiveOverviewsClient<ProtocolChannel>,
-    teams: &mut TeamsClient<ProtocolChannel>,
     token: &str,
     objective_id: &str,
     task_offset: u32,
-    after_post: u64,
 ) -> Result<ObjectiveOverview> {
     let mut page = async |offset: u32| -> Result<ObjectiveOverview> {
         Ok(overviews
@@ -605,43 +554,6 @@ async fn read(
         view.tasks.extend(more.tasks);
         next = more.next_offset.filter(|next| *next > offset);
     }
-    // Listing a Team's whole Workstream is an operator call. A client sees the posts its
-    // overview carries, the Team's latest ones.
-    view.posts = match view.team.as_ref().map(|team| team.team_id.clone()) {
-        Some(team) => {
-            let listed = all_posts(async |cursor| {
-                Ok(teams
-                    .list_workstream_posts(authenticated_request(
-                        ListWorkstreamPostsRequest {
-                            team: team.clone(),
-                            after_sequence: Some(after_post),
-                            limit: 0,
-                            cursor,
-                        },
-                        token,
-                        None,
-                    )?)
-                    .await?
-                    .into_inner())
-            })
-            .await;
-            match listed {
-                Ok(posts) => posts,
-                Err(error)
-                    if error
-                        .downcast_ref::<tonic::Status>()
-                        .is_some_and(|status| status.code() == tonic::Code::PermissionDenied) =>
-                {
-                    std::mem::take(&mut view.posts)
-                        .into_iter()
-                        .filter(|post| post.sequence > after_post)
-                        .collect()
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        None => vec![],
-    };
     Ok(view)
 }
 
@@ -655,23 +567,12 @@ pub(crate) async fn watch(
 ) -> Result<()> {
     let target = resolve_target(connection)?;
     let channel = crate::network::operator_channel(&target.endpoint(POLL * 5).await?).await?;
-    let mut overviews = ObjectiveOverviewsClient::new(channel.clone())
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
-    let mut teams = TeamsClient::new(channel)
+    let mut overviews = ObjectiveOverviewsClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
     let mut timeline = Timeline::default();
     // An Objective that cannot be read fails at once, before any stream opens.
-    let mut view = read(
-        &mut overviews,
-        &mut teams,
-        &target.token,
-        &objective_id,
-        0,
-        0,
-    )
-    .await?;
+    let mut view = read(&mut overviews, &target.token, &objective_id, 0).await?;
     let changed = Arc::new(tokio::sync::Notify::new());
     let notices = tokio::spawn(follow_changes(
         target.clone(),
@@ -698,7 +599,7 @@ pub(crate) async fn watch(
             }
             // A failed read is read again after the next notice or tick, so a Control Plane
             // restart or a network outage does not end the watch.
-            let (task_offset, after_post) = (timeline.task_offset(), timeline.last_post());
+            let task_offset = timeline.task_offset();
             view = reread(
                 async || {
                     tokio::select! {
@@ -706,17 +607,7 @@ pub(crate) async fn watch(
                         () = tokio::time::sleep(POLL) => {}
                     }
                 },
-                async || {
-                    read(
-                        &mut overviews,
-                        &mut teams,
-                        &target.token,
-                        &objective_id,
-                        task_offset,
-                        after_post,
-                    )
-                    .await
-                },
+                async || read(&mut overviews, &target.token, &objective_id, task_offset).await,
                 |error| errln!("Could not read Objective {objective_id}; retrying: {error:#}"),
             )
             .await;
@@ -734,13 +625,9 @@ async fn follow_changes(
     objective_id: String,
     changed: Arc<tokio::sync::Notify>,
 ) {
-    let kinds = [
-        WatchKind::Objective,
-        WatchKind::Task,
-        WatchKind::WorkstreamPost,
-    ]
-    .map(|kind| kind as i32)
-    .to_vec();
+    let kinds = [WatchKind::Objective, WatchKind::Task]
+        .map(|kind| kind as i32)
+        .to_vec();
     let mut resume = String::new();
     loop {
         let stream = async {
@@ -968,26 +855,16 @@ mod tests {
     }
 
     #[test]
-    fn shows_questions_posts_approvals_and_closing_reasons() {
+    fn shows_questions_approvals_and_closing_reasons() {
         let mut asking = owner(ObjectiveSessionStatus::Waiting);
         asking.question = "Which region first?".into();
         let mut first = view(ObjectiveStatus::Working, vec![asking]);
-        first.posts = vec![ObjectiveTeamPost {
-            sequence: 1,
-            author_tag_id: "builder".into(),
-            to_tag_ids: vec!["planner".into()],
-            body: "Exporter ready\nDetails follow".into(),
-            created_at_ms: AT + 5_000,
-        }];
         first.pending_approvals = 2;
         let mut timeline = Timeline::default();
         let text = lines(&mut timeline, &first).join("\n");
         assert!(text.contains(
             "planner       Objective conversation: Task task-start is waiting: Which region first?"
         ));
-        assert!(
-            text.contains("2026-11-07 00:00:05Z  builder       Posted to planner: Exporter ready")
-        );
         assert!(text.contains(
             "supertag      2 approval requests wait for a decision: supertag get approval --objective ship-sso --pending"
         ));
@@ -1083,75 +960,6 @@ mod tests {
             "2026-11-07 00:00:05Z  builder       Started Build the exporter"
         );
         assert!(text[2].contains("Objective conversation: Task task-start finished"));
-    }
-
-    fn post(sequence: u64) -> supertag_protocol::v2::WorkstreamPost {
-        supertag_protocol::v2::WorkstreamPost {
-            sequence,
-            author_tag_id: "builder".into(),
-            body: format!("Update {sequence}"),
-            created_at_ms: AT + sequence as i64 * 1_000,
-            ..Default::default()
-        }
-    }
-
-    /// A Team's posts after `after`, 16 to a page, as `ListWorkstreamPosts` pages them.
-    fn page(all: &[u64], after: u64, cursor: &str) -> ListWorkstreamPostsResponse {
-        let after = cursor
-            .strip_prefix('s')
-            .map_or(after, |value| value.parse().unwrap());
-        let rest: Vec<_> = all
-            .iter()
-            .copied()
-            .filter(|sequence| *sequence > after)
-            .collect();
-        let posts: Vec<_> = rest.iter().take(16).copied().map(post).collect();
-        ListWorkstreamPostsResponse {
-            next_cursor: if rest.len() > 16 {
-                format!("s{}", posts.last().unwrap().sequence)
-            } else {
-                String::new()
-            },
-            posts,
-        }
-    }
-
-    #[tokio::test]
-    async fn replays_every_team_post_a_page_at_a_time_and_prints_each_burst_in_full() {
-        let mut timeline = Timeline::default();
-        let mut sequences: Vec<u64> = (1..=120).collect();
-        let mut printed = vec![];
-        for burst in [120, 250] {
-            sequences.extend(sequences.len() as u64 + 1..=burst);
-            let after = timeline.last_post();
-            let mut reads = 0;
-            let posts = all_posts(async |cursor| {
-                reads += 1;
-                Ok(page(&sequences, after, &cursor))
-            })
-            .await
-            .unwrap();
-            assert!(reads > 1, "one page holds 16 posts");
-            let mut read = view(ObjectiveStatus::Working, vec![]);
-            read.posts = posts;
-            printed.extend(
-                timeline
-                    .events(&read)
-                    .into_iter()
-                    .filter(|event| event.kind == "team.post")
-                    .map(|event| event.message),
-            );
-        }
-        assert_eq!(printed.len(), 250);
-        for sequence in [1, 50, 120, 121, 250] {
-            assert_eq!(
-                printed
-                    .iter()
-                    .filter(|message| **message == format!("Posted to the Team: Update {sequence}"))
-                    .count(),
-                1
-            );
-        }
     }
 
     #[tokio::test]

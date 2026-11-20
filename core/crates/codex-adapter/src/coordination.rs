@@ -7,7 +7,7 @@ use supertag_protocol::{
     MAX_MESSAGE_BYTES, MAX_WORKSPACE_BLOB_BYTES,
     v2::{
         ApprovalState, CommitReview, CommitReviewDecision, CommitReviewResponse,
-        CommitReviewSubmission, HarnessAskWorkSessionQuestionRequest,
+        CommitReviewSubmission, HarnessAskTagRequest, HarnessAskWorkSessionQuestionRequest,
         HarnessCloseWorkSessionRequest, HarnessContinueWorkSessionRequest,
         HarnessPostWorkstreamRequest, HarnessReadMailboxRequest, HarnessReadReviewPatchRequest,
         HarnessReadWorkstreamRequest, HarnessSendTagMessageRequest, HarnessStartWorkSessionRequest,
@@ -29,6 +29,7 @@ pub(crate) enum Arguments {
     Capture(crate::artifact::Capture),
     Acquire(crate::artifact::Acquisition),
     Ask(String),
+    AskTag(String),
     Post(Post),
     ReadWorkstream(WorkstreamPage),
     ReadMailbox(Page),
@@ -55,6 +56,18 @@ pub(crate) enum Inventory {
     WorkSessionsReview,
     WorkSessionLifecycle,
     WorkSessionLifecycleReview,
+}
+
+/// Which Tags a turn reaches. Only a Tag's inbox Session and person conversations reach other
+/// Tags; an Objective's Session asks its own Tag instead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Reach {
+    /// `post`, `read_workstream`, `read_mailbox`, and `send_message`.
+    Tags,
+    /// `ask_tag`, and no tool that reaches another Tag.
+    OwnTag,
+    /// No Tag at all.
+    None,
 }
 
 impl Inventory {
@@ -86,7 +99,6 @@ fn bounded_identity(value: &str) -> bool {
 pub(crate) struct StartSession {
     title: String,
     instruction: String,
-    tag: Option<String>,
     harness: Option<String>,
 }
 
@@ -113,7 +125,6 @@ impl StartSession {
                 && !self.instruction.trim().is_empty()
                 && self.instruction.encode_utf16().count() <= 8000
                 && !self.instruction.contains('\0')
-                && self.tag.as_deref().is_none_or(bounded_identity)
                 && self
                     .harness
                     .as_deref()
@@ -127,7 +138,11 @@ impl StartSession {
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DirectMessage {
+    /// Another Tag; empty when the message answers `objective`.
+    #[serde(default)]
     to: String,
+    /// From the inbox Session: one of this Tag's Objectives that asked it.
+    objective: Option<String>,
     text: String,
     review: Option<DirectReview>,
     #[serde(default, rename = "type")]
@@ -298,7 +313,7 @@ pub(crate) struct Page {
     cursor: String,
 }
 
-pub(crate) fn arguments(params: &Value, inventory: Inventory) -> Result<Arguments> {
+pub(crate) fn arguments(params: &Value, inventory: Inventory, reach: Reach) -> Result<Arguments> {
     ensure!(
         params["namespace"] == "supertag",
         "Codex requested an unregistered coordination tool"
@@ -310,7 +325,19 @@ pub(crate) fn arguments(params: &Value, inventory: Inventory) -> Result<Argument
         Some("ask") if inventory >= Inventory::Ask => {
             Ok(Arguments::Ask(crate::questions::validate_tool(params)?))
         }
-        Some("post") if inventory >= Inventory::Workstream => {
+        Some("ask_tag") if reach == Reach::OwnTag => {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct AskTag {
+                text: String,
+            }
+            let ask: AskTag =
+                serde_json::from_value(input.clone()).context("invalid Codex ask_tag arguments")?;
+            let text = ask.text.trim().to_owned();
+            ensure!(bounded_text(&text, 8000), "invalid Codex ask_tag text");
+            Ok(Arguments::AskTag(text))
+        }
+        Some("post") if inventory >= Inventory::Workstream && reach == Reach::Tags => {
             let mut post: Post = serde_json::from_value(input.clone())
                 .context("invalid Codex Workstream post arguments")?;
             post.text = post.text.trim().to_owned();
@@ -328,19 +355,19 @@ pub(crate) fn arguments(params: &Value, inventory: Inventory) -> Result<Argument
             post.to.dedup();
             Ok(Arguments::Post(post))
         }
-        Some("read_workstream") if inventory >= Inventory::Workstream => {
+        Some("read_workstream") if inventory >= Inventory::Workstream && reach == Reach::Tags => {
             let page: WorkstreamPage = serde_json::from_value(input.clone())
                 .context("invalid Codex Workstream read arguments")?;
             validate_page(page.limit, &page.cursor)?;
             Ok(Arguments::ReadWorkstream(page))
         }
-        Some("read_mailbox") if inventory >= Inventory::Workstream => {
+        Some("read_mailbox") if inventory >= Inventory::Workstream && reach == Reach::Tags => {
             let page: Page = serde_json::from_value(input.clone())
                 .context("invalid Codex Mailbox read arguments")?;
             validate_page(page.limit, &page.cursor)?;
             Ok(Arguments::ReadMailbox(page))
         }
-        Some("read_review_patch") if inventory.supports_reviews() => {
+        Some("read_review_patch") if inventory.supports_reviews() && reach == Reach::Tags => {
             let page: ReviewPage = serde_json::from_value(input.clone())
                 .context("invalid Codex commit review patch arguments")?;
             ensure!(
@@ -349,7 +376,7 @@ pub(crate) fn arguments(params: &Value, inventory: Inventory) -> Result<Argument
             );
             Ok(Arguments::ReadReviewPatch(page))
         }
-        Some("send_message") if inventory >= Inventory::Direct => {
+        Some("send_message") if inventory >= Inventory::Direct && reach == Reach::Tags => {
             ensure!(
                 input
                     .get("review")
@@ -362,22 +389,25 @@ pub(crate) fn arguments(params: &Value, inventory: Inventory) -> Result<Argument
                 review.normalize()?;
             }
             message.text = message.text.trim().to_owned();
+            let recipient = match &message.objective {
+                // An answer to an Objective is text only.
+                Some(objective) => {
+                    message.to.is_empty() && message.review.is_none() && bounded_identity(objective)
+                }
+                None => bounded_identity(&message.to),
+            };
             ensure!(
                 !message.text.is_empty()
                     && message.text.encode_utf16().count() <= 8000
                     && !message.text.contains('\0')
-                    && !message.to.is_empty()
-                    && message.to.len() <= 256
-                    && !message.to.chars().any(char::is_control),
+                    && recipient,
                 "invalid Codex direct message"
             );
             Ok(Arguments::Send(message))
         }
         Some("start_session") if inventory >= Inventory::WorkSessions => {
             ensure!(
-                ["tag", "harness"]
-                    .into_iter()
-                    .all(|key| input.get(key).is_none_or(Value::is_string)),
+                input.get("harness").is_none_or(Value::is_string),
                 "invalid Codex Work Session arguments"
             );
             let start: StartSession = serde_json::from_value(input.clone())
@@ -477,7 +507,51 @@ pub(crate) fn close_arguments(params: &Value) -> Result<Option<String>> {
 
 const POST_DESCRIPTION: &str = "Record progress, findings, or a decision in the Team Workstream, the Team's shared record. A post wakes nobody: every member sees it at the start of its next inbox turn. Optional Tag IDs in to mark the post as addressed to them. A pending approval requires ending the turn and waiting for a decision.";
 
-pub(crate) fn tool_specs(inventory: Inventory) -> Vec<Value> {
+/// `ask_tag`, for an Objective's Session.
+pub(crate) fn ask_tag_spec() -> Value {
+    json!({
+        "type":"function", "name":"ask_tag",
+        "description":"Ask this Tag's inbox Session for something this Objective needs from outside it, such as another Tag's work, an answer only another Tag has, or a review of a verified commit. This Objective's Session reaches no other Tag; the inbox Session does, and its answer runs as this Objective's next turn. Asking does not end this turn: keep working, and finish the turn when nothing else is left. Say what you need and why in text.",
+        "inputSchema":{"type":"object","properties":{
+            "text":{"type":"string","minLength":1,"maxLength":8000}
+        },"required":["text"],"additionalProperties":false}
+    })
+}
+
+pub(crate) fn tool_specs(inventory: Inventory, reach: Reach) -> Vec<Value> {
+    let mut tools = Vec::new();
+    if reach == Reach::Tags {
+        tools.extend(messaging_specs(inventory));
+    }
+    if reach == Reach::OwnTag {
+        tools.push(ask_tag_spec());
+    }
+    if inventory >= Inventory::WorkSessions {
+        tools.push(json!({
+            "type":"function", "name":"start_session",
+            "description":"Start a Work Session on this Tag with a short title and self-contained instruction. After it is accepted, acknowledge the work and finish this turn. The Work Session works in this Task's Workspace and reports to this conversation. Omit harness to keep codex; name another only when the work needs it. A Work Session keeps its harness, and you talk to it only through its report and continue_session.",
+            "inputSchema":{"type":"object","properties":{
+                "title":{"type":"string","minLength":1,"maxLength":120},
+                "instruction":{"type":"string","minLength":1,"maxLength":8000},
+                "harness":{"type":"string","enum":HARNESSES}
+            },"required":["title","instruction"],"additionalProperties":false}
+        }));
+    }
+    if inventory >= Inventory::WorkSessionLifecycle {
+        tools.push(json!({
+            "type":"function", "name":"continue_session",
+            "description":"Relay an answer or follow-up instruction to a Work Session after its report. The Work Session resumes its existing history.",
+            "inputSchema":{"type":"object","properties":{
+                "sessionId":{"type":"string","minLength":1,"maxLength":256},
+                "message":{"type":"string","minLength":1,"maxLength":8000}
+            },"required":["sessionId","message"],"additionalProperties":false}
+        }));
+    }
+    tools
+}
+
+/// The tools that reach other Tags.
+fn messaging_specs(inventory: Inventory) -> Vec<Value> {
     let mut tools = vec![json!({
         "type":"function", "name":"post",
         "description":POST_DESCRIPTION,
@@ -516,16 +590,17 @@ pub(crate) fn tool_specs(inventory: Inventory) -> Vec<Value> {
     if inventory >= Inventory::Direct {
         let mut send = json!({
             "type":"function", "name":"send_message",
-            "description":"Send a private message to another Tag; it wakes the Tag for a turn of its own. Use it to ask a question (type question) or raise a blocker (type blocker); a note is the default. Record progress and decisions with post instead. A pending approval requires ending the turn and waiting for a decision.",
+            "description":"Send a private message to another Tag; it wakes the Tag for a turn of its own. Use it to ask a question (type question) or raise a blocker (type blocker); a note is the default. Record progress and decisions with post instead. In this Tag's inbox, answer one of this Tag's Objectives that asked with objective instead of to. A pending approval requires ending the turn and waiting for a decision.",
             "inputSchema":{"type":"object","properties":{
                 "to":{"type":"string","minLength":1,"maxLength":256},
+                "objective":{"type":"string","minLength":1,"maxLength":256},
                 "text":{"type":"string","minLength":1,"maxLength":8000},
                 "type":{"type":"string","enum":MESSAGE_TYPES}
-            },"required":["to","text"],"additionalProperties":false}
+            },"required":["text"],"additionalProperties":false}
         });
         if inventory.supports_reviews() {
             send["description"] = json!(
-                "Send a private message that another Tag handles in a later turn of its own; it wakes the Tag. Use it to ask a question (type question) or raise a blocker (type blocker); a note is the default. Record progress and decisions with post instead. At most 3 new messages per Task. To request review, provide the full delivered commit hash. To record a verdict, provide the review request ID and verdict. A pending approval requires ending the turn and waiting for a decision."
+                "Send a private message that another Tag handles in a later turn of its own; it wakes the Tag. Use it to ask a question (type question) or raise a blocker (type blocker); a note is the default. Record progress and decisions with post instead. At most 3 new messages per Task. In this Tag's inbox, answer one of this Tag's Objectives that asked with objective instead of to. To request review of an Objective's verified commit, provide the full commit hash. To record a verdict, provide the review request ID and verdict. A pending approval requires ending the turn and waiting for a decision."
             );
             send["inputSchema"]["properties"]["review"] = json!({
                 "type":"object", "additionalProperties":false, "properties":{
@@ -546,28 +621,6 @@ pub(crate) fn tool_specs(inventory: Inventory) -> Vec<Value> {
                 },"required":["requestId"],"additionalProperties":false}
             }));
         }
-    }
-    if inventory >= Inventory::WorkSessions {
-        tools.push(json!({
-            "type":"function", "name":"start_session",
-            "description":"Start a Work Session with a short title and self-contained instruction. After it is accepted, acknowledge the work and finish this turn. The Work Session works in this Task's Workspace and reports to this conversation. To delegate to an eligible Tag on this Objective's Team, name it in tag; omit tag to run the work on this Tag. Omit harness to keep codex; name another only when the work needs it. A Work Session keeps its harness, and you talk to it only through its report and continue_session.",
-            "inputSchema":{"type":"object","properties":{
-                "title":{"type":"string","minLength":1,"maxLength":120},
-                "instruction":{"type":"string","minLength":1,"maxLength":8000},
-                "tag":{"type":"string","minLength":1,"maxLength":256},
-                "harness":{"type":"string","enum":HARNESSES}
-            },"required":["title","instruction"],"additionalProperties":false}
-        }));
-    }
-    if inventory >= Inventory::WorkSessionLifecycle {
-        tools.push(json!({
-            "type":"function", "name":"continue_session",
-            "description":"Relay an answer or follow-up instruction to a Work Session after its report. The Work Session resumes its existing history.",
-            "inputSchema":{"type":"object","properties":{
-                "sessionId":{"type":"string","minLength":1,"maxLength":256},
-                "message":{"type":"string","minLength":1,"maxLength":8000}
-            },"required":["sessionId","message"],"additionalProperties":false}
-        }));
     }
     tools
 }
@@ -619,7 +672,6 @@ impl Client {
         let start = StartSession {
             title: crate::auth::redact(start.normalized_title(), secrets),
             instruction: crate::auth::redact(start.instruction.trim().to_owned(), secrets),
-            tag: start.tag.clone(),
             harness: start.harness.clone(),
         };
         if start.validate().is_err() {
@@ -630,7 +682,6 @@ impl Client {
             operation_id,
             title: title.clone(),
             instruction: start.instruction,
-            target_tag_id: start.tag,
             harness: start.harness,
         };
         let receipt = confirm_reason(async || {
@@ -656,7 +707,7 @@ impl Client {
                 && receipt.parent_session_id == session_id
                 && receipt.starter_task_id == task_id
                 && receipt.title == title
-                && receipt.tag_id == input.target_tag_id.as_deref().unwrap_or(tag)
+                && receipt.tag_id == tag
                 && receipt
                     .work_session_id
                     .strip_prefix("work/")
@@ -899,6 +950,7 @@ impl Client {
             kind: message.kind.wire().into(),
             operation_id,
             recipient_tag_id: message.to.clone(),
+            recipient_objective_id: message.objective.clone().unwrap_or_default(),
             text: text.clone(),
             review: message
                 .review
@@ -924,10 +976,18 @@ impl Client {
         };
         match (result.message, result.approval, result.review) {
             (Some(sent), None, None) => {
+                // An answer to an Objective names it and no recipient Tag.
+                let recipient = match &message.objective {
+                    Some(objective) => {
+                        sent.recipient_tag_id.is_empty()
+                            && sent.objective_id.as_deref() == Some(objective.as_str())
+                    }
+                    None => sent.recipient_tag_id == message.to,
+                };
                 ensure!(
                     sent.source_task_id == task_id
                         && sent.sender_tag_id == tag_id
-                        && sent.recipient_tag_id == message.to
+                        && recipient
                         && sent.text == text
                         && sent.origin() == TagMessageOrigin::Direct
                         && sent.workstream_post_id.is_none()
@@ -1009,6 +1069,50 @@ impl Client {
             }
             _ => bail!("invalid direct message receipt"),
         }
+    }
+
+    /// `ask_tag`: an Objective's turn asks its own Tag's inbox Session; the turn goes on.
+    pub(crate) async fn ask_tag(
+        &mut self,
+        text: &str,
+        operation_id: String,
+        token: &str,
+        secrets: &[String],
+    ) -> Result<Value> {
+        let text = crate::auth::redact(text.to_owned(), secrets);
+        if !bounded_text(&text, 8000) {
+            return Ok(refused());
+        }
+        let input = HarnessAskTagRequest { operation_id, text };
+        let result = confirm_reason(async || {
+            self.mailbox
+                .ask_tag(
+                    crate::request(input.clone(), token)
+                        .map_err(|_| Status::unauthenticated("invalid execution credential"))?,
+                )
+                .await
+        })
+        .await?;
+        let receipt = match result {
+            Ok(receipt) => receipt,
+            // A spent ask limit or a closed Objective: the model can say so and go on.
+            Err(Some(reason)) => return Ok(response(crate::auth::redact(reason, secrets), false)),
+            Err(None) => return Ok(refused()),
+        };
+        ensure!(
+            bounded_identity(&receipt.message_id),
+            "ask_tag receipt has no message identity"
+        );
+        let mut output = json!({
+            "status": "asked",
+            "messageId": receipt.message_id,
+            "duplicate": receipt.duplicate,
+            "note": "The answer runs as this Objective's next turn. Keep working; finish the turn when nothing else is left.",
+        });
+        if !receipt.wake_deferred.is_empty() {
+            output["wakeDeferred"] = json!(crate::auth::redact(receipt.wake_deferred, secrets));
+        }
+        Ok(response(output.to_string(), true))
     }
 
     pub(crate) async fn read_review_patch(
@@ -1344,8 +1448,17 @@ mod tests {
 
     #[test]
     fn commit_review_schema_is_versioned_and_arguments_are_exclusive() {
+        let answer = json!({"namespace":"supertag","tool":"send_message",
+            "arguments":{"objective":"goal","text":"Here is the answer."}});
+        assert!(arguments(&answer, Inventory::DirectReview, Reach::Tags).is_ok());
+        let both = json!({"namespace":"supertag","tool":"send_message",
+            "arguments":{"objective":"goal","to":"other","text":"Both."}});
+        assert!(arguments(&both, Inventory::DirectReview, Reach::Tags).is_err());
+        let reviewed = json!({"namespace":"supertag","tool":"send_message",
+            "arguments":{"objective":"goal","text":"Answer.","review":{"commit":"ab".repeat(20)}}});
+        assert!(arguments(&reviewed, Inventory::DirectReview, Reach::Tags).is_err());
         let send_schema = |inventory| {
-            tool_specs(inventory)
+            tool_specs(inventory, Reach::Tags)
                 .into_iter()
                 .find(|spec| spec["name"] == "send_message")
                 .unwrap()["inputSchema"]
@@ -1376,12 +1489,13 @@ mod tests {
         };
         let commit = "AB".repeat(20);
         let request = params(json!({"commit":commit}));
-        assert!(arguments(&request, Inventory::Direct).is_err());
-        assert!(arguments(&request, Inventory::DirectReview).is_ok());
+        assert!(arguments(&request, Inventory::Direct, Reach::Tags).is_err());
+        assert!(arguments(&request, Inventory::DirectReview, Reach::Tags).is_ok());
         assert!(
             arguments(
                 &params(json!({"requestId":"request-1","verdict":"changes_requested"})),
-                Inventory::DirectReview
+                Inventory::DirectReview,
+                Reach::Tags
             )
             .is_ok()
         );
@@ -1396,7 +1510,7 @@ mod tests {
             json!({"requestId":"request-1","verdict":"accepted"}),
             json!({"commit":commit,"workspace":"forged"}),
         ] {
-            assert!(arguments(&params(malformed), Inventory::DirectReview).is_err());
+            assert!(arguments(&params(malformed), Inventory::DirectReview, Reach::Tags).is_err());
         }
     }
 }

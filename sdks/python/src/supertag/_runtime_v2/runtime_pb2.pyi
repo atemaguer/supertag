@@ -1024,7 +1024,7 @@ class AskQuestionRequest(_message.Message):
     def __init__(self, operation_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
 
 class AttemptCapabilities(_message.Message):
-    __slots__ = ("may_ask_objective_question", "may_use_workstream", "may_read_mailbox", "may_send_tag_message", "may_start_work_session", "may_continue_work_session", "may_ask_work_session_question", "may_request_commit_review", "may_read_tag_sessions", "tag_portfolio", "objective_ongoing", "may_schedule", "time_zone", "open_work_sessions", "max_work_sessions", "memory_trusted", "may_stay_quiet", "may_read_own_session")
+    __slots__ = ("may_ask_objective_question", "may_use_workstream", "may_read_mailbox", "may_send_tag_message", "may_start_work_session", "may_continue_work_session", "may_ask_work_session_question", "may_request_commit_review", "may_read_tag_sessions", "tag_portfolio", "objective_ongoing", "may_schedule", "time_zone", "open_work_sessions", "max_work_sessions", "memory_trusted", "may_stay_quiet", "may_read_own_session", "may_ask_tag")
     MAY_ASK_OBJECTIVE_QUESTION_FIELD_NUMBER: _ClassVar[int]
     MAY_USE_WORKSTREAM_FIELD_NUMBER: _ClassVar[int]
     MAY_READ_MAILBOX_FIELD_NUMBER: _ClassVar[int]
@@ -1043,6 +1043,7 @@ class AttemptCapabilities(_message.Message):
     MEMORY_TRUSTED_FIELD_NUMBER: _ClassVar[int]
     MAY_STAY_QUIET_FIELD_NUMBER: _ClassVar[int]
     MAY_READ_OWN_SESSION_FIELD_NUMBER: _ClassVar[int]
+    MAY_ASK_TAG_FIELD_NUMBER: _ClassVar[int]
     may_ask_objective_question: bool
     may_use_workstream: bool
     may_read_mailbox: bool
@@ -1061,7 +1062,8 @@ class AttemptCapabilities(_message.Message):
     memory_trusted: bool
     may_stay_quiet: bool
     may_read_own_session: bool
-    def __init__(self, may_ask_objective_question: _Optional[bool] = ..., may_use_workstream: _Optional[bool] = ..., may_read_mailbox: _Optional[bool] = ..., may_send_tag_message: _Optional[bool] = ..., may_start_work_session: _Optional[bool] = ..., may_continue_work_session: _Optional[bool] = ..., may_ask_work_session_question: _Optional[bool] = ..., may_request_commit_review: _Optional[bool] = ..., may_read_tag_sessions: _Optional[bool] = ..., tag_portfolio: _Optional[str] = ..., objective_ongoing: _Optional[bool] = ..., may_schedule: _Optional[bool] = ..., time_zone: _Optional[str] = ..., open_work_sessions: _Optional[int] = ..., max_work_sessions: _Optional[int] = ..., memory_trusted: _Optional[bool] = ..., may_stay_quiet: _Optional[bool] = ..., may_read_own_session: _Optional[bool] = ...) -> None: ...
+    may_ask_tag: bool
+    def __init__(self, may_ask_objective_question: _Optional[bool] = ..., may_use_workstream: _Optional[bool] = ..., may_read_mailbox: _Optional[bool] = ..., may_send_tag_message: _Optional[bool] = ..., may_start_work_session: _Optional[bool] = ..., may_continue_work_session: _Optional[bool] = ..., may_ask_work_session_question: _Optional[bool] = ..., may_request_commit_review: _Optional[bool] = ..., may_read_tag_sessions: _Optional[bool] = ..., tag_portfolio: _Optional[str] = ..., objective_ongoing: _Optional[bool] = ..., may_schedule: _Optional[bool] = ..., time_zone: _Optional[str] = ..., open_work_sessions: _Optional[int] = ..., max_work_sessions: _Optional[int] = ..., memory_trusted: _Optional[bool] = ..., may_stay_quiet: _Optional[bool] = ..., may_read_own_session: _Optional[bool] = ..., may_ask_tag: _Optional[bool] = ...) -> None: ...
 
 class CloseWorkSessionRequest(_message.Message):
     __slots__ = ("work_session_id", "delivery_pulled")
@@ -1132,18 +1134,16 @@ class WorkSessionQuestion(_message.Message):
     def __init__(self, work_session_id: _Optional[str] = ..., task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., text: _Optional[str] = ..., asked_at_ms: _Optional[int] = ..., published_at_ms: _Optional[int] = ..., answer_task_id: _Optional[str] = ...) -> None: ...
 
 class StartWorkSessionRequest(_message.Message):
-    __slots__ = ("operation_id", "title", "instruction", "target_tag_id", "harness")
+    __slots__ = ("operation_id", "title", "instruction", "harness")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     TITLE_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTION_FIELD_NUMBER: _ClassVar[int]
-    TARGET_TAG_ID_FIELD_NUMBER: _ClassVar[int]
     HARNESS_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     title: str
     instruction: str
-    target_tag_id: str
     harness: str
-    def __init__(self, operation_id: _Optional[str] = ..., title: _Optional[str] = ..., instruction: _Optional[str] = ..., target_tag_id: _Optional[str] = ..., harness: _Optional[str] = ...) -> None: ...
+    def __init__(self, operation_id: _Optional[str] = ..., title: _Optional[str] = ..., instruction: _Optional[str] = ..., harness: _Optional[str] = ...) -> None: ...
 
 class GetWorkSessionRequest(_message.Message):
     __slots__ = ("work_session_id", "report_task_id")
@@ -1196,6 +1196,24 @@ class ListWorkSessionsResponse(_message.Message):
     open_work_sessions: int
     max_work_sessions: int
     def __init__(self, work_sessions: _Optional[_Iterable[_Union[WorkSession, _Mapping]]] = ..., next_cursor: _Optional[str] = ..., open_work_sessions: _Optional[int] = ..., max_work_sessions: _Optional[int] = ...) -> None: ...
+
+class AskAttemptTagRequest(_message.Message):
+    __slots__ = ("operation_id", "text")
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    operation_id: str
+    text: str
+    def __init__(self, operation_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
+
+class AskTagResponse(_message.Message):
+    __slots__ = ("message_id", "duplicate", "wake_deferred")
+    MESSAGE_ID_FIELD_NUMBER: _ClassVar[int]
+    DUPLICATE_FIELD_NUMBER: _ClassVar[int]
+    WAKE_DEFERRED_FIELD_NUMBER: _ClassVar[int]
+    message_id: str
+    duplicate: bool
+    wake_deferred: str
+    def __init__(self, message_id: _Optional[str] = ..., duplicate: _Optional[bool] = ..., wake_deferred: _Optional[str] = ...) -> None: ...
 
 class TagMessage(_message.Message):
     __slots__ = ("message_id", "sender_tag_id", "recipient_tag_id", "source_task_id", "workstream_post_id", "objective_id", "text", "hops", "task_id", "state", "created_at_ms", "origin", "review", "kind")
@@ -1280,18 +1298,20 @@ class CommitReview(_message.Message):
     def __init__(self, request_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., commit: _Optional[str] = ..., workspace_id: _Optional[str] = ..., source_task_id: _Optional[str] = ..., requester_tag_id: _Optional[str] = ..., reviewer_tag_id: _Optional[str] = ..., requested_at_ms: _Optional[int] = ..., verdict: _Optional[_Union[CommitReviewVerdict, _Mapping]] = ...) -> None: ...
 
 class SendAttemptTagMessageRequest(_message.Message):
-    __slots__ = ("operation_id", "recipient_tag_id", "text", "review", "kind")
+    __slots__ = ("operation_id", "recipient_tag_id", "text", "review", "kind", "recipient_objective_id")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     RECIPIENT_TAG_ID_FIELD_NUMBER: _ClassVar[int]
     TEXT_FIELD_NUMBER: _ClassVar[int]
     REVIEW_FIELD_NUMBER: _ClassVar[int]
     KIND_FIELD_NUMBER: _ClassVar[int]
+    RECIPIENT_OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     recipient_tag_id: str
     text: str
     review: CommitReviewSubmission
     kind: MessageKind
-    def __init__(self, operation_id: _Optional[str] = ..., recipient_tag_id: _Optional[str] = ..., text: _Optional[str] = ..., review: _Optional[_Union[CommitReviewSubmission, _Mapping]] = ..., kind: _Optional[_Union[MessageKind, str]] = ...) -> None: ...
+    recipient_objective_id: str
+    def __init__(self, operation_id: _Optional[str] = ..., recipient_tag_id: _Optional[str] = ..., text: _Optional[str] = ..., review: _Optional[_Union[CommitReviewSubmission, _Mapping]] = ..., kind: _Optional[_Union[MessageKind, str]] = ..., recipient_objective_id: _Optional[str] = ...) -> None: ...
 
 class SendTagMessageResponse(_message.Message):
     __slots__ = ("message", "duplicate", "approval", "review", "wake_deferred")
@@ -1989,32 +2009,40 @@ class HarnessAskWorkSessionQuestionRequest(_message.Message):
     def __init__(self, operation_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
 
 class HarnessStartWorkSessionRequest(_message.Message):
-    __slots__ = ("operation_id", "title", "instruction", "target_tag_id", "harness")
+    __slots__ = ("operation_id", "title", "instruction", "harness")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     TITLE_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTION_FIELD_NUMBER: _ClassVar[int]
-    TARGET_TAG_ID_FIELD_NUMBER: _ClassVar[int]
     HARNESS_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     title: str
     instruction: str
-    target_tag_id: str
     harness: str
-    def __init__(self, operation_id: _Optional[str] = ..., title: _Optional[str] = ..., instruction: _Optional[str] = ..., target_tag_id: _Optional[str] = ..., harness: _Optional[str] = ...) -> None: ...
+    def __init__(self, operation_id: _Optional[str] = ..., title: _Optional[str] = ..., instruction: _Optional[str] = ..., harness: _Optional[str] = ...) -> None: ...
 
 class HarnessSendTagMessageRequest(_message.Message):
-    __slots__ = ("operation_id", "recipient_tag_id", "text", "review", "kind")
+    __slots__ = ("operation_id", "recipient_tag_id", "text", "review", "kind", "recipient_objective_id")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     RECIPIENT_TAG_ID_FIELD_NUMBER: _ClassVar[int]
     TEXT_FIELD_NUMBER: _ClassVar[int]
     REVIEW_FIELD_NUMBER: _ClassVar[int]
     KIND_FIELD_NUMBER: _ClassVar[int]
+    RECIPIENT_OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     recipient_tag_id: str
     text: str
     review: CommitReviewSubmission
     kind: MessageKind
-    def __init__(self, operation_id: _Optional[str] = ..., recipient_tag_id: _Optional[str] = ..., text: _Optional[str] = ..., review: _Optional[_Union[CommitReviewSubmission, _Mapping]] = ..., kind: _Optional[_Union[MessageKind, str]] = ...) -> None: ...
+    recipient_objective_id: str
+    def __init__(self, operation_id: _Optional[str] = ..., recipient_tag_id: _Optional[str] = ..., text: _Optional[str] = ..., review: _Optional[_Union[CommitReviewSubmission, _Mapping]] = ..., kind: _Optional[_Union[MessageKind, str]] = ..., recipient_objective_id: _Optional[str] = ...) -> None: ...
+
+class HarnessAskTagRequest(_message.Message):
+    __slots__ = ("operation_id", "text")
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    operation_id: str
+    text: str
+    def __init__(self, operation_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
 
 class HarnessReadMailboxRequest(_message.Message):
     __slots__ = ("limit", "cursor")
@@ -3901,7 +3929,7 @@ class HarnessCompleteResponse(_message.Message):
     def __init__(self) -> None: ...
 
 class CreateObjectiveRequest(_message.Message):
-    __slots__ = ("operation_id", "objective_id", "owner_tag_id", "outcome", "ongoing", "deadline_ms", "budget_limit_minor", "budget_currency", "team_id", "runtime_actions", "notification_task_id")
+    __slots__ = ("operation_id", "objective_id", "owner_tag_id", "outcome", "ongoing", "deadline_ms", "budget_limit_minor", "budget_currency", "runtime_actions", "notification_task_id")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
     OWNER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
@@ -3910,7 +3938,6 @@ class CreateObjectiveRequest(_message.Message):
     DEADLINE_MS_FIELD_NUMBER: _ClassVar[int]
     BUDGET_LIMIT_MINOR_FIELD_NUMBER: _ClassVar[int]
     BUDGET_CURRENCY_FIELD_NUMBER: _ClassVar[int]
-    TEAM_ID_FIELD_NUMBER: _ClassVar[int]
     RUNTIME_ACTIONS_FIELD_NUMBER: _ClassVar[int]
     NOTIFICATION_TASK_ID_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
@@ -3921,10 +3948,9 @@ class CreateObjectiveRequest(_message.Message):
     deadline_ms: int
     budget_limit_minor: int
     budget_currency: str
-    team_id: str
     runtime_actions: RuntimeActions
     notification_task_id: str
-    def __init__(self, operation_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., team_id: _Optional[str] = ..., runtime_actions: _Optional[_Union[RuntimeActions, _Mapping]] = ..., notification_task_id: _Optional[str] = ...) -> None: ...
+    def __init__(self, operation_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., runtime_actions: _Optional[_Union[RuntimeActions, _Mapping]] = ..., notification_task_id: _Optional[str] = ...) -> None: ...
 
 class RuntimeActions(_message.Message):
     __slots__ = ("actions",)
@@ -3933,7 +3959,7 @@ class RuntimeActions(_message.Message):
     def __init__(self, actions: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class Objective(_message.Message):
-    __slots__ = ("objective_id", "owner_tag_id", "session_id", "outcome", "ongoing", "starting_task_id", "status", "revision", "deadline_ms", "budget_limit_minor", "budget_currency", "paused_at_ms", "reported_spend_minor", "team_id", "runtime_actions", "completion_summary", "cancelled_at_ms", "cancellation_reason", "created_by", "notification_task_id", "idle_since_ms")
+    __slots__ = ("objective_id", "owner_tag_id", "session_id", "outcome", "ongoing", "starting_task_id", "status", "revision", "deadline_ms", "budget_limit_minor", "budget_currency", "paused_at_ms", "reported_spend_minor", "runtime_actions", "completion_summary", "cancelled_at_ms", "cancellation_reason", "created_by", "notification_task_id", "idle_since_ms")
     OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
     OWNER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -3947,7 +3973,6 @@ class Objective(_message.Message):
     BUDGET_CURRENCY_FIELD_NUMBER: _ClassVar[int]
     PAUSED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     REPORTED_SPEND_MINOR_FIELD_NUMBER: _ClassVar[int]
-    TEAM_ID_FIELD_NUMBER: _ClassVar[int]
     RUNTIME_ACTIONS_FIELD_NUMBER: _ClassVar[int]
     COMPLETION_SUMMARY_FIELD_NUMBER: _ClassVar[int]
     CANCELLED_AT_MS_FIELD_NUMBER: _ClassVar[int]
@@ -3968,7 +3993,6 @@ class Objective(_message.Message):
     budget_currency: str
     paused_at_ms: int
     reported_spend_minor: int
-    team_id: str
     runtime_actions: RuntimeActions
     completion_summary: str
     cancelled_at_ms: int
@@ -3976,7 +4000,7 @@ class Objective(_message.Message):
     created_by: str
     notification_task_id: str
     idle_since_ms: int
-    def __init__(self, objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., starting_task_id: _Optional[str] = ..., status: _Optional[_Union[ObjectiveStatus, str]] = ..., revision: _Optional[int] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., paused_at_ms: _Optional[int] = ..., reported_spend_minor: _Optional[int] = ..., team_id: _Optional[str] = ..., runtime_actions: _Optional[_Union[RuntimeActions, _Mapping]] = ..., completion_summary: _Optional[str] = ..., cancelled_at_ms: _Optional[int] = ..., cancellation_reason: _Optional[str] = ..., created_by: _Optional[str] = ..., notification_task_id: _Optional[str] = ..., idle_since_ms: _Optional[int] = ...) -> None: ...
+    def __init__(self, objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., starting_task_id: _Optional[str] = ..., status: _Optional[_Union[ObjectiveStatus, str]] = ..., revision: _Optional[int] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., paused_at_ms: _Optional[int] = ..., reported_spend_minor: _Optional[int] = ..., runtime_actions: _Optional[_Union[RuntimeActions, _Mapping]] = ..., completion_summary: _Optional[str] = ..., cancelled_at_ms: _Optional[int] = ..., cancellation_reason: _Optional[str] = ..., created_by: _Optional[str] = ..., notification_task_id: _Optional[str] = ..., idle_since_ms: _Optional[int] = ...) -> None: ...
 
 class TeamWakeLimits(_message.Message):
     __slots__ = ("mutual_per_task", "per_tag_per_hour", "per_objective_per_hour")
@@ -3989,11 +4013,10 @@ class TeamWakeLimits(_message.Message):
     def __init__(self, mutual_per_task: _Optional[int] = ..., per_tag_per_hour: _Optional[int] = ..., per_objective_per_hour: _Optional[int] = ...) -> None: ...
 
 class Team(_message.Message):
-    __slots__ = ("team_id", "name", "member_tag_ids", "max_concurrency", "revision", "created_at_ms", "updated_at_ms", "wake_limits")
+    __slots__ = ("team_id", "name", "member_tag_ids", "revision", "created_at_ms", "updated_at_ms", "wake_limits")
     TEAM_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     MEMBER_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
-    MAX_CONCURRENCY_FIELD_NUMBER: _ClassVar[int]
     REVISION_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     UPDATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
@@ -4001,28 +4024,25 @@ class Team(_message.Message):
     team_id: str
     name: str
     member_tag_ids: _containers.RepeatedScalarFieldContainer[str]
-    max_concurrency: int
     revision: int
     created_at_ms: int
     updated_at_ms: int
     wake_limits: TeamWakeLimits
-    def __init__(self, team_id: _Optional[str] = ..., name: _Optional[str] = ..., member_tag_ids: _Optional[_Iterable[str]] = ..., max_concurrency: _Optional[int] = ..., revision: _Optional[int] = ..., created_at_ms: _Optional[int] = ..., updated_at_ms: _Optional[int] = ..., wake_limits: _Optional[_Union[TeamWakeLimits, _Mapping]] = ...) -> None: ...
+    def __init__(self, team_id: _Optional[str] = ..., name: _Optional[str] = ..., member_tag_ids: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., created_at_ms: _Optional[int] = ..., updated_at_ms: _Optional[int] = ..., wake_limits: _Optional[_Union[TeamWakeLimits, _Mapping]] = ...) -> None: ...
 
 class CreateTeamRequest(_message.Message):
-    __slots__ = ("operation_id", "team_id", "name", "member_tag_ids", "max_concurrency", "wake_limits")
+    __slots__ = ("operation_id", "team_id", "name", "member_tag_ids", "wake_limits")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     TEAM_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     MEMBER_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
-    MAX_CONCURRENCY_FIELD_NUMBER: _ClassVar[int]
     WAKE_LIMITS_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     team_id: str
     name: str
     member_tag_ids: _containers.RepeatedScalarFieldContainer[str]
-    max_concurrency: int
     wake_limits: TeamWakeLimits
-    def __init__(self, operation_id: _Optional[str] = ..., team_id: _Optional[str] = ..., name: _Optional[str] = ..., member_tag_ids: _Optional[_Iterable[str]] = ..., max_concurrency: _Optional[int] = ..., wake_limits: _Optional[_Union[TeamWakeLimits, _Mapping]] = ...) -> None: ...
+    def __init__(self, operation_id: _Optional[str] = ..., team_id: _Optional[str] = ..., name: _Optional[str] = ..., member_tag_ids: _Optional[_Iterable[str]] = ..., wake_limits: _Optional[_Union[TeamWakeLimits, _Mapping]] = ...) -> None: ...
 
 class GetTeamRequest(_message.Message):
     __slots__ = ("team",)
@@ -4055,22 +4075,20 @@ class TeamMembers(_message.Message):
     def __init__(self, tag_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class UpdateTeamRequest(_message.Message):
-    __slots__ = ("operation_id", "team", "expected_revision", "name", "members", "max_concurrency", "wake_limits")
+    __slots__ = ("operation_id", "team", "expected_revision", "name", "members", "wake_limits")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     TEAM_FIELD_NUMBER: _ClassVar[int]
     EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     MEMBERS_FIELD_NUMBER: _ClassVar[int]
-    MAX_CONCURRENCY_FIELD_NUMBER: _ClassVar[int]
     WAKE_LIMITS_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     team: str
     expected_revision: int
     name: str
     members: TeamMembers
-    max_concurrency: int
     wake_limits: TeamWakeLimits
-    def __init__(self, operation_id: _Optional[str] = ..., team: _Optional[str] = ..., expected_revision: _Optional[int] = ..., name: _Optional[str] = ..., members: _Optional[_Union[TeamMembers, _Mapping]] = ..., max_concurrency: _Optional[int] = ..., wake_limits: _Optional[_Union[TeamWakeLimits, _Mapping]] = ...) -> None: ...
+    def __init__(self, operation_id: _Optional[str] = ..., team: _Optional[str] = ..., expected_revision: _Optional[int] = ..., name: _Optional[str] = ..., members: _Optional[_Union[TeamMembers, _Mapping]] = ..., wake_limits: _Optional[_Union[TeamWakeLimits, _Mapping]] = ...) -> None: ...
 
 class DeleteTeamRequest(_message.Message):
     __slots__ = ("operation_id", "team", "dry_run")

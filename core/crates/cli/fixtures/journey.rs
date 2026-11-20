@@ -62,7 +62,6 @@ pub async fn exercise(
                     operation_id: format!("journey-{}", task.task_id),
                     title: title.trim().into(),
                     instruction: instruction.trim().into(),
-                    target_tag_id: None,
                     harness: None,
                 },
                 &bootstrap.token,

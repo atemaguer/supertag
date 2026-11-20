@@ -1,5 +1,3 @@
-#[path = "support/report_scope.rs"]
-mod report_scope;
 mod support;
 
 use prost::Message;
@@ -124,6 +122,71 @@ async fn finish_waiting(
     store.finish_task(host, &input).await.unwrap();
 }
 
+/// Only a Tag's inbox Session reaches other Tags, so it requests reviews for its Tag's
+/// Objectives: the Objective's report asks its Tag (`ask_tag`), and this starts the inbox turn
+/// that ask wakes.
+async fn inbox_turn(
+    store: &Store,
+    host: &HostAuthority,
+    clock: &Arc<AtomicI64>,
+    report: &InspectAttemptRequest,
+    tag: &str,
+) -> InspectAttemptRequest {
+    let access = supertag_control_plane::AttemptAccess::new(host, report);
+    assert!(
+        !store
+            .attempt_capabilities(&access)
+            .await
+            .unwrap()
+            .may_request_commit_review,
+        "an Objective's Session asks its Tag instead of requesting a review"
+    );
+    assert!(matches!(
+        store
+            .send_attempt_tag_message(&access, &request("from-report", "reviewer", HEAD))
+            .await,
+        Err(StoreError::PermissionDenied)
+    ));
+    store
+        .ask_attempt_tag(
+            &access,
+            &AskAttemptTagRequest {
+                operation_id: format!("ask-{}", report.task_id),
+                text: format!("Have another Tag review commit {HEAD}."),
+            },
+        )
+        .await
+        .unwrap();
+    // The ask waits out the debounce; the rest of the fixture keeps its own times.
+    let asked_at = clock.fetch_add(5_000, Ordering::SeqCst);
+    store.sweep_mailbox().await.unwrap();
+    let assignment = store
+        .claim_task_with_workspaces(host, &Uuid::new_v4().to_string(), &["repo".into()])
+        .await
+        .unwrap()
+        .expect("the ask wakes the inbox Session");
+    let task = assignment.task.unwrap();
+    assert_eq!(task.session_id, format!("inbox:{tag}"));
+    let attempt = InspectAttemptRequest {
+        task_id: task.task_id,
+        attempt_id: assignment.attempt_id,
+        lease_token: assignment.lease_token,
+    };
+    store
+        .start_task(
+            host,
+            &StartTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    clock.store(asked_at, Ordering::SeqCst);
+    attempt
+}
+
 fn request(operation: &str, reviewer: &str, commit: &str) -> SendAttemptTagMessageRequest {
     SendAttemptTagMessageRequest {
         kind: 0,
@@ -133,6 +196,7 @@ fn request(operation: &str, reviewer: &str, commit: &str) -> SendAttemptTagMessa
         review: Some(CommitReviewSubmission {
             kind: Some(commit_review_submission::Kind::Commit(commit.into())),
         }),
+        recipient_objective_id: String::new(),
     }
 }
 
@@ -150,6 +214,7 @@ fn response(request: &str) -> SendAttemptTagMessageRequest {
                 },
             )),
         }),
+        recipient_objective_id: String::new(),
     }
 }
 
@@ -175,7 +240,7 @@ async fn contract(url: &str) {
     let pool = sqlx::AnyPool::connect(url).await.unwrap();
     let host = support::register_host(&store, "reviews").await;
     let delivered = deliver_children(&store, &host).await;
-    let reviews = request_child_reviews(&store, &host, &delivered).await;
+    let reviews = request_child_reviews(&store, &host, &clock, &delivered).await;
     pending_review_projection(&store, &pool, &reviews).await;
     let recorded =
         record_paused_verdict(&store, &host, &pool, &reviews.first, &delivered.work).await;
@@ -274,7 +339,7 @@ async fn deliver_children(store: &Store, host: &HostAuthority) -> DeliveredChild
                 &request("undelivered", "reviewer", HEAD)
             )
             .await,
-        Err(StoreError::FailedPrecondition(_))
+        Err(StoreError::PermissionDenied)
     ));
     let child = store
         .start_work_session(
@@ -315,6 +380,7 @@ async fn deliver_children(store: &Store, host: &HostAuthority) -> DeliveredChild
 async fn request_child_reviews(
     store: &Store,
     host: &HostAuthority,
+    clock: &Arc<AtomicI64>,
     delivered: &DeliveredChildren,
 ) -> AcceptedReviews {
     let DeliveredChildren {
@@ -327,36 +393,25 @@ async fn request_child_reviews(
         .await
         .unwrap();
     let report = start(store, host, child.report_task_id.as_ref().unwrap()).await;
+    let inbox = inbox_turn(store, host, clock, &report, "owner").await;
     assert!(
         store
-            .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(host, &report))
+            .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(host, &inbox))
             .await
             .unwrap()
             .may_request_commit_review
     );
-    assert!(
-        matches!(
-            store
-                .send_attempt_tag_message(
-                    &supertag_control_plane::AttemptAccess::new(host, &report),
-                    &request("other-child-commit", "reviewer", BASE)
-                )
-                .await,
-            Err(StoreError::FailedPrecondition(_))
-        ),
-        "an owner report cannot request a different child's commit"
-    );
     assert!(matches!(
         store
             .send_attempt_tag_message(
-                &supertag_control_plane::AttemptAccess::new(host, &report),
+                &supertag_control_plane::AttemptAccess::new(host, &inbox),
                 &request("wrong-commit", "reviewer", &"3".repeat(40))
             )
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     let input = request("first-review", "reviewer", HEAD);
-    let access = supertag_control_plane::AttemptAccess::new(host, &report);
+    let access = supertag_control_plane::AttemptAccess::new(host, &inbox);
     let (left, right) = tokio::join!(
         store.send_attempt_tag_message(&access, &input),
         store.send_attempt_tag_message(&access, &input)
@@ -372,7 +427,7 @@ async fn request_child_reviews(
             .get_review_artifact(
                 host,
                 &GetReviewArtifactRequest {
-                    attempt: Some(report.clone()),
+                    attempt: Some(inbox.clone()),
                     review_id: first.message_id.clone()
                 }
             )
@@ -381,7 +436,7 @@ async fn request_child_reviews(
     ));
     let second = store
         .send_attempt_tag_message(
-            &supertag_control_plane::AttemptAccess::new(host, &report),
+            &supertag_control_plane::AttemptAccess::new(host, &inbox),
             &request("second-review", "second", HEAD),
         )
         .await
@@ -399,17 +454,10 @@ async fn request_child_reviews(
         )
         .await
         .unwrap();
-    assert!(
-        !store
-            .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(host, &report))
-            .await
-            .unwrap()
-            .may_request_commit_review
-    );
     assert!(matches!(
         store
             .send_attempt_tag_message(
-                &supertag_control_plane::AttemptAccess::new(host, &report),
+                &supertag_control_plane::AttemptAccess::new(host, &inbox),
                 &request("obsolete-commit", "reviewer", HEAD)
             )
             .await,
@@ -418,7 +466,7 @@ async fn request_child_reviews(
     assert_eq!(
         store
             .send_attempt_tag_message(
-                &supertag_control_plane::AttemptAccess::new(host, &report),
+                &supertag_control_plane::AttemptAccess::new(host, &inbox),
                 &input
             )
             .await
@@ -428,21 +476,23 @@ async fn request_child_reviews(
         first,
         "accepted request replay stays stable after the child advances"
     );
-    finish(store, host, &report, Some(BASE)).await;
-    let no_op_child = store
-        .get_work_session(OPERATOR, &no_op_child.work_session_id)
-        .await
-        .unwrap();
-    let no_op_report = start(store, host, no_op_child.report_task_id.as_ref().unwrap()).await;
+    // The inbox Session requests a review of any of its Objectives' current deliveries.
     let no_op_review = store
         .send_attempt_tag_message(
-            &supertag_control_plane::AttemptAccess::new(host, &no_op_report),
+            &supertag_control_plane::AttemptAccess::new(host, &inbox),
             &request("no-op-review", "gated", BASE),
         )
         .await
         .unwrap()
         .message
         .unwrap();
+    finish(store, host, &inbox, Some(BASE)).await;
+    finish(store, host, &report, Some(BASE)).await;
+    let no_op_child = store
+        .get_work_session(OPERATOR, &no_op_child.work_session_id)
+        .await
+        .unwrap();
+    let no_op_report = start(store, host, no_op_child.report_task_id.as_ref().unwrap()).await;
     finish(store, host, &no_op_report, Some(BASE)).await;
     AcceptedReviews {
         first,
@@ -1058,17 +1108,17 @@ async fn gated_request_contract(url: &str) {
     let clock = Arc::new(AtomicI64::new(NOW));
     let store = open(url, &clock).await;
     let host = support::register_host(&store, "scoped-review-host").await;
-    let (child_a, child_b, report) = prepare_gated_reports(&store, &host).await;
-    let (sent, child_continuation) =
-        approve_scoped_request(&store, &host, &child_a, &child_b, &report).await;
-    record_separate_root_verdict(&store, &host, sent, &child_continuation).await;
+    let (child_a, inbox) = prepare_gated_reports(&store, &host, &clock).await;
+    let sent = approve_scoped_request(&store, &host, &child_a, &inbox).await;
+    record_separate_root_verdict(&store, &host, sent).await;
     store.close().await;
 }
 
 async fn prepare_gated_reports(
     store: &Store,
     host: &HostAuthority,
-) -> (WorkSession, WorkSession, InspectAttemptRequest) {
+    clock: &Arc<AtomicI64>,
+) -> (WorkSession, InspectAttemptRequest) {
     store
         .put_tag_spec(PutTagRequest {
             tag_id: "scoped-owner".into(),
@@ -1159,16 +1209,17 @@ async fn prepare_gated_reports(
     let report_b = start(store, host, child_b.report_task_id.as_ref().unwrap()).await;
     finish(store, host, &report_b, Some(BASE)).await;
     let report = start(store, host, child_a.report_task_id.as_ref().unwrap()).await;
-    (child_a, child_b, report)
+    let inbox = inbox_turn(store, host, clock, &report, "scoped-owner").await;
+    finish(store, host, &report, Some(BASE)).await;
+    (child_a, inbox)
 }
 
 async fn approve_scoped_request(
     store: &Store,
     host: &HostAuthority,
     child_a: &WorkSession,
-    child_b: &WorkSession,
     report: &InspectAttemptRequest,
-) -> (TagMessage, WorkSession) {
+) -> TagMessage {
     let original_report_task = store.get_task(&report.task_id).await.unwrap();
     let pending = store
         .send_attempt_tag_message(
@@ -1187,7 +1238,7 @@ async fn approve_scoped_request(
         vec![approval.approval_id.clone()],
     )
     .await;
-    // Editing live Tag policy while a scoped report waits must not broaden its continuation.
+    // The approved request continues in the inbox Session.
     store
         .put_tag_spec(PutTagRequest {
             tag_id: "scoped-owner".into(),
@@ -1228,24 +1279,8 @@ async fn approve_scoped_request(
         .await
         .unwrap();
     let continued = start(store, host, approved.continuation_task_id.as_ref().unwrap()).await;
-    report_scope::assert_restricted_report_continuation(
-        store,
-        host,
-        &continued,
-        &original_report_task,
-        &child_b.work_session_id,
-        "scoped-reviewer",
-    )
-    .await;
-    assert!(matches!(
-        store
-            .send_attempt_tag_message(
-                &supertag_control_plane::AttemptAccess::new(host, &continued),
-                &request("wrong-inherited-child", "scoped-reviewer", BASE)
-            )
-            .await,
-        Err(StoreError::FailedPrecondition(_))
-    ));
+    let task = store.get_task(&continued.task_id).await.unwrap();
+    assert_eq!(task.session_id, original_report_task.session_id);
     let sent = store
         .send_attempt_tag_message(
             &supertag_control_plane::AttemptAccess::new(host, &continued),
@@ -1259,28 +1294,11 @@ async fn approve_scoped_request(
         sent.review.as_ref().unwrap().source_task_id,
         child_a.latest_task_id
     );
-    let child_continuation = store
-        .continue_work_session(
-            &supertag_control_plane::AttemptAccess::new(host, &continued),
-            &ContinueWorkSessionRequest {
-                operation_id: "same-child-after-approved-request".into(),
-                work_session_id: child_a.work_session_id.clone(),
-                message: "Follow up on the same inspected child".into(),
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(child_continuation.work_session_id, child_a.work_session_id);
     finish(store, host, &continued, Some(BASE)).await;
-    (sent, child_continuation)
+    sent
 }
 
-async fn record_separate_root_verdict(
-    store: &Store,
-    host: &HostAuthority,
-    sent: TagMessage,
-    child_continuation: &WorkSession,
-) {
+async fn record_separate_root_verdict(store: &Store, host: &HostAuthority, sent: TagMessage) {
     let claim = store
         .claim_task_with_workspaces(host, "scoped-reviewer", &["repo".into()])
         .await
@@ -1315,14 +1333,6 @@ async fn record_separate_root_verdict(
         )
         .await
         .unwrap();
-    assert_eq!(
-        store
-            .get_task(&child_continuation.latest_task_id)
-            .await
-            .unwrap()
-            .state(),
-        TaskState::Cancelled
-    );
     store
         .put_tag(
             "scoped-reviewer",
@@ -1387,6 +1397,7 @@ async fn record_separate_root_verdict(
                         },
                     )),
                 }),
+                recipient_objective_id: String::new(),
             },
         )
         .await

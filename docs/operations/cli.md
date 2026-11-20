@@ -368,7 +368,7 @@ See [Manage Control Plane resources](resources.md) for manifests and apply sets,
 ```sh
 supertag objective create flaky-tests \
   "The checkout tests pass ten runs in a row. Evidence: links to the CI runs." \
-  --owner lead --team core --deadline 2026-12-01T17:00:00Z \
+  --owner lead --deadline 2026-12-01T17:00:00Z \
   --budget-minor 2000 --currency USD
 supertag watch objective flaky-tests
 ```

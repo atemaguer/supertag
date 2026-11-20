@@ -11,7 +11,6 @@ spec:
     checkout end-to-end tests cover saving, reusing, and removing a card, the API's tests cover
     the new endpoints, and the reviewer has no open high or medium findings. Card numbers never
     touch our servers: only the payment provider's token is stored. Guest checkout is unchanged.
-  team: checkout
   budgetLimitMinor: 40000
   budgetCurrency: USD
   deadline: "2027-03-31T00:00:00Z"

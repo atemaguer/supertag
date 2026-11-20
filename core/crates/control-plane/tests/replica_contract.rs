@@ -192,7 +192,6 @@ async fn claim_reads_the_inbox_under_its_lock(url: &str) {
             team_id: "engineering".into(),
             name: "Engineering".into(),
             member_tag_ids: vec!["owner".into()],
-            max_concurrency: None,
         },
     )
     .await
@@ -205,7 +204,6 @@ async fn claim_reads_the_inbox_under_its_lock(url: &str) {
                 objective_id: "release".into(),
                 owner_tag_id: "owner".into(),
                 outcome: "Ship the fix".into(),
-                team_id: Some("engineering".into()),
                 ..Default::default()
             },
         )

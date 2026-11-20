@@ -264,7 +264,9 @@ message TaskRuntimeAuthority {
   repeated RuntimeApprovalRequirement approvals = 2;
   optional string objective_id = 3;
   optional uint64 objective_revision = 4;
-  optional string delegating_task_id = 5;
+  // Work Sessions run on their parent's Tag, so no Task is delegated to another.
+  reserved 5;
+  reserved "delegating_task_id";
   // The path scope composed from the accepted Permission Sets. Absent: no restriction beyond
   // the accepted actions.
   FileScope files = 6;

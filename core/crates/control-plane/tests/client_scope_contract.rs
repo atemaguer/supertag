@@ -43,13 +43,12 @@ async fn enroll_client(store: &Store, name: &str, tags: &[&str]) {
         .unwrap();
 }
 
-fn objective(id: &str, tag: &str, team: Option<&str>) -> CreateObjectiveRequest {
+fn objective(id: &str, tag: &str) -> CreateObjectiveRequest {
     CreateObjectiveRequest {
         objective_id: id.into(),
         operation_id: format!("create-{id}"),
         owner_tag_id: tag.into(),
         outcome: "Resolve the decision".into(),
-        team_id: team.map(str::to_owned),
         ..Default::default()
     }
 }
@@ -145,7 +144,7 @@ async fn contract(url: &str) {
 
     // An operator's Objective on a Tag the client's key does not allow, waiting on a question.
     let secret = store
-        .create_objective(OPERATOR, &objective("op-secret", "owner", None))
+        .create_objective(OPERATOR, &objective("op-secret", "owner"))
         .await
         .unwrap();
     ask(
@@ -159,7 +158,7 @@ async fn contract(url: &str) {
     // client is refused before the thread is even looked up, and nothing is created.
     let chooses = CreateObjectiveRequest {
         notification_task_id: Some("operator-thread".into()),
-        ..objective("mine", "other", None)
+        ..objective("mine", "other")
     };
     let refused = store.create_objective(MALLORY, &chooses).await;
     assert!(
@@ -168,7 +167,7 @@ async fn contract(url: &str) {
     );
     // The client's own Objective, waiting on a question too.
     let mine = store
-        .create_objective(MALLORY, &objective("mine", "other", None))
+        .create_objective(MALLORY, &objective("mine", "other"))
         .await
         .unwrap();
     ask(&store, &host, &mine.starting_task_id, "Which branch?").await;
@@ -259,7 +258,6 @@ async fn contract(url: &str) {
                     team_id: team.into(),
                     name: team.into(),
                     member_tag_ids: members.into_iter().map(str::to_owned).collect(),
-                    max_concurrency: None,
                 },
             )
             .await
@@ -308,19 +306,6 @@ async fn contract(url: &str) {
     ));
     assert_eq!(store.get_team(MALLORY, "solo").await.unwrap().name, "solo");
     assert!(store.get_team(OPERATOR, "mixed").await.is_ok());
-    // A Team with a member outside the key cannot carry the client's work to that member.
-    assert!(matches!(
-        store
-            .create_objective(MALLORY, &objective("delegate", "other", Some("mixed")))
-            .await,
-        Err(StoreError::NotFound(_))
-    ));
-    assert!(
-        store
-            .create_objective(MALLORY, &objective("team-work", "other", Some("solo")))
-            .await
-            .is_ok()
-    );
 
     // A Gateway its Auth Key does not trust with every Tag serves no account that no Surface
     // Account names; the seeded Gateway, trusted with every Tag, does.

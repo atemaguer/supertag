@@ -18,11 +18,9 @@ const MAX_PAGE: u32 = 50;
 /// Sessions listed in one read; `total_sessions` counts the rest.
 const MAX_SESSIONS: i64 = 100;
 const CONVERSATION_TURNS: i64 = 20;
-const TEAM_POSTS: i64 = 10;
 const PROMPT_CHARS: usize = 2_000;
 const RESULT_CHARS: usize = 4_000;
 const QUESTION_CHARS: usize = 8_000;
-const POST_CHARS: usize = 2_000;
 
 /// A bounded excerpt that ends with an ellipsis when it was cut.
 fn excerpt(text: &str, chars: usize) -> String {
@@ -358,50 +356,6 @@ pub(crate) async fn overview_in(
         ObjectiveStatus::Completed | ObjectiveStatus::Cancelled
     );
 
-    let team = match &objective.team_id {
-        Some(team_id) => {
-            let row =
-                sqlx::query("SELECT name, max_concurrency FROM supertag_v2_teams WHERE team_id=$1")
-                    .bind(team_id)
-                    .fetch_optional(&mut **tx)
-                    .await?;
-            match row {
-                Some(row) => {
-                    let members: Vec<String> = sqlx::query_scalar("SELECT tag_id FROM supertag_v2_team_members WHERE team_id=$1 ORDER BY tag_id")
-                            .bind(team_id).fetch_all(&mut **tx).await?;
-                    // The same slots the Team's concurrency limit counts.
-                    let running: i64 = sqlx::query_scalar(
-                            "SELECT COUNT(*) FROM supertag_v2_tasks active
-                            JOIN supertag_v2_objective_tasks link ON link.task_id=active.task_id
-                            JOIN supertag_v2_objectives objective ON objective.objective_id=link.objective_id
-                            WHERE objective.team_id=$1 AND (objective.status NOT IN ($2,$3) OR active.cleanup_pending=1)
-                            AND (active.state=$4 OR active.cleanup_pending=1
-                              OR (active.state=$5 AND active.lease_expires_at_ms>$6))",
-                        )
-                        .bind(team_id)
-                        .bind(ObjectiveStatus::Completed as i64)
-                        .bind(ObjectiveStatus::Cancelled as i64)
-                        .bind(TaskState::Running as i64)
-                        .bind(TaskState::Claimed as i64)
-                        .bind(now_ms)
-                        .fetch_one(&mut **tx)
-                        .await?;
-                    Some(ObjectiveOverviewTeam {
-                        team_id: team_id.clone(),
-                        name: row.try_get("name")?,
-                        member_tag_ids: members,
-                        max_concurrency: row
-                            .try_get::<Option<i64>, _>("max_concurrency")?
-                            .map(|value| value as u32),
-                        running_turns: running as u32,
-                    })
-                }
-                None => None,
-            }
-        }
-        None => None,
-    };
-
     // The owner's Session, then each Work Session under the Objective.
     let owner = session_status(tx, &objective.owner_tag_id, &objective.session_id, now_ms).await?;
     let owner_question = owner.question.clone();
@@ -539,20 +493,6 @@ pub(crate) async fn overview_in(
     let next = u64::from(input.offset) + tasks.len() as u64;
     let next_offset = (next < total_tasks as u64 && !tasks.is_empty()).then_some(next as u32);
 
-    let mut posts = vec![];
-    if let Some(team) = &team
-        && let Some(channel) = crate::messages::team_channel_in(tx, &team.team_id).await?
-    {
-        for message in crate::messages::page_in(tx, &channel, None, None, TEAM_POSTS).await? {
-            posts.push(ObjectiveTeamPost {
-                sequence: message.seq as u64,
-                author_tag_id: message.sender_id,
-                to_tag_ids: message.addressees,
-                body: excerpt(&message.text, POST_CHARS),
-                created_at_ms: message.created_at_ms,
-            });
-        }
-    }
     let times = sqlx::query(
         "SELECT created_at_ms, updated_at_ms FROM supertag_v2_objectives WHERE objective_id=$1",
     )
@@ -576,11 +516,9 @@ pub(crate) async fn overview_in(
         deadline: deadline(&model, now_ms),
         objective: Some(objective),
         as_of_ms: now_ms,
-        team,
         attention,
         sessions,
         conversation,
-        posts,
         tasks,
         total_tasks: total_tasks as u32,
         next_offset,

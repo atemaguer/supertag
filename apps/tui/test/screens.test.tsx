@@ -38,7 +38,6 @@ function coordinated() {
       objectiveId: "ship-sso",
       ownerTagId: "lead",
       outcome: "Ship single sign-on",
-      teamId: "release",
       budgetLimitMinor: 30_000n,
       budgetCurrency: "USD",
       reportedSpendMinor: 1_250n,
@@ -80,9 +79,7 @@ function coordinated() {
       },
     },
   ];
-  fake.teams = [
-    { teamId: "release", name: "Release", memberTagIds: ["lead", "engineer"], maxConcurrency: 2 },
-  ];
+  fake.teams = [{ teamId: "release", name: "Release", memberTagIds: ["lead", "engineer"] }];
   fake.posts = [
     {
       postId: "p1",
@@ -123,7 +120,8 @@ test("an Objective shows what describe objective shows, and m messages its owner
   // lead, engineer, reviewer, then the first Objective.
   await railDown(screen, 3);
   const frame = await screen.waitFor("ship-sso · working");
-  expect(frame).toContain("Owner: lead · Team: release");
+  expect(frame).toContain("Owner: lead");
+  expect(frame).not.toContain("Team: release");
   expect(frame).toContain("Budget: $12.50 of $300.00 spent · $287.50 left");
   await screen.press("TAB");
   await screen.press("m");
@@ -165,7 +163,7 @@ test("an Objective ready for review is approved with a, and its home line says s
   await screen.close();
 });
 
-test("/goal alone opens the form; it creates with a Team and a budget, and r starts one that did not", async () => {
+test("/goal alone opens the form; it creates with a budget, and r starts one that did not", async () => {
   const fake = coordinated();
   fake.unstartedObjectives = 1;
   current = setup(fake);
@@ -182,9 +180,6 @@ test("/goal alone opens the form; it creates with a Team and a budget, and r sta
   expect(fake.sent).toEqual([]);
   await screen.type("Cut the release");
   await screen.press("RETURN");
-  await screen.press("ARROW_RIGHT");
-  await screen.waitFor("‹ Release ›");
-  await screen.press("RETURN");
   await screen.type("12.5 eur");
   await screen.press("RETURN");
   await screen.waitFor("It did not start");
@@ -192,7 +187,6 @@ test("/goal alone opens the form; it creates with a Team and a budget, and r sta
   expect(first).toMatchObject({
     ownerTagId: "lead",
     outcome: "Cut the release",
-    teamId: "release",
     budgetLimitMinor: 1250n,
     budgetCurrency: "EUR",
   });
@@ -217,7 +211,6 @@ test("the Objective form refuses a budget it cannot read", async () => {
   await screen.press("RETURN");
   await screen.waitFor("New Objective for lead");
   await screen.type("Anything");
-  await screen.press("RETURN");
   await screen.press("RETURN");
   await screen.type("lots");
   await screen.press("RETURN");
@@ -373,14 +366,14 @@ test("an interrupted turn its host did not confirm stopped says who can decide",
   await screen.close();
 });
 
-test("a Team shows its members, its turn limit, and its Workstream", async () => {
+test("a Team shows its members and its Workstream", async () => {
   current = setup(coordinated());
   const screen = await render(current, { width: 120, height: 40 });
   await screen.waitFor("Waiting on you (2)");
   await railDown(screen, 7);
   const frame = await screen.waitFor("The rollout is ready.");
   expect(frame).toContain("Members: lead, engineer");
-  expect(frame).toContain("at most 2 turns at once");
+  expect(frame).not.toContain("at once");
   await screen.close();
 });
 

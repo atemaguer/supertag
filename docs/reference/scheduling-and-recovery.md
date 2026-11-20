@@ -48,12 +48,11 @@ models with `models` in `supertag.yaml`, or `--harness-model` and `--harness-mod
 ## Waiting for capacity
 
 A Task that no host can run waits, without holding back other Sessions' Tasks. Concurrency is
-limited in three places:
+limited in two places:
 
 | Limit | Set by |
 | --- | --- |
 | Task Attempts on a host, across its harnesses | The host service's `concurrency`, 1 through 16, and `harness-limits` for one harness within it |
-| Tasks a Team runs at once across its Objectives | `team create --max-concurrency`, or a Team manifest's `maxConcurrency` |
 | Native agents and work Sessions one turn may start | `task submit --max-native-agents` |
 
 `supertag metrics` shows queued Tasks, host capacity, and how long Tasks waited: before a claim,

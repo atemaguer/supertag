@@ -342,34 +342,6 @@ pub fn compose<'a>(
     (!is_empty(&scope)).then_some(scope)
 }
 
-/// A delegated write: the member's own write allow and outside write directories, the union of
-/// both Tags' read-only and hidden entries, and the outside read directories both Tags have.
-pub fn delegate(member: Option<&FileScope>, delegator: Option<&FileScope>) -> Option<FileScope> {
-    let empty = FileScope::default();
-    let (member, delegator) = (member.unwrap_or(&empty), delegator.unwrap_or(&empty));
-    let union = |left: &[String], right: &[String]| -> Vec<String> {
-        left.iter()
-            .chain(right)
-            .cloned()
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect()
-    };
-    let scope = FileScope {
-        write: member.write.clone(),
-        read_only: union(&member.read_only, &delegator.read_only),
-        hidden: union(&member.hidden, &delegator.hidden),
-        outside_write: member.outside_write.clone(),
-        outside_read: member
-            .outside_read
-            .iter()
-            .filter(|path| delegator.outside_read.contains(path))
-            .cloned()
-            .collect(),
-    };
-    (!is_empty(&scope)).then_some(scope)
-}
-
 pub fn is_empty(scope: &FileScope) -> bool {
     scope.write.is_empty()
         && scope.read_only.is_empty()
@@ -837,13 +809,7 @@ mod tests {
                 assert!(error.contains(needle), "{error} lacks {needle}");
             };
         refused("commands:execute", &["src/"], &[], &[], "takes no paths");
-        refused(
-            "files:delegate-write",
-            &[],
-            &["src/"],
-            &[],
-            "takes no paths",
-        );
+        refused("mailbox:send", &[], &["src/"], &[], "takes no paths");
         refused(FILES_READ, &["src/"], &[], &[], "files:read takes no paths");
         refused(FILES_WRITE, &["src/*.rs"], &[], &[], "is a glob");
         refused(FILES_WRITE, &[], &["**/gen"], &[], "is a glob");
@@ -1046,31 +1012,6 @@ mod tests {
         assert!(gated.write.is_empty() && gated.outside_write.is_empty());
         assert_eq!(gated.read_only, generated);
         assert!(compose([grant(FILES_READ, &none, &none, &none)], false).is_none());
-    }
-
-    #[test]
-    fn delegation_keeps_member_writes_and_both_restrictions() {
-        let member = FileScope {
-            write: strings(&["src/"]),
-            read_only: strings(&["src/gen/"]),
-            hidden: strings(&["a/"]),
-            outside_write: strings(&["~/.cache/pip"]),
-            outside_read: strings(&["/opt/a", "/opt/b"]),
-        };
-        let delegator = FileScope {
-            write: strings(&["docs/"]),
-            read_only: strings(&["README.md"]),
-            hidden: strings(&["**/.env"]),
-            outside_write: strings(&["/tmp/x"]),
-            outside_read: strings(&["/opt/b"]),
-        };
-        let scope = delegate(Some(&member), Some(&delegator)).unwrap();
-        assert_eq!(scope.write, strings(&["src/"]));
-        assert_eq!(scope.read_only, strings(&["README.md", "src/gen/"]));
-        assert_eq!(scope.hidden, strings(&["**/.env", "a/"]));
-        assert_eq!(scope.outside_write, strings(&["~/.cache/pip"]));
-        assert_eq!(scope.outside_read, strings(&["/opt/b"]));
-        assert!(delegate(None, None).is_none());
     }
 
     fn task(actions: &[&str], scope: FileScope, workspace: bool) -> Task {

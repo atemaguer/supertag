@@ -120,6 +120,7 @@ impl Fixture {
                     recipient_tag_id: to.into(),
                     text: text.into(),
                     review: None,
+                    recipient_objective_id: String::new(),
                 },
             )
             .await

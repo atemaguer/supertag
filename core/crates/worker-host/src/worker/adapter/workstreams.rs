@@ -1,11 +1,11 @@
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
-        Approval, ApprovalState, HarnessPostWorkstreamRequest, HarnessReadMailboxRequest,
-        HarnessReadWorkstreamRequest, HarnessSendTagMessageRequest, ListMailboxMessagesResponse,
-        PostAttemptWorkstreamRequest, PostAttemptWorkstreamResponse, ReadAttemptWorkstreamRequest,
-        ReadAttemptWorkstreamResponse, ReadMailboxRequest, SendAttemptTagMessageRequest,
-        SendTagMessageResponse,
+        Approval, ApprovalState, AskAttemptTagRequest, AskTagResponse, HarnessAskTagRequest,
+        HarnessPostWorkstreamRequest, HarnessReadMailboxRequest, HarnessReadWorkstreamRequest,
+        HarnessSendTagMessageRequest, ListMailboxMessagesResponse, PostAttemptWorkstreamRequest,
+        PostAttemptWorkstreamResponse, ReadAttemptWorkstreamRequest, ReadAttemptWorkstreamResponse,
+        ReadMailboxRequest, SendAttemptTagMessageRequest, SendTagMessageResponse,
         harness_mailbox_server::{HarnessMailbox, HarnessMailboxServer},
         harness_workstreams_server::{HarnessWorkstreams, HarnessWorkstreamsServer},
     },
@@ -132,6 +132,7 @@ impl HarnessMailbox for Bridge {
             recipient_tag_id: input.recipient_tag_id,
             text: self.redact(&input.text),
             review: input.review,
+            recipient_objective_id: input.recipient_objective_id,
         };
         let sent = self
             .retry(upstream, |request| {
@@ -142,6 +143,33 @@ impl HarnessMailbox for Bridge {
         self.record_pending(&mut state, sent.get_ref().approval.as_ref())?;
         Ok(sent)
     }
+    async fn ask_tag(
+        &self,
+        request: Request<HarnessAskTagRequest>,
+    ) -> Result<Response<AskTagResponse>, Status> {
+        self.authenticate(&request)?;
+        self.require_attached()?;
+        // Keep completion ordered after this effect.
+        let state = self.state.lock().await;
+        if state.outcome.is_some() {
+            return Err(Status::failed_precondition("execution is complete"));
+        }
+        let input = request.into_inner();
+        // The Control Plane replays an ask by its operation ID.
+        let upstream = AskAttemptTagRequest {
+            operation_id: input.operation_id,
+            text: self.redact(&input.text),
+        };
+        let response = self
+            .retry(upstream, |request| {
+                let mut client = self.coordination.mailbox.clone();
+                async move { client.ask_tag(request).await }
+            })
+            .await;
+        drop(state);
+        response
+    }
+
     async fn read(
         &self,
         request: Request<HarnessReadMailboxRequest>,

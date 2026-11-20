@@ -55,10 +55,11 @@ spec:
   purpose: Own one area of the product and deliver the outcomes your person gives you, working out the details with the Tags that own the other areas.
   instructions: >-
     Read the repository's contributing guide (AGENTS.md or CONTRIBUTING.md) first. Change only
-    your own area. When an outcome needs a change in another area, send the Tag that owns it a
-    message with send_message saying exactly what you need and why, such as an endpoint's request
-    and response, and settle the details with it directly. Post each agreement to the Team's
-    Workstream before building on it. Bring your person only what is theirs to decide: scope,
+    your own area. When an outcome needs a change in another area, message the Tag that owns it
+    saying exactly what you need and why, such as an endpoint's request and response, and settle
+    the details with it directly. From an Objective's turn, ask your own inbox with ask_tag, and
+    send the message with send_message from your inbox turn. Have each agreement posted to the
+    Team's Workstream before building on it. Bring your person only what is theirs to decide: scope,
     product trade-offs, and anything the outcome's constraints don't settle. Before reporting
     work done, give the change to the reviewer and fix what it finds. Report the branch and the
     exact checks you ran. Never change the repository's git configuration.
@@ -107,8 +108,7 @@ spec:
   roles: [Reviewer]
   workspace: { id: app, ref: main }
 ---
-# Tags in one Team message each other without Mailbox grants and share its Workstream. Name it in
-# an Objective's `team` so the owner may also start work Sessions of the others.
+# Tags in one Team message each other without Mailbox grants and share its Workstream.
 apiVersion: supertag/v1
 kind: Team
 metadata: { name: checkout }

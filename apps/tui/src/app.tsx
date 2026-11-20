@@ -714,7 +714,6 @@ function Workspace({
             gateway={gateway}
             owner={tag.tagId}
             ownerName={tag.name ?? tag.tagId}
-            teams={coordination.teams}
             width={Math.min(84, Math.max(40, width - 4))}
             onClose={closeOverlay}
             onShow={(objectiveId) => {

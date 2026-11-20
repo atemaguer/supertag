@@ -60,7 +60,6 @@ export function objective(value: ProtoObjective): Objective {
     revision: num(value.revision),
     ongoing: value.ongoing,
     startingTaskId: value.startingTaskId,
-    teamId: value.teamId || undefined,
     deadlineMs: optionalNum(value.deadlineMs),
     budget:
       limit === undefined ? undefined : { minor: limit, currency: value.budgetCurrency ?? "" },
@@ -151,7 +150,6 @@ export function team(value: ProtoTeam): Team {
     teamId: value.teamId,
     name: value.name || value.teamId,
     memberTagIds: [...value.memberTagIds],
-    maxConcurrency: value.maxConcurrency,
     revision: num(value.revision),
   } as Team);
 }
@@ -274,7 +272,6 @@ export async function createObjective(client: GatewayClient, created: NewObjecti
           objectiveId: created.objectiveId,
           ownerTagId: created.ownerTagId,
           outcome: created.outcome,
-          ...(created.teamId ? { teamId: created.teamId } : {}),
           ...(created.budget
             ? {
                 budgetLimitMinor: BigInt(created.budget.minor),

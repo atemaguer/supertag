@@ -171,12 +171,13 @@ message ReadTagObjectiveRequest {
   optional string objective_id = 2;
 }
 
-// What a Tag reads of an Objective: its record, Team, budget pool, deadline,
+// What a Tag reads of an Objective: its record, budget pool, deadline,
 // limit notices, and the status of each of its Sessions. It carries no Task
 // prompts, results, or failure text.
 message TagObjectiveView {
   Objective objective = 1;
-  ObjectiveOverviewTeam team = 2;
+  reserved 2;
+  reserved "team";
   ObjectiveBudgetPool pool = 3;
   ObjectiveDeadlineView deadline = 4;
   repeated ObjectiveLimitNotice notices = 5;

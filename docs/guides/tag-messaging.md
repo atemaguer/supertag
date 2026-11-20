@@ -108,21 +108,52 @@ A Tag sends with the `send_message` coordination tool, which takes `to` (a Tag n
 A Tag cannot choose the `review` type. SuperTag gives it to a
 [commit review request](#request-a-commit-review), which wakes the reviewer at once.
 
-`send_message` is available in a Tag's conversations, in an Objective's conversation, and in the
-Tag's own inbox turn. It is not available in a work Session, which may address only the Session
-that started it, nor in the turn that brings a work Session's report back, except to request a
-commit review of what that Session delivered.
+`send_message` is available in a Tag's conversations with people and in the Tag's own inbox
+turn. It is not available in an Objective's conversation or in a work Session: they know only
+their own Tag. A work Session addresses only the Session that started it, and an Objective's
+conversation asks its own Tag, as the next section describes.
 
 `backend` takes the message in its next inbox turn, together with anything else waiting. It
 answers with `send_message` back to `support` only when the sender needs an answer; a message
 sent only to acknowledge another is noise.
 
+## Ask the Tag from an Objective
+
+An [Objective](objectives.md) is an outcome a Tag owns. Its turns never message other Tags.
+When the Objective needs another Tag, its turn asks its own Tag's inbox with `ask_tag`, which
+takes only `text`:
+
+```json
+{
+  "text": "Ask backend whether the usage event carries the plan ID for annual plans."
+}
+```
+
+Asking does not end the turn. The ask is a question in the Tag's inbox, under the same debounce
+and [wake limits](#wake-limits) as a message from another Tag. The inbox turn sees it as an
+`<objective-message objective="ID">` entry, may message `backend` and wait for its answer in a
+later inbox turn, and then answers the Objective with `send_message` naming `objective` instead
+of `to`:
+
+```json
+{
+  "objective": "usage-billing",
+  "text": "backend says the event carries plan_id since v42; older events lack it."
+}
+```
+
+The answer becomes the Objective's next turn. Only the inbox turn sends to an Objective, and only
+to one of its own Tag's Objectives with an unanswered question. While an answer is due, the
+Objective waits instead of going idle.
+
 ## Request a commit review
 
-An [Objective](objectives.md) records an outcome owned by a Tag. Its owner can ask another Tag,
-such as one on another Team, to review a delivered Git commit. Set `review.commit` to the full hash in
-`send_message`. The reviewer gets the request in its Mailbox with the Objective, commit,
-and request message ID, and reads the commit's patch with `read_review_patch`.
+An Objective can have another Tag, such as one on another Team, review a Git commit its work
+Session delivered. The Objective's turn asks its own Tag with `ask_tag`, naming the commit. The
+inbox turn requests the review: it sets `review.commit` to the full hash in `send_message` to the
+reviewer. The commit must be a current verified delivery of a work Session of one of the Tag's
+open Objectives. The reviewer gets the request in its Mailbox with the Objective, commit, and
+request message ID, and reads the commit's patch with `read_review_patch`.
 
 The reviewer uses `send_message` with the requester as `to` and its evidence as `text`.
 Set `review.requestId` to the request message ID and `review.verdict` to `approved` or

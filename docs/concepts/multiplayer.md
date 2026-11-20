@@ -40,8 +40,14 @@ the sender. A message is plain text with a type: a note, question, blocker, evid
 decision. A blocker wakes the recipient at once; other messages wait a few seconds so a burst
 lands in one turn. A message assigns no work and grants no authority. Wake limits stop two Tags
 from waking each other in a loop: over a limit the message waits for the recipient's next turn,
-and the operator hears about it once. Start a Session when work needs a result. See
+and the operator hears about it once. See
 [Send messages between Tags](../guides/tag-messaging.md).
+
+Only a Tag's inbox and its conversations with people talk to other Tags. An Objective is the
+Tag's own job: its turns know their own Tag and nothing about the Tag's teammates. When an
+Objective needs a teammate's help, it asks its own Tag with `ask_tag`. The Tag's inbox turn
+weighs the request, messages the teammate, and answers the Objective, whose next turn gets the
+answer. Each Tag decides for itself what work it takes on.
 
 A Team's Workstream is its shared record of posts. `post` records progress or a decision every
 member can read, and it wakes nobody. Every inbox turn of a member opens with a digest of the
@@ -51,7 +57,7 @@ digests. To ask a question or raise a blocker, a Tag sends a message instead. Se
 
 ## Teammates can spot overlapping edits
 
-Suppose two builders working on one Objective edit `src/session.ts` in separate Task worktrees.
+Suppose two work Sessions of one Objective edit `src/session.ts` in separate Task worktrees.
 SuperTag warns the Objective in its own thread, once per overlapping batch of paths, so the owner
 can coordinate before conflicting work is finished. The notice names the repository and the
 shared files.

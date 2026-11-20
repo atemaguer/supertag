@@ -26,9 +26,9 @@ if _version_not_supported:
 
 
 class ObjectiveOverviewsStub:
-    """One operator read of an Objective: its record, Team and concurrency limit,
-    budget pool, deadline, what needs a person, every Session of its work, the
-    owner's conversation, recent Team posts, and one page of its Tasks.
+    """One operator read of an Objective: its record, budget pool, deadline, what
+    needs a person, every Session of its work, the owner's conversation, and one
+    page of its Tasks.
     """
 
     def __init__(self, channel):
@@ -45,9 +45,9 @@ class ObjectiveOverviewsStub:
 
 
 class ObjectiveOverviewsServicer:
-    """One operator read of an Objective: its record, Team and concurrency limit,
-    budget pool, deadline, what needs a person, every Session of its work, the
-    owner's conversation, recent Team posts, and one page of its Tasks.
+    """One operator read of an Objective: its record, budget pool, deadline, what
+    needs a person, every Session of its work, the owner's conversation, and one
+    page of its Tasks.
     """
 
     def GetObjectiveOverview(self, request, context):
@@ -73,9 +73,9 @@ def add_ObjectiveOverviewsServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class ObjectiveOverviews:
-    """One operator read of an Objective: its record, Team and concurrency limit,
-    budget pool, deadline, what needs a person, every Session of its work, the
-    owner's conversation, recent Team posts, and one page of its Tasks.
+    """One operator read of an Objective: its record, budget pool, deadline, what
+    needs a person, every Session of its work, the owner's conversation, and one
+    page of its Tasks.
     """
 
     @staticmethod

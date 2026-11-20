@@ -94,6 +94,7 @@ fn message(
         text: text.into(),
         kind: kind.into(),
         review: None,
+        recipient_objective_id: String::new(),
     }
 }
 
@@ -138,15 +139,16 @@ async fn contract(url: String) {
         )
         .await
         .unwrap();
-    let objective = store
-        .create_objective(
+    // Only the inbox Session and person conversations reach other Tags: the lead posts from a
+    // root Session that is not an Objective's.
+    let shipping = store
+        .submit_task(
             OPERATOR,
-            &CreateObjectiveRequest {
-                operation_id: "objective-ship".into(),
-                objective_id: "ship".into(),
-                owner_tag_id: "lead".into(),
-                outcome: "Ship the release".into(),
-                team_id: Some("release".into()),
+            &SubmitTaskRequest {
+                operation_id: "ship".into(),
+                tag_id: "lead".into(),
+                session_id: "ship".into(),
+                prompt: "Ship the release".into(),
                 ..Default::default()
             },
         )
@@ -154,7 +156,7 @@ async fn contract(url: String) {
         .unwrap();
     let host = support::register_host(&store, "worker").await;
     let lead = claim(&store, &host).await;
-    assert_eq!(lead.task_id, objective.starting_task_id);
+    assert_eq!(lead.task_id, shipping.task_id);
     start(&store, &host, &lead).await;
     let as_lead = AttemptAccess::new(&host, &lead);
 
@@ -315,7 +317,7 @@ async fn contract(url: String) {
     assert!(!prompt.contains("<workstream-post"), "{prompt}");
     finish(&store, &host, &again).await;
 
-    // Reads and the Objective overview show each post's addressees.
+    // Reads show each post's addressees.
     let page = store
         .list_workstream_posts(
             OPERATOR,
@@ -329,24 +331,6 @@ async fn contract(url: String) {
         .unwrap();
     assert_eq!(
         page.posts
-            .iter()
-            .map(|post| (post.sequence, post.to_tag_ids.clone()))
-            .collect::<Vec<_>>(),
-        [(1, vec![]), (2, vec!["reviewer".to_owned()]), (3, vec![]),]
-    );
-    let overview = store
-        .objective_overview(
-            OPERATOR,
-            &GetObjectiveOverviewRequest {
-                objective_id: "ship".into(),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        overview
-            .posts
             .iter()
             .map(|post| (post.sequence, post.to_tag_ids.clone()))
             .collect::<Vec<_>>(),

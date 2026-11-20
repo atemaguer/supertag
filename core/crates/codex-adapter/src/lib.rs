@@ -131,8 +131,22 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
     } else {
         coordination::Inventory::None
     };
+    // Only the inbox Session and person conversations reach other Tags; an Objective's Session
+    // asks its own Tag.
+    let reach = if capabilities.may_ask_tag {
+        coordination::Reach::OwnTag
+    } else if capabilities.may_use_workstream
+        || capabilities.may_read_mailbox
+        || capabilities.may_send_tag_message
+        || capabilities.may_request_commit_review
+    {
+        coordination::Reach::Tags
+    } else {
+        coordination::Reach::None
+    };
     let tools = questions::Tools {
         coordination: inventory,
+        reach,
         capture_artifact: attached.may_capture_artifacts,
         acquire_artifacts: attached.may_acquire_artifacts,
         attach_artifacts: attached.may_materialize_artifacts,

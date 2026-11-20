@@ -19,9 +19,6 @@ pub enum TeamCommand {
         /// Member Tag ID. Repeat for each member.
         #[arg(long, required = true)]
         member: Vec<String>,
-        /// Most Tasks the Team runs at once. Omit for no Team limit.
-        #[arg(long)]
-        max_concurrency: Option<u32>,
         /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
@@ -35,12 +32,6 @@ pub enum TeamCommand {
         /// Replace the members with these Tag IDs. Repeat for each member.
         #[arg(long)]
         member: Vec<String>,
-        /// Most Tasks the Team runs at once.
-        #[arg(long, conflicts_with = "clear_concurrency", value_parser = clap::value_parser!(u32).range(1..=1000))]
-        max_concurrency: Option<u32>,
-        /// Remove the Team concurrency limit.
-        #[arg(long)]
-        clear_concurrency: bool,
         /// The revision you last read. If given, the change is refused when the resource has changed since.
         #[arg(long)]
         expected_revision: Option<u64>,
@@ -168,7 +159,6 @@ pub async fn run(connection: Connection, command: TeamCommand) -> Result<()> {
             team_id,
             name,
             member,
-            max_concurrency,
             operation_id,
         } => {
             let name = name.unwrap_or_else(|| team_id.clone());
@@ -177,7 +167,6 @@ pub async fn run(connection: Connection, command: TeamCommand) -> Result<()> {
                 team_id,
                 name,
                 member_tag_ids: member,
-                max_concurrency,
                 operation_id: operation(operation_id),
             };
             team_json(
@@ -191,17 +180,12 @@ pub async fn run(connection: Connection, command: TeamCommand) -> Result<()> {
             team,
             name,
             member,
-            max_concurrency,
-            clear_concurrency,
             expected_revision,
             operation_id,
         } => {
             ensure!(
-                name.is_some()
-                    || !member.is_empty()
-                    || max_concurrency.is_some()
-                    || clear_concurrency,
-                "set at least one of --name, --member, --max-concurrency or --clear-concurrency"
+                name.is_some() || !member.is_empty(),
+                "set at least one of --name or --member"
             );
             let mut input = UpdateTeamRequest {
                 wake_limits: None,
@@ -210,11 +194,6 @@ pub async fn run(connection: Connection, command: TeamCommand) -> Result<()> {
                 expected_revision: expected_revision.unwrap_or_default(),
                 name,
                 members: (!member.is_empty()).then_some(TeamMembers { tag_ids: member }),
-                max_concurrency: if clear_concurrency {
-                    Some(0)
-                } else {
-                    max_concurrency
-                },
             };
             let observed = if expected_revision.is_none() {
                 let current = get(&mut client, &token, input.team.clone()).await?;
@@ -257,7 +236,6 @@ async fn get(
 fn unchanged_fields(request: &UpdateTeamRequest, before: &Team, current: &Team) -> bool {
     (request.name.is_none() || before.name == current.name)
         && (request.members.is_none() || before.member_tag_ids == current.member_tag_ids)
-        && (request.max_concurrency.is_none() || before.max_concurrency == current.max_concurrency)
 }
 
 fn operation(value: Option<String>) -> String {
@@ -269,7 +247,6 @@ pub(crate) fn team_json(team: Team) -> Value {
         "team_id": team.team_id,
         "name": team.name,
         "member_tag_ids": team.member_tag_ids,
-        "max_concurrency": team.max_concurrency,
         // Each absent limit is the default: 3 mutual wakes per Task, 20 per Tag and 60 per
         // Objective per hour.
         "wake_limits": team.wake_limits.map(|limits| json!({

@@ -87,7 +87,7 @@ async fn exercise(root: &Path, database_url: &str) -> Result<()> {
 apiVersion: supertag/v1
 kind: Objective
 metadata: {name: release}
-spec: {ownerTagId: builder, outcome: "Prepare a release.", team: engineering}
+spec: {ownerTagId: builder, outcome: "Prepare a release."}
 ---
 apiVersion: supertag/v1
 kind: Tag
@@ -132,7 +132,7 @@ spec:
         input.join("a-team.json"),
         r#"[
       {"apiVersion":"supertag/v1","kind":"Team","metadata":{"name":"engineering"},
-       "spec":{"members":["builder","reviewer"],"maxConcurrency":2,
+       "spec":{"members":["builder","reviewer"],
                "wakeLimits":{"mutualPerTask":5}}}
     ]"#,
     )?;
@@ -227,8 +227,8 @@ spec: {source: "file:///var/lib/supertag/archive"}
     let revised = std::fs::read_to_string(&yaml)?
         .replace("Build the release.", "Verify release artifacts.")
         .replace(
-            "team: engineering}",
-            "team: engineering, budgetLimitMinor: 150, budgetCurrency: USD}",
+            "outcome: \"Prepare a release.\"}",
+            "outcome: \"Prepare a release.\", budgetLimitMinor: 150, budgetCurrency: USD}",
         );
     std::fs::write(&yaml, revised)?;
     assert_eq!(
@@ -240,6 +240,30 @@ spec: {source: "file:///var/lib/supertag/archive"}
         command(&gateway, &["diff", "-f", path], true).await?.trim(),
         "No changes."
     );
+    // An Objective names no Team, and a Team caps no Objective turns.
+    let named = root.join("named-team.yaml");
+    for (kind, manifest) in [
+        (
+            "Objective",
+            "apiVersion: supertag/v1\nkind: Objective\nmetadata: {name: teamed}\nspec: {ownerTagId: builder, outcome: \"Teamed.\", team: engineering}\n",
+        ),
+        (
+            "Team",
+            "apiVersion: supertag/v1\nkind: Team\nmetadata: {name: capped}\nspec: {members: [builder], maxConcurrency: 2}\n",
+        ),
+    ] {
+        std::fs::write(&named, manifest)?;
+        let refused = command(
+            &gateway,
+            &["diff", "-f", named.to_str().context("manifest path")?],
+            false,
+        )
+        .await?;
+        assert!(
+            refused.contains(&format!("invalid {kind} spec")),
+            "{refused}"
+        );
+    }
 
     let mut operator = OperatorClient::new(protocol::dial(gateway.clone()).await?);
     let before = operator

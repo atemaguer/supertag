@@ -423,22 +423,20 @@ class RuntimeApprovalRequirement(_message.Message):
     def __init__(self, action: _Optional[str] = ..., permission_set_ids: _Optional[_Iterable[str]] = ..., approvers: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class TaskRuntimeAuthority(_message.Message):
-    __slots__ = ("actions", "approvals", "objective_id", "objective_revision", "delegating_task_id", "files", "network")
+    __slots__ = ("actions", "approvals", "objective_id", "objective_revision", "files", "network")
     ACTIONS_FIELD_NUMBER: _ClassVar[int]
     APPROVALS_FIELD_NUMBER: _ClassVar[int]
     OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
     OBJECTIVE_REVISION_FIELD_NUMBER: _ClassVar[int]
-    DELEGATING_TASK_ID_FIELD_NUMBER: _ClassVar[int]
     FILES_FIELD_NUMBER: _ClassVar[int]
     NETWORK_FIELD_NUMBER: _ClassVar[int]
     actions: _containers.RepeatedScalarFieldContainer[str]
     approvals: _containers.RepeatedCompositeFieldContainer[RuntimeApprovalRequirement]
     objective_id: str
     objective_revision: int
-    delegating_task_id: str
     files: FileScope
     network: NetworkScope
-    def __init__(self, actions: _Optional[_Iterable[str]] = ..., approvals: _Optional[_Iterable[_Union[RuntimeApprovalRequirement, _Mapping]]] = ..., objective_id: _Optional[str] = ..., objective_revision: _Optional[int] = ..., delegating_task_id: _Optional[str] = ..., files: _Optional[_Union[FileScope, _Mapping]] = ..., network: _Optional[_Union[NetworkScope, _Mapping]] = ...) -> None: ...
+    def __init__(self, actions: _Optional[_Iterable[str]] = ..., approvals: _Optional[_Iterable[_Union[RuntimeApprovalRequirement, _Mapping]]] = ..., objective_id: _Optional[str] = ..., objective_revision: _Optional[int] = ..., files: _Optional[_Union[FileScope, _Mapping]] = ..., network: _Optional[_Union[NetworkScope, _Mapping]] = ...) -> None: ...
 
 class FileScope(_message.Message):
     __slots__ = ("write", "read_only", "hidden", "outside_write", "outside_read")

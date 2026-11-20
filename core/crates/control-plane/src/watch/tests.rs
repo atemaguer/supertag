@@ -616,7 +616,6 @@ async fn client_team_notices(url: &str) -> anyhow::Result<()> {
                     team_id: team.into(),
                     name: team.into(),
                     member_tag_ids: members.into_iter().map(str::to_owned).collect(),
-                    max_concurrency: None,
                 },
             )
             .await?;

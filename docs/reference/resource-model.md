@@ -75,11 +75,12 @@ scheduler then chooses a compatible harness and model on one of those hosts. Non
 - **Objective** — an outcome a Tag owns, with a budget, a deadline, a status and an explicit
   completion assessment. It is a conversation with a goal: it talks in the thread it was created
   in, and the work happens in Sessions started beneath it. Set `ongoing: true` for a continuing
-  responsibility that only an operator can end. An Objective may name one Team, whose members its
-  owner may start work Sessions of. See [Objective coordination](coordination.md#objectives).
-- **Team** is a flat list of member Tags with an optional concurrency limit. Members may message
-  one another and share the Team's Workstream. A Team stands alone: any number of Objectives may
-  name one Team. See [Teams](coordination.md#teams).
+  responsibility that only an operator can end. An Objective names no Team: its conversation
+  reaches other Tags only by asking its own Tag's inbox. See
+  [Objective coordination](coordination.md#objectives).
+- **Team** is a flat list of member Tags. Members may message one another and share the Team's
+  Workstream, from their inbox and their conversations with people. See
+  [Teams](coordination.md#teams).
 - **Workstream** is a Team's shared record of posts. Every member reads it. A post has no type and
   wakes nobody; every inbox turn of a member opens with the posts it has not seen, the ones that
   address it first. See [Workstream](coordination.md#workstream).
@@ -121,8 +122,8 @@ credential binds the connection to that Worker Host. Rotation and
 revocation block older connections without exposing credentials through ordinary resource reads.
 A **connection generation** is the increasing number that identifies the current connection.
 
-Most of these records are inspectable but not declaratively applied. An Objective, with the Team
-it names, may also be declared in a manifest; see [Declared Objectives](#declared-objectives). So
+Most of these records are inspectable but not declaratively applied. An Objective may also be
+declared in a manifest; see [Declared Objectives](#declared-objectives). So
 may a recurring Schedule; see [Declared Schedules](#declared-schedules).
 Otherwise an Objective comes from `supertag objective create` or a person's `/goal` message,
 a Team from `supertag team create`, a Schedule from a Tag's `schedule` tool or
@@ -697,7 +698,6 @@ spec:
   ownerTagId: maintainer
   outcome: Keep dependencies current and the build green. Open a pull request for each upgrade.
   ongoing: true
-  team: upkeep
   budgetLimitMinor: 50000
   budgetCurrency: USD
   deadline: "2027-01-01T00:00:00Z"
@@ -710,7 +710,6 @@ spec:
 | `spec.ownerTagId` | Required. The owner Tag. |
 | `spec.outcome` | Required. One natural-language statement of the outcome. |
 | `spec.ongoing` | `true` for a responsibility that only an operator ends. Default `false`. |
-| `spec.team` | An existing Team, declared as its own `Team` manifest or created with `supertag team create`. |
 | `spec.budgetLimitMinor`, `spec.budgetCurrency` | The budget, in minor units of an uppercase currency. |
 | `spec.deadline` or `spec.deadlineMs` | An RFC 3339 time with a time zone, or milliseconds since the epoch. |
 | `spec.runtimeActions` | Runtime actions its turns may receive. Omitted: what the owner's Permission Sets allow when it is created. |
@@ -799,7 +798,6 @@ never erases history, and it refuses a resource that is still in use:
 
 | Resource | Refused while |
 | --- | --- |
-| Team | An Objective that names it is still open |
 | Permission Set, Context Set | A Role lists it, or a surface location activates it |
 | Volume | Reserved or verified artifact copies depend on it, or a Tag names it as its `volume` |
 | Workspace | Given an out-of-date `--expected-revision` |
@@ -818,8 +816,9 @@ that the input no longer declares, by the same rules.
 ## Internal coordination
 
 Each Tag has one Mailbox: plain-text messages from other Tags, handled together in one turn of
-the Tag's inbox. Mailboxes are not separately configured. Tags in one Team message each other
-without a grant; across Teams, a grant records that a recipient accepts messages from a sender.
+the Tag's inbox. Mailboxes are not separately configured. Only a Tag's inbox and its
+conversations with people send messages; an Objective's conversation asks its own Tag's inbox
+with `ask_tag`. Tags in one Team message each other without a grant; across Teams, a grant records that a recipient accepts messages from a sender.
 Delivery grants no execution authority. See [Mailbox](coordination.md#mailbox) and
 [Send messages between Tags](../guides/tag-messaging.md).
 

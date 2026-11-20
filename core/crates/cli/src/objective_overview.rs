@@ -152,14 +152,6 @@ pub(crate) fn text(view: &ObjectiveOverview) -> String {
         lines.push(format!("{label}: {}", block(summary, "  ")));
     }
     lines.push(format!("Owner: {}", objective.owner_tag_id));
-    if let Some(team) = &view.team {
-        let members = if team.member_tag_ids.is_empty() {
-            "no members".to_owned()
-        } else {
-            team.member_tag_ids.join(", ")
-        };
-        lines.push(format!("Team: {} ({members})", team.name));
-    }
     lines.push(budget_line(view));
     if let Some(deadline) = &view.deadline {
         lines.push(format!(
@@ -279,24 +271,6 @@ pub(crate) fn text(view: &ObjectiveOverview) -> String {
         }
     }
 
-    if !view.posts.is_empty() {
-        lines.push(String::new());
-        lines.push("Team posts:".into());
-        for post in &view.posts {
-            let to = if post.to_tag_ids.is_empty() {
-                String::new()
-            } else {
-                format!(" to {}", post.to_tag_ids.join(", "))
-            };
-            lines.push(format!(
-                "  #{} {}{to}: {}",
-                post.sequence,
-                post.author_tag_id,
-                first_line(&post.body)
-            ));
-        }
-    }
-
     lines.push(String::new());
     lines.push("Details:".into());
     lines.push(format!("  Revision: {}", objective.revision));
@@ -323,18 +297,6 @@ pub(crate) fn text(view: &ObjectiveOverview) -> String {
             time(notice.at_ms),
             block(&notice.message, "    ")
         ));
-    }
-    if let Some(team) = &view.team {
-        lines.push(match team.max_concurrency {
-            Some(limit) => format!(
-                "  Team {}: at most {limit} turns at once across its Objectives; {} running now",
-                team.name, team.running_turns
-            ),
-            None => format!(
-                "  Team {}: turns limited only by Worker Host capacity; {} running now",
-                team.name, team.running_turns
-            ),
-        });
     }
     if view.total_tasks > 0 {
         lines.push(format!(
@@ -450,13 +412,6 @@ pub(crate) fn json(view: &ObjectiveOverview) -> Value {
     json!({
         "objective": view.objective.clone().map(crate::objectives::output),
         "as_of_ms": view.as_of_ms,
-        "team": view.team.as_ref().map(|team| json!({
-            "team_id": team.team_id,
-            "name": team.name,
-            "member_tag_ids": team.member_tag_ids,
-            "max_concurrency": team.max_concurrency,
-            "running_turns": team.running_turns,
-        })),
         "pool": view.pool.as_ref().map(|pool| json!({
             "measure": pool.measure().as_str_name(),
             "currency": pool.currency,
@@ -511,13 +466,6 @@ pub(crate) fn json(view: &ObjectiveOverview) -> Value {
         })).collect::<Vec<_>>(),
         "total_sessions": view.total_sessions,
         "conversation": view.conversation.iter().map(turn_json).collect::<Vec<_>>(),
-        "posts": view.posts.iter().map(|post| json!({
-            "sequence": post.sequence,
-            "author_tag_id": post.author_tag_id,
-            "to_tag_ids": post.to_tag_ids,
-            "body": post.body,
-            "created_at_ms": post.created_at_ms,
-        })).collect::<Vec<_>>(),
         "tasks": view.tasks.iter().map(turn_json).collect::<Vec<_>>(),
         "total_tasks": view.total_tasks,
         "next_offset": view.next_offset,
@@ -535,8 +483,7 @@ pub(crate) fn json(view: &ObjectiveOverview) -> Value {
 mod tests {
     use super::*;
     use supertag_protocol::v2::{
-        Objective, ObjectiveAttention, ObjectiveBudgetPool, ObjectiveOverviewTeam,
-        ObjectiveSessionView,
+        Objective, ObjectiveAttention, ObjectiveBudgetPool, ObjectiveSessionView,
     };
 
     fn view(status: ObjectiveStatus) -> ObjectiveOverview {
@@ -620,7 +567,7 @@ mod tests {
     }
 
     #[test]
-    fn budgets_and_team_limits_read_in_plain_words() {
+    fn budgets_read_in_plain_words() {
         let mut budgeted = view(ObjectiveStatus::Working);
         budgeted.pool = Some(ObjectiveBudgetPool {
             measure: ObjectiveBudgetMeasure::ProviderReportedCost as i32,
@@ -631,22 +578,12 @@ mod tests {
             unknown_cost_attempts: 1,
             ..Default::default()
         });
-        budgeted.team = Some(ObjectiveOverviewTeam {
-            team_id: "t".into(),
-            name: "delivery".into(),
-            member_tag_ids: vec!["helper".into(), "planner".into()],
-            max_concurrency: Some(2),
-            running_turns: 1,
-        });
         let text = text(&budgeted);
         assert!(
             text.contains("Budget: $2.50 of $10.00 spent; 1 Task Attempt with unknown cost"),
             "{text}"
         );
-        assert!(text.contains("Team: delivery (helper, planner)"));
-        assert!(text.contains("at most 2 turns at once across its Objectives; 1 running now"));
-        budgeted.team.as_mut().unwrap().max_concurrency = None;
-        assert!(super::text(&budgeted).contains("turns limited only by Worker Host capacity"));
+        assert!(!text.contains("Team"), "{text}");
     }
 
     #[test]

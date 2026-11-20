@@ -110,7 +110,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 122;
+        const SCHEMA_VERSION: i64 = 123;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -357,6 +357,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0120_redelivery.sql"),
                 include_str!("../migrations/sqlite/0121_native_memory_seeds.sql"),
                 include_str!("../migrations/sqlite/0122_session_input_queue.sql"),
+                include_str!("../migrations/sqlite/0123_tag_session_boundaries.sql"),
             ]
         } else {
             [
@@ -484,6 +485,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0120_redelivery.sql"),
                 include_str!("../migrations/postgresql/0121_native_memory_seeds.sql"),
                 include_str!("../migrations/postgresql/0122_session_input_queue.sql"),
+                include_str!("../migrations/postgresql/0123_tag_session_boundaries.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -2335,13 +2337,10 @@ pub(crate) async fn current_work_policy_in(
             },
         });
     }
+    // A Work Session delegated to another Tag before Work Sessions always ran on their parent's
+    // Tag finishes what it was doing, but an approval does not resume it.
     if source.tag_id != starter.tag_id {
-        let id = objective.ok_or(StoreError::PermissionDenied)?;
-        let eligible:i64=sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_objectives o JOIN supertag_v2_team_members m ON m.team_id=o.team_id AND m.tag_id=$2 WHERE o.objective_id=$1 AND EXISTS (SELECT 1 FROM supertag_v2_hosts h WHERE h.generation>0 AND h.revoked_at_ms IS NULL AND (h.all_tags=1 OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=h.host_id AND scope.tag_id=$2)))")
-            .bind(id).bind(&source.tag_id).fetch_one(&mut **tx).await?;
-        if eligible == 0 {
-            return Err(StoreError::PermissionDenied);
-        }
+        return Err(StoreError::PermissionDenied);
     }
     let mut accepted = tag_policy_in(tx, &source.tag_id, surface.as_ref()).await?;
     crate::artifact_context::inherit(source, &mut accepted.policy)?;
@@ -2353,23 +2352,12 @@ pub(crate) async fn current_work_policy_in(
         .fetch_one(&mut **tx)
         .await?;
         let actions = serde_json::from_str(&row.try_get::<String, _>("runtime_actions")?)?;
-        if source.tag_id == starter.tag_id {
-            crate::policy::apply_objective_runtime(
-                &mut accepted.policy,
-                id,
-                row.try_get::<i64, _>("revision")? as u64,
-                actions,
-            )?;
-        } else {
-            crate::policy::apply_delegated_runtime(
-                &mut accepted.policy,
-                starter,
-                id,
-                row.try_get::<i64, _>("revision")? as u64,
-                &actions,
-            )?;
-            accepted.workspace = starter.workspace.clone();
-        }
+        crate::policy::apply_objective_runtime(
+            &mut accepted.policy,
+            id,
+            row.try_get::<i64, _>("revision")? as u64,
+            actions,
+        )?;
     }
     crate::remote_workspaces::pins::inherit(&mut accepted.workspace, &source.workspace);
     crate::workspaces::inherit_resolved_ref(&mut accepted.workspace, source.workspace.as_ref());
@@ -2383,44 +2371,6 @@ pub(crate) async fn current_work_policy_in(
     result.workspace = accepted.workspace;
     result.tag_revision = accepted.revision as u64;
     Ok(result)
-}
-
-pub(crate) async fn insert_delegated_task_in(
-    transaction: &mut Transaction<'_, Any>,
-    order: i64,
-    parent: &Task,
-    objective_id: &str,
-    tag_id: &str,
-    session_id: &str,
-    prompt: &str,
-) -> Result<Task> {
-    let objective = sqlx::query(
-        "SELECT revision,runtime_actions FROM supertag_v2_objectives WHERE objective_id=$1",
-    )
-    .bind(objective_id)
-    .fetch_one(&mut **transaction)
-    .await?;
-    let objective_actions: Vec<String> =
-        serde_json::from_str(&objective.try_get::<String, _>("runtime_actions")?)?;
-    let mut accepted = tag_policy_in(transaction, tag_id, None).await?;
-    accepted.workspace = parent.workspace.clone();
-    crate::policy::apply_delegated_runtime(
-        &mut accepted.policy,
-        parent,
-        objective_id,
-        objective.try_get::<i64, _>("revision")? as u64,
-        &objective_actions,
-    )?;
-    insert_accepted_task(
-        transaction,
-        order,
-        tag_id,
-        session_id,
-        prompt,
-        accepted,
-        None,
-    )
-    .await
 }
 
 async fn insert_accepted_task(
@@ -2517,24 +2467,6 @@ pub(crate) async fn retarget_harness_in(
         .execute(&mut **transaction)
         .await?;
     *task = bounded_task_in(transaction, &task.task_id).await?;
-    Ok(())
-}
-
-pub(crate) async fn preserve_execution_in(
-    transaction: &mut Transaction<'_, Any>,
-    task: &mut Task,
-    source: &Task,
-) -> Result<()> {
-    if let Some(selection) = &source.execution_selection
-        && task.execution_selection.as_ref() != Some(selection)
-    {
-        sqlx::query("UPDATE supertag_v2_tasks SET execution_selection=$1 WHERE task_id=$2")
-            .bind(selection.encode_to_vec())
-            .bind(&task.task_id)
-            .execute(&mut **transaction)
-            .await?;
-        task.execution_selection = Some(selection.clone());
-    }
     Ok(())
 }
 

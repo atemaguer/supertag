@@ -6,8 +6,10 @@ a flat list of member Tags. An **Objective** is an outcome owned by one Tag; it 
 outcome and another should do part of the work.
 
 This walkthrough adds a `builder` to the `lead` from the [quickstart](../../README.md#get-started).
-The lead delegates a file to the builder, reviews what comes back, posts the result to the Team's
-**Workstream** (its shared record of posts), and sends the builder a message.
+The lead's Objective asks the lead's own inbox for help, the lead messages the builder, the
+builder writes a file in a turn of its own, and the lead posts the result to the Team's
+**Workstream** (its shared record of posts). An Objective's turns never message other Tags
+themselves: only a Tag's inbox does.
 
 ## Before you start
 
@@ -58,9 +60,11 @@ metadata:
   name: builder
 spec:
   roles: [Builder]
+  workspace: { id: WORKSPACE, ref: main }
 ```
 
-Apply the manifest:
+Replace `WORKSPACE` with the name `supertag get workspace` lists for your repository, and `main`
+with its branch. Apply the manifest:
 
 ```sh
 supertag apply -f builder.yaml
@@ -69,8 +73,8 @@ supertag describe tag builder
 
 The Role grants the same local file-editing and command permissions that `init` gave `lead`.
 Membership of a Team grants none of these. Give this builder only work you trust to run on the
-selected host. A Session the lead starts for `builder` works in the lead's Workspace, so the
-builder needs no Workspace binding of its own. `local-tools` also grants `web:fetch`, unless the
+selected host. The builder does its work in its own turns, so it needs its own Workspace
+binding. `local-tools` also grants `web:fetch`, unless the
 harness is Cursor or the host runs Tasks in local-vm containers: the builder can read web pages, and its commands can reach
 the network. Current Codex models need it to run commands; see
 [Codex commands and models](../operations/requirements.md#codex-commands-and-models).
@@ -87,19 +91,20 @@ and share one Workstream.
 
 ## 3. Create the Objective
 
-Create the Objective with the CLI, which names its ID and its Team:
+Create the Objective with the CLI, which names its ID:
 
 ```sh
 supertag objective create team-greeting \
-  'Create TEAM-HELLO.md containing exactly: Hello from the team. Have builder write the file; review what it reports. Done when you have checked the delivered file, posted a one-line summary to the Workstream, and sent builder a message saying the file was accepted. Change no other files; do not push.' \
-  --owner lead --team first-team
+  'Create TEAM-HELLO.md containing exactly: Hello from the team. Ask builder, through your own inbox, to write the file; review what it reports. Done when you have checked the delivered file and a one-line summary is posted to the Workstream. Change no other files; do not push.' \
+  --owner lead
 ```
 
-It prints the Objective as JSON. Creating the Objective starts it. The lead takes its first turn in the Objective's own
-conversation, starts a Session of `builder` for the file, and gets a turn back there when that
-Session reports. That report turn cannot post to the Workstream or message `builder`; the lead
-does both in a later turn of the Objective's conversation, such as the one SuperTag starts when
-nothing is left running. Use new Objective and Team IDs if these already exist.
+It prints the Objective as JSON. Creating the Objective starts it. The lead takes its first turn
+in the Objective's own conversation and asks its own Tag with `ask_tag`. The lead's inbox turn
+messages `builder`. The builder takes the message in its inbox turn, writes the file, and answers
+the lead. The lead's next inbox turn answers the Objective, posts the summary to the Workstream,
+and the answer arrives as the Objective's next turn. Use new Objective and Team IDs if these
+already exist.
 
 ## 4. Follow the work
 
@@ -110,19 +115,19 @@ supertag watch objective team-greeting
 supertag describe objective team-greeting
 ```
 
-`describe` lists the Objective's conversation and the Session beneath it under **Work**:
+`describe` lists the Objective's conversation under **Work**:
 
 ```text
-Work: 2 Sessions
+Work: 1 Session
   succeeded  lead     Objective conversation  (3 Tasks, latest Task 6c2b48d0-9e13-4a77-b5f2-80ad1e6c4932)
-  succeeded  builder  Write TEAM-HELLO.md  (1 Task, latest Task 4c71…)
 ```
 
-Each Session's work arrives in your repository as its own branch under `supertag/session/`, so
-the change stays there until you choose to integrate it. You are still in `~/supertag-first-team`,
-which is not a git checkout, so inspect the file with `git -C`, replacing `APP_CHECKOUT` with your
-repository and `BUILDER_BRANCH` with the builder Session's branch from
-`git -C APP_CHECKOUT branch --list 'supertag/session/*'`:
+The builder's turns run in its own inbox Session, `inbox:builder`. Read them with
+`supertag get session inbox:builder`. Each Session's work arrives in your repository as its own
+branch under `supertag/session/`, so the change stays there until you choose to integrate it. You
+are still in `~/supertag-first-team`, which is not a git checkout, so inspect the file with
+`git -C`, replacing `APP_CHECKOUT` with your repository and `BUILDER_BRANCH` with the builder's
+branch from `git -C APP_CHECKOUT branch --list 'supertag/session/*'`:
 
 ```sh
 git -C APP_CHECKOUT show BUILDER_BRANCH:TEAM-HELLO.md
@@ -142,16 +147,15 @@ can read. The second shows the lead's message to `builder`, with `state`
 `TAG_MESSAGE_STATE_PENDING` until the builder's inbox takes it and `TAG_MESSAGE_STATE_HANDLED`
 afterwards.
 
-The lead cannot close the Objective itself. Once the file, the post, and the message check out,
-record the result:
+Once the file and the post check out, record the result:
 
 ```sh
-printf '%s\n' "builder wrote TEAM-HELLO.md; lead posted the summary and messaged builder." | \
+printf '%s\n' "builder wrote TEAM-HELLO.md; lead posted the summary." | \
   supertag objective complete team-greeting --summary-file -
 ```
 
 `supertag get inbox-item` lists the lead's questions; answer one with
-`supertag question answer TASK_ID TEXT`. Your answer becomes its next turn. If no builder Session starts, check `supertag placement explain TASK_ID`, then use [first-reply troubleshooting](troubleshooting.md). A provider error needs a
+`supertag question answer TASK_ID TEXT`. Your answer becomes its next turn. If the builder takes no turn, check `supertag placement explain TASK_ID`, then use [first-reply troubleshooting](troubleshooting.md). A provider error needs a
 working harness sign-in before the Team can finish.
 
 ## Stop or continue

@@ -256,6 +256,12 @@ impl Store {
         authority: &AttemptAccess,
         input: &SendAttemptTagMessageRequest,
     ) -> Result<SendTagMessageResponse> {
+        if !input.recipient_objective_id.is_empty() {
+            if !input.recipient_tag_id.is_empty() {
+                return Err(invalid("name a recipient Tag or an Objective, not both"));
+            }
+            return self.answer_attempt_objective(authority, input).await;
+        }
         let _wake = self.hint_after_commit();
         let host = authority.host();
         let attempt = authority.lease();
@@ -323,14 +329,19 @@ impl Store {
                 "direct messaging requires a live running Attempt".into(),
             ));
         }
-        let kind = crate::work_sessions::task_kind_in(&mut tx, &attempt.task_id).await?;
-        if kind.is_some()
-            && !(kind == Some(crate::work_sessions::REPORT)
-                && matches!(review, Some(ReviewKind::Commit(_))))
+        let sender: String = task.try_get("tag_id")?;
+        let session: String = task.try_get("session_id")?;
+        // Only the inbox Session and person conversations reach other Tags: a Work Session's
+        // Tasks and an Objective's Session do not.
+        if crate::work_sessions::task_kind_in(&mut tx, &attempt.task_id)
+            .await?
+            .is_some()
+            || super::objective_asks::objective_session_in(&mut tx, &sender, &session)
+                .await?
+                .is_some()
         {
             return Err(StoreError::PermissionDenied);
         }
-        let sender: String = task.try_get("tag_id")?;
         if sender == input.recipient_tag_id {
             return Err(invalid("a Tag cannot send a message to itself"));
         }
@@ -442,7 +453,7 @@ impl Store {
             let sent: i64 = sqlx::query_scalar(
                 "SELECT COUNT(*) FROM supertag_v2_messages m
                  JOIN supertag_v2_conversations c ON c.conversation_id=m.conversation_id AND c.kind=1
-                 WHERE m.source_task_id=$1 AND m.sender_kind=1",
+                 WHERE m.source_task_id=$1 AND m.sender_kind=1 AND substr(c.direct_key,1,2)<>'o:'",
             )
             .bind(&attempt.task_id)
             .fetch_one(&mut *tx)
@@ -495,12 +506,18 @@ impl Store {
                 review: Some(recorded),
             });
         }
-        let objective: Option<String> = sqlx::query_scalar(
-            "SELECT objective_id FROM supertag_v2_objective_tasks WHERE task_id=$1",
-        )
-        .bind(&attempt.task_id)
-        .fetch_optional(&mut *tx)
-        .await?;
+        // A review request is for the Objective whose Work Session delivered the commit.
+        let objective: Option<String> = match &validated_request {
+            Some(request) => Some(request.objective_id().to_owned()),
+            None => {
+                sqlx::query_scalar(
+                    "SELECT objective_id FROM supertag_v2_objective_tasks WHERE task_id=$1",
+                )
+                .bind(&attempt.task_id)
+                .fetch_optional(&mut *tx)
+                .await?
+            }
+        };
         let conversation = messages::direct_conversation_in(
             &mut tx,
             Member::Tag(&sender),

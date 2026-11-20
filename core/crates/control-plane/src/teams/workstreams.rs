@@ -271,29 +271,33 @@ pub(crate) async fn workstream_for_task_in(
     {
         return Err(StoreError::PermissionDenied);
     }
-    let objective: Option<Option<String>> = sqlx::query_scalar("SELECT o.team_id FROM supertag_v2_objective_tasks link JOIN supertag_v2_objectives o ON o.objective_id=link.objective_id WHERE link.task_id=$1")
-        .bind(task_id).fetch_optional(&mut **tx).await?;
-    let id = match objective {
-        Some(id) => {
-            id.ok_or_else(|| StoreError::FailedPrecondition("this Objective has no Team".into()))?
+    // Only the inbox Session and person conversations reach other Tags: an Objective's Session
+    // has no Workstream.
+    let objective: Option<String> =
+        sqlx::query_scalar("SELECT objective_id FROM supertag_v2_objective_tasks WHERE task_id=$1")
+            .bind(task_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    if objective.is_some() {
+        return Err(StoreError::PermissionDenied);
+    }
+    let teams: Vec<String> = sqlx::query_scalar(
+        "SELECT team_id FROM supertag_v2_team_members WHERE tag_id=$1 ORDER BY team_id LIMIT 2",
+    )
+    .bind(author)
+    .fetch_all(&mut **tx)
+    .await?;
+    let id = match teams.as_slice() {
+        [only] => only.clone(),
+        [] => {
+            return Err(StoreError::FailedPrecondition(
+                "this Tag is in no Team".into(),
+            ));
         }
-        None => {
-            let teams: Vec<String> = sqlx::query_scalar("SELECT team_id FROM supertag_v2_team_members WHERE tag_id=$1 ORDER BY team_id LIMIT 2")
-                .bind(author).fetch_all(&mut **tx).await?;
-            match teams.as_slice() {
-                [only] => only.clone(),
-                [] => {
-                    return Err(StoreError::FailedPrecondition(
-                        "this Tag is in no Team".into(),
-                    ));
-                }
-                _ => {
-                    return Err(StoreError::FailedPrecondition(
-                        "this Tag is in several Teams; an Objective must select the Workstream"
-                            .into(),
-                    ));
-                }
-            }
+        _ => {
+            return Err(StoreError::FailedPrecondition(
+                "this Tag is in several Teams, so it has no one Workstream".into(),
+            ));
         }
     };
     let team = team_by_id_in(tx, &id)

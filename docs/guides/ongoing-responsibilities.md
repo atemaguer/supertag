@@ -28,7 +28,7 @@ Only an operator can end it.
   the condition to watch, the evidence needed to change the policy, and who may apply changes. See
   [Roles](../concepts/roles.md).
 
-## 1. Declare the Objective and its Team
+## 1. Declare the Objective and the Team
 
 Standing work belongs in configuration, beside the Tags that do it. Save the responsibility as
 `support-policy.yaml`:
@@ -40,7 +40,6 @@ metadata:
   name: support
 spec:
   members: [support-manager, support-specialist]
-  maxConcurrency: 2
 ---
 apiVersion: supertag/v1
 kind: Objective
@@ -51,17 +50,17 @@ spec:
   outcome: >-
     Maintain the support response policy. Investigate each overdue-ticket report that arrives in
     this conversation, and change the policy only after a specialist's written proposal.
-    Post every policy change to the Workstream. Between steps, handle the oldest unresolved
+    Have every policy change posted to the Workstream. Between steps, handle the oldest unresolved
     report first. If blocked, stop and report what you tried and what would unlock it.
   ongoing: true
-  team: support
   budgetLimitMinor: 50000
   budgetCurrency: USD
 ```
 
 `metadata.name` is the Objective's ID. `outcome` is one statement of the result, how it is
 verified, and what must not change. `ongoing: true` makes this a continuing responsibility that
-only an operator can end. `team` names the Team the manager may hand work to.
+only an operator can end. The Team lets the manager and the specialist message each other and
+share a Workstream; the Objective names no Team.
 
 Preview and apply it:
 
@@ -82,12 +81,11 @@ The same Objective can be created with a command instead:
 supertag team create support --member support-manager --member support-specialist
 supertag objective create support-policy \
   "Maintain the support response policy. Investigate each overdue-ticket report that arrives in this conversation, and change the policy only after a specialist's written proposal." \
-  --owner support-manager --team support --ongoing --budget-minor 50000 --currency USD
+  --owner support-manager --ongoing --budget-minor 50000 --currency USD
 ```
 
-**Check:** `supertag describe objective support-policy` shows `working`, the Team and its
-members, and the manager's first turn under **Work**. The manager is a member of the Team because
-only members may post to its Workstream.
+**Check:** `supertag describe objective support-policy` shows `working` and the manager's first
+turn under **Work**. `supertag get team support` lists both members.
 
 ## 2. Deliver evidence to the Objective
 
@@ -112,27 +110,21 @@ If the Objective has a Slack or Lark home thread, you can also reply there. See
 **Check:** `supertag watch objective support-policy` shows the manager's turn starting within
 seconds of the message.
 
-## 3. Let the manager delegate and review
+## 3. Let the manager ask the specialist
 
-The manager investigates, then starts a Session of `support-specialist` for the proposal. That
-Session runs under the specialist's own Roles, narrowed to the Objective's runtime actions, and
-draws on the Objective's single budget pool. When it ends, its report comes back as a turn in the
-Objective's conversation; the manager reviews it, accepts it in its reply, or sends fixes back to
-the same Session.
+The Objective's turns know only their own Tag. The manager investigates, then asks its own Tag
+for a proposal with `ask_tag`, and goes on with what it can do alone. The manager's inbox turn
+messages `support-specialist`, which writes the proposal in a turn of its own, under its own
+Roles, and sends it back. The manager's inbox then answers the Objective, and the answer arrives
+as a turn in the Objective's conversation. The manager reviews it and accepts it or asks again.
 
 ```sh
 supertag describe objective support-policy
+supertag get message --mailbox support-specialist
 ```
 
-```text
-Work: 2 Sessions
-  succeeded  support-manager     Objective conversation  (3 Tasks, latest Task b81e5d47-2fa0-4c69-9d31-7e05a3bc8164)
-  succeeded  support-specialist  Propose a response-time policy  (1 Task, latest Task 81ba…)
-```
-
-Once the manager applies a change, it posts the decision to the Team's Workstream, where every
-member reads it. The manager posts from a turn of the Objective's conversation; the turn that
-brings a Session's report back cannot post.
+Once the manager applies a change, its Objective asks its Tag to post the decision. The inbox
+turn posts it to the Team's Workstream, where every member reads it:
 
 ```sh
 supertag get workstream-post --team support
@@ -153,7 +145,7 @@ changes neither budgets nor permissions. See [Respond to an Objective](objective
 ## 5. Change or end the responsibility
 
 The owner treats the Objective's definition as the work, so `ownerTagId`, `outcome`, `ongoing`,
-`team`, and `runtimeActions` are fixed. Applying the manifest again with a new `deadline` or
+and `runtimeActions` are fixed. Applying the manifest again with a new `deadline` or
 `budgetLimitMinor` changes those limits, with the same rules as `supertag objective set-limits`.
 Change runtime actions with a command, and give a declaration a new name to create a new
 Objective:
@@ -163,7 +155,7 @@ supertag objective set-limits support-policy --budget-minor 80000 --currency USD
 supertag objective set-runtime-actions support-policy --runtime-action files:write
 ```
 
-Change the Team's members and `maxConcurrency` in its manifest and apply it again.
+Change the Team's members in its manifest and apply it again.
 
 To end the responsibility, cancel it. Removing it from the file does not, because `--prune` never
 removes an Objective. See
@@ -198,11 +190,10 @@ reason.
   turn to see why no Worker Host takes it.
 - **The Objective is `limited`.** The budget pool is spent. Raise it with
   `supertag objective set-limits support-policy --budget-minor AMOUNT`; a budget can only increase.
-- **Work waits although the budget has room.** The Team's `maxConcurrency` counts turns across
-  every Objective that names the Team. See
-  [Throttle a Team on purpose](teams.md#throttle-a-team-on-purpose).
+- **The Objective waits on its Tag.** It asked with `ask_tag` and the inbox has not answered.
+  Read the inbox Session with `supertag get session inbox:support-manager`.
 - **A turn needs attention.** Run `supertag get inbox-item --kind task-attention`.
-- **Apply refuses a change.** `ownerTagId`, `outcome`, `ongoing`, `team`, and `runtimeActions`
+- **Apply refuses a change.** `ownerTagId`, `outcome`, `ongoing`, and `runtimeActions`
   are fixed once the Objective exists. Create a new Objective for a different definition.
 
 ## Next

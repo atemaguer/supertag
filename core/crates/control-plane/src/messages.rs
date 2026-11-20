@@ -213,6 +213,52 @@ pub(crate) async fn direct_conversation_in(
     Ok(id)
 }
 
+/// Gets or creates the conversation of an Objective with its Tag: a direct conversation keyed
+/// `o:<objective>` whose one member is the Tag. The Objective's asks and its inbox Session's
+/// answers are its messages (`crate::mailbox::objective_asks`).
+pub(crate) async fn objective_conversation_in(
+    tx: &mut Transaction<'_, Any>,
+    tag_id: &str,
+    objective_id: &str,
+    now: i64,
+) -> Result<String> {
+    name("Objective ID", objective_id)?;
+    let key = format!("o:{objective_id}");
+    sqlx::query(
+        "INSERT INTO supertag_v2_conversations (conversation_id,kind,direct_key,created_at_ms)
+         VALUES ($1,1,$2,$3) ON CONFLICT(direct_key) DO NOTHING",
+    )
+    .bind(format!("direct/{}", Uuid::new_v4().simple()))
+    .bind(&key)
+    .bind(now)
+    .execute(&mut **tx)
+    .await?;
+    let id: String = sqlx::query_scalar(
+        "SELECT conversation_id FROM supertag_v2_conversations WHERE direct_key=$1",
+    )
+    .bind(&key)
+    .fetch_one(&mut **tx)
+    .await?;
+    join_in(tx, &id, Member::Tag(tag_id), 0, now).await?;
+    Ok(id)
+}
+
+/// The Objective whose conversation with its Tag this is, if it is one.
+pub(crate) async fn conversation_objective_in(
+    tx: &mut Transaction<'_, Any>,
+    conversation_id: &str,
+) -> Result<Option<String>> {
+    let key: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT direct_key FROM supertag_v2_conversations WHERE conversation_id=$1",
+    )
+    .bind(conversation_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(key
+        .flatten()
+        .and_then(|key| key.strip_prefix("o:").map(str::to_owned)))
+}
+
 async fn join_in(
     tx: &mut Transaction<'_, Any>,
     conversation_id: &str,

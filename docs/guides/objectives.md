@@ -3,13 +3,13 @@
 A **Tag** is a persistent AI actor with its own identity, responsibilities, permissions, and work history. An
 **Objective** is an outcome owned by a Tag, with a budget, a deadline, and a status. A **Session**
 is one Tag's thread of **Tasks**, and a Task is one turn of a Session; a **Task Attempt** is one
-execution of a Task. A **Team** is a flat list of member Tags. The **Control Plane** is the
+execution of a Task. The **Control Plane** is the
 SuperTag service that stores and runs this work. See the [glossary](../reference/glossary.md) for
 other terms.
 
 An Objective is a conversation with a goal. You can direct it from the CLI or its home
-thread. Its owner Tag asks you a question when it needs a decision. Work happens in Sessions
-started beneath it, including Sessions of other Tags in its Team.
+thread. Its owner Tag asks you a question when it needs a decision. Work happens in work Sessions
+of the owner Tag started beneath it. When it needs another Tag, it asks its own Tag's inbox.
 
 Use this guide to record an outcome, follow the owner's work, and close the Objective with an
 explicit assessment. Ordinary questions and small requests do not need an Objective. See
@@ -72,7 +72,7 @@ owner's first turn. `supertag describe objective ID` shows its progress. The own
 the owner Tag's [Workspace](../reference/resource-model.md#workspaces).
 
 Use `supertag objective create` when scripting creation, choosing the Objective's ID, or setting a
-Team, a budget, or a deadline. You can also [declare the Objective in a manifest](../operations/resources.md#declare-objectives).
+budget or a deadline. You can also [declare the Objective in a manifest](../operations/resources.md#declare-objectives).
 
 ```sh
 supertag objective create usage-billing \
@@ -88,8 +88,8 @@ conversation. Running the same command again is refused, because the ID already 
 after a lost response, pass the same `--operation-id` both times; the retry returns the first
 result and never starts a second turn.
 
-In this example, the owner starts its own work Sessions. To let it hand work to other Tags,
-create a Team and name it with `--team`. See [Organize Tags into Teams](teams.md).
+The owner does the work in its own work Sessions. When it needs another Tag, it asks its own
+Tag's inbox, which messages that Tag; see [Watch the owner work](#3-watch-the-owner-work).
 
 Read it back, and list Objectives; filter the JSON with a tool such as `jq`:
 
@@ -99,8 +99,8 @@ supertag get objective | jq '.objectives[] | select(.owner_tag_id == "lead")'
 ```
 
 A list page holds at most 12 Objectives; pass the last ID as `--after-id` for the next page. The
-other `supertag objective` commands each print the updated Objective as JSON. The outcome, owner,
-and Team are fixed once created; an operator can later move the deadline, raise the budget, or
+other `supertag objective` commands each print the updated Objective as JSON. The outcome and
+owner are fixed once created; an operator can later move the deadline, raise the budget, or
 change runtime actions.
 
 Standing work belongs in configuration instead. An `Objective` manifest declares the same fields,
@@ -136,17 +136,9 @@ supertag objective set-runtime-actions docs-review --runtime-action files:write 
 The update applies to turns that start afterwards. An action marked `approvalRequired: true` still
 waits for approval, whoever runs it. See [Approval](../reference/iam.md#approval).
 
-Give a lead `files:delegate-write` in its Role's Permission Set when it coordinates edits
-from a read-only Workspace. Include that action in the Objective's runtime actions if you
-set the list explicitly. A builder in the Team can then write in a delegated Session if
-its own Role allows `files:write`. Both the lead's delegation approval rules and the
-builder's write approval rules apply. To switch an existing Objective to this model,
-replace its recorded runtime actions with the delegation action and any other actions
-the lead still needs.
-
 ### When the first turn waits
 
-Creation refuses an unknown owner Tag or Team, and an ID that already exists. It does not check whether a Worker Host can run the owner's turns: the first turn is
+Creation refuses an unknown owner Tag and an ID that already exists. It does not check whether a Worker Host can run the owner's turns: the first turn is
 accepted and waits until one can. If nothing starts, find the waiting Task under **Work** in
 `supertag describe objective ID`, then run `supertag describe task TASK_ID` or
 `supertag placement explain TASK_ID` to see why each bound Worker Host cannot take it. See the
@@ -172,8 +164,8 @@ Rules:
   commands embedded in other text do not count.
 - The Objective inherits the requesting turn's runtime permission ceiling. The request cannot
   grant additional collaboration surface access.
-- The Objective's work runs in the Workspace of the owner's turn, and Sessions it starts,
-  including those of other Tags, work there too. See
+- The Objective's work runs in the Workspace of the owner's turn, and Sessions it starts work
+  there too. See
   [Work in a repository with Workspaces](workspaces.md).
 - In the home thread, `@SuperTag approve`, `@SuperTag pause`, and `@SuperTag resume` act on the
   Objective. A chat message saying "approved" approves nothing, and an action approval goes
@@ -183,10 +175,9 @@ Rules:
 
 ## 3. Watch the owner work
 
-The owner plans the work and starts it in Sessions beneath the Objective. A Session of the owner's
-own Tag does work the owner keeps close; a Session of another Tag in the Objective's Team
-delegates it. Each Session reports back into the Objective's conversation when it ends, and the
-owner reviews the report, accepts it in its reply, or sends fixes.
+The owner plans the work and starts it in work Sessions of its own Tag beneath the Objective.
+Each Session reports back into the Objective's conversation when it ends, and the owner reviews
+the report, accepts it in its reply, or sends fixes.
 
 ```sh
 supertag watch objective usage-billing
@@ -210,9 +201,10 @@ Three rules shape what the owner can do:
 - **One budget pool.** The owner's turns and every Session beneath it draw on the same budget. A
   turn may spend at most what the budget has left; below a small floor, no new turn or Session
   starts and the Objective becomes `limited`.
-- **Delegation stays inside the Team.** The owner may start a Session of any Tag in the
-  Objective's Team that is active and bound to a Worker Host. That Tag runs under its own Roles,
-  narrowed to the Objective's runtime actions and to the owner's own turn.
+- **Other Tags go through the Tag's inbox.** An Objective's turns know only their own Tag. To
+  get help from another Tag, a turn calls `ask_tag` and goes on working. The Tag's inbox turn
+  messages the other Tag, which takes the work in a turn of its own, then answers the Objective.
+  The answer is the Objective's next turn, and while it is due the Objective is not idle.
 - **The Objective keeps moving or stops.** When a turn ends with nothing running and no question
   asked while the Objective is still `working`, SuperTag wakes the owner once and asks it to
   continue or to report the Objective's status. If that woken turn also ends that way, the Objective
@@ -221,9 +213,10 @@ Three rules shape what the owner can do:
   the owner's `report_objective` makes it `blocked` or finished from a turn. An `--ongoing`
   Objective is exempt: it may rest until its next message.
 
-An outstanding commit review also keeps an Objective waiting for work. When the reviewer
-records a verdict, SuperTag attaches it to the exact commit and delivers it to the lead in
-the Objective's conversation. See [Request a commit review](tag-messaging.md#request-a-commit-review).
+An outstanding commit review also keeps an Objective waiting for work. The Objective asks its
+Tag with `ask_tag` to get a commit reviewed, and the inbox turn requests the review. When the
+reviewer records a verdict, SuperTag attaches it to the exact commit and delivers it to the lead
+in the Objective's conversation. See [Request a commit review](tag-messaging.md#request-a-commit-review).
 
 ## 4. Answer a question
 
@@ -348,12 +341,11 @@ reason.
   turn in the Objective's Session.
 - **The Objective is `limited`.** Its budget pool is spent or its deadline passed. Raise the
   budget or move the deadline to let work continue.
-- **Nothing starts although the budget has room.** The Objective may be paused, or its Team's
-  `maxConcurrency` may already be reached across every Objective that names the Team. See
-  [Organize Tags into Teams](teams.md#throttle-a-team-on-purpose).
-- **Delegation is refused.** The target Tag is not a member of the Objective's Team, is not
-  active, or has no bound Worker Host. Check `supertag get team NAME` and
-  `supertag describe tag NAME`.
+- **Nothing starts although the budget has room.** The Objective may be paused. Check
+  `supertag describe objective ID`.
+- **The Objective waits on its Tag.** It asked its Tag's inbox with `ask_tag`, and the answer has
+  not come. Read the Tag's inbox Session with `supertag get session inbox:TAG`; the inbox may be
+  waiting on another Tag.
 - **Work stopped before the deadline or budget should have been reached.** Reported spend counts
   only what each **harness** (the coding agent that runs a Task, such as Claude Code or Codex)
   reports; unpriced Task Attempts are listed on the budget line.

@@ -54,7 +54,6 @@ export interface FakeObjective {
   ownerTagId: string;
   outcome: string;
   status?: ObjectiveStatus;
-  teamId?: string;
   budgetLimitMinor?: bigint;
   budgetCurrency?: string;
   reportedSpendMinor?: bigint;
@@ -174,7 +173,7 @@ export class FakeGateway {
   /** What the execution report of an uncertain Task says of cleanup. */
   uncertainCleanup = AttemptCleanup.CONFIRMED;
   readonly reviews: { objectiveId: string; approved: boolean; feedback: string }[] = [];
-  teams: { teamId: string; name: string; memberTagIds: string[]; maxConcurrency?: number }[] = [];
+  teams: { teamId: string; name: string; memberTagIds: string[] }[] = [];
   posts: { postId: string; teamId: string; authorTagId: string; body: string; sequence: number }[] =
     [];
   workSessions: FakeWorkSession[] = [];
@@ -332,7 +331,6 @@ export class FakeGateway {
       revision: 1n,
       ongoing: false,
       startingTaskId: objective.startingTaskId ?? "",
-      ...(objective.teamId ? { teamId: objective.teamId } : {}),
       ...(objective.budgetLimitMinor !== undefined
         ? { budgetLimitMinor: objective.budgetLimitMinor, budgetCurrency: objective.budgetCurrency }
         : {}),
@@ -551,7 +549,6 @@ export class FakeGateway {
               objectiveId: request.objectiveId,
               ownerTagId: request.ownerTagId,
               outcome: request.outcome,
-              ...(request["teamId"] ? { teamId: request["teamId"] as string } : {}),
               ...(request["budgetLimitMinor"] !== undefined
                 ? {
                     budgetLimitMinor: request["budgetLimitMinor"] as bigint,

@@ -41,10 +41,13 @@ spec:
   purpose: Own Objectives for this repository. Plan the work, split it into bounded work Sessions for builders and reviewers, and integrate and verify the results.
   instructions: >-
     Read the repository's contributing guide (AGENTS.md or CONTRIBUTING.md) before planning.
-    Delegate implementation to builders with start_session, naming the builder's Tag, and do the integration yourself. Each work Session reports back to the Objective's conversation. Send each finished change
-    to the reviewer, and changes to authentication, credentials, process execution, or file paths
-    to the security reviewer as well. Send findings back to the builder and ask the same reviewer
-    to re-review the fix. Before reporting a commit ready, give it to the verifier for a full run.
+    Your Objective's turns reach the other Tags only through your own inbox: ask it with ask_tag
+    what you need, and your inbox turn messages the Tags with send_message and answers the
+    Objective. Hand implementation to builders and do the integration yourself. Send each
+    finished change to the reviewer, and changes to authentication, credentials, process
+    execution, or file paths to the security reviewer as well. Send findings back to the builder
+    and ask the same reviewer to re-review the fix. Before reporting a commit ready, give it to
+    the verifier for a full run.
     Accept work only on evidence: passing checks, new tests for new behavior, and no open high or
     medium findings. Then send the operator an owner report naming the commit to merge. Never
     change the repository's git configuration (.git/config, .git/info, hooks): SuperTag refuses to
@@ -155,7 +158,7 @@ spec:
   workspace: { id: app, ref: main }
   runsOn: [verify]
 ---
-# Name this Team in an Objective's `team` so the lead may hand its work to the others.
+# Members message one another without a grant and share the Team's Workstream.
 apiVersion: supertag/v1
 kind: Team
 metadata: { name: app-team }

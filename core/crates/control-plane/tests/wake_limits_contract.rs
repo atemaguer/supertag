@@ -111,6 +111,7 @@ impl Fixture {
                     recipient_tag_id: to.into(),
                     text: text.into(),
                     review: None,
+                    recipient_objective_id: String::new(),
                 },
             )
             .await
@@ -220,7 +221,6 @@ async fn contract(url: &str) {
     every_type_wakes(&fixture).await;
     pair_release(&fixture).await;
     team_overrides(&fixture).await;
-    objective_limit(&fixture).await;
     fixture.store.close().await;
 }
 
@@ -239,6 +239,7 @@ async fn typed_and_debounced(f: &Fixture) {
                     recipient_tag_id: "b".into(),
                     text: "Refused".into(),
                     review: None,
+                    recipient_objective_id: String::new(),
                 },
             )
             .await;
@@ -604,61 +605,6 @@ async fn pair_release(f: &Fixture) {
     f.finish(&c1).await;
 }
 
-/// The Objective limit counts every Tag the Objective's Tags wake.
-async fn objective_limit(f: &Fixture) {
-    f.set_limits(
-        "objective",
-        TeamWakeLimits {
-            per_objective_per_hour: Some(1),
-            ..Default::default()
-        },
-    )
-    .await;
-    f.settle(HOUR_MS).await;
-    let objective = f
-        .store
-        .create_objective(
-            OPERATOR,
-            &CreateObjectiveRequest {
-                operation_id: "goal".into(),
-                objective_id: "goal".into(),
-                owner_tag_id: "a".into(),
-                outcome: "Ship the release".into(),
-                ongoing: true,
-                team_id: Some("crew".into()),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-    let owner = f.claim("a").await;
-    let first = f
-        .send(&owner, "b", "Please build", MessageKind::Note)
-        .await
-        .unwrap();
-    assert_eq!(first.wake_deferred, "");
-    assert_eq!(
-        first.message.unwrap().objective_id.as_deref(),
-        Some(objective.objective_id.as_str())
-    );
-    let held = f
-        .send(&owner, "c", "Please review", MessageKind::Note)
-        .await
-        .unwrap();
-    assert_eq!(
-        held.wake_deferred,
-        "Objective goal already woke its Tags once this hour; Tag c will see this message in its next turn."
-    );
-    let item = f
-        .wake_limit_items()
-        .await
-        .into_iter()
-        .find(|item| item.key.starts_with("wake_limit:2:"))
-        .unwrap();
-    assert_eq!(item.objective_id, "goal");
-    f.finish(&owner).await;
-}
-
 /// A Team's wake limits are stored, replaced whole, restored to the defaults, and bounded.
 async fn team_overrides(f: &Fixture) {
     let team = f.set_limits("defaults", TeamWakeLimits::default()).await;
@@ -697,7 +643,6 @@ async fn team_overrides(f: &Fixture) {
                     mutual_per_task: Some(1001),
                     ..Default::default()
                 }),
-                ..Default::default()
             },
         )
         .await;

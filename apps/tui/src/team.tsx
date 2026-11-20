@@ -55,9 +55,6 @@ export function TeamView({
       <text fg={color.muted}>
         {safe(team.teamId)} · {team.memberTagIds.length}{" "}
         {team.memberTagIds.length === 1 ? "member" : "members"}
-        {team.maxConcurrency !== undefined
-          ? ` · at most ${team.maxConcurrency} ${team.maxConcurrency === 1 ? "turn" : "turns"} at once`
-          : " · no turn limit"}
       </text>
       <text fg={color.text}>
         Members: {team.memberTagIds.map((tagId) => safe(tagName(tagId))).join(", ") || "none"}

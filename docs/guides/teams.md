@@ -1,16 +1,18 @@
 # Organize Tags into Teams
 
 A **Tag** is a persistent AI actor with its own identity, responsibilities, permissions, and work history. A **Team** is
-a flat list of member Tags with an optional limit on how much work runs at once. An **Objective**
+a flat list of member Tags. An **Objective**
 is an outcome owned by a Tag, worked on in **Sessions**: threads of **Tasks**, one Task per turn.
 The **Control Plane** is the SuperTag service that stores and runs this work. See the
 [glossary](../reference/glossary.md) for other terms.
 
-A Team answers three questions:
+A Team answers two questions:
 
-- Which Tags may an Objective's owner hand work to.
 - Which Tags may message each other without a grant.
 - Who shares the **Workstream**, the Team's record of posts.
+
+A Tag reaches its teammates from its inbox and from its conversations with people. An
+Objective's turns ask their own Tag instead.
 
 Together, your Teams of Tags make up an **autonomous organization**: Teams may pursue different
 Objectives but share one Control Plane, its rules, and its record of the work. A **Role**
@@ -39,11 +41,12 @@ supertag get team
 supertag get team service-identity
 ```
 
-`team create` and `get team NAME` print the Team as JSON: its ID, name, members, concurrency
-limit, and revision. `get team` alone lists every Team.
+`team create` and `get team NAME` print the Team as JSON: its ID, name, members, and revision.
+`get team` alone lists every Team.
 
-A Team has a name, its members, and an optional concurrency limit. There is no lead, no hierarchy,
-and no Objective of its own: several Objectives can name the same Team.
+A Team has a name and its members. There is no lead, no hierarchy, and no Objective of its own.
+Declare a Team in a manifest to keep it in version control; see
+[Declarative resources](../operations/resources.md).
 
 ## 2. Change the membership
 
@@ -58,52 +61,25 @@ The CLI reads the Team's current revision for you and retries once after an unre
 Pass `--expected-revision N` to fail on any concurrent change instead. A stale revision still succeeds,
 without a change, when the Team already has the values you set.
 
-## 3. Name the Team on an Objective
+## 3. Give an Objective to a member
+
+An Objective names no Team. Its owner Tag works on it in its own work Sessions, and asks its own
+Tag's inbox when it needs another member:
 
 ```sh
 supertag objective create service-identity-migration \
   "Move 12 production services to short-lived credentials issued to each service. Keep requests working through each rollout wave. Done when service checks pass and the old keys are retired. Ask me to approve each production cutover and retirement of the shared keys." \
-  --owner lead --team service-identity
+  --owner lead
 ```
 
-`lead` owns the Objective and starts work Sessions with the other Tags for each wave. Each
-Tag runs under its own Roles, narrowed to the Objective's runtime actions, and draws on the
-Objective's budget. A Tag must be active and bound to a Worker Host to take delegated work.
-The operator approves production cutovers and retirement of the shared keys.
+`lead` owns the Objective. When a wave needs `migration` or `rollout`, the Objective's turn calls
+`ask_tag`. The inbox turn of `lead` messages those Tags, and they each take the work in their own
+turns, under their own Roles. When they answer, `lead`'s inbox answers the Objective, and the
+answer becomes the Objective's next turn. The operator approves production cutovers and
+retirement of the shared keys.
 
-A Session the owner starts, for its own Tag or another member, works in the **Workspace** of the
-owner's turn that started it, the repository the owner is bound to; see
-[Work in a repository with Workspaces](workspaces.md).
-
-Manifests can declare the Team and the Objective together:
-
-```yaml
-apiVersion: supertag/v1
-kind: Team
-metadata:
-  name: service-identity
-spec:
-  members: [lead, identity, migration, verification, rollout]
-  maxConcurrency: 2
----
-apiVersion: supertag/v1
-kind: Objective
-metadata:
-  name: service-identity-migration
-spec:
-  ownerTagId: lead
-  team: service-identity
-  outcome: >-
-    Move 12 production services to short-lived credentials issued to each service.
-    Keep requests working through each rollout wave.
-    Done when service checks pass and the old keys are retired.
-    Ask me to approve each production cutover and retirement of the shared keys.
-```
-
-A Team's members, `maxConcurrency`, and `wakeLimits` change when you apply its manifest again.
-Which Team an
-Objective names is fixed once it exists. See
-[Declare Objectives](../operations/resources.md#declare-objectives).
+Each Tag weighs a request against its other work and may push back; no Tag runs another Tag's
+Roles. See [Asking the Tag](../reference/coordination.md#asking-the-tag).
 
 ## 4. Delete the Team
 
@@ -111,30 +87,8 @@ Objective names is fixed once it exists. See
 supertag delete team service-identity
 ```
 
-Deletion is refused while an open Objective names the Team. Cancel or complete those Objectives
-first.
-
-Verify the deletion with `supertag get team`.
-
-## Throttle a Team on purpose
-
-By default a Team has no concurrency limit, so its members start work as soon as a Worker Host has
-a free slot. Set a limit only when you want fewer turns running at once, for example to protect a
-rate-limited service:
-
-```sh
-supertag team update service-identity --max-concurrency 2
-```
-
-The limit counts turns across every open Objective that names the Team; later turns wait, and a
-waiting turn holds no slot. Remove it again, so Worker Host capacity is the only limit:
-
-```sh
-supertag team update service-identity --clear-concurrency
-```
-
-Use `supertag describe objective service-identity-migration` to see the Team's limit or confirm
-that only Worker Host capacity limits the number of turns.
+Verify the deletion with `supertag get team`. Its Workstream posts stay in the Mailboxes of the
+Tags they addressed.
 
 ## Change how often Tags wake each other
 
@@ -184,13 +138,8 @@ addressed to Tags reaches their inboxes. See [Share a Team's Workstream](workstr
 
 - **An update fails with a revision conflict.** Read the Team again and retry with its current
   revision.
-- **Deletion is refused.** An open Objective names the Team. `supertag get objective` shows
-  which Objectives are still open.
-- **The owner cannot hand work to a Tag.** It must be a member of the Objective's Team, active,
-  and runnable by a Worker Host. `supertag placement explain TASK_ID` says why its Task waits.
-- **Turns stay pending while Worker Hosts have free slots.** The Team may have a concurrency
-  limit, counted across every Objective that names it. Check
-  `supertag describe objective ID`, and remove the limit if nobody meant to throttle the Team.
+- **A teammate's work waits.** The teammate takes it in a turn of its own. It must be active and
+  runnable by a Worker Host; `supertag placement explain TASK_ID` says why its Task waits.
 - **A Tag cannot message another Tag.** They share no Team and there is no grant; see
   [Send messages between Tags](tag-messaging.md).
 - **The Inbox says Tags hit a wake limit.** They woke each other more often than the Team allows.

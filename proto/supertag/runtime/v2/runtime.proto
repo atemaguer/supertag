@@ -535,6 +535,11 @@ message AttemptCapabilities {
   // `read_turn` (AttemptTagSessions), and no other Session. Root turns have
   // `may_read_tag_sessions` instead.
   bool may_read_own_session = 19;
+  // An Objective's Session asks its own Tag's inbox Session (AttemptMailbox.AskTag); the inbox
+  // answers with SendMessage to the Objective, and the answer is the Objective's next turn. Only
+  // the inbox Session and person conversations reach other Tags, so an Objective's Session has no
+  // `may_send_tag_message`, `may_read_mailbox`, or `may_use_workstream`.
+  bool may_ask_tag = 20;
 }
 
 // Operators see the work started in Sessions they can access.
@@ -627,8 +632,11 @@ message StartWorkSessionRequest {
   // A Work Session always works in its parent Task's Workspace.
   reserved 5;
   reserved "workspace_id";
-  optional string target_tag_id = 6;
-  // A built-in harness for the Work Session, such as `claude-code`: by default, the target Tag's.
+  // A Work Session always runs on its parent Task's Tag: another Tag's work is that Tag's to take,
+  // through its inbox.
+  reserved 6;
+  reserved "target_tag_id";
+  // A built-in harness for the Work Session, such as `claude-code`: by default, the Tag's own.
   // The Work Session keeps it for its whole life.
   optional string harness = 7;
 }
@@ -694,6 +702,22 @@ service Mailbox {
 service AttemptMailbox {
   rpc ReadMailbox(ReadMailboxRequest) returns (ListMailboxMessagesResponse);
   rpc SendMessage(SendAttemptTagMessageRequest) returns (SendTagMessageResponse);
+  // An Objective's turn asks its own Tag's inbox Session.
+  rpc AskTag(AskAttemptTagRequest) returns (AskTagResponse);
+}
+
+message AskAttemptTagRequest {
+  string operation_id = 1;
+  string text = 2;
+}
+
+message AskTagResponse {
+  // The stored message, in the Objective's conversation with its Tag.
+  string message_id = 1;
+  bool duplicate = 2;
+  // Why the inbox Session was not woken now, such as a wake limit; empty when it was. The message
+  // is stored either way.
+  string wake_deferred = 3;
 }
 
 // What a Mailbox message is for. Questions and blockers wake their recipient sooner than notes.
@@ -726,6 +750,8 @@ enum TagMessageState {
 message TagMessage {
   string message_id = 1;
   string sender_tag_id = 2;
+  // Empty for an inbox Session's answer to one of its Tag's Objectives, which `objective_id`
+  // names.
   string recipient_tag_id = 3;
   string source_task_id = 4;
   optional string workstream_post_id = 5;
@@ -781,10 +807,13 @@ message SendAttemptTagMessageRequest {
   reserved 1;
   reserved "attempt";
   string operation_id = 2;
+  // Exactly one recipient: another Tag, or, from the inbox Session, one of its Tag's Objectives
+  // that asked it.
   string recipient_tag_id = 3;
   string text = 4;
   CommitReviewSubmission review = 5;
   MessageKind kind = 6;
+  string recipient_objective_id = 7;
 }
 
 message SendTagMessageResponse {
@@ -1513,6 +1542,7 @@ service HarnessMailbox {
   rpc Read(HarnessReadMailboxRequest) returns (ListMailboxMessagesResponse);
   rpc SendMessage(HarnessSendTagMessageRequest) returns (SendTagMessageResponse);
   rpc ReadReviewPatch(HarnessReadReviewPatchRequest) returns (HarnessReviewPatch);
+  rpc AskTag(HarnessAskTagRequest) returns (AskTagResponse);
 }
 
 // The supervising Worker Host supplies the Attempt identity.
@@ -1545,7 +1575,8 @@ message HarnessStartWorkSessionRequest {
   // A Work Session always works in its parent Task's Workspace.
   reserved 4;
   reserved "workspace_id";
-  optional string target_tag_id = 5;
+  reserved 5;
+  reserved "target_tag_id";
   optional string harness = 6;
 }
 
@@ -1555,6 +1586,12 @@ message HarnessSendTagMessageRequest {
   string text = 3;
   CommitReviewSubmission review = 4;
   MessageKind kind = 5;
+  string recipient_objective_id = 6;
+}
+
+message HarnessAskTagRequest {
+  string operation_id = 1;
+  string text = 2;
 }
 
 message HarnessReadMailboxRequest {
@@ -3208,7 +3245,9 @@ message CreateObjectiveRequest {
   optional int64 deadline_ms = 6;
   optional uint64 budget_limit_minor = 7;
   optional string budget_currency = 8;
-  optional string team_id = 9;
+  // An Objective names no Team: its Session reaches other Tags only through its Tag's inbox.
+  reserved 9;
+  reserved "team_id";
   // Omit to capture the owner's current runtime grants. An empty selection grants none.
   RuntimeActions runtime_actions = 10;
   // A surface Task whose thread gets the Objective's limit notices and completion
@@ -3234,7 +3273,8 @@ message Objective {
   optional string budget_currency = 11;
   optional int64 paused_at_ms = 12;
   optional uint64 reported_spend_minor = 13;
-  optional string team_id = 14;
+  reserved 14;
+  reserved "team_id";
   RuntimeActions runtime_actions = 15;
   // The owner's or operator's assessment recorded when the Objective was
   // submitted for review or completed.
@@ -3268,7 +3308,9 @@ message Team {
   string team_id = 1;
   string name = 2;
   repeated string member_tag_ids = 3;
-  optional uint32 max_concurrency = 4;
+  // Objectives name no Team, so a Team caps no Objective turns.
+  reserved 4;
+  reserved "max_concurrency";
   uint64 revision = 5;
   int64 created_at_ms = 6;
   int64 updated_at_ms = 7;
@@ -3280,7 +3322,8 @@ message CreateTeamRequest {
   string team_id = 2;
   string name = 3;
   repeated string member_tag_ids = 4;
-  optional uint32 max_concurrency = 5;
+  reserved 5;
+  reserved "max_concurrency";
   TeamWakeLimits wake_limits = 6;
 }
 
@@ -3309,7 +3352,8 @@ message UpdateTeamRequest {
   uint64 expected_revision = 3;
   optional string name = 4;
   TeamMembers members = 5;
-  optional uint32 max_concurrency = 6;
+  reserved 6;
+  reserved "max_concurrency";
   // When present, replaces all three limits.
   TeamWakeLimits wake_limits = 7;
 }

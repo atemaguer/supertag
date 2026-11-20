@@ -1572,6 +1572,9 @@ pub(crate) async fn admission_in(
     Ok(policy)
 }
 
+// The delegated-write grant went with delegation to another Tag: a Permission Set that still
+// names it grants nothing, and the effective digest keeps counting it so the digests of Tasks
+// accepted before compare unchanged.
 const DELEGATE_WRITE: &str = "files:delegate-write";
 const FILES_WRITE: &str = "files:write";
 
@@ -1738,70 +1741,6 @@ pub(crate) fn apply_objective_runtime(
     authority.objective_id = Some(objective_id.to_owned());
     authority.objective_revision = Some(revision);
     project_runtime(policy, authority)
-}
-
-pub(crate) fn apply_delegated_runtime(
-    policy: &mut AdmissionPolicy,
-    parent: &Task,
-    objective_id: &str,
-    revision: u64,
-    objective_actions: &[String],
-) -> Result<()> {
-    let target = policy.snapshot.runtime_authority.take().unwrap_or_default();
-    let source = runtime_authority(parent);
-    let files =
-        supertag_protocol::file_scope::delegate(target.files.as_ref(), source.files.as_ref());
-    let mut actions: BTreeSet<String> = source
-        .actions
-        .into_iter()
-        .filter(|action| objective_actions.contains(action))
-        .collect();
-    let delegated_write = actions.contains(DELEGATE_WRITE)
-        && target.actions.iter().any(|action| action == FILES_WRITE);
-    if delegated_write {
-        actions.insert(FILES_WRITE.to_owned());
-    }
-    let mut approvals = BTreeMap::new();
-    for rule in policy.approval_rules.iter().chain(&parent.approval_rules) {
-        // Preserve configured effects which the semantic grant set excluded.
-        if !target
-            .approvals
-            .iter()
-            .chain(&source.approvals)
-            .any(|gate| gate.action == rule.action)
-        {
-            merge_runtime_requirement(&mut approvals, base_runtime_requirement(rule));
-        }
-    }
-    for requirement in target.approvals {
-        merge_runtime_requirement(&mut approvals, requirement);
-    }
-    for requirement in source.approvals {
-        if delegated_write && requirement.action == DELEGATE_WRITE {
-            merge_runtime_requirement(
-                &mut approvals,
-                RuntimeApprovalRequirement {
-                    action: FILES_WRITE.to_owned(),
-                    ..requirement.clone()
-                },
-            );
-        }
-        merge_runtime_requirement(&mut approvals, requirement);
-    }
-    project_runtime(
-        policy,
-        TaskRuntimeAuthority {
-            actions: actions.into_iter().collect(),
-            approvals: approvals.into_values().collect(),
-            objective_id: Some(objective_id.to_owned()),
-            objective_revision: Some(revision),
-            delegating_task_id: Some(parent.task_id.clone()),
-            // The member writes within its own scope; both Tags' exclusions apply.
-            files,
-            // Delegation carries no network access: the member keeps its own scope.
-            network: target.network,
-        },
-    )
 }
 
 /// Semantic policy excludes mutable catalog identity, revisions and capture time.

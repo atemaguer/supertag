@@ -92,7 +92,6 @@ async fn team(store: &Store, id: &str, members: &[&str]) -> Team {
                 team_id: id.into(),
                 name: id.into(),
                 member_tag_ids: members.iter().map(|value| (*value).into()).collect(),
-                max_concurrency: None,
             },
         )
         .await

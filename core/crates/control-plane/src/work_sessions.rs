@@ -15,10 +15,7 @@ use crate::{
     ControlPlane, Store, StoreError,
     conversations::work_session_in,
     objectives::work_session_admission_in,
-    store::{
-        Result, insert_delegated_task_in, insert_task_from_snapshot, invalid, lease_is_live, name,
-        owned, task_row,
-    },
+    store::{Result, insert_task_from_snapshot, invalid, lease_is_live, name, owned, task_row},
 };
 
 pub(crate) const CHILD: i64 = 1;
@@ -116,93 +113,28 @@ pub(crate) async fn can_claim_in(tx: &mut Transaction<'_, Any>, task: &Task) -> 
     Ok(running.is_some_and(|count| count < MAX_RUNNING))
 }
 
+/// A Work Session's next Task: its parent Task's accepted policy, in the Work Session. A Work
+/// Session always runs on its parent's Tag; another Tag's work is that Tag's to take, through its
+/// inbox.
 async fn insert_child_in(
     tx: &mut Transaction<'_, Any>,
     order: i64,
     parent: &Task,
-    objective_id: Option<&str>,
-    target: &str,
     session_id: &str,
     prompt: &str,
 ) -> Result<Task> {
-    if target == parent.tag_id {
-        return insert_task_from_snapshot(tx, order, parent, session_id, prompt).await;
-    }
-    let objective = objective_id.ok_or_else(|| {
-        StoreError::FailedPrecondition(format!(
-            "only an Objective's own turn may start a Work Session on another Tag; omit tag to start it on {}",
-            parent.tag_id
-        ))
-    })?;
-    let team: Option<String> =
-        sqlx::query_scalar("SELECT team_id FROM supertag_v2_objectives WHERE objective_id=$1")
-            .bind(objective)
-            .fetch_one(&mut **tx)
-            .await?;
-    let team = team.ok_or_else(|| {
-        StoreError::FailedPrecondition("the Objective must name a Team to delegate work".into())
-    })?;
-    let member: Option<String> = sqlx::query_scalar(
-        "SELECT tag_id FROM supertag_v2_team_members WHERE team_id=$1 AND tag_id=$2",
-    )
-    .bind(team)
-    .bind(target)
-    .fetch_optional(&mut **tx)
-    .await?;
-    if member.is_none() {
-        return Err(StoreError::FailedPrecondition(format!(
-            "Tag {target} is not on this Objective's Team, so it can't take this work"
-        )));
-    }
-    let host: Option<String> = sqlx::query_scalar(
-        "SELECT h.host_id FROM supertag_v2_hosts h
-         WHERE h.generation>0 AND h.revoked_at_ms IS NULL
-           AND (h.all_tags=1 OR EXISTS (
-               SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=h.host_id AND scope.tag_id=$1))
-         LIMIT 1",
-    )
-    .bind(target)
-    .fetch_optional(&mut **tx)
-    .await?;
-    if host.is_none() {
-        return Err(StoreError::FailedPrecondition(
-            "the delegated Tag has no registered Worker Host".into(),
-        ));
-    }
-    // Keep the policy composer's larger async state off the same-Tag path.
-    Box::pin(insert_delegated_task_in(
-        tx, order, parent, objective, target, session_id, prompt,
-    ))
-    .await
+    insert_task_from_snapshot(tx, order, parent, session_id, prompt).await
 }
 
 /// The harness a new Work Session names, when it differs from the parent Task's: `None` runs
-/// the target Tag's own. Work delegated to another Tag runs that Tag's harness.
-async fn work_session_harness_in(
-    tx: &mut Transaction<'_, Any>,
-    parent: &Task,
-    target: &str,
-    requested: Option<&str>,
-) -> Result<Option<HarnessKind>> {
+/// the Tag's own.
+fn work_session_harness(parent: &Task, requested: Option<&str>) -> Result<Option<HarnessKind>> {
     let Some(requested) = requested else {
         return Ok(None);
     };
     let harness = crate::policy::harness_for_name(requested).ok_or_else(|| {
         invalid("unknown Work Session harness: use codex, claude-code, openai-agents, opencode, or cursor")
     })?;
-    if target != parent.tag_id {
-        let own: Option<i64> =
-            sqlx::query_scalar("SELECT harness_kind FROM supertag_v2_tags WHERE tag_id=$1")
-                .bind(target)
-                .fetch_optional(&mut **tx)
-                .await?;
-        if own.is_some_and(|own| own != harness as i64) {
-            return Err(StoreError::FailedPrecondition(format!(
-                "work delegated to Tag {target} runs that Tag's harness; start it without a harness"
-            )));
-        }
-        return Ok(None);
-    }
     if harness == parent.harness_kind() {
         return Ok(None);
     }
@@ -575,16 +507,13 @@ impl Store {
         if !may_start_in(&mut tx, &parent).await? {
             return Err(StoreError::PermissionDenied);
         }
-        let target = input.target_tag_id.as_deref().unwrap_or(&parent.tag_id);
-        name("target Tag ID", target)?;
-        let harness =
-            work_session_harness_in(&mut tx, &parent, target, input.harness.as_deref()).await?;
+        let harness = work_session_harness(&parent, input.harness.as_deref())?;
         let workspace = parent
             .workspace
             .as_ref()
             .map(|spec| spec.workspace_id.as_str());
-        // A start that names no harness keeps the digest it had before starts could name one, so a
-        // retry of an operation recorded then still matches.
+        // The digest names the Tag the Work Session runs on: its parent's.
+        let target = parent.tag_id.as_str();
         let content = match &input.harness {
             None => serde_json::to_vec(&(&title, instruction, workspace, target))?,
             Some(harness) => {
@@ -638,16 +567,7 @@ impl Store {
         }
         let id = format!("{SESSION_PREFIX}{}", Uuid::new_v4());
         let prompt = format!("Work Session: {title}\n\n{instruction}");
-        let mut child = insert_child_in(
-            &mut tx,
-            order,
-            &parent,
-            objective_id.as_deref(),
-            target,
-            &id,
-            &prompt,
-        )
-        .await?;
+        let mut child = insert_child_in(&mut tx, order, &parent, &id, &prompt).await?;
         if let Some(harness) = harness {
             crate::store::retarget_harness_in(&mut tx, &mut child, harness).await?;
         }

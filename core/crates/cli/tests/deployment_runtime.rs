@@ -83,7 +83,7 @@ spec:
 apiVersion: supertag/v1
 kind: Team
 metadata: {name: csv}
-spec: {members: [builder-manager, review-manager], maxConcurrency: 2}
+spec: {members: [builder-manager, review-manager]}
 "#;
 
 struct Pki {

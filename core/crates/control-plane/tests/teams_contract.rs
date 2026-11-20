@@ -13,24 +13,22 @@ use uuid::Uuid;
 const OPERATOR: &str = "operator:alice";
 const NOW: i64 = 1_893_456_000_000;
 
-fn create_team(id: &str, name: &str, members: &[&str], limit: Option<u32>) -> CreateTeamRequest {
+fn create_team(id: &str, name: &str, members: &[&str]) -> CreateTeamRequest {
     CreateTeamRequest {
         wake_limits: None,
         operation_id: format!("create-{id}"),
         team_id: id.into(),
         name: name.into(),
         member_tag_ids: members.iter().map(|id| (*id).into()).collect(),
-        max_concurrency: limit,
     }
 }
 
-fn create_objective(id: &str, tag: &str, team: &str) -> CreateObjectiveRequest {
+fn create_objective(id: &str, tag: &str) -> CreateObjectiveRequest {
     CreateObjectiveRequest {
         operation_id: format!("objective-{id}"),
         objective_id: id.into(),
         owner_tag_id: tag.into(),
         outcome: "Verify a safe rollout".into(),
-        team_id: Some(team.into()),
         ..Default::default()
     }
 }
@@ -75,12 +73,7 @@ async fn finish(store: &Store, host: &HostAuthority, attempt: &InspectAttemptReq
 }
 
 async fn team_lifecycle(store: &Store) {
-    let create = create_team(
-        "release",
-        " Release team ",
-        &["reviewer", "lead", "lead"],
-        Some(2),
-    );
+    let create = create_team("release", " Release team ", &["reviewer", "lead", "lead"]);
     let (first, replay) = tokio::join!(
         store.create_team(OPERATOR, &create),
         store.create_team(OPERATOR, &create),
@@ -97,30 +90,24 @@ async fn team_lifecycle(store: &Store) {
     );
     assert!(matches!(
         store
-            .create_team(
-                OPERATOR,
-                &create_team("taken", "Release team", &["lead"], None)
-            )
+            .create_team(OPERATOR, &create_team("taken", "Release team", &["lead"]))
             .await,
         Err(StoreError::Conflict(_))
     ));
     assert!(matches!(
         store
-            .create_team(
-                OPERATOR,
-                &create_team("missing", "Missing", &["missing"], None)
-            )
+            .create_team(OPERATOR, &create_team("missing", "Missing", &["missing"]))
             .await,
         Err(StoreError::NotFound(_))
     ));
     assert!(matches!(
         store
-            .create_team(OPERATOR, &create_team("empty", "Empty", &[], None))
+            .create_team(OPERATOR, &create_team("empty", "Empty", &[]))
             .await,
         Err(StoreError::InvalidArgument(_))
     ));
 
-    let another = create_team("checks", "Checks", &["reviewer"], None);
+    let another = create_team("checks", "Checks", &["reviewer"]);
     store.create_team(OPERATOR, &another).await.unwrap();
     let list = ListTeamsRequest {
         member_tag_id: "reviewer".into(),
@@ -156,11 +143,9 @@ async fn team_lifecycle(store: &Store) {
         members: Some(TeamMembers {
             tag_ids: vec!["lead".into(), "reviewer".into()],
         }),
-        max_concurrency: Some(0),
     };
     let updated = store.update_team(OPERATOR, &update).await.unwrap();
     assert_eq!(updated.name, "Release engineers");
-    assert_eq!(updated.max_concurrency, None);
     assert_eq!(updated.revision, 2);
     assert_eq!(store.update_team(OPERATOR, &update).await.unwrap(), updated);
     let refreshed = UpdateTeamRequest {
@@ -189,38 +174,21 @@ async fn team_lifecycle(store: &Store) {
 async fn team_work(store: &Store, clock: &AtomicI64) {
     let host = support::register_host(store, "worker").await;
     let other_host = support::register_host(store, "another-worker").await;
-    let first = store
-        .create_objective(OPERATOR, &create_objective("first", "lead", "release"))
-        .await
-        .unwrap();
-    let second = store
-        .create_objective(
+    // A root Session that is not an Objective's reaches its Tag's one Team's Workstream.
+    let rollout = store
+        .submit_task(
             OPERATOR,
-            &create_objective("second", "reviewer", "Release engineers"),
-        )
-        .await
-        .unwrap();
-    assert_eq!(first.team_id.as_deref(), Some("release"));
-    assert_eq!(second.team_id, first.team_id);
-    let one = claim(store, &host, &first.starting_task_id).await;
-    let two = claim(store, &other_host, &second.starting_task_id).await;
-    store
-        .update_team(
-            OPERATOR,
-            &UpdateTeamRequest {
-                operation_id: "restrict-release".into(),
-                team: "release".into(),
-                expected_revision: 2,
-                max_concurrency: Some(1),
+            &SubmitTaskRequest {
+                operation_id: "rollout-op".into(),
+                tag_id: "lead".into(),
+                session_id: "rollout".into(),
+                prompt: "Check the rollout".into(),
                 ..Default::default()
             },
         )
         .await
         .unwrap();
-    assert!(matches!(
-        store.start_task(&other_host, &start(&two)).await,
-        Err(StoreError::FailedPrecondition(_))
-    ));
+    let one = claim(store, &host, &rollout.task_id).await;
     store.start_task(&host, &start(&one)).await.unwrap();
 
     let unrelated = store
@@ -243,13 +211,6 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
         .start_task(&other_host, &start(&outside))
         .await
         .unwrap();
-    assert!(
-        store
-            .claim_task(&other_host, "at-team-cap")
-            .await
-            .unwrap()
-            .is_none()
-    );
     let denied = PostAttemptWorkstreamRequest {
         operation_id: "outside".into(),
         body: "Not my team".into(),
@@ -537,47 +498,42 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
         team: "release".into(),
         dry_run: false,
     };
-    assert!(matches!(
-        store.delete_team(OPERATOR, &delete).await,
-        Err(StoreError::FailedPrecondition(_))
-    ));
-    // A dry run makes the same checks, so it is refused for the same reason.
-    let dry_run = DeleteTeamRequest {
-        operation_id: "delete-release-dry-run".into(),
-        dry_run: true,
-        ..delete.clone()
-    };
-    assert!(matches!(
-        store.delete_team(OPERATOR, &dry_run).await,
-        Err(StoreError::FailedPrecondition(_))
-    ));
     finish(store, &host, &one).await;
-    store
-        .create_objective(OPERATOR, &create_objective("third", "lead", "release"))
+    // Only the inbox Session and person conversations reach other Tags: an Objective's own
+    // turn has no Workstream, though its Tag is in one Team.
+    let objective = store
+        .create_objective(OPERATOR, &create_objective("first", "lead"))
         .await
         .unwrap();
-    let (claim_one, claim_two) = tokio::join!(
-        store.claim_task(&host, "race-one"),
-        store.claim_task(&other_host, "race-two"),
-    );
-    let (assignment, assigned_host) = match (claim_one.unwrap(), claim_two.unwrap()) {
-        (Some(assignment), None) => (assignment, &host),
-        (None, Some(assignment)) => (assignment, &other_host),
-        _ => panic!("a Team limit of one must reserve just one of the two queued Tasks"),
-    };
-    let task = assignment.task.unwrap();
-    assert_eq!(task.task_id, second.starting_task_id);
-    let two = InspectAttemptRequest {
-        task_id: task.task_id,
-        attempt_id: assignment.attempt_id,
-        lease_token: assignment.lease_token,
-    };
-    store.start_task(assigned_host, &start(&two)).await.unwrap();
+    let owner = claim(store, &host, &objective.starting_task_id).await;
+    store.start_task(&host, &start(&owner)).await.unwrap();
+    assert!(matches!(
+        store
+            .post_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &owner),
+                &PostAttemptWorkstreamRequest {
+                    operation_id: "objective-post".into(),
+                    body: "From the Objective".into(),
+                    ..Default::default()
+                }
+            )
+            .await,
+        Err(StoreError::PermissionDenied)
+    ));
+    assert!(matches!(
+        store
+            .read_attempt_workstream(
+                &supertag_control_plane::AttemptAccess::new(&host, &owner),
+                &ReadAttemptWorkstreamRequest::default()
+            )
+            .await,
+        Err(StoreError::PermissionDenied)
+    ));
     clock.store(NOW + 60_000, Ordering::SeqCst);
     assert!(matches!(
         store
             .post_attempt_workstream(
-                &supertag_control_plane::AttemptAccess::new(assigned_host, &two),
+                &supertag_control_plane::AttemptAccess::new(&host, &owner),
                 &PostAttemptWorkstreamRequest {
                     operation_id: "expired".into(),
                     body: "Expired attempt".into(),
@@ -587,19 +543,17 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
-    for id in ["first", "second", "third"] {
-        store
-            .cancel_objective(
-                OPERATOR,
-                &ObjectiveActionRequest {
-                    objective_id: id.into(),
-                    operation_id: format!("cancel-{id}"),
-                    reason: "Finished checking".into(),
-                },
-            )
-            .await
-            .unwrap();
-    }
+    store
+        .cancel_objective(
+            OPERATOR,
+            &ObjectiveActionRequest {
+                objective_id: "first".into(),
+                operation_id: "cancel-first".into(),
+                reason: "Finished checking".into(),
+            },
+        )
+        .await
+        .unwrap();
     // A dry run that would succeed deletes nothing and records no operation, so the real
     // deletion with the same operation ID still happens afterwards.
     let dry_run = DeleteTeamRequest {
@@ -612,19 +566,11 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
     let deleted = store.delete_team(OPERATOR, &delete).await.unwrap();
     assert_eq!(deleted, previewed);
     assert_eq!(store.delete_team(OPERATOR, &delete).await.unwrap(), deleted);
-    assert_eq!(
-        store
-            .get_objective("operator:local", "first")
-            .await
-            .unwrap()
-            .team_id,
-        None
-    );
     assert!(matches!(
         store.get_team(OPERATOR, "release").await,
         Err(StoreError::NotFound(_))
     ));
-    let mut recreate = create_team("release", "Release engineers", &["lead"], None);
+    let mut recreate = create_team("release", "Release engineers", &["lead"]);
     recreate.operation_id = "recreate-release".into();
     let recreated = store.create_team(OPERATOR, &recreate).await.unwrap();
     assert!(recreated.revision > deleted.revision);

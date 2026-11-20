@@ -229,16 +229,16 @@ async fn durable_delivery(url: &str) {
     let sender = support::register_host(&store, "sender-host").await;
     let recipient = support::register_host(&store, "recipient-host").await;
     let other = support::register_host(&store, "other-host").await;
-    let objective = store
-        .create_objective(
+    // Only the inbox Session and person conversations reach other Tags: the sender's mail
+    // comes from a root Session that is not an Objective's.
+    store
+        .submit_task(
             OPERATOR,
-            &CreateObjectiveRequest {
-                operation_id: "mail-objective".into(),
-                objective_id: "mail-objective".into(),
-                owner_tag_id: "sender".into(),
-                outcome: "Coordinate a review".into(),
-                ongoing: true,
-                team_id: Some("team".into()),
+            &SubmitTaskRequest {
+                operation_id: "mail-coordination".into(),
+                tag_id: "sender".into(),
+                session_id: "mail-coordination".into(),
+                prompt: "Coordinate a review".into(),
                 ..Default::default()
             },
         )
@@ -283,10 +283,7 @@ async fn durable_delivery(url: &str) {
         Some(addressed.post.as_ref().unwrap().post_id.clone())
     );
     assert_eq!(initial[0].source_task_id, source.task_id);
-    assert_eq!(
-        initial[0].objective_id.as_deref(),
-        Some(objective.objective_id.as_str())
-    );
+    assert_eq!(initial[0].objective_id, None);
     assert_eq!(initial[0].sender_tag_id, "sender");
     assert_eq!(initial[0].recipient_tag_id, "recipient");
     assert_eq!(initial[0].state(), TagMessageState::Pending);
@@ -444,8 +441,8 @@ async fn durable_delivery(url: &str) {
             .unwrap()
             .is_none()
     );
-    // Mail carries the source Objective as provenance, without the right to
-    // complete it or inherit its owner's Session and permissions.
+    // Mail never gives its recipient the right to complete an Objective or inherit the
+    // sender's Session and permissions.
     assert!(matches!(
         store
             .finish_task(
@@ -455,7 +452,7 @@ async fn durable_delivery(url: &str) {
                     attempt_id: first.attempt_id.clone(),
                     lease_token: first.lease_token.clone(),
                     succeeded: true,
-                    result: "I do not own this Objective".into(),
+                    result: "I own no Objective here".into(),
                     objective_signal: ObjectiveSignal::Completed as i32,
                     ..Default::default()
                 }
@@ -463,14 +460,6 @@ async fn durable_delivery(url: &str) {
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
-    assert_eq!(
-        store
-            .get_objective("operator:local", &objective.objective_id)
-            .await
-            .unwrap()
-            .status(),
-        ObjectiveStatus::Working
-    );
     assert!(matches!(
         store
             .submit_task(

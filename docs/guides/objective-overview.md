@@ -6,8 +6,7 @@ retry work.
 
 A **Tag** is a persistent AI actor with its own identity, responsibilities, permissions, and work history. An
 **Objective** is an outcome owned by a Tag. It works in **Sessions**: threads of **Tasks**, one
-Task per turn, and each execution of a Task is a **Task Attempt**. A **Team** is a flat list of
-member Tags, and its **Workstream** is the Team's shared record of posts. A **Workspace** is a
+Task per turn, and each execution of a Task is a **Task Attempt**. A **Workspace** is a
 named repository the work happens in. A **Worker Host** is a machine or sandbox that runs work.
 The **Control Plane** is the SuperTag service that stores and runs it. See the
 [glossary](../reference/glossary.md) for other terms.
@@ -29,12 +28,11 @@ The view leads with what you decide on, then the details:
 Objective usage-billing-7f3k: working
 Outcome: Bill customers for metered usage. Done when the reconciliation suite passes.
 Owner: lead
-Team: Metering (backend, frontend, qa)
 Budget: $12.40 of $2,000.00 spent
 Deadline: 2027-03-31T23:00:00.000Z (about 138 days left)
 
 Delivered:
-  Meter API calls per customer (backend, Task 2f1c…)
+  Meter API calls per customer (lead, Task 2f1c…)
     Commit 0123456789ab in Workspace app, 4 changed files since fedcba987654
 
 Needs you:
@@ -43,19 +41,17 @@ Needs you:
 
 Work: 3 Sessions
   waiting    lead     Objective conversation  (2 Tasks, latest Task 8d50…)
-  succeeded  backend  Meter API calls per customer  (1 Task, latest Task 2f1c…)
-  running    backend  Add the usage tables  (1 Task, latest Task 9ab3…)
+  succeeded  lead     Meter API calls per customer  (1 Task, latest Task 2f1c…)
+  running    lead     Add the usage tables  (1 Task, latest Task 9ab3…)
 
 Details:
   Revision: 7
-  Team Metering: at most 2 turns at once across its Objectives; 1 running now
   Tasks: 4 Tasks
   Follow it: supertag watch objective usage-billing-7f3k
   Full record: supertag describe objective usage-billing-7f3k --output json
 ```
 
-- **Owner** is the owner Tag. **Team** is the Team the Objective names, with its members; it is
-  absent when the owner works alone.
+- **Owner** is the owner Tag.
 - **Budget** is unlimited, or how much of the pool is spent. One pool covers the Objective's own
   conversation and every Session beneath it. Task Attempts with unknown cost are called out,
   because the budget cannot count them.
@@ -69,9 +65,8 @@ Details:
   the status of its latest turn and the Tag that runs it. A turn shows `waiting` when it asked a
   question or waits on an approval. Under a failed turn, the Control Plane explains why in its
   own words, with the next command to run.
-- **Objective conversation** lists the owner's turns with the first line of each reply, and
-  **Team posts** lists the Team's recent Workstream posts, when there are any.
-- **Details** carries the revision, the Team's concurrency limit, notices such as budget and
+- **Objective conversation** lists the owner's turns with the first line of each reply.
+- **Details** carries the revision, notices such as budget and
   deadline warnings, and the commands that follow the Objective.
 
 When a turn is queued but nothing runs it, ask why with
@@ -93,19 +88,17 @@ cancelled:
 
 ```text
 2026-10-01 15:40:02Z  operator      Objective usage-billing-7f3k created for lead: Bill customers for metered usage. Done when the reconciliation suite passes.
-2026-10-01 15:42:10Z  backend       Started Meter API calls per customer
+2026-10-01 15:42:10Z  lead          Started Meter API calls per customer
 2026-10-01 15:47:12Z  lead          Objective conversation: Task 8d50c417-3e6b-49aa-b2f1-c07d5e9143ab waiting: Which plans should the first invoice run cover?
-2026-10-01 15:49:31Z  backend       Meter API calls per customer: Task 2f1c… delivered Commit 0123456789ab in Workspace app, 4 changed files since fedcba987654
-2026-10-01 15:52:02Z  frontend      Posted to backend: Reconciliation needs the plan ID
+2026-10-01 15:49:31Z  lead          Meter API calls per customer: Task 2f1c… delivered Commit 0123456789ab in Workspace app, 4 changed files since fedcba987654
 ```
 
 Events cover the Objective's creation and status changes, each Session's start, every turn's
-status and delivery, the number of approval requests waiting, budget and deadline notices, and
-the Team's Workstream posts. The first lines replay what already happened. When the Objective
+status and delivery, the number of approval requests waiting, and budget and deadline notices. The first lines replay what already happened. When the Objective
 closes, `watch` prints its result and deliveries and exits. Press Ctrl-C to stop earlier; the
 work continues. `--output json` prints one JSON object per line instead, with `kind`,
 `objective_id`, `at`, `actor`, `message`, and, where they apply, `session_id`, `task_id`,
-`status`, `workspace_id`, `head_commit`, `changed_files`, `sequence`, and `pending`.
+`status`, `workspace_id`, `head_commit`, `changed_files`, and `pending`.
 
 ## 3. Inspect one turn
 
@@ -133,9 +126,6 @@ rest with `ObjectiveOverviews.GetObjectiveOverview` in the
 the plain Objective record. `supertag objective commit-reviews OBJECTIVE_ID` lists commit review
 requests and their verdicts by exact Git commit.
 
-Together, your Teams of Tags make up an **autonomous organization**: Teams may pursue different
-Objectives but share one Control Plane, its rules, and its record of the work.
-
 ## 5. Find what needs you across Objectives
 
 The overview's **Needs you** covers one Objective. The operator inbox covers every Objective:
@@ -152,16 +142,6 @@ prints each item on one line as it appears; press Ctrl-C to stop. To be told wit
 [set up operator notifications](notifications.md). How to decide each
 kind is in [Respond to an Objective](objective-decisions.md).
 
-## 6. Read the Team's Workstream
-
-Posts live with the Team, not the Objective, so they outlast any one Objective:
-
-```sh
-supertag get workstream-post --team TEAM --after-sequence 0
-```
-
-See [Share a Team's Workstream](workstreams.md).
-
 ## Check that it worked
 
 Every Session you expected appears across the pages, and each held or waiting turn shows a reason.
@@ -169,7 +149,7 @@ Every Session you expected appears across the pages, and each held or waiting tu
 ## Reasons and next actions
 
 The overview explains questions, pending approvals, reviews, pauses, budget or deadline limits,
-and failed turns, and shows the Team's concurrency limit with how many turns hold a slot now. To
+and failed turns. To
 learn why no bound Worker Host takes a waiting turn, run `supertag placement explain TASK_ID`.
 Explanations are evidence and suggested next steps, not permission grants.
 
@@ -188,7 +168,7 @@ Explanations are evidence and suggested next steps, not permission grants.
 - **Access is denied.** The overview needs operator access to the whole Objective; see
   [access](../reference/coordination.md#access).
 - **A turn stays pending with no blocker.** Check Worker Host availability with
-  [troubleshooting](troubleshooting.md), and the Team's `maxConcurrency`.
+  [troubleshooting](troubleshooting.md).
 - **A running lease expired.** See
   [After a Control Plane restart](../reference/coordination.md#after-a-control-plane-restart).
 

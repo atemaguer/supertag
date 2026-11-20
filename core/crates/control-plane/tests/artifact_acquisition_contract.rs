@@ -422,19 +422,6 @@ async fn objective_contract(url: &str) {
     }
     let host = support::register_host(&store, "objective-artifacts").await;
     support::hold_artifacts(&store, &host).await;
-    let team = store
-        .create_team(
-            OP,
-            &CreateTeamRequest {
-                operation_id: "team".into(),
-                team_id: "artifact-team".into(),
-                name: "Artifact team".into(),
-                member_tag_ids: vec!["owner".into(), "reviewer".into()],
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
     let objective = store
         .create_objective(
             OP,
@@ -444,7 +431,6 @@ async fn objective_contract(url: &str) {
                 owner_tag_id: "owner".into(),
                 outcome: "Review immutable evidence".into(),
                 ongoing: true,
-                team_id: Some(team.team_id),
                 ..Default::default()
             },
         )
@@ -460,12 +446,12 @@ async fn objective_contract(url: &str) {
                 operation_id: "delegate".into(),
                 title: "Review".into(),
                 instruction: "Read source evidence".into(),
-                target_tag_id: Some("reviewer".into()),
                 ..Default::default()
             },
         )
         .await
         .unwrap();
+    // The Work Session runs on the owner's Tag and reads the Objective's evidence.
     let reviewer = claim(&store, &host, "reviewer").await;
     assert_eq!(reviewer.task_id, child.latest_task_id);
     let visible = store

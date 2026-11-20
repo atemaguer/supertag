@@ -170,8 +170,6 @@ async fn delivered_commit_review_survives_restart_and_notifies_owner_once(
         "release",
         "--owner",
         "owner",
-        "--team",
-        "release",
         "--ongoing",
         "Review the work",
     ]))
@@ -204,6 +202,31 @@ async fn delivered_commit_review_survives_restart_and_notifies_owner_once(
     success(credentials.worker_with_mode(
         &public,
         &root.join("owner-report"),
+        Some(&source),
+        &format!("--request-commit-review={commit}"),
+    ))
+    .await?;
+    // The report asked the owner Tag; once the ask's wake is due, the owner's inbox turn requests
+    // the review.
+    let mut db = database::connect(&database).await?;
+    timeout(WAIT, async {
+        loop {
+            let waiting: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM supertag_v2_tasks WHERE tag_id='owner' AND session_id='inbox:owner'",
+            )
+            .fetch_one(&mut db)
+            .await?;
+            if waiting > 0 {
+                return Ok::<_, anyhow::Error>(());
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .context("the owner's inbox did not wake for the ask")??;
+    success(credentials.worker_with_mode(
+        &public,
+        &root.join("owner-inbox"),
         Some(&source),
         &format!("--request-commit-review={commit}"),
     ))
@@ -242,7 +265,6 @@ async fn delivered_commit_review_survives_restart_and_notifies_owner_once(
 
     // Observe the durable internal notice without treating Objective Sessions as
     // direct operator conversations. Execute it on the owner through the Host.
-    let mut db = database::connect(&database).await?;
     let notices: Vec<String> = timeout(WAIT, async {
         loop {
             let ids: Vec<String> = sqlx::query_scalar(

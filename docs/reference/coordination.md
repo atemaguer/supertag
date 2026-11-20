@@ -34,14 +34,15 @@ Three rules cover every exchange in SuperTag.
    at the start of their next inbox turn.
 2. **One wait state.** A Task ends done or waiting. `ask` waits on an answer; a gated action waits
    on an approval. The reply arrives as that Session's next Task.
-3. **One address rule.** A work Session may address only the Session that started it. A Tag's
-   conversations, its Objectives' conversations and its inbox turns may address the work Sessions
-   they started, Tags in their Team, and the Workstream. To get another Tag's work, start a
-   Session of that Tag with `start_session {tag}`.
+3. **One address rule.** A work Session may address only the Session that started it. An
+   Objective's conversation may address the work Sessions it started and its own Tag's inbox,
+   with `ask_tag`. Only a Tag's inbox turns and its conversations with people reach other Tags:
+   they address the work Sessions they started, Tags in their Team, and the Workstream. To get
+   another Tag's work, an Objective asks its own Tag, and the inbox turn messages the other Tag.
 
 An Objective is a conversation with a goal. A person directs it from the CLI or the
 thread where it was created. Its owner Tag asks the person when it needs a decision. The work
-happens in Sessions started beneath it, including Sessions of other Tags in its Team.
+happens in work Sessions of the owner Tag started beneath it.
 
 ### A worked example
 
@@ -53,18 +54,20 @@ and starts its conversation there.
 #admin-app thread
   Maya      @SuperTag /goal Ship SSO for the admin app
   SuperTag  Started Objective ship-sso-for-7f3a9c2e: Ship SSO for the admin app
-  planner   Starting. I'll have builder do the provider work and reviewer check it.
-            ├─ work Session of builder   "SAML provider"      → reports back
-            └─ work Session of reviewer  "Security review"    → reports back
+  planner   Starting. I'll build the provider and get it reviewed.
+            ├─ work Session "SAML provider"                       → reports back
+            └─ ask_tag "Please get commit 3f9c… reviewed"         → inbox answers
   planner   Do we need SCIM provisioning in this release?        (ask)
   Maya      No, next quarter.
   planner   Done. SSO ships behind the sso flag, and the security review passed.
 ```
 
-`planner` owns the Objective, and `builder` and `reviewer` are the other members of its Team. Each
-work Session's result returns to the Objective's conversation as a turn. `planner`'s `ask` reaches
-Maya in the thread and in `supertag get inbox-item`; her reply is the conversation's next turn. Every
-turn, in every Session, draws on the Objective's one budget pool.
+`planner` owns the Objective. Its work Session runs on `planner` and reports back to the
+Objective's conversation as a turn. For the review, the Objective asks `planner`'s inbox with
+`ask_tag`; the inbox turn asks the Tag `reviewer` for a review, and its answer returns as the
+Objective's next turn. `planner`'s `ask` reaches Maya in the thread and in
+`supertag get inbox-item`; her reply is the conversation's next turn. Every turn of the
+Objective, in every Session, draws on the Objective's one budget pool.
 
 ## Objectives
 
@@ -75,15 +78,13 @@ turn, in every Session, draws on the Objective's one budget pool.
   afterwards. Changing it takes a new Objective.
 - The ID is caller-chosen and required: `supertag objective create OBJECTIVE_ID OUTCOME --owner TAG`.
 - The owner Tag must be active.
-- `--team TEAM` names the Team whose members the Objective may start work Sessions of. Without
-  one, every work Session runs on the owner Tag.
 - `--deadline` takes an RFC 3339 time with a time zone. See [Deadlines](#deadlines).
 - `--budget-minor` and `--currency` set the [budget pool](#the-budget-pool).
 - `--runtime-action` narrows the Objective's [runtime actions](#objective-runtime-actions);
   `--no-runtime-actions` grants none.
 - `--ongoing` makes the Objective a continuing responsibility that only an operator ends.
-- The Objective's work runs in the Workspaces of the Tags that do it: the owner's, and those of
-  the Tags its work Sessions run on. See [Workspaces](../guides/workspaces.md).
+- The Objective's work runs in the owner Tag's Workspace. See
+  [Workspaces](../guides/workspaces.md).
 - Creating an Objective starts it: the Control Plane queues the first turn of its conversation in
   the same step. Every refusal is an error, and nothing is stored. A turn that no Worker Host can
   take waits; `supertag placement explain TASK_ID` says why. See [Waiting turns](#waiting-turns).
@@ -106,7 +107,7 @@ the Objective itself, answers with its ID, and starts its first turn at once:
   the conversation's audience: only that person's turns see it. The Control Plane alone records
   which conversation created an Objective; no command or API call can set it.
 - `/goal` with no outcome creates nothing; the answer says how to write the command. Use
-  `supertag objective create` to set a Team, a deadline, or a budget.
+  `supertag objective create` to set a deadline or a budget.
 
 ### Objective runtime actions
 
@@ -125,9 +126,6 @@ commands. `runtimeActions` is the Objective's ceiling for them.
   apply: the Objective is not a conversation there.
 - An inherited action keeps its approval requirement. A turn waits for approval when its own
   Permission Sets, or the owner's, mark the action `approvalRequired: true`.
-- If both the Objective and the delegating Task allow `files:delegate-write`, a different
-  Team member whose Role grants `files:write` can write in its delegated Session. The
-  owner's own Sessions receive no write access from this grant.
 - Only operators change the list afterwards, with
   `supertag objective set-runtime-actions ID --runtime-action ACTION ...`. The new list replaces the old one,
   stays within the owner's Permission Sets at that moment, and applies to turns admitted
@@ -199,35 +197,53 @@ Task ends waiting. The question reaches the person in the home thread and as a `
 in the operator inbox. An answer from `supertag question answer` or from the home
 thread becomes the conversation's next turn. The same tool in a work Session asks the Session that started it.
 
-### Work and delegation
+### Work Sessions
 
-An Objective's turn starts work with `start_session {title, instruction, tag?, harness?}`:
+An Objective's turn starts work with `start_session {title, instruction, harness?}`:
 
 - The instruction must be self-contained. A work Session sees only its own work, never the
   Objective's conversation or the Tag's other Sessions.
-- Without `tag`, the work Session runs on the owner Tag. With `tag`, it runs on another Tag, whose
-  parent Session is the Objective's conversation. The target must be active, bound to a Worker
-  Host and a member of the Objective's Team; otherwise the call is refused and says why.
-- A delegated Session runs with the target Tag's Roles, narrowed to the Objective's runtime
-  actions and to the starting turn's authorization.
-- Only an Objective's own turn is offered `tag`. A conversation's or an inbox turn's
-  `start_session` runs on its own Tag.
-- The work Session works in the Workspace of the Task that started it, including when it runs on
-  another Tag. Edits go to that Session's one branch, and each later Task of the Session commits
-  on top of them.
+- The work Session always runs on the owner Tag, with the Objective's conversation as its parent
+  Session. Another Tag's work is that Tag's to take: [ask the Tag](#asking-the-tag), and its
+  inbox turn messages the other Tag.
+- The work Session works in the Workspace of the Task that started it. Edits go to that
+  Session's one branch, and each later Task of the Session commits on top of them.
 - `harness` names a built-in harness for the work Session: `codex`, `claude-code`,
   `openai-agents`, `opencode`, or `cursor`. Without it, the work Session runs its Tag's harness.
   The work Session keeps that harness for its whole life, including when it is continued, and
   talks to the Session that started it only through messages. The start is refused when the name
-  is unknown, when `tag` names another Tag whose harness differs, when no Worker Host bound to the
-  Tag runs that harness, or when that harness can't enforce the work Session's permissions or
-  limits. A work Session on another harness uses that host's default model.
+  is unknown, when no Worker Host bound to the Tag runs that harness, or when that harness can't
+  enforce the work Session's permissions or limits. A work Session on another harness uses that
+  host's default model.
 - At most four work Sessions run at once per Session; later ones wait.
 
 A work Session's result returns to the Objective's conversation as a turn. The owner reads it,
 then either accepts it in its reply or sends fixes with `continue_session {sessionId, message}`.
-`continue_session` across Tags is checked against a fresh authorization, not the authorization
-captured when the Session started.
+
+A work Session that another Tag started for an Objective before the upgrade that removed
+cross-Tag work Sessions keeps running and still reports to the Objective's conversation. Nothing
+new can start one.
+
+### Asking the Tag
+
+An Objective's conversation knows its own Tag and controls only its own work Sessions. It has no
+`send_message`, `read_mailbox`, `post`, or `read_workstream`, and its instructions name no other
+Tag. When it needs something from another Tag, it asks its own Tag's inbox Session:
+
+- `ask_tag {text}` sends a message to the inbox Session of the Tag that owns the Objective. It
+  names no recipient. Asking does not end the turn.
+- The message waits in the inbox Session's input queue as a question. The 3-second debounce and
+  the per-Tag and per-Objective [wake limits](#wake-limits) apply as they do to Tag messages.
+- The inbox turn sees the message as an `<objective-message objective="ID">` entry. It may
+  message other Tags first, then answers with `send_message {objective, text}`. `objective`
+  replaces `to`, and takes no `type` or `review`.
+- The answer becomes the Objective's next turn, like a work Session report. One answer answers
+  every open question that Objective asked.
+- Only the inbox Session sends to an Objective, and only to one of its own Tag's Objectives that
+  has an unanswered question.
+- A turn that asked and has nothing else running ends waiting: the
+  [idle rule](#the-idle-rule) does not fire while an answer is due. An answer stays due until the
+  inbox Session answers.
 
 ### Open work Sessions
 
@@ -277,7 +293,7 @@ Only the owner's `report_objective` changes an Objective's status from a turn (`
 `ready_for_review`, or `completed`); operators change it with their own commands.
 
 An Objective is idle only when all of these hold: its latest conversation turn completed or
-failed, it asked no question and waits on no approval, no turn is pending or running in any of its
+failed, it asked no question, waits on no answer from its Tag, waits on no approval, no turn is pending or running in any of its
 Sessions, no work Session result is unreported, and no active [Schedule](#schedules) will wake it. Ongoing Objectives are exempt: they may rest
 until their next message.
 
@@ -314,8 +330,6 @@ Statuses are `working`, `blocked`, `limited`, `ready_for_review`, `completed` an
   its reply and clean up.
 - Pending approval requests of the Objective expire.
 - Queued and waiting Tasks in the Objective's Sessions are cancelled, each with a recorded reason.
-- The Objective's Team is not deleted. A Team outlives the Objectives that name it; see
-  [Teams](#teams).
 
 The Control Plane settles these leftovers right after completion or cancellation, and again on its
 regular sweep.
@@ -478,15 +492,18 @@ tool the turn does not get; it does not only leave it out of the list.
 
 | Turn | Tools |
 | --- | --- |
-| An Objective's conversation | `start_session`, `continue_session`, `ask`, `report_objective`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule` and `cancel_schedule` (with `schedule:create`), and the [Session reads](#recalling-other-sessions) |
+| An Objective's conversation | `start_session`, `continue_session`, `ask`, `ask_tag`, `report_objective`, `schedule` and `cancel_schedule` (with `schedule:create`), and the [Session reads](#recalling-other-sessions) |
 | A conversation with a person, or a surface thread | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule` and `cancel_schedule` (with `schedule:create`), and the Session reads |
-| A Tag's inbox | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, the Session reads, and `stay_quiet` |
+| A Tag's inbox | `start_session`, `continue_session`, `send_message` (also to its own Tag's Objectives), `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, the Session reads, and `stay_quiet` |
 | A Tag's [memory review](#memory) | The Session reads and `stay_quiet` |
 | A work Session's report turn | The Session reads |
 | A work Session's turn | `ask` |
 
 A turn no person is waiting on also gets `stay_quiet`: a Schedule's wake-up, an Objective's
 notice or idle wake, a memory review, and an inbox turn. See [Quiet results](#quiet-results).
+
+Only a Tag's inbox and its conversations with people reach other Tags. An Objective's
+conversation asks its own Tag's inbox instead; see [Asking the Tag](#asking-the-tag).
 
 A work Session sees only its own work: it cannot message another Tag, start more work, or read
 the Tag's other Sessions or Objectives. It may reread its own earlier turns with `read_session`
@@ -498,12 +515,13 @@ when the Tag makes the call; see [Approval requests](#approval-requests). The [a
 
 | Tool | Input | Effect |
 | --- | --- | --- |
-| `start_session` | `title` (up to 120 characters), `instruction` (up to 8,000), optional `harness`, and `tag` on an Objective's own turn | Starts a work Session; see [Work and delegation](#work-and-delegation) |
+| `start_session` | `title` (up to 120 characters), `instruction` (up to 8,000), optional `harness` | Starts a work Session of the Tag; see [Work Sessions](#work-sessions) |
 | `continue_session` | `sessionId`, `message` (up to 8,000 characters) | Starts that work Session's next Task |
 | `close_session` | `sessionId` | Closes one of the Tag's work Sessions, so it stops counting toward the [limit](#open-work-sessions) |
 | `ask` | `text` (up to 16,000 characters; 2,000 in a work Session) | Ends the Task waiting on a person's answer |
 | `report_objective` | `status` (`ready_for_review`, `completed`, or `blocked`; not `completed` for an ongoing Objective), `summary` (up to 16,000 characters) | When the turn ends, sets the Objective's status; the summary becomes the turn's result |
-| `send_message` | `to`, `text` (up to 8,000 characters), optional `type` and commit review | Delivers a message to another Tag's Mailbox |
+| `ask_tag` | `text` (up to 8,000 characters) | Asks the Objective's own Tag; the inbox answer is the Objective's next turn. See [Asking the Tag](#asking-the-tag) |
+| `send_message` | `to`, `text` (up to 8,000 characters), optional `type` and commit review; or, in an inbox turn, `objective` and `text` | Delivers a message to another Tag's Mailbox, or answers one of the Tag's Objectives |
 | `read_mailbox` | optional `limit` (1–16), `cursor` | Reads the Tag's Mailbox |
 | `post` | `text` (up to 16,384 characters), optional `to` (up to 20 Tags) | Posts to the Team's Workstream |
 | `read_workstream` | `afterSequence` or `cursor`, `limit` (1–16, default 16) | Reads the Team's Workstream |
@@ -513,7 +531,7 @@ when the Tag makes the call; see [Approval requests](#approval-requests). The [a
 | `read_session` | `sessionId`, `limit` (1–20), `before` | Reads one page of a visible Session's finished turns, oldest first |
 | `read_turn` | `taskId`, `limit` (1–100, default 50), `after` | Reads one page of what happened during a visible finished turn: the Tag's messages, its activity, and its progress, in order |
 | `list_objectives` | `limit` (1–20), `offset` | Lists the Tag's open Objectives it may see |
-| `read_objective` | optional `objectiveId` | Reads an Objective's status, limits, budget pool, Team, and Sessions |
+| `read_objective` | optional `objectiveId` | Reads an Objective's status, limits, budget pool, and Sessions |
 | `schedule` | `note` (up to 4,000 characters), and `at` or `every`, optional `timeZone` | When the turn succeeds, creates a [Schedule](#schedules) that wakes the Tag later in this Session |
 | `cancel_schedule` | `scheduleId` | Cancels one of the Tag's Schedules in this Session |
 | `stay_quiet` | `note` (up to 500 characters) | Ends the turn without posting anything; see [Quiet results](#quiet-results) |
@@ -842,7 +860,7 @@ reported Objective status or a wait for approvals is never held.
   identity.
 - A Task cannot use that credential after its lease ends. A **lease** is the Control Plane's
   time-limited claim that one Task Attempt is running.
-- `to` on `send_message` and `post`, and `tag` on `start_session`, take a Tag's name or its ID. An
+- `to` on `send_message` and `post` takes a Tag's name or its ID. An
   active Tag's ID matches first; otherwise SuperTag uses the active Tag with that name. Active Tag
   names are unique.
 
@@ -857,9 +875,11 @@ waiting when a turn starts is handled together in that one turn.
   A Tag cannot send `review`: the Control Plane gives that type to a commit review request.
   `TagMessage.kind` carries the type. To ask a question or raise a blocker, a Tag sends a
   message; a Workstream post has no type and wakes nobody.
-- `send_message {to, text, type?}` is allowed from a Tag's conversations, its Objectives' conversations
-  and its own inbox turns. A work Session cannot send: its result reaches the Session that started
-  it.
+- `send_message {to, text, type?}` is allowed from a Tag's conversations with people and its own
+  inbox turns. An Objective's conversation cannot send: it asks its own Tag with `ask_tag`. A work
+  Session cannot send: its result reaches the Session that started it.
+- An inbox turn answers its Tag's Objective with `send_message {objective, text}`; see
+  [Asking the Tag](#asking-the-tag).
 - A Tag may message another when they share a Team, or when the recipient accepts messages from
   it. A grant is exactly that: "this recipient accepts messages from this sender". Operators set
   one with `supertag mailbox-grant allow SENDER RECIPIENT` and remove it with
@@ -883,7 +903,8 @@ to the Tag since the last turn's, and after them the direct messages a [wake lim
 or the backlog held back. One turn takes the messages of every Tag that wrote, at most 16
 messages; the rest become the next turn. The turn's prompt opens with a
 count such as `3 unread messages, 2 address you.`, then the [Workstream digest](#workstream) of
-each of the Tag's Teams, then the messages, each marked with its sender and `type`. The count
+each of the Tag's Teams, then the messages, each marked with its sender and `type`. A question
+from one of the Tag's own Objectives appears as an `<objective-message objective="ID">` entry. The count
 includes the unread posts and the posts that address the Tag. A message counts as seen once a
 turn takes it; Tags send no read receipts.
 
@@ -942,8 +963,10 @@ next turn count toward neither the 64 nor the wake limits.
 
 ### Commit reviews
 
-- An Objective's owner sends `send_message {to, text, review: {commit}}` from the Objective's
-  conversation. The full Git hash must match a current delivery by one of its work Sessions.
+- An Objective's conversation asks its own Tag for a review with `ask_tag`, naming the commit.
+  The inbox turn sends `send_message {to, text, review: {commit}}` to the reviewer. The full Git
+  hash must match a current verified delivery by a work Session of one of the Tag's open
+  Objectives.
 - The requested reviewer sends `send_message {to, text, review: {requestId, verdict}}` from a
   root Session. `to` is the requester. The request fixes the Objective and commit, and
   `verdict` is `approved` or `changes_requested`. The Control Plane records one verdict per
@@ -984,8 +1007,8 @@ A Team's Workstream is its shared record of posts. Every member can read it, and
   against a [wake limit](#wake-limits). Each Tag named in `to` must be a Team member; it gets one
   more mention and sees the post first in its next digest. To ask a question or raise a blocker,
   send a message instead.
-- The Team is the Objective's Team for an Objective's turn, and otherwise the Tag's only Team. A
-  Tag in several Teams gets 409 listing them; a Tag in none gets 409 saying so.
+- The Team is the Tag's only Team. A Tag in several Teams gets 409 listing them; a Tag in none
+  gets 409 saying so. An Objective's conversation has no Workstream.
 - A post body holds 1 to 16,384 characters, and `to` names at most 20 Tags.
 - Posting the same text to the same Tags again in the same Task stores nothing new and returns
   the earlier post.
@@ -1001,28 +1024,21 @@ A Team's Workstream is its shared record of posts. Every member can read it, and
 
 ## Teams
 
-A Team is a flat list of member Tags with an optional concurrency limit. It stands alone: any
-number of Objectives may name one Team.
+A Team is a flat list of member Tags. It scopes the Workstream and messaging of its members'
+inbox Sessions and conversations with people. Objectives name no Team.
 
-- `supertag team create NAME --member TAG [--member TAG ...] [--max-concurrency N]` creates one.
-  An Objective manifest's `team:` declares either an existing Team's name or the Objective's own
-  Team as `{name?, members, maxConcurrency?}`; see
-  [Declared Objectives](resource-model.md#declared-objectives).
+- `supertag team create NAME --member TAG [--member TAG ...]` creates one, and so does a Team
+  manifest; see [Declarative resources](../operations/resources.md).
 - Every member must be an active Tag, the name must be unused, and a Team holds at most 100
   members.
-- `supertag team update NAME [--member TAG ...] [--max-concurrency N | --clear-concurrency] [--name TEXT] [--expected-revision N]`
+- `supertag team update NAME [--member TAG ...] [--name TEXT] [--expected-revision N]`
   replaces the fields it names; see [Statuses](#statuses) for the revision check. `supertag get team` and
   `supertag get team NAME` read them.
 - `supertag delete team NAME` deletes the Team. Its Workstream posts stay in the Mailboxes of the
-  Tags they addressed. It is refused with 409
-  while an Objective that is not completed or cancelled names the Team.
-  A Team created again with a deleted Team's ID continues after the deleted Team's last
+  Tags they addressed. A Team created again with a deleted Team's ID continues after the deleted Team's last
   revision, so a revision read before the deletion cannot update the new Team.
-- Membership does two things: members may message one another without a grant, and an Objective
-  may start work Sessions of its Team's members.
-- `--max-concurrency N` limits how many turns run at once across the Sessions of every open
-  Objective naming the Team. Later turns stay pending and consume no Task Attempt. Without it,
-  Worker Host capacity is the only limit.
+- Membership lets members message one another without a grant, and gives them the Team's
+  Workstream.
 - A Team manifest's `spec.wakeLimits` overrides the [wake limits](#wake-limits). Declared limits
   replace all three; `Team.wake_limits` shows the overrides, and is absent with the defaults.
 - No coordination tool creates or changes a Team. Teams are operator configuration.
@@ -1131,14 +1147,12 @@ skipped.
 | --- | --- |
 | `objective` | The Objective record, including status, revision, budget and deadline |
 | `as_of_ms` | When the Control Plane read the view |
-| `team` | The Objective's Team with its ID, name, members, `max_concurrency` and running turns; null when the owner works alone |
 | `pool` | The budget pool: its measure, currency, limit, spend, what is left, any overrun, and the Task Attempts with unknown or estimated cost |
 | `deadline` | The deadline, the time left or since it passed, and the end of its grace period |
 | `attention` | Approval, question, review, pause, budget and deadline items needing a person, each with its next commands |
 | `sessions` | Each of the Objective's Sessions with the Tag running it, its status, its latest Task's delivery, and the failure of a failed latest turn |
 | `total_sessions` | The number of Sessions, including any the view leaves out |
 | `conversation` | The newest turns of the Objective's conversation |
-| `posts` | The newest Workstream posts of the Objective's Team |
 | `tasks`, `total_tasks`, `next_offset` | One page of Tasks, the number on all pages, and the offset of the next page |
 | `notices` | Limit and coordination notices raised for the Objective |
 | `pending_approvals` | The number of the Objective's approval requests waiting for a decision |
@@ -1154,8 +1168,8 @@ skipped.
 
 ### Queue time
 
-Queue age alone does not establish a capacity shortage: Team concurrency, the Tag's other running
-work and Worker Host availability all delay a claim.
+Queue age alone does not establish a capacity shortage: the Tag's other running work and Worker
+Host availability both delay a claim.
 
 ### Waiting turns
 

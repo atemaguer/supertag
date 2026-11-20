@@ -168,7 +168,6 @@ const schemas = {
   start_session: z.strictObject({
     title: nonblankText(120),
     instruction: nonblankText(8000),
-    tag: tagId.optional(),
     harness: z.enum(["codex", "claude-code", "openai-agents", "opencode", "cursor"]).optional(),
   }),
   close_session: z.strictObject({ sessionId: z.string().regex(workSessionId) }),
@@ -185,12 +184,22 @@ const schemas = {
     .refine((input) => input.afterSequence === undefined || input.cursor === undefined),
   read_mailbox: z.strictObject({ limit, cursor }),
   read_review_patch: reviewPatchInput,
-  send_message: z.strictObject({
-    to: tagId,
-    text: nonblankText(8000),
-    review: commitReviewInput.optional(),
-    type: messageType.optional(),
-  }),
+  // `to` another Tag, or, from the inbox Session, `objective`: one of this Tag's Objectives that
+  // asked it. An answer to an Objective is text only.
+  send_message: z
+    .strictObject({
+      to: tagId.optional(),
+      objective: tagId.optional(),
+      text: nonblankText(8000),
+      review: commitReviewInput.optional(),
+      type: messageType.optional(),
+    })
+    .refine((input) =>
+      input.objective === undefined
+        ? input.to !== undefined
+        : input.to === undefined && input.review === undefined,
+    ),
+  ask_tag: z.strictObject({ text: nonblankText(8000) }),
   list_sessions: z.strictObject({ limit: sessionLimit, offset }),
   search_sessions: z.strictObject({ query: nonblankText(200), limit: sessionLimit }),
   read_session: z.strictObject({
@@ -848,18 +857,16 @@ export function registerCoordinationTools(
     const capacity = run.coordination.maxWorkSessions
       ? ` This Tag has ${run.coordination.openWorkSessions} of ${run.coordination.maxWorkSessions} Work Sessions open; close one that is done with close_session.`
       : "";
-    // Only an Objective's own turn may delegate to another Tag, so only it is offered `tag`.
-    const delegates = run.coordination?.mayAskObjectiveQuestion ?? run.mayAskObjectiveQuestion;
     const current = harnessName(run.task?.harnessKind);
     tools.push("start_session");
     server.registerTool(
       "start_session",
       {
-        description: `Start a separate Work Session for one piece of the current Task. Its result comes back to this Session. Provide a short title and an instruction; it works in this Task's Workspace.${delegates ? " To delegate to an eligible Tag on this Objective's Team, name it in tag; omit tag to run the work on this Tag." : ""} Omit harness to keep ${current ?? "this Tag's harness"}; name another only when the work needs it. A Work Session keeps its harness, and you talk to it only through its report and continue_session.${capacity}`,
-        inputSchema: delegates ? schemas.start_session : schemas.start_session.omit({ tag: true }),
+        description: `Start a separate Work Session on this Tag for one piece of the current Task. Its result comes back to this Session. Provide a short title and an instruction; it works in this Task's Workspace. Omit harness to keep ${current ?? "this Tag's harness"}; name another only when the work needs it. A Work Session keeps its harness, and you talk to it only through its report and continue_session.${capacity}`,
+        inputSchema: schemas.start_session,
         _meta: meta,
       },
-      ({ title, instruction, tag, harness }: z.infer<typeof schemas.start_session>, tool) =>
+      ({ title, instruction, harness }: z.infer<typeof schemas.start_session>, tool) =>
         write(async () => {
           if (asked || pending.size || scope.hasPendingExternalApprovals?.())
             return response(
@@ -872,10 +879,8 @@ export function registerCoordinationTools(
             !schemas.start_session.safeParse({
               title: safeTitle,
               instruction: safeInstruction,
-              tag,
               harness,
-            }).success ||
-            (tag !== undefined && safeText(tag) !== tag)
+            }).success
           )
             return response("Provide a valid Work Session request.", true);
           const operationId = `claude-work-session:${randomUUID()}`;
@@ -886,14 +891,13 @@ export function registerCoordinationTools(
                   operationId,
                   title: safeTitle,
                   instruction: safeInstruction,
-                  targetTagId: tag,
                   harness,
                 },
                 config,
               ),
             );
             if (
-              verifiedWorkSession(stored, scope, parentSession, tag ?? scope.tagId) &&
+              verifiedWorkSession(stored, scope, parentSession, scope.tagId) &&
               stored.title === safeTitle
             ) {
               return response(
@@ -905,8 +909,8 @@ export function registerCoordinationTools(
               );
             }
           } catch (error) {
-            // A refusal the model can act on, such as the Tag's Work Session limit or a Tag
-            // outside the Objective's Team, comes back with its reason; the turn goes on.
+            // A refusal the model can act on, such as the Tag's Work Session limit, comes back
+            // with its reason; the turn goes on.
             const failure = ConnectError.from(error);
             if (ACTIONABLE.includes(failure.code))
               return response(safeText(failure.rawMessage), true);
@@ -1213,23 +1217,108 @@ export function registerCoordinationTools(
       },
     );
   }
+  // The inbox Session's answer to one of its Tag's Objectives: text only, and it runs as the
+  // Objective's next turn.
+  const answerObjective = async (
+    objective: string,
+    text: string,
+    type: z.infer<typeof messageType> | undefined,
+    signal: AbortSignal,
+  ) => {
+    if (safeText(objective) !== objective) return response("Provide a valid Objective ID.", true);
+    try {
+      const { message, duplicate } = await call(signal, (config) =>
+        mailbox.sendMessage(
+          {
+            operationId: `claude-answer:${randomUUID()}`,
+            recipientObjectiveId: objective,
+            text,
+            kind: messageKind(type),
+          },
+          config,
+        ),
+      );
+      if (
+        message?.messageId &&
+        message.sourceTaskId === scope.taskId &&
+        message.senderTagId === scope.tagId &&
+        message.recipientTagId === "" &&
+        message.objectiveId === objective &&
+        message.text === text
+      )
+        return response(
+          JSON.stringify({ status: "answered", messageId: message.messageId, duplicate }),
+        );
+    } catch (error) {
+      const failure = ConnectError.from(error);
+      if (ACTIONABLE.includes(failure.code)) return response(safeText(failure.rawMessage), true);
+    }
+    return response("The answer could not be confirmed.", true);
+  };
+  // An Objective's Session reaches no other Tag: it asks its own Tag's inbox Session, whose answer
+  // runs as the Objective's next turn. Asking does not end the turn.
+  if (run.coordination?.mayAskTag) {
+    tools.push("ask_tag");
+    server.registerTool(
+      "ask_tag",
+      {
+        description:
+          "Ask this Tag's inbox Session for something this Objective needs from outside it, such as another Tag's work, an answer only another Tag has, or a review of a verified commit. This Objective's Session reaches no other Tag; the inbox Session does, and its answer runs as this Objective's next turn. Asking does not end this turn: keep working, and finish the turn when nothing else is left. Say what you need and why in text.",
+        inputSchema: schemas.ask_tag,
+        _meta: meta,
+      },
+      ({ text }, tool) =>
+        write(async () => {
+          if (asked)
+            return response("Finish this turn and wait for the Objective answer first.", true);
+          const safe = trim(safeText(text));
+          if (!schemas.ask_tag.safeParse({ text: safe }).success)
+            return response("Provide what this Objective needs in text.", true);
+          try {
+            const { messageId, duplicate, wakeDeferred } = await call(tool.signal, (config) =>
+              mailbox.askTag({ operationId: `claude-ask-tag:${randomUUID()}`, text: safe }, config),
+            );
+            if (messageId && tagId.safeParse(messageId).success)
+              return response(
+                JSON.stringify({
+                  status: "asked",
+                  messageId,
+                  duplicate,
+                  next: "The answer runs as this Objective's next turn. Keep working; finish the turn when nothing else is left.",
+                  ...(wakeDeferred ? { wakeDeferred: safeText(wakeDeferred) } : {}),
+                }),
+              );
+          } catch (error) {
+            const failure = ConnectError.from(error);
+            if (ACTIONABLE.includes(failure.code))
+              return response(safeText(failure.rawMessage), true);
+          }
+          return response("The question to this Tag could not be confirmed.", true);
+        }),
+    );
+  }
   if (run.coordination?.maySendTagMessage || run.coordination?.mayRequestCommitReview) {
     tools.push("send_message");
     server.registerTool(
       "send_message",
       {
         description:
-          "Send a private message that another Tag handles in a later turn of its own; it wakes the Tag. To ask a question or raise a blocker, give the type question or blocker; the type may also be note (the default), evidence, or decision. Record progress and decisions with post instead. At most 3 new messages per Task. To request review, provide the full delivered commit hash. To record a verdict, provide the review request ID and verdict. If approval is pending, finish this turn and wait for the decision.",
+          "Send a private message that another Tag handles in a later turn of its own; it wakes the Tag. To ask a question or raise a blocker, give the type question or blocker; the type may also be note (the default), evidence, or decision. Record progress and decisions with post instead. At most 3 new messages per Task. In this Tag's inbox, answer one of this Tag's Objectives that asked with objective instead of to; the answer runs as the Objective's next turn. To request review of an Objective's verified commit, provide the full commit hash. To record a verdict, provide the review request ID and verdict. If approval is pending, finish this turn and wait for the decision.",
         inputSchema: schemas.send_message,
         _meta: meta,
       },
-      ({ to, text, review, type }, tool) =>
+      ({ to: recipient, objective, text, review, type }, tool) =>
         write(async () => {
           if (asked)
             return response("Finish this turn and wait for the Objective answer first.", true);
           const safe = trim(safeText(text));
-          if (!schemas.send_message.safeParse({ to, text: safe, review, type }).success)
+          if (
+            !schemas.send_message.safeParse({ to: recipient, objective, text: safe, review, type })
+              .success
+          )
             return response("Provide valid direct message text.", true);
+          if (objective !== undefined) return answerObjective(objective, safe, type, tool.signal);
+          const to = recipient ?? "";
           const kind = reviewSubmission(review);
           if (!run.coordination?.maySendTagMessage && kind?.case !== "commit")
             return response("This Task may only request a commit review.", true);
@@ -1578,17 +1667,6 @@ export function registerCoordinationTools(
               pausedAt: at(objective?.pausedAtMs),
               ...(objective?.completionSummary
                 ? { completionSummary: safeText(objective.completionSummary) }
-                : {}),
-              ...(view.team
-                ? {
-                    team: {
-                      name: safeText(view.team.name),
-                      members: view.team.memberTagIds.map(safeText),
-                      ...(view.team.maxConcurrency === undefined
-                        ? {}
-                        : { maxConcurrency: view.team.maxConcurrency }),
-                    },
-                  }
                 : {}),
               ...(view.pool
                 ? {

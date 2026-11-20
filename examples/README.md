@@ -49,7 +49,7 @@ Each Tag works in one **Workspace**, the repository a Worker Host serves, declar
    ```
 
 From then on, the files are the source of truth. Edit them and run `supertag apply` again;
-`supertag diff` shows what changes first. An Objective's owner, outcome, `ongoing`, and Team
+`supertag diff` shows what changes first. An Objective's owner, outcome, and `ongoing`
 can't change once it exists; create a new Objective instead.
 
 ## Adjust it
@@ -73,8 +73,8 @@ can't change once it exists; create a new Objective instead.
   instead, see [local-vm containers](../docs/reference/supertag-yaml.md#local-vm-containers). Codex runs
   commands on code-mode-only models such as gpt-6-sol only with `web:fetch` too; see
   [Codex commands and models](../docs/operations/requirements.md#codex-commands-and-models).
-- **Teams.** A Tag hands work to another Tag only when the Objective names a Team they share, and
-  Tags in one Team message each other without further grants. A Tag outside the Team needs an
+- **Teams.** Tags in one Team message each other without further grants. An Objective's turns
+  reach other Tags only by asking their own Tag's inbox with `ask_tag`. A Tag outside the Team needs an
   `acceptsMessagesFrom` entry on the recipient. Entries are one-way, so in `reliability` each Tag
   names the other: `support` hands over reports, and `reliability` answers.
 

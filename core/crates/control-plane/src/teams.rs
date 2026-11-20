@@ -1,4 +1,5 @@
-//! Team definitions and scheduling policy. Mutations share the Control Plane write order.
+//! Team definitions: members, wake limits, and the Workstream. Mutations share the Control Plane
+//! write order.
 
 pub(crate) mod workstreams;
 
@@ -28,7 +29,6 @@ impl Store {
             &input.team_id
         })?;
         let members = member_ids(&input.member_tag_ids)?;
-        let concurrency = input.max_concurrency.map(validate_limit).transpose()?;
         let wake_limits = wake_limits(input.wake_limits.as_ref())?;
         let digest = digest(
             "create",
@@ -38,7 +38,6 @@ impl Store {
                 team_id: id.into(),
                 name: label.into(),
                 member_tag_ids: members.clone(),
-                max_concurrency: concurrency,
             },
         );
         let (mut tx, order) = self.write().await?;
@@ -49,7 +48,6 @@ impl Store {
         let team = if let Some(prior) = team_by_id_in(&mut tx, id).await? {
             if prior.name != label
                 || prior.member_tag_ids != members
-                || prior.max_concurrency != concurrency
                 || prior.wake_limits != wake_limits
             {
                 return Err(StoreError::Conflict(
@@ -65,8 +63,8 @@ impl Store {
             let revision = next_revision(last)?;
             let now = self.execution_now_ms();
             let (mutual, per_tag, per_objective) = wake_limit_columns(wake_limits);
-            sqlx::query("INSERT INTO supertag_v2_teams (team_id,name,max_concurrency,revision,created_at_ms,updated_at_ms,wake_mutual_limit,wake_tag_hourly_limit,wake_objective_hourly_limit) VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8)")
-                .bind(id).bind(label).bind(concurrency.map(i64::from)).bind(revision).bind(now)
+            sqlx::query("INSERT INTO supertag_v2_teams (team_id,name,revision,created_at_ms,updated_at_ms,wake_mutual_limit,wake_tag_hourly_limit,wake_objective_hourly_limit) VALUES ($1,$2,$3,$4,$4,$5,$6,$7)")
+                .bind(id).bind(label).bind(revision).bind(now)
                 .bind(mutual).bind(per_tag).bind(per_objective).execute(&mut *tx).await?;
             replace_members(&mut tx, id, &members).await?;
             // The Team's Workstream is its channel; its members read it.
@@ -76,7 +74,6 @@ impl Store {
                 team_id: id.into(),
                 name: label.into(),
                 member_tag_ids: members,
-                max_concurrency: concurrency,
                 revision: revision as u64,
                 created_at_ms: now,
                 updated_at_ms: now,
@@ -206,24 +203,14 @@ impl Store {
             .as_ref()
             .map(|members| member_ids(&members.tag_ids))
             .transpose()?;
-        let limit = input
-            .max_concurrency
-            .map(|limit| {
-                if limit == 0 {
-                    Ok(None)
-                } else {
-                    validate_limit(limit).map(Some)
-                }
-            })
-            .transpose()?;
         let wakes = input
             .wake_limits
             .as_ref()
             .map(|limits| wake_limits(Some(limits)))
             .transpose()?;
-        if label.is_none() && members.is_none() && limit.is_none() && wakes.is_none() {
+        if label.is_none() && members.is_none() && wakes.is_none() {
             return Err(invalid(
-                "set at least one of Team name, members, concurrency, or wake limits",
+                "set at least one of Team name, members, or wake limits",
             ));
         }
         // A caller may refresh its revision before replaying an update. The
@@ -239,7 +226,6 @@ impl Store {
                 expected_revision: 0,
                 name: label.map(str::to_owned),
                 members: members.clone().map(|tag_ids| TeamMembers { tag_ids }),
-                max_concurrency: input.max_concurrency,
             },
         );
         let (mut tx, order) = self.write().await?;
@@ -252,7 +238,6 @@ impl Store {
             && members
                 .as_ref()
                 .is_none_or(|members| team.member_tag_ids == *members)
-            && limit.is_none_or(|limit| team.max_concurrency == limit)
             && wakes.is_none_or(|wakes| team.wake_limits == wakes);
         if input.expected_revision > team.revision
             || (input.expected_revision < team.revision && !satisfied)
@@ -274,13 +259,12 @@ impl Store {
                     .await?;
                 team.member_tag_ids = members;
             }
-            team.max_concurrency = limit.unwrap_or(team.max_concurrency);
             team.wake_limits = wakes.unwrap_or(team.wake_limits);
             team.revision = next_revision(team.revision as i64)? as u64;
             team.updated_at_ms = now;
             let (mutual, per_tag, per_objective) = wake_limit_columns(team.wake_limits);
-            sqlx::query("UPDATE supertag_v2_teams SET name=$1,max_concurrency=$2,revision=$3,updated_at_ms=$4,wake_mutual_limit=$6,wake_tag_hourly_limit=$7,wake_objective_hourly_limit=$8 WHERE team_id=$5")
-                .bind(&team.name).bind(team.max_concurrency.map(i64::from)).bind(team.revision as i64)
+            sqlx::query("UPDATE supertag_v2_teams SET name=$1,revision=$2,updated_at_ms=$3,wake_mutual_limit=$5,wake_tag_hourly_limit=$6,wake_objective_hourly_limit=$7 WHERE team_id=$4")
+                .bind(&team.name).bind(team.revision as i64)
                 .bind(team.updated_at_ms).bind(&team.team_id)
                 .bind(mutual).bind(per_tag).bind(per_objective).execute(&mut *tx).await?;
         }
@@ -332,8 +316,7 @@ impl Store {
     }
 }
 
-/// Deletes a Team no open Objective names. With `expected_revision`, refuses a
-/// Team another writer changed.
+/// Deletes a Team. With `expected_revision`, refuses a Team another writer changed.
 pub(crate) async fn delete_team_in(
     tx: &mut Transaction<'_, Any>,
     team: &Team,
@@ -343,17 +326,7 @@ pub(crate) async fn delete_team_in(
     if expected_revision.is_some_and(|revision| revision != team.revision) {
         return Err(StoreError::Conflict("Team revision changed".into()));
     }
-    let open: Option<String> = sqlx::query_scalar("SELECT objective_id FROM supertag_v2_objectives WHERE team_id=$1 AND status NOT IN ($2,$3) ORDER BY created_at_ms,objective_id LIMIT 1")
-        .bind(&team.team_id).bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64)
-        .fetch_optional(&mut **tx).await?;
-    if let Some(open) = open {
-        return Err(StoreError::FailedPrecondition(format!(
-            "Team {} cannot be deleted while Objective {open} names it",
-            team.name
-        )));
-    }
-    // The Team's closed Objectives remain readable. Its membership cascades with the
-    // definition, while receipts stay audited. Its Workstream channel is archived and kept as a
+    // Its membership cascades with the definition, while receipts stay audited. Its Workstream channel is archived and kept as a
     // record, as the Mailbox copies of its addressed posts are.
     crate::messages::archive_team_channel_in(tx, &team.team_id, now).await?;
     sqlx::query("DELETE FROM supertag_v2_teams WHERE team_id=$1")
@@ -445,9 +418,6 @@ fn team_row(row: &AnyRow) -> Result<Team> {
         team_id: row.try_get("team_id")?,
         name: row.try_get("name")?,
         member_tag_ids: Vec::new(),
-        max_concurrency: row
-            .try_get::<Option<i64>, _>("max_concurrency")?
-            .map(|limit| limit as u32),
         revision: row.try_get::<i64, _>("revision")? as u64,
         created_at_ms: row.try_get("created_at_ms")?,
         updated_at_ms: row.try_get("updated_at_ms")?,
@@ -542,14 +512,6 @@ fn member_ids(values: &[String]) -> Result<Vec<String>> {
     Ok(members)
 }
 
-fn validate_limit(value: u32) -> Result<u32> {
-    if (1..=1000).contains(&value) {
-        Ok(value)
-    } else {
-        Err(invalid("Team concurrency must be from 1 to 1,000"))
-    }
-}
-
 /// A Team's wake-limit overrides, each 0–1,000; no override at all is `None`.
 fn wake_limits(input: Option<&TeamWakeLimits>) -> Result<Option<TeamWakeLimits>> {
     let Some(input) = input else {
@@ -633,46 +595,6 @@ async fn receipt(
         .bind(principal).bind(operation).bind(digest).bind(&team.team_id).bind(action)
         .bind(revision).bind(order).bind(team.encode_to_vec()).execute(&mut **tx).await?;
     Ok(())
-}
-
-pub(crate) async fn capacity_in(
-    tx: &mut Transaction<'_, Any>,
-    team_id: &str,
-    task: &Task,
-    now: i64,
-) -> Result<bool> {
-    let limit: Option<i64> =
-        sqlx::query_scalar("SELECT max_concurrency FROM supertag_v2_teams WHERE team_id=$1")
-            .bind(team_id)
-            .fetch_one(&mut **tx)
-            .await?;
-    let Some(limit) = limit else {
-        return Ok(true);
-    };
-    // Closing the Objective does not prove that its native execution stopped.
-    // Keep its slot reserved until the Worker Host confirms cleanup.
-    let held: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM supertag_v2_tasks active
-        JOIN supertag_v2_objective_tasks link ON link.task_id=active.task_id
-        JOIN supertag_v2_objectives objective ON objective.objective_id=link.objective_id
-        WHERE objective.team_id=$1 AND (objective.status NOT IN ($2,$3) OR active.cleanup_pending=1)
-        AND active.task_id<>$4
-        AND (active.state=$5 OR active.cleanup_pending=1
-          OR (active.state=$6 AND active.lease_expires_at_ms>$7 AND ($8=0 OR active.accepted_order < (
-            SELECT accepted_order FROM supertag_v2_tasks WHERE task_id=$4
-          ))))",
-    )
-    .bind(team_id)
-    .bind(ObjectiveStatus::Completed as i64)
-    .bind(ObjectiveStatus::Cancelled as i64)
-    .bind(&task.task_id)
-    .bind(TaskState::Running as i64)
-    .bind(TaskState::Claimed as i64)
-    .bind(now)
-    .bind(i64::from(task.state() == TaskState::Claimed))
-    .fetch_one(&mut **tx)
-    .await?;
-    Ok(held < limit)
 }
 
 impl ControlPlane {

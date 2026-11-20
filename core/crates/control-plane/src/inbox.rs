@@ -80,8 +80,18 @@ impl Store {
         let is_root =
             !crate::work_sessions::reserved_session(&session) && kind.is_none() && !review;
         let task = crate::store::task_row(&row)?;
-        let may_request_commit_review = kind == Some(crate::work_sessions::REPORT)
-            && crate::commit_reviews::may_request_in(&mut tx, &task).await?;
+        // Only the inbox Session and person conversations reach other Tags. An Objective's
+        // Session asks its Tag instead.
+        let objective_session =
+            crate::mailbox::objective_asks::objective_session_in(&mut tx, &task.tag_id, &session)
+                .await?
+                .is_some();
+        let reaches_tags = is_root && !objective_session;
+        let may_ask_tag = crate::mailbox::objective_asks::asking_objective_in(&mut tx, &task, kind)
+            .await?
+            .is_some();
+        let may_request_commit_review =
+            crate::commit_reviews::may_request_in(&mut tx, &task).await?;
         let may_continue_work_session =
             crate::work_sessions::continuation::may_continue_in(&mut tx, &task, scope.as_ref())
                 .await?;
@@ -109,6 +119,7 @@ impl Store {
         let may_stay_quiet = crate::attention::may_stay_quiet_in(&mut tx, &task).await?;
         let tag: String = row.try_get("tag_id")?;
         let may_use_workstream = !review
+            && !objective_session
             && match crate::teams::workstreams::workstream_for_task_in(
                 &mut tx,
                 &attempt.task_id,
@@ -128,8 +139,8 @@ impl Store {
         Ok(AttemptCapabilities {
             may_ask_objective_question,
             may_use_workstream,
-            may_read_mailbox: is_root,
-            may_send_tag_message: is_root,
+            may_read_mailbox: reaches_tags,
+            may_send_tag_message: reaches_tags,
             may_start_work_session,
             may_continue_work_session,
             may_ask_work_session_question: kind == Some(crate::work_sessions::CHILD),
@@ -145,6 +156,7 @@ impl Store {
             max_work_sessions,
             memory_trusted,
             may_stay_quiet,
+            may_ask_tag,
         })
     }
 

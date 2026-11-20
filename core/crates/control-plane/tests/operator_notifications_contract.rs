@@ -116,7 +116,6 @@ impl Fixture {
                     objective_id: id.into(),
                     owner_tag_id: "owner".into(),
                     outcome: "Ship the fix".into(),
-                    team_id: Some("engineering".into()),
                     ..Default::default()
                 },
             )
@@ -229,22 +228,6 @@ impl Fixture {
             .await
             .unwrap();
     }
-
-    async fn approval(&self, attempt: &InspectAttemptRequest, operation: &str) -> Approval {
-        self.store
-            .post_attempt_workstream(
-                &supertag_control_plane::AttemptAccess::new(&self.host, attempt),
-                &PostAttemptWorkstreamRequest {
-                    operation_id: operation.into(),
-                    body: format!("Update {operation}"),
-                    to_tag_ids: vec![],
-                },
-            )
-            .await
-            .unwrap()
-            .approval
-            .expect("a pending approval")
-    }
 }
 
 async fn contract(url: &str) {
@@ -265,20 +248,6 @@ async fn contract(url: &str) {
             }],
             ..Default::default()
         })
-        .await
-        .unwrap();
-    store
-        .create_team(
-            OPERATOR,
-            &CreateTeamRequest {
-                wake_limits: None,
-                operation_id: "team".into(),
-                team_id: "engineering".into(),
-                name: "Engineering".into(),
-                member_tag_ids: vec!["owner".into()],
-                max_concurrency: None,
-            },
-        )
         .await
         .unwrap();
     let host = support::register_host(&store, "notify-host").await;
@@ -429,94 +398,6 @@ async fn contract(url: &str) {
         )
         .await
         .unwrap();
-
-    // A blocking approval goes out at once, even inside the window.
-    let approvals = f.objective("approvals").await;
-    let running = f.running(&approvals.starting_task_id).await;
-    let request = f.approval(&running, "first-post").await;
-    let (first_approval, lease) = f.claim(&[slack()]).await.expect("approval");
-    assert_eq!(
-        first_approval.text,
-        format!(
-            "Objective approvals needs you: Approval {} (work is waiting): {} (requested by Tag owner)\n`supertag describe objective approvals`",
-            request.approval_id, request.summary
-        )
-    );
-    f.settle(&first_approval, &lease, Ok("approval-1"))
-        .await
-        .unwrap();
-    let again = f.approval(&running, "second-post").await;
-    let (immediate, lease) = f.claim(&[slack()]).await.expect("immediate approval");
-    assert!(immediate.text.contains(&again.approval_id));
-    assert!(immediate.text.contains("(work is waiting)"));
-
-    // An unsettled claim is claimed again only after its lease lapses.
-    assert!(f.claim(&[slack()]).await.is_none());
-    f.store
-        .decide_approval(
-            OPERATOR,
-            &DecideApprovalRequest {
-                approval_id: again.approval_id.clone(),
-                operation_id: "deny".into(),
-                approve: false,
-                scope: ApprovalScope::Unspecified as i32,
-                valid_until_ms: None,
-                reason: "Not now".into(),
-            },
-        )
-        .await
-        .unwrap();
-    f.advance(LEASE_MS);
-    // The re-claimed message's only item was resolved meanwhile: it is settled unsent.
-    assert!(f.claim(&[slack()]).await.is_none());
-    assert!(matches!(
-        f.settle(&immediate, &lease, Ok("late")).await,
-        Err(StoreError::FailedPrecondition(_))
-    ));
-    let dropped = f.latest(SLACK, "approvals").await;
-    assert_eq!(dropped.notification_id, immediate.notification_id);
-    assert_eq!(dropped.status(), OperatorNotificationStatus::Delivered);
-    assert!(dropped.external_message_id.is_none());
-
-    // An approval a Task ended waiting on still blocks work: it goes out at once, inside the
-    // window, as TypeScript marks every pending Inbox approval blocking.
-    let waiting = f.objective("waiting").await;
-    let held = f.running(&waiting.starting_task_id).await;
-    let opener = f.approval(&held, "opening-post").await;
-    let mut opened = false;
-    while let Some((next, lease)) = f.claim(&[slack()]).await {
-        opened |= next.text.contains(&opener.approval_id);
-        f.settle(&next, &lease, Ok("waiting-1")).await.unwrap();
-    }
-    assert!(opened, "the first approval was sent");
-    let parked = f.approval(&held, "parked-post").await;
-    f.store
-        .finish_task(
-            &f.host,
-            &FinishTaskRequest {
-                task_id: held.task_id.clone(),
-                attempt_id: held.attempt_id.clone(),
-                lease_token: held.lease_token.clone(),
-                succeeded: true,
-                result: "Waiting for the operator".into(),
-                waiting_approval_ids: vec![parked.approval_id.clone()],
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-    let (ended, lease) = f
-        .claim(&[slack()])
-        .await
-        .expect("an approval an ended Task waits on is sent at once");
-    assert_eq!(
-        ended.text,
-        format!(
-            "Objective waiting needs you: Approval {} (work is waiting): {} (requested by Tag owner)\n`supertag describe objective waiting`",
-            parked.approval_id, parked.summary
-        )
-    );
-    f.settle(&ended, &lease, Ok("waiting-2")).await.unwrap();
 
     // A message whose lease lapses on its last attempt fails instead of being sent again.
     let lapsing = NotificationDestination {
