@@ -120,7 +120,8 @@ sh "$here/stack.sh" tag releaser approve --require-workstream-approval --workstr
 sh "$here/stack.sh" tag planner coord --allow files:read --allow schedule:create >/dev/null
 cli team create release --name Release --member releaser --member planner || true
 cli objective create "release-q-$$" --owner asker "Ask which branch to release"
-cli objective create "rollout-$$" --owner releaser "Verify the rollout"
+# Only a conversation reaches the Workstream; an Objective's Session asks its Tag instead.
+cli task submit --tag releaser --session "rollout-$$" "Verify the rollout" >/dev/null
 wait_for "Waiting on you ("
 echo "inbox listed ok"
 # Open inbox shows the first item; answer the question and approve the post, in either order.

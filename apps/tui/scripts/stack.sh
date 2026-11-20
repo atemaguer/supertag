@@ -4,7 +4,7 @@
 # (default 47451), and four Worker Hosts running the fixture adapter, which answers every
 # message. Each carries a label a Tag's runsOn picks: `plain` only answers; `coord` also starts a
 # Work Session from each conversation turn and schedules a wake-up; `ask` asks the
-# operator when an Objective's turn says "Ask which branch to release"; `approve` posts to its
+# operator when an Objective's turn says "Ask which branch to release"; `approve` posts, from a conversation, to its
 # Team's Workstream, which waits for an operator's approval. Never touches ~/.supertag or :3434. Build the
 # binaries first, in core/:
 #   cargo build -p supertag-cli --features test-fixtures --bin supertag --bin supertag-fixture-adapter
