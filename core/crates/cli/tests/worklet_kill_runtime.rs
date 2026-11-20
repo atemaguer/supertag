@@ -11,6 +11,8 @@
 //! with Task artifact inputs reaches, in `support/task_artifact_inputs_runtime.rs`.
 #[path = "support/children.rs"]
 mod children;
+#[path = "../../../test-support/executables.rs"]
+mod executables;
 use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
@@ -303,8 +305,6 @@ async fn scenario(database: &str, killed: Killed, point: &str, stage: &str) -> R
 }
 
 fn recording_adapter(directory: &Path) -> Result<(PathBuf, PathBuf)> {
-    use std::os::unix::fs::PermissionsExt;
-
     let script = directory.join("recording-adapter");
     let launches = directory.join("adapter-launches");
     let quote = |path: &Path| -> Result<String> {
@@ -315,15 +315,15 @@ fn recording_adapter(directory: &Path) -> Result<(PathBuf, PathBuf)> {
                 .replace('\'', "'\\''")
         ))
     };
-    std::fs::write(
+    executables::write_executable(
         &script,
         format!(
             "#!/bin/sh\nprintf '%s\\n' \"$$\" >> {}\nexec {} \"$@\"\n",
             quote(&launches)?,
             quote(Path::new(ADAPTER))?
         ),
+        0o700,
     )?;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))?;
     Ok((script, launches))
 }
 

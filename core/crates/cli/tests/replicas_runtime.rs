@@ -14,6 +14,8 @@
 //! SQLite serves one Control Plane process; a second process on the same file is refused.
 #[path = "support/children.rs"]
 mod children;
+#[path = "../../../test-support/executables.rs"]
+mod executables;
 use children::reaped;
 
 // This lane runs only on PostgreSQL, so it calls the runner without `database_tests!`.
@@ -535,18 +537,17 @@ async fn task_state(connection: &mut sqlx::AnyConnection, task_id: &str) -> Resu
 
 /// A Worker Host adapter that records each launch, then runs the fixture adapter.
 fn recording_adapter(directory: &Path) -> Result<(PathBuf, PathBuf)> {
-    use std::os::unix::fs::PermissionsExt;
     let script = directory.join("recording-adapter");
     let launches = directory.join("adapter-launches");
-    std::fs::write(
+    executables::write_executable(
         &script,
         format!(
             "#!/bin/sh\nprintf '%s\\n' \"$$\" >> '{}'\nexec '{}' \"$@\"\n",
             launches.display(),
             ADAPTER
         ),
+        0o700,
     )?;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))?;
     Ok((script, launches))
 }
 

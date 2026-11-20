@@ -3,6 +3,8 @@
 //! start when its Codex CLI or configured models cannot run Tasks.
 #[path = "support/children.rs"]
 mod children;
+#[path = "../../../test-support/executables.rs"]
+mod executables;
 use children::reaped;
 use std::{
     fs,
@@ -43,8 +45,7 @@ impl Machine {
 
     fn fake(&self, name: &str, body: &str) -> Result<()> {
         let path = self.bin.join(name);
-        fs::write(&path, format!("#!/bin/sh\n{body}\n"))?;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755))?;
+        executables::write_executable(&path, format!("#!/bin/sh\n{body}\n"), 0o755)?;
         Ok(())
     }
 

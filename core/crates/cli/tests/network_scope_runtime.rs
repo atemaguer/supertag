@@ -4,6 +4,8 @@
 //! a refused connection reaches `describe task`.
 #[path = "support/children.rs"]
 mod children;
+#[path = "../../../test-support/executables.rs"]
+mod executables;
 use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
@@ -142,12 +144,12 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o600))?;
     let record = directory.join("codex-record.json");
     let fake = directory.join("codex-fixture");
-    std::fs::write(
+    executables::write_executable(
         &fake,
         include_str!("fixtures/network_scope_app_server.py")
             .replace("@RECORD@", record.to_str().context("path is not UTF-8")?),
+        0o700,
     )?;
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o700))?;
     let manifest = directory.join("fetcher.yaml");
     std::fs::write(
         &manifest,

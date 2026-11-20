@@ -1,5 +1,7 @@
 #[path = "support/children.rs"]
 mod children;
+#[path = "../../../test-support/executables.rs"]
+mod executables;
 use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
@@ -132,7 +134,7 @@ async fn operator(args: &[&str], gateway: &str, token: &str) -> Result<Value> {
 }
 
 fn fixture_launcher(path: &Path) -> Result<()> {
-    std::fs::write(
+    executables::write_executable(
         path,
         r#"#!/bin/sh
 set -eu
@@ -159,8 +161,8 @@ test "$3" = "--timeout-seconds"
 test "$4" = "3600"
 exec "$program"
 "#,
+        0o700,
     )?;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
     Ok(())
 }
 
@@ -430,11 +432,11 @@ fn repo_path(relative: &str) -> Result<std::path::PathBuf> {
 
 fn claude_fixture(directory: &Path) -> Result<std::path::PathBuf> {
     let native = directory.join("claude-fixture.mjs");
-    std::fs::copy(
-        repo_path("harnesses/claude-code/fixtures/rust-native-claude.mjs")?,
+    executables::copy_executable(
+        &repo_path("harnesses/claude-code/fixtures/rust-native-claude.mjs")?,
         &native,
+        0o700,
     )?;
-    std::fs::set_permissions(&native, std::fs::Permissions::from_mode(0o700))?;
     Ok(native)
 }
 

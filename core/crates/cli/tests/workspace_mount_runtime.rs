@@ -3,6 +3,8 @@
 //! write a read-write copy's changes back to its Volume.
 #[path = "support/children.rs"]
 mod children;
+#[path = "../../../test-support/executables.rs"]
+mod executables;
 use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
@@ -153,11 +155,11 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     )?;
     std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o600))?;
     let fake = directory.join("codex-fixture");
-    std::fs::write(
+    executables::write_executable(
         &fake,
         include_str!("fixtures/workspace_mount_app_server.py"),
+        0o700,
     )?;
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o700))?;
     let source_url = file_url(&source)?;
     let mappings = directory.join("mappings.json");
     std::fs::write(

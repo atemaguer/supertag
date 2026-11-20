@@ -1,5 +1,7 @@
 //! Real native subprocesses connected to a real authenticated Harness gRPC server.
 //! Every executable, workspace, credential, and provider response is a disposable fixture.
+#[path = "../../../test-support/executables.rs"]
+mod executables;
 use std::{
     collections::BTreeMap,
     ffi::OsString,
@@ -1369,8 +1371,7 @@ impl NativeFixture {
             ]),
         )?;
         std::fs::write(directory.path().join("tail"), tail)?;
-        std::fs::write(&command, include_str!("fixtures/app_server.py"))?;
-        std::fs::set_permissions(&command, std::fs::Permissions::from_mode(0o700))?;
+        executables::write_executable(&command, include_str!("fixtures/app_server.py"), 0o700)?;
         Ok(Self {
             directory,
             workspace,

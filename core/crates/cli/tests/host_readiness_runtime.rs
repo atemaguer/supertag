@@ -1,6 +1,8 @@
 //! Actual idle presence expiry and restart through separate Control Plane and Worklet processes.
 #[path = "support/children.rs"]
 mod children;
+#[path = "../../../test-support/executables.rs"]
+mod executables;
 use children::reaped;
 
 #[path = "../../../test-support/prerequisites.rs"]
@@ -403,15 +405,14 @@ async fn running_attempt_keeps_the_machine_awake_and_low_disk_is_reported() -> R
     // A fake OS command records the platform arguments it receives and its termination.
     let log = directory.path().join("keep-awake.log");
     let script = directory.path().join("keep-awake");
-    std::fs::write(
+    executables::write_executable(
         &script,
         format!(
             "#!/bin/sh\necho \"start $*\" >> '{0}'\ntrap 'echo term >> \"{0}\"; exit 0' TERM\nwhile :; do sleep 0.05; done\n",
             log.display()
         ),
+        0o700,
     )?;
-    use std::os::unix::fs::PermissionsExt as _;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))?;
     let gib = 1u64 << 30;
     let state = directory.path().join("worker");
     let mut command = host_command(&credentials, &public, &state);

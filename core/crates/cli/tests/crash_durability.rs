@@ -26,6 +26,8 @@
 //! with test durability settings.
 #[path = "support/children.rs"]
 mod children;
+#[path = "../../../test-support/executables.rs"]
+mod executables;
 use children::reaped;
 #[path = "support/protocol.rs"]
 mod protocol;
@@ -458,8 +460,6 @@ async fn post_slack_event(http: SocketAddr) -> Result<Option<reqwest::StatusCode
 }
 
 fn recording_adapter(directory: &Path) -> Result<(PathBuf, PathBuf)> {
-    use std::os::unix::fs::PermissionsExt;
-
     let script = directory.join("recording-adapter");
     let launches = directory.join("adapter-launches");
     let quote = |path: &Path| -> Result<String> {
@@ -470,15 +470,15 @@ fn recording_adapter(directory: &Path) -> Result<(PathBuf, PathBuf)> {
                 .replace('\'', "'\\''")
         ))
     };
-    std::fs::write(
+    executables::write_executable(
         &script,
         format!(
             "#!/bin/sh\nprintf '%s\\n' \"$$\" >> {}\nexec {} \"$@\"\n",
             quote(&launches)?,
             quote(Path::new(ADAPTER))?
         ),
+        0o700,
     )?;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))?;
     Ok((script, launches))
 }
 
@@ -500,6 +500,8 @@ struct System<'a> {
     private: SocketAddr,
     public: SocketAddr,
     http: SocketAddr,
+    /// Keeps the Control Plane's port while it is down after a crash; see [`PortReservation`].
+    _private_port: PortReservation,
     crashed: bool,
 }
 
@@ -510,11 +512,12 @@ impl<'a> System<'a> {
         let marker = directory.join("crash-marker");
         let (adapter, launches) = recording_adapter(directory)?;
         let unbound: SocketAddr = "127.0.0.1:0".parse()?;
+        let (listen, private_port) = PortReservation::loopback()?;
         let mut control_plane = spawn_control_plane(
             &credentials,
             database,
             directory,
-            unbound,
+            listen,
             (case.target == Target::ControlPlane).then_some((case.point, marker.as_path())),
         )?;
         let private = control_plane.endpoints(1).await?[0];
@@ -542,6 +545,7 @@ impl<'a> System<'a> {
             private,
             public: endpoints[0],
             http: endpoints[1],
+            _private_port: private_port,
             crashed: false,
         })
     }
@@ -717,14 +721,18 @@ impl<'a> System<'a> {
                     status.signal() == Some(libc::SIGKILL),
                     "Gateway exited with {status} instead of SIGKILL"
                 );
+                // Only this test reaches the Gateway's listeners, so the restarted Gateway takes
+                // new ports rather than racing other processes for the ones the killed one held.
+                let unbound: SocketAddr = "127.0.0.1:0".parse()?;
                 let mut restarted = spawn_gateway(
                     &self.credentials,
                     self.directory,
                     &self.mock,
-                    (self.private, self.public, self.http),
+                    (self.private, unbound, unbound),
                     None,
                 )?;
-                ensure!(restarted.endpoints(2).await? == [self.public, self.http]);
+                let endpoints = restarted.endpoints(2).await?;
+                (self.public, self.http) = (endpoints[0], endpoints[1]);
                 self.retired
                     .push(std::mem::replace(&mut self.gateway, restarted));
             }
@@ -1124,6 +1132,69 @@ impl<'a> System<'a> {
         connection.close().await?;
         ensure!(claimable == 0, "{claimable} replies remain claimable");
         Ok(())
+    }
+}
+
+/// The Gateway and Worker Host keep the Control Plane's address, so a restarted Control Plane
+/// must listen on its old port. Between the crash and the restart that port is free, and any
+/// process on the machine binding port 0 (another case's service or mock, run in parallel) may
+/// be given it. On Linux a socket bound with `SO_REUSEADDR` that never listens holds the port
+/// against those binds and against outgoing connections, while a listener that also sets
+/// `SO_REUSEADDR`, as the Control Plane's does, can still bind it. Elsewhere the port is chosen
+/// by the Control Plane and not held.
+struct PortReservation(#[allow(dead_code)] Option<std::os::fd::OwnedFd>);
+
+impl PortReservation {
+    #[cfg(target_os = "linux")]
+    fn loopback() -> Result<(SocketAddr, Self)> {
+        use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd};
+        // SAFETY: plain socket calls on a descriptor this function owns, with buffers sized for
+        // the structures they hold.
+        unsafe {
+            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0);
+            ensure!(
+                fd >= 0,
+                "reserve a port: {}",
+                std::io::Error::last_os_error()
+            );
+            let socket = OwnedFd::from_raw_fd(fd);
+            let on: libc::c_int = 1;
+            ensure!(
+                libc::setsockopt(
+                    socket.as_raw_fd(),
+                    libc::SOL_SOCKET,
+                    libc::SO_REUSEADDR,
+                    (&raw const on).cast(),
+                    size_of::<libc::c_int>() as libc::socklen_t,
+                ) == 0,
+                "reserve a port: {}",
+                std::io::Error::last_os_error()
+            );
+            let mut address: libc::sockaddr_in = std::mem::zeroed();
+            address.sin_family = libc::AF_INET as libc::sa_family_t;
+            address.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
+            let mut length = size_of::<libc::sockaddr_in>() as libc::socklen_t;
+            ensure!(
+                libc::bind(socket.as_raw_fd(), (&raw const address).cast(), length) == 0,
+                "reserve a port: {}",
+                std::io::Error::last_os_error()
+            );
+            ensure!(
+                libc::getsockname(socket.as_raw_fd(), (&raw mut address).cast(), &mut length) == 0,
+                "reserve a port: {}",
+                std::io::Error::last_os_error()
+            );
+            let port = u16::from_be(address.sin_port);
+            Ok((
+                SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port)),
+                Self(Some(socket)),
+            ))
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn loopback() -> Result<(SocketAddr, Self)> {
+        Ok(("127.0.0.1:0".parse()?, Self(None)))
     }
 }
 

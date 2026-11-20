@@ -1,6 +1,8 @@
 //! Exercises the shipped binary entry points in independent OS processes.
 #[path = "support/children.rs"]
 mod children;
+#[path = "../../../test-support/executables.rs"]
+mod executables;
 use children::reaped;
 
 #[path = "../../../test-support/prerequisites.rs"]
@@ -760,8 +762,6 @@ async fn local_up(
 }
 
 fn recording_adapter(directory: &Path) -> Result<(PathBuf, PathBuf)> {
-    use std::os::unix::fs::PermissionsExt;
-
     let script = directory.join("recording-adapter");
     let launches = directory.join("adapter-launches");
     let quote = |path: &Path| -> Result<String> {
@@ -772,15 +772,15 @@ fn recording_adapter(directory: &Path) -> Result<(PathBuf, PathBuf)> {
                 .replace('\'', "'\\''")
         ))
     };
-    std::fs::write(
+    executables::write_executable(
         &script,
         format!(
             "#!/bin/sh\nprintf '%s\\n' \"$$\" >> {}\nexec {} \"$@\"\n",
             quote(&launches)?,
             quote(Path::new(ADAPTER))?
         ),
+        0o700,
     )?;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))?;
     Ok((script, launches))
 }
 
@@ -2334,11 +2334,11 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
     )?;
     std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o600))?;
     let fake = directory.path().join("codex-fixture");
-    std::fs::write(
+    executables::write_executable(
         &fake,
         include_str!("../../codex-adapter/tests/fixtures/cli_app_server.py"),
+        0o700,
     )?;
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o700))?;
 
     let start = || {
         let mut command = local_up_command(&database);
@@ -3268,11 +3268,11 @@ async fn native_codex_plan_replaces_the_slack_acknowledgement_in_place(
     )?;
     std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o600))?;
     let fake = directory.join("codex-fixture");
-    std::fs::write(
+    executables::write_executable(
         &fake,
         include_str!("../../codex-adapter/tests/fixtures/cli_app_server.py"),
+        0o700,
     )?;
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o700))?;
     let release = directory.join("plan-release");
     let thread = "1794470400.000001";
     assert_eq!(
@@ -3401,11 +3401,11 @@ async fn native_codex_takes_a_folded_slack_message_into_its_running_turn(
     )?;
     std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o600))?;
     let fake = directory.join("codex-fixture");
-    std::fs::write(
+    executables::write_executable(
         &fake,
         include_str!("../../codex-adapter/tests/fixtures/cli_app_server.py"),
+        0o700,
     )?;
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o700))?;
     let thread = "1794470500.000001";
     assert_eq!(
         signed_slack_mention(&http, "EvFOLD1", thread, "Wait for live input").await?,

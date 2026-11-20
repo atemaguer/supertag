@@ -7,6 +7,8 @@
 //! reconnect, no repeated accepted work) to the Rust services.
 #[path = "support/children.rs"]
 mod children;
+#[path = "../../../test-support/executables.rs"]
+mod executables;
 use children::reaped;
 #[path = "support/database.rs"]
 mod database;
@@ -614,7 +616,7 @@ struct Report {
 fn recording_adapter(directory: &Path, host: &str) -> Result<(PathBuf, PathBuf)> {
     let script = directory.join(format!("{host}-adapter"));
     let launches = directory.join(format!("{host}-launches"));
-    std::fs::write(
+    executables::write_executable(
         &script,
         format!(
             "#!/bin/sh\nprintf '%s\\n' \"$$\" >> '{}'\n'{}' \"$@\" 2>> '{2}'\nstatus=$?\nprintf 'adapter %s exited %s at %s\\n' \"$$\" \"$status\" \"$(date +%s)\" >> '{2}'\nexit $status\n",
@@ -622,8 +624,8 @@ fn recording_adapter(directory: &Path, host: &str) -> Result<(PathBuf, PathBuf)>
             ADAPTER,
             launches.with_extension("stderr").display()
         ),
+        0o700,
     )?;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))?;
     Ok((script, launches))
 }
 

@@ -1,6 +1,8 @@
 //! The ordinary native `up -f` entry point owns every service and its private enrollment.
 #[path = "support/children.rs"]
 mod children;
+#[path = "../../../test-support/executables.rs"]
+mod executables;
 use children::reaped;
 #[path = "support/database.rs"]
 mod database;
@@ -909,11 +911,11 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     // The Codex host checks its CLI before it starts; this machine's own Codex is not used.
     let bin = temp.path().join("bin");
     fs::create_dir(&bin)?;
-    fs::write(
-        bin.join("codex"),
+    executables::write_executable(
+        &bin.join("codex"),
         "#!/bin/sh\nif [ \"$1\" = --version ]; then echo codex-cli 0.163.0; fi\n",
+        0o700,
     )?;
-    fs::set_permissions(bin.join("codex"), fs::Permissions::from_mode(0o700))?;
     let path = format!("{}:{}", bin.display(), std::env::var("PATH")?);
     let home_value = home.to_str().context("UTF-8 home")?;
     let mut supervisor = Process::spawn(
@@ -1252,8 +1254,8 @@ impl SharedHost {
         let gate_text = gate.to_str().context("UTF-8 gate")?;
         // OpenAI Agents runs `python3 -I -m ...`; this stand-in marks its start, waits at the
         // gate, then becomes the protocol fixture adapter.
-        fs::write(
-            bin.join("python3"),
+        executables::write_executable(
+            &bin.join("python3"),
             format!(
                 "#!/bin/sh\ntest -z \"${{CODEX_API_KEY:-}}${{ANTHROPIC_API_KEY:-}}${{SUPERTAG_HOST_TOKEN:-}}\" || exit 3\n\
                  test \"${{OPENAI_API_KEY:-}}\" = fixture-openai || exit 4\n\
@@ -1261,6 +1263,7 @@ impl SharedHost {
                  while [ ! -e \"{gate_text}/release\" ]; do sleep 0.05; done\n\
                  exec \"{ADAPTER}\" $(cat \"{gate_text}/adapter-args\" 2>/dev/null)\n"
             ),
+            0o700,
         )?;
         // Answer the version probe without starting Python, which is slow on a loaded machine.
         let server = temp.path().join("gated_codex_app_server.py");
@@ -1268,17 +1271,15 @@ impl SharedHost {
             &server,
             include_str!("fixtures/gated_codex_app_server.py").replace("@GATE@", gate_text),
         )?;
-        fs::write(
-            bin.join("codex"),
+        executables::write_executable(
+            &bin.join("codex"),
             format!(
                 "#!/bin/sh\nif [ \"$*\" = --version ]; then echo codex-cli 0.163.0; exit 0; fi\n\
                  exec /usr/bin/python3 \"{}\" \"$@\"\n",
                 server.display()
             ),
+            0o700,
         )?;
-        for name in ["python3", "codex"] {
-            fs::set_permissions(bin.join(name), fs::Permissions::from_mode(0o700))?;
-        }
         // The first launch of a new executable can wait on macOS policy checks. Take that once
         // here, outside the adapter's bounded version probe.
         let probe = Command::new(bin.join("codex")).arg("--version").output()?;

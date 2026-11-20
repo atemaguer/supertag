@@ -2,6 +2,8 @@
 //! under a service unit, `down`, `ps`, `logs`, `status`, `version`, and `config`.
 #[path = "support/children.rs"]
 mod children;
+#[path = "../../../test-support/executables.rs"]
+mod executables;
 use children::reaped;
 use std::{
     fs,
@@ -503,8 +505,7 @@ fn fake_launchd(machine: &mut Machine) -> Result<PathBuf> {
     let launchd = machine.home.join("fake-launchd");
     fs::create_dir_all(&launchd)?;
     let fake = machine.bin.join("launchctl");
-    fs::write(&fake, FAKE_LAUNCHCTL)?;
-    fs::set_permissions(&fake, fs::Permissions::from_mode(0o755))?;
+    executables::write_executable(&fake, FAKE_LAUNCHCTL, 0o755)?;
     machine
         .extra
         .push(("FAKE_LAUNCHD_DIR".into(), launchd.to_str().unwrap().into()));
@@ -652,11 +653,11 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
 
     // A harness on PATH, but no terminal and no --yes.
     let codex = machine.bin.join("codex");
-    fs::write(
+    executables::write_executable(
         &codex,
         "#!/bin/sh\nif [ \"$1\" = --version ]; then echo codex-cli 0.163.0; fi\nexit 0\n",
+        0o755,
     )?;
-    fs::set_permissions(&codex, fs::Permissions::from_mode(0o755))?;
     let output = init(&[])?;
     assert!(String::from_utf8_lossy(&output.stderr).contains("needs a terminal"));
     let output = init(&["--yes"])?;

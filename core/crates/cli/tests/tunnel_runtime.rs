@@ -14,6 +14,8 @@
 //!   WebSocket upgrades and closes connections idle longer than 25 seconds.
 #[path = "support/children.rs"]
 mod children;
+#[path = "../../../test-support/executables.rs"]
+mod executables;
 use children::reaped;
 #[path = "support/holding_host.rs"]
 mod holding_host;
@@ -1732,15 +1734,15 @@ async fn tunnel_carries_every_service_role_and_call_shape_with_mutual_tls(
 fn recording_adapter(directory: &Path) -> Result<(PathBuf, PathBuf)> {
     let script = directory.join("recording-adapter");
     let launches = directory.join("adapter-launches");
-    std::fs::write(
+    executables::write_executable(
         &script,
         format!(
             "#!/bin/sh\nprintf '%s\\n' \"$$\" >> '{}'\nexec '{}' \"$@\"\n",
             launches.display(),
             ADAPTER,
         ),
+        0o700,
     )?;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))?;
     Ok((script, launches))
 }
 

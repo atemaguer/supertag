@@ -4,6 +4,8 @@
 //! clone), and the CLI. A delivered Task lands as the Session's branch on the server.
 #[path = "support/children.rs"]
 mod children;
+#[path = "../../../test-support/executables.rs"]
+mod executables;
 use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
@@ -330,14 +332,14 @@ async fn a_remote_workspace_lands_through_git_delivery(database: String) -> Resu
 
     // The adapter must see none of the credentials, even with them in the host's environment.
     let adapter = root.join("isolated-adapter");
-    std::fs::write(
+    executables::write_executable(
         &adapter,
         format!(
             "#!/bin/sh\nset -eu\nfor name in SUPERTAG_WORKSPACE_TOKEN SUPERTAG_HOST_TOKEN SUPERTAG_OPERATOR_TOKEN GIT_CONFIG_VALUE_0; do\n eval 'test -z \"${{'\"$name\"'+x}}\"' || exit 22\ndone\nexec '{}' \"$@\"\n",
             ADAPTER
         ),
+        0o700,
     )?;
-    std::fs::set_permissions(&adapter, std::fs::Permissions::from_mode(0o700))?;
     let mut host = credentials.command(&["worklet", "--control-plane", &public]);
     host.arg("--adapter")
         .arg(&adapter)

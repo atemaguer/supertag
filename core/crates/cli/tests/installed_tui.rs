@@ -1,12 +1,14 @@
 //! `supertag tui` and plain `supertag` start the terminal UI installed beside the CLI: through
 //! an installed command link, with the release's version, passing only `--gateway` and
 //! `--state-directory` and the CLI's own path, never a credential.
+#[path = "../../../test-support/executables.rs"]
+mod executables;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 
 use std::{
     fs,
-    os::unix::fs::{PermissionsExt, symlink},
+    os::unix::fs::symlink,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
 };
@@ -18,7 +20,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// A stand-in terminal UI that reports this release's version (or `version`) and prints its
 /// name, arguments, and the variables the launcher sets or passes through.
 fn fixture(path: &Path, name: &str, version: &str) -> Result<()> {
-    fs::write(
+    executables::write_executable(
         path,
         format!(
             "#!/bin/sh\nif [ \"$1\" = --version ]; then printf '%s\\n' '{version}'; exit 0; fi\n\
@@ -26,8 +28,8 @@ fn fixture(path: &Path, name: &str, version: &str) -> Result<()> {
              printf 'cli=%s\\n' \"$SUPERTAG_CLI\"\nprintf 'notify=%s\\n' \"$SUPERTAG_TUI_NOTIFY\"\n\
              exit 7\n"
         ),
+        0o755,
     )?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755))?;
     Ok(())
 }
 
@@ -48,7 +50,11 @@ fn install() -> Result<Install> {
     fs::create_dir_all(&release)?;
     fs::create_dir(&bin)?;
     fs::create_dir(&home)?;
-    fs::copy(env!("CARGO_BIN_EXE_supertag"), release.join("supertag"))?;
+    executables::copy_executable(
+        Path::new(env!("CARGO_BIN_EXE_supertag")),
+        &release.join("supertag"),
+        0o755,
+    )?;
     let command = bin.join("supertag");
     symlink(release.join("supertag"), &command)?;
     Ok(Install {
@@ -204,7 +210,11 @@ fn the_real_terminal_ui_starts_through_the_installed_command() -> Result<()> {
         return Ok(());
     };
     let install = install()?;
-    fs::copy(&binary, install.release.join("supertag-tui"))?;
+    executables::copy_executable(
+        Path::new(&binary),
+        &install.release.join("supertag-tui"),
+        0o755,
+    )?;
     let output = run(&install, &["tui"], &[])?;
     assert_eq!(output.status.code(), Some(2), "{output:?}");
     assert!(

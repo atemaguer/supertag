@@ -1,6 +1,8 @@
 //! Real Control Plane and Worklet processes with a provider-shaped OpenCode CLI.
 #[path = "support/children.rs"]
 mod children;
+#[path = "../../../test-support/executables.rs"]
+mod executables;
 use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
@@ -206,8 +208,7 @@ impl Runtime {
         let fixture = directory.join("native-fixture");
         std::fs::create_dir(&fixture)?;
         let native = fixture.join("opencode.mjs");
-        std::fs::write(&native, format!("#!{}\n{NATIVE}", node.display()))?;
-        std::fs::set_permissions(&native, std::fs::Permissions::from_mode(0o700))?;
+        executables::write_executable(&native, format!("#!{}\n{NATIVE}", node.display()), 0o700)?;
         let mut control = credentials.command();
         control
             .arg("control-plane")
