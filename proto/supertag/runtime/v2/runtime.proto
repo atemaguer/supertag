@@ -675,9 +675,9 @@ service AttemptMailbox {
   rpc SendMessage(SendAttemptTagMessageRequest) returns (SendTagMessageResponse);
 }
 
-// What a Mailbox message or Workstream post is for. Questions and blockers wake their recipient
-// sooner than notes. REVIEW marks a commit review request: the Control Plane sets it, and a request
-// that names it is refused.
+// What a Mailbox message is for. Questions and blockers wake their recipient sooner than notes.
+// REVIEW marks a commit review request: the Control Plane sets it, and a request that names it is
+// refused. Workstream posts have no type.
 enum MessageKind {
   // Treated as a note.
   MESSAGE_KIND_UNSPECIFIED = 0;
@@ -1486,7 +1486,6 @@ message HarnessPostWorkstreamRequest {
   string operation_id = 1;
   string body = 2;
   repeated string to_tag_ids = 3;
-  MessageKind kind = 4;
 }
 
 service HarnessMailbox {
@@ -3276,7 +3275,6 @@ message WorkstreamPost {
   string source_task_id = 6;
   uint64 sequence = 7;
   int64 created_at_ms = 8;
-  MessageKind kind = 9;
 }
 
 message ListWorkstreamPostsRequest {
@@ -3310,7 +3308,6 @@ message PostAttemptWorkstreamRequest {
   string operation_id = 2;
   string body = 3;
   repeated string to_tag_ids = 4;
-  MessageKind kind = 5;
 }
 
 message PostAttemptWorkstreamResponse {
@@ -3318,9 +3315,6 @@ message PostAttemptWorkstreamResponse {
   bool duplicate = 2;
   // A pending or denied approval is returned instead of writing a post.
   Approval approval = 3;
-  // Why some addressee was not woken now, such as a wake limit; empty when every addressee was
-  // woken or none needed a wake. The post is stored either way.
-  string wake_deferred = 4;
 }
 
 message GetObjectiveRequest {

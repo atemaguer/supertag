@@ -1,5 +1,5 @@
-//! A Team's Workstream is its channel: typed posts, the default addressee of an unaddressed
-//! question or blocker, and the digest an inbox turn opens with.
+//! A Team's Workstream is its channel and shared record: posts have no type and wake nobody, and
+//! every inbox turn of a member opens with the digest of the posts it has not seen.
 mod support;
 
 use std::sync::{
@@ -74,18 +74,45 @@ async fn finish(store: &Store, host: &HostAuthority, attempt: &InspectAttemptReq
         .unwrap();
 }
 
-fn post(
-    operation: &str,
-    body: &str,
-    kind: MessageKind,
-    to: &[&str],
-) -> PostAttemptWorkstreamRequest {
+fn post(operation: &str, body: &str, to: &[&str]) -> PostAttemptWorkstreamRequest {
     PostAttemptWorkstreamRequest {
         operation_id: operation.into(),
         body: body.into(),
         to_tag_ids: to.iter().map(|id| (*id).into()).collect(),
-        kind: kind.into(),
     }
+}
+
+fn message(
+    operation: &str,
+    to: &str,
+    text: &str,
+    kind: MessageKind,
+) -> SendAttemptTagMessageRequest {
+    SendAttemptTagMessageRequest {
+        operation_id: operation.into(),
+        recipient_tag_id: to.into(),
+        text: text.into(),
+        kind: kind.into(),
+        review: None,
+    }
+}
+
+async fn pending_wakes(store: &Store) -> i64 {
+    store.metrics().await.unwrap().mailbox.unwrap().pending
+}
+
+async fn mailbox(store: &Store, tag: &str) -> Vec<TagMessage> {
+    store
+        .list_mailbox_messages(
+            OPERATOR,
+            &ListMailboxMessagesRequest {
+                tag_id: tag.into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .messages
 }
 
 async fn contract(url: String) {
@@ -131,159 +158,131 @@ async fn contract(url: String) {
     start(&store, &host, &lead).await;
     let as_lead = AttemptAccess::new(&host, &lead);
 
-    // The owner's own unaddressed question names nobody.
+    // Posts have no type and wake nobody, addressed or not.
     let asked = store
-        .post_attempt_workstream(
-            &as_lead,
-            &post("ask", "Which branch ships?", MessageKind::Question, &[]),
-        )
+        .post_attempt_workstream(&as_lead, &post("ask", "Which branch ships?", &[]))
         .await
+        .unwrap()
+        .post
         .unwrap();
-    let asked = asked.post.unwrap();
-    assert_eq!(asked.kind(), MessageKind::Question);
     assert!(asked.to_tag_ids.is_empty());
     assert_eq!(asked.sequence, 1);
-
-    // An unspecified kind is a note; Tags cannot mark a review request or invent a kind.
     let noted = store
         .post_attempt_workstream(
             &as_lead,
-            &post(
-                "note",
-                "Please check the changelog.",
-                MessageKind::Unspecified,
-                &["reviewer"],
-            ),
+            &post("note", "Please check the changelog.", &["reviewer"]),
         )
         .await
+        .unwrap()
+        .post
         .unwrap();
-    assert!(noted.wake_deferred.is_empty());
-    let noted = noted.post.unwrap();
-    assert_eq!(noted.kind(), MessageKind::Note);
     assert_eq!(noted.to_tag_ids, ["reviewer"]);
-    for (operation, kind) in [("review", MessageKind::Review as i32), ("unknown", 99)] {
-        let mut request = post(operation, "Not allowed", MessageKind::Note, &[]);
-        request.kind = kind;
-        assert!(
-            matches!(
-                store.post_attempt_workstream(&as_lead, &request).await,
-                Err(StoreError::InvalidArgument(_))
-            ),
-            "{operation}"
-        );
-    }
-
-    // The kind is part of the operation and of the effect.
-    assert!(matches!(
-        store
-            .post_attempt_workstream(
-                &as_lead,
-                &post(
-                    "note",
-                    "Please check the changelog.",
-                    MessageKind::Decision,
-                    &["reviewer"]
-                ),
-            )
-            .await,
-        Err(StoreError::Conflict(_))
-    ));
     let replay = store
         .post_attempt_workstream(
             &as_lead,
-            &post(
-                "note",
-                "Please check the changelog.",
-                MessageKind::Note,
-                &["reviewer"],
-            ),
+            &post("note", "Please check the changelog.", &["reviewer"]),
         )
         .await
         .unwrap();
     assert!(replay.duplicate);
     assert_eq!(replay.post.as_ref(), Some(&noted));
-    let same_effect = store
-        .post_attempt_workstream(
-            &as_lead,
-            &post(
-                "note-again",
-                "Please check the changelog.",
-                MessageKind::Note,
-                &["reviewer"],
-            ),
-        )
-        .await
-        .unwrap();
-    assert!(same_effect.duplicate);
-    assert_eq!(same_effect.post.as_ref(), Some(&noted));
-    let decided = store
-        .post_attempt_workstream(
-            &as_lead,
-            &post(
-                "decide",
-                "Please check the changelog.",
-                MessageKind::Decision,
-                &["reviewer"],
-            ),
-        )
-        .await
-        .unwrap();
-    assert!(!decided.duplicate);
-    let decided = decided.post.unwrap();
-    assert_eq!(
-        (decided.kind(), decided.sequence),
-        (MessageKind::Decision, 3)
-    );
-    finish(&store, &host, &lead).await;
+    assert!(matches!(
+        store
+            .post_attempt_workstream(
+                &as_lead,
+                &post("note", "Please check the changelog.", &["builder"]),
+            )
+            .await,
+        Err(StoreError::Conflict(_))
+    ));
+    clock.fetch_add(10_000, Ordering::SeqCst);
+    store.sweep_mailbox().await.unwrap();
+    assert_eq!(pending_wakes(&store).await, 0, "a post writes no wake");
+    let addressed = mailbox(&store, "reviewer").await;
+    assert_eq!(addressed.len(), 1);
+    assert_eq!(addressed[0].state(), TagMessageState::Pending);
+    assert_eq!(addressed[0].task_id, None);
 
-    // The reviewer's inbox turn takes the posts addressed to it.
+    // A direct message wakes its recipient, and the turn opens with the Team's digest: the post
+    // addressed to the reviewer first, then the rest, then the message.
+    store
+        .send_attempt_tag_message(
+            &as_lead,
+            &message(
+                "review",
+                "reviewer",
+                "Can you review today?",
+                MessageKind::Question,
+            ),
+        )
+        .await
+        .unwrap();
+    finish(&store, &host, &lead).await;
     clock.fetch_add(10_000, Ordering::SeqCst);
     store.sweep_mailbox().await.unwrap();
     let reviewer = claim_inbox(&store, &host, "reviewer").await;
     start(&store, &host, &reviewer).await;
     let prompt = store.get_task(&reviewer.task_id).await.unwrap().prompt;
-    assert!(prompt.contains("Please check the changelog."), "{prompt}");
+    let positions: Vec<usize> = [
+        "Please check the changelog.",
+        "Which branch ships?",
+        "Can you review today?",
+    ]
+    .iter()
+    .map(|text| {
+        prompt
+            .find(text)
+            .unwrap_or_else(|| panic!("{text}: {prompt}"))
+    })
+    .collect();
+    assert!(
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "{prompt}"
+    );
+    assert!(prompt.contains("to=\"you\""), "{prompt}");
+    assert!(!prompt.contains("via=\"workstream post\""), "{prompt}");
+    assert!(
+        prompt.contains("3 unread messages, 2 address you."),
+        "{prompt}"
+    );
+    assert_eq!(
+        mailbox(&store, "reviewer")
+            .await
+            .iter()
+            .find(|message| message.workstream_post_id.is_some())
+            .unwrap()
+            .state(),
+        TagMessageState::Handled,
+        "a digest showed the addressed post"
+    );
     let as_reviewer = AttemptAccess::new(&host, &reviewer);
 
-    // From an inbox turn, an unaddressed note goes nowhere, and an unaddressed blocker goes to the
-    // owner of the Objective the turn's messages came from.
+    // An unaddressed post from an inbox turn goes to nobody: no Objective owner is woken.
     let evidence = store
         .post_attempt_workstream(
             &as_reviewer,
-            &post(
-                "evidence",
-                "The changelog lists every fix.",
-                MessageKind::Evidence,
-                &[],
-            ),
+            &post("evidence", "The release notes are missing.", &[]),
         )
         .await
         .unwrap()
         .post
         .unwrap();
-    assert_eq!(evidence.kind(), MessageKind::Evidence);
     assert!(evidence.to_tag_ids.is_empty());
-    let blocked = store
-        .post_attempt_workstream(
+    store
+        .send_attempt_tag_message(
             &as_reviewer,
-            &post(
+            &message(
                 "blocked",
-                "The release notes are missing.",
+                "lead",
+                "Blocked on the release notes.",
                 MessageKind::Blocker,
-                &[],
             ),
         )
         .await
-        .unwrap()
-        .post
         .unwrap();
-    assert_eq!(blocked.kind(), MessageKind::Blocker);
-    assert_eq!(blocked.to_tag_ids, ["lead"]);
     finish(&store, &host, &reviewer).await;
 
-    // The owner's inbox turn shows the blocker that woke it, and a digest of the other unread
-    // posts, without its own.
-    clock.fetch_add(10_000, Ordering::SeqCst);
+    // The owner's next inbox turn shows only what it has not seen: not its own posts.
     store.sweep_mailbox().await.unwrap();
     let owner = claim_inbox(&store, &host, "lead").await;
     start(&store, &host, &owner).await;
@@ -292,15 +291,31 @@ async fn contract(url: String) {
         prompt.contains("The release notes are missing."),
         "{prompt}"
     );
-    assert!(
-        prompt.contains("The changelog lists every fix."),
-        "{prompt}"
-    );
-    assert!(prompt.contains("type=\"evidence\""), "{prompt}");
+    assert!(prompt.contains("Blocked on the release notes."), "{prompt}");
+    assert!(prompt.contains("type=\"blocker\""), "{prompt}");
     assert!(!prompt.contains("Which branch ships?"), "{prompt}");
+    let as_owner = AttemptAccess::new(&host, &owner);
+    store
+        .send_attempt_tag_message(
+            &as_owner,
+            &message("thanks", "reviewer", "Writing them now.", MessageKind::Note),
+        )
+        .await
+        .unwrap();
     finish(&store, &host, &owner).await;
 
-    // Reads and the Objective overview carry each post's kind.
+    // Every inbox turn has a digest of what is new since the last one, even when no post woke it.
+    clock.fetch_add(10_000, Ordering::SeqCst);
+    store.sweep_mailbox().await.unwrap();
+    let again = claim_inbox(&store, &host, "reviewer").await;
+    start(&store, &host, &again).await;
+    let prompt = store.get_task(&again.task_id).await.unwrap().prompt;
+    assert!(prompt.contains("Writing them now."), "{prompt}");
+    assert!(!prompt.contains("Please check the changelog."), "{prompt}");
+    assert!(!prompt.contains("<workstream-post"), "{prompt}");
+    finish(&store, &host, &again).await;
+
+    // Reads and the Objective overview show each post's addressees.
     let page = store
         .list_workstream_posts(
             OPERATOR,
@@ -315,15 +330,9 @@ async fn contract(url: String) {
     assert_eq!(
         page.posts
             .iter()
-            .map(|post| (post.sequence, post.kind()))
+            .map(|post| (post.sequence, post.to_tag_ids.clone()))
             .collect::<Vec<_>>(),
-        [
-            (1, MessageKind::Question),
-            (2, MessageKind::Note),
-            (3, MessageKind::Decision),
-            (4, MessageKind::Evidence),
-            (5, MessageKind::Blocker),
-        ]
+        [(1, vec![]), (2, vec!["reviewer".to_owned()]), (3, vec![]),]
     );
     let overview = store
         .objective_overview(
@@ -339,15 +348,9 @@ async fn contract(url: String) {
         overview
             .posts
             .iter()
-            .map(|post| (post.sequence, post.kind(), post.to_tag_ids.clone()))
+            .map(|post| (post.sequence, post.to_tag_ids.clone()))
             .collect::<Vec<_>>(),
-        [
-            (1, MessageKind::Question, vec![]),
-            (2, MessageKind::Note, vec!["reviewer".to_owned()]),
-            (3, MessageKind::Decision, vec!["reviewer".to_owned()]),
-            (4, MessageKind::Evidence, vec![]),
-            (5, MessageKind::Blocker, vec!["lead".to_owned()]),
-        ]
+        [(1, vec![]), (2, vec!["reviewer".to_owned()]), (3, vec![]),]
     );
     store.close().await;
 }

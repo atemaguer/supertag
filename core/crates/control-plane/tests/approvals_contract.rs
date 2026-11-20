@@ -55,7 +55,6 @@ async fn start(store: &Store, host: &HostAuthority, attempt: &InspectAttemptRequ
 }
 fn post(operation: &str, body: &str) -> PostAttemptWorkstreamRequest {
     PostAttemptWorkstreamRequest {
-        kind: 0,
         operation_id: operation.into(),
         body: body.into(),
         to_tag_ids: vec![],

@@ -135,8 +135,8 @@ pub(crate) struct DirectMessage {
     kind: MessageType,
 }
 
-/// What a post or direct message is for: the `type` field of `post` and `send_message`. Questions
-/// and blockers wake their recipient sooner than notes.
+/// What a direct message is for: the `type` field of `send_message`. Questions and blockers wake
+/// their recipient sooner than notes. Workstream posts have no type.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum MessageType {
@@ -280,8 +280,6 @@ pub(crate) struct Post {
     text: String,
     #[serde(default)]
     to: Vec<String>,
-    #[serde(default, rename = "type")]
-    kind: MessageType,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -478,16 +476,22 @@ pub(crate) fn close_arguments(params: &Value) -> Result<Option<String>> {
     Ok(Some(close.session_id))
 }
 
+const POST_DESCRIPTION: &str = "Record progress, findings, or a decision in the Team Workstream, the Team's shared record. A post wakes nobody: every member sees it at the start of its next inbox turn. Optional Tag IDs in to mark the post as addressed to them. A pending approval requires ending the turn and waiting for a decision.";
+
 pub(crate) fn tool_specs(inventory: Inventory) -> Vec<Value> {
     let mut tools = vec![json!({
         "type":"function", "name":"post",
-        "description":"Post progress to the Team Workstream. Optional Tag IDs in to wake their Mailboxes. Optional type: note (default), question, blocker, evidence, or decision; an unaddressed question or blocker goes to the Objective's owner Tag. A pending approval requires ending the turn and waiting for a decision.",
+        "description":POST_DESCRIPTION,
         "inputSchema":{"type":"object","properties":{
             "text":{"type":"string","minLength":1,"maxLength":16384},
-            "to":{"type":"array","items":{"type":"string"},"maxItems":20},
-            "type":{"type":"string","enum":MESSAGE_TYPES}
+            "to":{"type":"array","items":{"type":"string"},"maxItems":20}
         },"required":["text"],"additionalProperties":false}
     })];
+    if inventory >= Inventory::Direct {
+        tools[0]["description"] = json!(format!(
+            "{POST_DESCRIPTION} To ask a question or raise a blocker, send a direct message with send_message instead."
+        ));
+    }
     for (name, description) in [
         (
             "read_workstream",
@@ -513,7 +517,7 @@ pub(crate) fn tool_specs(inventory: Inventory) -> Vec<Value> {
     if inventory >= Inventory::Direct {
         let mut send = json!({
             "type":"function", "name":"send_message",
-            "description":"Send a private message to another Tag. A pending approval requires ending the turn and waiting for a decision.",
+            "description":"Send a private message to another Tag; it wakes the Tag for a turn of its own. Use it to ask a question (type question) or raise a blocker (type blocker); a note is the default. Record progress and decisions with post instead. A pending approval requires ending the turn and waiting for a decision.",
             "inputSchema":{"type":"object","properties":{
                 "to":{"type":"string","minLength":1,"maxLength":256},
                 "text":{"type":"string","minLength":1,"maxLength":8000},
@@ -522,7 +526,7 @@ pub(crate) fn tool_specs(inventory: Inventory) -> Vec<Value> {
         });
         if inventory.supports_reviews() {
             send["description"] = json!(
-                "Send a private message that another Tag handles in a later turn of its own. At most 3 new messages per Task. To request review, provide the full delivered commit hash. To record a verdict, provide the review request ID and verdict. A pending approval requires ending the turn and waiting for a decision."
+                "Send a private message that another Tag handles in a later turn of its own; it wakes the Tag. Use it to ask a question (type question) or raise a blocker (type blocker); a note is the default. Record progress and decisions with post instead. At most 3 new messages per Task. To request review, provide the full delivered commit hash. To record a verdict, provide the review request ID and verdict. A pending approval requires ending the turn and waiting for a decision."
             );
             send["inputSchema"]["properties"]["review"] = json!({
                 "type":"object", "additionalProperties":false, "properties":{
@@ -818,11 +822,9 @@ impl Client {
         let post = Post {
             text: crate::auth::redact(post.text.clone(), secrets),
             to: post.to.clone(),
-            kind: post.kind,
         };
         let effect = PendingEffect::Post(post.clone());
         let input = HarnessPostWorkstreamRequest {
-            kind: post.kind.wire().into(),
             operation_id,
             body: post.text.clone(),
             to_tag_ids: post.to.clone(),
@@ -841,25 +843,15 @@ impl Client {
         };
         match (result.post, result.approval) {
             (Some(posted), None) => {
-                // An unaddressed question or blocker may go to the Objective's owner Tag.
-                let addressed = posted.to_tag_ids == post.to
-                    || (post.to.is_empty()
-                        && matches!(post.kind, MessageType::Question | MessageType::Blocker)
-                        && posted.to_tag_ids.len() == 1);
                 ensure!(
                     posted.source_task_id == task_id
                         && posted.body == post.text
-                        && addressed
-                        && same_kind(posted.kind(), post.kind)
+                        && posted.to_tag_ids == post.to
                         && !posted.post_id.is_empty(),
                     "Workstream receipt has mismatched identity or content"
                 );
                 self.pending.remove(&effect);
-                let mut output = json!({"postId":posted.post_id,"sequence":posted.sequence.to_string(),"duplicate":result.duplicate});
-                if !result.wake_deferred.is_empty() {
-                    output["wakeDeferred"] =
-                        json!(crate::auth::redact(result.wake_deferred, secrets));
-                }
+                let output = json!({"postId":posted.post_id,"sequence":posted.sequence.to_string(),"duplicate":result.duplicate});
                 Ok(response(output.to_string(), true))
             }
             (None, Some(approval)) if approval.state() == ApprovalState::Pending => {
@@ -1124,7 +1116,7 @@ impl Client {
             "Workstream history belongs to a different Team"
         );
         let posts = page.posts.into_iter().map(|post| json!({
-            "id":post.post_id,"sequence":post.sequence.to_string(),"type":type_name(post.kind()),
+            "id":post.post_id,"sequence":post.sequence.to_string(),
             "author":post.author_tag_id,"to":post.to_tag_ids,"body":crate::auth::redact(post.body,secrets)
         })).collect::<Vec<_>>();
         Ok(history(

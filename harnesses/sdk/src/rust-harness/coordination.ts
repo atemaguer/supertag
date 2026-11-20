@@ -71,7 +71,8 @@ function nonblankText(limit: number) {
 
 const limit = z.number().int().min(1).max(16).optional();
 const cursor = z.string().min(1).max(256).optional();
-// What a post or direct message is for; questions and blockers wake their recipient sooner.
+// What a direct message is for; questions and blockers wake their recipient sooner. Workstream
+// posts have no type.
 const messageTypes = ["note", "question", "blocker", "evidence", "decision"] as const;
 const messageType = z.enum(messageTypes);
 const messageKinds: Record<(typeof messageTypes)[number], MessageKind> = {
@@ -179,7 +180,6 @@ const schemas = {
   post: z.strictObject({
     text: nonblankText(16_384),
     to: z.array(tagId).min(1).max(20).optional(),
-    type: messageType.optional(),
   }),
   read_workstream: z
     .strictObject({ afterSequence, limit, cursor })
@@ -996,22 +996,24 @@ export function registerCoordinationTools(
     server.registerTool(
       "post",
       {
-        description:
-          "Post to the Team Workstream. Optionally address member Tag IDs so they receive the post in their Mailboxes. Optionally give a type: note (the default), question, blocker, evidence, or decision. An unaddressed question or blocker goes to the Objective's owner Tag.",
+        description: `Record progress, findings, or a decision in the Team Workstream, the Team's shared record. A post wakes nobody: every member sees it at the start of its next inbox turn. Optionally address member Tag IDs to mark the post as addressed to them.${
+          run.coordination.maySendTagMessage
+            ? " To ask a question or raise a blocker, send a direct message with send_message instead."
+            : ""
+        }`,
         inputSchema: schemas.post,
         _meta: meta,
       },
-      ({ text, to, type }, tool) =>
+      ({ text, to }, tool) =>
         write(async () => {
           if (asked)
             return response("Finish this turn and wait for the Objective answer first.", true);
           const body = trim(safeText(text));
-          if (!schemas.post.safeParse({ text: body, to, type }).success)
+          if (!schemas.post.safeParse({ text: body, to }).success)
             return response("Provide valid Workstream post text.", true);
           const toTagIds = [...new Set(to ?? [])].sort();
-          const kind = messageKind(type);
           const operationId = `claude-workstream:${createHash("sha256")
-            .update(JSON.stringify([body, toTagIds, type ?? "note"]))
+            .update(JSON.stringify([body, toTagIds]))
             .digest("hex")}`;
           if (!pending.has(operationId) && pending.size >= MAX_PENDING_APPROVALS)
             return response(
@@ -1019,20 +1021,15 @@ export function registerCoordinationTools(
               true,
             );
           try {
-            const { post, approval, duplicate, wakeDeferred } = await call(tool.signal, (config) =>
-              workstreams.post({ operationId, body, toTagIds, kind }, config),
+            const { post, approval, duplicate } = await call(tool.signal, (config) =>
+              workstreams.post({ operationId, body, toTagIds }, config),
             );
             if (
               post?.postId &&
               post.sourceTaskId === scope.taskId &&
               post.authorTagId === scope.tagId &&
               post.body === body &&
-              sameKind(post.kind, kind) &&
-              // An unaddressed question or blocker may go to the Objective's owner Tag.
-              ([...post.toTagIds].sort().join("\0") === toTagIds.join("\0") ||
-                (toTagIds.length === 0 &&
-                  (kind === MessageKind.QUESTION || kind === MessageKind.BLOCKER) &&
-                  post.toTagIds.length === 1))
+              [...post.toTagIds].sort().join("\0") === toTagIds.join("\0")
             ) {
               pending.delete(operationId);
               return response(
@@ -1041,7 +1038,6 @@ export function registerCoordinationTools(
                   postId: post.postId,
                   sequence: post.sequence.toString(),
                   duplicate,
-                  ...(wakeDeferred ? { wakeDeferred: safeText(wakeDeferred) } : {}),
                 }),
               );
             }
@@ -1104,7 +1100,6 @@ export function registerCoordinationTools(
                 id: post.postId,
                 from: post.authorTagId,
                 to: post.toTagIds,
-                type: kindName(post.kind),
                 sequence: post.sequence.toString(),
                 text: safeText(post.body),
               })),
@@ -1212,7 +1207,7 @@ export function registerCoordinationTools(
       "send_message",
       {
         description:
-          "Send a private message that another Tag handles in a later turn of its own. At most 3 new messages per Task. Optionally give a type: note (the default), question, blocker, evidence, or decision. To request review, provide the full delivered commit hash. To record a verdict, provide the review request ID and verdict. If approval is pending, finish this turn and wait for the decision.",
+          "Send a private message that another Tag handles in a later turn of its own; it wakes the Tag. To ask a question or raise a blocker, give the type question or blocker; the type may also be note (the default), evidence, or decision. Record progress and decisions with post instead. At most 3 new messages per Task. To request review, provide the full delivered commit hash. To record a verdict, provide the review request ID and verdict. If approval is pending, finish this turn and wait for the decision.",
         inputSchema: schemas.send_message,
         _meta: meta,
       },

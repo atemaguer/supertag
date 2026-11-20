@@ -1,6 +1,7 @@
 //! Wake rows: which Tag must take an inbox turn for which messages. A pending wake (no Task yet)
 //! is coalesced per Tag and conversation, so a burst of messages makes one turn; the inbox Task
-//! that delivers it binds the wake and records the seqs it delivered.
+//! that delivers it binds the wake and records the seqs it delivered. Only direct messages wake a
+//! Tag: a Workstream post wakes nobody and reaches its members in the digest of their next turn.
 //!
 //! Only Tags' messages come through here, so only they count toward the wake limits: mutual wakes
 //! per pair of Tags per originating Task, and Tag-originated wakes per woken Tag and per Objective
@@ -13,15 +14,14 @@ use sqlx::{Any, Transaction};
 use supertag_protocol::v2::MessageKind;
 use uuid::Uuid;
 
-use super::ConversationKind;
 use crate::{StoreError, store::Result};
 
 /// A message continues a chain through at most this many inboxes.
 pub(crate) const MAX_HOPS: i64 = 4;
 
-/// `supertag_v2_wakes.reasons` bits.
+/// `supertag_v2_wakes.reasons` bits. Bit 2 was an addressed Workstream post's; posts no longer
+/// wake.
 pub(crate) const REASON_DIRECT: i64 = 1;
-pub(crate) const REASON_ADDRESSED: i64 = 2;
 pub(crate) const REASON_QUESTION: i64 = 4;
 pub(crate) const REASON_BLOCKER: i64 = 8;
 pub(crate) const REASON_REVIEW: i64 = 16;
@@ -47,11 +47,9 @@ pub(crate) const LIMIT_PAIR: i64 = 3;
 pub(crate) struct WakeRequest<'a> {
     /// The Tag to wake.
     pub tag_id: &'a str,
+    /// The direct conversation the message is in.
     pub conversation_id: &'a str,
-    pub kind: ConversationKind,
     pub message_kind: MessageKind,
-    /// The message names the Tag (a post's `to`).
-    pub addressed: bool,
     pub sender_tag_id: &'a str,
     pub seq: i64,
     pub hops: i64,
@@ -72,25 +70,13 @@ pub(crate) struct WakeOutcome {
 
 /// The reason bits and priority of a wake for one message.
 pub(crate) fn reasons_and_priority(request: &WakeRequest<'_>) -> (i64, i64) {
-    let mut reasons = 0;
-    if request.kind == ConversationKind::Direct {
-        reasons |= REASON_DIRECT;
-    }
-    if request.addressed {
-        reasons |= REASON_ADDRESSED;
-    }
     let (bit, priority) = match request.message_kind {
         MessageKind::Question => (REASON_QUESTION, 2),
         MessageKind::Blocker => (REASON_BLOCKER, 3),
         MessageKind::Review => (REASON_REVIEW, 2),
         _ => (0, 1),
     };
-    // A wake always has a reason; an unaddressed channel message wakes as addressed.
-    reasons |= bit;
-    if reasons == 0 {
-        reasons = REASON_ADDRESSED;
-    }
-    (reasons, priority)
+    (REASON_DIRECT | bit, priority)
 }
 
 /// The word a sender's notice uses for the message.

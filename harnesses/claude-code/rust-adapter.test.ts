@@ -302,7 +302,6 @@ async function invoke({
                     teamId: request.cursor === "s7" ? "other-team" : "engineering",
                     authorTagId: "lead",
                     sequence: 6n,
-                    kind: MessageKind.BLOCKER,
                     body: `Untrusted Workstream text ${providerSecret}`,
                   },
                 ],
@@ -327,7 +326,6 @@ async function invoke({
                   sourceTaskId: "task",
                   body: request.body,
                   toTagIds: request.toTagIds,
-                  kind: request.kind,
                 },
               };
             }
@@ -1367,8 +1365,7 @@ it("runs scoped Workstream and Mailbox tools in the real SDK and stages only the
     expect(request.body).toBe("Pending post [REDACTED]");
     expect(request.toTagIds).toEqual(["builder", "lead"]);
   }
-  for (const request of run.posts.slice(0, 3)) expect(request.kind).toBe(MessageKind.NOTE);
-  expect(run.posts.at(-1)).toMatchObject({ body: "Confirmed post", kind: MessageKind.DECISION });
+  expect(run.posts.at(-1)).toMatchObject({ body: "Confirmed post" });
   expect(run.completions).toHaveLength(2);
   expect(run.completions[0]).toEqual(run.completions[1]);
   expect(run.completions[0]?.waitingApprovalIds).toEqual(["approval-1"]);

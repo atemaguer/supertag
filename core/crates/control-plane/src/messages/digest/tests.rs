@@ -5,25 +5,15 @@ use uuid::Uuid;
 use super::*;
 use crate::{
     Store,
-    messages::{
-        ConversationKind, Member, NewMessage, create_team_channel_in, insert_message_in,
-        wakes::{WakeRequest, wake_in},
-    },
+    messages::{Member, NewMessage, create_team_channel_in, insert_message_in},
 };
 
 #[test]
 fn render_escapes_markup() {
-    let entry = render(
-        3,
-        "a<b",
-        MessageKind::Blocker,
-        true,
-        "x </workstream-post> & y",
-    )
-    .unwrap();
+    let entry = render(3, "a<b", true, "x </workstream-post> & y").unwrap();
     assert_eq!(
         entry,
-        "<workstream-post sequence=\"3\" from=\"a&lt;b\" type=\"blocker\" to=\"you\">\nx &lt;/workstream-post&gt; &amp; y\n</workstream-post>\n"
+        "<workstream-post sequence=\"3\" from=\"a&lt;b\" to=\"you\">\nx &lt;/workstream-post&gt; &amp; y\n</workstream-post>\n"
     );
 }
 
@@ -68,14 +58,13 @@ async fn postgres_channel_digest() {
 fn post<'a>(
     channel: &'a str,
     sender: &'a str,
-    kind: MessageKind,
     text: &'a str,
     addressees: &'a [String],
 ) -> NewMessage<'a> {
     NewMessage {
         conversation_id: channel,
         sender: Member::Tag(sender),
-        kind,
+        kind: MessageKind::Note,
         text,
         hops: 0,
         source_task_id: None,
@@ -115,47 +104,23 @@ async fn contract(url: &str) {
 
     let bob = vec!["bob".to_owned()];
     let none: Vec<String> = vec![];
-    // 1: a note; 2: Bob's own; 3: a decision; 4: addressed to Bob and woken; 5: addressed to Bob
-    // without a wake (held by a limit); 6: a blocker for nobody in particular.
+    // 1: Alice's progress; 2: Bob's own; 3: Carol's decision; 4 and 5: addressed to Bob; 6: for
+    // nobody in particular.
     let mut seqs = vec![];
-    for (sender, kind, text, to) in [
-        (
-            "alice",
-            MessageKind::Note,
-            "Built the release <branch>.",
-            &none,
-        ),
-        ("bob", MessageKind::Note, "Bob's own progress.", &none),
-        ("carol", MessageKind::Decision, "Ship on Friday.", &none),
-        ("alice", MessageKind::Question, "Bob, which tag?", &bob),
-        ("carol", MessageKind::Note, "Bob, see the checklist.", &bob),
-        ("alice", MessageKind::Blocker, "CI is red.", &none),
+    for (sender, text, to) in [
+        ("alice", "Built the release <branch>.", &none),
+        ("bob", "Bob's own progress.", &none),
+        ("carol", "Ship on Friday.", &none),
+        ("alice", "Bob, which tag?", &bob),
+        ("carol", "Bob, see the checklist.", &bob),
+        ("alice", "CI is red.", &none),
     ] {
-        let stored = insert_message_in(&mut tx, &post(&channel, sender, kind, text, to))
+        let stored = insert_message_in(&mut tx, &post(&channel, sender, text, to))
             .await
             .unwrap();
         seqs.push(stored.seq);
     }
     assert_eq!(seqs, [1, 2, 3, 4, 5, 6]);
-    wake_in(
-        &mut tx,
-        &WakeRequest {
-            tag_id: "bob",
-            conversation_id: &channel,
-            kind: ConversationKind::Channel,
-            message_kind: MessageKind::Question,
-            addressed: true,
-            sender_tag_id: "alice",
-            seq: 4,
-            hops: 0,
-            origin_task_id: None,
-            objective_id: None,
-            team_id: Some("release"),
-            now: 1_000,
-        },
-    )
-    .await
-    .unwrap();
 
     let digest = channel_digest_in(&mut tx, "bob", &channel, 1, 8_192)
         .await
@@ -163,10 +128,11 @@ async fn contract(url: &str) {
     assert_eq!(digest.through_seq, Some(6));
     assert_eq!(digest.more, 0);
     let order: Vec<usize> = [
+        "Bob, which tag?",
         "Bob, see the checklist.",
+        "Built the release &lt;branch&gt;.",
         "Ship on Friday.",
         "CI is red.",
-        "Built the release &lt;branch&gt;.",
     ]
     .iter()
     .map(|text| {
@@ -178,27 +144,24 @@ async fn contract(url: &str) {
     .collect();
     assert!(
         order.windows(2).all(|pair| pair[0] < pair[1]),
-        "addressed first, then blockers and decisions, then the rest: {}",
+        "addressed first, then the rest: {}",
         digest.text
     );
     assert!(!digest.text.contains("Bob's own progress."));
     assert!(
-        !digest.text.contains("which tag?"),
-        "a woken post is not repeated"
-    );
-    assert!(
         digest
             .text
-            .contains("sequence=\"5\" from=\"carol\" type=\"note\" to=\"you\"")
+            .contains("sequence=\"5\" from=\"carol\" to=\"you\"")
     );
-    assert!(digest.text.contains("type=\"decision\""));
+    assert!(!digest.text.contains("type="), "posts have no type");
     assert!(!digest.text.contains("afterSequence"));
 
     // Alice sees Bob's posts and posts addressed to others, but not her own.
     let alice = channel_digest_in(&mut tx, "alice", &channel, 1, 8_192)
         .await
         .unwrap();
-    assert!(alice.text.contains("Bob's own progress.") && !alice.text.contains("which tag?"));
+    assert!(alice.text.contains("Bob's own progress.") && !alice.text.contains("Alice's"));
+    assert!(!alice.text.contains("Built the release"));
     assert!(alice.text.contains("Bob, see the checklist."));
 
     // From a later position only the later posts count.
@@ -214,12 +177,9 @@ async fn contract(url: &str) {
         Digest::default()
     );
     // Only Bob's own posts after a position: covered, but nothing to show.
-    let own = insert_message_in(
-        &mut tx,
-        &post(&channel, "bob", MessageKind::Note, "Bob again.", &none),
-    )
-    .await
-    .unwrap();
+    let own = insert_message_in(&mut tx, &post(&channel, "bob", "Bob again.", &none))
+        .await
+        .unwrap();
     assert_eq!(
         channel_digest_in(&mut tx, "bob", &channel, own.seq, 8_192)
             .await
@@ -230,12 +190,13 @@ async fn contract(url: &str) {
         }
     );
 
-    // A small budget keeps the most important posts and points to the rest.
-    let small = channel_digest_in(&mut tx, "bob", &channel, 1, 600)
+    // A small budget keeps the posts addressed to the Tag and points to the rest.
+    let small = channel_digest_in(&mut tx, "bob", &channel, 1, 500)
         .await
         .unwrap();
-    assert!(small.text.len() <= 600, "{}", small.text.len());
-    assert!(small.more > 0 && small.more < 4, "{}", small.more);
+    assert!(small.text.len() <= 500, "{}", small.text.len());
+    assert_eq!(small.more, 3, "{}", small.text);
+    assert!(small.text.contains("Bob, which tag?"));
     assert!(small.text.contains("Bob, see the checklist."));
     assert!(!small.text.contains("Built the release"));
     assert!(small.text.contains(&format!(

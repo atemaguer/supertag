@@ -542,7 +542,6 @@ async fn objective_overview(store: &Store, host: &HostAuthority, clock: &AtomicI
         .post_attempt_workstream(
             &supertag_control_plane::AttemptAccess::new(host, &turn),
             &PostAttemptWorkstreamRequest {
-                kind: 0,
                 operation_id: "post".into(),
                 body: "Exporter handed to helper.".into(),
                 to_tag_ids: vec!["helper".into()],

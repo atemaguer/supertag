@@ -46,14 +46,13 @@ whole system rather than another first-class resource.
   start work Sessions of its members. See [Teams](coordination.md#teams).
 - <a id="workstream"></a>**Workstream** — a Team's shared record of posts. Every member reads it. See
   [Workstream](coordination.md#workstream).
-- <a id="post"></a>**post** — one append-only entry in a Team's Workstream. It is plain text with a
-  type (note, question, blocker, evidence, or decision) and carries no authority. Each Tag it
-  addresses receives it in that Tag's Mailbox; an unaddressed question or blocker goes to the
-  Objective's owner Tag, and other members see it in a digest the next time the Workstream wakes
-  them. See
+- <a id="post"></a>**post** — one append-only entry in a Team's Workstream. It is plain text with
+  no type, carries no authority, and wakes nobody. Every member sees it in the digest that opens
+  its next inbox turn, and the Tags it addresses see it first. See
   [Share progress in a Workstream](../guides/workstreams.md).
 - <a id="mailbox"></a>**Mailbox** — a Tag's inbox for plain-text messages from other Tags. Each
-  message has the same types as a post. Everything waiting when a turn starts is handled together
+  message has a type: note, question, blocker, evidence, or decision. A message wakes its
+  recipient, within the wake limits. Everything waiting when a turn starts is handled together
   in that turn, and a message counts as seen once a turn takes it. See
   [Mailbox](coordination.md#mailbox).
 - <a id="wake-limit"></a>**wake limit** — a cap on how often Tags wake one another: by default 3

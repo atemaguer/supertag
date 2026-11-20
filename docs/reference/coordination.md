@@ -29,8 +29,9 @@ Other terms used here are defined in the glossary: [Role](glossary.md#role),
 Three rules cover every exchange in SuperTag.
 
 1. **Delivery is a Task.** A person's message, a work Session's result, a Mailbox message, an
-   addressed Workstream post, an answer and an approval decision all arrive the same way: as the
-   next Task of one Session of the recipient Tag, carrying who it is from.
+   answer and an approval decision all arrive the same way: as the next Task of one Session of
+   the recipient Tag, carrying who it is from. A Workstream post starts no Task; members see it
+   at the start of their next inbox turn.
 2. **One wait state.** A Task ends done or waiting. `ask` waits on an answer; a gated action waits
    on an approval. The reply arrives as that Session's next Task.
 3. **One address rule.** A work Session may address only the Session that started it. A Tag's
@@ -797,7 +798,8 @@ waiting when a turn starts is handled together in that one turn.
   commit review request or verdict to an Objective.
 - A message has a `type`: `note` (the default), `question`, `blocker`, `evidence`, or `decision`.
   A Tag cannot send `review`: the Control Plane gives that type to a commit review request.
-  `TagMessage.kind` carries the type.
+  `TagMessage.kind` carries the type. To ask a question or raise a blocker, a Tag sends a
+  message; a Workstream post has no type and wakes nobody.
 - `send_message {to, text, type?}` is allowed from a Tag's conversations, its Objectives' conversations
   and its own inbox turns. A work Session cannot send: its result reaches the Session that started
   it.
@@ -822,8 +824,9 @@ The turn takes the recipient's due wakes when it starts, the most urgent first: 
 questions and review requests, then the rest. From each woken conversation it takes every message
 to the Tag since the last turn's, and it adds direct messages a [wake limit](#wake-limits) held
 back. It takes at most 16 messages; the rest become the next turn. The turn's prompt opens with a
-count such as `3 unread messages, 2 address you.` and marks each message with its sender, `type`,
-and whether it came as a direct message or a Workstream post. A message counts as seen once a
+count such as `3 unread messages, 2 address you.`, then the [Workstream digest](#workstream) of
+each of the Tag's Teams, then the messages, each marked with its sender and `type`. The count
+includes the unread posts and the posts that address the Tag. A message counts as seen once a
 turn takes it; Tags send no read receipts.
 
 A message that arrives between the claim and the binding is not lost: the turn takes it if its
@@ -839,8 +842,6 @@ its final reply in the Session. Answering a sender takes another `send_message`.
 - A chain of messages may pass through at most **4** inbox turns. A message sent from an inbox turn
   carries one more hop than the messages that turn handled; above the limit the call returns 409
   and tells the Tag to answer in its reply instead.
-- Posts addressed with `post {to}` deliver messages too, and those do not count against the
-  per-Task send limit.
 
 ### Wake limits
 
@@ -856,8 +857,8 @@ the recipient has no wake waiting already. Messages from people never count.
 The originating Task is the sending Task, or for an inbox turn and its approval continuations,
 the Task that started the chain it continues. A Team overrides the limits with
 `spec.wakeLimits` (`mutualPerTask`, `perTagPerHour`, `perObjectivePerHour`, each 0 to 1,000;
-0 allows no wake). A Workstream post uses its Team's limits and a direct message the limits of
-its sender's Workstream Team; otherwise the defaults apply.
+0 allows no wake). A message uses the limits of its sender's Workstream Team; otherwise the
+defaults apply.
 
 Over a limit, the message is stored and never dropped:
 
@@ -893,8 +894,10 @@ the Tag is behind. Questions, blockers, and review requests always get one.
 ### Status and history
 
 A message's status is the status of the inbox turn that took it: `pending` until a turn takes
-it, then `handled` when that Task completed, or `failed` when it failed or was cancelled. A post
-addressed to several Tags has one status per addressee.
+it, then `handled` when that Task completed, or `failed` when it failed or was cancelled. The
+Mailbox also lists the Workstream posts that address the Tag. Such a post is `pending` until a
+digest shows it to the Tag, then `handled`, and no turn holds it. A post addressed to several Tags
+has one status per addressee.
 
 `supertag get message --mailbox TAG [--limit N]` lists the messages a Tag sent and received,
 newest first, with a cursor for older pages. The Tag reads its own Mailbox with `read_mailbox`.
@@ -911,23 +914,24 @@ due, and a Worker Host holding a claim takes that turn at once.
 
 A Team's Workstream is its shared record of posts. Every member can read it, and every post stays.
 
-- `post {text, to?, type?}` adds one post, with the same types as a message. Each Tag named in
-  `to` must be a Team member, receives the post in its Mailbox, and is woken as for a message.
-  A `question` or `blocker` without `to` wakes the owner of the post's Objective. Other posts wake
-  nobody. Posts count against the Team's [wake limits](#wake-limits).
+- `post {text, to?}` adds one post. A post has no type and wakes nobody, so it never counts
+  against a [wake limit](#wake-limits). Each Tag named in `to` must be a Team member; it gets one
+  more mention and sees the post first in its next digest. To ask a question or raise a blocker,
+  send a message instead.
 - The Team is the Objective's Team for an Objective's turn, and otherwise the Tag's only Team. A
   Tag in several Teams gets 409 listing them; a Tag in none gets 409 saying so.
 - A post body holds 1 to 16,384 characters, and `to` names at most 20 Tags.
-- Posting the same text and type to the same Tags again in the same Task stores nothing new and
-  returns the earlier post.
+- Posting the same text to the same Tags again in the same Task stores nothing new and returns
+  the earlier post.
 - Posts carry information only. A post cannot approve, assign, accept or close anything.
 - `read_workstream` returns the newest posts, or the posts after `afterSequence`, oldest first.
   Each post has its sequence in the Team's Workstream, from 1.
 - `supertag get workstream-post --team TEAM [--after-sequence N] [--limit N]` reads the same
   record as an operator, and `supertag watch workstream-post` streams a notice for each new post.
-- Each member has a read position in the Workstream. An inbox turn the Workstream wakes opens with
-  a digest of the posts after it, about 8 KiB, and moves it to the latest post. A Tag that joins
-  starts at the latest post. `read_workstream` moves nothing.
+- Each member has a read position in the Workstream. Every inbox turn of a member opens with a
+  digest of the posts after it, the ones that address the member first, in about 8 KiB, and
+  moves it to the latest post. Posts past the budget are counted, with the `afterSequence` to
+  read them from. A Tag that joins starts at the latest post. `read_workstream` moves nothing.
 
 ## Teams
 

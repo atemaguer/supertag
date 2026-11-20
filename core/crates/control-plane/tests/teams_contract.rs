@@ -267,7 +267,6 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
     finish(store, &other_host, &outside).await;
 
     let post = PostAttemptWorkstreamRequest {
-        kind: 0,
         operation_id: "progress".into(),
         body: " Reviewed the rollout. ".into(),
         to_tag_ids: vec![],
@@ -302,7 +301,6 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
         .unwrap();
     assert!(!first_post.duplicate);
     assert_eq!(first_post.post.as_ref().unwrap().sequence, 1);
-    assert_eq!(first_post.post.as_ref().unwrap().kind(), MessageKind::Note);
     let replay = store
         .post_attempt_workstream(
             &supertag_control_plane::AttemptAccess::new(&host, &one),
@@ -347,27 +345,17 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
         .unwrap();
     assert_eq!(second_post.sequence, 2);
     assert_eq!(second_post.to_tag_ids, ["reviewer"]);
-    // Addressed posts now enqueue a durable inbox turn once a note's short debounce passes. This
-    // turn is outside the sender's Objective and does not consume its Team's Objective slots.
+    // A post wakes nobody, addressed or not: the addressee sees it in the digest of its next
+    // inbox turn.
     clock.fetch_add(5_000, Ordering::SeqCst);
     store.sweep_mailbox().await.unwrap();
-    let inbox = store
-        .claim_task(&other_host, "addressed-post-inbox")
-        .await
-        .unwrap()
-        .unwrap();
-    let inbox_task = inbox.task.unwrap();
-    assert_eq!(inbox_task.session_id, "inbox:reviewer");
-    let inbox_attempt = InspectAttemptRequest {
-        task_id: inbox_task.task_id,
-        attempt_id: inbox.attempt_id,
-        lease_token: inbox.lease_token,
-    };
-    store
-        .start_task(&other_host, &start(&inbox_attempt))
-        .await
-        .unwrap();
-    finish(store, &other_host, &inbox_attempt).await;
+    assert!(
+        store
+            .claim_task(&other_host, "addressed-post-inbox")
+            .await
+            .unwrap()
+            .is_none()
+    );
     let read = store
         .read_attempt_workstream(
             &supertag_control_plane::AttemptAccess::new(&host, &one),
@@ -422,7 +410,6 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
     // tests/workstream-post-store.test.ts: text, addressees, and read options are validated.
     let invalid_post =
         |operation: &str, body: String, to: Vec<String>| PostAttemptWorkstreamRequest {
-            kind: 0,
             operation_id: operation.into(),
             body,
             to_tag_ids: to,

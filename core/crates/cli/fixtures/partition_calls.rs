@@ -155,7 +155,6 @@ pub async fn exercise(
     let posted = workstreams
         .post(authenticated_request(
             HarnessPostWorkstreamRequest {
-                kind: 0,
                 operation_id: "partition-post".into(),
                 body: "Posted through a partition".into(),
                 to_tag_ids: vec![],

@@ -11,15 +11,17 @@ sender.
 
 Messages are how teammates' Tags coordinate without involving you: one Tag asks, the other
 answers in its own turn, and people hear about it only when a decision is theirs. Use a message
-when one Tag needs another Tag to know or do something. Post to the
-[Workstream](workstreams.md) when the whole Team may want the information later.
+when one Tag needs another Tag to know or do something, and always to ask a question or raise a
+blocker: a message wakes its recipient. Post to the [Workstream](workstreams.md) to record
+progress and decisions the whole Team may want later. A post wakes nobody; members see it at the
+start of their next inbox turn.
 
 ## How a Mailbox behaves
 
 - **Several pending messages are handled together.** A Tag's inbox is one thread of turns. While
   a turn runs, arriving messages queue and the next turn takes all of them at once, each marked
   with its sender and type. The turn opens with a count such as `3 unread messages, 2 address
-  you.`
+  you.`, then a digest of the Workstream posts of the Tag's Teams that it has not seen.
 - **A burst lands in one turn.** A note, evidence, a decision, or a question wakes its recipient
   about 3 seconds after it arrives, so messages sent together arrive together. A blocker wakes the
   recipient at once. The most urgent messages come first: blockers, then questions, then the rest.

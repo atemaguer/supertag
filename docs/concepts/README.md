@@ -63,8 +63,8 @@ with a type, such as a question or a blocker. Wake limits keep Tags from waking 
 loop.
 
 A Team's [Workstream](../guides/workstreams.md) is its shared record of posts. Every member can
-read it. A note wakes nobody; a post addressed to Tags reaches those Tags' inboxes, and an
-unaddressed question or blocker reaches the Objective's owner Tag.
+read it. A post wakes nobody. Every inbox turn of a member opens with the posts it has not seen,
+the ones addressed to it first. To ask a question or raise a blocker, a Tag sends a message.
 
 SuperTag makes Mailboxes and Workstreams available only to the main agent running for a Tag. Any
 subagents coordinate inside that local execution instead of communicating as independent members of

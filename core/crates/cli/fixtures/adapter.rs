@@ -558,7 +558,6 @@ async fn main() -> Result<()> {
     if std::env::args().any(|arg| arg == "--workstream-approval") {
         let mut workstreams = HarnessWorkstreamsClient::connect(bootstrap.endpoint.clone()).await?;
         let input = HarnessPostWorkstreamRequest {
-            kind: 0,
             operation_id: "fixture-release-post".into(),
             body: "The rollout is ready.".into(),
             to_tag_ids: vec![],

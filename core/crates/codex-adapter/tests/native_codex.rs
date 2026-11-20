@@ -443,7 +443,6 @@ impl HarnessWorkstreams for HarnessFixture {
                     post_id: "existing".into(),
                     body: "Prior Workstream data.".into(),
                     team_id: "release".into(),
-                    kind: MessageKind::Blocker.into(),
                     ..Default::default()
                 }],
                 next_cursor: "workstream-next".into(),
@@ -484,7 +483,6 @@ impl HarnessWorkstreams for HarnessFixture {
                     source_task_id: "native-task".into(),
                     body: input.body,
                     to_tag_ids: input.to_tag_ids,
-                    kind: input.kind,
                     sequence: 7,
                     ..Default::default()
                 }),
@@ -492,7 +490,6 @@ impl HarnessWorkstreams for HarnessFixture {
             )
         };
         Ok(Response::new(PostAttemptWorkstreamResponse {
-            wake_deferred: String::new(),
             post,
             approval,
             duplicate: false,
@@ -1251,9 +1248,6 @@ async fn native_coordination_pins_tools_and_stages_only_verified_workstream_appr
             usize::from(workstream_allowed)
         );
         assert_eq!(observed.posts.len(), [2, 1, 0][index]);
-        if let Some(post) = observed.posts.first() {
-            assert_eq!(post.kind(), MessageKind::Decision);
-        }
         assert_eq!(observed.mailbox_sends.len(), [2, 2, 0][index]);
         if let Some(send) = observed.mailbox_sends.first() {
             assert_eq!(send.recipient_tag_id, "reviewer");
@@ -1266,8 +1260,8 @@ async fn native_coordination_pins_tools_and_stages_only_verified_workstream_appr
             assert_eq!(outcome.waiting_approval_ids, ["approve-post"]);
             assert!(logs.contains("read_workstream") && logs.contains("read_mailbox"));
             assert!(
-                logs.contains(r#"\"type\":\"blocker\""#)
-                    && logs.contains(r#"\"type\":\"evidence\""#)
+                logs.contains(r#"\"type\":\"evidence\""#),
+                "a Mailbox read shows each message's type"
             );
             assert!(logs.contains("send_message") && logs.contains("direct-receipt"));
         } else {

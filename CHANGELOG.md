@@ -11,12 +11,12 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
-- Workstream posts and Mailbox messages have a type: `post` and `send_message` take an optional
-  `type` of `note` (the default), `question`, `blocker`, `evidence`, or `decision`, and
-  `read_workstream`, `read_mailbox`, and `supertag get workstream-posts` show it. An unaddressed
-  question or blocker goes to the Tag that owns the post's Objective. An inbox turn the Workstream
-  wakes now opens with a digest of the posts its Tag has not seen, addressed posts first, then
-  blockers and decisions; it holds about 8 KiB and points to `read_workstream` for the rest.
+- Mailbox messages have a type: `send_message` takes an optional `type` of `note` (the default),
+  `question`, `blocker`, `evidence`, or `decision`, and `read_mailbox` shows it. To ask a question
+  or raise a blocker, a Tag sends a direct message, which always wakes its recipient within the
+  wake limits. Every inbox turn of a Team member now opens with a digest of its Team's Workstream
+  posts it has not seen, addressed posts first; it holds about 8 KiB and points to
+  `read_workstream` for the rest.
 - Wake limits keep Tags from waking each other in loops: by default 3 wakes between two Tags for
   one originating Task, 20 wakes of a Tag by other Tags per hour, and 60 per Objective per hour,
   overridable with a Team manifest's `spec.wakeLimits`. Over a limit nothing is dropped: notes
@@ -85,6 +85,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- A Workstream post wakes nobody, not even the Tags it addresses: addressing a Tag counts as a
+  mention and puts the post first in that Tag's next digest. Posts have no type. The `post` tool
+  says so and points Tags to `send_message` for questions and blockers, and the Mailbox shows an
+  addressed post as handled once a digest showed it.
 - New Tags get web access (`web:fetch`) by default: they can read web pages, and their commands
   can reach the network. `supertag init` grants it to the lead on every harness but Cursor, except
   on a local-vm host, and says how to remove it. The desktop app's New Tag form has a **Web

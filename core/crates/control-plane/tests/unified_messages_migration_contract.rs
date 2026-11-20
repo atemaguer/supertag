@@ -135,7 +135,7 @@ fn table(expected: &[&[&str]]) -> Vec<Vec<String>> {
 async fn contract(url: String) {
     let head = seed_prior_version(&url).await;
     let store = Store::open(&url).await.unwrap();
-    assert_eq!(store.migrated(), Some((116, 118)));
+    assert_eq!(store.migrated(), Some((116, 119)));
     let pool = AnyPool::connect(&url).await.unwrap();
 
     // Conversations: the Team's channel continues its sequence; the deleted Team's copy lives in
@@ -256,7 +256,8 @@ async fn contract(url: String) {
     );
 
     // Delivery state: the split batch is two bound wakes; pending mail is one pending wake per Tag
-    // and conversation, due now, and a review request raises its priority.
+    // and conversation, due now, and a review request raises its priority. 0119 drops the pending
+    // wakes 0117 made for addressed posts, since posts wake nobody; the digest shows them.
     let wakes = rows(
         &pool,
         "SELECT w.tag_id,c.kind,COALESCE(c.name,'-'),w.reasons,w.priority,w.first_seq,w.last_seq,
@@ -273,23 +274,6 @@ async fn contract(url: String) {
                 "builder", "1", "-", "1", "1", "3", "3", "-", "1", "-", "rsrc", "0"
             ],
             &[
-                "builder", "2", "-", "2", "1", "3", "3", "-", "1", "-", "hsrc", "0"
-            ],
-            &[
-                "builder",
-                "2",
-                "deleted teams",
-                "2",
-                "1",
-                "1",
-                "1",
-                "-",
-                "2",
-                "-",
-                "hsrc",
-                "0"
-            ],
-            &[
                 "reviewer", "1", "-", "1", "1", "1", "1", "1", "0", "inbox1", "src", "0"
             ],
             &[
@@ -301,14 +285,12 @@ async fn contract(url: String) {
             &[
                 "reviewer", "2", "-", "2", "1", "2", "2", "2", "0", "inbox1", "src", "0"
             ],
-            &[
-                "reviewer", "2", "-", "2", "1", "3", "3", "-", "1", "-", "hsrc", "0"
-            ],
         ])
     );
 
     // Members: a Tag's direct position stops before its first pending message; channel members
-    // start at the latest post and count the pending posts addressed to them.
+    // start at the latest post and count the pending posts addressed to them, and 0119 moves a
+    // member's position back before the first post a dropped wake held, so its digest shows it.
     let members = rows(
         &pool,
         "SELECT c.kind,m.member_kind,m.member_id,m.read_seq,m.delivered_seq,m.mention_count
@@ -322,9 +304,9 @@ async fn contract(url: String) {
         table(&[
             &["1", "1", "builder", "2", "2", "1"],
             &["1", "1", "reviewer", "3", "3", "2"],
-            &["2", "1", "builder", "3", "3", "1"],
+            &["2", "1", "builder", "3", "2", "1"],
             &["2", "1", "helper", "3", "3", "0"],
-            &["2", "1", "reviewer", "3", "3", "1"],
+            &["2", "1", "reviewer", "3", "2", "1"],
         ])
     );
 

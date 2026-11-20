@@ -264,9 +264,7 @@ async fn contract(url: &str) {
     let request = |seq, message_kind, now| WakeRequest {
         tag_id: "bob",
         conversation_id: &ab,
-        kind: ConversationKind::Direct,
         message_kind,
-        addressed: false,
         sender_tag_id: "alice",
         seq,
         hops: seq - 1,

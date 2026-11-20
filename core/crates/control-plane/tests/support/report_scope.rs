@@ -98,7 +98,6 @@ pub async fn assert_restricted_report_continuation(
             .post_attempt_workstream(
                 &supertag_control_plane::AttemptAccess::new(host, continued),
                 &PostAttemptWorkstreamRequest {
-                    kind: 0,
                     operation_id: "post-from-report-continuation".into(),
                     body: "Send an unrelated post.".into(),
                     to_tag_ids: vec![],

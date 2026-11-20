@@ -856,7 +856,6 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     let send = |credential: &str, operation_id: &str, body: &str| {
         host_request(
             PostAttemptWorkstreamRequest {
-                kind: 0,
                 operation_id: operation_id.into(),
                 body: body.into(),
                 to_tag_ids: vec![],
@@ -1189,11 +1188,9 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
     assert_eq!(page["posts"][0]["body"], "The rollout checks passed.");
     assert_eq!(page["posts"][0]["author_tag_id"], "engineer");
     assert_eq!(page["posts"][0]["sequence"], 1);
-    assert_eq!(page["posts"][0]["kind"], "note");
     assert_eq!(page["posts"].as_array().context("missing posts")?.len(), 1);
 
     let addressed_request = PostAttemptWorkstreamRequest {
-        kind: 0,
         operation_id: "address-reviewer".into(),
         body: "Please independently verify the rollback steps.".into(),
         to_tag_ids: vec!["reviewer".into()],
@@ -1249,11 +1246,28 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
         Some(addressed.post.context("addressed post")?.post_id)
     );
     assert_eq!(message.objective_id.as_deref(), Some("rollout"));
+    // The post wakes nobody. A direct question wakes the reviewer after a short debounce, and
+    // its inbox turn opens with the Team's digest, which shows the addressed post.
+    let direct = attempt_mailbox
+        .send_message(host_request(
+            SendAttemptTagMessageRequest {
+                operation_id: "ask-reviewer".into(),
+                recipient_tag_id: "reviewer".into(),
+                text: "Can you verify the rollback today?".into(),
+                kind: MessageKind::Question as i32,
+                review: None,
+            },
+            &attempt_credential,
+            host.generation,
+        )?)
+        .await?
+        .into_inner()
+        .message
+        .context("direct message")?;
     let inbox = worker
         .claim_task(host_request(
             ClaimTaskRequest {
                 operation_id: "claim-inbox".into(),
-                // An addressed note wakes its addressee after a short debounce.
                 wait_ms: 8_000,
                 ..Default::default()
             },
@@ -1263,7 +1277,7 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
         .await?
         .into_inner()
         .assignment
-        .context("addressed post must wake reviewer")?;
+        .context("the direct message must wake the reviewer")?;
     let claimed = inbox.task.context("inbox Task")?;
     assert_eq!(claimed.tag_id, "reviewer");
     assert_eq!(claimed.session_id, "inbox:reviewer");
@@ -1301,15 +1315,21 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
             .prompt
             .contains("Please independently verify the rollback steps.")
     );
-    assert!(running.prompt.contains("via=\"workstream post\""));
-    assert!(running.prompt.contains(&message.message_id));
+    assert!(running.prompt.contains("<workstream-post"));
+    assert!(running.prompt.contains(&direct.message_id));
     let read_result = attempt_mailbox
         .read_mailbox(host_request(read, &inbox_credential, host.generation)?)
         .await?
         .into_inner();
-    assert_eq!(read_result.messages.len(), 1);
+    assert_eq!(read_result.messages.len(), 2);
     assert_eq!(
-        read_result.messages[0].task_id.as_deref(),
+        read_result
+            .messages
+            .iter()
+            .find(|read| read.message_id == direct.message_id)
+            .context("direct message read")?
+            .task_id
+            .as_deref(),
         Some(inbox_attempt.task_id.as_str())
     );
     let settled = worker
@@ -1332,9 +1352,19 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
         .list_messages(authenticated_request(list, &operator_token, None)?)
         .await?
         .into_inner();
-    assert_eq!(handled.messages.len(), 1);
-    assert_eq!(handled.messages[0].message_id, message.message_id);
-    assert_eq!(handled.messages[0].state(), TagMessageState::Handled);
+    assert_eq!(handled.messages.len(), 2);
+    assert!(
+        handled
+            .messages
+            .iter()
+            .any(|handled| handled.message_id == message.message_id)
+    );
+    assert!(
+        handled
+            .messages
+            .iter()
+            .all(|handled| handled.state() == TagMessageState::Handled)
+    );
     assert!(
         worker
             .claim_task(host_request(

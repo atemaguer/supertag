@@ -537,9 +537,7 @@ impl Store {
             &WakeRequest {
                 tag_id: &input.recipient_tag_id,
                 conversation_id: &conversation,
-                kind: ConversationKind::Direct,
                 message_kind,
-                addressed: false,
                 sender_tag_id: &sender,
                 seq: stored.seq,
                 hops,

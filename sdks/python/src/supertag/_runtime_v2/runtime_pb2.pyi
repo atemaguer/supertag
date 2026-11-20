@@ -1939,16 +1939,14 @@ class HarnessReadWorkstreamRequest(_message.Message):
     def __init__(self, after_sequence: _Optional[int] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
 
 class HarnessPostWorkstreamRequest(_message.Message):
-    __slots__ = ("operation_id", "body", "to_tag_ids", "kind")
+    __slots__ = ("operation_id", "body", "to_tag_ids")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     BODY_FIELD_NUMBER: _ClassVar[int]
     TO_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
-    KIND_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     body: str
     to_tag_ids: _containers.RepeatedScalarFieldContainer[str]
-    kind: MessageKind
-    def __init__(self, operation_id: _Optional[str] = ..., body: _Optional[str] = ..., to_tag_ids: _Optional[_Iterable[str]] = ..., kind: _Optional[_Union[MessageKind, str]] = ...) -> None: ...
+    def __init__(self, operation_id: _Optional[str] = ..., body: _Optional[str] = ..., to_tag_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class HarnessCloseWorkSessionRequest(_message.Message):
     __slots__ = ("work_session_id",)
@@ -4041,7 +4039,7 @@ class DeleteTeamRequest(_message.Message):
     def __init__(self, operation_id: _Optional[str] = ..., team: _Optional[str] = ..., dry_run: _Optional[bool] = ...) -> None: ...
 
 class WorkstreamPost(_message.Message):
-    __slots__ = ("post_id", "team_id", "author_tag_id", "to_tag_ids", "body", "source_task_id", "sequence", "created_at_ms", "kind")
+    __slots__ = ("post_id", "team_id", "author_tag_id", "to_tag_ids", "body", "source_task_id", "sequence", "created_at_ms")
     POST_ID_FIELD_NUMBER: _ClassVar[int]
     TEAM_ID_FIELD_NUMBER: _ClassVar[int]
     AUTHOR_TAG_ID_FIELD_NUMBER: _ClassVar[int]
@@ -4050,7 +4048,6 @@ class WorkstreamPost(_message.Message):
     SOURCE_TASK_ID_FIELD_NUMBER: _ClassVar[int]
     SEQUENCE_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
-    KIND_FIELD_NUMBER: _ClassVar[int]
     post_id: str
     team_id: str
     author_tag_id: str
@@ -4059,8 +4056,7 @@ class WorkstreamPost(_message.Message):
     source_task_id: str
     sequence: int
     created_at_ms: int
-    kind: MessageKind
-    def __init__(self, post_id: _Optional[str] = ..., team_id: _Optional[str] = ..., author_tag_id: _Optional[str] = ..., to_tag_ids: _Optional[_Iterable[str]] = ..., body: _Optional[str] = ..., source_task_id: _Optional[str] = ..., sequence: _Optional[int] = ..., created_at_ms: _Optional[int] = ..., kind: _Optional[_Union[MessageKind, str]] = ...) -> None: ...
+    def __init__(self, post_id: _Optional[str] = ..., team_id: _Optional[str] = ..., author_tag_id: _Optional[str] = ..., to_tag_ids: _Optional[_Iterable[str]] = ..., body: _Optional[str] = ..., source_task_id: _Optional[str] = ..., sequence: _Optional[int] = ..., created_at_ms: _Optional[int] = ...) -> None: ...
 
 class ListWorkstreamPostsRequest(_message.Message):
     __slots__ = ("team", "after_sequence", "limit", "cursor")
@@ -4101,28 +4097,24 @@ class ReadAttemptWorkstreamResponse(_message.Message):
     def __init__(self, team: _Optional[_Union[Team, _Mapping]] = ..., page: _Optional[_Union[ListWorkstreamPostsResponse, _Mapping]] = ...) -> None: ...
 
 class PostAttemptWorkstreamRequest(_message.Message):
-    __slots__ = ("operation_id", "body", "to_tag_ids", "kind")
+    __slots__ = ("operation_id", "body", "to_tag_ids")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     BODY_FIELD_NUMBER: _ClassVar[int]
     TO_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
-    KIND_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     body: str
     to_tag_ids: _containers.RepeatedScalarFieldContainer[str]
-    kind: MessageKind
-    def __init__(self, operation_id: _Optional[str] = ..., body: _Optional[str] = ..., to_tag_ids: _Optional[_Iterable[str]] = ..., kind: _Optional[_Union[MessageKind, str]] = ...) -> None: ...
+    def __init__(self, operation_id: _Optional[str] = ..., body: _Optional[str] = ..., to_tag_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class PostAttemptWorkstreamResponse(_message.Message):
-    __slots__ = ("post", "duplicate", "approval", "wake_deferred")
+    __slots__ = ("post", "duplicate", "approval")
     POST_FIELD_NUMBER: _ClassVar[int]
     DUPLICATE_FIELD_NUMBER: _ClassVar[int]
     APPROVAL_FIELD_NUMBER: _ClassVar[int]
-    WAKE_DEFERRED_FIELD_NUMBER: _ClassVar[int]
     post: WorkstreamPost
     duplicate: bool
     approval: Approval
-    wake_deferred: str
-    def __init__(self, post: _Optional[_Union[WorkstreamPost, _Mapping]] = ..., duplicate: _Optional[bool] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ..., wake_deferred: _Optional[str] = ...) -> None: ...
+    def __init__(self, post: _Optional[_Union[WorkstreamPost, _Mapping]] = ..., duplicate: _Optional[bool] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ...) -> None: ...
 
 class GetObjectiveRequest(_message.Message):
     __slots__ = ("objective_id",)

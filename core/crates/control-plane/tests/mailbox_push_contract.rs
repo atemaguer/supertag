@@ -1,6 +1,6 @@
-//! A Tag follows its Mailbox and Workstream through a held claim: a blocker sent to it, directly
-//! or as an addressed post, makes its inbox turn in the send, and the held claim takes that turn
-//! at once instead of at the end of its wait.
+//! A Tag follows its Mailbox through a held claim: a blocker sent to it makes its inbox turn in
+//! the send, and the held claim takes that turn at once instead of at the end of its wait. A
+//! Workstream post, even one addressed to it, makes no turn.
 mod support;
 
 use std::time::{Duration, Instant};
@@ -168,28 +168,27 @@ async fn contract(url: &str) {
     );
     finish(&store, &host, &inbox).await;
 
-    // A Workstream blocker addressed to the reviewer.
-    let (assignment, after) = held_while(&store, &host, async || {
-        store
-            .post_attempt_workstream(
-                &access,
-                &PostAttemptWorkstreamRequest {
-                    kind: MessageKind::Blocker as i32,
-                    operation_id: "post-blocked".into(),
-                    body: "Still blocked on the parser review".into(),
-                    to_tag_ids: vec!["reviewer".into()],
-                },
-            )
-            .await
-            .unwrap();
-    })
-    .await;
-    let task = assignment
-        .expect("the held claim took the inbox turn")
-        .task
+    // A post addressed to the reviewer wakes nobody.
+    store
+        .post_attempt_workstream(
+            &access,
+            &PostAttemptWorkstreamRequest {
+                operation_id: "post-blocked".into(),
+                body: "Still blocked on the parser review".into(),
+                to_tag_ids: vec!["reviewer".into()],
+            },
+        )
+        .await
         .unwrap();
-    assert_eq!(task.session_id, "inbox:reviewer");
-    assert!(after < Duration::from_millis(900), "{after:?}");
+    store.sweep_mailbox().await.unwrap();
+    assert!(
+        store
+            .claim_task(&host, &Uuid::new_v4().to_string())
+            .await
+            .unwrap()
+            .is_none(),
+        "a post makes no inbox turn"
+    );
     store.close().await;
 }
 

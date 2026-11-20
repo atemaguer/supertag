@@ -43,10 +43,11 @@ from waking each other in a loop: over a limit the message waits for the recipie
 and the operator hears about it once. Start a Session when work needs a result. See
 [Send messages between Tags](../guides/tag-messaging.md).
 
-A Team's Workstream is its shared record of posts. `post` adds a note every member can read, and
-it wakes nobody; members see it in a digest the next time the Workstream wakes them. Give the post a
-`to` list and each addressed member receives it in its inbox as a message. A post typed
-`question` or `blocker` with no `to` goes to the Tag that owns the Objective. See [Coordinate in a Team Workstream](../guides/workstreams.md).
+A Team's Workstream is its shared record of posts. `post` records progress or a decision every
+member can read, and it wakes nobody. Every inbox turn of a member opens with a digest of the
+posts it has not seen. Give the post a `to` list and the addressed members see it first in their
+digests. To ask a question or raise a blocker, a Tag sends a message instead. See
+[Coordinate in a Team Workstream](../guides/workstreams.md).
 
 ## Teammates can spot overlapping edits
 

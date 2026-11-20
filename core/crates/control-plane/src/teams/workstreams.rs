@@ -6,10 +6,7 @@ use tonic::{Request, Response, Status};
 
 use crate::{
     ControlPlane, HostAuthority, Store, StoreError,
-    messages::{
-        self, ConversationKind, Member, MessageRow, NewMessage, OperationScope,
-        wakes::{self, WakeRequest},
-    },
+    messages::{self, Member, MessageRow, NewMessage, OperationScope},
     store::{Result, WORKSTREAM_POST_ACTION, invalid, lease_is_live, name, owned},
 };
 
@@ -68,6 +65,9 @@ impl Store {
         })
     }
 
+    /// Appends a post to the Team's Workstream, its shared record. A post wakes nobody: each Tag it
+    /// addresses gets one more mention, and every member sees it in the digest that opens its next
+    /// inbox turn.
     pub async fn post_attempt_workstream(
         &self,
         authority: &AttemptAccess,
@@ -83,7 +83,6 @@ impl Store {
                 "post body must contain 1–16,384 characters without a NUL",
             ));
         }
-        let kind = post_kind(input.kind)?;
         let recipients = recipients(&input.to_tag_ids)?;
         let (mut tx, order) = self.write().await?;
         let now = self.execution_now_ms();
@@ -93,12 +92,7 @@ impl Store {
             .ok_or_else(|| StoreError::NotFound("Team Workstream was not found".into()))?;
         let digest = format!(
             "{:x}",
-            Sha256::digest(serde_json::to_vec(&(
-                &team.team_id,
-                &recipients,
-                body,
-                messages::stored_kind(kind),
-            ))?)
+            Sha256::digest(serde_json::to_vec(&(&team.team_id, &recipients, body))?)
         );
         let prior = messages::operation_in(
             &mut tx,
@@ -116,7 +110,6 @@ impl Store {
             let post = post_by_id(&mut tx, &team.team_id, &id).await?;
             tx.rollback().await?;
             return Ok(PostAttemptWorkstreamResponse {
-                wake_deferred: String::new(),
                 post: Some(post),
                 duplicate: true,
                 approval: None,
@@ -137,20 +130,16 @@ impl Store {
         .bind(&digest)
         .fetch_optional(&mut *tx)
         .await?;
-        // A note's arguments name no type, as a direct message's do.
-        let mut arguments = serde_json::json!({"body": body, "to_tag_ids": recipients});
-        if kind != MessageKind::Note {
-            arguments["type"] = messages::digest::kind_name(kind).into();
-        }
         let approval_request = RequestApprovalRequest {
             attempt: Some(attempt.clone()),
             operation_id: input.operation_id.clone(),
             action: WORKSTREAM_POST_ACTION.into(),
             resource: team.team_id.clone(),
-            arguments_json: serde_json::to_string(&arguments)?,
+            arguments_json: serde_json::to_string(&serde_json::json!({
+                "body": body, "to_tag_ids": recipients,
+            }))?,
             summary: format!(
-                "Post a {} to the Team Workstream with {} addressed Tags.",
-                messages::digest::kind_name(kind),
+                "Post to the Team Workstream with {} addressed Tags.",
                 recipients.len()
             ),
         };
@@ -169,7 +158,6 @@ impl Store {
             if !authorization.granted {
                 tx.commit().await?;
                 return Ok(PostAttemptWorkstreamResponse {
-                    wake_deferred: String::new(),
                     post: None,
                     duplicate: false,
                     approval: authorization.approval,
@@ -177,73 +165,30 @@ impl Store {
             }
         }
         let duplicate = prior.is_some();
-        let mut deferred = Vec::new();
         let id = if let Some(id) = prior {
             id
         } else {
             let objective = post_objective_in(&mut tx, &attempt.task_id).await?;
-            let mut addressees: Vec<String> = recipients
-                .iter()
-                .filter(|id| **id != author)
-                .cloned()
-                .collect();
-            if recipients.is_empty()
-                && matches!(kind, MessageKind::Question | MessageKind::Blocker)
-                && let Some(owner) = objective_owner_in(&mut tx, objective.as_deref()).await?
-                && owner != author
-            {
-                addressees.push(owner);
-            }
-            // Only a post that wakes someone continues a chain; the hop limit applies to it.
-            let (hops, origin) = if addressees.is_empty() {
-                (0, attempt.task_id.clone())
-            } else {
-                wakes::origin_in(&mut tx, &attempt.task_id).await?
-            };
-            let stored = messages::insert_message_in(
+            // A post continues no chain: it wakes nobody.
+            messages::insert_message_in(
                 &mut tx,
                 &NewMessage {
                     conversation_id: &channel,
                     sender: Member::Tag(&author),
-                    kind,
+                    kind: MessageKind::Note,
                     text: body,
-                    hops,
+                    hops: 0,
                     source_task_id: Some(&attempt.task_id),
-                    origin_task_id: Some(&origin),
+                    origin_task_id: None,
                     objective_id: objective.as_deref(),
                     task_id: None,
                     effect_digest: Some(&digest),
-                    addressees: &addressees,
+                    addressees: &recipients,
                     now,
                 },
             )
-            .await?;
-            for addressee in &addressees {
-                let outcome = wakes::wake_in(
-                    &mut tx,
-                    &WakeRequest {
-                        tag_id: addressee,
-                        conversation_id: &channel,
-                        kind: ConversationKind::Channel,
-                        message_kind: kind,
-                        addressed: true,
-                        sender_tag_id: &author,
-                        seq: stored.seq,
-                        hops,
-                        origin_task_id: Some(&origin),
-                        objective_id: objective.as_deref(),
-                        team_id: Some(&team.team_id),
-                        now,
-                    },
-                )
-                .await?;
-                deferred.extend(outcome.deferred);
-            }
-            if !addressees.is_empty() {
-                // A wake that is already due, such as a blocker's, gets its inbox turn now.
-                crate::mailbox::sweep_in(&mut tx, now).await?;
-            }
-            stored.message_id
+            .await?
+            .message_id
         };
         let post = post_by_id(&mut tx, &team.team_id, &id).await?;
         messages::record_operation_in(
@@ -257,24 +202,10 @@ impl Store {
         .await?;
         tx.commit().await?;
         Ok(PostAttemptWorkstreamResponse {
-            wake_deferred: deferred.join(" "),
             post: Some(post),
             duplicate,
             approval: None,
         })
-    }
-}
-
-/// The kind of a post a Tag writes: a note unless it says otherwise. Only the Control Plane marks
-/// a commit review request.
-fn post_kind(value: i32) -> Result<MessageKind> {
-    match MessageKind::try_from(value) {
-        Ok(MessageKind::Unspecified | MessageKind::Note) => Ok(MessageKind::Note),
-        Ok(MessageKind::Review) => Err(invalid(
-            "a Workstream post cannot be a commit review request",
-        )),
-        Ok(kind) => Ok(kind),
-        Err(_) => Err(invalid("unknown Workstream post type")),
     }
 }
 
@@ -301,24 +232,6 @@ async fn post_objective_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> Resu
           ORDER BY w.hops DESC,w.created_at_ms,w.wake_id LIMIT 1",
     )
     .bind(task_id)
-    .fetch_optional(&mut **tx)
-    .await?)
-}
-
-/// Who an unaddressed question or blocker goes to: the owner Tag of the post's Objective.
-async fn objective_owner_in(
-    tx: &mut Transaction<'_, Any>,
-    objective: Option<&str>,
-) -> Result<Option<String>> {
-    let Some(objective) = objective else {
-        return Ok(None);
-    };
-    Ok(sqlx::query_scalar(
-        "SELECT o.owner_tag_id FROM supertag_v2_objectives o
-         JOIN supertag_v2_tags tag ON tag.tag_id=o.owner_tag_id
-         WHERE o.objective_id=$1 AND tag.retired_at_ms IS NULL",
-    )
-    .bind(objective)
     .fetch_optional(&mut **tx)
     .await?)
 }
@@ -461,7 +374,6 @@ async fn post_by_id(tx: &mut Transaction<'_, Any>, team: &str, id: &str) -> Resu
 
 fn post_row(team: &str, message: MessageRow) -> WorkstreamPost {
     WorkstreamPost {
-        kind: message.kind.into(),
         post_id: message.message_id,
         team_id: team.to_owned(),
         author_tag_id: message.sender_id,

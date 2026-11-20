@@ -90,7 +90,6 @@ impl HarnessWorkstreams for Bridge {
         }
         let input = request.into_inner();
         let upstream = PostAttemptWorkstreamRequest {
-            kind: input.kind,
             operation_id: input.operation_id,
             body: self.redact(&input.body),
             to_tag_ids: input.to_tag_ids,

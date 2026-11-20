@@ -80,10 +80,9 @@ scheduler then chooses a compatible harness and model on one of those hosts. Non
 - **Team** is a flat list of member Tags with an optional concurrency limit. Members may message
   one another and share the Team's Workstream. A Team stands alone: any number of Objectives may
   name one Team. See [Teams](coordination.md#teams).
-- **Workstream** is a Team's shared record of posts. Every member reads it. Each Tag a post
-  addresses receives it in its Mailbox, and an unaddressed question or blocker goes to the
-  Objective's owner Tag; other posts wake nobody. See
-  [Workstream](coordination.md#workstream).
+- **Workstream** is a Team's shared record of posts. Every member reads it. A post has no type and
+  wakes nobody; every inbox turn of a member opens with the posts it has not seen, the ones that
+  address it first. See [Workstream](coordination.md#workstream).
 - **Mailbox** is a Tag's inbox for plain-text messages from other Tags. Each message has a type:
   note, question, blocker, evidence, or decision. Every message waiting when a turn starts is
   handled together in that turn, and a message counts as seen once a turn takes it. A Team's
@@ -833,9 +832,7 @@ identity and no Mailbox; they coordinate through the harness's local primitives.
 [Coordination tools](coordination.md#coordination-tools).
 
 Each Team has one [Workstream](../guides/workstreams.md), its shared record of posts. Every
-member reads it, an unaddressed note wakes nobody, and each Tag a post addresses receives it in its
-Mailbox. A post has a type: note, question, blocker, evidence, or decision. An unaddressed question
-or blocker is addressed to the Objective's owner Tag.
-Posts carry information only. See [Workstream](coordination.md#workstream).
+member reads it. A post has no type and wakes nobody. Every inbox turn of a member opens with a
+digest of the posts it has not seen, the ones that address it first. Posts carry information only. See [Workstream](coordination.md#workstream).
 
 For saved Task output, producer provenance, and artifact acquisition, see [artifacts](artifacts.md).

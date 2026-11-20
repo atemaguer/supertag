@@ -545,7 +545,6 @@ pub(crate) async fn overview_in(
     {
         for message in crate::messages::page_in(tx, &channel, None, None, TEAM_POSTS).await? {
             posts.push(ObjectiveTeamPost {
-                kind: message.kind.into(),
                 sequence: message.seq as u64,
                 author_tag_id: message.sender_id,
                 to_tag_ids: message.addressees,

@@ -235,7 +235,6 @@ impl Fixture {
             .post_attempt_workstream(
                 &supertag_control_plane::AttemptAccess::new(&self.host, attempt),
                 &PostAttemptWorkstreamRequest {
-                    kind: 0,
                     operation_id: operation.into(),
                     body: format!("Update {operation}"),
                     to_tag_ids: vec![],

@@ -381,7 +381,6 @@ async fn submit_direct_messages(
         .post_attempt_workstream(
             &supertag_control_plane::AttemptAccess::new(sender, &source),
             &PostAttemptWorkstreamRequest {
-                kind: 0,
                 operation_id: "public".into(),
                 body: "Public update".into(),
                 to_tag_ids: vec!["beta".into()],
@@ -452,9 +451,15 @@ async fn verify_restarted_delivery(
     finish(store, receiver, &inbox, vec![]).await;
     let successor = claim_inbox(store, clock, receiver, "beta").await;
     let next = start(store, receiver, &successor).await;
-    assert_eq!(next.prompt.matches("<tag-message ").count(), 2);
+    // The addressed post comes in the Team's digest, not as a message of its own.
+    assert_eq!(next.prompt.matches("<tag-message ").count(), 1);
     assert!(next.prompt.contains("via=\"direct message\""));
-    assert!(next.prompt.contains("via=\"workstream post\""));
+    assert!(
+        next.prompt
+            .contains("from=\"alpha\" to=\"you\">\nPublic update\n</workstream-post>"),
+        "{}",
+        next.prompt
+    );
     finish(store, receiver, &successor, vec![]).await;
     ordinary(store, "quiet").await;
     let quiet = claim(store, other, "quiet").await;

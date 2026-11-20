@@ -220,7 +220,7 @@ database_tests! {
     claude_captures_selected_workspace_files_for_the_operator;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
-    claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn;
+    claude_sdk_approves_one_workstream_post_that_wakes_nobody;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
     claude_sdk_applies_accepted_usd_budget_and_records_the_stop_usage;
@@ -2845,9 +2845,7 @@ async fn declared_output_cases(
     Ok(())
 }
 
-async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn(
-    database: String,
-) -> Result<()> {
+async fn claude_sdk_approves_one_workstream_post_that_wakes_nobody(database: String) -> Result<()> {
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
@@ -2990,10 +2988,7 @@ async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn(
     let approval = services.operator(&["get", "approval", approval_id]).await?;
     assert!(approval["consumed_at_ms"].is_i64());
 
-    // The addressed post wakes its recipient once its 3 s debounce passes and the Control Plane's
-    // next sweep, at most a second later, queues the inbox turn.
-    tokio::time::sleep(Duration::from_millis(4_500)).await;
-    success(worker("recipient-host")).await?;
+    // The post wakes nobody: the recipient's Mailbox lists it, and no inbox turn waits.
     let mailbox = services
         .operator(&["get", "messages", "--mailbox", "recipient"])
         .await?;
@@ -3008,12 +3003,8 @@ async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn(
     assert_eq!(message["workstream_post_id"], post["post_id"]);
     assert_eq!(message["sender_tag_id"], "claude");
     assert_eq!(message["recipient_tag_id"], "recipient");
-    assert_eq!(message["state"], "TAG_MESSAGE_STATE_HANDLED");
-    let mail_task = message["task_id"].as_str().context("Mailbox Task ID")?;
-    let mail = services.operator(&["get", "task", mail_task]).await?;
-    assert_eq!(mail["state"], "TASK_STATE_SUCCEEDED", "{mail}");
-    assert_eq!(mail["session_id"], "inbox:recipient");
-    assert_eq!(mail["result"], "SDK fixture handled the addressed post");
+    assert_eq!(message["state"], "TAG_MESSAGE_STATE_PENDING");
+    assert!(message["task_id"].is_null(), "{message}");
     services.stop().await
 }
 

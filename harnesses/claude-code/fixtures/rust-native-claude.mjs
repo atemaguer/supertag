@@ -480,7 +480,7 @@ async function coordinationTools(workstream) {
     timeline?.isError ||
     JSON.parse(timelineText).trust !== "untrusted" ||
     !timelineText.includes("Untrusted Workstream text [REDACTED]") ||
-    JSON.parse(timelineText).posts?.[0]?.type !== "blocker" ||
+    JSON.parse(timelineText).posts?.[0]?.type !== undefined ||
     timelineText.includes(secret)
   )
     throw new Error("Workstream read was not safely presented");
@@ -505,10 +505,10 @@ async function coordinationTools(workstream) {
     throw new Error("Denied approval appeared to succeed");
   if (!(await call("post", { text: "Wrong receipt" }))?.isError)
     throw new Error("An approval for another Attempt appeared to succeed");
-  const pending = await call("post", { text: "Confirmed post", type: "decision" });
+  const pending = await call("post", { text: "Confirmed post" });
   if (pending?.isError || JSON.parse(pending.content[0].text).status !== "pending")
     throw new Error("Expected a pending receipt before the post");
-  const posted = await call("post", { text: "Confirmed post", type: "decision" });
+  const posted = await call("post", { text: "Confirmed post" });
   if (posted?.isError || JSON.parse(posted.content[0].text).status !== "posted")
     throw new Error("Workstream post receipt missing");
   return "Coordination complete";
@@ -599,20 +599,6 @@ async function approvalAndQuestion(order) {
 
 async function processCoordination(prompt) {
   const body = "The SDK fixture verified the release.";
-  if (prompt.startsWith("This is this Tag's inbox.")) {
-    const result = await coordinationCall("read_mailbox", {});
-    const page = JSON.parse(result.content[0].text);
-    if (
-      result.isError ||
-      page.trust !== "untrusted" ||
-      page.messages.length !== 1 ||
-      page.messages[0].from !== "claude" ||
-      page.messages[0].text !== body ||
-      !prompt.includes(body)
-    )
-      throw new Error("Addressed Workstream post did not arrive in the Mailbox");
-    return "SDK fixture handled the addressed post";
-  }
   const timeline = await coordinationCall("read_workstream", { afterSequence: 0 });
   const page = JSON.parse(timeline.content[0].text);
   if (

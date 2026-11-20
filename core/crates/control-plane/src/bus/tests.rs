@@ -617,7 +617,6 @@ async fn messages(
                 operation_id: "post".into(),
                 body: "Parser is ready for review".into(),
                 to_tag_ids: vec!["reviewer".into()],
-                ..Default::default()
             },
         )
         .await?

@@ -41,7 +41,7 @@ budget_mode = root.joinpath("budget-mode").read_text() if root.joinpath("budget-
 coordination_tools = [
     ("read_workstream", {"afterSequence": 1, "limit": 2}),
     ("read_mailbox", {"limit": 2}),
-    ("post", {"text": "Release is ready.", "to": ["reviewer"], "type": "decision"}),
+    ("post", {"text": "Release is ready.", "to": ["reviewer"]}),
 ] if root.joinpath("coordination-mode").exists() else []
 if root.joinpath("direct-mode").exists():
     coordination_tools.append(("send_message", {"to": "reviewer", "text": "Private rollout note.", "type": "question"}))
