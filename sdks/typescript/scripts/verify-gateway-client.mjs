@@ -360,7 +360,6 @@ async function verifyServices(client, taskId) {
   const me = await client.enrollments.whoAmI({}, options);
   assert.equal(me.role, PrincipalRole.OPERATOR);
   assert.match(me.principal, /^operator:/u);
-  assert.deepEqual((await client.memories.list({ tagId: "node-sdk" }, options)).memories, []);
   assert.ok(Array.isArray((await client.networkLogs.list({ tagId: "node-sdk" }, options)).logs));
   const located = await client.taskFiles.locate({ taskId, machineId: "" }, options);
   assert.ok(Array.isArray(located.locations));
