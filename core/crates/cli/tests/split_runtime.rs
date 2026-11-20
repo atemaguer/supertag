@@ -2923,7 +2923,11 @@ async fn control_plane_partition_expires_execution_and_requires_audited_retry_be
     assert_ne!(completed.attempt_id, running.attempt_id);
     assert_eq!(
         completed.result.as_deref(),
-        Some("Retry only with evidence: inspect after recovery [files:read]")
+        // An operator's retry of an interrupted Attempt is told it was interrupted, as a
+        // redelivery is.
+        Some(
+            "Retry only with evidence: inspect after recovery\n\nA previous run of this request was interrupted before finishing. Any file changes it made were discarded, so check the current state before continuing. It had not said anything to the person yet. [files:read]"
+        )
     );
     assert_eq!(std::fs::read_to_string(&launches)?.lines().count(), 2);
     let history = events(&mut operator, &credentials, &accepted.task_id, 0).await?;
