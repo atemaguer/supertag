@@ -19,8 +19,20 @@ use crate::{GitOutputFiles, check_cancelled, paths};
 
 pub(crate) const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 const REMOTE_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long one object copy between repositories may take. Packing and strictly indexing a
+/// monorepo's multi-gigabyte history takes minutes, not the seconds of every other Git command,
+/// and the copy holds no memory of its own while it runs.
+const COPY_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
+/// The most one buffered Git read keeps. Object copies, which grow with a repository's history
+/// and tree, stream between Git children instead (see [`pipeline`]), and a remote's ref
+/// advertisement is read line by line, so what stays buffered is a listing of one tree or of a
+/// checkout's changes: 256 MiB holds the `ls-tree` of a tree of about two million files.
 const MAX_OUTPUT: usize = 268_435_456;
+/// The longest line a streamed Git listing may have: an object ID, a tab, and a ref name.
+const MAX_LINE: usize = 4096;
+/// The largest local source configuration read to find its remote.
+const MAX_SOURCE_CONFIG: usize = 8 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TreeEntry {
@@ -222,17 +234,48 @@ impl Repository {
         check_cancelled(cancel)?;
         let source_objects = source_objects(source)?;
         reject_object_links(&source_objects)?;
-        let pack = self
-            .command(
-                &["pack-objects", "--stdout", "--revs"],
-                format!("{commit}\n").as_bytes(),
-                &[("GIT_OBJECT_DIRECTORY", source_objects.into_os_string())],
-                cancel,
-            )
-            .await?;
-        self.command(&["index-pack", "--stdin", "--strict"], &pack, &[], cancel)
-            .await?;
+        let pack = self.git(
+            &["pack-objects", "--stdout", "--revs"],
+            &[("GIT_OBJECT_DIRECTORY", source_objects.into_os_string())],
+        )?;
+        self.copy_objects(vec![pack], format!("{commit}\n").as_bytes(), cancel)
+            .await
+            .context("copy the commit's history from the source repository")?;
         self.verify_commit(commit, cancel).await
+    }
+
+    /// Copies `head`, a commit that contains `base`, from another Workspace state directory of
+    /// the same source and base, such as another lane's: only the objects `head` reaches beyond
+    /// `base`, which this repository already holds with its history. Nothing is bundled.
+    pub(crate) async fn import_held(
+        &self,
+        holder: &Repository,
+        base: &str,
+        head: &str,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        validate_oid(base)?;
+        validate_oid(head)?;
+        ensure!(
+            holder.oid_length == self.oid_length,
+            "the holding Workspace uses another object format"
+        );
+        self.verify_commit(base, cancel).await?;
+        if self.verify_commit(head, cancel).await.is_ok() {
+            return self.assert_ancestor(base, head, cancel).await;
+        }
+        holder.assert_ancestor(base, head, cancel).await?;
+        let objects = holder.git_dir.join("objects");
+        reject_object_links(&objects)?;
+        // `--revs` without `--thin`: every object comes whole or as a delta within the pack.
+        let pack = self.git(
+            &["pack-objects", "--stdout", "--revs"],
+            &[("GIT_OBJECT_DIRECTORY", objects.into_os_string())],
+        )?;
+        self.copy_objects(vec![pack], format!("{head}\n^{base}\n").as_bytes(), cancel)
+            .await
+            .context("copy the Session's commits from the Workspace that holds them")?;
+        self.assert_ancestor(base, head, cancel).await
     }
 
     /// Merges `theirs` into `ours` without a work tree: the merged tree, conflicting files holding
@@ -306,6 +349,35 @@ impl Repository {
         extra: &[(&str, OsString)],
         cancel: &CancellationToken,
     ) -> Result<Vec<u8>> {
+        run(
+            self.git(args, extra)?,
+            input,
+            cancel,
+            MAX_OUTPUT,
+            COMMAND_TIMEOUT,
+        )
+        .await
+    }
+
+    /// Writes into this repository the objects one or more stages before it select:
+    /// `stages | pack-objects --stdout | index-pack --stdin --strict`, the pack streaming between
+    /// the Git children and never through this process. A monorepo's history or tree packs to
+    /// gigabytes, so the pack has no size bound here; the copy only has its deadline.
+    async fn copy_objects(
+        &self,
+        stages: Vec<Command>,
+        input: &[u8],
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        let mut stages = stages;
+        stages.push(self.git(&["index-pack", "--stdin", "--strict"], &[])?);
+        pipeline(stages, input, cancel, 64 * 1024, COPY_TIMEOUT).await?;
+        Ok(())
+    }
+
+    /// A hardened Git command for this repository, after checking its configuration and
+    /// metadata have not changed.
+    fn git(&self, args: &[&str], extra: &[(&str, OsString)]) -> Result<Command> {
         paths::verify_directory(&self.git_dir)?;
         ensure!(
             paths::read_regular(&self.git_dir.join("config"), 65_536)?
@@ -357,7 +429,7 @@ impl Repository {
             command.env(name, value);
         }
         command.args(args);
-        run(command, input, cancel, MAX_OUTPUT, COMMAND_TIMEOUT).await
+        Ok(command)
     }
 
     pub(crate) async fn verify_commit(&self, oid: &str, cancel: &CancellationToken) -> Result<()> {
@@ -572,10 +644,10 @@ impl Repository {
                         scope.spawn(move || -> Result<()> {
                             for (path, expected) in part {
                                 check_cancelled(cancel)?;
-                                let actual = paths::read_checkout_file(directory, path)?;
+                                let actual =
+                                    paths::hash_checkout_file(directory, path, oid_length)?;
                                 ensure!(
-                                    actual.mode == expected.mode
-                                        && blob_oid(&actual.bytes, oid_length) == expected.oid,
+                                    actual.mode == expected.mode && actual.oid == expected.oid,
                                     "materialized file differs from its pinned tree: {path}"
                                 );
                             }
@@ -672,41 +744,23 @@ impl Repository {
             copy_packs(packs, &checkout.git_dir.join("objects/pack"))?;
             listed.push_str(&format!("^{prior_start}\n"));
         }
-        let mut objects = self
-            .command(
-                &["rev-list", "--objects", "--no-walk", "--stdin"],
+        // The listed commits with their complete trees, and the merge's tree with everything in
+        // it: `rev-list` names them and `pack-objects` packs them for the checkout, streaming. A
+        // monorepo's tree alone packs to gigabytes.
+        if let Some(tree) = index_tree {
+            listed.push_str(&format!("{tree}\n"));
+        }
+        checkout
+            .copy_objects(
+                vec![
+                    self.git(&["rev-list", "--objects", "--no-walk", "--stdin"], &[])?,
+                    self.git(&["pack-objects", "--stdout"], &[])?,
+                ],
                 listed.as_bytes(),
-                &[],
                 cancel,
             )
-            .await?;
-        if let Some(tree) = index_tree {
-            objects.extend_from_slice(format!("{tree}\n").as_bytes());
-            let listed = self
-                .command(&["ls-tree", "-r", "-t", "-z", tree], &[], &[], cancel)
-                .await?;
-            for entry in listed
-                .split(|byte| *byte == 0)
-                .filter(|entry| !entry.is_empty())
-            {
-                let header = entry
-                    .split(|byte| *byte == b'\t')
-                    .next()
-                    .unwrap_or_default();
-                if let Some(oid) = std::str::from_utf8(header)?.split(' ').nth(2) {
-                    validate_oid(oid)?;
-                    objects.extend_from_slice(format!("{oid}\n").as_bytes());
-                }
-            }
-        }
-        if !objects.is_empty() {
-            let pack = self
-                .command(&["pack-objects", "--stdout"], &objects, &[], cancel)
-                .await?;
-            checkout
-                .command(&["index-pack", "--stdin", "--strict"], &pack, &[], cancel)
-                .await?;
-        }
+            .await
+            .context("copy the checkout's objects")?;
         checkout
             .command(&["update-ref", "HEAD", start], &[], &[], cancel)
             .await?;
@@ -1317,16 +1371,10 @@ impl Repository {
             isolated.git_dir.join("objects").into_os_string(),
         )];
         objects.extend(borrowing.iter().cloned());
-        let pack = self
-            .command(
-                &["pack-objects", "--stdout", "--revs"],
-                revisions.as_bytes(),
-                &objects,
-                cancel,
-            )
-            .await?;
-        self.command(&["index-pack", "--stdin", "--strict"], &pack, &[], cancel)
-            .await?;
+        let pack = self.git(&["pack-objects", "--stdout", "--revs"], &objects)?;
+        self.copy_objects(vec![pack], revisions.as_bytes(), cancel)
+            .await
+            .context("copy the delivery's objects from its quarantine")?;
         self.verify_commit(head, cancel).await
     }
 
@@ -1441,6 +1489,39 @@ pub(crate) fn blob_oid(bytes: &[u8], length: usize) -> String {
     }
 }
 
+/// A Git blob ID computed a block at a time, for a blob of `size` bytes: the same ID
+/// [`blob_oid`] gives the whole bytes.
+pub(crate) enum BlobHasher {
+    Sha1(sha1::Sha1),
+    Sha256(sha2::Sha256),
+}
+impl BlobHasher {
+    pub(crate) fn new(oid_length: usize, size: u64) -> Self {
+        let header = format!("blob {size}\0");
+        if oid_length == 64 {
+            let mut digest = sha2::Sha256::new();
+            digest.update(header);
+            Self::Sha256(digest)
+        } else {
+            let mut digest = sha1::Sha1::new();
+            digest.update(header);
+            Self::Sha1(digest)
+        }
+    }
+    pub(crate) fn update(&mut self, bytes: &[u8]) {
+        match self {
+            Self::Sha1(digest) => digest.update(bytes),
+            Self::Sha256(digest) => digest.update(bytes),
+        }
+    }
+    pub(crate) fn finish(self) -> String {
+        match self {
+            Self::Sha1(digest) => format!("{:x}", digest.finalize()),
+            Self::Sha256(digest) => format!("{:x}", digest.finalize()),
+        }
+    }
+}
+
 fn source_git_directory(source: &Path) -> Result<PathBuf> {
     let git = source.join(".git");
     let mut directory = if fs::symlink_metadata(&git).is_ok_and(|metadata| metadata.is_dir()) {
@@ -1495,7 +1576,12 @@ pub(crate) async fn advertised_output_remote(
     cancel: &CancellationToken,
 ) -> Result<Option<String>> {
     validate_oid(commit)?;
-    let config = paths::read_regular(&source_git_directory(source)?.join("config"), 65_536)?;
+    // A repository's configuration grows a section for each branch that tracks a remote, about a
+    // hundred bytes each: a monorepo's thousands of branches pass 64 KiB.
+    let config = paths::read_regular(
+        &source_git_directory(source)?.join("config"),
+        MAX_SOURCE_CONFIG,
+    )?;
     let mut read = isolated_remote_command();
     read.args([
         "config",
@@ -1523,11 +1609,88 @@ pub(crate) async fn advertised_output_remote(
         .arg(format!("protocol.{}.allow=always", remote.scheme()))
         .args(["-c", "http.followRedirects=false", "ls-remote", "--"])
         .arg(remote.as_str());
-    let advertised = run(lookup, &[], cancel, 1024 * 1024, REMOTE_TIMEOUT).await?;
-    Ok(std::str::from_utf8(&advertised)?
-        .lines()
-        .any(|line| line.split_once('\t').is_some_and(|(oid, _)| oid == commit))
-        .then(|| remote.into()))
+    // A GitHub monorepo advertises every branch, tag, and pull request ref, megabytes in all, so
+    // the advertisement is read a line at a time and the lookup stops at the commit.
+    let advertised = any_line(lookup, cancel, REMOTE_TIMEOUT, |line| {
+        line.split(|byte| *byte == b'\t').next() == Some(commit.as_bytes())
+    })
+    .await?;
+    Ok(advertised.then(|| remote.into()))
+}
+
+/// Whether a line `command` prints satisfies `matches`. Its output is read a line at a time, each
+/// at most [`MAX_LINE`] bytes, and the command is stopped at the first match, so a listing of
+/// any length takes no more memory than its longest line; the deadline bounds its time.
+async fn any_line(
+    mut command: Command,
+    cancel: &CancellationToken,
+    timeout: Duration,
+    matches: impl Fn(&[u8]) -> bool,
+) -> Result<bool> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    check_cancelled(cancel)?;
+    let operation = operation(&command);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    command.as_std_mut().process_group(0);
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("start trusted Git executable for `{operation}`"))?;
+    let pid = child.id().context("Git child has no process ID")?;
+    let mut stdout = BufReader::new(child.stdout.take().context("Git stdout unavailable")?);
+    let stderr = child.stderr.take().context("Git stderr unavailable")?;
+    let errors = {
+        let operation = operation.clone();
+        tokio::spawn(async move { limited(stderr, MAX_STDERR, &operation, "error output").await })
+    };
+    let result = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => Err(anyhow::anyhow!("workspace operation cancelled")),
+        _ = tokio::time::sleep(timeout) => Err(anyhow::anyhow!("`{operation}` exceeded its deadline")),
+        result = async {
+            let mut line = Vec::with_capacity(128);
+            loop {
+                line.clear();
+                let read = (&mut stdout)
+                    .take(MAX_LINE as u64 + 1)
+                    .read_until(b'\n', &mut line)
+                    .await?;
+                if read == 0 {
+                    break;
+                }
+                ensure!(
+                    line.ends_with(b"\n") || line.len() <= MAX_LINE,
+                    "`{operation}` output line exceeds its {} size limit",
+                    size(MAX_LINE)
+                );
+                if matches(line.strip_suffix(b"\n").unwrap_or(&line)) {
+                    return Ok(true);
+                }
+            }
+            let stderr = errors.await.context("read Git error output")??;
+            let status = child.wait().await?;
+            if !status.success() {
+                return Err(GitExit {
+                    code: status.code(),
+                    operation: operation.clone(),
+                    stderr: String::from_utf8_lossy(&stderr).trim().into(),
+                }
+                .into());
+            }
+            Ok(false)
+        } => result,
+    };
+    // Stopped at a match, or failed: the rest of the listing is not wanted.
+    if !matches!(result, Ok(false)) {
+        unsafe {
+            libc::kill(-(pid as i32), libc::SIGKILL);
+        }
+        let _ = child.wait().await;
+    }
+    result
 }
 
 fn isolated_remote_command() -> Command {
@@ -1611,28 +1774,75 @@ fn reject_object_links(directory: &Path) -> Result<()> {
 #[derive(Debug)]
 pub(crate) struct GitExit {
     pub(crate) code: Option<i32>,
+    operation: String,
     stderr: String,
 }
 impl std::fmt::Display for GitExit {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             formatter,
-            "Git command failed ({:?}): {}",
-            self.code, self.stderr
+            "`{}` failed ({:?}): {}",
+            self.operation, self.code, self.stderr
         )
     }
 }
 impl std::error::Error for GitExit {}
 
-async fn limited(mut reader: impl AsyncRead + Unpin, maximum: usize) -> Result<Vec<u8>> {
+/// What a child runs, such as `git pack-objects`, so an error names the Git operation that hit a
+/// limit or failed. Global options and their values are skipped.
+pub(crate) fn operation(command: &Command) -> String {
+    let command = command.as_std();
+    let program = Path::new(command.get_program())
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut arguments = command.get_args();
+    while let Some(argument) = arguments.next() {
+        match argument.to_str() {
+            Some("-c" | "-C") => {
+                arguments.next();
+            }
+            Some(option) if option.starts_with('-') => {}
+            Some(subcommand) if program == "git" => return format!("git {subcommand}"),
+            _ => break,
+        }
+    }
+    program
+}
+
+fn size(bytes: usize) -> String {
+    const MIB: usize = 1024 * 1024;
+    if bytes >= MIB && bytes.is_multiple_of(MIB) {
+        format!("{} MiB", bytes / MIB)
+    } else if bytes >= 1024 && bytes.is_multiple_of(1024) {
+        format!("{} KiB", bytes / 1024)
+    } else {
+        format!("{bytes}-byte")
+    }
+}
+
+/// Reads at most `maximum` bytes of `operation`'s `stream`, failing when it writes more.
+async fn limited(
+    mut reader: impl AsyncRead + Unpin,
+    maximum: usize,
+    operation: &str,
+    stream: &str,
+) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     (&mut reader)
         .take(maximum as u64 + 1)
         .read_to_end(&mut bytes)
         .await?;
-    ensure!(bytes.len() <= maximum, "Git output exceeds its size limit");
+    ensure!(
+        bytes.len() <= maximum,
+        "`{operation}` {stream} exceeds its {} size limit",
+        size(maximum)
+    );
     Ok(bytes)
 }
+
+/// The most one Git child may write to its standard error.
+const MAX_STDERR: usize = 65_536;
 
 pub(crate) async fn run(
     mut command: Command,
@@ -1642,13 +1852,16 @@ pub(crate) async fn run(
     timeout: Duration,
 ) -> Result<Vec<u8>> {
     check_cancelled(cancel)?;
+    let operation = operation(&command);
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     command.as_std_mut().process_group(0);
-    let mut child = command.spawn().context("start trusted Git executable")?;
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("start trusted Git executable for `{operation}`"))?;
     let pid = child.id().context("Git child has no process ID")?;
     let mut stdin = child.stdin.take().context("Git stdin unavailable")?;
     let stdout = child.stdout.take().context("Git stdout unavailable")?;
@@ -1656,10 +1869,27 @@ pub(crate) async fn run(
     let result = tokio::select! {
         biased;
         _ = cancel.cancelled() => Err(anyhow::anyhow!("workspace operation cancelled")),
-        _ = tokio::time::sleep(timeout) => Err(anyhow::anyhow!("Git command exceeded its deadline")),
+        _ = tokio::time::sleep(timeout) => Err(anyhow::anyhow!("`{operation}` exceeded its deadline")),
         result = async {
-            let ((), stdout, stderr, status) = tokio::try_join!(async { stdin.write_all(input).await?; stdin.shutdown().await?; drop(stdin); Ok::<_, anyhow::Error>(()) }, limited(stdout, maximum), limited(stderr, 65_536), async { Ok::<_, anyhow::Error>(child.wait().await?) })?;
-            if !status.success() { return Err(GitExit { code: status.code(), stderr: String::from_utf8_lossy(&stderr).trim().into() }.into()); }
+            let ((), stdout, stderr, status) = tokio::try_join!(
+                async {
+                    stdin.write_all(input).await?;
+                    stdin.shutdown().await?;
+                    drop(stdin);
+                    Ok::<_, anyhow::Error>(())
+                },
+                limited(stdout, maximum, &operation, "output"),
+                limited(stderr, MAX_STDERR, &operation, "error output"),
+                async { Ok::<_, anyhow::Error>(child.wait().await?) }
+            )?;
+            if !status.success() {
+                return Err(GitExit {
+                    code: status.code(),
+                    operation: operation.clone(),
+                    stderr: String::from_utf8_lossy(&stderr).trim().into(),
+                }
+                .into());
+            }
             Ok(stdout)
         } => result,
     };
@@ -1668,6 +1898,130 @@ pub(crate) async fn run(
             libc::kill(-(pid as i32), libc::SIGKILL);
         }
         let _ = child.wait().await;
+    }
+    result
+}
+
+/// Runs `stages` as a pipeline: each stage's output is the next stage's input through an
+/// operating-system pipe, never through this process, so what flows between them, such as a pack
+/// of a monorepo's whole history, takes no memory here and has no size bound of its own. `input`
+/// feeds the first stage, and the last stage's output is bounded by `maximum`. Every stage shares
+/// the deadline, each stage's error output keeps its bound, and an error, a cancellation, or the
+/// deadline kills every stage's process group before this returns.
+pub(crate) async fn pipeline(
+    stages: Vec<Command>,
+    input: &[u8],
+    cancel: &CancellationToken,
+    maximum: usize,
+    timeout: Duration,
+) -> Result<Vec<u8>> {
+    check_cancelled(cancel)?;
+    ensure!(!stages.is_empty(), "a Git pipeline needs a stage");
+    let operations: Vec<String> = stages.iter().map(operation).collect();
+    let last = stages.len() - 1;
+    let mut children = Vec::with_capacity(stages.len());
+    let mut groups: Vec<i32> = Vec::with_capacity(stages.len());
+    let mut errors = Vec::with_capacity(stages.len());
+    let (mut first_input, mut last_output) = (None, None);
+    let mut started = Ok(());
+    let mut previous: Option<Stdio> = None;
+    for (index, mut command) in stages.into_iter().enumerate() {
+        command
+            .stdin(previous.take().unwrap_or_else(Stdio::piped))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        command.as_std_mut().process_group(0);
+        let spawned = (|| {
+            let mut child = command.spawn().with_context(|| {
+                format!("start trusted Git executable for `{}`", operations[index])
+            })?;
+            groups.push(child.id().context("Git child has no process ID")? as i32);
+            let stdin = child.stdin.take();
+            let stdout = child.stdout.take().context("Git stdout unavailable")?;
+            let stderr = child.stderr.take().context("Git stderr unavailable")?;
+            children.push(child);
+            if index == 0 {
+                first_input = Some(stdin.context("Git stdin unavailable")?);
+            }
+            if index == last {
+                last_output = Some(stdout);
+            } else {
+                previous = Some(
+                    stdout
+                        .try_into()
+                        .context("connect a Git pipeline stage to the next")?,
+                );
+            }
+            let operation = operations[index].clone();
+            errors.push(tokio::spawn(async move {
+                limited(stderr, MAX_STDERR, &operation, "error output").await
+            }));
+            anyhow::Ok(())
+        })();
+        if spawned.is_err() {
+            started = spawned;
+            break;
+        }
+    }
+    let result = match (started, first_input, last_output) {
+        (Err(error), _, _) => Err(error),
+        (Ok(()), Some(mut stdin), Some(stdout)) => tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(anyhow::anyhow!("workspace operation cancelled")),
+            _ = tokio::time::sleep(timeout) => Err(anyhow::anyhow!(
+                "`{}` exceeded its deadline",
+                operations.join(" | ")
+            )),
+            result = async {
+                let (written, stdout) = tokio::join!(
+                    async {
+                        stdin.write_all(input).await?;
+                        stdin.shutdown().await?;
+                        drop(stdin);
+                        Ok::<_, std::io::Error>(())
+                    },
+                    limited(stdout, maximum, &operations[last], "output"),
+                );
+                let stdout = stdout?;
+                // A failing stage makes the stages before it fail writing to it, so a failure
+                // with an exit code of its own, not a signal, is the one that explains the rest.
+                let mut failures = Vec::new();
+                for ((child, errors), operation) in
+                    children.iter_mut().zip(&mut errors).zip(&operations)
+                {
+                    let status = child.wait().await?;
+                    let stderr = errors.await.context("read Git error output")??;
+                    if !status.success() {
+                        failures.push(GitExit {
+                            code: status.code(),
+                            operation: operation.clone(),
+                            stderr: String::from_utf8_lossy(&stderr).trim().into(),
+                        });
+                    }
+                }
+                if !failures.is_empty() {
+                    let explaining = failures
+                        .iter()
+                        .position(|failure| failure.code.is_some())
+                        .unwrap_or(0);
+                    return Err(failures.swap_remove(explaining).into());
+                }
+                written.with_context(|| format!("write the input of `{}`", operations[0]))?;
+                Ok(stdout)
+            } => result,
+        },
+        _ => Err(anyhow::anyhow!("Git pipeline streams unavailable")),
+    };
+    if result.is_err() {
+        for group in &groups {
+            unsafe {
+                libc::kill(-group, libc::SIGKILL);
+            }
+        }
+        for child in &mut children {
+            let _ = child.wait().await;
+        }
     }
     result
 }
@@ -1681,22 +2035,29 @@ pub(crate) async fn run_status(
     timeout: Duration,
 ) -> Result<(Option<i32>, Vec<u8>)> {
     check_cancelled(cancel)?;
+    let operation = operation(&command);
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     command.as_std_mut().process_group(0);
-    let mut child = command.spawn().context("start trusted Git executable")?;
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("start trusted Git executable for `{operation}`"))?;
     let pid = child.id().context("Git child has no process ID")?;
     let stdout = child.stdout.take().context("Git stdout unavailable")?;
     let stderr = child.stderr.take().context("Git stderr unavailable")?;
     let result = tokio::select! {
         biased;
         _ = cancel.cancelled() => Err(anyhow::anyhow!("workspace operation cancelled")),
-        _ = tokio::time::sleep(timeout) => Err(anyhow::anyhow!("Git command exceeded its deadline")),
+        _ = tokio::time::sleep(timeout) => Err(anyhow::anyhow!("`{operation}` exceeded its deadline")),
         result = async {
-            let (stdout, _, status) = tokio::try_join!(limited(stdout, maximum), limited(stderr, 65_536), async { Ok::<_, anyhow::Error>(child.wait().await?) })?;
+            let (stdout, _, status) = tokio::try_join!(
+                limited(stdout, maximum, &operation, "output"),
+                limited(stderr, MAX_STDERR, &operation, "error output"),
+                async { Ok::<_, anyhow::Error>(child.wait().await?) }
+            )?;
             Ok((status.code(), stdout))
         } => result,
     };
@@ -1746,6 +2107,182 @@ mod tests {
         ensure!(result.is_err());
         ensure!(unsafe { libc::kill(pid, 0) } == -1);
         ensure!(std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH));
+        Ok(())
+    }
+
+    fn shell(script: &str) -> Command {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", script]);
+        command
+    }
+
+    #[test]
+    fn an_operation_is_named_by_its_git_subcommand() {
+        let mut command = Command::new("/usr/bin/git");
+        command.arg("--git-dir=/tmp/x").args([
+            "-c",
+            "core.pager=cat",
+            "-C",
+            "/",
+            "pack-objects",
+            "--stdout",
+        ]);
+        assert_eq!(operation(&command), "git pack-objects");
+        assert_eq!(operation(&shell("true")), "sh");
+    }
+
+    #[tokio::test]
+    async fn a_read_over_its_limit_names_the_git_operation() -> Result<()> {
+        let mut command = Command::new("/usr/bin/git");
+        command
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .args(["-c", "core.pager=cat", "version"]);
+        let error = run(command, &[], &CancellationToken::new(), 8, COMMAND_TIMEOUT)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "`git version` output exceeds its 8-byte size limit"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_pipeline_streams_more_than_any_buffer_between_its_stages() -> Result<()> {
+        // 64 MiB flows from the first stage to the second; only the count reaches this process.
+        let output = pipeline(
+            vec![
+                shell("/bin/dd if=/dev/zero bs=1048576 count=64 2>/dev/null"),
+                shell("/usr/bin/wc -c"),
+            ],
+            &[],
+            &CancellationToken::new(),
+            64,
+            COMMAND_TIMEOUT,
+        )
+        .await?;
+        assert_eq!(String::from_utf8(output)?.trim(), "67108864");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_pipeline_reports_the_stage_that_failed_not_the_one_it_starved() -> Result<()> {
+        let error = pipeline(
+            vec![
+                shell("/bin/cat"),
+                shell("/bin/cat >/dev/null; echo refused >&2; exit 3"),
+            ],
+            b"input",
+            &CancellationToken::new(),
+            64,
+            COMMAND_TIMEOUT,
+        )
+        .await
+        .unwrap_err();
+        let exit = error.downcast_ref::<GitExit>().context("a stage exit")?;
+        assert_eq!((exit.code, exit.stderr.as_str()), (Some(3), "refused"));
+        // The first stage dies writing to a stage that stopped reading; the stage that stopped
+        // explains it.
+        let error = pipeline(
+            vec![
+                shell("/usr/bin/yes"),
+                shell("/usr/bin/head -c 10 >/dev/null; exit 4"),
+            ],
+            &[],
+            &CancellationToken::new(),
+            64,
+            COMMAND_TIMEOUT,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<GitExit>().and_then(|exit| exit.code),
+            Some(4)
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_pipeline_reaps_every_stage() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let started = root.path().join("started");
+        let mut first = shell("echo $$ >> \"$1\"; exec /bin/sleep 60");
+        first.arg("fixture").arg(&started);
+        let mut second = shell("echo $$ >> \"$1\"; exec /bin/cat");
+        second.arg("fixture").arg(&started);
+        let token = CancellationToken::new();
+        let task_token = token.clone();
+        let task = tokio::spawn(async move {
+            pipeline(vec![first, second], &[], &task_token, 64, COMMAND_TIMEOUT).await
+        });
+        let pids: Vec<i32> = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(text) = fs::read_to_string(&started)
+                    && text.lines().count() == 2
+                    && text.ends_with('\n')
+                {
+                    return text;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?
+        .lines()
+        .map(str::parse)
+        .collect::<Result<_, _>>()?;
+        token.cancel();
+        let result = tokio::time::timeout(Duration::from_secs(5), task).await??;
+        ensure!(result.is_err());
+        for pid in pids {
+            ensure!(unsafe { libc::kill(pid, 0) } == -1);
+            ensure!(std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH));
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_streamed_listing_stops_at_its_match_and_bounds_each_line() -> Result<()> {
+        let cancel = CancellationToken::new();
+        // An endless listing: only the line read so far is held, and the match stops it.
+        ensure!(
+            any_line(shell("/usr/bin/yes"), &cancel, COMMAND_TIMEOUT, |line| line
+                == b"y")
+            .await?
+        );
+        ensure!(
+            !any_line(
+                shell("printf 'a\\nb\\n'"),
+                &cancel,
+                COMMAND_TIMEOUT,
+                |line| { line == b"c" }
+            )
+            .await?
+        );
+        let error = any_line(
+            shell("/bin/dd if=/dev/zero bs=8192 count=1 2>/dev/null"),
+            &cancel,
+            COMMAND_TIMEOUT,
+            |_| false,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "`sh` output line exceeds its 4 KiB size limit"
+        );
+        let error = any_line(
+            shell("echo gone >&2; exit 2"),
+            &cancel,
+            COMMAND_TIMEOUT,
+            |_| false,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<GitExit>().and_then(|exit| exit.code),
+            Some(2)
+        );
         Ok(())
     }
 }

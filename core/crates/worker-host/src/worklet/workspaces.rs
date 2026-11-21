@@ -101,14 +101,6 @@ pub(crate) fn granted_credential(
     })
 }
 
-/// A complete bundle of a Session's last delivery, read on this host.
-enum Continuation {
-    /// From another lane's repository, in a private temporary file, with its SHA-256.
-    Local(NamedTempFile, String),
-    /// From the remote Workspace's Session branch.
-    Remote(supertag_git_delivery::source::FetchedSource),
-}
-
 /// The Attempt cannot read its Session's last delivery yet, and waits for `holder`: it has not
 /// pushed it, or it holds a local Workspace, which continues only there.
 fn waits_for(holder: &str) -> Status {
@@ -382,26 +374,14 @@ impl Workspaces {
                     "approved continuation belongs to another workspace"
                 );
                 if !workspace.holds_commit(&reference.head_commit, cancel).await {
-                    let bundle = match transfers.held_workspace(&holder.attempt_id) {
-                        // Another lane of this host delivered it: bundle it from that lane's
-                        // repository.
+                    match transfers.held_workspace(&holder.attempt_id) {
+                        // Another lane of this host delivered it: copy the Session's commits from
+                        // that lane's repository. A complete bundle would carry the Workspace's
+                        // whole history, gigabytes for a monorepo.
                         Some(state) => {
-                            let bytes = supertag_workspaces::complete_delivery_bundle(
-                                &state,
-                                &reference.head_commit,
-                                &reference.delivery_id,
-                                cancel,
-                            )
-                            .await?;
-                            // A configured state path may contain a platform alias such as /var
-                            // on macOS. Import validates every directory component, so use the
-                            // canonical private parent for this host-owned file.
-                            let mut temporary =
-                                NamedTempFile::new_in(self.directory.canonicalize()?)?;
-                            temporary.write_all(&bytes)?;
-                            temporary.as_file().sync_all()?;
-                            let sha256 = format!("{:x}", Sha256::digest(&bytes));
-                            Continuation::Local(temporary, sha256)
+                            workspace
+                                .import_held_commit(&state, &reference.head_commit, cancel)
+                                .await?;
                         }
                         None if matches!(mapping.source, WorkspaceSource::ControlPlane) => {
                             let grant = tokio::select! {
@@ -420,27 +400,19 @@ impl Workspaces {
                                 )
                                 .await?
                                 .ok_or_else(|| waits_for(&holder.host_id))?;
-                            Continuation::Remote(fetched)
+                            workspace
+                                .import_bundle(
+                                    &fetched.bundle.path,
+                                    &fetched.bundle.sha256,
+                                    &reference.head_commit,
+                                    Some(&reference.start_commit),
+                                    cancel,
+                                )
+                                .await?;
                         }
                         // A local Workspace's Session continues only on the host holding it.
                         None => return Err(waits_for(&holder.host_id).into()),
-                    };
-                    let (path, sha256) = match &bundle {
-                        Continuation::Local(file, sha256) => (file.path(), sha256.as_str()),
-                        Continuation::Remote(fetched) => (
-                            fetched.bundle.path.as_path(),
-                            fetched.bundle.sha256.as_str(),
-                        ),
-                    };
-                    workspace
-                        .import_bundle(
-                            path,
-                            sha256,
-                            &reference.head_commit,
-                            Some(&reference.start_commit),
-                            cancel,
-                        )
-                        .await?;
+                    }
                 }
                 Some(reference.head_commit)
             }

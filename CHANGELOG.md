@@ -16,6 +16,18 @@ within the pre-1.0 compatibility policy described in
   `SuperTag-VERSION-darwin-amd64.dmg` desktop app. The installer script picks it on an Intel Mac,
   and still installs the Apple silicon build from a Rosetta terminal on Apple silicon.
 
+### Fixed
+
+- Tasks in a large local Workspace no longer fail with "Task workspace could not be prepared
+  safely". Before, a Worker Host held each copy of Git objects in memory, up to 256 MiB, so a
+  repository whose history or checkout passed that size failed every Task. Now the copies stream
+  between Git processes. A delivery reads whole only the files a Task changed, so a checkout of
+  any size delivers. A Session that continues on another lane of the same Worker Host copies only
+  its own commits. Checking whether an output commit was pushed now reads the remote's refs a
+  line at a time and stops at the commit, so tens of thousands of pull request refs no longer
+  break it. A Git read that still hits a limit names its operation in the Worker Host log, such
+  as `` `git pack-objects` output exceeds its 256 MiB size limit ``.
+
 ## [0.3.5] - 2026-11-20
 
 ### Added

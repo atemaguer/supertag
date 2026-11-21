@@ -244,7 +244,7 @@ impl GitDelivery {
         let target = landing.target.as_str();
         let target_ref = format!("refs/heads/{target}");
         for _ in 0..MERGE_ATTEMPTS {
-            let refs = list_refs(session, &[target_ref.as_str()], false, cancel).await?;
+            let refs = list_refs(session, &[], &[target_ref.as_str()], cancel).await?;
             let Some(current) = refs
                 .into_iter()
                 .find(|(name, _)| *name == target_ref)
@@ -419,7 +419,7 @@ impl GitDelivery {
             let remote = self.remote(&workspace, crate::Access::Read).await?;
             let session = self.session(&remote)?;
             let reference = format!("refs/heads/{}", landing.branch);
-            let named = list_refs(&session, &[reference.as_str()], false, cancel)
+            let named = list_refs(&session, &[], &[reference.as_str()], cancel)
                 .await?
                 .into_iter()
                 .find(|(name, _)| *name == reference)

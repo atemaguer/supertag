@@ -747,6 +747,75 @@ pub(crate) fn read_checkout_file(root: &Path, path: &str) -> Result<CapturedFile
     }
 }
 
+/// A checkout file's mode, Git blob ID, and size, read as [`read_checkout_file`] reads it but
+/// hashed a block at a time, so a file of any size takes no more memory than one block. A
+/// monorepo tracks files larger than any capture bound; only a changed file's bytes are kept.
+pub(crate) struct HashedFile {
+    pub mode: String,
+    pub oid: String,
+    pub size: u64,
+}
+
+pub(crate) fn hash_checkout_file(root: &Path, path: &str, oid_length: usize) -> Result<HashedFile> {
+    validate_repo_path(path)?;
+    let directory = checkout_parent(root, path)?;
+    let name = path.rsplit('/').next().context("missing filename")?;
+    let metadata = metadata_at(&directory, name)?;
+    match metadata.st_mode & libc::S_IFMT {
+        libc::S_IFLNK => {
+            let bytes = link_at(&directory, name)?;
+            validate_link(path, &bytes)?;
+            Ok(HashedFile {
+                mode: "120000".into(),
+                oid: crate::git::blob_oid(&bytes, oid_length),
+                size: bytes.len() as u64,
+            })
+        }
+        libc::S_IFREG => {
+            let file = open_file_at(&directory, name)?;
+            let before = file.metadata()?;
+            ensure!(
+                before.is_file() && before.nlink() == 1,
+                "capture requires a regular file without external hard links"
+            );
+            let mut hasher = crate::git::BlobHasher::new(oid_length, before.len());
+            let mut block = vec![0; 1 << 20];
+            let mut read = 0_u64;
+            loop {
+                let count = (&file).read(&mut block)?;
+                if count == 0 {
+                    break;
+                }
+                read += count as u64;
+                ensure!(
+                    read <= before.len(),
+                    "file changed during capture; stop the adapter before finalizing"
+                );
+                hasher.update(&block[..count]);
+            }
+            let after = file.metadata()?;
+            ensure!(
+                before.len() == after.len()
+                    && before.mtime() == after.mtime()
+                    && before.mtime_nsec() == after.mtime_nsec()
+                    && read == after.len(),
+                "file changed during capture; stop the adapter before finalizing"
+            );
+            Ok(HashedFile {
+                mode: if before.mode() & 0o111 != 0 {
+                    "100755"
+                } else {
+                    "100644"
+                }
+                .into(),
+                oid: hasher.finish(),
+                size: read,
+            })
+        }
+        _ => bail!("workspace file changed type during capture: {path}"),
+    }
+}
+
 #[cfg(test)]
 mod artifact_tests {
     use super::*;

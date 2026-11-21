@@ -1273,3 +1273,44 @@ async fn deliveries_exclude_caches_like_a_gitignore_and_keep_look_alikes() {
     }
     assert_eq!(delivery.changed_files, 7);
 }
+
+#[tokio::test]
+async fn a_merge_follow_up_checkout_holds_the_merged_tree_and_its_objects() {
+    let fixture = Fixture::new();
+    let workspace = fixture.workspace();
+    let first = prepare(&workspace, "first", "first-attempt", None).await;
+    fs::write(first.path.join("README.md"), "the Session's work\n").unwrap();
+    let delivery = workspace
+        .finalize(&first, complete(), &CancellationToken::new())
+        .await
+        .unwrap();
+    // The target branch moved on in the source after the Session started.
+    fs::create_dir(fixture.source.join("target")).unwrap();
+    fs::write(fixture.source.join("target/new.txt"), "target work\n").unwrap();
+    git(&fixture.source, &["add", "-A"]);
+    git(&fixture.source, &["commit", "--quiet", "-m", "Target work"]);
+    let target = git(&fixture.source, &["rev-parse", "HEAD"]);
+    let cancel = CancellationToken::new();
+    workspace
+        .import_source_commit(&target, &cancel)
+        .await
+        .unwrap();
+    let mut merge = request("merge", "merge-attempt", Some(delivery.head_commit.clone()));
+    merge.merge_commit = Some(target);
+    let checkout = workspace.prepare(merge, &cancel).await.unwrap();
+    assert_eq!(
+        fs::read_to_string(checkout.path.join("README.md")).unwrap(),
+        "the Session's work\n"
+    );
+    assert_eq!(
+        fs::read_to_string(checkout.path.join("target/new.txt")).unwrap(),
+        "target work\n"
+    );
+    // The index holds the merge, staged on the Session's head, and the checkout's repository
+    // every object of its tree.
+    assert_eq!(
+        git(&checkout.path, &["status", "--porcelain"]),
+        "A  target/new.txt"
+    );
+    git(&checkout.path, &["cat-file", "-e", ":target/new.txt"]);
+}

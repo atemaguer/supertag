@@ -271,6 +271,52 @@ async fn sessions_start_from_a_pinned_commit_relayed_as_a_bundle() {
     assert!(format!("{error:#}").contains("Git LFS"), "{error:?}");
 }
 
+/// A GitHub monorepo advertises a ref for every pull request it ever had: megabytes more than
+/// its branches and tags, which alone say whether an output commit was pushed.
+#[tokio::test]
+async fn an_output_commit_is_found_past_a_monorepos_pull_request_refs() {
+    let fixture = Fixture::new();
+    let cancel = CancellationToken::new();
+    let workspace = fixture.workspace(None);
+    git(&fixture.work, &["checkout", "--quiet", "-b", "review"]);
+    std::fs::write(fixture.work.join("notes.md"), "under review\n").unwrap();
+    git(&fixture.work, &["commit", "--quiet", "-am", "review"]);
+    let reviewed = git(&fixture.work, &["rev-parse", "HEAD"]);
+    git(
+        &fixture.work,
+        &[
+            "push",
+            "--quiet",
+            fixture.remote.to_str().unwrap(),
+            "review:refs/pull/1/head",
+        ],
+    );
+    let packed = fixture.remote.join("packed-refs");
+    assert!(!packed.exists());
+    let refs: String = (2..100_000)
+        .map(|number| format!("{} refs/pull/{number:06}/head\n", fixture.base))
+        .collect();
+    assert!(refs.len() > 4 * 1024 * 1024);
+    std::fs::write(&packed, refs).unwrap();
+    assert_eq!(
+        fixture
+            .delivery
+            .advertised_output_remote(&workspace, &fixture.base, &cancel)
+            .await
+            .unwrap(),
+        Some(fixture.url())
+    );
+    // A commit only a pull request ref names was not pushed to a branch or tag.
+    assert_eq!(
+        fixture
+            .delivery
+            .advertised_output_remote(&workspace, &reviewed, &cancel)
+            .await
+            .unwrap(),
+        None
+    );
+}
+
 #[tokio::test]
 async fn branch_mode_pushes_the_session_branch_fast_forward_only() {
     let fixture = Fixture::new();

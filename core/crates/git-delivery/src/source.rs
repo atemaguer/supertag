@@ -33,18 +33,17 @@ pub struct FetchedSource {
     pub directory: TempDir,
 }
 
-/// The refs a remote advertises, by name.
+/// The refs a remote advertises, by name: those `patterns` name, with `ls-remote` `options` such
+/// as `--symref` or `--heads --tags`. A GitHub remote advertises a ref for every pull request, so
+/// a listing of everything grows with the repository's age; ask for what is needed.
 pub(crate) async fn list_refs(
     session: &Session,
+    options: &[&str],
     patterns: &[&str],
-    symref: bool,
     cancel: &CancellationToken,
 ) -> Result<Vec<(String, String)>> {
     let mut command = session.command(session.directory.path());
-    command.arg("ls-remote");
-    if symref {
-        command.arg("--symref");
-    }
+    command.arg("ls-remote").args(options);
     command.arg("--").arg(&session.url);
     command.args(patterns);
     let output = git::run(
@@ -118,7 +117,7 @@ impl GitDelivery {
         let remote = self.remote(workspace, Access::Read).await?;
         let session = self.session(&remote)?;
         if workspace.r#ref.is_empty() {
-            let refs = list_refs(&session, &["HEAD"], true, cancel).await?;
+            let refs = list_refs(&session, &["--symref"], &["HEAD"], cancel).await?;
             let branch = refs
                 .iter()
                 .find(|(name, _)| name == "symref:HEAD")
@@ -137,7 +136,7 @@ impl GitDelivery {
             return Ok((branch, commit));
         }
         let wanted = format!("refs/heads/{}", workspace.r#ref);
-        let refs = list_refs(&session, &[wanted.as_str()], false, cancel).await?;
+        let refs = list_refs(&session, &[], &[wanted.as_str()], cancel).await?;
         let commit = refs
             .into_iter()
             .find(|(name, _)| *name == wanted)
@@ -311,7 +310,9 @@ impl GitDelivery {
         ensure!(valid_git_commit(commit), "invalid output commit");
         let remote = self.remote(workspace, Access::Read).await?;
         let session = self.session(&remote)?;
-        let refs = list_refs(&session, &[], false, cancel).await?;
+        // Only branches and tags, which the server filters on before sending: a monorepo's pull
+        // request refs alone pass the listing's bound.
+        let refs = list_refs(&session, &["--heads", "--tags"], &[], cancel).await?;
         Ok(refs
             .iter()
             .any(|(_, oid)| oid == commit)

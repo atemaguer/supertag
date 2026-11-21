@@ -669,8 +669,9 @@ impl Workspace {
             })
             .cloned()
             .collect();
-        // Every file is read and hashed on several threads; only a changed file's bytes are kept,
-        // to be written as a blob. Most of a turn's files are unchanged.
+        // Every file is hashed on several threads, a block at a time; only a changed file's bytes
+        // are read whole and kept, to be written as a blob. Most of a turn's files are unchanged,
+        // and a monorepo's checkout is far larger than what one delivery may change.
         let hashed = {
             let (root, oid_length, cancel) = (
                 checkout.path.clone(),
@@ -682,8 +683,8 @@ impl Workspace {
                 .map(|(path, entry)| (path.clone(), entry.oid.clone()))
                 .collect();
             tokio::task::spawn_blocking(move || {
-                // The capture limit holds across the workers, so a huge Workspace stops early
-                // instead of being read whole.
+                // The limit on changed bytes holds across the workers, so a delivery too large to
+                // keep stops early instead of being read whole.
                 let total = std::sync::atomic::AtomicUsize::new(0);
                 let chunk = captured.len().div_ceil(git::parallelism()).max(1);
                 std::thread::scope(|scope| {
@@ -695,23 +696,26 @@ impl Workspace {
                                 let mut out = Vec::with_capacity(part.len());
                                 for path in part {
                                     check_cancelled(cancel)?;
-                                    let file = paths::read_checkout_file(root, path)?;
-                                    let size = file.bytes.len();
+                                    let file = paths::hash_checkout_file(root, path, oid_length)?;
+                                    if known.get(path) == Some(&file.oid) {
+                                        out.push((path.clone(), file.mode, file.oid, None));
+                                        continue;
+                                    }
+                                    let size = usize::try_from(file.size)
+                                        .context("workspace size overflow")?;
                                     ensure!(
                                         total.fetch_add(size, std::sync::atomic::Ordering::Relaxed)
                                             + size
                                             <= CAPTURE_LIMIT,
-                                        "workspace capture exceeds 256 MiB"
+                                        "workspace changes exceed 256 MiB"
                                     );
-                                    let oid = git::blob_oid(&file.bytes, oid_length);
-                                    let changed = known.get(path) != Some(&oid);
-                                    out.push((
-                                        path.clone(),
-                                        file.mode,
-                                        oid,
-                                        size,
-                                        changed.then_some(file.bytes),
-                                    ));
+                                    let read = paths::read_checkout_file(root, path)?;
+                                    ensure!(
+                                        read.mode == file.mode
+                                            && git::blob_oid(&read.bytes, oid_length) == file.oid,
+                                        "file changed during capture; stop the adapter before finalizing"
+                                    );
+                                    out.push((path.clone(), file.mode, file.oid, Some(read.bytes)));
                                 }
                                 Ok(out)
                             })
@@ -732,16 +736,16 @@ impl Workspace {
         };
         let mut entries = BTreeMap::new();
         let mut captured_bytes = 0_usize;
-        for (path, mode, oid, size, changed) in hashed {
+        for (path, mode, oid, changed) in hashed {
             check_cancelled(cancel)?;
-            captured_bytes = captured_bytes
-                .checked_add(size)
-                .context("workspace size overflow")?;
-            ensure!(
-                captured_bytes <= CAPTURE_LIMIT,
-                "workspace capture exceeds 256 MiB"
-            );
             if let Some(bytes) = changed {
+                captured_bytes = captured_bytes
+                    .checked_add(bytes.len())
+                    .context("workspace size overflow")?;
+                ensure!(
+                    captured_bytes <= CAPTURE_LIMIT,
+                    "workspace changes exceed 256 MiB"
+                );
                 ensure!(
                     repository.write_blob(&bytes, cancel).await? == oid,
                     "Git returned an unexpected blob identity"
@@ -977,6 +981,41 @@ impl Workspace {
             .await?;
         repository
             .assert_ancestor(&self.inner.config.base_commit, expected_head, cancel)
+            .await?;
+        repository.sync()?;
+        Ok(())
+    }
+
+    /// Imports a Session's delivered `head` from another Workspace state directory of this host
+    /// with the same base, such as another lane's. Only the objects `head` reaches beyond the
+    /// base, which both repositories hold with its history, are copied, Git child to Git child, so
+    /// a monorepo's history is never bundled or held in memory. Another process may own `holder`:
+    /// its repository is only read.
+    pub async fn import_held_commit(
+        &self,
+        holder: &Path,
+        head: &str,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        check_cancelled(cancel)?;
+        let _guard = self.inner.gate.lock().await;
+        git::validate_oid(head)?;
+        let root = paths::planned_path(holder)?;
+        paths::verify_directory(&root)?;
+        ensure!(
+            root != self.inner.root,
+            "a Workspace cannot import from its own state"
+        );
+        let record: ConfigRecord = read_json(&root.join("config.json"))?
+            .context("the holding Workspace state has no configuration")?;
+        ensure!(
+            record.base_commit == self.inner.config.base_commit,
+            "the holding Workspace state has another base"
+        );
+        let holder = git::Repository::existing(&root, record.base_commit.len())?;
+        let repository = self.repository(cancel).await?;
+        repository
+            .import_held(&holder, &self.inner.config.base_commit, head, cancel)
             .await?;
         repository.sync()?;
         Ok(())
@@ -1362,7 +1401,8 @@ pub async fn complete_delivery_bundle(
 
 /// Where removed checkouts wait for `purge_discarded`, inside the workspace state directory.
 const DISCARDED: &str = "discarded";
-/// The most file bytes one delivery captures.
+/// The most bytes of changed and new files one delivery captures. Unchanged files, however many,
+/// are only hashed.
 const CAPTURE_LIMIT: usize = 268_435_456;
 /// Each Session's last delivered checkout, kept for its next Attempt.
 const PARKED: &str = "parked";
