@@ -14,7 +14,7 @@ use supertag_credential_vault::CredentialVault;
 use supertag_git_delivery::Credential;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
-    git_remote::{credential_vault_id, remote_transport, valid_credential_name},
+    git_remote::{credential_vault_id, remote_transport},
     negotiation::ProtocolChannel,
     v2::*,
 };
@@ -338,8 +338,8 @@ async fn credential(connection: Connection, command: CredentialCommand) -> Resul
             private_key,
         } => {
             ensure!(
-                valid_credential_name(&name),
-                "a Workspace Credential name starts with a letter or digit and uses letters, digits, '.', '-', and '_'"
+                supertag_protocol::valid_resource_id(&name),
+                supertag_protocol::resource_id_error("a Workspace Credential name")
             );
             let (secret, kind, identifier) = if let Some(path) = ssh_key {
                 let private_key = read_secret_file(&path, "SSH key")?;

@@ -3,7 +3,7 @@
 use prost::Message;
 use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction};
-use supertag_protocol::{v2::*, valid_workspace_id};
+use supertag_protocol::{v2::*, valid_resource_id};
 
 use super::{HostAuthority, Result, Store, StoreError, execution, hosts, invalid, name};
 
@@ -53,7 +53,7 @@ impl Store {
             ));
         }
         if input.workspace_ids.len() > 256
-            || input.workspace_ids.iter().any(|id| !valid_workspace_id(id))
+            || input.workspace_ids.iter().any(|id| !valid_resource_id(id))
         {
             return Err(invalid("host must report at most 256 valid Workspace IDs"));
         }

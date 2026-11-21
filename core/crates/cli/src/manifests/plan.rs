@@ -141,6 +141,23 @@ fn sorted(values: &mut Vec<String>) -> Result<()> {
     Ok(())
 }
 
+/// Sorts and deduplicates references to other resources, each a resource ID.
+fn references(values: &mut Vec<String>, kind: &str) -> Result<()> {
+    ensure!(
+        values.len() <= MAX_REFERENCES,
+        "too many resource references"
+    );
+    if let Some(_invalid) = values
+        .iter()
+        .find(|value| !supertag_protocol::valid_resource_id(value))
+    {
+        bail!(supertag_protocol::resource_id_error(kind));
+    }
+    values.sort_unstable();
+    values.dedup();
+    Ok(())
+}
+
 fn id() -> String {
     Uuid::new_v4().to_string()
 }
@@ -447,6 +464,7 @@ impl<'a> Catalog<'a> {
                         .insert((Kind::ContextSet, name.into()), prior.set_id);
                     return Ok(None);
                 }
+                let named = display_name(&mut value.name, prior.as_ref().map(|v| &v.name), name);
                 normalize_manifest_context(&mut value, prior.as_ref())?;
                 let revision = prior.as_ref().map(|value| value.revision);
                 preserve_identity(
@@ -467,6 +485,12 @@ impl<'a> Catalog<'a> {
                     previous.as_ref().map(|v| messages(&v.items)),
                     messages(&value.items),
                 )];
+                if named {
+                    self.planned_fields.push(display_field(
+                        previous.as_ref().map(|v| &v.name),
+                        &value.name,
+                    ));
+                }
                 (previous.as_ref() != Some(&value)).then(|| {
                     (
                         previous.is_some(),
@@ -490,6 +514,7 @@ impl<'a> Catalog<'a> {
                         .insert((Kind::PermissionSet, name.into()), prior.set_id);
                     return Ok(None);
                 }
+                let named = display_name(&mut value.name, prior.as_ref().map(|v| &v.name), name);
                 normalize_manifest_permission(&mut value, prior.as_ref())?;
                 let revision = prior.as_ref().map(|value| value.revision);
                 preserve_identity(
@@ -521,6 +546,12 @@ impl<'a> Catalog<'a> {
                         messages(&value.permissions),
                     ),
                 ];
+                if named {
+                    self.planned_fields.push(display_field(
+                        previous.as_ref().map(|v| &v.name),
+                        &value.name,
+                    ));
+                }
                 (previous.as_ref() != Some(&value)).then(|| {
                     (
                         previous.is_some(),
@@ -541,6 +572,7 @@ impl<'a> Catalog<'a> {
                     declarations.roles.insert(name.into(), prior);
                     return Ok(None);
                 }
+                let named = display_name(&mut value.name, prior.as_ref().map(|v| &v.name), name);
                 normalize_manifest_role(&mut value, prior.as_ref())?;
                 self.resolve_sets(
                     declarations,
@@ -590,6 +622,10 @@ impl<'a> Catalog<'a> {
                         message(&value.execution),
                     ),
                 ];
+                if named {
+                    self.planned_fields
+                        .push(display_field(old.map(|v| &v.name), &value.name));
+                }
                 (prior.as_ref() != Some(&value)).then(|| {
                     (
                         prior.is_some(),
@@ -772,7 +808,11 @@ impl<'a> Catalog<'a> {
         kind: Kind,
         ids: &mut Vec<String>,
     ) -> Result<()> {
-        sorted(ids)?;
+        let label = match kind {
+            Kind::ContextSet => "a Context Set reference",
+            _ => "a Permission Set reference",
+        };
+        references(ids, label)?;
         for reference in ids.iter_mut() {
             if let Some(value) = declarations.resource_id(kind, reference) {
                 *reference = value.into();
@@ -795,7 +835,7 @@ impl<'a> Catalog<'a> {
             };
             *reference = value.ok_or_else(|| missing(kind, reference))?;
         }
-        sorted(ids)
+        references(ids, label)
     }
 
     async fn tag(&mut self, id: &str) -> Result<Option<Tag>> {
@@ -857,10 +897,13 @@ impl<'a> Catalog<'a> {
             spec.memory.is_some(),
             spec.start_rate.is_some(),
             spec.volume.is_some(),
+            spec.display_name.is_some(),
         ];
         let mut value = PutTagRequest {
             tag_id: name.into(),
-            name: prior.as_ref().map(|prior| prior.name.clone()),
+            name: spec
+                .display_name
+                .or_else(|| prior.as_ref().map(|prior| prior.name.clone())),
             instructions: spec.instructions.unwrap_or_else(|| {
                 prior
                     .as_ref()
@@ -904,8 +947,8 @@ impl<'a> Catalog<'a> {
         );
         if let Some(workspace) = spec.workspace {
             ensure!(
-                supertag_protocol::valid_workspace_id(&workspace.id),
-                "invalid Workspace ID"
+                supertag_protocol::valid_resource_id(&workspace.id),
+                supertag_protocol::resource_id_error("spec.workspace.id")
             );
             let base_commit = workspace.base_commit.unwrap_or_default();
             let base_ref = workspace.base_ref.unwrap_or_default();
@@ -963,7 +1006,7 @@ impl<'a> Catalog<'a> {
                     .is_none_or(|settings| settings.shared_execution_environment_id.is_none()),
             "shared execution cannot use a pinned Git Workspace"
         );
-        sorted(&mut spec.roles)?;
+        references(&mut spec.roles, "a Role reference")?;
         let mut role_ids = BTreeMap::new();
         for reference in spec.roles {
             let role = if let Some(role) = declarations.roles.get(&reference) {
@@ -984,7 +1027,10 @@ impl<'a> Catalog<'a> {
             );
             role_ids.insert(role.role_id, reference);
         }
-        sorted(&mut spec.accepts_messages_from)?;
+        references(
+            &mut spec.accepts_messages_from,
+            "an acceptsMessagesFrom Tag",
+        )?;
         ensure!(
             role_ids.len() + spec.accepts_messages_from.len() <= MAX_REFERENCES,
             "too many Tag relationships"
@@ -1142,6 +1188,7 @@ impl<'a> Catalog<'a> {
                     .as_bytes()
                     .to_vec(),
             ),
+            display_field(old.map(|v| &v.name), value.name.as_deref().unwrap_or(name)),
         ]
         .into_iter()
         .zip(declared)
@@ -1165,6 +1212,7 @@ impl<'a> Catalog<'a> {
                     .volume
                     .as_ref()
                     .is_none_or(|volume| *volume == old.volume)
+                && value.name.as_ref().is_none_or(|name| *name == old.name)
         });
         Ok((!unchanged).then_some((prior.is_some(), Write::Tag(value))))
     }
@@ -1175,12 +1223,6 @@ impl<'a> Catalog<'a> {
         name: &str,
         declarations: &mut Declarations,
     ) -> Result<Option<(bool, Write)>> {
-        ensure!(
-            name.encode_utf16().count() <= 200
-                && !matches!(name, "." | "..")
-                && !name.chars().any(char::is_whitespace),
-            "invalid Team ID"
-        );
         let prior = lookup(
             self.teams
                 .get_team(request(GetTeamRequest { team: name.into() }, self.token)?),
@@ -1248,7 +1290,7 @@ impl<'a> Catalog<'a> {
                 .as_ref()
                 .map_or_else(Vec::new, |prior| prior.member_tag_ids.clone())
         });
-        sorted(&mut members)?;
+        references(&mut members, "a Team member")?;
         ensure!(
             (1..=100).contains(&members.len()),
             "a Team needs 1–100 distinct members"
@@ -1765,6 +1807,24 @@ fn number(value: i64) -> Vec<u8> {
     } else {
         value.to_le_bytes().to_vec()
     }
+}
+
+/// Fills an omitted `spec.displayName` with the current one, or the ID for a new resource, and
+/// says whether the manifest declared it.
+fn display_name(value: &mut String, prior: Option<&String>, id: &str) -> bool {
+    let declared = !value.is_empty();
+    if !declared {
+        *value = prior.map_or(id, String::as_str).into();
+    }
+    declared
+}
+
+fn display_field(prior: Option<&String>, value: &str) -> ManifestField {
+    field(
+        "spec.displayName",
+        prior.map(|v| v.as_bytes().to_vec()),
+        value.as_bytes().to_vec(),
+    )
 }
 
 fn preserve_identity(value: &mut String, prior: Option<&str>) -> Result<()> {

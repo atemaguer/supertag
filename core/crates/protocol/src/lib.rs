@@ -378,15 +378,25 @@ impl v2::SessionCheckpoint {
 
 pub const MAX_WORKSPACE_BLOB_BYTES: usize = 256 * 1024 * 1024;
 
-pub fn valid_workspace_id(value: &str) -> bool {
-    value.len() <= 80
-        && value
-            .as_bytes()
-            .first()
-            .is_some_and(u8::is_ascii_alphanumeric)
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+/// What every user-named resource ID must be: a DNS-1123 label, as in Kubernetes.
+pub const RESOURCE_ID_RULE: &str =
+    "1–63 lowercase letters, digits, and hyphens, starting and ending with a letter or digit";
+
+/// Whether `value` is a resource ID: a DNS-1123 label of 1–63 lowercase ASCII letters, digits,
+/// and `-`, starting and ending with a letter or digit (`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`).
+/// A leading digit is allowed, so a generated UUID is a resource ID.
+pub fn valid_resource_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let edge = |byte: &u8| byte.is_ascii_lowercase() || byte.is_ascii_digit();
+    (1..=63).contains(&bytes.len())
+        && bytes.first().is_some_and(edge)
+        && bytes.last().is_some_and(edge)
+        && bytes.iter().all(|byte| edge(byte) || *byte == b'-')
+}
+
+/// The error for a `kind` (such as "Role ID") that is not a resource ID; it states the rule.
+pub fn resource_id_error(kind: &str) -> String {
+    format!("{kind} must be {RESOURCE_ID_RULE}")
 }
 
 /// The one branch a Tag's Session delivers to: `supertag/session/<id>`, where `<id>` is the
@@ -439,7 +449,7 @@ pub fn validate_workspace_delivery(
     let blob = |value: &v2::BlobReference| {
         valid_sha256(&value.sha256) && value.byte_length <= MAX_WORKSPACE_BLOB_BYTES as u64
     };
-    if !valid_workspace_id(&reference.workspace_id)
+    if !valid_resource_id(&reference.workspace_id)
         || !valid_sha256(&reference.delivery_id)
         || ![
             &reference.base_commit,
@@ -464,6 +474,54 @@ pub fn validate_workspace_delivery(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod resource_id_tests {
+    use super::{resource_id_error, valid_resource_id};
+
+    #[test]
+    fn accepts_dns_labels_and_refuses_everything_else() {
+        let longest = "a".repeat(63);
+        for valid in [
+            "8198e0c0-71fa-4c4e-9a43-6d2f1b0a9e11",
+            "10x",
+            "a",
+            "0",
+            "security-reviewer",
+            "a--b",
+            longest.as_str(),
+        ] {
+            assert!(valid_resource_id(valid), "{valid}");
+        }
+        let too_long = "a".repeat(64);
+        for invalid in [
+            "",
+            too_long.as_str(),
+            "Reviewer",
+            "Security Reviewer",
+            "security reviewer",
+            "a_b",
+            "a.b",
+            "a/b",
+            "a:b",
+            "-a",
+            "a-",
+            "-",
+            " a",
+            "café",
+        ] {
+            assert!(!valid_resource_id(invalid), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn error_states_the_rule() {
+        assert_eq!(
+            resource_id_error("Role ID"),
+            "Role ID must be 1–63 lowercase letters, digits, and hyphens, starting and ending with a letter or digit"
+        );
+    }
 }
 
 #[cfg(test)]

@@ -307,7 +307,7 @@ pub(crate) async fn tag_volume_in(
     match requested {
         Some(id) if id.is_empty() => Ok(None),
         Some(id) => {
-            name("artifact Volume", &id)?;
+            crate::store::resource_id("Volume ID", &id)?;
             if revision_in(tx, &id).await?.is_none() {
                 return Err(StoreError::FailedPrecondition(format!(
                     "artifact Volume {id} does not exist"
@@ -777,7 +777,7 @@ impl Store {
         input: &PutArtifactVolumeRequest,
     ) -> Result<ArtifactVolume> {
         operator(principal)?;
-        name("Volume ID", &input.volume_id)?;
+        crate::store::resource_id("Volume ID", &input.volume_id)?;
         name("operation ID", &input.operation_id)?;
         validate_volume_source(&input.source).map_err(|e| invalid(e.message()))?;
         let digest = hash("put", input);

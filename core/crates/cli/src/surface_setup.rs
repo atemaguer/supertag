@@ -817,12 +817,8 @@ pub async fn setup(command: SetupCommand) -> Result<()> {
         .clone()
         .unwrap_or_else(|| provider.name().to_owned());
     ensure!(
-        (1..=63).contains(&name.len())
-            && name.as_bytes()[0].is_ascii_alphanumeric()
-            && name
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_'),
-        "--name must use 1-63 lowercase letters, numbers, hyphens, or underscores"
+        supertag_protocol::valid_resource_id(&name),
+        supertag_protocol::resource_id_error("--name")
     );
     if let Some(listen) = listen {
         ensure!(

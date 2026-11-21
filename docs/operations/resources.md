@@ -66,8 +66,9 @@ spec:
 ---
 apiVersion: supertag/v1
 kind: Role
-metadata: { name: Builder }
+metadata: { name: builder }
 spec:
+  displayName: Builder
   purpose: Implement bounded changes with tests.
   instructions: Run the project's checks before reporting, and report the exact commands.
   permissionSets: [local-tools]
@@ -77,7 +78,7 @@ apiVersion: supertag/v1
 kind: Tag
 metadata: { name: builder }
 spec:
-  roles: [Builder]
+  roles: [builder]
   runsOn: [linux]
 ---
 apiVersion: supertag/v1
@@ -93,7 +94,7 @@ supertag apply -f organization.yaml
 ```
 
 `-f` takes YAML documents, a JSON array, a directory of manifests, or `-` for standard input.
-`diff` prints each change, such as `create Tag/builder` or `assign Role/Builder to Tag/builder`;
+`diff` prints each change, such as `create Tag/builder` or `assign Role/builder to Tag/builder`;
 it prints `No changes.` when the Control Plane already matches. `apply` applies resources in
 dependency order. Applying the same files again changes nothing. A Tag's `runsOn` names labels a
 Worker Host must carry, from the host's `labels` in `supertag.yaml` or its host Auth Key. See

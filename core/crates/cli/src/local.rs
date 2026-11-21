@@ -1586,7 +1586,7 @@ fn join_key_name(host: &str) -> String {
     let mut name: String = host
         .chars()
         .map(|c| match c.to_ascii_lowercase() {
-            c @ ('a'..='z' | '0'..='9' | '-' | '_') => c,
+            c @ ('a'..='z' | '0'..='9' | '-') => c,
             _ => '-',
         })
         .take(40)

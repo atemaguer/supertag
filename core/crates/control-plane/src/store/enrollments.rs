@@ -91,7 +91,7 @@ impl Store {
         input: &CreateAuthKeyRequest,
     ) -> Result<AuthKey> {
         operator(principal)?;
-        auth_key_name(&input.name)?;
+        super::resource_id("Auth Key name", &input.name)?;
         let role = required_role(input.role)?;
         if role != Role::Host && (input.ephemeral || !input.labels.is_empty()) {
             return Err(invalid("only host Auth Keys are ephemeral or grant labels"));
@@ -291,6 +291,10 @@ impl Store {
         crate::audit::note_actor(&actor);
         let role = required_role(input.role)?;
         enrollee_name(&input.name)?;
+        // A Worker Host's name is its resource ID; Gateway and client names may be host names.
+        if role == Role::Host {
+            super::resource_id("Worker Host name", &input.name)?;
+        }
         // The Control Plane seeds `host:local` and `gateway:local` from its configuration, so no
         // Auth Key may take that name first and stop it from starting.
         if role != Role::Client && input.name == BOOTSTRAP_NAME {
@@ -375,7 +379,8 @@ impl Store {
                 )));
             }
             enrolled = format!("{}-{suffix}", input.name);
-            if enrollee_name(&enrolled).is_err() {
+            // Only Worker Hosts take a suffix, and a suffixed name is still a resource ID.
+            if !supertag_protocol::valid_resource_id(&enrolled) {
                 return Err(StoreError::Conflict(format!(
                     "the {} name is not available",
                     role.as_str()

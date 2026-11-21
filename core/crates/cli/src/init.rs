@@ -19,7 +19,7 @@ use crate::{harness_checks, lifecycle, local_config};
 
 const DEFAULT_PORT: u16 = 3434;
 const PERMISSION_SET: &str = "local-tools";
-const ROLE: &str = "Lead";
+const ROLE: &str = "lead";
 /// The Context Set init gives the lead's Role: every Skill the Worker Host has.
 const CONTEXT_SET: &str = "skills";
 /// Task Attempts the local Worker Host runs at once across its harnesses, so one stuck Task does
@@ -1939,6 +1939,7 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
                         "kind": "Role",
                         "metadata": { "name": ROLE },
                         "spec": {
+                            "displayName": "Lead",
                             "purpose": "Own Objectives for this repository: plan the work, make and verify changes, and report what changed.",
                             "permissionSets": [PERMISSION_SET],
                             "contextSets": [CONTEXT_SET],

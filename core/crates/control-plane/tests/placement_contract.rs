@@ -613,7 +613,7 @@ async fn host_id_suffix_contract(url: &str) {
         Err(StoreError::Conflict(_))
     ));
     // A suffix that would make the name too long is not tried.
-    let long = "h".repeat(250);
+    let long = "h".repeat(63);
     assert_eq!(
         enroll(&fleet, &long, "long", "t6").await.unwrap().name,
         long
@@ -832,7 +832,16 @@ async fn auth_key_names_and_host_credentials_contract(url: &str) {
 
     // Names are validated, and never reused: not after revocation, expiry or use.
     let mut invalid = create("invalid", true, 0);
-    for name in ["", "CI", "_ci", "ci key", "ci.key", &"c".repeat(64)] {
+    for name in [
+        "",
+        "CI",
+        "_ci",
+        "ci_key",
+        "ci-",
+        "ci key",
+        "ci.key",
+        &"c".repeat(64),
+    ] {
         invalid.name = name.into();
         assert!(matches!(
             store.create_auth_key(OPERATOR, &invalid).await,
@@ -840,7 +849,7 @@ async fn auth_key_names_and_host_credentials_contract(url: &str) {
         ));
     }
     let mut longest = create("longest", true, 0);
-    longest.name = format!("9{}", "_".repeat(62));
+    longest.name = format!("9{}9", "-".repeat(61));
     store.create_auth_key(OPERATOR, &longest).await.unwrap();
     let laptop = create("laptop", false, 0);
     let issued = store.create_auth_key(OPERATOR, &laptop).await.unwrap();

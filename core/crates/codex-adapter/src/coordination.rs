@@ -16,7 +16,7 @@ use supertag_protocol::{
         harness_work_sessions_client::HarnessWorkSessionsClient,
         harness_workstreams_client::HarnessWorkstreamsClient,
     },
-    valid_git_commit, valid_workspace_id, validate_workspace_delivery,
+    valid_git_commit, valid_resource_id, validate_workspace_delivery,
 };
 use tonic::{Code, Response, Status, transport::Channel};
 
@@ -1297,7 +1297,7 @@ impl Client {
 fn valid_review(review: &CommitReview) -> bool {
     review_identity(&review.request_id)
         && valid_git_commit(&review.commit)
-        && valid_workspace_id(&review.workspace_id)
+        && valid_resource_id(&review.workspace_id)
         && bounded_identity(&review.objective_id)
         && bounded_identity(&review.source_task_id)
         && bounded_identity(&review.requester_tag_id)

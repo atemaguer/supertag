@@ -48,8 +48,9 @@ A **Role** supplies instructions and permissions for a Tag. Save this as `builde
 apiVersion: supertag/v1
 kind: Role
 metadata:
-  name: Builder
+  name: builder
 spec:
+  displayName: Builder
   purpose: Implement small, verifiable repository changes.
   instructions: Do the work you are given, check the result, and report what changed.
   permissionSets: [local-tools]
@@ -59,7 +60,7 @@ kind: Tag
 metadata:
   name: builder
 spec:
-  roles: [Builder]
+  roles: [builder]
   workspace: { id: WORKSPACE, ref: main }
 ```
 

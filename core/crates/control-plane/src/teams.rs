@@ -485,17 +485,7 @@ fn team_name(value: &str) -> Result<&str> {
 }
 
 fn team_id(value: &str) -> Result<&str> {
-    if value.is_empty()
-        || value.encode_utf16().count() > 200
-        || matches!(value, "." | "..")
-        || value
-            .chars()
-            .any(|ch| ch.is_whitespace() || ch.is_control())
-    {
-        return Err(invalid(
-            "Team ID must contain 1–200 characters without whitespace or control characters",
-        ));
-    }
+    crate::store::resource_id("Team ID", value)?;
     Ok(value)
 }
 
@@ -507,7 +497,7 @@ fn member_ids(values: &[String]) -> Result<Vec<String>> {
         return Err(invalid("a Team needs 1–100 distinct members"));
     }
     for member in &members {
-        name("member Tag ID", member)?;
+        crate::store::resource_id("member Tag ID", member)?;
     }
     Ok(members)
 }

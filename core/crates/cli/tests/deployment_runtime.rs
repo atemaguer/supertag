@@ -57,7 +57,7 @@ spec:
 ---
 apiVersion: supertag/v1
 kind: Role
-metadata: {name: Manager}
+metadata: {name: manager}
 spec:
   purpose: Build and independently review a CSV utility in one shared workspace.
   permissionSets: [shared-workspace]
@@ -66,7 +66,7 @@ apiVersion: supertag/v1
 kind: Tag
 metadata: {name: builder-manager}
 spec:
-  roles: [Manager]
+  roles: [manager]
   instructions: "Build the CSV utility"
   acceptsMessagesFrom: [review-manager]
   runsOn: [builder-host]
@@ -75,7 +75,7 @@ apiVersion: supertag/v1
 kind: Tag
 metadata: {name: review-manager}
 spec:
-  roles: [Manager]
+  roles: [manager]
   instructions: "Review the CSV utility"
   acceptsMessagesFrom: [builder-manager]
   runsOn: [review-host]

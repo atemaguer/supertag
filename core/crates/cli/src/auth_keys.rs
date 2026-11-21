@@ -55,7 +55,8 @@ pub enum AuthKeyCommand {
     /// Create a named Auth Key for one role: one-time for a single enrollee, or reusable. Every
     /// enrollee chooses its own name.
     Create {
-        /// The key's name: 1-63 lowercase letters, digits, hyphens or underscores. Never reused.
+        /// The key's name: 1-63 lowercase letters, digits, and hyphens, starting and ending with a
+        /// letter or digit. Never reused.
         name: String,
         /// The role every enrollee takes. It never changes.
         #[arg(long, value_enum)]

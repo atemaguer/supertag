@@ -12,7 +12,7 @@ use supertag_protocol::v2::*;
 use crate::{
     Store,
     policy::operator,
-    store::{Result, invalid, name},
+    store::{Result, invalid},
 };
 
 const KINDS: [&str; 10] = [
@@ -62,7 +62,7 @@ impl Store {
             if !KINDS.contains(&resource.kind.as_str()) {
                 return Err(invalid("unsupported manifest field kind"));
             }
-            name("manifest resource name", &resource.name)?;
+            crate::store::resource_id("metadata.name", &resource.name)?;
             if !seen.insert((&resource.kind, &resource.name)) {
                 return Err(invalid("duplicate manifest resource"));
             }

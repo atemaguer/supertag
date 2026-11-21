@@ -495,7 +495,7 @@ async fn contract(url: &str) {
     assert_eq!(list(&store, "paused").await.items.len(), 1);
     cancel(&store, "paused").await;
 
-    for id in ["Page-A", "page-a", "page-B"] {
+    for id in ["page-a", "page-b", "page-c"] {
         ready_question(&store, &host, id, "Choose a direction").await;
     }
     let all = list(&store, "").await;
@@ -538,7 +538,7 @@ async fn contract(url: &str) {
         keys,
         all.items.iter().map(|i| i.key.clone()).collect::<Vec<_>>()
     );
-    for id in ["Page-A", "page-a", "page-B"] {
+    for id in ["page-a", "page-b", "page-c"] {
         cancel(&store, id).await;
     }
 

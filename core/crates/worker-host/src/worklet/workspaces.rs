@@ -15,7 +15,7 @@ use supertag_protocol::{
     v2::{
         transfers_client::TransfersClient, workspace_git_access_client::WorkspaceGitAccessClient, *,
     },
-    valid_workspace_id, validate_workspace_delivery,
+    valid_resource_id, validate_workspace_delivery,
 };
 use supertag_workspaces::{
     Checkout, Delivery, FinalizeRequest, Outcome, PrepareRequest, PreparedExport, TransferArtifact,
@@ -127,7 +127,7 @@ impl Workspaces {
             .into_iter()
             .map(|mut mapping| -> Result<_> {
                 ensure!(
-                    valid_workspace_id(&mapping.workspace_id),
+                    valid_resource_id(&mapping.workspace_id),
                     "invalid hosted workspace identity"
                 );
                 ensure!(

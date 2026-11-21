@@ -4,9 +4,9 @@ use prost::Message;
 use sqlx::{Any, Row, Transaction};
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
-    git_remote::{self, remote_transport, valid_credential_name, valid_merge_target},
+    git_remote::{self, remote_transport, valid_merge_target},
     v2::*,
-    valid_git_branch, valid_workspace_id,
+    valid_git_branch,
 };
 use tonic::{Request, Response, Status};
 
@@ -64,9 +64,7 @@ pub(crate) async fn delete_in(
 
 /// Validates and normalizes a Workspace as an operator declares it.
 pub fn validate_manifest_workspace(value: &mut Workspace) -> Result<()> {
-    if !valid_workspace_id(&value.workspace_id) {
-        return Err(invalid("valid Workspace ID required"));
-    }
+    crate::store::resource_id("Workspace ID", &value.workspace_id)?;
     remote_transport(&value.remote).map_err(invalid_owned)?;
     if !value.r#ref.is_empty() && !valid_git_branch(&value.r#ref) {
         return Err(invalid("a Workspace ref is a branch name, such as main"));
@@ -78,8 +76,8 @@ pub fn validate_manifest_workspace(value: &mut Workspace) -> Result<()> {
     }
     let credentials = value.credentials.get_or_insert_default();
     for credential in [&credentials.read, &credentials.push] {
-        if !credential.is_empty() && !valid_credential_name(credential) {
-            return Err(invalid("invalid Workspace Credential name"));
+        if !credential.is_empty() {
+            crate::store::resource_id("Workspace Credential name", credential)?;
         }
     }
     // github.com is GitHub; any other host is a GitHub forge only when the operator says so.

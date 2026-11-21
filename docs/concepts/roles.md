@@ -40,24 +40,27 @@ guide one or more existing actors.
 | Need | Use | Example |
 | --- | --- | --- |
 | Someone must own release work and receive messages about it | Tag | `release-manager` |
-| Several actors should follow the same security review policy | Role | `Security Reviewer` |
+| Several actors should follow the same security review policy | Role | `security-reviewer` |
 | Research needs its own work, results, and Team placement, separate from engineering | Tag | `researcher` |
-| Every Tag on a Team should document its work the same way | Role | `Documentation Steward` |
+| Every Tag on a Team should document its work the same way | Role | `documentation-steward` |
 
 If a security reviewer must independently receive work, report progress, and be accountable
 for approval, make it a Tag. If release and payments actors should each apply the same review rules
-as part of their existing work, assign both Tags the `Security Reviewer` Role.
+as part of their existing work, assign both Tags the `security-reviewer` Role.
 
 ## Configure a Role
 
-A Role manifest defines the reusable description:
+A Role manifest defines the reusable description. Its `metadata.name` is the Role's ID, which
+follows the [resource ID rule](../reference/resource-model.md#resource-ids); `spec.displayName`
+is the name people see:
 
 ```yaml
 apiVersion: supertag/v1
 kind: Role
 metadata:
-  name: Security Reviewer
+  name: security-reviewer
 spec:
+  displayName: Security Reviewer
   purpose: Review changes that affect customer data.
   instructions: Require evidence and state unresolved risk.
   contextSets:
@@ -75,8 +78,8 @@ metadata:
   name: release-manager
 spec:
   roles:
-    - Release Manager
-    - Security Reviewer
+    - release-manager
+    - security-reviewer
 ```
 
 Apply and inspect them with the normal commands:
@@ -85,7 +88,7 @@ Apply and inspect them with the normal commands:
 supertag apply -f security-reviewer.yaml
 supertag apply -f release-manager.yaml
 supertag describe tag release-manager
-supertag get role "Security Reviewer"
+supertag get role security-reviewer
 ```
 
 A Role can also set the harness, models, and reasoning effort its Tags run with, such as Codex at

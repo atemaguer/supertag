@@ -585,17 +585,8 @@ impl Store {
     ) -> Result<Schedule> {
         crate::policy::operator(principal)?;
         let id = input.schedule_id.as_str();
-        if id.is_empty()
-            || id.len() > 63
-            || !id
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        {
-            return Err(invalid(
-                "a Schedule ID has 1 to 63 lowercase letters, digits, and hyphens",
-            ));
-        }
-        name("Tag ID", &input.tag_id)?;
+        crate::store::resource_id("Schedule ID", id)?;
+        crate::store::resource_id("Tag ID", &input.tag_id)?;
         let note = note(&input.note)?;
         if input.every.trim().is_empty() {
             return Err(invalid("a declared Schedule recurs: set every"));

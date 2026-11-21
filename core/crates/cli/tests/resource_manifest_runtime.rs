@@ -93,7 +93,7 @@ apiVersion: supertag/v1
 kind: Tag
 metadata: {name: builder}
 spec:
-  roles: [Engineer]
+  roles: [engineer]
   acceptsMessagesFrom: [reviewer]
   instructions: "Build the release."
 ---
@@ -104,8 +104,9 @@ spec: {instructions: "Review the release."}
 ---
 apiVersion: supertag/v1
 kind: Role
-metadata: {name: Engineer}
+metadata: {name: engineer}
 spec:
+  displayName: Release Engineer
   purpose: Ship verified releases.
   permissionSets: [engineering-read]
   contextSets: [release-practice]
@@ -177,10 +178,10 @@ spec: {source: "file:///var/lib/supertag/archive"}
         "create Volume/archive",
         "create ContextSet/release-practice",
         "create PermissionSet/engineering-read",
-        "create Role/Engineer",
+        "create Role/engineer",
         "create Tag/builder",
         "create Team/engineering",
-        "assign Role/Engineer to Tag/builder",
+        "assign Role/engineer to Tag/builder",
         "grant Mailbox access from Tag/reviewer to Tag/builder",
         "create Objective/release",
     ] {
@@ -188,6 +189,35 @@ spec: {source: "file:///var/lib/supertag/archive"}
     }
     command(&gateway, &["get", "tag", "builder"], false).await?;
     command(&gateway, &["apply", "-f", path], true).await?;
+    // metadata.name is the Role's ID; spec.displayName is the name clients show, and reads
+    // accept either.
+    for reference in ["engineer", "Release Engineer"] {
+        let role: Value =
+            serde_json::from_str(&command(&gateway, &["get", "role", reference], true).await?)?;
+        assert_eq!(role["role_id"], "engineer", "{role}");
+        assert_eq!(role["name"], "Release Engineer", "{role}");
+    }
+    let spaced = root.join("spaced.yaml");
+    for (kind, name) in [("Role", "Security Reviewer"), ("Tag", "Release_Bot")] {
+        std::fs::write(
+            &spaced,
+            format!(
+                "apiVersion: supertag/v1\nkind: {kind}\nmetadata: {{name: {name}}}\nspec: {{purpose: Review.}}\n"
+            ),
+        )?;
+        let refused = command(
+            &gateway,
+            &["apply", "-f", spaced.to_str().context("manifest path")?],
+            false,
+        )
+        .await?;
+        assert!(
+            refused.contains(
+                "metadata.name must be 1–63 lowercase letters, digits, and hyphens, starting and ending with a letter or digit"
+            ),
+            "{refused}"
+        );
+    }
     let team: Value =
         serde_json::from_str(&command(&gateway, &["get", "team", "engineering"], true).await?)?;
     assert_eq!(team["wake_limits"]["mutual_per_task"], 5, "{team}");
@@ -313,7 +343,7 @@ spec: {}
 ---
 apiVersion: supertag/v1
 kind: Role
-metadata: {name: Observer}
+metadata: {name: observer}
 spec: {purpose: Observe releases.}
 "#,
     )?;
@@ -328,7 +358,7 @@ spec: {purpose: Observe releases.}
     .await?;
     command(
         &gateway,
-        &["role-assignment", "create", "Observer", "builder"],
+        &["role-assignment", "create", "observer", "builder"],
         true,
     )
     .await?;
@@ -368,7 +398,9 @@ spec: {purpose: Observe releases.}
     )?;
     assert_eq!(assignments["assignments"].as_array().unwrap().len(), 1);
     let observer: Value =
-        serde_json::from_str(&command(&gateway, &["get", "role", "Observer"], true).await?)?;
+        serde_json::from_str(&command(&gateway, &["get", "role", "observer"], true).await?)?;
+    // A Role without spec.displayName shows its ID.
+    assert_eq!(observer["name"], "observer", "{observer}");
     assert_eq!(
         assignments["assignments"][0]["role_id"],
         observer["role_id"]
@@ -805,7 +837,7 @@ async fn field_managers(root: &Path, gateway: &str) -> Result<()> {
         std::fs::write(
             &path,
             format!(
-                "apiVersion: supertag/v1\nkind: Role\nmetadata: {{name: Owner}}\nspec: {{purpose: \"{purpose}\"}}\n---\napiVersion: supertag/v1\nkind: Tag\nmetadata: {{name: field-tag}}\nspec: {{instructions: \"{instructions}\"}}\n"
+                "apiVersion: supertag/v1\nkind: Role\nmetadata: {{name: owner}}\nspec: {{purpose: \"{purpose}\"}}\n---\napiVersion: supertag/v1\nkind: Tag\nmetadata: {{name: field-tag}}\nspec: {{instructions: \"{instructions}\"}}\n"
             ),
         )?;
         Ok(path.to_str().context("manifest path")?.to_owned())
@@ -818,11 +850,11 @@ async fn field_managers(root: &Path, gateway: &str) -> Result<()> {
     let preview = command(gateway, &["diff", "-f", &quick, "--set", "team-b"], true).await?;
     assert_eq!(
         preview.trim(),
-        "update Role/Owner\nconflict Role/Owner: spec.purpose is owned by team-a  (use --force-conflicts)"
+        "update Role/owner\nconflict Role/owner: spec.purpose is owned by team-a  (use --force-conflicts)"
     );
     let refused = command(gateway, &["apply", "-f", &quick, "--set", "team-b"], false).await?;
     assert!(
-        refused.contains("Nothing was applied. Role/Owner: spec.purpose is owned by team-a"),
+        refused.contains("Nothing was applied. Role/owner: spec.purpose is owned by team-a"),
         "{refused}"
     );
     assert_eq!(

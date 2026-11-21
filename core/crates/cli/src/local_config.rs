@@ -469,7 +469,7 @@ pub(crate) fn parse(
     let mut plane = None;
     let mut plane_name = None;
     for (name, service) in &document.services {
-        identifier(name)?;
+        resource_name(name)?;
         if let Service::ControlPlane {
             ports,
             url,
@@ -789,7 +789,7 @@ pub(crate) fn parse(
         let mut session_branches = BTreeMap::new();
         let mut remote_workspaces = Vec::new();
         for (id, workspace) in &workspaces {
-            identifier(id)?;
+            resource_name(id)?;
             let Some((path, land, setup)) = workspace.parts() else {
                 // Its landing is the Workspace resource's own `land`.
                 ensure!(
@@ -1242,6 +1242,16 @@ fn scalar(value: &serde_json::Value) -> String {
         other => other.to_string(),
     }
 }
+/// A service, surface, or Workspace mapping name: a resource ID, since each names a Worker Host,
+/// Gateway, Surface Account, or Workspace.
+fn resource_name(value: &str) -> Result<()> {
+    ensure!(
+        supertag_protocol::valid_resource_id(value),
+        supertag_protocol::resource_id_error("a service, surface, or Workspace name")
+    );
+    Ok(())
+}
+/// An instance or secret name.
 fn identifier(value: &str) -> Result<()> {
     ensure!(
         (1..=63).contains(&value.len())
@@ -1249,7 +1259,7 @@ fn identifier(value: &str) -> Result<()> {
             && value
                 .bytes()
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_'),
-        "service, instance and mapping names must use lowercase letters, numbers, hyphens or underscores"
+        "instance and secret names must use lowercase letters, numbers, hyphens or underscores"
     );
     Ok(())
 }

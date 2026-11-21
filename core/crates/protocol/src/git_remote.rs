@@ -2,7 +2,7 @@
 //! change, and who authors the commits it makes. Shared by the Control Plane, git delivery, and
 //! the CLI so all three refuse the same values.
 
-use crate::{valid_git_branch, valid_workspace_id};
+use crate::valid_git_branch;
 
 /// How git delivery reaches a remote.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,11 +105,6 @@ pub fn remote_transport(remote: &str) -> Result<RemoteTransport, String> {
         return Err("invalid scp-style Workspace remote; use user@host:path".into());
     }
     Ok(RemoteTransport::Ssh)
-}
-
-/// A Workspace Credential's name: the same characters as a Workspace ID.
-pub fn valid_credential_name(name: &str) -> bool {
-    valid_workspace_id(name)
 }
 
 /// The credential vault entry that holds a Workspace Credential's secret.

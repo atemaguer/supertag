@@ -109,7 +109,7 @@ async fn exercise(url: &str) {
         &[
             ("Tag", "builder"),
             ("ContextSet", "practice"),
-            ("Role", "Engineer"),
+            ("Role", "engineer"),
             ("Team", "crew"),
             ("Volume", "owned"),
             ("Volume", "edited"),
@@ -133,8 +133,8 @@ async fn exercise(url: &str) {
             &PutContextSetRequest {
                 operation_id: op(),
                 context_set: Some(ContextSet {
-                    set_id: "practice-id".into(),
-                    name: "practice".into(),
+                    set_id: "practice".into(),
+                    name: "Release Practice".into(),
                     ..Default::default()
                 }),
                 expected_revision: None,
@@ -148,7 +148,7 @@ async fn exercise(url: &str) {
             &PutRoleRequest {
                 operation_id: op(),
                 role: Some(Role {
-                    role_id: "engineer-id".into(),
+                    role_id: "engineer".into(),
                     name: "Engineer".into(),
                     purpose: "Ship releases".into(),
                     context_set_ids: vec![context.set_id.clone()],
@@ -183,7 +183,7 @@ async fn exercise(url: &str) {
     let first = vec![
         declared("Tag", "builder", tag.revision, true),
         declared("ContextSet", "practice", context.revision, true),
-        declared("Role", "Engineer", role.revision, true),
+        declared("Role", "engineer", role.revision, true),
         declared("Team", "crew", crew.revision, true),
         declared("Volume", "owned", owned.revision, true),
         declared("Volume", "edited", edited.revision, true),
@@ -249,7 +249,7 @@ async fn exercise(url: &str) {
     let expected = vec![
         ("Team/crew".to_owned(), ApplySetPruneAction::Delete),
         ("Tag/builder".to_owned(), ApplySetPruneAction::Keep),
-        ("Role/Engineer".to_owned(), ApplySetPruneAction::Keep),
+        ("Role/engineer".to_owned(), ApplySetPruneAction::Keep),
         ("ContextSet/practice".to_owned(), ApplySetPruneAction::Keep),
         ("Volume/edited".to_owned(), ApplySetPruneAction::Release),
         ("Volume/owned".to_owned(), ApplySetPruneAction::Delete),
@@ -331,7 +331,7 @@ async fn exercise(url: &str) {
         reconcile(&store, "team-a", vec![], true, false).await,
         vec![
             ("Tag/builder".to_owned(), ApplySetPruneAction::Delete),
-            ("Role/Engineer".to_owned(), ApplySetPruneAction::Delete),
+            ("Role/engineer".to_owned(), ApplySetPruneAction::Delete),
             (
                 "ContextSet/practice".to_owned(),
                 ApplySetPruneAction::Delete
@@ -354,10 +354,9 @@ async fn exercise(url: &str) {
         store.get_context_set(OP, "practice").await,
         Err(StoreError::NotFound(_))
     ));
-    assert!(
-        reconcile(&store, "team-a", vec![], true, false)
-            .await
-            .is_empty()
+    assert_eq!(
+        reconcile(&store, "team-a", vec![], true, false).await,
+        vec![]
     );
 
     // A writer racing a prune is serialized: either the prune sees the edit and

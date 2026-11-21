@@ -497,8 +497,8 @@ async fn cancel_open_in(
 }
 
 pub fn validate_manifest_objective(input: &CreateObjectiveRequest) -> Result<()> {
-    name("Objective ID", &input.objective_id)?;
-    name("owner Tag ID", &input.owner_tag_id)?;
+    crate::store::resource_id("Objective ID", &input.objective_id)?;
+    crate::store::resource_id("owner Tag ID", &input.owner_tag_id)?;
     text("outcome", &input.outcome, 65_536)?;
     if input.outcome.trim().is_empty() {
         return Err(invalid("outcome is required"));

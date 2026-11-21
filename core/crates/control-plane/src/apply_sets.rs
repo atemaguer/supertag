@@ -18,7 +18,7 @@ use supertag_protocol::v2::*;
 use crate::{
     Store, StoreError,
     policy::operator,
-    store::{Result, invalid, name},
+    store::{Result, invalid},
 };
 
 /// Prunable kinds, in removal order: dependents before what they use.
@@ -156,7 +156,7 @@ impl Store {
         let mut declared = BTreeMap::new();
         for item in &input.declared {
             order(&item.kind)?;
-            name("apply set member name", &item.name)?;
+            crate::store::resource_id("metadata.name", &item.name)?;
             if declared
                 .insert((item.kind.as_str(), item.name.as_str()), item)
                 .is_some()

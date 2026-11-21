@@ -86,6 +86,10 @@ whole system rather than another first-class resource.
   captures when it accepts a Task. See [Stored Task inputs](context-resolution.md#stored-task-inputs).
 - <a id="manifest"></a>A **manifest** is a YAML file of resources in the common resource envelope, which
   `supertag apply -f` creates or updates. See [Resource envelope](resource-model.md#resource-envelope).
+- <a id="resource-id"></a>A **resource ID** names one resource of a kind, such as a Tag or Role:
+  1–63 lowercase letters, digits, and hyphens, starting and ending with a letter or digit. A
+  manifest's `metadata.name` is the ID, and a **display name** is the separate name clients show.
+  See [Resource IDs](resource-model.md#resource-ids).
 - <a id="field-manager"></a>A **field manager** is the writer that last set one field of an applied resource, such as
   `apply`, an apply set, or `cli`. <a id="apply-set"></a>An **apply set** is a named group of resources that one input
   declares and `--prune` keeps in step. See

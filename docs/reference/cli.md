@@ -2594,7 +2594,7 @@ Usage: supertag auth-key create [OPTIONS] --role <ROLE> <NAME>
 
 Arguments:
   <NAME>
-          The key's name: 1-63 lowercase letters, digits, hyphens or underscores. Never reused
+          The key's name: 1-63 lowercase letters, digits, and hyphens, starting and ending with a letter or digit. Never reused
 
 Options:
       --gateway <URL|NAME>

@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::{
     ControlPlane, Store, StoreError,
     policy::{assignment_row, increment, operator, save_assignment},
-    store::{Result, invalid, name},
+    store::{Result, invalid},
     tags,
 };
 
@@ -245,7 +245,7 @@ impl Store {
         input: &ReconcileTagRelationshipsRequest,
     ) -> Result<ReconcileTagRelationshipsResponse> {
         let owner = manager(&input.manager)?;
-        name("Tag ID", &input.tag_id)?;
+        crate::store::resource_id("Tag ID", &input.tag_id)?;
         if input.role_ids.len() + input.mailbox_senders.len() > MAX_RELATIONSHIPS {
             return Err(invalid("too many manifest Tag relationships"));
         }
@@ -265,7 +265,14 @@ impl Store {
             (Kind::Mailbox, &input.mailbox_senders),
         ] {
             for related in values {
-                name("relationship reference", related)?;
+                crate::store::resource_id(
+                    if kind == Kind::Role {
+                        "Role ID"
+                    } else {
+                        "sender Tag ID"
+                    },
+                    related,
+                )?;
                 if kind == Kind::Mailbox && related == &input.tag_id {
                     return Err(invalid("a Tag cannot grant itself messaging access"));
                 }
@@ -393,7 +400,7 @@ impl Store {
             let mut tag = entry
                 .tag
                 .ok_or_else(|| invalid("missing provisioned Tag"))?;
-            name("Tag ID", &tag.tag_id)?;
+            crate::store::resource_id("Tag ID", &tag.tag_id)?;
             if !seen.insert(tag.tag_id.clone()) {
                 return Err(invalid("duplicate provisioned Tag"));
             }

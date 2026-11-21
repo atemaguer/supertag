@@ -3,7 +3,7 @@
 //! delivery; the Control Plane database never holds key material or tokens.
 use prost::Message;
 use sqlx::{Any, Transaction};
-use supertag_protocol::{MAX_MESSAGE_BYTES, git_remote::valid_credential_name, v2::*};
+use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
 use tonic::{Request, Response, Status};
 
 use crate::{
@@ -26,11 +26,7 @@ pub(crate) async fn catalog_in(
 }
 
 fn validate(value: &WorkspaceCredential) -> Result<()> {
-    if !valid_credential_name(&value.name) {
-        return Err(invalid(
-            "a Workspace Credential name starts with a letter or digit and uses letters, digits, '.', '-', and '_'",
-        ));
-    }
+    crate::store::resource_id("Workspace Credential name", &value.name)?;
     if value.kind() == WorkspaceCredentialKind::Unspecified {
         return Err(invalid("a Workspace Credential kind is required"));
     }

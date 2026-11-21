@@ -112,8 +112,8 @@ metadata:
   name: release-manager
 spec:
   roles:
-    - Release Manager
-    - Security Reviewer
+    - release-manager
+    - security-reviewer
 ```
 
 All active Roles listed on a Tag apply to its work. A Role does not create another actor or choose

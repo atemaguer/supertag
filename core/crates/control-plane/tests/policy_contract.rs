@@ -350,6 +350,7 @@ async fn contract(url: String) {
         Err(StoreError::NotFound(_))
     ));
     validation(&store).await;
+    resource_ids(&store).await;
     composition(&store).await;
     path_scopes(&store).await;
     store.close().await;
@@ -909,6 +910,102 @@ async fn validation(store: &Store) {
             .await,
         Err(StoreError::InvalidArgument(_))
     ));
+}
+
+const RULE: &str = "must be 1–63 lowercase letters, digits, and hyphens, starting and ending with a letter or digit";
+
+fn refused<T: std::fmt::Debug>(result: Result<T, StoreError>, kind: &str) {
+    match result {
+        Err(StoreError::InvalidArgument(message)) => {
+            assert_eq!(message, format!("{kind} {RULE}"));
+        }
+        other => panic!("{kind}: {other:?}"),
+    }
+}
+
+/// Every policy resource ID, and every Tag ID, is a resource ID; display names are separate.
+async fn resource_ids(store: &Store) {
+    for id in [
+        "Security Reviewer",
+        "security_reviewer",
+        "-reviewer",
+        "a.b",
+        &"a".repeat(64),
+    ] {
+        let mut request = role(id, &[], &[]);
+        request.operation_id = format!("invalid-role-{}", Uuid::new_v4());
+        refused(store.put_role(OP, &request).await, "Role ID");
+        let mut request = permission(id, "files:read");
+        request.operation_id = format!("invalid-set-{}", Uuid::new_v4());
+        refused(
+            store.put_permission_set(OP, &request).await,
+            "Permission Set ID",
+        );
+        refused(
+            store
+                .put_tag_spec(PutTagRequest {
+                    tag_id: id.into(),
+                    ..Default::default()
+                })
+                .await,
+            "Tag ID",
+        );
+    }
+    let mut request = role("bad-reference", &["Not An ID"], &[]);
+    request.operation_id = "bad-reference".into();
+    refused(store.put_role(OP, &request).await, "Set ID");
+
+    // The display name defaults to the ID, can change, and is not the ID.
+    let mut request = role("10x", &[], &[]);
+    request.role.as_mut().unwrap().name = String::new();
+    let created = store.put_role(OP, &request).await.unwrap();
+    assert_eq!(
+        (created.role_id.as_str(), created.name.as_str()),
+        ("10x", "10x")
+    );
+    let mut rename = role("10x", &[], &[]);
+    rename.operation_id = "rename-10x".into();
+    rename.expected_revision = Some(created.revision);
+    rename.role.as_mut().unwrap().name = "Security Reviewer".into();
+    let renamed = store.put_role(OP, &rename).await.unwrap();
+    assert_eq!(renamed.role_id, "10x");
+    assert_eq!(renamed.name, "Security Reviewer");
+    assert_eq!(store.get_role(OP, "10x").await.unwrap(), renamed);
+    assert_eq!(
+        store.get_role(OP, "Security Reviewer").await.unwrap(),
+        renamed
+    );
+    let mut keep = role("10x", &[], &[]);
+    keep.operation_id = "keep-10x".into();
+    keep.expected_revision = Some(renamed.revision);
+    keep.role.as_mut().unwrap().name = String::new();
+    keep.role.as_mut().unwrap().purpose = "Review a change carefully".into();
+    assert_eq!(
+        store.put_role(OP, &keep).await.unwrap().name,
+        "Security Reviewer"
+    );
+    let tag = store
+        .put_tag_spec(PutTagRequest {
+            tag_id: "10x".into(),
+            name: Some("Ten X".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!((tag.tag_id.as_str(), tag.name.as_str()), ("10x", "Ten X"));
+    refused(
+        store
+            .assign_role(
+                OP,
+                &AssignRoleRequest {
+                    operation_id: "assign-by-name".into(),
+                    tag_id: "10x".into(),
+                    role: "Security Reviewer".into(),
+                },
+            )
+            .await,
+        "Role ID",
+    );
 }
 
 #[tokio::test]

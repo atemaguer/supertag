@@ -80,7 +80,7 @@ kind: Tag
 metadata:
   name: backend
 spec:
-  roles: [Backend]
+  roles: [backend]
   acceptsMessagesFrom: [support]
 ```
 

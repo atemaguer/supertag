@@ -33,6 +33,23 @@ within the pre-1.0 compatibility policy described in
   `disable-model-invocation: true`, which only a person may start.
   Cursor still loads none: it skips an optional Skill item and records the omission. See
   [Skills](docs/reference/context-resolution.md#skills).
+- Tags, Roles, Permission Sets, and Context Sets take an optional `spec.displayName`, the name
+  clients show. Omitted, it keeps the current name, and a new resource shows its ID.
+
+### Changed
+
+- Every resource you name has an ID that follows one rule: a DNS-1123 label of 1–63 lowercase
+  letters, digits, and hyphens, starting and ending with a letter or digit, such as `10x` or
+  `security-reviewer`. It covers Tags, Roles, Permission Sets, Context Sets, Teams, Objectives,
+  Schedules, Workspaces, Workspace Credentials, Volumes, Surface Accounts, Tag locations, Worker
+  Hosts, Auth Keys, and Operator Tokens. A manifest's `metadata.name` is now the resource's ID,
+  including a Role's, Permission Set's, or Context Set's, which used to get a generated ID. The
+  Control Plane refuses an ID, or a reference to one, that breaks the rule when a resource is
+  created, replaced, or names another. Existing resources stay as stored, and you can still read
+  and delete them. To keep using one with a name such as `Security Reviewer`, recreate it as
+  `metadata.name: security-reviewer` with `spec.displayName: Security Reviewer`, and update the
+  references to it. Workspace IDs and Workspace Credential names no longer accept `.`, `_`, or
+  uppercase letters. See [Resource IDs](docs/reference/resource-model.md#resource-ids).
 
 ## [0.3.6] - 2026-11-21
 

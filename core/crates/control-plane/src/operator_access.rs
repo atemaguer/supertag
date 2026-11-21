@@ -155,6 +155,7 @@ impl Store {
         input: &CreateOperatorTokenRequest,
     ) -> Result<OperatorToken> {
         name("operator identity", created_by)?;
+        crate::store::resource_id("Operator Token name", &input.name)?;
         let token = token_name(&input.name)?;
         name("operation ID", &input.operation_id)?;
         let digest = hex_digest(&input.secret_digest)?;

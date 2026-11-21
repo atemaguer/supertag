@@ -8,7 +8,8 @@ import {
 
 const fullCommit = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/u;
 const hash = /^[0-9a-f]{64}(?![\s\S])/u;
-const workspaceId = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}(?![\s\S])/u;
+// A resource ID, as supertag_protocol::valid_resource_id checks it.
+const workspaceId = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?![\s\S])/u;
 const maximumBlobBytes = 256 * 1024 * 1024;
 const patchPageBytes = 16 * 1024;
 const reviewId = z

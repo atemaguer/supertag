@@ -53,7 +53,7 @@ use supertag_protocol::{
         ReplyState, ReportAttemptMilestoneRequest, StartTaskRequest, StartTaskResponse,
         SubmitTaskRequest, Tag, Task, TaskEvent, TaskState, WorkspaceSpec,
     },
-    valid_git_commit, valid_workspace_id,
+    valid_git_commit, valid_resource_id,
 };
 use uuid::Uuid;
 
@@ -661,13 +661,15 @@ impl Store {
                 "shared execution cannot use a pinned Git Workspace",
             ));
         }
-        name("Tag ID", tag_id)?;
+        resource_id("Tag ID", tag_id)?;
         if let Some(display_name) = &display_name {
             crate::tags::validate_display_name(display_name)?;
         }
+        if let Some(spec) = &workspace {
+            resource_id("Workspace ID", &spec.workspace_id)?;
+        }
         if let Some(spec) = &workspace
-            && (!valid_workspace_id(&spec.workspace_id)
-                || (!spec.base_commit.is_empty() && !valid_git_commit(&spec.base_commit))
+            && ((!spec.base_commit.is_empty() && !valid_git_commit(&spec.base_commit))
                 || (!spec.base_ref.is_empty()
                     && !supertag_protocol::valid_git_branch(&spec.base_ref))
                 || spec.remote.is_some()
@@ -677,7 +679,7 @@ impl Store {
                 || !spec.co_author.is_empty())
         {
             return Err(invalid(
-                "workspace ID and a full Git base commit or branch name required",
+                "a Workspace binding needs a full Git base commit or branch name",
             ));
         }
         if let Some(spec) = &workspace
@@ -1149,7 +1151,7 @@ impl Store {
             return Err(invalid("only a Claude Code lane runs a command sandbox"));
         }
         let profile_bytes = profile.encode_to_vec();
-        if workspace_ids.len() > 128 || workspace_ids.iter().any(|id| !valid_workspace_id(id)) {
+        if workspace_ids.len() > 128 || workspace_ids.iter().any(|id| !valid_resource_id(id)) {
             return Err(invalid("invalid Worker Host workspace capabilities"));
         }
         let mut workspace_ids = workspace_ids.to_vec();
@@ -1159,7 +1161,7 @@ impl Store {
         if gateway_workspace_ids.len() > 128
             || gateway_workspace_ids
                 .iter()
-                .any(|id| !valid_workspace_id(id))
+                .any(|id| !valid_resource_id(id))
         {
             return Err(invalid("invalid Gateway workspace capabilities"));
         }
@@ -2841,6 +2843,18 @@ pub(crate) fn name(kind: &str, value: &str) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+/// A user-named resource's ID, such as a Tag or Role ID, created or referenced in a write: a
+/// DNS-1123 label (see `supertag_protocol::valid_resource_id`).
+pub(crate) fn resource_id(kind: &str, value: &str) -> Result<()> {
+    if supertag_protocol::valid_resource_id(value) {
+        Ok(())
+    } else {
+        Err(StoreError::InvalidArgument(
+            supertag_protocol::resource_id_error(kind),
+        ))
+    }
 }
 
 pub(crate) fn text(kind: &str, value: &str, maximum: usize) -> Result<()> {

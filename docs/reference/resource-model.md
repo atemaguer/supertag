@@ -148,7 +148,7 @@ spec:
 
 A manifest has exactly `apiVersion`, `kind`, `metadata.name`, and `spec`; any other field, such
 as `status`, is refused. The Control Plane owns everything else it reports, such as revisions and
-phases, and `supertag get KIND NAME` prints it as JSON.
+phases, and `supertag get KIND ID` prints it as JSON.
 
 The relationship between Tags and Roles follows that same boundary: `Tag.spec.roles` is desired
 configuration; `supertag get role-assignment` lists the resulting assignments. A Tag's Worker Host
@@ -162,6 +162,7 @@ More Tag fields declare where its Tasks run, where the Tag works, and who may me
 
 | Field | Entry | Meaning |
 | --- | --- | --- |
+| `spec.displayName` | text | The name clients show. Omitted keeps the current value; a new Tag shows its ID. See [Resource IDs](#resource-ids). |
 | `spec.runsOn` | label | Labels a bound Worker Host must carry to run the Tag's Tasks. See [Worker Host labels](#worker-host-labels). |
 | `spec.workspace` | `id`, `baseCommit` or `ref`, `mcp` | The Workspace the Tag's Tasks work in, the commit new Sessions start from or the local branch whose current commit they start from, and the `.mcp.json` servers they may use. See [Workspaces](#workspaces). |
 | `spec.acceptsMessagesFrom` | Tag name | Mailbox grants where this Tag is the recipient |
@@ -186,6 +187,41 @@ share a Team need no entry. See [Mailbox](coordination.md#mailbox).
 
 Apply merges each of these lists entry by entry, and records who set each entry. See
 [Field managers and apply sets](#field-managers-and-apply-sets).
+
+## Resource IDs
+
+Every resource you name has an ID, and every ID follows one rule. An ID is a DNS-1123 label, as in
+Kubernetes: 1–63 lowercase ASCII letters, digits, and `-`, starting and ending with a letter or
+digit. `10x`, `security-reviewer`, and a generated UUID are IDs. `Security Reviewer`,
+`release_manager`, and `app.v2` are not.
+
+The rule covers Tags, Roles, Permission Sets, Context Sets, Teams, Objectives, Schedules,
+Workspaces, Workspace Credentials, Volumes, Surface Accounts, Tag locations, Worker Hosts, Auth
+Keys, and Operator Tokens. A manifest's `metadata.name` is the resource's ID. The Control Plane
+checks the rule whenever a resource is created or replaced, and whenever one names another, such
+as a Tag naming its Roles. The CLI, the desktop app, and the SDKs all meet the same check. Reads,
+deletions, and retirements still accept an ID stored before the rule, so you can remove such a
+resource and create it again under a new ID.
+
+IDs that SuperTag or a provider assigns follow their own formats: Session IDs such as
+`inbox:<tag>`, Task, Schedule, and operation IDs SuperTag generates, Slack and other provider IDs,
+and Gateway and client names.
+
+A display name is separate from the ID. Tags, Roles, Permission Sets, and Context Sets take an
+optional `spec.displayName`, and Teams take `spec.name`. A display name is up to 256 bytes of any
+text without control characters or surrounding whitespace. Omitted, it keeps its current value,
+and a new resource shows its ID. Clients show the display name. `supertag get` reads a Role,
+Permission Set, or Context Set by its ID or its display name.
+
+```yaml
+apiVersion: supertag/v1
+kind: Role
+metadata:
+  name: security-reviewer
+spec:
+  displayName: Security Reviewer
+  purpose: Review changes that affect customer data.
+```
 
 ## Auth Keys
 
@@ -360,8 +396,9 @@ example, a Reviewer Role can run on Codex with one model at medium or high effor
 apiVersion: supertag/v1
 kind: Role
 metadata:
-  name: Reviewer
+  name: reviewer
 spec:
+  displayName: Reviewer
   purpose: Review changes before they merge.
   execution:
     harness: codex
@@ -399,7 +436,7 @@ Tag's own range. See
 [Scheduling and recovery](scheduling-and-recovery.md#placement-by-harness-and-model).
 
 `execution` is one field under the [field manager rules](#field-managers-and-apply-sets): one
-manager owns all its settings together. `supertag get role NAME` and `supertag get tag NAME`
+manager owns all its settings together. `supertag get role ID` and `supertag get tag ID`
 print it as JSON. Tags and Roles without `execution` run on
 whatever harness and model their Worker Hosts offer, starting at low effort.
 
@@ -446,7 +483,7 @@ apiVersion: supertag/v1
 kind: Tag
 metadata: { name: builder }
 spec:
-  roles: [Builder]
+  roles: [builder]
   workspace: { id: app, baseCommit: 4f2c0d1e9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d, mcp: [docs-search] }
 ```
 
@@ -656,7 +693,7 @@ A **field manager** is the name recorded for that writer:
 A field is either one value or one entry of a list. Each entry of a Tag's `spec.roles`,
 `spec.runsOn`, and `spec.acceptsMessagesFrom` has its own manager. Every other field, such as a
 Role's `spec.purpose`, a Permission Set's `spec.permissions`, or a Team's `spec.members`, is a
-single value. Messages name fields by path, such as `spec.purpose` or `spec.roles[Builder]`.
+single value. Messages name fields by path, such as `spec.purpose` or `spec.roles[builder]`.
 
 Apply follows four rules for each field:
 

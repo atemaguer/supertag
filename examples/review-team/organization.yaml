@@ -36,8 +36,9 @@ spec:
 ---
 apiVersion: supertag/v1
 kind: Role
-metadata: { name: Lead }
+metadata: { name: lead }
 spec:
+  displayName: Lead
   purpose: Own Objectives for this repository. Plan the work, split it into bounded work Sessions for builders and reviewers, and integrate and verify the results.
   instructions: >-
     Read the repository's contributing guide (AGENTS.md or CONTRIBUTING.md) before planning.
@@ -57,8 +58,9 @@ spec:
 ---
 apiVersion: supertag/v1
 kind: Role
-metadata: { name: Builder }
+metadata: { name: builder }
 spec:
+  displayName: Builder
   purpose: Implement bounded changes to this repository with tests and docs.
   instructions: >-
     Follow the repository's contributing guide. Write tests first where practical. Run the
@@ -71,8 +73,9 @@ spec:
 ---
 apiVersion: supertag/v1
 kind: Role
-metadata: { name: Reviewer }
+metadata: { name: reviewer }
 spec:
+  displayName: Reviewer
   purpose: Review proposed changes for correctness, test coverage, and consistency with the repository's conventions.
   instructions: >-
     Read the diff and run the tests yourself. Report each defect as a finding with a severity and
@@ -82,8 +85,9 @@ spec:
 ---
 apiVersion: supertag/v1
 kind: Role
-metadata: { name: Security Reviewer }
+metadata: { name: security-reviewer }
 spec:
+  displayName: Security Reviewer
   purpose: Review proposed changes adversarially for ways repository content, a dependency, or an agent could gain authority, read credentials, or mislead an operator.
   instructions: >-
     Read the contributing guide and the diff, then attack it. For every value a user, a
@@ -98,8 +102,9 @@ spec:
 ---
 apiVersion: supertag/v1
 kind: Role
-metadata: { name: Verifier }
+metadata: { name: verifier }
 spec:
+  displayName: Verifier
   purpose: Run the full checks on an integrated commit and report exact results, so the lead can accept the work or send it back.
   instructions: >-
     Confirm your worktree contains the commit named in your instruction, and never switch branches or
@@ -114,7 +119,7 @@ apiVersion: supertag/v1
 kind: Tag
 metadata: { name: lead }
 spec:
-  roles: [Lead]
+  roles: [lead]
   workspace: { id: app, ref: main }
   runsOn: [team]
 ---
@@ -122,7 +127,7 @@ apiVersion: supertag/v1
 kind: Tag
 metadata: { name: builder-1 }
 spec:
-  roles: [Builder]
+  roles: [builder]
   workspace: { id: app, ref: main }
   runsOn: [team]
 ---
@@ -130,7 +135,7 @@ apiVersion: supertag/v1
 kind: Tag
 metadata: { name: builder-2 }
 spec:
-  roles: [Builder]
+  roles: [builder]
   workspace: { id: app, ref: main }
   runsOn: [team]
 ---
@@ -138,7 +143,7 @@ apiVersion: supertag/v1
 kind: Tag
 metadata: { name: reviewer }
 spec:
-  roles: [Reviewer]
+  roles: [reviewer]
   workspace: { id: app, ref: main }
   runsOn: [team]
 ---
@@ -146,7 +151,7 @@ apiVersion: supertag/v1
 kind: Tag
 metadata: { name: security-reviewer }
 spec:
-  roles: [Security Reviewer]
+  roles: [security-reviewer]
   workspace: { id: app, ref: main }
   runsOn: [team]
 ---
@@ -154,7 +159,7 @@ apiVersion: supertag/v1
 kind: Tag
 metadata: { name: verifier }
 spec:
-  roles: [Verifier]
+  roles: [verifier]
   workspace: { id: app, ref: main }
   runsOn: [verify]
 ---

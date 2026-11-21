@@ -113,7 +113,7 @@ fn normalize_set_ids(ids: &mut Vec<String>) -> Result<()> {
         return Err(invalid("too many policy Sets on one Surface location"));
     }
     for id in ids.iter() {
-        name("policy Set ID", id)?;
+        crate::store::resource_id("Set ID", id)?;
     }
     ids.sort_unstable();
     ids.dedup();
@@ -166,7 +166,7 @@ impl Store {
             .account
             .clone()
             .ok_or_else(|| invalid("Surface Account is required"))?;
-        name("Surface Account ID", &value.account_id)?;
+        crate::store::resource_id("Surface Account ID", &value.account_id)?;
         let (_, identity_key) = provider_identity(&value)?;
         super::serving_gateway(&value)?;
         let prior = account_in(&mut tx, &value.account_id).await?;
@@ -245,9 +245,9 @@ impl Store {
             .location
             .clone()
             .ok_or_else(|| invalid("Surface location is required"))?;
-        name("Surface location ID", &value.location_id)?;
-        name("Surface Account ID", &value.account_id)?;
-        name("Tag ID", &value.tag_id)?;
+        crate::store::resource_id("Surface location ID", &value.location_id)?;
+        crate::store::resource_id("Surface Account ID", &value.account_id)?;
+        crate::store::resource_id("Tag ID", &value.tag_id)?;
         normalize_set_ids(&mut value.permission_set_ids)?;
         normalize_set_ids(&mut value.context_set_ids)?;
         let account = account_in(&mut tx, &value.account_id)

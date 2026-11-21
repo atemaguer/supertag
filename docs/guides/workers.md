@@ -202,8 +202,9 @@ Role's `execution` then chooses a harness, models, and efforts within what hosts
 ```yaml
 apiVersion: supertag/v1
 kind: Role
-metadata: { name: Builder }
+metadata: { name: builder }
 spec:
+  displayName: Builder
   purpose: Implement bounded changes with tests.
   execution: { harness: codex, models: [gpt-6-sol], efforts: [medium, high] }
 ```

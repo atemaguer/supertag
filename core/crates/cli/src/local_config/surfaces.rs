@@ -293,7 +293,12 @@ impl Surface {
             location.tag,
             location.scope_key(self.provider)?
         ));
-        Ok(format!("{name}-{}", crate::lifecycle::hex(&digest[..6])))
+        // The account name keeps at most 50 characters, so the ID stays a resource ID.
+        let prefix = name
+            .get(..name.len().min(50))
+            .unwrap_or(name)
+            .trim_end_matches('-');
+        Ok(format!("{prefix}-{}", crate::lifecycle::hex(&digest[..6])))
     }
 
     /// The connector account alias in Control Plane policy: bare for Slack, and qualified with
@@ -453,7 +458,7 @@ pub fn validate(surfaces: &BTreeMap<String, Surface>) -> Result<()> {
     let mut serving = BTreeMap::new();
     let mut listeners = BTreeSet::new();
     for (name, surface) in surfaces {
-        super::identifier(name)?;
+        super::resource_name(name)?;
         surface.validate(name)?;
         if let (Some(listen), Some(_)) = (&surface.listen, &surface.location) {
             ensure!(

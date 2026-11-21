@@ -11,7 +11,7 @@ const C: &str = "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 fn role(current: &str, desired: &str) -> ManifestFieldResource {
     ManifestFieldResource {
         kind: "Role".into(),
-        name: "Engineer".into(),
+        name: "engineer".into(),
         fields: vec![ManifestField {
             path: "spec.purpose".into(),
             current_digest: current.into(),
@@ -52,7 +52,7 @@ async fn reconcile(
 
 async fn exercise(url: &str) {
     let store = Store::open(url).await.unwrap();
-    let owned_by = |manager: &str| vec![format!("Role/Engineer spec.purpose {manager}")];
+    let owned_by = |manager: &str| vec![format!("Role/engineer spec.purpose {manager}")];
 
     // A value no apply recorded belongs to cli: changing it conflicts, and a
     // conflicting reconcile records nothing.

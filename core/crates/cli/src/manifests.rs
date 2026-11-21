@@ -158,6 +158,8 @@ struct TagSpec {
     /// The Volume that keeps the Tag's work. Omitted keeps the current value; an empty string
     /// removes it.
     volume: Option<String>,
+    /// The name clients show. Omitted keeps the current value; a new Tag shows its ID.
+    display_name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -252,6 +254,15 @@ fn valid_name(value: &str) -> bool {
         && !value.chars().any(char::is_control)
 }
 
+/// An optional `spec.displayName`: the loose check display names keep.
+fn display_name(value: Option<&str>) -> Result<()> {
+    ensure!(
+        value.is_none_or(valid_name),
+        "spec.displayName must be 1–256 bytes without control characters or surrounding whitespace"
+    );
+    Ok(())
+}
+
 fn same_identity(identity: &str, name: &str) -> Result<()> {
     ensure!(
         identity.is_empty() || identity == name,
@@ -271,7 +282,10 @@ fn manifest(value: Value, source: &str) -> Result<Manifest> {
         api_version == "supertag/v1",
         "unsupported manifest apiVersion"
     );
-    ensure!(valid_name(&name), "invalid metadata.name");
+    ensure!(
+        supertag_protocol::valid_resource_id(&name),
+        supertag_protocol::resource_id_error("metadata.name")
+    );
     let resource = match kind {
         Kind::SurfaceAccount => {
             let mut value: AccountSpec = typed(spec, kind)?;
@@ -336,23 +350,30 @@ fn manifest(value: Value, source: &str) -> Result<Manifest> {
         }
         Kind::ContextSet => {
             let mut value: ContextSpec = typed(spec, kind)?;
-            same_identity(&value.name, &name)?;
-            value.name.clone_from(&name);
+            same_identity(&value.set_id, &name)?;
+            value.set_id.clone_from(&name);
+            display_name(value.display_name.as_deref())?;
             Resource::ContextSet(value.into())
         }
         Kind::PermissionSet => {
             let mut value: PermissionSpec = typed(spec, kind)?;
-            same_identity(&value.name, &name)?;
-            value.name.clone_from(&name);
+            same_identity(&value.set_id, &name)?;
+            value.set_id.clone_from(&name);
+            display_name(value.display_name.as_deref())?;
             Resource::PermissionSet(value.into())
         }
         Kind::Role => {
             let mut value: RoleSpec = typed(spec, kind)?;
-            same_identity(&value.name, &name)?;
-            value.name.clone_from(&name);
+            same_identity(&value.role_id, &name)?;
+            value.role_id.clone_from(&name);
+            display_name(value.display_name.as_deref())?;
             Resource::Role(value.into())
         }
-        Kind::Tag => Resource::Tag(typed(spec, kind)?),
+        Kind::Tag => {
+            let value: TagSpec = typed(spec, kind)?;
+            display_name(value.display_name.as_deref())?;
+            Resource::Tag(value)
+        }
         Kind::Team => Resource::Team(typed(spec, kind)?),
         Kind::SurfaceLocation => {
             let mut value: LocationSpec = typed(spec, kind)?;

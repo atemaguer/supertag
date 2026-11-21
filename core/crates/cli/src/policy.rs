@@ -93,10 +93,11 @@ pub struct AssignmentListArgs {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(crate) struct PermissionSpec {
+    /// The resource ID; generated when omitted.
     #[serde(default)]
-    set_id: String,
-    #[serde(default)]
-    pub(crate) name: String,
+    pub(crate) set_id: String,
+    /// The name clients show; defaults to the current one, or the ID for a new resource.
+    pub(crate) display_name: Option<String>,
     #[serde(default)]
     approvers: Vec<String>,
     #[serde(default)]
@@ -144,7 +145,7 @@ impl From<PermissionSpec> for PermissionSet {
     fn from(spec: PermissionSpec) -> Self {
         Self {
             set_id: spec.set_id,
-            name: spec.name,
+            name: spec.display_name.unwrap_or_default(),
             approvers: spec.approvers,
             permissions: spec
                 .permissions
@@ -179,10 +180,11 @@ impl From<PermissionSpec> for PermissionSet {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(crate) struct ContextSpec {
+    /// The resource ID; generated when omitted.
     #[serde(default)]
-    set_id: String,
-    #[serde(default)]
-    pub(crate) name: String,
+    pub(crate) set_id: String,
+    /// The name clients show; defaults to the current one, or the ID for a new resource.
+    pub(crate) display_name: Option<String>,
     #[serde(default)]
     items: Vec<ContextItemSpec>,
 }
@@ -203,7 +205,7 @@ impl From<ContextSpec> for ContextSet {
     fn from(spec: ContextSpec) -> Self {
         Self {
             set_id: spec.set_id,
-            name: spec.name,
+            name: spec.display_name.unwrap_or_default(),
             items: spec
                 .items
                 .into_iter()
@@ -233,10 +235,11 @@ enum RoleState {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(crate) struct RoleSpec {
+    /// The resource ID; generated when omitted.
     #[serde(default)]
-    role_id: String,
-    #[serde(default)]
-    pub(crate) name: String,
+    pub(crate) role_id: String,
+    /// The name clients show; defaults to the current one, or the ID for a new resource.
+    pub(crate) display_name: Option<String>,
     purpose: String,
     #[serde(default)]
     instructions: String,
@@ -275,7 +278,7 @@ impl From<RoleSpec> for Role {
     fn from(spec: RoleSpec) -> Self {
         Self {
             role_id: spec.role_id,
-            name: spec.name,
+            name: spec.display_name.unwrap_or_default(),
             purpose: spec.purpose,
             instructions: spec.instructions,
             permission_set_ids: spec.permission_set_ids,

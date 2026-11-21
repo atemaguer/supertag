@@ -74,8 +74,9 @@ spec:
 ---
 apiVersion: supertag/v1
 kind: Role
-metadata: { name: Builder }
+metadata: { name: builder }
 spec:
+  displayName: Builder
   purpose: Implement bounded changes with tests.
   instructions: Run the project's checks before reporting, and report the exact commands.
   permissionSets: [engineering-access]
@@ -85,7 +86,7 @@ apiVersion: supertag/v1
 kind: Tag
 metadata: { name: builder }
 spec:
-  roles: [Builder]
+  roles: [builder]
 ```
 
 ```sh
@@ -131,7 +132,7 @@ Two harness rules decide whether `commands:execute` works:
   [claude-code]`, which `supertag init` sets where that sandbox can start. Cursor and OpenCode run
   commands without a sandbox. Otherwise these harnesses' Tasks that may run commands run only on a
   host with `environment: local-vm` or the harness in `allow-unsandboxed-commands`; without one
-  of these, as the `Builder` above needs, they wait.
+  of these, as the `builder` Role above needs, they wait.
 - Current Codex models run commands only in Codex code mode, which SuperTag starts only for a Task
   that also has `web:fetch`. A Codex Tag that should run commands needs
   `{ target: runtime, action: web:fetch }` too, which also opens the network to its commands; see

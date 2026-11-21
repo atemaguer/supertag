@@ -50,8 +50,9 @@ spec:
 ---
 apiVersion: supertag/v1
 kind: Role
-metadata: { name: Area Owner }
+metadata: { name: area-owner }
 spec:
+  displayName: Area Owner
   purpose: Own one area of the product and deliver the outcomes your person gives you, working out the details with the Tags that own the other areas.
   instructions: >-
     Read the repository's contributing guide (AGENTS.md or CONTRIBUTING.md) first. Change only
@@ -67,15 +68,17 @@ spec:
 ---
 apiVersion: supertag/v1
 kind: Role
-metadata: { name: Codex Commands }
+metadata: { name: codex-commands }
 spec:
+  displayName: Codex Commands
   purpose: Let Codex run commands on code-mode-only models such as gpt-6-sol.
   permissionSets: [registries]
 ---
 apiVersion: supertag/v1
 kind: Role
-metadata: { name: Reviewer }
+metadata: { name: reviewer }
 spec:
+  displayName: Reviewer
   purpose: Review changes from any area for correctness, test coverage, and whether both sides of a contract agree.
   instructions: >-
     Read the diff and run the tests yourself. When a change touches a contract between areas,
@@ -89,7 +92,7 @@ apiVersion: supertag/v1
 kind: Tag
 metadata: { name: web }
 spec:
-  roles: [Area Owner]
+  roles: [area-owner]
   workspace: { id: app, ref: main }
   execution: { harness: claude-code, models: [claude-sonnet-5-5], efforts: [low, medium, high] }
 ---
@@ -97,7 +100,7 @@ apiVersion: supertag/v1
 kind: Tag
 metadata: { name: api }
 spec:
-  roles: [Area Owner, Codex Commands]
+  roles: [area-owner, codex-commands]
   workspace: { id: app, ref: main }
   execution: { harness: codex, models: [gpt-6-sol], efforts: [low, medium, high] }
 ---
@@ -105,7 +108,7 @@ apiVersion: supertag/v1
 kind: Tag
 metadata: { name: reviewer }
 spec:
-  roles: [Reviewer]
+  roles: [reviewer]
   workspace: { id: app, ref: main }
 ---
 # Tags in one Team message each other without Mailbox grants and share its Workstream.

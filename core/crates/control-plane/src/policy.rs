@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::{
     ControlPlane, Store, StoreError,
-    store::{MAILBOX_SEND_ACTION, Result, WORKSTREAM_POST_ACTION, invalid, name},
+    store::{MAILBOX_SEND_ACTION, Result, WORKSTREAM_POST_ACTION, invalid, name, resource_id},
     surface_policy::AdmissionSurface,
 };
 
@@ -66,6 +66,10 @@ fn identity(value: &str, label: &str) -> Result<String> {
     let value = value.trim();
     name(label, value)?;
     Ok(value.into())
+}
+/// A policy resource's display name: 1–256 bytes without control characters, trimmed.
+fn display_name(value: &str, label: &str) -> Result<String> {
+    identity(value, label)
 }
 fn size<M: Message>(value: &M, maximum: usize) -> Result<()> {
     if value.encoded_len() > maximum {
@@ -124,8 +128,11 @@ trait Resource: Message + Default + Clone {
     const KEY: &'static str;
     const KIND: &'static str;
     const APPLY_KIND: &'static str;
+    /// How errors name the resource's ID, such as "Role ID".
+    const ID_LABEL: &'static str;
     fn id(&self) -> &str;
     fn name(&self) -> &str;
+    fn set_name(&mut self, name: String);
     fn revision(&self) -> u64;
     fn set_identity(&mut self, id: String, revision: u64);
     fn normalize(&mut self, prior: Option<&Self>) -> Result<()>;
@@ -145,8 +152,9 @@ manifest_normalizer!(normalize_manifest_context, ContextSet);
 manifest_normalizer!(normalize_manifest_permission, PermissionSet);
 manifest_normalizer!(normalize_manifest_role, Role);
 macro_rules! resource_fields {
-    ($ty:ty,$table:literal,$key:ident,$kind:literal) => {
+    ($ty:ty,$table:literal,$key:ident,$kind:literal,$label:literal) => {
         const TABLE: &'static str = $table;
+        const ID_LABEL: &'static str = $label;
         const KEY: &'static str = stringify!($key);
         const KIND: &'static str = $kind;
         const APPLY_KIND: &'static str = stringify!($ty);
@@ -155,6 +163,9 @@ macro_rules! resource_fields {
         }
         fn name(&self) -> &str {
             &self.name
+        }
+        fn set_name(&mut self, name: String) {
+            self.name = name;
         }
         fn revision(&self) -> u64 {
             self.revision
@@ -170,10 +181,11 @@ impl Resource for PermissionSet {
         PermissionSet,
         "supertag_v2_permission_sets",
         set_id,
-        "permission-set"
+        "permission-set",
+        "Permission Set ID"
     );
     fn normalize(&mut self, prior: Option<&Self>) -> Result<()> {
-        self.name = identity(&self.name, "Permission Set name")?;
+        self.name = display_name(&self.name, "Permission Set display name")?;
         if self.approvers.len() > 50 || self.permissions.len() > 256 {
             return Err(invalid(
                 "Permission Set has too many approvers or permissions",
@@ -365,10 +377,11 @@ impl Resource for ContextSet {
         ContextSet,
         "supertag_v2_context_sets",
         set_id,
-        "context-set"
+        "context-set",
+        "Context Set ID"
     );
     fn normalize(&mut self, prior: Option<&Self>) -> Result<()> {
-        self.name = identity(&self.name, "Context Set name")?;
+        self.name = display_name(&self.name, "Context Set display name")?;
         if self.items.len() > 256 {
             return Err(invalid("Context Set has too many items"));
         }
@@ -504,10 +517,10 @@ fn validate_context(item: &PolicyContextItem, config: &mut serde_json::Value) ->
     Ok(())
 }
 impl Resource for Role {
-    resource_fields!(Role, "supertag_v2_roles", role_id, "role");
+    resource_fields!(Role, "supertag_v2_roles", role_id, "role", "Role ID");
     fn normalize(&mut self, _prior: Option<&Self>) -> Result<()> {
-        self.name = bounded(&self.name, "Role name", 100, false)?;
-        name("Role name", &self.name)?;
+        self.name = bounded(&self.name, "Role display name", 100, false)?;
+        name("Role display name", &self.name)?;
         self.purpose = bounded(&self.purpose, "Role purpose", 1000, false)?;
         self.instructions = self.instructions.trim().into();
         if self.instructions.len() > 32768 || self.instructions.contains('\0') {
@@ -534,7 +547,7 @@ fn references(input: &[String]) -> Result<Vec<String>> {
     }
     input
         .iter()
-        .map(|id| identity(id, "Set identity"))
+        .map(|id| resource_id("Set ID", id).map(|()| id.clone()))
         .collect::<Result<BTreeSet<_>>>()
         .map(|s| s.into_iter().collect())
 }
@@ -700,7 +713,7 @@ async fn delete_policy_in<M: Resource>(
         .bind(value.id())
         .execute(&mut **tx)
         .await?;
-    crate::apply_sets::forget(tx, M::APPLY_KIND, value.name()).await
+    crate::apply_sets::forget(tx, M::APPLY_KIND, value.id()).await
 }
 
 pub(crate) async fn delete_permission_set_in(
@@ -795,7 +808,7 @@ pub(crate) async fn retire_role_in(
         .bind(&value.role_id)
         .execute(&mut **tx)
         .await?;
-    crate::apply_sets::forget(tx, "Role", &value.name).await
+    crate::apply_sets::forget(tx, "Role", &value.role_id).await
 }
 
 async fn resource<M: Resource>(tx: &mut Transaction<'_, Any>, reference: &str) -> Result<M> {
@@ -809,21 +822,20 @@ async fn prepare_resource<M: Resource>(
     expected: Option<u64>,
 ) -> Result<M> {
     if !value.id().is_empty() {
-        value.set_identity(identity(value.id(), "policy identity")?, value.revision());
+        resource_id(M::ID_LABEL, value.id())?;
     }
-    let prior = if value.id().is_empty() {
-        optional_resource::<M>(tx, value.name().trim()).await?
-    } else {
+    let prior = if !value.id().is_empty() {
         optional_resource::<M>(tx, value.id()).await?
+    } else if value.name().trim().is_empty() {
+        None
+    } else {
+        optional_resource::<M>(tx, value.name().trim()).await?
     };
     if let Some(prior) = &prior {
         if expected != Some(prior.revision()) {
             return Err(StoreError::Conflict(
                 "policy revision changed or expected revision is missing".into(),
             ));
-        }
-        if value.name().trim() != prior.name() {
-            return Err(invalid("policy resource names are immutable"));
         }
         if !value.id().is_empty() && value.id() != prior.id() {
             return Err(StoreError::Conflict(
@@ -835,14 +847,22 @@ async fn prepare_resource<M: Resource>(
             "new policy resource cannot have an expected revision".into(),
         ));
     }
-    value.normalize(prior.as_ref())?;
     let id = if let Some(prior) = &prior {
         prior.id().into()
     } else if value.id().is_empty() {
         Uuid::new_v4().to_string()
     } else {
-        identity(value.id(), "policy identity")?
+        value.id().into()
     };
+    // An omitted display name keeps the current one; a new resource's is its ID.
+    if value.name().trim().is_empty() {
+        value.set_name(
+            prior
+                .as_ref()
+                .map_or_else(|| id.clone(), |prior| prior.name().into()),
+        );
+    }
+    value.normalize(prior.as_ref())?;
     for reference in [&id, value.name()] {
         if let Some(existing) = optional_resource::<M>(tx, reference).await?
             && existing.id() != id
@@ -878,7 +898,7 @@ pub(crate) async fn next_revision_in(
 }
 async fn save_resource<M: Resource>(tx: &mut Transaction<'_, Any>, value: &M) -> Result<()> {
     let query = format!(
-        "INSERT INTO {} ({},name,revision,payload) VALUES ($1,$2,$3,$4) ON CONFLICT({}) DO UPDATE SET revision=excluded.revision,payload=excluded.payload",
+        "INSERT INTO {} ({},name,revision,payload) VALUES ($1,$2,$3,$4) ON CONFLICT({}) DO UPDATE SET name=excluded.name,revision=excluded.revision,payload=excluded.payload",
         M::TABLE,
         M::KEY,
         M::KEY
@@ -1048,7 +1068,7 @@ impl Store {
             contexts.insert(resource::<ContextSet>(&mut tx, id).await?.set_id);
         }
         value.context_set_ids = contexts.into_iter().collect();
-        sqlx::query("INSERT INTO supertag_v2_roles (role_id,name,revision,status,payload) VALUES ($1,$2,$3,$4,$5) ON CONFLICT(role_id) DO UPDATE SET revision=excluded.revision,status=excluded.status,payload=excluded.payload").bind(&value.role_id).bind(&value.name).bind(value.revision as i64).bind(value.status as i64).bind(value.encode_to_vec()).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO supertag_v2_roles (role_id,name,revision,status,payload) VALUES ($1,$2,$3,$4,$5) ON CONFLICT(role_id) DO UPDATE SET name=excluded.name,revision=excluded.revision,status=excluded.status,payload=excluded.payload").bind(&value.role_id).bind(&value.name).bind(value.revision as i64).bind(value.status as i64).bind(value.encode_to_vec()).execute(&mut *tx).await?;
         for table in [
             "supertag_v2_role_permission_sets",
             "supertag_v2_role_context_sets",
@@ -1199,8 +1219,8 @@ impl Store {
     ) -> Result<RoleAssignment> {
         operator(principal)?;
         name("operation ID", &input.operation_id)?;
-        name("Tag ID", &input.tag_id)?;
-        name("Role reference", &input.role)?;
+        resource_id("Tag ID", &input.tag_id)?;
+        resource_id("Role ID", &input.role)?;
         let hash = digest("assign-role", input);
         let (mut tx, _) = self.write().await?;
         if let Some(value) = replay(&mut tx, principal, &input.operation_id, &hash).await? {

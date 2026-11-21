@@ -55,8 +55,9 @@ spec:
 ---
 apiVersion: supertag/v1
 kind: Role
-metadata: { name: Reliability Owner }
+metadata: { name: reliability-owner }
 spec:
+  displayName: Reliability Owner
   purpose: Keep production healthy and main green. Act on each error report, alert, failed CI run, and dependency advisory as it arrives, and bring people only the decisions that are theirs.
   instructions: >-
     Each report arrives as a message in the conversation of the ongoing Objective it belongs to.
@@ -74,8 +75,9 @@ spec:
 ---
 apiVersion: supertag/v1
 kind: Role
-metadata: { name: Support Triage }
+metadata: { name: support-triage }
 spec:
+  displayName: Support Triage
   purpose: Triage bug reports from users. Find where in the code a reported problem comes from, answer the reporter, and hand production errors to reliability.
   instructions: >-
     Read the code to find where a reported problem comes from, and answer the reporter in plain
@@ -90,7 +92,7 @@ apiVersion: supertag/v1
 kind: Tag
 metadata: { name: reliability }
 spec:
-  roles: [Reliability Owner]
+  roles: [reliability-owner]
   workspace: { id: app, ref: main }
   acceptsMessagesFrom: [support]
 ---
@@ -100,7 +102,7 @@ apiVersion: supertag/v1
 kind: Tag
 metadata: { name: support }
 spec:
-  roles: [Support Triage]
+  roles: [support-triage]
   workspace: { id: app, ref: main }
   # Grants are one-way: this lets `reliability` answer or ask about a report it was handed.
   acceptsMessagesFrom: [reliability]

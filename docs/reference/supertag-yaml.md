@@ -71,8 +71,9 @@ services:
               config: { reference: "*" }
       - apiVersion: supertag/v1
         kind: Role
-        metadata: { name: Lead }
+        metadata: { name: lead }
         spec:
+          displayName: Lead
           purpose: "Own Objectives for this repository: plan the work, make and verify changes, and report what changed."
           permissionSets: [local-tools]
           contextSets: [skills]
@@ -81,7 +82,7 @@ services:
         metadata: { name: lead }
         spec:
           lead: true
-          roles: [Lead]
+          roles: [lead]
           execution: { harness: codex }
           workspace: { id: app, ref: main }
   studio:
@@ -447,7 +448,7 @@ services:
       - apiVersion: supertag/v1
         kind: Tag
         metadata: { name: lead }
-        spec: { roles: [Lead] }
+        spec: { roles: [lead] }
 ```
 
 On every `supertag up`, SuperTag waits for the Control Plane to become healthy, then creates each
