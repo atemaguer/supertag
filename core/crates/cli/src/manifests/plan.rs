@@ -572,8 +572,9 @@ impl<'a> Catalog<'a> {
                 if self.create_only
                     && let Some(prior) = prior
                 {
-                    declarations.roles.insert(name.into(), prior);
-                    return Ok(None);
+                    return self
+                        .provision_role_sets(value, prior, name, declarations)
+                        .await;
                 }
                 if self.create_only {
                     declarations.created_roles.insert(name.into());
@@ -842,6 +843,58 @@ impl<'a> Catalog<'a> {
             *reference = value.ok_or_else(|| missing(kind, reference))?;
         }
         references(ids, label)
+    }
+
+    /// Provisioning leaves an existing Role as it is, except that the Role gains each Permission Set
+    /// and Context Set its manifest lists that it lacks, such as the `skills` Context Set a later
+    /// `supertag init` adds. It never loses a Set, and a retired Role is left alone.
+    async fn provision_role_sets(
+        &mut self,
+        mut declared: Role,
+        mut prior: Role,
+        name: &str,
+        declarations: &mut Declarations,
+    ) -> Result<Option<(bool, Write)>> {
+        if prior.status != RoleStatus::Active as i32 {
+            declarations.roles.insert(name.into(), prior);
+            return Ok(None);
+        }
+        self.resolve_sets(
+            declarations,
+            Kind::PermissionSet,
+            &mut declared.permission_set_ids,
+        )
+        .await?;
+        self.resolve_sets(
+            declarations,
+            Kind::ContextSet,
+            &mut declared.context_set_ids,
+        )
+        .await?;
+        let mut changed = false;
+        for (stored, wanted) in [
+            (&mut prior.permission_set_ids, declared.permission_set_ids),
+            (&mut prior.context_set_ids, declared.context_set_ids),
+        ] {
+            for id in wanted {
+                if !stored.contains(&id) {
+                    stored.push(id);
+                    changed = true;
+                }
+            }
+            stored.sort_unstable();
+        }
+        declarations.roles.insert(name.into(), prior.clone());
+        Ok(changed.then(|| {
+            (
+                true,
+                Write::Role(PutRoleRequest {
+                    operation_id: id(),
+                    expected_revision: Some(prior.revision),
+                    role: Some(prior),
+                }),
+            )
+        }))
     }
 
     async fn tag(&mut self, id: &str) -> Result<Option<Tag>> {

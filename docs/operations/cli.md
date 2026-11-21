@@ -82,8 +82,10 @@ The `skills` Context Set has one `supertag/skill` item with `reference: "*"`, so
 your own Skills from `~/.claude/skills` and `~/.agents/skills` and the repository's from
 `.claude/skills` and `.agents/skills`, with no further setup; see
 [Skills](../reference/context-resolution.md#skills). Run again on a setup from before it did,
-`init` adds the Context Set to the `lead` Role. To stop loading them, remove `skills` from the
-Role's `contextSets` in `supertag.yaml` and run `supertag up`.
+`init` adds the Context Set to the `lead` Role in `supertag.yaml`, and the next `supertag up` adds
+it to the stored Role. To stop loading them, remove `skills` from the Role's `contextSets` in
+`supertag.yaml` first, then from the stored Role with `supertag apply -f`: `up` adds back a Set
+the file still lists, but removes none.
 
 A setup from before [resource IDs](../reference/resource-model.md#resource-ids) were lowercase
 names the Role `Lead`, and `supertag up` refuses it. Run `supertag init` again: it renames the

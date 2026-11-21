@@ -536,7 +536,14 @@ async fn sqlite_wildcard_skill_items_resolve_to_any_number_of_pins() {
         commit(bad).await,
         Err(StoreError::InvalidArgument(_))
     ));
-    assert_eq!(commit(manifest.clone()).await.unwrap(), manifest);
+    // The Control Plane keeps pins in (Set, item, reference) order, and item IDs are random, so
+    // the expected manifest is put in that order too. Order sets no precedence: a Worker resolves
+    // named items before `*` items itself, and the record is only what it loaded.
+    let mut expected = manifest.clone();
+    expected.pins.sort_by(|a, b| {
+        (&a.set_id, &a.item_id, &a.reference).cmp(&(&b.set_id, &b.item_id, &b.reference))
+    });
+    assert_eq!(commit(manifest.clone()).await.unwrap(), expected);
     store.close().await;
     // A `*` item with nothing to load records its omission.
     let dir = tempfile::tempdir().unwrap();

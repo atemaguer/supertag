@@ -56,6 +56,12 @@ within the pre-1.0 compatibility policy described in
   They keep the old `Lead` Role too until you deactivate its assignment. Provisioning still
   changes no existing Tag otherwise. See
   [Start in a repository](docs/operations/cli.md#start-in-a-repository).
+- `supertag up` now gives an existing Role each Permission Set and Context Set its provisioned
+  manifest lists that the Role lacks. Before, it skipped an existing Role, so running
+  `supertag init` again added the `skills` Context Set to `supertag.yaml` but never to the stored
+  lead Role. It never removes a Set, and a Set you remove from the Role by hand returns on the next
+  `up` while `supertag.yaml` still lists it. See
+  [Provision resources](docs/reference/supertag-yaml.md#provision-resources).
 
 ## [0.3.6] - 2026-11-21
 

@@ -155,7 +155,7 @@ echoing secret values.
 | `credentials` | `file` | The credential vault. The local supervisor supports `file` only |
 | `notify` | none | One destination or a list: `webhook:https://HOST/PATH[#SECRET_NAME]` or `slack:CHANNEL_OR_USER` (optionally `slack:WORKSPACE/CHANNEL_OR_USER`). A webhook's secret name must exist under `secrets:`. See [Set up operator notifications](../guides/notifications.md) |
 | `logging.audit` | off | Also write each audit entry as one JSON line to `stderr` or an absolute file path. The database keeps every entry either way. See [Audit log](../operations/control-plane.md#audit-log) |
-| `provision` | none | Manifests to create when missing. See [Provision resources](#provision-resources) |
+| `provision` | none | Manifests to create when missing, and Sets and Roles to add to existing Roles and Tags. See [Provision resources](#provision-resources) |
 | `restart` | `no` | `unless-stopped` installs a service unit. See [Service units](#service-units) |
 
 ### host service
@@ -451,8 +451,18 @@ services:
 ```
 
 On every `supertag up`, SuperTag waits for the Control Plane to become healthy, then creates each
-listed resource that is missing. It never changes or deletes one that exists; change those with
-`supertag apply -f`. Provisioned resources belong to the apply set `provision`.
+listed resource that is missing. It deletes nothing, and changes an existing resource in only two
+ways, both additive:
+
+- An existing Role gains each Permission Set and Context Set its manifest lists that it lacks.
+  This is how a later `supertag init` gives an existing lead Role the `skills` Context Set. A Set
+  you remove from the Role by hand comes back on the next `up` while the file still lists it, so
+  remove it from the file too.
+- An existing Tag gains each Role its manifest lists that the same `up` creates.
+
+Neither removes a Set or a Role, and nothing else about an existing resource changes; change it
+with `supertag apply -f`. Tasks already accepted keep the policy they were admitted with; later
+Tasks see the added Sets. Provisioned resources belong to the apply set `provision`.
 
 ## Service units
 

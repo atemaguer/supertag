@@ -3378,6 +3378,175 @@ async fn postgres_init_role_renamed_to_follow_the_resource_id_rule() -> Result<(
     with_database(true, init_role_renamed_to_follow_the_resource_id_rule).await
 }
 
+/// A Role provisioning created earlier gains the Sets its manifest now lists, as when a later
+/// `supertag init` adds the `skills` Context Set, and loses none. Accepted Tasks keep the policy
+/// they were admitted with.
+async fn provisioning_adds_listed_sets_to_an_existing_role(database: String) -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let state = temp.path().join("sets");
+    let file = temp.path().join("supertag.yaml");
+    let permission = serde_json::json!({"apiVersion":"supertag/v1","kind":"PermissionSet","metadata":{"name":"local-tools"},"spec":{"permissions":[{"target":"runtime","action":"files:read"}]}});
+    let skills = serde_json::json!({"apiVersion":"supertag/v1","kind":"ContextSet","metadata":{"name":"skills"},"spec":{"items":[{"itemKey":"skills","type":"supertag/skill","version":1,"required":false,"config":{"reference":"*"}}]}});
+    let config = |with_skills: bool| {
+        let mut role = serde_json::json!({"apiVersion":"supertag/v1","kind":"Role","metadata":{"name":"lead"},"spec":{"purpose":"Own Objectives for this repository.","permissionSets":["local-tools"]}});
+        let mut provision = vec![permission.clone()];
+        if with_skills {
+            role["spec"]["contextSets"] = serde_json::json!(["skills"]);
+            provision.push(skills.clone());
+        }
+        provision.push(role);
+        provision.push(serde_json::json!({"apiVersion":"supertag/v1","kind":"Tag","metadata":{"name":"lead"},"spec":{"lead":true,"roles":["lead"]}}));
+        serde_json::json!({"services":{
+            "control-plane":{"type":"control-plane","ports":["127.0.0.1:0"],"provision":provision},
+            "worker":{"type":"host","adapter":ADAPTER}
+        }})
+    };
+    let submit = |operator: &mut operator_client::OperatorClient<ProtocolChannel>,
+                  credential: &str,
+                  session: &str| {
+        let request = authenticated_request(
+            SubmitTaskRequest {
+                tag_id: "lead".into(),
+                session_id: session.into(),
+                operation_id: Uuid::new_v4().to_string(),
+                prompt: "Run configured worker".into(),
+                ..Default::default()
+            },
+            credential,
+            None,
+        );
+        let mut operator = operator.clone();
+        async move { Ok::<_, anyhow::Error>(operator.submit_task(request?).await?.into_inner()) }
+    };
+    let context_sets = |task: &Task| -> Vec<String> {
+        task.policy_snapshot
+            .as_ref()
+            .map(|snapshot| {
+                snapshot
+                    .context_sets
+                    .iter()
+                    .map(|set| set.set_id.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let connect = |endpoint: String| async move {
+        let channel =
+            protocol::negotiated(Channel::from_shared(endpoint)?.connect().await?).await?;
+        Ok::<_, anyhow::Error>((
+            operator_client::OperatorClient::new(channel.clone()),
+            policy_catalog_client::PolicyCatalogClient::new(channel),
+        ))
+    };
+    let role = |policy: &mut policy_catalog_client::PolicyCatalogClient<ProtocolChannel>,
+                credential: &str| {
+        let request = authenticated_request(
+            GetPolicyResourceRequest {
+                reference: "lead".into(),
+            },
+            credential,
+            None,
+        );
+        let mut policy = policy.clone();
+        async move { Ok::<_, anyhow::Error>(policy.get_role(request?).await?.into_inner()) }
+    };
+
+    // A setup from before init gave its Role the skills Context Set.
+    yaml(&file, &config(false))?;
+    let mut first = Process::spawn(&state, Some(&file), &database_env(&database))?;
+    let endpoint = first.ready()?;
+    let credential = token(&state)?;
+    let (mut operator, mut policy) = connect(endpoint.clone()).await?;
+    let before = role(&mut policy, &credential).await?;
+    assert!(before.context_set_ids.is_empty(), "{before:?}");
+    let accepted = submit(&mut operator, &credential, "before").await?;
+    assert!(context_sets(&accepted).is_empty());
+    first.stop().await?;
+
+    // supertag init added the Context Set and listed it on the Role.
+    yaml(&file, &config(true))?;
+    let mut upgraded = Process::spawn(&state, Some(&file), &database_env(&database))?;
+    assert_eq!(upgraded.ready()?, endpoint);
+    let (mut operator, mut policy) = connect(endpoint.clone()).await?;
+    let after = role(&mut policy, &credential).await?;
+    assert_eq!(after.context_set_ids, ["skills"]);
+    assert_eq!(after.permission_set_ids, before.permission_set_ids);
+    assert_eq!(
+        (&after.purpose, &after.name, after.status),
+        (&before.purpose, &before.name, before.status)
+    );
+    assert!(after.revision > before.revision);
+    let task = submit(&mut operator, &credential, "after").await?;
+    let snapshot = task.policy_snapshot.clone().context("policy snapshot")?;
+    let set = snapshot
+        .context_sets
+        .iter()
+        .find(|set| set.set_id == "skills")
+        .context("skills Context Set missing from the new Task's policy")?;
+    assert!(
+        set.items
+            .iter()
+            .any(|item| item.r#type == "supertag/skill" && item.config_json.contains("\"*\"")),
+        "{set:?}"
+    );
+    // The Task accepted earlier keeps the policy it was admitted with.
+    let kept = operator
+        .get_task(authenticated_request(
+            GetTaskRequest {
+                task_id: accepted.task_id.clone(),
+            },
+            &credential,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    assert!(context_sets(&kept).is_empty());
+
+    // Removing the Set by hand lasts only until the next up: the file still declares it.
+    let mut edited = after.clone();
+    edited.context_set_ids.clear();
+    let edited = policy
+        .put_role(authenticated_request(
+            PutRoleRequest {
+                operation_id: Uuid::new_v4().to_string(),
+                expected_revision: Some(after.revision),
+                role: Some(edited),
+            },
+            &credential,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    upgraded.stop().await?;
+
+    let mut again = Process::spawn(&state, Some(&file), &database_env(&database))?;
+    assert_eq!(again.ready()?, endpoint);
+    let (_, mut policy) = connect(endpoint.clone()).await?;
+    let readded = role(&mut policy, &credential).await?;
+    assert_eq!(readded.context_set_ids, ["skills"]);
+    assert!(readded.revision > edited.revision);
+    again.stop().await?;
+
+    // An up whose file the Role already satisfies changes nothing.
+    let mut settled = Process::spawn(&state, Some(&file), &database_env(&database))?;
+    assert_eq!(settled.ready()?, endpoint);
+    let (_, mut policy) = connect(endpoint).await?;
+    assert_eq!(role(&mut policy, &credential).await?, readded);
+    settled.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn sqlite_provisioning_adds_listed_sets_to_an_existing_role() -> Result<()> {
+    with_database(false, provisioning_adds_listed_sets_to_an_existing_role).await
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_provisioning_adds_listed_sets_to_an_existing_role() -> Result<()> {
+    with_database(true, provisioning_adds_listed_sets_to_an_existing_role).await
+}
+
 #[tokio::test]
 async fn sqlite_local_provision_creates_ordered_resources_once_and_preserves_operator_edits()
 -> Result<()> {
