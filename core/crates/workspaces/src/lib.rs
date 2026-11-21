@@ -11,6 +11,7 @@ mod git;
 mod lock;
 pub mod packages;
 mod paths;
+pub mod repository_skills;
 pub mod session_branch;
 pub mod setup;
 pub mod source;
@@ -1110,6 +1111,25 @@ impl Workspace {
         })
         .await
         .context("devcontainer read stopped")?
+    }
+
+    /// Writes the repository Skills `commit` holds into the empty directory `destination`, read
+    /// as data from the private repository; see [`repository_skills::materialize`].
+    pub async fn repository_skills(
+        &self,
+        commit: &str,
+        destination: &Path,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<repository_skills::SkippedRepositorySkill>> {
+        check_cancelled(cancel)?;
+        let _guard = self.inner.gate.lock().await;
+        let repository = self.repository(cancel).await?.path().to_owned();
+        let (commit, destination) = (commit.to_owned(), destination.to_owned());
+        tokio::task::spawn_blocking(move || {
+            repository_skills::materialize(&repository, &commit, &destination)
+        })
+        .await
+        .context("repository Skill read stopped")?
     }
 
     /// Removes an Attempt's MCP snapshot, if any.

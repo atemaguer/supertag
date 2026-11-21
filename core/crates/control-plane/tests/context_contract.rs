@@ -177,6 +177,7 @@ async fn contract(url: String) {
             reference: "review".into(),
             version: "v1".into(),
             digest: format!("sha256:{}", "a".repeat(64)),
+            source: "catalog".into(),
         }],
         omissions: vec![OmittedContextItem {
             set_id: context.set_id.clone(),
@@ -186,6 +187,7 @@ async fn contract(url: String) {
             version: optional.version,
             reason: "No supported Context Resolver is configured".into(),
         }],
+        skipped: vec![],
     };
     let request = CommitContextResolutionRequest {
         manifest: Some(manifest.clone()),
@@ -336,6 +338,291 @@ async fn contract(url: String) {
             .commit_context_resolution(
                 &supertag_control_plane::AttemptAccess::new(&other, &retry),
                 &retry_request
+            )
+            .await
+            .unwrap(),
+        manifest
+    );
+    store.close().await;
+}
+fn skill_item(key: &str, required: bool, config: &str) -> PolicyContextItem {
+    PolicyContextItem {
+        item_key: key.into(),
+        r#type: "supertag/skill".into(),
+        version: 1,
+        required,
+        config_json: config.into(),
+        ..Default::default()
+    }
+}
+async fn put_set(
+    store: &Store,
+    id: &str,
+    items: Vec<PolicyContextItem>,
+) -> Result<ContextSet, StoreError> {
+    store
+        .put_context_set(
+            "operator:alice",
+            &PutContextSetRequest {
+                operation_id: id.into(),
+                context_set: Some(ContextSet {
+                    set_id: id.into(),
+                    name: id.into(),
+                    items,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+}
+#[tokio::test]
+async fn sqlite_wildcard_skill_items_resolve_to_any_number_of_pins() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = format!(
+        "sqlite://{}?mode=rwc",
+        dir.path().join("wildcard.db").display()
+    );
+    let store = Store::open(&url)
+        .await
+        .unwrap()
+        .with_execution_clock(|| NOW);
+    let host = support::register_host(&store, "reader").await;
+    // `*` can be neither required nor pinned.
+    for (required, config) in [
+        (true, r#"{"reference":"*"}"#),
+        (false, r#"{"reference":"*","version":"1"}"#),
+        (false, r#"{"reference":"*","digest":"sha256:x"}"#),
+    ] {
+        let error = put_set(&store, "invalid", vec![skill_item("all", required, config)])
+            .await
+            .unwrap_err();
+        assert!(matches!(error, StoreError::InvalidArgument(_)), "{error:?}");
+    }
+    let set = put_set(
+        &store,
+        "skills",
+        vec![
+            skill_item("all", false, r#"{"reference":"*"}"#),
+            skill_item("review", true, r#"{"reference":"review","version":"v1"}"#),
+        ],
+    )
+    .await
+    .unwrap();
+    store
+        .put_tag("reader", "Review", vec!["files:read".into()])
+        .await
+        .unwrap();
+    store
+        .put_role(
+            "operator:alice",
+            &PutRoleRequest {
+                operation_id: "role".into(),
+                role: Some(Role {
+                    role_id: "reader".into(),
+                    name: "Reader".into(),
+                    purpose: "Read Skills".into(),
+                    context_set_ids: vec![set.set_id.clone()],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .assign_role(
+            "operator:alice",
+            &AssignRoleRequest {
+                operation_id: "assign".into(),
+                role: "reader".into(),
+                tag_id: "reader".into(),
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .submit_task(
+            "operator:alice",
+            &SubmitTaskRequest {
+                output_policy: None,
+                execution_limits: None,
+                operation_id: "task".into(),
+                tag_id: "reader".into(),
+                session_id: "one".into(),
+                prompt: "Review".into(),
+                input_artifacts: vec![],
+            },
+        )
+        .await
+        .unwrap();
+    let attempt = claim(&store, &host, "claim").await;
+    start(&store, &host, &attempt).await;
+    let item = |key: &str| set.items.iter().find(|i| i.item_key == key).unwrap();
+    let pin = |key: &str, reference: &str, version: &str| ContextPin {
+        set_id: set.set_id.clone(),
+        item_id: item(key).item_id.clone(),
+        item_key: key.into(),
+        reference: reference.into(),
+        version: version.into(),
+        digest: format!("sha256:{}", "a".repeat(64)),
+        source: "user:~/.claude/skills".into(),
+    };
+    let manifest = ContextResolutionManifest {
+        pins: vec![
+            pin("all", "lint", ""),
+            pin("all", "review", "v1"),
+            pin("review", "review", "v1"),
+        ],
+        omissions: vec![],
+        skipped: vec![SkippedSkill {
+            reference: "lint".into(),
+            source: "user:~/.agents/skills".into(),
+            reason: "the Skill of this name from user:~/.claude/skills takes precedence".into(),
+        }],
+    };
+    let access = supertag_control_plane::AttemptAccess::new(&host, &attempt);
+    let commit = |manifest: ContextResolutionManifest| {
+        let access = &access;
+        let store = &store;
+        async move {
+            store
+                .commit_context_resolution(
+                    access,
+                    &CommitContextResolutionRequest {
+                        manifest: Some(manifest),
+                    },
+                )
+                .await
+        }
+    };
+    // A named item resolves to exactly one pin; a reference cannot repeat within an item; a `*`
+    // item cannot pin `*` itself; only a `*` item may be omitted for having nothing to load.
+    let mut bad = manifest.clone();
+    bad.pins.push(pin("review", "lint", ""));
+    assert!(matches!(
+        commit(bad).await,
+        Err(StoreError::InvalidArgument(_))
+    ));
+    let mut bad = manifest.clone();
+    bad.pins.push(pin("all", "lint", ""));
+    assert!(matches!(
+        commit(bad).await,
+        Err(StoreError::InvalidArgument(_))
+    ));
+    let mut bad = manifest.clone();
+    bad.pins[0].reference = "*".into();
+    assert!(matches!(
+        commit(bad).await,
+        Err(StoreError::InvalidArgument(_))
+    ));
+    let mut bad = manifest.clone();
+    bad.pins[1].digest = format!("sha256:{}", "b".repeat(64));
+    assert!(matches!(
+        commit(bad).await,
+        Err(StoreError::InvalidArgument(_))
+    ));
+    let omitted = |key: &str| OmittedContextItem {
+        set_id: set.set_id.clone(),
+        item_id: item(key).item_id.clone(),
+        item_key: key.into(),
+        r#type: "supertag/skill".into(),
+        version: 1,
+        reason: "No Skills are available to this Task".into(),
+    };
+    let mut bad = manifest.clone();
+    bad.omissions.push(omitted("all"));
+    assert!(matches!(
+        commit(bad).await,
+        Err(StoreError::InvalidArgument(_))
+    ));
+    assert_eq!(commit(manifest.clone()).await.unwrap(), manifest);
+    store.close().await;
+    // A `*` item with nothing to load records its omission.
+    let dir = tempfile::tempdir().unwrap();
+    let url = format!(
+        "sqlite://{}?mode=rwc",
+        dir.path().join("empty.db").display()
+    );
+    let store = Store::open(&url)
+        .await
+        .unwrap()
+        .with_execution_clock(|| NOW);
+    let host = support::register_host(&store, "reader").await;
+    let set = put_set(
+        &store,
+        "skills",
+        vec![skill_item("all", false, r#"{"reference":"*"}"#)],
+    )
+    .await
+    .unwrap();
+    store
+        .put_tag("reader", "Review", vec!["files:read".into()])
+        .await
+        .unwrap();
+    store
+        .put_role(
+            "operator:alice",
+            &PutRoleRequest {
+                operation_id: "role".into(),
+                role: Some(Role {
+                    role_id: "reader".into(),
+                    name: "Reader".into(),
+                    purpose: "Read Skills".into(),
+                    context_set_ids: vec![set.set_id.clone()],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .assign_role(
+            "operator:alice",
+            &AssignRoleRequest {
+                operation_id: "assign".into(),
+                role: "reader".into(),
+                tag_id: "reader".into(),
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .submit_task(
+            "operator:alice",
+            &SubmitTaskRequest {
+                output_policy: None,
+                execution_limits: None,
+                operation_id: "task".into(),
+                tag_id: "reader".into(),
+                session_id: "one".into(),
+                prompt: "Review".into(),
+                input_artifacts: vec![],
+            },
+        )
+        .await
+        .unwrap();
+    let attempt = claim(&store, &host, "claim").await;
+    start(&store, &host, &attempt).await;
+    let manifest = ContextResolutionManifest {
+        omissions: vec![OmittedContextItem {
+            set_id: set.set_id.clone(),
+            item_id: set.items[0].item_id.clone(),
+            item_key: "all".into(),
+            r#type: "supertag/skill".into(),
+            version: 1,
+            reason: "No Skills are available to this Task".into(),
+        }],
+        ..Default::default()
+    };
+    assert_eq!(
+        store
+            .commit_context_resolution(
+                &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+                &CommitContextResolutionRequest {
+                    manifest: Some(manifest.clone()),
+                },
             )
             .await
             .unwrap(),

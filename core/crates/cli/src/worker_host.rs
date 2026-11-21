@@ -259,11 +259,7 @@ async fn build(args: WorkerHostArgs, worker: bool) -> Result<Built> {
     }
     let harness = adapter.harness_kind();
     ensure!(
-        skill_catalog.is_none()
-            || !matches!(
-                harness,
-                HarnessKind::OpenaiAgents | HarnessKind::Opencode | HarnessKind::Cursor
-            ),
+        skill_catalog.is_none() || supertag_worker_host::context::harness_loads_skills(harness),
         "this Worker Host's selected harness does not load Skills"
     );
     let provider_model = adapter.provider_model();
@@ -529,9 +525,19 @@ async fn build(args: WorkerHostArgs, worker: bool) -> Result<Built> {
         attempt_timeout: Duration::from_secs(attempt_timeout_seconds),
         remote_provider,
         shared_execution,
-        context_catalog: supertag_worker_host::context::ContextCatalog::load(
-            skill_catalog.as_deref(),
-        )?,
+        // A harness that loads Skills gets the configured catalog, the Task's repository Skills,
+        // and those of the user this host runs as.
+        context_catalog: if !supertag_worker_host::context::harness_loads_skills(harness) {
+            supertag_worker_host::context::ContextCatalog::without_skills()
+        } else {
+            supertag_worker_host::context::ContextCatalog::load(
+                skill_catalog.as_deref(),
+                std::env::var_os("HOME")
+                    .filter(|home| !home.is_empty())
+                    .map(PathBuf::from)
+                    .as_deref(),
+            )?
+        },
     };
     Ok(Built {
         worker,

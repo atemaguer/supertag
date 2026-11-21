@@ -31,8 +31,9 @@ repositories.
 ### On your own
 
 `supertag init` writes a file like this for the repository you run it in. It provisions a
-`local-tools` Permission Set, a `Lead` Role, and the Control Plane's lead Tag, which follows the
-current branch. It grants `commands:execute` only when the host may run the lead's commands: always
+`local-tools` Permission Set, a `skills` Context Set that loads every
+[Skill](context-resolution.md#skills) the host has, a `Lead` Role with both, and the Control
+Plane's lead Tag, which follows the current branch. It grants `commands:execute` only when the host may run the lead's commands: always
 for Codex; for Claude Code with `sandbox-commands`, which `init` sets wherever Claude Code's
 sandbox can start; and for Cursor or OpenCode only with `environment: local-vm` or
 `allow-unsandboxed-commands`. `local-tools` also grants `web:fetch`, so the lead can read web pages
@@ -59,11 +60,22 @@ services:
             - { target: runtime, action: files:write }
             - { target: runtime, action: web:fetch }
       - apiVersion: supertag/v1
+        kind: ContextSet
+        metadata: { name: skills }
+        spec:
+          items:
+            - itemKey: "skill:all"
+              type: supertag/skill
+              version: 1
+              required: false
+              config: { reference: "*" }
+      - apiVersion: supertag/v1
         kind: Role
         metadata: { name: Lead }
         spec:
           purpose: "Own Objectives for this repository: plan the work, make and verify changes, and report what changed."
           permissionSets: [local-tools]
+          contextSets: [skills]
       - apiVersion: supertag/v1
         kind: Tag
         metadata: { name: lead }
@@ -157,7 +169,7 @@ echoing secret values.
 | `adapter`, `adapter-args` | none | An executable that speaks the harness protocol, in place of `harnesses`. See [Write a harness adapter](../guides/harness-adapters.md) |
 | `models` | none | Models per harness: one model, or a list whose first is the default. See [Host models](#host-models) |
 | `workspaces` | none | Up to 128 Workspace names, each to a repository path or `{ path, land, setup }`. See [Workspaces](#workspaces) |
-| `skills` | none | Local Skill directory or JSON catalog file selected by Context Sets. Relative paths resolve from this file |
+| `skills` | none | Local Skill directory or JSON catalog file selected by Context Sets, in addition to the user's and the repository's Skills; its Skills take precedence over theirs. Relative paths resolve from this file |
 | `labels` | none | Placement labels the host carries, such as `[gpu]`, for a Tag's `runsOn`. See [Worker Host labels](resource-model.md#worker-host-labels) |
 | `environment` | none | `local-vm` runs Claude Code, Cursor, OpenCode, and Codex Tasks' commands and file tools in containers on this machine. See [local-vm containers](#local-vm-containers) |
 | `allow-unsandboxed-commands` | none | `claude-code`, `cursor`, or `opencode` from `harnesses`. See [Unsandboxed harnesses](#unsandboxed-harnesses) |

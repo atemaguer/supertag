@@ -30,7 +30,8 @@ that Tag's work.
 
 Use a Context Set to select:
 
-- Skills from the Worker Host's Skill catalog;
+- Skills the Worker Host has: its user's, the repository's, and any catalog its operator
+  configured;
 - metadata summaries of captured [artifacts](../reference/artifacts.md), such as research reports,
   from named source locations for the Tag.
 
@@ -62,12 +63,19 @@ supertag context-set activate shared-engineering --tag engineering \
   --provider github --repo acme/api
 ```
 
+A Skill item can name one Skill, as above, or every Skill with `reference: "*"`. A Task then loads
+whatever Skills its Worker Host has: those in the user's `~/.claude/skills` and `~/.agents/skills`,
+those in the repository's `.claude/skills` and `.agents/skills`, and any catalog the operator
+configured. A `*` item is always optional. `supertag init` gives the Tag it creates a Context Set
+named `skills` with one such item, so your own Skills work from the first Task. Without a Skill
+item, a Task loads no Skill, not even the harness's own.
+
 Artifact selectors use exact collaboration-surface sources and same-Tag work. They are not
 available on an Objective's own Tasks through Roles; those Tasks use the catalog's Objective
 visibility rules instead.
 
-A **Context Item** is one entry in a Context Set. Two types exist: `supertag/skill`, a Skill that the
-**Worklet**, the program on each Worker Host, resolves from its host's catalog, and `supertag/artifacts`, artifact selections the Control
+A **Context Item** is one entry in a Context Set. Two types exist: `supertag/skill`, Skills that the
+**Worklet**, the program on each Worker Host, resolves from its host's Skill sources, and `supertag/artifacts`, artifact selections the Control
 Plane resolves. A Task with a required Item runs only on a Worker Host that can resolve it. See
 the [context resolution reference](../reference/context-resolution.md).
 

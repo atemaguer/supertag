@@ -213,9 +213,6 @@ importers:
       '@supertag/worker-sdk':
         specifier: workspace:*
         version: link:../sdk
-      yaml:
-        specifier: 2.8.1
-        version: 2.8.1
     devDependencies:
       '@anthropic-ai/sandbox-runtime':
         specifier: 0.0.83
@@ -296,6 +293,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.30.0
         version: 1.30.0(supports-color@7.2.0)(zod@4.4.3)
+      yaml:
+        specifier: 2.8.1
+        version: 2.8.1
       zod:
         specifier: 4.4.3
         version: 4.4.3

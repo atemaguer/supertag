@@ -353,8 +353,11 @@ A Workspace Volume must stay outside artifact storage. See [Worker Host referenc
 
 ## Select repository Skills and MCP servers
 
-A Context Set can select **Skills**, reusable instruction packages, from the host's Skill
-catalog. A Workspace's own `.mcp.json` servers run only when the Tag lists them:
+A Context Set can select **Skills**, reusable instruction packages, including the repository's
+own: those in `.claude/skills` and `.agents/skills` at the commit the Task starts from. A Context
+Set item with `reference: "*"` loads every Skill the host has; see
+[Skills](../reference/context-resolution.md#skills). A Workspace's own `.mcp.json` servers run
+only when the Tag lists them:
 
 ```sh
 supertag tag put builder --instructions "Implement bounded changes with tests." \

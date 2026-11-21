@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   chmod,
   lstat,
@@ -14,6 +15,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
+import { digestContextPackage } from "@supertag/worker-sdk";
 import * as rustHarness from "@supertag/worker-sdk/internal/rust-harness";
 import { afterEach, expect, it, vi } from "vitest";
 import { openCodePatterns, openCodePermissions, runOpenCode } from "./src/index.js";
@@ -863,4 +865,118 @@ it("loads the memory folder's index into the turn and refuses a folder it cannot
   await expect(
     openCodeMemory({ ...environment, SUPERTAG_NATIVE_MEMORY_DIRECTORY: linked }, false),
   ).rejects.toThrow("OpenCode cannot confine the Tag's memory folder");
+});
+
+/** A Skill Context Set: one item, `*` or a named reference. */
+const skillPolicy = (reference: string) => ({
+  execution: { models: ["openai/test"] },
+  contextSets: [
+    {
+      setId: "set",
+      items: [
+        {
+          itemId: "item",
+          itemKey: "item",
+          type: "supertag/skill",
+          version: 1,
+          configJson: JSON.stringify({ reference }),
+        },
+      ],
+    },
+  ],
+});
+
+/** The Worker Host's private copy of one Skill, as it delivers it. */
+async function hostSkill(directory: string, reference: string, markdown: string) {
+  const localPath = join(
+    directory,
+    `skill-${createHash("sha256").update(reference).digest("hex")}`,
+  );
+  await mkdir(localPath, { mode: 0o700 });
+  await writeFile(join(localPath, "SKILL.md"), markdown, { mode: 0o600 });
+  const digest = await digestContextPackage(localPath, { maxFiles: 8, maxBytes: 4096 });
+  return { localPath, pin: { setId: "set", itemId: "item", itemKey: "item", reference, digest } };
+}
+
+it("loads only the delivered Skills, read-only, and leaves out a * Skill OpenCode cannot name", async () => {
+  const { root, environment } = await sandbox();
+  const host = join(root, "host-skills");
+  await mkdir(host, { mode: 0o700 });
+  const run = create(HarnessRunSchema, {
+    ...ownedRun(),
+    task: { ...ownedRun().task, policySnapshot: skillPolicy("*") },
+    resolvedSkills: [
+      await hostSkill(host, "review", "---\nname: review\ndescription: Review.\n---\nReview it.\n"),
+      await hostSkill(host, "unnamed", "No frontmatter, so OpenCode would not load it.\n"),
+    ],
+  });
+  const { task, model, skills } = taskModel(run, configuration);
+  expect(skills.map(({ skill }) => skill.pin?.reference)).toEqual(["review", "unnamed"]);
+  const request = (
+    await nativeRequest(
+      task,
+      model,
+      { ...configuration, environment },
+      [],
+      [],
+      undefined,
+      "",
+      false,
+      false,
+      undefined,
+      skills,
+    )
+  ).forTools([]);
+  const staged = join(root, "opencode-skills");
+  expect(await readFile(join(staged, "review", "SKILL.md"), "utf8")).toContain("Review it.");
+  await expect(lstat(join(staged, "unnamed"))).rejects.toThrow();
+  expect(request.environment["OPENCODE_DISABLE_EXTERNAL_SKILLS"]).toBe("true");
+  const config = JSON.parse(request.environment["OPENCODE_CONFIG_CONTENT"] ?? "{}");
+  expect(config.skills).toEqual({ paths: [staged] });
+  const permission = config.permission;
+  expect(decide(permission.skill, "review")).toBe("allow");
+  expect(decide(permission.skill, "customize-opencode")).toBe("deny");
+  expect(decide(permission.skill, "ambient")).toBe("deny");
+  // The Skill's own files are readable but never editable.
+  expect(decide(permission.external_directory, `${staged}/review/*`)).toBe("allow");
+  expect(decide(permission.edit, `${staged}/review/SKILL.md`)).toBe("deny");
+  // Without Skills, OpenCode loads none.
+  const plain = await sandbox();
+  const none = (
+    await nativeRequest(task, model, { ...configuration, environment: plain.environment })
+  ).forTools([]);
+  const unconfigured = JSON.parse(none.environment["OPENCODE_CONFIG_CONTENT"] ?? "{}");
+  expect(unconfigured.skills).toBeUndefined();
+  expect(unconfigured.permission.skill).toBe("deny");
+});
+
+it("fails a Task whose named Skill OpenCode cannot load, and loads none in a remote Workspace", async () => {
+  const { root, environment } = await sandbox();
+  const host = join(root, "host-skills");
+  await mkdir(host, { mode: 0o700 });
+  const named = create(HarnessRunSchema, {
+    ...ownedRun(),
+    task: { ...ownedRun().task, policySnapshot: skillPolicy("unnamed") },
+    resolvedSkills: [await hostSkill(host, "unnamed", "No frontmatter.\n")],
+  });
+  const { task, model, skills } = taskModel(named, configuration);
+  await expect(
+    nativeRequest(
+      task,
+      model,
+      { ...configuration, environment },
+      [],
+      [],
+      undefined,
+      "",
+      false,
+      false,
+      undefined,
+      skills,
+    ),
+  ).rejects.toThrow(/cannot load a named Skill/u);
+  // A remote Workspace's OpenCode runs no Skill tool: optional Skills are left out.
+  named.remoteWorkspace = true;
+  if (named.task) named.task.allowedActions = ["files:read"];
+  expect(taskModel(named, configuration).skills).toEqual([]);
 });

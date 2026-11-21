@@ -35,6 +35,12 @@ export interface OpenCodeCopy {
   readonly readWrite: boolean;
 }
 
+/** The Task's admitted Skills, staged in `root`, and the names OpenCode loads them as. */
+export interface OpenCodeSkills {
+  readonly root: string;
+  readonly names: readonly string[];
+}
+
 /**
  * OpenCode asks `external_directory` with the absolute parent directory of each file outside the
  * worktree, followed by `/*`, and `edit` with the file's path relative to the worktree. The last
@@ -263,8 +269,24 @@ export function openCodeConfigurationEnvironment(
   scope?: OpenCodeScope,
   /** The Tag's memory folder, which OpenCode may always read and edit. */
   memory?: string,
+  /** The Task's admitted Skills, the only ones OpenCode may load; their files are read-only. */
+  skills?: OpenCodeSkills,
 ): Readonly<Record<string, string>> {
-  const admittedPermission = openCodePermissions(actions, copies, worktree, scope, memory);
+  if (skills && (!isAbsolute(skills.root) || /[*?\p{Cc}]/u.test(skills.root)))
+    throw new Error("OpenCode cannot confine the Skill directory");
+  const admittedPermission = {
+    ...openCodePermissions(
+      actions,
+      skills ? [...copies, { destination: skills.root, readWrite: false }] : copies,
+      worktree,
+      scope,
+      memory,
+    ),
+    // OpenCode asks `skill` with the Skill's name; the last matching rule wins.
+    skill: skills?.names.length
+      ? Object.fromEntries([["*", "deny"], ...skills.names.map((name) => [name, "allow"])])
+      : "deny",
+  };
   const permission: Record<string, unknown> = {
     ...admittedPermission,
     task: { "*": "deny", general: "allow", explore: "allow" },
@@ -303,6 +325,8 @@ export function openCodeConfigurationEnvironment(
     plugin: [],
     // File tools also invoke these integrations outside the bash permission check.
     ...(disableAuxiliaryProcesses ? { formatter: false, lsp: false } : {}),
+    // With external Skills and project configuration off, these are the only Skills it finds.
+    ...(skills ? { skills: { paths: [skills.root] } } : {}),
     mcp,
     permission,
     agent: {
@@ -326,6 +350,8 @@ export function openCodeConfigurationEnvironment(
     OPENCODE_DISABLE_AUTOUPDATE: "true",
     OPENCODE_DISABLE_DEFAULT_PLUGINS: "true",
     OPENCODE_DISABLE_CLAUDE_CODE: "true",
+    // No Skills from the home directory or the worktree's `.claude` and `.agents`.
+    OPENCODE_DISABLE_EXTERNAL_SKILLS: "true",
     // The Task worktree may contain untrusted OpenCode configuration and plugins.
     OPENCODE_DISABLE_PROJECT_CONFIG: "true",
     OPENCODE_DISABLE_LSP_DOWNLOAD: "true",
@@ -385,6 +411,8 @@ export function openCodeRemoteConfigurationEnvironment(
     OPENCODE_DISABLE_AUTOUPDATE: "true",
     OPENCODE_DISABLE_DEFAULT_PLUGINS: "true",
     OPENCODE_DISABLE_CLAUDE_CODE: "true",
+    // No Skills from the home directory or the worktree's `.claude` and `.agents`.
+    OPENCODE_DISABLE_EXTERNAL_SKILLS: "true",
     OPENCODE_DISABLE_PROJECT_CONFIG: "true",
     OPENCODE_DISABLE_LSP_DOWNLOAD: "true",
   };

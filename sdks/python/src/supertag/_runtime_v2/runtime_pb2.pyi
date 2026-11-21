@@ -3535,20 +3535,32 @@ class ContextContract(_message.Message):
     def __init__(self, type: _Optional[str] = ..., version: _Optional[int] = ...) -> None: ...
 
 class ContextPin(_message.Message):
-    __slots__ = ("set_id", "item_id", "item_key", "reference", "version", "digest")
+    __slots__ = ("set_id", "item_id", "item_key", "reference", "version", "digest", "source")
     SET_ID_FIELD_NUMBER: _ClassVar[int]
     ITEM_ID_FIELD_NUMBER: _ClassVar[int]
     ITEM_KEY_FIELD_NUMBER: _ClassVar[int]
     REFERENCE_FIELD_NUMBER: _ClassVar[int]
     VERSION_FIELD_NUMBER: _ClassVar[int]
     DIGEST_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
     set_id: str
     item_id: str
     item_key: str
     reference: str
     version: str
     digest: str
-    def __init__(self, set_id: _Optional[str] = ..., item_id: _Optional[str] = ..., item_key: _Optional[str] = ..., reference: _Optional[str] = ..., version: _Optional[str] = ..., digest: _Optional[str] = ...) -> None: ...
+    source: str
+    def __init__(self, set_id: _Optional[str] = ..., item_id: _Optional[str] = ..., item_key: _Optional[str] = ..., reference: _Optional[str] = ..., version: _Optional[str] = ..., digest: _Optional[str] = ..., source: _Optional[str] = ...) -> None: ...
+
+class SkippedSkill(_message.Message):
+    __slots__ = ("reference", "source", "reason")
+    REFERENCE_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    reference: str
+    source: str
+    reason: str
+    def __init__(self, reference: _Optional[str] = ..., source: _Optional[str] = ..., reason: _Optional[str] = ...) -> None: ...
 
 class OmittedContextItem(_message.Message):
     __slots__ = ("set_id", "item_id", "item_key", "type", "version", "reason")
@@ -3567,12 +3579,14 @@ class OmittedContextItem(_message.Message):
     def __init__(self, set_id: _Optional[str] = ..., item_id: _Optional[str] = ..., item_key: _Optional[str] = ..., type: _Optional[str] = ..., version: _Optional[int] = ..., reason: _Optional[str] = ...) -> None: ...
 
 class ContextResolutionManifest(_message.Message):
-    __slots__ = ("pins", "omissions")
+    __slots__ = ("pins", "omissions", "skipped")
     PINS_FIELD_NUMBER: _ClassVar[int]
     OMISSIONS_FIELD_NUMBER: _ClassVar[int]
+    SKIPPED_FIELD_NUMBER: _ClassVar[int]
     pins: _containers.RepeatedCompositeFieldContainer[ContextPin]
     omissions: _containers.RepeatedCompositeFieldContainer[OmittedContextItem]
-    def __init__(self, pins: _Optional[_Iterable[_Union[ContextPin, _Mapping]]] = ..., omissions: _Optional[_Iterable[_Union[OmittedContextItem, _Mapping]]] = ...) -> None: ...
+    skipped: _containers.RepeatedCompositeFieldContainer[SkippedSkill]
+    def __init__(self, pins: _Optional[_Iterable[_Union[ContextPin, _Mapping]]] = ..., omissions: _Optional[_Iterable[_Union[OmittedContextItem, _Mapping]]] = ..., skipped: _Optional[_Iterable[_Union[SkippedSkill, _Mapping]]] = ...) -> None: ...
 
 class ResolvedSkill(_message.Message):
     __slots__ = ("pin", "local_path")

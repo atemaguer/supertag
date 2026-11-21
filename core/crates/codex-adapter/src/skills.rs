@@ -10,6 +10,9 @@ use supertag_protocol::v2::{ResolvedSkill, Task};
 use supertag_workspaces::packages;
 use tokio_util::sync::CancellationToken;
 
+/// The `reference` of a Skill Context Item that loads every Skill available to the Task.
+const WILDCARD: &str = "*";
+
 pub(crate) struct Prepared {
     pub paths: BTreeSet<String>,
     pub manifest: String,
@@ -28,7 +31,8 @@ pub(crate) fn prepare(task: &Task, skills: &[ResolvedSkill], home: &Path) -> Res
     let root = home.join("skills");
     std::fs::create_dir(&root)?;
     let cancel = CancellationToken::new();
-    let mut seen = BTreeSet::new();
+    // The references delivered for each item: one for a named item, any for a `*` item.
+    let mut seen: BTreeMap<_, BTreeSet<&str>> = BTreeMap::new();
     let mut resolved = BTreeMap::new();
     let mut paths = BTreeSet::new();
     for skill in skills {
@@ -40,16 +44,24 @@ pub(crate) fn prepare(task: &Task, skills: &[ResolvedSkill], home: &Path) -> Res
         let item = admitted
             .get(&key)
             .context("resolved Skill is outside accepted context")?;
+        let config: Value = serde_json::from_str(&item.config_json)?;
+        let wildcard = config["reference"].as_str() == Some(WILDCARD);
+        let references = seen.entry(key).or_default();
         ensure!(
-            seen.insert(key)
+            references.insert(pin.reference.as_str())
+                && (wildcard || references.len() == 1)
                 && item.r#type == "supertag/skill"
                 && item.version == 1
                 && item.item_key == pin.item_key,
             "resolved Skill differs from accepted context"
         );
-        let config: Value = serde_json::from_str(&item.config_json)?;
-        ensure!(
+        let reference = if wildcard {
+            !pin.reference.is_empty() && pin.reference != WILDCARD
+        } else {
             config["reference"].as_str() == Some(pin.reference.as_str())
+        };
+        ensure!(
+            reference
                 && config
                     .get("version")
                     .and_then(Value::as_str)
@@ -89,7 +101,7 @@ pub(crate) fn prepare(task: &Task, skills: &[ResolvedSkill], home: &Path) -> Res
     ensure!(
         admitted
             .iter()
-            .all(|(key, item)| !item.required || seen.contains(key)),
+            .all(|(key, item)| !item.required || seen.contains_key(key)),
         "a required Context Item has no Codex delivery"
     );
     let manifest = if resolved.is_empty() {
@@ -100,8 +112,10 @@ pub(crate) fn prepare(task: &Task, skills: &[ResolvedSkill], home: &Path) -> Res
     Ok(Prepared { paths, manifest })
 }
 
-/// Native discovery includes built-in and repository Skills. Explicitly disable
-/// all non-admitted entries before starting a turn, including when selection is empty.
+/// Native discovery includes built-in, user, and repository Skills. Explicitly disable
+/// all non-admitted entries before starting a turn, including when selection is empty: an
+/// admitted repository or user Skill arrives as its private copy in the native home, so only
+/// those copies stay enabled.
 pub(crate) fn inventory(value: &Value) -> Result<Vec<(String, bool)>> {
     let entries = value["data"]
         .as_array()

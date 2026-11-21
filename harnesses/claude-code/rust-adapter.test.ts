@@ -1620,6 +1620,43 @@ it.each(["valid", "tampered", "hooks"] as const)(
   30000,
 );
 
+it.each(["valid", "hooks"] as const)(
+  "loads the Skills a * Context Item delivers, leaving out one it cannot load (%s)",
+  async (kind) => {
+    const policySnapshot = create(TaskPolicySnapshotSchema, {
+      version: 1,
+      contextSets: [
+        {
+          setId: "context",
+          items: [
+            {
+              itemId: "runbook",
+              itemKey: "runbook",
+              type: "supertag/skill",
+              version: 1,
+              required: false,
+              configJson: JSON.stringify({ reference: "*" }),
+            },
+          ],
+        },
+      ],
+    });
+    const run = await invoke({
+      prompt: kind === "valid" ? "inspect-skill-package" : "first",
+      policySnapshot,
+      skill: {
+        markdown: `---\nname: release-runbook\ndescription: Verify the release.\n${kind === "hooks" ? "hooks: {}\n" : ""}---\nUse the release checklist.\n`,
+      },
+    });
+    // A Skill only a * item loaded does not fail the Task when Claude Code cannot load it.
+    expect(run.completions[0]?.succeeded, run.completions[0]?.result).toBe(true);
+    expect(run.completions[0]?.result).toBe(
+      kind === "valid" ? "fixture verified Skill package" : "fixture first turn",
+    );
+  },
+  30000,
+);
+
 it("uses the first accepted model and falls back to the host model without one", async () => {
   const policySnapshot = create(TaskPolicySnapshotSchema, {
     version: 1,

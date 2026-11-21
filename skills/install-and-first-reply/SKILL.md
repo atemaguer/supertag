@@ -47,8 +47,10 @@ on later. `--yes` accepts every default and needs no terminal. It writes `~/.sup
 
 - a `control-plane` service, which creates the Permission Set `local-tools` (`files:read`,
   `files:write`, `schedule:create`, and, except for Cursor, `web:fetch`, and for Codex also
-`commands:execute`), the Role `Lead`, and the Tag `lead`, bound to this repository's Workspace and
-  following the branch checked out when `init` ran;
+`commands:execute`), the Context Set `skills` (every Skill the host has: the user's
+  `~/.claude/skills` and `~/.agents/skills`, and the repository's `.claude/skills` and
+  `.agents/skills`), the Role `Lead` with both, and the Tag `lead`, bound to this repository's
+  Workspace and following the branch checked out when `init` ran;
 - a Gateway; and
 - a `host` service named after the machine, which maps this repository as the Workspace,
   named after the repository by default, runs every harness `init` found signed in (the lead's

@@ -1410,7 +1410,7 @@ fn successful(text: &str) -> String {
 }
 
 #[tokio::test]
-async fn native_skill_delivery_is_explicit_and_read_only() -> Result<()> {
+async fn native_skill_delivery_is_explicit_for_read_only_and_writable_tasks() -> Result<()> {
     use supertag_protocol::v2::{
         ContextPin, ContextSet, PolicyContextItem, ResolvedSkill, TaskPolicySnapshot,
     };
@@ -1489,7 +1489,9 @@ async fn native_skill_delivery_is_explicit_and_read_only() -> Result<()> {
             observed.resolved_skills = vec![skill.clone()];
             observed.policy_snapshot = Some(snapshot.clone());
         }
-        run(native.options(), server.bootstrap.clone()).await?;
+        let mut options = native.options();
+        options.allow_workspace_write = index == 2;
+        run(options, server.bootstrap.clone()).await?;
         let observed = server.observed.lock().await;
         let outcome = observed.outcome.as_ref().context("Skill outcome")?;
         if index < 2 {
@@ -1505,10 +1507,11 @@ async fn native_skill_delivery_is_explicit_and_read_only() -> Result<()> {
                     .exists()
             );
         } else if index == 2 {
-            assert!(!outcome.succeeded);
-            assert!(outcome.checkpoint.is_none());
-            assert!(!native.directory.path().join("pid").exists());
-            assert!(outcome.result.contains("read-only"));
+            // A writable Task receives its Skills too, with unadmitted ones still disabled.
+            ensure!(outcome.succeeded, "{}", outcome.result);
+            let requests = native.read("requests.jsonl")?;
+            assert!(requests.contains("skills/config/write"));
+            assert!(requests.contains("unselected/SKILL.md"));
         } else {
             // A changed Skill is new resolved context: the thread that loaded the old one is
             // not resumed, and a fresh one starts with the new one.

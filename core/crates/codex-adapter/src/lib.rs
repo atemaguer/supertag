@@ -246,14 +246,6 @@ async fn execute(
         .and_then(|applied| applied.limits.as_ref())
         .and_then(|limits| limits.max_reported_tokens);
     ensure!(
-        resolved_skills.is_empty()
-            || !task
-                .allowed_actions
-                .iter()
-                .any(|action| matches!(action.as_str(), "files:write" | "commands:execute")),
-        "Codex Skill delivery currently requires read-only file access without command execution"
-    );
-    ensure!(
         !options.timeout.is_zero(),
         "Codex execution timeout must be positive"
     );

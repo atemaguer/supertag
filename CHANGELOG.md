@@ -19,6 +19,16 @@ within the pre-1.0 compatibility policy described in
   `--version` installs a named release, including an older one. It refuses the desktop app's
   copy, which updates itself, and a `supertag` built from source. See
   [Upgrade](docs/operations/install.md#upgrade).
+- Tags load your own Skills with no setup. Every Worker Host now offers the Skills in its user's
+  `~/.claude/skills` and `~/.agents/skills` and in the Task repository's `.claude/skills` and
+  `.agents/skills`, read from the Task's commit, beside any configured `skills` catalog, which
+  takes precedence. A Context Set's `supertag/skill` item with `reference: "*"` loads every Skill
+  the host has; it is always optional, and the Task records what it loaded, with each Skill's
+  source and digest, and what it skipped. `supertag init` gives the lead's Role a `skills` Context
+  Set with one such item, and adds it to an existing setup when run again. OpenCode Tasks now load
+  their selected Skills, and Codex Tasks that may edit files or run commands receive theirs.
+  Cursor still loads none: it skips an optional Skill item and records the omission. See
+  [Skills](docs/reference/context-resolution.md#skills).
 
 ## [0.3.6] - 2026-11-21
 

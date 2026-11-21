@@ -95,6 +95,24 @@ supertag apply -f team.yaml
 
 A grant with `approvalRequired: true` waits in the operator inbox for each call.
 
+A Context Set's `supertag/skill` item loads Skills (SuperTag's reusable instruction packages).
+`config.reference` names one Skill, or is `"*"` for every Skill the Task's Worker Host has: the
+host user's `~/.claude/skills` and `~/.agents/skills`, the repository's `.claude/skills` and
+`.agents/skills` at the Task's commit, and any catalog the host's `skills` path names, which takes
+precedence. A `*` item must be `required: false` and carries no `version` or `digest`.
+`supertag init` gives the lead's Role a `skills` Context Set with one such item. A Tag without a
+Skill item loads none, not even its harness's own. Cursor loads no Skills. See
+[Skills](../../docs/reference/context-resolution.md#skills).
+
+```yaml
+apiVersion: supertag/v1
+kind: ContextSet
+metadata: { name: skills }
+spec:
+  items:
+    - { itemKey: "skill:all", type: supertag/skill, version: 1, required: false, config: { reference: "*" } }
+```
+
 A Tag sets [Schedules](../../docs/reference/coordination.md#schedules), wake-ups for itself,
 only when it holds `{ target: runtime, action: schedule:create }`. `supertag init` grants it to
 the lead; add it to a set to let another Tag follow up on its own, and leave it out to stop one.

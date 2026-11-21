@@ -2908,6 +2908,17 @@ message ContextPin {
   string reference = 4;
   string version = 5;
   string digest = 6;
+  // Where the Worker Host found the Skill: "catalog", "repository:.claude/skills",
+  // "repository:.agents/skills", "user:~/.claude/skills", or "user:~/.agents/skills".
+  string source = 7;
+}
+
+// A Skill a Context Item could have loaded but did not: another source's Skill of the same name
+// took precedence, or a `*` item skipped it.
+message SkippedSkill {
+  string reference = 1;
+  string source = 2;
+  string reason = 3;
 }
 
 message OmittedContextItem {
@@ -2922,6 +2933,7 @@ message OmittedContextItem {
 message ContextResolutionManifest {
   repeated ContextPin pins = 1;
   repeated OmittedContextItem omissions = 2;
+  repeated SkippedSkill skipped = 3;
 }
 
 message ResolvedSkill {

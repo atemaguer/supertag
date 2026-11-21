@@ -58,9 +58,9 @@ impl Store {
         if manifest.encoded_len() > 128 * 1024 {
             return Err(invalid("context resolution manifest exceeds size limit"));
         }
-        manifest
-            .pins
-            .sort_by(|a, b| (&a.set_id, &a.item_id).cmp(&(&b.set_id, &b.item_id)));
+        manifest.pins.sort_by(|a, b| {
+            (&a.set_id, &a.item_id, &a.reference).cmp(&(&b.set_id, &b.item_id, &b.reference))
+        });
         manifest
             .omissions
             .sort_by(|a, b| (&a.set_id, &a.item_id).cmp(&(&b.set_id, &b.item_id)));
@@ -124,6 +124,21 @@ async fn manifest_in(
         })
         .transpose()
 }
+/// The `reference` of a Skill Context Item that loads every Skill available to the Task.
+pub(crate) const WILDCARD: &str = "*";
+/// The omission a `*` item records when its Task has no Skill to load.
+const NO_SKILLS: &str = "No Skills are available to this Task";
+const MAX_SKIPPED: usize = 128;
+
+/// Whether a Skill Context Item's configuration names every available Skill.
+pub(crate) fn is_wildcard(config: &serde_json::Value) -> bool {
+    config.get("reference").and_then(serde_json::Value::as_str) == Some(WILDCARD)
+}
+
+fn bounded(value: &str) -> bool {
+    value.chars().count() <= 256 && !value.chars().any(char::is_control)
+}
+
 fn validate(task: &Task, manifest: &ContextResolutionManifest) -> Result<()> {
     let mut items = BTreeMap::new();
     if let Some(snapshot) = &task.policy_snapshot {
@@ -136,19 +151,20 @@ fn validate(task: &Task, manifest: &ContextResolutionManifest) -> Result<()> {
             }
         }
     }
-    if manifest.pins.len() + manifest.omissions.len() != items.len() {
-        return Err(invalid(
-            "context resolution must cover every admitted Context Item exactly once",
-        ));
-    }
-    let mut seen = BTreeSet::new();
+    // A named item resolves to one pin or omission; a `*` item to a pin for each Skill it loaded,
+    // or to one omission.
+    let mut pinned: BTreeMap<(&str, &str), BTreeSet<&str>> = BTreeMap::new();
     let mut references = BTreeMap::new();
     for pin in &manifest.pins {
         let key = (pin.set_id.as_str(), pin.item_id.as_str());
         let item = items
             .get(&key)
             .ok_or_else(|| invalid("context pin names an unadmitted Context Item"))?;
-        if !seen.insert(key)
+        let config: serde_json::Value = serde_json::from_str(&item.config_json)?;
+        let wildcard = is_wildcard(&config);
+        let loaded = pinned.entry(key).or_default();
+        if !loaded.insert(pin.reference.as_str())
+            || (!wildcard && loaded.len() > 1)
             || item.item_key != pin.item_key
             || item.r#type != "supertag/skill"
             || item.version != 1
@@ -157,15 +173,20 @@ fn validate(task: &Task, manifest: &ContextResolutionManifest) -> Result<()> {
                 "context pin differs from the admitted Skill contract",
             ));
         }
-        let config: serde_json::Value = serde_json::from_str(&item.config_json)?;
-        if config.get("reference").and_then(serde_json::Value::as_str)
-            != Some(pin.reference.as_str())
+        let reference_matches = if wildcard {
+            !pin.reference.is_empty() && pin.reference != WILDCARD && bounded(&pin.reference)
+        } else {
+            config.get("reference").and_then(serde_json::Value::as_str)
+                == Some(pin.reference.as_str())
+        };
+        if !reference_matches
             || pin.version.len() > 256
             || pin.version.chars().any(char::is_control)
+            || !bounded(&pin.source)
             || !valid_digest(&pin.digest)
         {
             return Err(invalid(
-                "context pin has an invalid reference, version, or digest",
+                "context pin has an invalid reference, version, source, or digest",
             ));
         }
         if config
@@ -186,7 +207,7 @@ fn validate(task: &Task, manifest: &ContextResolutionManifest) -> Result<()> {
                 "resolved Skill digest differs from accepted policy".into(),
             ));
         }
-        let value = (&pin.version, &pin.digest);
+        let value = (&pin.version, &pin.digest, &pin.source);
         if references
             .insert(&pin.reference, value)
             .is_some_and(|previous| previous != value)
@@ -196,26 +217,48 @@ fn validate(task: &Task, manifest: &ContextResolutionManifest) -> Result<()> {
             ));
         }
     }
+    let mut omitted = BTreeSet::new();
     for omission in &manifest.omissions {
         let key = (omission.set_id.as_str(), omission.item_id.as_str());
         let item = items
             .get(&key)
             .ok_or_else(|| invalid("context omission names an unadmitted Context Item"))?;
-        if !seen.insert(key)
+        let wildcard = item.r#type == "supertag/skill"
+            && serde_json::from_str::<serde_json::Value>(&item.config_json)
+                .is_ok_and(|config| is_wildcard(&config));
+        let reason = match omission.reason.as_str() {
+            "No supported Context Resolver is configured"
+            | "Harness does not support Skill inputs" => true,
+            NO_SKILLS => wildcard,
+            _ => false,
+        };
+        if !omitted.insert(key)
+            || pinned.contains_key(&key)
             || item.required
             || item.item_key != omission.item_key
             || item.r#type != omission.r#type
             || item.version != omission.version
-            || !matches!(
-                omission.reason.as_str(),
-                "No supported Context Resolver is configured"
-                    | "Harness does not support Skill inputs"
-            )
+            || !reason
         {
             return Err(invalid(
                 "context omission differs from an optional admitted contract",
             ));
         }
+    }
+    if pinned.len() + omitted.len() != items.len() {
+        return Err(invalid(
+            "context resolution must cover every admitted Context Item exactly once",
+        ));
+    }
+    if manifest.skipped.len() > MAX_SKIPPED
+        || manifest.skipped.iter().any(|skipped| {
+            skipped.reference.is_empty()
+                || !bounded(&skipped.reference)
+                || !bounded(&skipped.source)
+                || !bounded(&skipped.reason)
+        })
+    {
+        return Err(invalid("context resolution records invalid skipped Skills"));
     }
     Ok(())
 }

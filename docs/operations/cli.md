@@ -47,9 +47,9 @@ Tag's name; for OpenCode it also asks for a `provider/model`. Claude Code runs t
 22.13.0 or later; without it on `PATH`, `init` says so and doesn't offer Claude Code. It writes
 `~/.supertag/supertag.yaml` with two services and starts them in the background:
 
-- a `control-plane` service, which also creates a `local-tools` Permission Set, a `Lead` Role,
-  and the `lead` Tag, bound to the repository's Workspace and following the branch checked out
-  when `init` ran; and
+- a `control-plane` service, which also creates a `local-tools` Permission Set, a `skills`
+  Context Set, a `Lead` Role with both, and the `lead` Tag, bound to the repository's Workspace
+  and following the branch checked out when `init` ran; and
 - a `host` service named after this machine, which maps the repository as a Workspace, runs
   every harness `init` found signed in, the lead's first, so Tags you create later can use any
   of them, and runs up to three Task Attempts at once across those harnesses (`concurrency: 3`),
@@ -77,6 +77,13 @@ not at all:
 sandbox. To run a Codex host's Tasks in containers anyway, add `environment: local-vm` to its
 service in supertag.yaml and run `supertag up`. Each image then gets the host's Codex version;
 see [local-vm containers](../reference/supertag-yaml.md#local-vm-containers).
+
+The `skills` Context Set has one `supertag/skill` item with `reference: "*"`, so the lead loads
+your own Skills from `~/.claude/skills` and `~/.agents/skills` and the repository's from
+`.claude/skills` and `.agents/skills`, with no further setup; see
+[Skills](../reference/context-resolution.md#skills). Run again on a setup from before it did,
+`init` adds the Context Set to the `Lead` Role. To stop loading them, remove `skills` from the
+Role's `contextSets` in `supertag.yaml` and run `supertag up`.
 
 The `local-tools` Permission Set grants `files:read`, `files:write`, and `schedule:create`, which lets
 the lead set [Schedules](../reference/coordination.md#schedules), wake-ups for itself, plus `commands:execute` when the host may run

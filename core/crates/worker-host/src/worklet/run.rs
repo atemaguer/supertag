@@ -229,10 +229,8 @@ fn validate(options: &WorkletOptions) -> Result<()> {
             "shared execution requires a Cursor Worker Host with the exact provider profile"
         );
         ensure!(
-            !matches!(
-                worker.harness,
-                HarnessKind::Opencode | HarnessKind::OpenaiAgents | HarnessKind::Cursor
-            ) || worker.context_catalog.supported_contracts().is_empty(),
+            crate::worker::context::harness_loads_skills(worker.harness)
+                || worker.context_catalog.supported_contracts().is_empty(),
             "the selected harness does not load Skills"
         );
     }

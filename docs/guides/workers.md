@@ -266,10 +266,14 @@ requires a shared environment with `tag put --shared-execution-environment ID`. 
 
 ## Optional: Skills
 
-`skills` on a host service, or `--skill-catalog`, names a private allowlist of **Skills**,
-reusable instruction packages that Context Sets select. A directory holds one directory per
-Skill. A JSON catalog can also name Skills in a GitHub repository, fetched at an exact commit when
-a Task needs one. See [Context and permissions](../concepts/context-and-permissions.md).
+A Worker Host already offers its user's **Skills**, reusable instruction packages, from
+`~/.claude/skills` and `~/.agents/skills`, and each Task's repository Skills from `.claude/skills`
+and `.agents/skills`. Context Sets select which of them a Task loads. `skills` on a host service,
+or `--skill-catalog`, adds a private catalog whose Skills take precedence over those. A directory
+holds one directory per Skill. A JSON catalog can also name Skills in a GitHub repository, fetched
+at an exact commit when a Task needs one. See
+[Context and permissions](../concepts/context-and-permissions.md) and
+[Skills](../reference/context-resolution.md#skills).
 
 ## Optional: MCP servers
 

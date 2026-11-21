@@ -155,8 +155,10 @@ and [Cursor models and pricing](https://cursor.com/docs/models-and-pricing.md).
 A **Context Set** selects reusable knowledge for a Tag. The Control Plane resolves
 `supertag/artifacts` selections into artifact summaries in Cursor's prompt. This selection applies
 only to Tasks from a collaboration surface, not internal Objective Tasks. Cursor does not load
-[Skills](../reference/context-resolution.md#skills): a Task Attempt that carries a resolved
-`supertag/skill` fails on Cursor. Cursor also enforces no execution limits, so a Task submitted to
+[Skills](../reference/context-resolution.md#skills): it finds Skills in the workspace and its home
+directory with no way to limit it to selected ones. A Cursor Task skips an optional Skill item and
+records the omission; a Task that requires a Skill waits for a host whose harness loads Skills.
+Cursor also enforces no execution limits, so a Task submitted to
 a Cursor Tag with a token, cost, or native agent limit is refused.
 
 For colocated local Tasks, SuperTag allows Cursor's read, search, list, and MCP tools.

@@ -15,6 +15,8 @@ import {
   receipt,
   redact,
   resolveOutsideDirectories,
+  type SelectedSkill,
+  selectSkills,
   sessionRecap,
   spawnOwnedProcess,
   startRemoteWorkspaceHttp,
@@ -32,6 +34,7 @@ import {
   type OpenCodeMcpTool,
   type OpenCodeRunRequest,
   type OpenCodeScope,
+  type OpenCodeSkills,
   openCodeConfigurationEnvironment,
   openCodeRemoteConfigurationEnvironment,
   readProviderApiKey,
@@ -44,6 +47,7 @@ import {
   NATIVE_INSPECTION_TIMEOUT_MS,
 } from "./completion.js";
 import { startCoordination } from "./coordination.js";
+import { stageOpenCodeSkills } from "./skills.js";
 import { verifyWorkspaceLinks } from "./workspace.js";
 
 const PROVIDER_KEYS = new Map([
@@ -122,14 +126,24 @@ export function taskModel(run: HarnessRun, configuration: AdapterOptions) {
     throw new SafeOpenCodeFailure(
       "OpenCode cannot enforce the accepted execution limits. Native execution did not start.",
     );
-  if (
-    run.resolvedSkills.length ||
-    task.policySnapshot?.contextSets.some((set) => set.items.some((item) => item.required))
-  )
+  let skills: SelectedSkill[];
+  try {
+    skills = selectSkills(task, run.resolvedSkills);
+  } catch {
     throw new SafeOpenCodeFailure(
-      "OpenCode cannot supply a required Context Item or delivered Skill. Native execution did not start.",
+      "OpenCode could not verify a required Context Item or delivered Skill. Native execution did not start.",
     );
-  return { task, model };
+  }
+  // In a remote Workspace OpenCode runs no built-in tool, its Skill tool among them, so it loads
+  // no Skill there: it leaves out the optional ones, and refuses a Task that requires one.
+  if (remote) {
+    if (task.policySnapshot?.contextSets.some((set) => set.items.some((item) => item.required)))
+      throw new SafeOpenCodeFailure(
+        "OpenCode cannot load a required Skill in a remote Workspace. Native execution did not start.",
+      );
+    skills = [];
+  }
+  return { task, model, skills };
 }
 
 async function metadata(path: string) {
@@ -267,6 +281,8 @@ export async function nativeRequest(
   remote = false,
   /** The Tag's memory folder ([`openCodeMemory`]), which OpenCode may always read and edit. */
   memory?: string,
+  /** The Task's delivered Skills ([`taskModel`]). */
+  selectedSkills: readonly SelectedSkill[] = [],
 ) {
   const environment = configuration.environment ?? process.env;
   const scratchPath = environment["SUPERTAG_ADAPTER_STATE_DIRECTORY"] ?? "";
@@ -333,6 +349,14 @@ export async function nativeRequest(
     configuration.authFile === undefined || proxyUrl !== undefined
       ? undefined
       : await readProviderApiKey(configuration.authFile, provider, true);
+  let skills: OpenCodeSkills | undefined;
+  try {
+    skills = await stageOpenCodeSkills(selectedSkills, join(scratch, "opencode-skills"), signal);
+  } catch (error) {
+    throw new SafeOpenCodeFailure(
+      `OpenCode cannot load a named Skill: ${error instanceof Error ? error.message : "its package is invalid"}. Native execution did not start.`,
+    );
+  }
   const home = join(scratch, "opencode-home");
   const temporary = join(scratch, "opencode-tmp");
   const environmentWithoutCredentials = privateEnvironment(home, temporary);
@@ -409,6 +433,7 @@ export async function nativeRequest(
                   workspace,
                   scope,
                   memory,
+                  skills,
                 ),
                 provider,
                 proxyUrl,
@@ -505,7 +530,7 @@ export async function runAdapter(
   // Values a failure reason must not carry; filled as the run learns them.
   const secrets: string[] = [bootstrap.token];
   try {
-    const { model } = taskModel(run, configuration);
+    const { model, skills } = taskModel(run, configuration);
     const cancellation = AbortSignal.any([signal, AbortSignal.timeout(configuration.timeoutMs)]);
     cancellation.throwIfAborted();
     const memory = await openCodeMemory(
@@ -525,6 +550,7 @@ export async function runAdapter(
       (run.coordination?.mayReadTagSessions || run.coordination?.mayReadOwnSession) ?? false,
       run.remoteWorkspace,
       memory?.directory,
+      skills,
     );
     secrets.push(...native.secrets);
     const coordination = await startCoordination(bridge, run, {

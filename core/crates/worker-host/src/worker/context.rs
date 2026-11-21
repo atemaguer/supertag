@@ -1,5 +1,5 @@
 //! Resolve admitted Skill references once, outside the native writable workspace.
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -11,23 +11,51 @@ use std::{
     path::{Path, PathBuf},
 };
 use supertag_protocol::v2::{
-    ContextContract, ContextPin, ContextResolutionManifest, OmittedContextItem, ResolvedSkill, Task,
+    ContextContract, ContextPin, ContextResolutionManifest, HarnessKind, OmittedContextItem,
+    PolicyContextItem, ResolvedSkill, SkippedSkill, Task,
 };
-use supertag_workspaces::packages;
+use supertag_workspaces::{packages, repository_skills::SkippedRepositorySkill};
 use tokio_util::sync::CancellationToken;
 
 mod github;
 
 const TYPE: &str = "supertag/skill";
+/// The `reference` of a Skill Context Item that loads every Skill available to the Task.
+pub const WILDCARD: &str = "*";
 const MAX_SKILLS: usize = 64;
 const MANIFEST_BYTES: usize = 128 * 1024;
+/// The most skipped Skills one manifest records.
+const MAX_SKIPPED: usize = 128;
+const MAX_REASON: usize = 256;
+/// The omission a `*` item records when the Task has no Skill to load.
+pub const NO_SKILLS: &str = "No Skills are available to this Task";
+const CATALOG_SOURCE: &str = "catalog";
+const USER_SOURCES: [(&str, &str); 2] = [
+    (".claude/skills", "user:~/.claude/skills"),
+    (".agents/skills", "user:~/.agents/skills"),
+];
 
+/// The Skills a Worker Host can load: its configured catalog, if any, the repository Skills of
+/// each Task's checkout, and its user's own Skills.
 #[derive(Clone, Default)]
 pub struct ContextCatalog {
-    configured: bool,
+    /// Whether this host's harness loads Skills; a host whose harness does not advertises no
+    /// Skill contract.
+    enabled: bool,
     entries: BTreeMap<String, CatalogEntry>,
     /// Skills from GitHub-hosted catalogs, by reference (the Skill's directory name).
     github: BTreeMap<String, github::GithubCatalog>,
+    /// The host user's home directory, whose `.claude/skills` and `.agents/skills` hold Skills.
+    home: Option<PathBuf>,
+    /// Set for a host whose harness does not load Skills, so its omissions say so.
+    harness_unsupported: bool,
+}
+
+/// Whether a harness loads delivered Skills. OpenAI Agents has no Skill support. Cursor finds
+/// Skills by name in the workspace and its home directory and has no setting that limits it to
+/// named ones, so delivered Skills could not be kept to those a Context Set admits.
+pub fn harness_loads_skills(harness: HarnessKind) -> bool {
+    !matches!(harness, HarnessKind::OpenaiAgents | HarnessKind::Cursor)
 }
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -54,6 +82,53 @@ struct SkillConfig {
     digest: Option<String>,
 }
 
+/// The repository Skills of a Task's checkout, written by its Workspace under `root` (see
+/// `supertag_workspaces::repository_skills`).
+pub struct RepositorySkills {
+    pub root: PathBuf,
+    /// The commit they were read from, recorded as their version.
+    pub commit: String,
+    pub skipped: Vec<SkippedRepositorySkill>,
+}
+
+/// Where one available Skill comes from.
+#[derive(Clone)]
+enum Origin {
+    Local {
+        path: PathBuf,
+        version: Option<String>,
+    },
+    Github(github::GithubCatalog),
+}
+#[derive(Clone)]
+struct Candidate {
+    source: String,
+    origin: Origin,
+}
+/// Every Skill available to one Task, by name; the first source's Skill takes precedence.
+#[derive(Default)]
+struct Available {
+    skills: BTreeMap<String, Candidate>,
+    /// The lower-precedence sources that also have a Skill of a name.
+    shadowed: BTreeMap<String, Vec<String>>,
+    /// Skills of the repository and user sources that cannot be loaded at all.
+    unusable: Vec<SkippedSkill>,
+}
+impl Available {
+    fn add(&mut self, name: String, candidate: Candidate) {
+        match self.skills.entry(name) {
+            std::collections::btree_map::Entry::Occupied(entry) => self
+                .shadowed
+                .entry(entry.key().clone())
+                .or_default()
+                .push(candidate.source),
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(candidate);
+            }
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PreparedContext {
     state_root: PathBuf,
@@ -69,11 +144,116 @@ struct Owner {
     manifest_digest: String,
 }
 
-impl ContextCatalog {
-    pub fn load(path: Option<&Path>) -> Result<Self> {
-        let Some(path) = path else {
-            return Ok(Self::default());
+/// One Task's resolution in progress.
+struct Resolution<'a> {
+    packages_root: PathBuf,
+    cache: PathBuf,
+    expected: &'a ContextResolutionManifest,
+    cancel: &'a CancellationToken,
+    /// The version, digest, and source each delivered reference resolved to.
+    delivered: BTreeMap<String, (String, String, String)>,
+    total: usize,
+    /// The commit each GitHub catalog resolved to for this Task, by catalog.
+    catalog_commits: BTreeMap<String, String>,
+}
+impl Resolution<'_> {
+    /// Resolves, captures, and privately copies one Skill, once per Task.
+    fn resolve(
+        &mut self,
+        reference: &str,
+        admitted_version: Option<&str>,
+        available: &Available,
+    ) -> Result<(String, String, String)> {
+        if let Some((version, digest, source)) = self.delivered.get(reference) {
+            ensure!(
+                admitted_version.is_none_or(|admitted| admitted == version),
+                "Skill reference resolved to conflicting versions"
+            );
+            return Ok((version.clone(), digest.clone(), source.clone()));
+        }
+        let candidate = available
+            .skills
+            .get(reference)
+            .context("Skill reference is not present on this Worker Host")?;
+        let (path, version) = match &candidate.origin {
+            Origin::Local { path, version } => {
+                if let Some(admitted) = admitted_version {
+                    ensure!(
+                        version.as_deref() == Some(admitted),
+                        "Skill catalog version differs from the admitted version"
+                    );
+                }
+                (path.clone(), version.clone().unwrap_or_default())
+            }
+            Origin::Github(source) => {
+                // A retry keeps its Task's commit; a new Task may name one.
+                // Every Skill of one catalog takes the commit the first resolved.
+                let key = source.key();
+                let resolved = self.catalog_commits.get(&key);
+                let pinned = self
+                    .expected
+                    .pins
+                    .iter()
+                    .find(|pin| pin.reference == reference)
+                    .map(|pin| pin.version.as_str())
+                    .or(admitted_version);
+                ensure!(
+                    resolved.is_none_or(|commit| pinned.is_none_or(|pinned| pinned == commit)),
+                    "Skills from GitHub Skill catalog are pinned to different commits"
+                );
+                let pinned = pinned.or(resolved.map(String::as_str));
+                let (path, commit) = source.pin(reference, pinned, &self.cache, self.cancel)?;
+                self.catalog_commits.insert(key, commit.clone());
+                (path, commit)
+            }
         };
+        ensure!(
+            self.delivered.len() < MAX_SKILLS,
+            "context exceeds Skill package count limit"
+        );
+        let package =
+            packages::capture(&path, self.cancel).context("Skill package capture failed")?;
+        let total = self
+            .total
+            .checked_add(package.files.values().map(|f| f.bytes.len()).sum::<usize>())
+            .context("context size overflow")?;
+        ensure!(
+            total <= packages::MAX_BYTES,
+            "context exceeds total package byte limit"
+        );
+        packages::materialize(
+            &package,
+            &self.packages_root.join(package_name(reference)),
+            self.cancel,
+        )?;
+        self.total = total;
+        let resolved = (version, package.digest, candidate.source.clone());
+        self.delivered.insert(reference.into(), resolved.clone());
+        Ok(resolved)
+    }
+}
+
+impl ContextCatalog {
+    /// A catalog for a host whose harness loads Skills: the configured `path`, if any, and the
+    /// Skills of `home`, the host user's home directory.
+    /// A catalog for a host whose harness does not load Skills: it advertises no Skill contract,
+    /// and records each optional Skill item as an omission.
+    pub fn without_skills() -> Self {
+        Self {
+            harness_unsupported: true,
+            ..Self::default()
+        }
+    }
+    pub fn load(path: Option<&Path>, home: Option<&Path>) -> Result<Self> {
+        let mut catalog = match path {
+            Some(path) => Self::configured(path)?,
+            None => Self::default(),
+        };
+        catalog.enabled = true;
+        catalog.home = home.map(absolute).transpose()?;
+        Ok(catalog)
+    }
+    fn configured(path: &Path) -> Result<Self> {
         let path = absolute(path)?;
         let metadata = fs::symlink_metadata(&path)?;
         ensure!(
@@ -159,13 +339,15 @@ impl ContextCatalog {
             }
         }
         Ok(Self {
-            configured: true,
+            enabled: false,
             entries,
             github,
+            home: None,
+            harness_unsupported: false,
         })
     }
     pub fn supported_contracts(&self) -> Vec<ContextContract> {
-        if self.configured {
+        if self.enabled {
             vec![ContextContract {
                 r#type: TYPE.into(),
                 version: 1,
@@ -174,12 +356,92 @@ impl ContextCatalog {
             vec![]
         }
     }
+    /// Whether the Task has a Skill Context Item this catalog resolves.
+    pub fn resolves_skills(&self, task: &Task) -> bool {
+        self.enabled
+            && task.policy_snapshot.as_ref().is_some_and(|snapshot| {
+                snapshot
+                    .context_sets
+                    .iter()
+                    .flat_map(|set| &set.items)
+                    .any(|item| item.r#type == TYPE && item.version == 1)
+            })
+    }
+    /// The Skills available to one Task, in precedence order: the configured catalog, then the
+    /// repository's `.claude/skills` and `.agents/skills`, then the user's.
+    fn available(&self, repository: Option<&RepositorySkills>) -> Result<Available> {
+        let mut available = Available::default();
+        for (name, entry) in &self.entries {
+            available.add(
+                name.clone(),
+                Candidate {
+                    source: CATALOG_SOURCE.into(),
+                    origin: Origin::Local {
+                        path: entry.path.clone(),
+                        version: entry.version.clone(),
+                    },
+                },
+            );
+        }
+        for (name, source) in &self.github {
+            available.add(
+                name.clone(),
+                Candidate {
+                    source: CATALOG_SOURCE.into(),
+                    origin: Origin::Github(source.clone()),
+                },
+            );
+        }
+        if let Some(repository) = repository {
+            for (root, subdirectory) in supertag_workspaces::repository_skills::ROOTS {
+                let source = format!("repository:{root}");
+                for skipped in repository.skipped.iter().filter(|s| s.root == root) {
+                    available
+                        .unusable
+                        .push(skipped_skill(&skipped.name, &source, &skipped.reason));
+                }
+                let (found, _) = discover(&repository.root.join(subdirectory), &source)?;
+                for (name, path) in found {
+                    available.add(
+                        name,
+                        Candidate {
+                            source: source.clone(),
+                            origin: Origin::Local {
+                                path,
+                                version: Some(repository.commit.clone()),
+                            },
+                        },
+                    );
+                }
+            }
+        }
+        if let Some(home) = &self.home {
+            for (directory, source) in USER_SOURCES {
+                let (found, unusable) = discover(&home.join(directory), source)?;
+                available.unusable.extend(unusable);
+                for (name, path) in found {
+                    available.add(
+                        name,
+                        Candidate {
+                            source: source.into(),
+                            origin: Origin::Local {
+                                path,
+                                version: None,
+                            },
+                        },
+                    );
+                }
+            }
+        }
+        Ok(available)
+    }
     pub async fn prepare(
         &self,
         task: &Task,
         state_root: &Path,
         attempt_id: &str,
         expected: &ContextResolutionManifest,
+        repository: Option<RepositorySkills>,
         cancel: &CancellationToken,
     ) -> Result<PreparedContext> {
         let catalog = self.clone();
@@ -189,7 +451,14 @@ impl ContextCatalog {
         let expected = expected.clone();
         let cancel = cancel.clone();
         tokio::task::spawn_blocking(move || {
-            catalog.prepare_blocking(&task, &state_root, &attempt_id, &expected, &cancel)
+            catalog.prepare_blocking(
+                &task,
+                &state_root,
+                &attempt_id,
+                &expected,
+                repository.as_ref(),
+                &cancel,
+            )
         })
         .await
         .context("context capture task stopped")?
@@ -200,6 +469,7 @@ impl ContextCatalog {
         state_root: &Path,
         attempt_id: &str,
         expected: &ContextResolutionManifest,
+        repository: Option<&RepositorySkills>,
         cancel: &CancellationToken,
     ) -> Result<PreparedContext> {
         validate_identity(&task.task_id)?;
@@ -233,10 +503,23 @@ impl ContextCatalog {
         let packages_root = temporary.path().join("skills");
         create_private(&packages_root)?;
         let mut manifest = ContextResolutionManifest::default();
-        let mut delivered: BTreeMap<String, (String, String)> = BTreeMap::new();
-        let mut total = 0usize;
-        // The commit each GitHub catalog resolved to for this Task, by catalog.
-        let mut catalog_commits: BTreeMap<String, String> = BTreeMap::new();
+        let available = if self.resolves_skills(task) {
+            self.available(repository)?
+        } else {
+            Available::default()
+        };
+        let mut resolution = Resolution {
+            packages_root: packages_root.clone(),
+            cache: prepared.state_root.join("skill-catalogs"),
+            expected,
+            cancel,
+            delivered: BTreeMap::new(),
+            total: 0,
+            catalog_commits: BTreeMap::new(),
+        };
+        let mut wildcards = vec![];
+        let mut skipped = BTreeMap::new();
+        // Named Skills resolve first, so their pins hold when a `*` item loads them too.
         if let Some(snapshot) = &task.policy_snapshot {
             for set in &snapshot.context_sets {
                 for item in &set.items {
@@ -247,123 +530,92 @@ impl ContextCatalog {
                     {
                         continue;
                     }
-                    if !self.configured || item.r#type != TYPE || item.version != 1 {
+                    if !self.enabled || item.r#type != TYPE || item.version != 1 {
                         ensure!(
                             !item.required,
                             "required Context Item has no supported resolver"
                         );
-                        manifest.omissions.push(OmittedContextItem {
-                            set_id: set.set_id.clone(),
-                            item_id: item.item_id.clone(),
-                            item_key: item.item_key.clone(),
-                            r#type: item.r#type.clone(),
-                            version: item.version,
-                            reason: "No supported Context Resolver is configured".into(),
-                        });
+                        let reason = if self.harness_unsupported && item.r#type == TYPE {
+                            "Harness does not support Skill inputs"
+                        } else {
+                            "No supported Context Resolver is configured"
+                        };
+                        manifest.omissions.push(omission(&set.set_id, item, reason));
                         continue;
                     }
                     let config: SkillConfig = serde_json::from_str(&item.config_json)
                         .context("invalid admitted Skill configuration")?;
+                    if config.reference == WILDCARD {
+                        ensure!(
+                            !item.required && config.version.is_none() && config.digest.is_none(),
+                            "a Skill Context Item with reference \"*\" can be neither required nor pinned"
+                        );
+                        wildcards.push((set, item));
+                        continue;
+                    }
                     validate_reference(&config.reference)?;
-                    let (version, digest) = if let Some((version, digest)) =
-                        delivered.get(&config.reference)
-                    {
-                        ensure!(
-                            config
-                                .version
-                                .as_ref()
-                                .is_none_or(|admitted| admitted == version),
-                            "Skill reference resolved to conflicting versions"
-                        );
-                        (version.clone(), digest.clone())
-                    } else {
-                        let (path, version) = if let Some(entry) =
-                            self.entries.get(&config.reference)
-                        {
-                            if let Some(version) = &config.version {
-                                ensure!(
-                                    entry.version.as_ref() == Some(version),
-                                    "Skill catalog version differs from the admitted version"
-                                );
-                            }
-                            (
-                                entry.path.clone(),
-                                entry.version.clone().unwrap_or_default(),
-                            )
-                        } else {
-                            let source = self
-                                .github
-                                .get(&config.reference)
-                                .context("Skill reference is not present in the host catalog")?;
-                            // A retry keeps its Task's commit; a new Task may name one.
-                            // Every Skill of one catalog takes the commit the first resolved.
-                            let key = source.key();
-                            let resolved = catalog_commits.get(&key);
-                            let pinned = expected
-                                .pins
-                                .iter()
-                                .find(|pin| pin.reference == config.reference)
-                                .map(|pin| pin.version.as_str())
-                                .or(config.version.as_deref());
-                            ensure!(
-                                resolved.is_none_or(
-                                    |commit| pinned.is_none_or(|pinned| pinned == commit)
-                                ),
-                                "Skills from GitHub Skill catalog are pinned to different commits"
-                            );
-                            let pinned = pinned.or(resolved.map(String::as_str));
-                            let (path, commit) = source.pin(
-                                &config.reference,
-                                pinned,
-                                &prepared.state_root.join("skill-catalogs"),
-                                cancel,
-                            )?;
-                            catalog_commits.insert(key, commit.clone());
-                            (path, commit)
-                        };
-                        ensure!(
-                            delivered.len() < MAX_SKILLS,
-                            "context exceeds Skill package count limit"
-                        );
-                        let package = packages::capture(&path, cancel)
-                            .context("Skill package capture failed")?;
-                        total = total
-                            .checked_add(
-                                package.files.values().map(|f| f.bytes.len()).sum::<usize>(),
-                            )
-                            .context("context size overflow")?;
-                        ensure!(
-                            total <= packages::MAX_BYTES,
-                            "context exceeds total package byte limit"
-                        );
-                        packages::materialize(
-                            &package,
-                            &packages_root.join(package_name(&config.reference)),
-                            cancel,
-                        )?;
-                        delivered.insert(
-                            config.reference.clone(),
-                            (version.clone(), package.digest.clone()),
-                        );
-                        (version, package.digest)
-                    };
+                    let (version, digest, source) = resolution.resolve(
+                        &config.reference,
+                        config.version.as_deref(),
+                        &available,
+                    )?;
                     if let Some(expected) = &config.digest {
                         ensure!(
                             normalize_digest(expected)? == digest,
                             "Skill package differs from the admitted digest"
                         );
                     }
-                    manifest.pins.push(ContextPin {
-                        set_id: set.set_id.clone(),
-                        item_id: item.item_id.clone(),
-                        item_key: item.item_key.clone(),
-                        reference: config.reference,
-                        version,
-                        digest,
-                    });
+                    manifest.pins.push(pin(
+                        &set.set_id,
+                        item,
+                        &config.reference,
+                        (version, digest, source),
+                    ));
                 }
             }
         }
+        for (set, item) in &wildcards {
+            let mut loaded = false;
+            for (name, candidate) in &available.skills {
+                ensure!(!cancel.is_cancelled(), "context preparation cancelled");
+                match resolution.resolve(name, None, &available) {
+                    Ok(resolved) => {
+                        loaded = true;
+                        manifest.pins.push(pin(&set.set_id, item, name, resolved));
+                    }
+                    Err(_) if cancel.is_cancelled() => bail!("context preparation cancelled"),
+                    Err(error) => {
+                        let skip = skipped_skill(name, &candidate.source, &format!("{error:#}"));
+                        skipped.insert((skip.reference.clone(), skip.source.clone()), skip);
+                    }
+                }
+            }
+            if !loaded {
+                manifest
+                    .omissions
+                    .push(omission(&set.set_id, item, NO_SKILLS));
+            }
+        }
+        // The Skills a delivered Skill's name shadowed, and, when a `*` item looked at every
+        // Skill, the ones that cannot be loaded.
+        for (reference, (_, _, source)) in &resolution.delivered {
+            for shadowed in available.shadowed.get(reference).into_iter().flatten() {
+                let skip = skipped_skill(
+                    reference,
+                    shadowed,
+                    &format!("the Skill of this name from {source} takes precedence"),
+                );
+                skipped.insert((skip.reference.clone(), skip.source.clone()), skip);
+            }
+        }
+        if !wildcards.is_empty() {
+            for skip in &available.unusable {
+                skipped
+                    .entry((skip.reference.clone(), skip.source.clone()))
+                    .or_insert_with(|| skip.clone());
+            }
+        }
+        manifest.skipped = skipped.into_values().take(MAX_SKIPPED).collect();
         canonicalize(&mut manifest);
         if !is_empty(expected) {
             ensure!(
@@ -394,6 +646,102 @@ impl ContextCatalog {
         File::open(&parent)?.sync_all()?;
         prepared.delivery()?;
         Ok(prepared)
+    }
+}
+
+/// The Skills directly under `root`: each real child directory with a `SKILL.md`. A root that
+/// does not exist has none. A symbolic link to the root is followed, but not one to a Skill.
+/// The Skills found in one directory, by name, and those found there that cannot be loaded.
+type Discovered = (Vec<(String, PathBuf)>, Vec<SkippedSkill>);
+fn discover(root: &Path, source: &str) -> Result<Discovered> {
+    let root = match root.canonicalize() {
+        Ok(root) => root,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Default::default());
+        }
+        Err(error) => {
+            return Err(error).with_context(|| format!("cannot read the Skills in {source}"));
+        }
+    };
+    if !fs::metadata(&root)?.is_dir() {
+        return Ok(Default::default());
+    }
+    let directory = packages::open_directory(&root)
+        .with_context(|| format!("cannot read the Skills in {source}"))?;
+    let mut names = packages::directory_names(&directory, 4096)?;
+    names.sort();
+    let (mut found, mut unusable) = (vec![], vec![]);
+    for name in names {
+        if name.starts_with('.') {
+            continue;
+        }
+        let child = root.join(&name);
+        let metadata = fs::symlink_metadata(&child)?;
+        if metadata.file_type().is_symlink() {
+            if fs::metadata(&child).is_ok_and(|meta| meta.is_dir()) {
+                unusable.push(skipped_skill(
+                    &name,
+                    source,
+                    "the Skill directory is a symbolic link, which SuperTag does not follow",
+                ));
+            }
+            continue;
+        }
+        let instructions =
+            fs::symlink_metadata(child.join("SKILL.md")).is_ok_and(|meta| meta.is_file());
+        if !metadata.is_dir() || !instructions {
+            continue;
+        }
+        if validate_reference(&name).is_err() {
+            unusable.push(skipped_skill(
+                &name,
+                source,
+                "the Skill directory name is not supported",
+            ));
+            continue;
+        }
+        found.push((name, child));
+    }
+    Ok((found, unusable))
+}
+fn pin(
+    set_id: &str,
+    item: &PolicyContextItem,
+    reference: &str,
+    (version, digest, source): (String, String, String),
+) -> ContextPin {
+    ContextPin {
+        set_id: set_id.into(),
+        item_id: item.item_id.clone(),
+        item_key: item.item_key.clone(),
+        reference: reference.into(),
+        version,
+        digest,
+        source,
+    }
+}
+fn omission(set_id: &str, item: &PolicyContextItem, reason: &str) -> OmittedContextItem {
+    OmittedContextItem {
+        set_id: set_id.into(),
+        item_id: item.item_id.clone(),
+        item_key: item.item_key.clone(),
+        r#type: item.r#type.clone(),
+        version: item.version,
+        reason: reason.into(),
+    }
+}
+fn skipped_skill(reference: &str, source: &str, reason: &str) -> SkippedSkill {
+    let bounded = |value: &str| {
+        value
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(MAX_REASON)
+            .collect::<String>()
+    };
+    SkippedSkill {
+        reference: bounded(reference),
+        source: bounded(source),
+        reason: bounded(reason),
     }
 }
 impl PreparedContext {
@@ -561,12 +909,12 @@ fn normalize_digest(value: &str) -> Result<String> {
     Ok(value)
 }
 fn is_empty(manifest: &ContextResolutionManifest) -> bool {
-    manifest.pins.is_empty() && manifest.omissions.is_empty()
+    manifest.pins.is_empty() && manifest.omissions.is_empty() && manifest.skipped.is_empty()
 }
 fn canonicalize(manifest: &mut ContextResolutionManifest) {
-    manifest
-        .pins
-        .sort_by(|a, b| (&a.set_id, &a.item_id).cmp(&(&b.set_id, &b.item_id)));
+    manifest.pins.sort_by(|a, b| {
+        (&a.set_id, &a.item_id, &a.reference).cmp(&(&b.set_id, &b.item_id, &b.reference))
+    });
     manifest
         .omissions
         .sort_by(|a, b| (&a.set_id, &a.item_id).cmp(&(&b.set_id, &b.item_id)));
@@ -611,6 +959,7 @@ mod tests {
                 temp.path(),
                 "artifact-metadata",
                 &ContextResolutionManifest::default(),
+                None,
                 &CancellationToken::new(),
             )
             .unwrap();
@@ -630,13 +979,14 @@ mod tests {
         let skill = catalog.join("review");
         fs::create_dir(&skill).unwrap();
         fs::write(skill.join("SKILL.md"), "Review carefully.").unwrap();
-        let resolver = ContextCatalog::load(Some(&catalog)).unwrap();
+        let resolver = ContextCatalog::load(Some(&catalog), None).unwrap();
         let prepared = resolver
             .prepare_blocking(
                 &task(true, TYPE),
                 &root,
                 "attempt",
                 &ContextResolutionManifest::default(),
+                None,
                 &CancellationToken::new(),
             )
             .unwrap();
@@ -655,6 +1005,7 @@ mod tests {
                     &root,
                     "other-attempt",
                     &manifest,
+                    None,
                     &CancellationToken::new()
                 )
                 .is_err()
@@ -667,6 +1018,7 @@ mod tests {
                     &root,
                     "attempt",
                     &manifest,
+                    None,
                     &CancellationToken::new()
                 )
                 .is_ok()
@@ -686,6 +1038,7 @@ mod tests {
                 &root,
                 "optional",
                 &ContextResolutionManifest::default(),
+                None,
                 &CancellationToken::new(),
             )
             .unwrap();
@@ -698,13 +1051,14 @@ mod tests {
                     &root,
                     "required",
                     &ContextResolutionManifest::default(),
+                    None,
                     &CancellationToken::new()
                 )
                 .is_err()
         );
         let catalog = root.join("catalog");
         fs::create_dir(&catalog).unwrap();
-        let resolver = ContextCatalog::load(Some(&catalog)).unwrap();
+        let resolver = ContextCatalog::load(Some(&catalog), None).unwrap();
         assert!(
             resolver
                 .prepare_blocking(
@@ -712,6 +1066,7 @@ mod tests {
                     &root,
                     "missing",
                     &ContextResolutionManifest::default(),
+                    None,
                     &CancellationToken::new()
                 )
                 .is_err()
@@ -726,13 +1081,14 @@ mod tests {
         let skill = catalog.join("review");
         fs::create_dir(&skill).unwrap();
         fs::write(skill.join("SKILL.md"), "Review.").unwrap();
-        let resolver = ContextCatalog::load(Some(&catalog)).unwrap();
+        let resolver = ContextCatalog::load(Some(&catalog), None).unwrap();
         let prepared = resolver
             .prepare_blocking(
                 &task(true, TYPE),
                 &root,
                 "attempt",
                 &ContextResolutionManifest::default(),
+                None,
                 &CancellationToken::new(),
             )
             .unwrap();
@@ -745,6 +1101,237 @@ mod tests {
         )
         .unwrap();
         assert!(prepared.discard().is_err());
+    }
+    fn write_skill(directory: &Path, name: &str, body: &str) {
+        fs::create_dir_all(directory.join(name)).unwrap();
+        fs::write(directory.join(name).join("SKILL.md"), body).unwrap();
+    }
+    fn item(id: &str, required: bool, config: serde_json::Value) -> PolicyContextItem {
+        PolicyContextItem {
+            artifact_snapshot: None,
+            item_id: id.into(),
+            item_key: id.into(),
+            r#type: TYPE.into(),
+            version: 1,
+            required,
+            config_json: config.to_string(),
+        }
+    }
+    fn with_items(items: Vec<PolicyContextItem>) -> Task {
+        let mut task = task(false, TYPE);
+        task.policy_snapshot.as_mut().unwrap().context_sets[0].items = items;
+        task
+    }
+    fn private_root() -> (tempfile::TempDir, PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        (temp, root)
+    }
+    #[test]
+    fn every_source_resolves_by_precedence_and_records_what_it_shadowed() {
+        let (_temp, root) = private_root();
+        let catalog = root.join("catalog");
+        write_skill(&catalog, "review", "catalog review");
+        let home = root.join("home");
+        write_skill(&home.join(".claude/skills"), "review", "user review");
+        write_skill(&home.join(".claude/skills"), "lint", "user lint");
+        write_skill(&home.join(".agents/skills"), "lint", "agents lint");
+        // A symbolic link to a Skill is not followed; one without SKILL.md is not a Skill.
+        write_skill(&root.join("elsewhere"), "linked", "linked");
+        std::os::unix::fs::symlink(
+            root.join("elsewhere/linked"),
+            home.join(".agents/skills/linked"),
+        )
+        .unwrap();
+        fs::create_dir_all(home.join(".agents/skills/notes")).unwrap();
+        let repository = root.join("repository");
+        write_skill(&repository.join("claude"), "deploy", "repository deploy");
+        write_skill(&repository.join("agents"), "lint", "repository lint");
+        fs::create_dir_all(repository.join("agents")).unwrap();
+        let commit = "a".repeat(40);
+        let repository = RepositorySkills {
+            root: repository,
+            commit: commit.clone(),
+            skipped: vec![SkippedRepositorySkill {
+                root: ".claude/skills",
+                name: "unsafe".into(),
+                reason: "the Skill holds a symbolic link".into(),
+            }],
+        };
+        let resolver = ContextCatalog::load(Some(&catalog), Some(&home)).unwrap();
+        let task = with_items(vec![
+            item("named", true, serde_json::json!({"reference": "review"})),
+            item("all", false, serde_json::json!({"reference": "*"})),
+        ]);
+        let state = root.join("state");
+        fs::create_dir(&state).unwrap();
+        fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
+        let prepared = resolver
+            .prepare_blocking(
+                &task,
+                &state,
+                "attempt",
+                &Default::default(),
+                Some(&repository),
+                &CancellationToken::new(),
+            )
+            .unwrap();
+        let manifest = prepared.manifest().unwrap();
+        let pins: Vec<_> = manifest
+            .pins
+            .iter()
+            .map(|pin| {
+                (
+                    pin.item_id.as_str(),
+                    pin.reference.as_str(),
+                    pin.source.as_str(),
+                    pin.version.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            pins,
+            [
+                (
+                    "all",
+                    "deploy",
+                    "repository:.claude/skills",
+                    commit.as_str()
+                ),
+                ("all", "lint", "repository:.agents/skills", commit.as_str()),
+                ("all", "review", "catalog", ""),
+                ("named", "review", "catalog", ""),
+            ]
+        );
+        assert!(manifest.omissions.is_empty());
+        let skipped: Vec<_> = manifest
+            .skipped
+            .iter()
+            .map(|skip| (skip.reference.as_str(), skip.source.as_str()))
+            .collect();
+        assert_eq!(
+            skipped,
+            [
+                ("linked", "user:~/.agents/skills"),
+                ("lint", "user:~/.agents/skills"),
+                ("lint", "user:~/.claude/skills"),
+                ("review", "user:~/.claude/skills"),
+                ("unsafe", "repository:.claude/skills"),
+            ]
+        );
+        assert!(
+            manifest.skipped[1]
+                .reason
+                .contains("from repository:.agents/skills takes precedence")
+        );
+        // The higher-precedence copy is the one delivered, once per name.
+        let delivered = prepared.delivery().unwrap();
+        assert_eq!(delivered.len(), 4);
+        let review = delivered
+            .iter()
+            .find(|skill| skill.pin.as_ref().unwrap().reference == "review")
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(PathBuf::from(&review.local_path).join("SKILL.md")).unwrap(),
+            "catalog review"
+        );
+        // A retry that finds the same Skills resolves the same way; a changed one is refused.
+        let retry = resolver
+            .prepare_blocking(
+                &task,
+                &state,
+                "retry",
+                &manifest,
+                Some(&repository),
+                &CancellationToken::new(),
+            )
+            .unwrap();
+        assert_eq!(retry.manifest().unwrap(), manifest);
+        fs::write(home.join(".claude/skills/review/SKILL.md"), "changed").unwrap();
+        write_skill(&home.join(".claude/skills"), "new", "new");
+        assert!(
+            resolver
+                .prepare_blocking(
+                    &task,
+                    &state,
+                    "changed",
+                    &manifest,
+                    Some(&repository),
+                    &CancellationToken::new(),
+                )
+                .is_err()
+        );
+    }
+    #[test]
+    fn a_wildcard_loads_nothing_without_skills_and_a_named_item_reaches_the_users() {
+        let (_temp, root) = private_root();
+        let home = root.join("home");
+        fs::create_dir(&home).unwrap();
+        let resolver = ContextCatalog::load(None, Some(&home)).unwrap();
+        // A host that loads Skills advertises the contract with no catalog configured.
+        assert_eq!(resolver.supported_contracts().len(), 1);
+        let prepare = |task: &Task, attempt: &str| {
+            resolver.prepare_blocking(
+                task,
+                &root,
+                attempt,
+                &Default::default(),
+                None,
+                &CancellationToken::new(),
+            )
+        };
+        let wildcard = with_items(vec![item(
+            "all",
+            false,
+            serde_json::json!({"reference": "*"}),
+        )]);
+        let manifest = prepare(&wildcard, "empty").unwrap().manifest().unwrap();
+        assert!(manifest.pins.is_empty());
+        assert_eq!(manifest.omissions[0].reason, NO_SKILLS);
+        // `*` can be neither required nor pinned.
+        let required = with_items(vec![item(
+            "all",
+            true,
+            serde_json::json!({"reference": "*"}),
+        )]);
+        assert!(prepare(&required, "required").is_err());
+        let pinned = with_items(vec![item(
+            "all",
+            false,
+            serde_json::json!({"reference": "*", "version": "1"}),
+        )]);
+        assert!(prepare(&pinned, "pinned").is_err());
+        // A named item resolves a user's Skill.
+        write_skill(&home.join(".agents/skills"), "deploy", "deploy");
+        let named = with_items(vec![item(
+            "named",
+            true,
+            serde_json::json!({"reference": "deploy"}),
+        )]);
+        let manifest = prepare(&named, "named").unwrap().manifest().unwrap();
+        assert_eq!(manifest.pins[0].source, "user:~/.agents/skills");
+        // A host whose harness loads no Skills advertises none and says why it omits one.
+        let none = ContextCatalog::without_skills();
+        assert!(none.supported_contracts().is_empty());
+        let manifest = none
+            .prepare_blocking(
+                &wildcard,
+                &root,
+                "unsupported",
+                &Default::default(),
+                None,
+                &CancellationToken::new(),
+            )
+            .unwrap()
+            .manifest()
+            .unwrap();
+        assert_eq!(
+            manifest.omissions[0].reason,
+            "Harness does not support Skill inputs"
+        );
+        assert!(!harness_loads_skills(HarnessKind::Cursor));
+        assert!(harness_loads_skills(HarnessKind::Opencode));
     }
     fn git(directory: &Path, args: &[&str]) -> String {
         let output = std::process::Command::new("git")
@@ -779,7 +1366,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let mut resolver = ContextCatalog::load(Some(&file)).unwrap();
+        let mut resolver = ContextCatalog::load(Some(&file), None).unwrap();
         for source in resolver.github.values_mut() {
             *source = source.clone().with_url(url.to_str().unwrap());
         }
@@ -798,6 +1385,7 @@ mod tests {
             root,
             attempt,
             expected,
+            None,
             &CancellationToken::new(),
         )
     }
@@ -902,7 +1490,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let mut resolver = ContextCatalog::load(Some(&file)).unwrap();
+        let mut resolver = ContextCatalog::load(Some(&file), None).unwrap();
         for source in resolver.github.values_mut() {
             *source = source.clone().with_url(repository.to_str().unwrap());
         }
@@ -926,6 +1514,7 @@ mod tests {
                 &host,
                 "one",
                 &Default::default(),
+                None,
                 &CancellationToken::new(),
             )
             .unwrap();
@@ -946,6 +1535,7 @@ mod tests {
                 &host,
                 "two",
                 &Default::default(),
+                None,
                 &CancellationToken::new(),
             )
             .err()
@@ -999,7 +1589,10 @@ mod tests {
                 serde_json::json!({"version":1,"github":[invalid]}).to_string(),
             )
             .unwrap();
-            assert!(ContextCatalog::load(Some(&file)).is_err(), "{invalid}");
+            assert!(
+                ContextCatalog::load(Some(&file), None).is_err(),
+                "{invalid}"
+            );
         }
     }
 }

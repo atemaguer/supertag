@@ -424,6 +424,20 @@ fn validate_context(item: &PolicyContextItem, config: &mut serde_json::Value) ->
         {
             return Err(invalid("skill context requires a reference"));
         }
+        if crate::context::is_wildcard(config) {
+            // `*` loads whatever Skills a Task's host has, so it can neither be required nor
+            // pin one package.
+            if item.required {
+                return Err(invalid(
+                    "a Skill Context Item with reference \"*\" cannot be required; set required: false or name the Skill",
+                ));
+            }
+            if config.get("version").is_some() || config.get("digest").is_some() {
+                return Err(invalid(
+                    "a Skill Context Item with reference \"*\" cannot pin a version or digest; name the Skill to pin it",
+                ));
+            }
+        }
         for key in ["version", "digest"] {
             if config
                 .get(key)

@@ -167,7 +167,14 @@ impl Worker<'_> {
                 .keep(
                     &attempt,
                     &cancel,
-                    prepare_context(options, &task, &attempt, context_host, token, &cancel),
+                    prepare_context(
+                        options,
+                        (&task, &attempt),
+                        workspace.as_ref().map(|prepared| (workspaces, prepared)),
+                        context_host,
+                        token,
+                        &cancel,
+                    ),
                 )
                 .await
             {

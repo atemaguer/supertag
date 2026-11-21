@@ -66,7 +66,7 @@ whole system rather than another first-class resource.
 - <a id="workspace-credential"></a>**Workspace Credential** — an SSH key, HTTPS token, git credential helper, or GitHub App that
   git delivery uses to read and push a remote Workspace. Its secret stays in the Control Plane machine's
   credential vault. See [Workspace Credentials](resource-model.md#workspace-credentials).
-- <a id="skill"></a>**Skill** — a reusable package of instructions and supporting files.
+- <a id="skill"></a>**Skill** — a reusable package of instructions and supporting files: a directory with a `SKILL.md`. A Worker Host offers its user's, the Task repository's, and any configured catalog's; Context Sets select which a Task loads. See [Skills](context-resolution.md#skills).
 - <a id="context-set"></a>**Context Set** — reusable knowledge, Skills, or captured [artifact](#artifact) selections that may be added to a Task. See
   [Context and permissions](../concepts/context-and-permissions.md).
 - <a id="permission-set"></a>**Permission Set** — actions that a Task is allowed to perform through external tools or its

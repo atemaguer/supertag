@@ -12,7 +12,7 @@ use tonic::{Status, service::interceptor::InterceptedService, transport::Channel
 use crate::worker::Settings;
 use crate::{
     HostHeaders, request,
-    worker::mcp,
+    worker::{context, mcp},
     worklet::{authority::AttemptClient, journal::Attempt, workspaces},
 };
 
@@ -62,15 +62,49 @@ pub(crate) async fn workspace_mcp(
     Ok(resolved)
 }
 
+/// Resolves the Task's Context Items and records the resolution with the Control Plane. The
+/// repository Skills of its checkout's start commit, if it has one, are read here, after
+/// checkout; they cannot be known when the host advertises what it resolves.
 pub(crate) async fn prepare_context(
     options: &Settings<'_>,
-    task: &Task,
-    attempt: &Attempt,
+    (task, attempt): (&Task, &Attempt),
+    workspace: Option<(&workspaces::Workspaces, &workspaces::PreparedWorkspace)>,
     mut host: AttemptClient,
     token: &str,
     cancel: &CancellationToken,
 ) -> Result<Vec<ResolvedSkill>, Status> {
     let credential = |_| Status::internal("invalid Context Item authority request");
+    let read_failed = |error: anyhow::Error| {
+        crate::failures::noted(
+            Status::failed_precondition("repository Skills could not be read"),
+            &error,
+        )
+    };
+    // A private directory outside the checkout, removed once the Skills are copied.
+    let scratch = match workspace {
+        Some((workspaces, prepared)) if options.context_catalog.resolves_skills(task) => {
+            let scratch = tempfile::Builder::new()
+                .prefix("repository-skills-")
+                .permissions(
+                    <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o700),
+                )
+                .tempdir_in(options.state_directory)
+                .map_err(|error| read_failed(error.into()))?;
+            let skipped = workspaces
+                .repository_skills(prepared, scratch.path(), cancel)
+                .await
+                .map_err(read_failed)?;
+            Some((scratch, prepared.checkout.start_commit.clone(), skipped))
+        }
+        _ => None,
+    };
+    let repository = scratch
+        .as_ref()
+        .map(|(scratch, commit, skipped)| context::RepositorySkills {
+            root: scratch.path().to_owned(),
+            commit: commit.clone(),
+            skipped: skipped.clone(),
+        });
     let expected = host
         .get_context_pins(
             request(supertag_protocol::v2::GetContextPinsRequest {}, token).map_err(credential)?,
@@ -84,6 +118,7 @@ pub(crate) async fn prepare_context(
             options.state_directory,
             &attempt.attempt_id,
             &expected,
+            repository,
             cancel,
         )
         .await
@@ -93,6 +128,7 @@ pub(crate) async fn prepare_context(
                 &error,
             )
         })?;
+    drop(scratch);
     let manifest = prepared.manifest().map_err(|error| {
         crate::failures::noted(Status::data_loss("invalid prepared Context Items"), &error)
     })?;

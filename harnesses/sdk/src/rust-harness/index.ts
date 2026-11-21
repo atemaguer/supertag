@@ -59,4 +59,13 @@ export {
   type RemoteWorkspaceHttpServer,
   startRemoteWorkspaceHttp,
 } from "./remote-workspace-http.js";
+export {
+  copySkill,
+  MAX_DELIVERED_SKILLS,
+  type SelectedSkill,
+  SKILL_WILDCARD,
+  selectSkills,
+  skillDirectory,
+  skillFrontmatter,
+} from "./skills.js";
 export { startTaskMcpHttp, type TaskMcpHttpServer } from "./task-mcp-http.js";

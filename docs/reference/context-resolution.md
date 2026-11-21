@@ -78,9 +78,22 @@ for capture, retrieval, storage, and attachment limits.
 ## Skills
 
 The Context Plan carries a Skill's stable identity, plus optional version and digest pins, never
-filesystem paths or package bytes. The Worker Host's Skill catalog resolves and allowlists the
-packages: a host service's `skills` path, or `supertag worklet --skill-catalog PATH`. It names
-a directory of Skill packages or a JSON catalog file:
+filesystem paths or package bytes. The Worker Host resolves each Skill from its sources, in this
+order of precedence:
+
+| Source | Recorded as | Where |
+| --- | --- | --- |
+| Configured catalog | `catalog` | A host service's `skills` path, or `supertag worklet --skill-catalog PATH` |
+| Repository | `repository:.claude/skills`, `repository:.agents/skills` | The Task's checkout, read from the commit it starts at |
+| User | `user:~/.claude/skills`, `user:~/.agents/skills` | The home directory of the user the Worker Host runs as |
+
+The repository and user sources need no configuration: every Worker Host whose harness loads
+Skills has them. In each, every immediate child directory that holds a `SKILL.md` is a Skill
+named after the directory. The Worklet reads repository Skills after it checks out the Task's
+commit, as data from its private copy of the repository: an uncommitted change is not read, and
+no repository command runs.
+
+The configured catalog names a directory of Skill packages or a JSON catalog file:
 
 ```json
 {
@@ -96,21 +109,65 @@ a directory of Skill packages or a JSON catalog file:
 
 In a directory catalog, each immediate child directory is a Skill named after that directory and
 contains `SKILL.md`. A `github` entry names Skill directories in a GitHub repository. A new Task
-pins the revision's current commit, and its retries keep it on any host. Resolution rejects
-unregistered identities, pin mismatches, symbolic links, duplicate identities, and oversized
-packages. The Worklet delivers each Skill read-only: Codex receives it in its disposable native home,
-and Claude Code receives it as an isolated plugin.
+pins the revision's current commit, and its retries keep it on any host.
+
+Two sources may have a Skill of the same name. The higher-precedence one loads, and the Task
+records each one it shadowed. Two Skills of one name in the configured catalog are refused.
+
+### Select Skills
+
+A `supertag/skill` Context Item selects Skills in one of two ways:
+
+| `config.reference` | Loads | `required` | `version`, `digest` |
+| --- | --- | --- | --- |
+| A Skill's name, such as `code-review` | That Skill | Allowed | Allowed |
+| `*` | Every Skill the Task's Worker Host has, from every source | Must be `false` | Not allowed |
+
+`supertag apply` refuses a `*` item that is required or pinned. A named item beside a `*` item
+keeps its pins. A Task without a `supertag/skill` item loads no Skill.
+
+A `*` item skips a Skill it cannot load, such as an oversized package or one with a symbolic link,
+and records why. When it loads none, the Task records an omission instead.
+
+### Pins and records
+
+The Task's context resolution records, for each Skill it loaded, the Context Item, the Skill's
+name, its source, its version, and its content digest. A repository Skill's version is the commit
+it was read from. The same record lists the Skills it skipped: those another source shadowed, and,
+for a `*` item, those it could not load. A Task records this once, at its first Task Attempt. A
+retry that finds different Skills, such as one whose user added a Skill in between, fails.
+
+Resolution rejects unregistered names, pin mismatches, symbolic links in a package, and oversized
+packages. A symbolic link to a whole source directory is followed; one to a single Skill is not.
+
+### Delivery
+
+The Worklet copies each Skill privately and delivers it read-only. Each harness loads only the
+Skills its Task selected, never its own native, user, or repository Skills:
+
+| Harness | Receives Skills as | A selected Skill it cannot load |
+| --- | --- | --- |
+| Claude Code | An isolated plugin; the Skill tool accepts only those names | Fails a named one; skips one only `*` selected |
+| Codex | Copies in its disposable native home; every other entry is disabled | Fails the Task |
+| OpenCode | A private `skills.paths` directory; the `skill` permission allows only those names | Fails a named one; skips one only `*` selected |
+| Cursor | Not delivered | Records an optional item as an omission; a required one waits for another host |
+
+Claude Code cannot load a Skill whose frontmatter sets `hooks`, `context`, `agent`,
+`allowed-tools`, `model`, or `effort`. OpenCode needs a frontmatter `name` no other selected Skill
+has, and no nested `SKILL.md`. OpenCode loads no Skill in a remote Workspace. Cursor finds Skills
+by name in the workspace and its home directory, with no setting that limits it to selected ones,
+so SuperTag does not deliver Skills to it.
 
 ## Context Item types
 
 | Type | Version | Resolved by | Result |
 | --- | --- | --- | --- |
-| `supertag/skill` | 1 | The Worker Host's Skill catalog | The pinned Skill package |
+| `supertag/skill` | 1 | The Worker Host's Skill sources | The pinned Skill packages |
 | `supertag/artifacts` | 1 | The Control Plane, at admission | Bounded artifact metadata summaries |
 
 Each Item has a `type`, a `version`, an `itemKey` unique within its Context Set, `required`, and a
 bounded, non-secret `config`. A Worklet advertises the types its host can resolve: `supertag/skill`
-only when the host has a Skill catalog. Only a Worklet that advertises every required Item's type
+whenever its harness loads Skills, which every built-in harness but Cursor does. Only a Worklet that advertises every required Item's type
 claims the Task; an optional Item the host cannot resolve is recorded as an omission. The Control
 Plane stores other types, but no Worklet resolves them.
 

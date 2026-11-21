@@ -23,8 +23,7 @@
     "@connectrpc/connect": "2.2.0",
     "@connectrpc/connect-node": "2.2.0",
     "@modelcontextprotocol/sdk": "1.30.0",
-    "@supertag/worker-sdk": "workspace:*",
-    "yaml": "2.8.1"
+    "@supertag/worker-sdk": "workspace:*"
   },
   "devDependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.83"

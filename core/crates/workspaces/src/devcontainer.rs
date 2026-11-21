@@ -449,7 +449,7 @@ pub fn parse_devcontainer_subset(source: &str) -> Result<DevcontainerSubset> {
     Ok(result)
 }
 
-fn git(repository: &Path, args: &[&str], limit: usize) -> Result<Vec<u8>> {
+pub(crate) fn git(repository: &Path, args: &[&str], limit: usize) -> Result<Vec<u8>> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repository)
@@ -487,12 +487,12 @@ fn git(repository: &Path, args: &[&str], limit: usize) -> Result<Vec<u8>> {
     Ok(output.stdout)
 }
 
-fn valid_commit(commit: &str) -> bool {
+pub(crate) fn valid_commit(commit: &str) -> bool {
     matches!(commit.len(), 40 | 64) && commit.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// Parses one `git ls-tree` entry: mode, object ID, and path.
-fn tree_entry(line: &str) -> Option<(&str, &str, &str)> {
+pub(crate) fn tree_entry(line: &str) -> Option<(&str, &str, &str)> {
     let (meta, path) = line.split_once('\t')?;
     let mut fields = meta.split(' ');
     let (mode, kind, oid) = (fields.next()?, fields.next()?, fields.next()?);

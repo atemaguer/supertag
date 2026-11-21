@@ -20,6 +20,8 @@ use crate::{harness_checks, lifecycle, local_config};
 const DEFAULT_PORT: u16 = 3434;
 const PERMISSION_SET: &str = "local-tools";
 const ROLE: &str = "Lead";
+/// The Context Set init gives the lead's Role: every Skill the Worker Host has.
+const CONTEXT_SET: &str = "skills";
 /// Task Attempts the local Worker Host runs at once across its harnesses, so one stuck Task does
 /// not hold every Tag.
 const CONCURRENCY: u32 = 3;
@@ -685,6 +687,7 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
         };
         if keep {
             add_repository(&path, &repository, prompter.as_mut())?;
+            add_skills(&path)?;
         }
         if !keep {
             outln!(
@@ -1806,6 +1809,67 @@ fn web_access_line(harness: Found, commands: Commands) -> String {
     )
 }
 
+/// A Context Set that loads every Skill the Task's Worker Host has: the user's, the
+/// repository's, and any catalog the host names.
+fn skills_context_set() -> Value {
+    json!({
+        "apiVersion": "supertag/v1",
+        "kind": "ContextSet",
+        "metadata": { "name": CONTEXT_SET },
+        "spec": {
+            "items": [{
+                "itemKey": "skill:all",
+                "type": "supertag/skill",
+                "version": 1,
+                "required": false,
+                "config": { "reference": "*" },
+            }],
+        },
+    })
+}
+
+/// On an existing setup from before init gave the lead's Role every Skill: adds the `skills`
+/// Context Set to the Role, so the Tags with it load the user's and the repository's Skills. A
+/// setup that already has it, has no such Role, or names something else `skills` is left alone.
+fn add_skills(path: &Path) -> Result<()> {
+    let text = std::fs::read_to_string(path)?;
+    let mut document = yaml_document(&text)?;
+    let Some(manifests) = document["services"]["control-plane"]["provision"].as_array_mut() else {
+        return Ok(());
+    };
+    if manifests
+        .iter()
+        .any(|manifest| manifest["metadata"]["name"] == CONTEXT_SET)
+    {
+        return Ok(());
+    }
+    let Some(role) = manifests
+        .iter()
+        .position(|manifest| manifest["kind"] == "Role" && manifest["metadata"]["name"] == ROLE)
+    else {
+        return Ok(());
+    };
+    if !rewritable(&text) {
+        outln!(
+            "\nTo let your Tags load your Skills, add a ContextSet {CONTEXT_SET} with one supertag/skill item whose reference is \"*\" to {}, list it in Role {ROLE}'s contextSets, and run supertag up.",
+            path.display()
+        );
+        return Ok(());
+    }
+    let spec = &mut manifests[role]["spec"];
+    match spec["contextSets"].as_array_mut() {
+        Some(sets) => sets.push(json!(CONTEXT_SET)),
+        None => spec["contextSets"] = json!([CONTEXT_SET]),
+    }
+    manifests.insert(role, skills_context_set());
+    rewrite(path, &document)
+        .context("adding the skills Context Set would make supertag.yaml invalid")?;
+    outln!(
+        "Gave Role {ROLE} the Context Set {CONTEXT_SET}, so its Tags load your Skills and the repository's."
+    );
+    Ok(())
+}
+
 fn document(answers: &Answers, repository: &Repository) -> Value {
     let harness = answers.harness.harness();
     let mut execution = json!({ "harness": harness });
@@ -1869,6 +1933,7 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
                         "metadata": { "name": PERMISSION_SET },
                         "spec": { "permissions": permissions },
                     },
+                    skills_context_set(),
                     {
                         "apiVersion": "supertag/v1",
                         "kind": "Role",
@@ -1876,6 +1941,7 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
                         "spec": {
                             "purpose": "Own Objectives for this repository: plan the work, make and verify changes, and report what changed.",
                             "permissionSets": [PERMISSION_SET],
+                            "contextSets": [CONTEXT_SET],
                         },
                     },
                     {
@@ -2156,9 +2222,14 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .clone();
-            assert_eq!(provision[2]["spec"]["workspace"], binding);
+            assert_eq!(provision[3]["spec"]["workspace"], binding);
             // The Tag init creates is the Control Plane's lead Tag.
-            assert_eq!(provision[2]["spec"]["lead"], true);
+            assert_eq!(provision[3]["spec"]["lead"], true);
+            // Its Role loads every Skill the Worker Host has.
+            assert_eq!(provision[1]["kind"], "ContextSet");
+            assert_eq!(provision[1]["spec"]["items"][0]["config"]["reference"], "*");
+            assert_eq!(provision[1]["spec"]["items"][0]["required"], false);
+            assert_eq!(provision[2]["spec"]["contextSets"], json!(["skills"]));
             // A Codex lead may fetch from the web, so it can run commands in Codex code mode.
             let actions: Vec<&str> = provision[0]["spec"]["permissions"]
                 .as_array()
@@ -2187,7 +2258,7 @@ mod tests {
                 .into_iter()
                 .map(crate::manifests::ProvisionSource::Inline)
                 .collect();
-            assert_eq!(crate::manifests::validate_provision(sources).unwrap(), 3);
+            assert_eq!(crate::manifests::validate_provision(sources).unwrap(), 4);
         }
     }
 

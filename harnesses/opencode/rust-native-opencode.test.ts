@@ -9,11 +9,13 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { create } from "@bufbuild/protobuf";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
+import { digestContextPackage } from "@supertag/worker-sdk";
 import {
   AdapterBootstrapSchema,
   Harness,
   type HarnessCompleteRequest,
   HarnessQuestions,
+  ResolvedSkillSchema,
   TaskSchema,
   TaskState,
 } from "@supertag/worker-sdk/internal/rust-harness";
@@ -68,6 +70,73 @@ it.runIf(Boolean(native))(
         timeout: 20_000,
       });
       await expect(stat(marker)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+  45_000,
+);
+
+it.runIf(Boolean(native))(
+  "the verified native release finds only the delivered Skills, none of the Workspace's",
+  async () => {
+    if (!native) throw new Error("OpenCode fixture executable is required");
+    const directory = await realpath(await mkdtemp(join(tmpdir(), "supertag-opencode-skills-")));
+    const scratch = join(directory, "scratch");
+    const workspace = join(directory, "checkout");
+    const host = join(directory, "host");
+    try {
+      await mkdir(scratch, { mode: 0o700 });
+      await mkdir(host, { mode: 0o700 });
+      for (const root of [".claude/skills", ".agents/skills", ".opencode/skills"]) {
+        const ambient = join(workspace, root, `ambient-${root.split("/")[0]?.slice(1)}`);
+        await mkdir(ambient, { recursive: true });
+        await writeFile(
+          join(ambient, "SKILL.md"),
+          `---\nname: ambient-${root.split("/")[0]?.slice(1)}\ndescription: Not admitted.\n---\nNo.\n`,
+        );
+      }
+      const localPath = join(host, `skill-${"b".repeat(64)}`);
+      await mkdir(localPath, { mode: 0o700 });
+      await writeFile(
+        join(localPath, "SKILL.md"),
+        "---\nname: admitted-review\ndescription: Review the change.\n---\nReview it.\n",
+        { mode: 0o600 },
+      );
+      const digest = await digestContextPackage(localPath, { maxFiles: 8, maxBytes: 4096 });
+      const skill = create(ResolvedSkillSchema, {
+        localPath,
+        pin: { setId: "set", itemId: "item", itemKey: "item", reference: "review", digest },
+      });
+      const request = await nativeRequest(
+        create(TaskSchema, { taskId }),
+        "fixture/fixture",
+        {
+          executable: native,
+          model: "fixture/fixture",
+          timeoutMs: 20_000,
+          environment: {
+            SUPERTAG_ADAPTER_STATE_DIRECTORY: scratch,
+            SUPERTAG_WORKSPACE_DIRECTORY: workspace,
+          },
+        },
+        [],
+        [],
+        AbortSignal.timeout(20_000),
+        "",
+        false,
+        false,
+        undefined,
+        [{ skill, named: true }],
+      );
+      const { environment } = request.forTools([]);
+      const { stdout } = await promisify(execFile)(native, ["--pure", "debug", "skill"], {
+        cwd: workspace,
+        env: { ...environment, OPENCODE_DISABLE_MODELS_FETCH: "true" },
+        timeout: 20_000,
+      });
+      expect(stdout).toContain("admitted-review");
+      expect(stdout).not.toContain("ambient-");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

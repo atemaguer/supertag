@@ -491,6 +491,19 @@ impl Workspaces {
             .await
     }
 
+    /// Writes the repository Skills of the commit the Task's checkout starts at into the empty
+    /// directory `destination`.
+    pub(crate) async fn repository_skills(
+        &self,
+        prepared: &PreparedWorkspace,
+        destination: &std::path::Path,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<supertag_workspaces::repository_skills::SkippedRepositorySkill>> {
+        self.open(&prepared.workspace_id, &prepared.checkout.base_commit)?
+            .repository_skills(&prepared.checkout.start_commit, destination, cancel)
+            .await
+    }
+
     /// The remote sandbox translated from the base commit's devcontainer subset, if any.
     /// Refusals name the property, before any provider call.
     pub(crate) async fn remote_environment(
