@@ -9,6 +9,8 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-11-21
+
 ### Added
 
 - Releases for Intel Macs: a `darwin-amd64` archive with the `supertag` CLI, the terminal UI, the
@@ -1607,7 +1609,8 @@ within the pre-1.0 compatibility policy described in
 - Gateway control-plane support and Slack, GitHub, Linear, Microsoft Teams,
   and Lark Surfaces.
 
-[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.6...HEAD
+[0.3.6]: https://github.com/atemaguer/supertag/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/atemaguer/supertag/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/atemaguer/supertag/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/atemaguer/supertag/compare/v0.3.2...v0.3.3

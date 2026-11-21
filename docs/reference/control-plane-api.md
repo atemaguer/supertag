@@ -33,7 +33,7 @@ call without it, or with a version the Control Plane does not speak, fails with
 `FAILED_PRECONDITION`. Only negotiation and the standard gRPC health service are exempt.
 
 SuperTag 0.3.0 speaks protocol 2, 0.3.1 speaks protocol 5, 0.3.2 speaks protocol 6, and 0.3.3,
-0.3.4, and 0.3.5 speak protocol 7.
+0.3.4, 0.3.5, and 0.3.6 speak protocol 7.
 Before 1.0, each release speaks only its own protocol version, so a client and a Control Plane from
 releases with different versions cannot connect. When you offer no version the Control Plane speaks, `Negotiate` fails
 with `FAILED_PRECONDITION` and a message of this form:
