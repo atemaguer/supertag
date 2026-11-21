@@ -46,6 +46,7 @@ Commands:
   team                  Manage Teams and read their Workstream posts
   sign-in               Check that a harness's Worker Host credentials work, and say how to sign in when not
   version               Print this CLI's version and the version of the running local services
+  update                Install the latest SuperTag release, or the one --version names, and restart the local services on it
   config                Print the resolved supertag.yaml that supertag up runs
   control-plane         Run the Control Plane: the public API for operator clients, Worker Hosts, and Gateways, and the service that stores work and schedules execution
   gateway               Run a Gateway: the endpoint clients and operators connect to, which forwards their calls to the Control Plane, and collaboration surface webhooks and connections, reply delivery, and operator notifications as gateway:NAME. Or enroll, revoke, and rotate the credentials of Gateways
@@ -2064,6 +2065,29 @@ Options:
           Print readable text, or JSON for scripts [default: text] [possible values: text, json]
   -h, --help
           Print help
+```
+
+## `supertag update`
+
+```text
+Install the latest SuperTag release, or the one --version names, and restart the local services on it.
+
+Downloads the release the install script would, checks it against the release's SHA256SUMS, installs it beside the running one, and switches the supertag link once its supertag and supertag-tui report the release's version. When the local services run an older release from supertag.yaml and no Task Attempt is running, they restart on the new one; otherwise update says what to run later. The desktop app and a supertag built from source update another way, which update names.
+
+Usage: supertag update [OPTIONS]
+
+Options:
+      --check
+          Only print this CLI's version and the latest release's
+
+      --version <VERSION>
+          Install this release instead of the latest, such as 0.3.5. An older release goes back to it
+
+      --state-directory <STATE_DIRECTORY>
+          Local state directory whose services restart on the new release (default: ~/.supertag or SUPERTAG_STATE_DIR)
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## `supertag config`

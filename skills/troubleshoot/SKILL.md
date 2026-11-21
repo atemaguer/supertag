@@ -40,8 +40,10 @@ supertag version
   `SUPERTAG_STATE_DIR` to the directory `up` uses, or pass `--gateway NAME`.
 - `... speaks SuperTag protocol N, but the Control Plane at URL runs SuperTag X (protocol M)`: the
   client and the Control Plane come from releases with different protocol versions. Upgrade the
-  side the message names; upgrade them together. After installing a new CLI, `supertag up`
-  restarts this machine's services with it, and `supertag down` stops them whatever their release.
+  side the message names; upgrade them together. `supertag update` installs the latest CLI and
+  restarts this machine's services on it when no Task Attempt is running. After installing a new
+  CLI another way, `supertag up` restarts them with it, and `supertag down` stops them whatever
+  their release.
 - `the database's schema version N is newer than this SuperTag release ... understands`: an older
   binary started against a database a newer release migrated. Run that release again, or restore
   the backup taken before the upgrade.

@@ -134,11 +134,12 @@ A script or app can run `init` without a terminal:
 | `supertag config` | Prints the resolved `supertag.yaml`, or every problem in it |
 | `supertag status` | Shows Worker Hosts, Tags, unfinished Objectives, and the operator inbox |
 | `supertag version` | Prints this CLI's version and the version of the running services |
+| `supertag update` | Installs the latest release and restarts the local services on it when no Task Attempt is running |
 
 Run `supertag up` again after editing `supertag.yaml`. It restarts only the services that
 changed and waits for their running Task Attempts unless you pass `--force`. After you install a
-new CLI, `supertag up` restarts services that run another build with the new one; see
-[Upgrade](install.md#upgrade).
+new CLI, `supertag up` restarts services that run another build with the new one.
+`supertag update` installs the new CLI and does this for you; see [Upgrade](install.md#upgrade).
 
 ### Run as a service
 

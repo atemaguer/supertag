@@ -52,6 +52,7 @@ mod task_artifact_inputs;
 mod tasks;
 mod teams;
 mod tui;
+mod update;
 mod volumes;
 mod work_sessions;
 mod worker_host;
@@ -359,6 +360,16 @@ enum Command {
     SignIn(harness_checks::SignInArgs),
     /// Print this CLI's version and the version of the running local services.
     Version(status::VersionArgs),
+    /// Install the latest SuperTag release, or the one --version names, and restart the local
+    /// services on it.
+    ///
+    /// Downloads the release the install script would, checks it against the release's
+    /// SHA256SUMS, installs it beside the running one, and switches the supertag link once its
+    /// supertag and supertag-tui report the release's version. When the local services run an
+    /// older release from supertag.yaml and no Task Attempt is running, they restart on the new
+    /// one; otherwise update says what to run later. The desktop app and a supertag built from
+    /// source update another way, which update names.
+    Update(update::UpdateArgs),
     /// Print the resolved supertag.yaml that supertag up runs.
     Config {
         /// Service configuration, otherwise STATE_DIRECTORY/supertag.yaml when present.
@@ -769,6 +780,7 @@ fn dispatch(gateway: Option<String>, command: Command) -> Result<()> {
                     | Command::Check { .. }
                     | Command::Verify { .. }
                     | Command::Up { .. }
+                    | Command::Update(_)
                     | Command::ControlPlane { .. }
                     | Command::Gateway {
                         command: None | Some(enrollments::GatewayCommand::Enroll { .. }),
@@ -905,6 +917,7 @@ async fn run(command: Command) -> Result<()> {
         Command::Message(args) => conversation_message::run(args).await?,
         Command::Status(args) => status::status(args).await?,
         Command::Version(args) => status::version(args)?,
+        Command::Update(args) => update::run(args).await?,
         Command::Config {
             file,
             state_directory,
@@ -2977,8 +2990,9 @@ mod tests {
     const LOCAL_GROUPS: [&str; 1] = ["mcp"];
 
     /// Top-level commands that act on this machine, a deployment, or a report rather than on one
-    /// resource kind. `connect` is the one verb: it saves a Control Plane on this machine.
-    const OPERATIONS: [&str; 19] = [
+    /// resource kind. `connect` and `update` are the two verbs: `connect` saves a Control Plane on
+    /// this machine, and `update` installs another SuperTag release.
+    const OPERATIONS: [&str; 20] = [
         "message",
         "health",
         "init",
@@ -2989,6 +3003,7 @@ mod tests {
         "ps",
         "status",
         "version",
+        "update",
         "config",
         "control-plane",
         "tui",
@@ -3054,7 +3069,7 @@ mod tests {
     }
 
     /// The grammar check refuses each shape review found in an earlier command tree, added back to
-    /// the real one: a verb taking its resource as a separate word (`update tag`), a verb-first
+    /// the real one: a verb taking its resource as a separate word (`put tag`), a verb-first
     /// action (`activate`), a group that is not a kind (`surface-policy`, `github-workspace`),
     /// and reads inside a group, whether named after a kind or not (`surface-location show`,
     /// `team posts`, `placement approval`, `mailbox-grant list`).
@@ -3065,7 +3080,7 @@ mod tests {
             clap::Command::new(name).subcommand(clap::Command::new(verb))
         };
         let mutations: Vec<(&str, clap::Command)> = vec![
-            ("update", Cli::command().subcommand(group("update", "tag"))),
+            ("put", Cli::command().subcommand(group("put", "tag"))),
             ("activate", Cli::command().subcommand(leaf("activate"))),
             (
                 "surface-policy",
@@ -3268,7 +3283,7 @@ mod tests {
             );
             let first = name.split('-').next().unwrap_or(name);
             assert!(
-                !VERBS.contains(&first) || name == "connect",
+                !VERBS.contains(&first) || name == "connect" || name == "update",
                 "supertag {name} starts with a verb; use supertag KIND VERB"
             );
             for spec in KINDS {

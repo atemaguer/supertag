@@ -9,6 +9,17 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Added
+
+- `supertag update` updates the CLI from the command line. It installs the latest published
+  release the way the installer script does, checked against the release's `SHA256SUMS`, and
+  switches the `supertag` link once the release's `supertag` and `supertag-tui` report its
+  version. Then it restarts the local services on the new release when no Task Attempt is
+  running, and otherwise prints the command to run later. `--check` only compares versions, and
+  `--version` installs a named release, including an older one. It refuses the desktop app's
+  copy, which updates itself, and a `supertag` built from source. See
+  [Upgrade](docs/operations/install.md#upgrade).
+
 ## [0.3.6] - 2026-11-21
 
 ### Added

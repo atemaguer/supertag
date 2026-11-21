@@ -155,7 +155,7 @@ release's page. Download the disk image there and install it as above.
 
 A Debian package can't update itself. On Linux the banner and the sidebar offer **Download
 VERSION** instead, which opens the release's page. Install the new `.deb` there with `apt`, and
-update the `supertag` command with the install script, since the app runs only a `supertag` of
+update the `supertag` command with `supertag update`, since the app runs only a `supertag` of
 its own version.
 
 ## Build only the CLI
@@ -195,8 +195,41 @@ TypeScript, and Python bindings live beside the SDKs in [`sdks/`](../../sdks/REA
 
 ## Upgrade
 
-Run the installer script again, or install a newer archive the same way. Then run `supertag up`.
-It sees that the services on this machine run another build and restarts them with the new one:
+Update the CLI with `supertag update`. It installs the latest published release the way the
+installer script does, from the same `SHA256SUMS`, archive, and layout:
+
+```text
+Downloading SuperTag 0.3.7 for darwin-arm64 from https://github.com/atemaguer/supertag/releases/latest/download...
+Updated SuperTag: 0.3.6 → 0.3.7 at /Users/you/.local/bin/supertag.
+Restarting the local services on SuperTag 0.3.7.
+```
+
+It checks the archive against `SHA256SUMS` and checks that the release's `supertag` and
+`supertag-tui` report its version. Then it installs the release beside the running one and
+switches the `supertag` link with one rename. A failed download or check leaves the running
+release in place. Older releases stay under `~/.local/share/supertag/versions`.
+
+| Command | What it does |
+| --- | --- |
+| `supertag update` | Installs the latest release, or says this CLI is already on it |
+| `supertag update --check` | Prints this CLI's version and the latest release's, and installs nothing |
+| `supertag update --version 0.3.5` | Installs that release, including an older one |
+
+When the local services run an older release, `update` restarts them on the new one with
+`supertag up`, but only when no Task Attempt is running. Otherwise it leaves them running and
+prints the command to run later, such as `supertag up`. It also leaves them alone when they don't
+run the current `~/.supertag/supertag.yaml`: you edited it since they started, or started them
+with options instead. Run `supertag up` yourself then, with any options you started them with. After going back to an older release, `update` never restarts them, because
+an older Control Plane refuses a database a newer one migrated.
+
+`update` replaces only a `supertag` the installer script installed. It refuses the copy inside
+the desktop app, which updates itself (see [Updating](#updating)), and a `supertag` built from
+source. It also refuses when the install directories aren't writable. Each refusal names what to
+do instead. `update` honors the installer's `SUPERTAG_BIN_DIR` and `XDG_BIN_HOME`.
+
+You can also run the installer script again, or install a newer archive the same way. Then run
+`supertag up`. It sees that the services on this machine run another build and restarts them
+with the new one:
 
 ```text
 SuperTag 0.3.0 runs in /Users/you/.supertag, a different build than this CLI, so it restarts with this one.
