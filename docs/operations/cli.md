@@ -48,7 +48,7 @@ Tag's name; for OpenCode it also asks for a `provider/model`. Claude Code runs t
 `~/.supertag/supertag.yaml` with two services and starts them in the background:
 
 - a `control-plane` service, which also creates a `local-tools` Permission Set, a `skills`
-  Context Set, a `Lead` Role with both, and the `lead` Tag, bound to the repository's Workspace
+  Context Set, a `lead` Role with both, and the `lead` Tag, bound to the repository's Workspace
   and following the branch checked out when `init` ran; and
 - a `host` service named after this machine, which maps the repository as a Workspace, runs
   every harness `init` found signed in, the lead's first, so Tags you create later can use any
@@ -82,8 +82,15 @@ The `skills` Context Set has one `supertag/skill` item with `reference: "*"`, so
 your own Skills from `~/.claude/skills` and `~/.agents/skills` and the repository's from
 `.claude/skills` and `.agents/skills`, with no further setup; see
 [Skills](../reference/context-resolution.md#skills). Run again on a setup from before it did,
-`init` adds the Context Set to the `Lead` Role. To stop loading them, remove `skills` from the
+`init` adds the Context Set to the `lead` Role. To stop loading them, remove `skills` from the
 Role's `contextSets` in `supertag.yaml` and run `supertag up`.
+
+A setup from before [resource IDs](../reference/resource-model.md#resource-ids) were lowercase
+names the Role `Lead`, and `supertag up` refuses it. Run `supertag init` again: it renames the
+Role `lead` in `supertag.yaml`, and the next `up` gives your Tags the new Role. They also keep the
+old `Lead` Role until you deactivate its assignment; `supertag get role-assignment --role Lead`
+lists them. A `supertag.yaml` with comments or `${...}` variables is not rewritten: `init` prints
+the edit to make instead.
 
 The `local-tools` Permission Set grants `files:read`, `files:write`, and `schedule:create`, which lets
 the lead set [Schedules](../reference/coordination.md#schedules), wake-ups for itself, plus `commands:execute` when the host may run

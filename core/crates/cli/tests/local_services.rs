@@ -3189,6 +3189,195 @@ async fn postgres_remote_host_only_env_and_file_auth_keys_are_needed_only_for_fi
     .await
 }
 
+/// A setup `supertag init` made before resource IDs were DNS labels declares the Role `Lead`.
+/// `up` refuses that name and says to run `supertag init` again; once init renames it `lead`,
+/// `up` creates Role `lead` beside the stored `Lead` and gives it to the existing Tag.
+async fn init_role_renamed_to_follow_the_resource_id_rule(database: String) -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let state = temp.path().join("renamed");
+    let file = temp.path().join("supertag.yaml");
+    let services = |provision: Value| {
+        serde_json::json!({"services":{
+            "control-plane":{"type":"control-plane","ports":["127.0.0.1:0"],"provision":provision},
+            "worker":{"type":"host","adapter":ADAPTER}
+        }})
+    };
+    let permission = serde_json::json!({"apiVersion":"supertag/v1","kind":"PermissionSet","metadata":{"name":"local-tools"},"spec":{"permissions":[{"target":"runtime","action":"files:read"}]}});
+    let provision = |role: &str| {
+        serde_json::json!([
+            permission,
+            {"apiVersion":"supertag/v1","kind":"Role","metadata":{"name":role},"spec":{"purpose":"Own Objectives for this repository.","permissionSets":["local-tools"]}},
+            {"apiVersion":"supertag/v1","kind":"Tag","metadata":{"name":"lead"},"spec":{"lead":true,"roles":[role]}}
+        ])
+    };
+
+    // What provisioning that file used to store: the Role `Lead` under a generated ID, held by
+    // the Tag `lead`. The current manifest path refuses the name, so the RPCs seed it.
+    yaml(&file, &services(serde_json::json!([permission])))?;
+    let mut seeding = Process::spawn(&state, Some(&file), &database_env(&database))?;
+    let endpoint = seeding.ready()?;
+    let credential = token(&state)?;
+    let channel =
+        protocol::negotiated(Channel::from_shared(endpoint.clone())?.connect().await?).await?;
+    let mut operator = operator_client::OperatorClient::new(channel.clone());
+    let mut policy = policy_catalog_client::PolicyCatalogClient::new(channel);
+    let old = policy
+        .put_role(authenticated_request(
+            PutRoleRequest {
+                operation_id: Uuid::new_v4().to_string(),
+                role: Some(Role {
+                    name: "Lead".into(),
+                    purpose: "Own Objectives for this repository.".into(),
+                    permission_set_ids: vec!["local-tools".into()],
+                    ..Default::default()
+                }),
+                expected_revision: None,
+            },
+            &credential,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    assert_ne!(old.role_id, "Lead");
+    operator
+        .put_tag(authenticated_request(
+            PutTagRequest {
+                tag_id: "lead".into(),
+                instructions: "Local fixture".into(),
+                ..Default::default()
+            },
+            &credential,
+            None,
+        )?)
+        .await?;
+    policy
+        .assign_role(authenticated_request(
+            AssignRoleRequest {
+                operation_id: Uuid::new_v4().to_string(),
+                role: old.role_id.clone(),
+                tag_id: "lead".into(),
+            },
+            &credential,
+            None,
+        )?)
+        .await?;
+    seeding.stop().await?;
+
+    // The file as init wrote it: `up` refuses it, naming the Role, the rule, and the fix.
+    yaml(&file, &services(provision("Lead")))?;
+    let refused = Process::spawn(&state, Some(&file), &database_env(&database))?;
+    let failure = refused.ready().unwrap_err().to_string();
+    for expected in [
+        "Role \"Lead\": metadata.name must be 1–63 lowercase letters, digits, and hyphens",
+        "run supertag init again to rename it lead",
+    ] {
+        assert!(failure.contains(expected), "{failure}");
+    }
+    drop(refused);
+
+    // The file after `supertag init` renamed the Role, as init's rename_role writes it.
+    yaml(&file, &services(provision("lead")))?;
+    let mut upgraded = Process::spawn(&state, Some(&file), &database_env(&database))?;
+    assert_eq!(upgraded.ready()?, endpoint);
+    let channel =
+        protocol::negotiated(Channel::from_shared(endpoint.clone())?.connect().await?).await?;
+    let mut operator = operator_client::OperatorClient::new(channel.clone());
+    let mut policy = policy_catalog_client::PolicyCatalogClient::new(channel);
+    let role = policy
+        .get_role(authenticated_request(
+            GetPolicyResourceRequest {
+                reference: "lead".into(),
+            },
+            &credential,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    assert_eq!(
+        (role.role_id.as_str(), role.name.as_str()),
+        ("lead", "lead")
+    );
+    let assignments = policy
+        .list_role_assignments(authenticated_request(
+            ListRoleAssignmentsRequest {
+                tag_id: "lead".into(),
+                limit: 10,
+                ..Default::default()
+            },
+            &credential,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    let mut held: Vec<_> = assignments
+        .assignments
+        .iter()
+        .filter(|assignment| assignment.status == RoleAssignmentStatus::Active as i32)
+        .map(|assignment| assignment.role_id.clone())
+        .collect();
+    held.sort();
+    let mut expected = vec!["lead".to_owned(), old.role_id.clone()];
+    expected.sort();
+    assert_eq!(held, expected);
+    let task = operator
+        .submit_task(authenticated_request(
+            SubmitTaskRequest {
+                tag_id: "lead".into(),
+                session_id: "renamed".into(),
+                operation_id: Uuid::new_v4().to_string(),
+                prompt: "Run configured worker".into(),
+                ..Default::default()
+            },
+            &credential,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    let roles: Vec<_> = task
+        .policy_snapshot
+        .as_ref()
+        .context("policy snapshot missing")?
+        .roles
+        .iter()
+        .filter_map(|snapshot| snapshot.role.as_ref())
+        .map(|role| role.role_id.clone())
+        .collect();
+    assert!(roles.iter().any(|id| id == "lead"), "{roles:?}");
+    timeout(WAIT, async {
+        loop {
+            let current = operator
+                .get_task(authenticated_request(
+                    GetTaskRequest {
+                        task_id: task.task_id.clone(),
+                    },
+                    &credential,
+                    None,
+                )?)
+                .await?
+                .into_inner();
+            if current.state() == TaskState::Succeeded {
+                break Ok::<_, anyhow::Error>(());
+            }
+            ensure!(current.state() != TaskState::Failed, "{:?}", current.result);
+            sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await??;
+    upgraded.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn sqlite_init_role_renamed_to_follow_the_resource_id_rule() -> Result<()> {
+    with_database(false, init_role_renamed_to_follow_the_resource_id_rule).await
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_init_role_renamed_to_follow_the_resource_id_rule() -> Result<()> {
+    with_database(true, init_role_renamed_to_follow_the_resource_id_rule).await
+}
+
 #[tokio::test]
 async fn sqlite_local_provision_creates_ordered_resources_once_and_preserves_operator_edits()
 -> Result<()> {

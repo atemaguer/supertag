@@ -687,6 +687,8 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
         };
         if keep {
             add_repository(&path, &repository, prompter.as_mut())?;
+            // Before add_skills, which finds the Role by its current name.
+            rename_role(&path)?;
             add_skills(&path)?;
         }
         if !keep {
@@ -1828,6 +1830,54 @@ fn skills_context_set() -> Value {
     })
 }
 
+/// On an existing setup from before resource IDs were DNS labels: renames the Role init created,
+/// `Lead`, to `lead` in its manifest and in every Tag's `roles`, since `supertag up` refuses the
+/// old name. A setup without that Role, or that already declares a Role `lead`, is left alone.
+fn rename_role(path: &Path) -> Result<()> {
+    use crate::manifests::INIT_ROLE_BEFORE_IDS as OLD;
+    let text = std::fs::read_to_string(path)?;
+    let mut document = yaml_document(&text)?;
+    let Some(manifests) = document["services"]["control-plane"]["provision"].as_array_mut() else {
+        return Ok(());
+    };
+    let named = |manifest: &Value, name: &str| {
+        manifest["kind"] == "Role" && manifest["metadata"]["name"] == name
+    };
+    let Some(role) = manifests.iter().position(|manifest| named(manifest, OLD)) else {
+        return Ok(());
+    };
+    if manifests.iter().any(|manifest| named(manifest, ROLE)) {
+        return Ok(());
+    }
+    if !rewritable(&text) {
+        outln!(
+            "\nsupertag up refuses the Role name {OLD}: IDs are now lowercase. In {}, set that Role's metadata.name to {ROLE}, write {ROLE} for {OLD} in each Tag's roles, and run supertag up.",
+            path.display()
+        );
+        return Ok(());
+    }
+    manifests[role]["metadata"]["name"] = json!(ROLE);
+    for manifest in manifests.iter_mut() {
+        if manifest["kind"] != "Tag" {
+            continue;
+        }
+        for reference in manifest["spec"]["roles"]
+            .as_array_mut()
+            .into_iter()
+            .flatten()
+        {
+            if *reference == OLD {
+                *reference = json!(ROLE);
+            }
+        }
+    }
+    rewrite(path, &document).context("renaming Role Lead would make supertag.yaml invalid")?;
+    outln!(
+        "Renamed Role {OLD} to {ROLE}, since IDs are now lowercase. supertag up gives your Tags Role {ROLE}, and they keep the old Role {OLD} until you deactivate it: see supertag get role-assignment --role {OLD}."
+    );
+    Ok(())
+}
+
 /// On an existing setup from before init gave the lead's Role every Skill: adds the `skills`
 /// Context Set to the Role, so the Tags with it load the user's and the repository's Skills. A
 /// setup that already has it, has no such Role, or names something else `skills` is left alone.
@@ -1939,7 +1989,6 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
                         "kind": "Role",
                         "metadata": { "name": ROLE },
                         "spec": {
-                            "displayName": "Lead",
                             "purpose": "Own Objectives for this repository: plan the work, make and verify changes, and report what changed.",
                             "permissionSets": [PERMISSION_SET],
                             "contextSets": [CONTEXT_SET],
@@ -2261,6 +2310,72 @@ mod tests {
                 .collect();
             assert_eq!(crate::manifests::validate_provision(sources).unwrap(), 4);
         }
+    }
+
+    #[test]
+    fn running_init_again_renames_the_role_init_named_lead_before_ids_were_lowercase() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let temp = tempfile::tempdir().unwrap();
+        let repository = Repository {
+            root: temp.path().to_path_buf(),
+            name: "app".into(),
+            start: Start::Branch("main".into()),
+        };
+        let answers = Answers {
+            port: DEFAULT_PORT,
+            harness: Found::Codex,
+            also: Vec::new(),
+            model: None,
+            commands: Commands::Unset,
+            workspace: "app".into(),
+            tag: "lead".into(),
+        };
+        // What init wrote before IDs were lowercase and before the skills Context Set.
+        let mut old = document(&answers, &repository);
+        let provision = old["services"]["control-plane"]["provision"]
+            .as_array_mut()
+            .unwrap();
+        provision.remove(1);
+        provision[1]["metadata"]["name"] = json!("Lead");
+        provision[1]["spec"]
+            .as_object_mut()
+            .unwrap()
+            .remove("contextSets");
+        provision[2]["spec"]["roles"] = json!(["Lead"]);
+        let state = temp.path().join("state");
+        std::fs::create_dir(&state).unwrap();
+        let path = state.join("supertag.yaml");
+        std::fs::write(&path, local_config::to_yaml(&old)).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        rename_role(&path).unwrap();
+        add_skills(&path).unwrap();
+        let upgraded = yaml_document(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let provision = upgraded["services"]["control-plane"]["provision"]
+            .as_array()
+            .unwrap();
+        let role = provision
+            .iter()
+            .find(|manifest| manifest["kind"] == "Role")
+            .unwrap();
+        assert_eq!(role["metadata"]["name"], ROLE);
+        assert_eq!(role["spec"]["contextSets"], json!([CONTEXT_SET]));
+        let tag = provision
+            .iter()
+            .find(|manifest| manifest["kind"] == "Tag")
+            .unwrap();
+        assert_eq!(tag["spec"]["roles"], json!([ROLE]));
+        let sources = provision
+            .iter()
+            .cloned()
+            .map(crate::manifests::ProvisionSource::Inline)
+            .collect();
+        assert_eq!(crate::manifests::validate_provision(sources).unwrap(), 4);
+        // Running init yet again changes nothing.
+        let text = std::fs::read_to_string(&path).unwrap();
+        rename_role(&path).unwrap();
+        add_skills(&path).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
     }
 
     #[test]

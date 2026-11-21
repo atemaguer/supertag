@@ -32,7 +32,7 @@ repositories.
 
 `supertag init` writes a file like this for the repository you run it in. It provisions a
 `local-tools` Permission Set, a `skills` Context Set that loads every
-[Skill](context-resolution.md#skills) the host has, a `Lead` Role with both, and the Control
+[Skill](context-resolution.md#skills) the host has, a `lead` Role with both, and the Control
 Plane's lead Tag, which follows the current branch. It grants `commands:execute` only when the host may run the lead's commands: always
 for Codex; for Claude Code with `sandbox-commands`, which `init` sets wherever Claude Code's
 sandbox can start; and for Cursor or OpenCode only with `environment: local-vm` or
@@ -73,7 +73,6 @@ services:
         kind: Role
         metadata: { name: lead }
         spec:
-          displayName: Lead
           purpose: "Own Objectives for this repository: plan the work, make and verify changes, and report what changed."
           permissionSets: [local-tools]
           contextSets: [skills]

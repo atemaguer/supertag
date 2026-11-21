@@ -24,6 +24,8 @@ mod plan;
 const MAX_INPUT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_MANIFESTS: usize = 256;
 const MAX_REFERENCES: usize = 256;
+/// The name `supertag init` gave its Role before resource IDs were DNS labels.
+pub(crate) const INIT_ROLE_BEFORE_IDS: &str = "Lead";
 
 #[derive(Args)]
 pub struct ManifestArgs {
@@ -282,10 +284,19 @@ fn manifest(value: Value, source: &str) -> Result<Manifest> {
         api_version == "supertag/v1",
         "unsupported manifest apiVersion"
     );
-    ensure!(
-        supertag_protocol::valid_resource_id(&name),
-        supertag_protocol::resource_id_error("metadata.name")
-    );
+    if !supertag_protocol::valid_resource_id(&name) {
+        // The name may hold anything, so it is quoted with its control characters escaped.
+        let mut message = format!(
+            "{kind:?} {name:?}: {}",
+            supertag_protocol::resource_id_error("metadata.name")
+        );
+        if kind == Kind::Role && name == INIT_ROLE_BEFORE_IDS {
+            message.push_str(
+                ". supertag init named its Role Lead before IDs had this rule; run supertag init again to rename it lead",
+            );
+        }
+        bail!(message);
+    }
     let resource = match kind {
         Kind::SurfaceAccount => {
             let mut value: AccountSpec = typed(spec, kind)?;

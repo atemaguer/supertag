@@ -50,6 +50,12 @@ within the pre-1.0 compatibility policy described in
   `metadata.name: security-reviewer` with `spec.displayName: Security Reviewer`, and update the
   references to it. Workspace IDs and Workspace Credential names no longer accept `.`, `_`, or
   uppercase letters. See [Resource IDs](docs/reference/resource-model.md#resource-ids).
+- `supertag init` names its Role `lead`. A setup `init` made earlier names it `Lead`, which
+  `supertag up` now refuses, saying to run `supertag init` again. Doing so renames the Role in
+  `supertag.yaml`, and the next `up` creates Role `lead` and gives it to the Tags that list it.
+  They keep the old `Lead` Role too until you deactivate its assignment. Provisioning still
+  changes no existing Tag otherwise. See
+  [Start in a repository](docs/operations/cli.md#start-in-a-repository).
 
 ## [0.3.6] - 2026-11-21
 

@@ -72,6 +72,7 @@ enum Write {
     Relationships(ReconcileTagRelationshipsRequest),
     RunsOn(SetTagRunsOnRequest),
     Schedule(PutScheduleRequest),
+    AssignRole(AssignRoleRequest),
 }
 
 pub(super) struct Change {
@@ -105,6 +106,8 @@ struct Declarations {
     accounts: BTreeMap<String, SurfaceAccount>,
     roles: BTreeMap<String, Role>,
     connector_aliases: BTreeSet<String>,
+    /// Roles this provisioning creates, which it also gives the existing Tags that list them.
+    created_roles: BTreeSet<String>,
 }
 
 impl Declarations {
@@ -572,6 +575,9 @@ impl<'a> Catalog<'a> {
                     declarations.roles.insert(name.into(), prior);
                     return Ok(None);
                 }
+                if self.create_only {
+                    declarations.created_roles.insert(name.into());
+                }
                 let named = display_name(&mut value.name, prior.as_ref().map(|v| &v.name), name);
                 normalize_manifest_role(&mut value, prior.as_ref())?;
                 self.resolve_sets(
@@ -879,6 +885,27 @@ impl<'a> Catalog<'a> {
         let prior = self.tag(name).await?;
         self.observed = prior.as_ref().map(|value| value.revision);
         if self.create_only && prior.is_some() {
+            // Provisioning leaves an existing Tag as it is, except that it gives the Tag each
+            // Role it lists that this provisioning creates, such as a Role renamed to follow the
+            // resource ID rule.
+            references(&mut spec.roles, "a Role reference")?;
+            for role in spec
+                .roles
+                .iter()
+                .filter(|role| declarations.created_roles.contains(*role))
+            {
+                followups.push(Change {
+                    key: None,
+                    label: format!("Tag/{name} Role/{role}"),
+                    action: "assign",
+                    details: vec![format!("assign Role/{role} to Tag/{name}")],
+                    write: Write::AssignRole(AssignRoleRequest {
+                        operation_id: id(),
+                        role: role.clone(),
+                        tag_id: name.into(),
+                    }),
+                });
+            }
             return Ok(None);
         }
         ensure!(
@@ -1558,6 +1585,11 @@ impl<'a> Catalog<'a> {
                 .put(request(input, token)?)
                 .await
                 .map(|value| Some(value.into_inner().revision)),
+            Write::AssignRole(input) => self
+                .policy
+                .assign_role(request(input, token)?)
+                .await
+                .map(|_| None),
         };
         let revision = result.with_context(|| format!("apply {}", change.label))?;
         if let Some(key) = &change.key
