@@ -6,7 +6,7 @@ permissions, and work history. It exists independently of the
 model or harness executing its work. Talk to it in your terminal, in Slack, or on a GitHub issue.
 It runs work on your coding agents, asks when a decision is yours, and returns a git branch to
 review. For bigger work, give it an **Objective** with a result to verify, a budget, and a
-deadline. The Tag plans the work and hands pieces to other Tags on its Team. Give it an enduring
+deadline. The Tag plans the work and hands pieces to other Tags on its Team. Give it an ongoing
 responsibility, and it acts on new reports and alerts without being asked. Your teammates direct
 Tags on the same Control Plane, and Tags on different machines and coding agents work together.
 
@@ -65,13 +65,13 @@ Follow this order on your first visit:
 
 Read these in order when you want the complete mental model:
 
-1. A [Tag](concepts/tags.md) is a persistent AI actor with a stable identity, responsibilities,
-   permissions, and work history.
-2. A [Role](concepts/roles.md) is an enduring responsibility assigned to a Tag.
+1. A [Tag](concepts/tags.md) is a persistent AI actor that holds Roles, owns Objectives, and
+   performs work under delegated authority.
+2. A [Role](concepts/roles.md) describes how a Tag works and what it may do.
 3. An [Objective](guides/objectives.md) is a desired outcome with a budget, a deadline, and a
    status. A Session is one Tag's thread of work, and a [Task](concepts/tasks.md) is one turn of
    it.
-4. A [Team](guides/teams.md) is a flat list of member Tags with an optional concurrency limit.
+4. A [Team](guides/teams.md) is a flat list of member Tags.
 5. A Team's [Workstream](guides/workstreams.md) is its shared record of posts; every member can
    read it, and a post wakes nobody. A Tag's [Mailbox](guides/tag-messaging.md) is its inbox for
    messages from other Tags; Tags in one Team message each other without a grant.

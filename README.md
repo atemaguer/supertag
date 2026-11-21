@@ -80,7 +80,7 @@ same Tag keeps the responsibilities you assigned it. [Connect a work tool](docs/
 
 ### Proactive
 
-Part of every job is noticing what needs doing. Give a Tag an enduring responsibility, and it
+Part of every job is noticing what needs doing. Give a Tag an ongoing responsibility, and it
 works to fulfill it without waiting to be asked.
 Each responsibility is an ongoing Objective, and related responsibilities belong to the same Tag.
 Say `reliability` keeps your service healthy. It owns four ongoing Objectives:
@@ -190,7 +190,7 @@ lives.
   your Tags and schedules their work, and connects your computer as a **Worker Host**, a machine
   or sandbox that runs the work. When your team joins, deploy the Control Plane where everyone can
   reach it, and connect laptops, servers, CI runners, or Modal and E2B sandboxes as Worker Hosts.
-  Keep a Tag with an enduring responsibility, such as `reliability`, on an always-on host.
+  Keep a Tag with an ongoing responsibility, such as `reliability`, on an always-on host.
 - **Your coding agents and models.** Each Tag runs on the coding agent and model you choose,
   signed in with your own account or key.
 - **Your limits.** Each Tag can do only what its permissions allow, and you choose which actions

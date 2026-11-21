@@ -16,7 +16,7 @@ runs on; the **Control Plane** stores the **autonomous organization**, all your 
 their shared rules and record of the work, and applies its policy; a **collaboration surface**
 links SuperTag to an external work tool.
 
-A [Role](roles.md) is an enduring responsibility assigned to a Tag. It can combine both kinds of
+A [Role](roles.md) describes how a Tag works and what it may do. It can combine both kinds of
 set with a purpose and behavioral instructions. Each Role listed on a Tag contributes its sets to
 that Tag's work.
 
@@ -181,7 +181,7 @@ See [IAM approval](../reference/iam.md#approval) for precedence and scope.
 
 Direct activation and Role composition serve different needs. Activate a Context Set or Permission
 Set directly when it applies only at a particular location or situation. Reference the set from a
-Role when it follows an enduring responsibility wherever a Tag performs work. Both paths still pass
+Role when it should apply wherever a Tag performs work. Both paths still pass
 through the same admission and native-provider checks.
 
 ## Combine sets without a hierarchy

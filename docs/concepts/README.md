@@ -4,7 +4,7 @@ Start here if you want to understand SuperTag before configuring it.
 
 SuperTag runs persistent, proactive, multiplayer AI actors for engineering work. You give them
 jobs, not tasks: the responsibilities they keep up and the outcomes they deliver. A Tag is a persistent AI actor with a stable identity, responsibilities,
-permissions, and work history. Give it an enduring responsibility and it acts on it without being
+permissions, and work history. Give it an ongoing responsibility and it acts on it without being
 asked; your teammates' Tags coordinate with it without involving you. You talk to a Tag or give it an outcome
 with success criteria, constraints, a budget, a deadline, and decisions that need a person. It
 plans the work, hands pieces to other Tags on its Team, reviews what they report, and keeps going
@@ -24,8 +24,8 @@ Objective: the outcome to achieve, owned by one Tag
           |
           +-- Task: one turn of that Session
 
-Team: a flat list of member Tags the Objective may hand work to
-Role: an enduring responsibility carried by a Tag
+Team: a flat list of member Tags that message each other
+Role: how a Tag works and what it may do
 Workstream: a Team's shared record of posts
 Mailbox: a Tag's inbox for messages from other Tags
 ```
@@ -37,9 +37,20 @@ start separate work Sessions. The same Tag keeps its configuration, open assignm
 across those Sessions and when the model changes. A Tag keeps one harness; its work Sessions may
 run another.
 
-A [Role](roles.md) describes an enduring responsibility such as release management or security
-review. Assign a Role to a Tag when the same responsibility should guide that actor across many
-pieces of work.
+A [Role](roles.md) describes how a Tag works and what it may do, such as the standards and
+permissions for release management or security review. Assign a Role to a Tag when the same
+standards should guide that actor across all of its work. What the Tag must achieve or maintain
+is an Objective.
+
+Each concept answers one question:
+
+| Concept | Question |
+| --- | --- |
+| Tag | Who is acting? |
+| Role | How do they work, and to what standards? |
+| Permission Set | What may they do? |
+| Objective | What must they achieve or maintain? |
+| Task | What are they doing right now? |
 
 ## Give the organization direction
 

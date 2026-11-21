@@ -16,7 +16,7 @@ Objective's turns ask their own Tag instead.
 
 Together, your Teams of Tags make up an **autonomous organization**: Teams may pursue different
 Objectives but share one Control Plane, its rules, and its record of the work. A **Role**
-describes an enduring responsibility held by a Tag; membership of a Team is separate and grants
+describes how a Tag works and what it may do; membership of a Team is separate and grants
 no permissions. Local subagents that an agent system creates inside one execution are not members.
 
 ## Before you start

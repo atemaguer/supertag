@@ -66,7 +66,7 @@ and [execution environments](glossary.md#execution-environment).
 
 Roles, Permission Sets, and Context Sets are shared resources. A Tag lists the Roles it holds. A set
 can be activated directly at one of a Tag's locations when it is situational, or referenced by a Role when it
-follows an enduring responsibility. Team membership places the Tag in the organization; the Task
+should apply to all of the Tag's work. Team membership places the Tag in the organization; the Task
 gives it current direction. A Tag's Worker Host bindings define where its Tasks may run; the
 scheduler then chooses a compatible harness and model on one of those hosts. None of these resources becomes a separate actor.
 

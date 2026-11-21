@@ -20,9 +20,9 @@ message or mention
   -> SuperTag replies in the original thread
 ```
 
-SuperTag checks the request before running it. It identifies the Tag, requester, source, enduring
-responsibilities, available knowledge, allowed actions, workspace, and execution needs. SuperTag
-calls those reusable responsibilities **Roles**. **Context Sets** select reusable knowledge, and
+SuperTag checks the request before running it. It identifies the Tag, requester, source, Roles,
+available knowledge, allowed actions, workspace, and execution needs. **Roles** describe how the
+Tag works and what it may do. **Context Sets** select reusable knowledge, and
 **Permission Sets** select allowed actions. SuperTag records these decisions on the Task. A later
 policy change affects later Tasks without rewriting work that was already accepted.
 

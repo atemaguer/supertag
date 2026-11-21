@@ -1,7 +1,7 @@
 # SuperTag and other agent systems
 
 SuperTag runs persistent, proactive, multiplayer AI actors for engineering work. Each actor, a Tag,
-owns outcomes and enduring responsibilities. Your coding agents do the work; the Tag keeps the
+owns outcomes and ongoing responsibilities. Your coding agents do the work; the Tag keeps the
 goal, acts on its responsibilities without being asked, and coordinates with your teammates' Tags.
 It runs on the coding agents and machines you choose.
 
@@ -13,7 +13,7 @@ model. A **Context Set** selects reusable knowledge that may be included, a **Pe
 selects allowed actions, and a **Task** is one turn of work that records the policy that
 applies to it.
 
-A **Role** is an enduring responsibility assigned to a Tag. A **Team** is a flat list of member
+A **Role** describes how a Tag works and what it may do. A **Team** is a flat list of member
 Tags, and its shared record of posts is its **Workstream**. An **Objective** is an outcome a Tag
 owns. A **Mailbox** is a Tag's inbox for messages from other Tags. Together, your Teams of Tags make up an **autonomous
 organization**: Teams may pursue different Objectives but share one Control Plane, its rules, and
@@ -48,8 +48,8 @@ operating the **autonomous organization itself**.
 SuperTag represents the parts of an organization that must survive any one prompt, model process,
 or harness session:
 
-- **Tags and Roles** define accountable actors and their enduring responsibilities.
-- **Teams** establish membership and a shared concurrency limit.
+- **Tags and Roles** define accountable actors, how they work, and what they may do.
+- **Teams** establish membership.
 - **Objectives, Sessions, and Tasks** connect desired outcomes to the work that delivers them and
   to its evidence.
 - **Workstreams and Mailboxes** carry communication. A Team's Workstream holds the posts its
@@ -94,7 +94,7 @@ application pattern does not claim compatibility with or affiliation to Anthropi
   memory, and local delegation.
 - Use a coding harness when the main need is agentic software work in a repository or sandbox.
 - Use SuperTag when you want persistent, proactive, multiplayer actors for engineering work: Tags
-  that own outcomes and enduring responsibilities, act on new errors and alerts without being
+  that own outcomes and ongoing responsibilities, act on new errors and alerts without being
   asked, coordinate with your teammates' Tags, and run on the coding agents and machines you
   choose.
 

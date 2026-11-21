@@ -61,8 +61,8 @@ organizational layer relates to assistants, agent runtimes, and coding harnesses
 
 ## The Control Plane
 
-The Control Plane is the source of truth for the organization. It owns Tags and their enduring
-responsibilities, called **Roles**. It owns **Objectives**, the outcomes Tags pursue, and
+The Control Plane is the source of truth for the organization. It owns Tags and their **Roles**,
+which describe how each Tag works and what it may do. It owns **Objectives**, the outcomes Tags pursue, and
 **Teams**, flat lists of member Tags. Each Team has a **Workstream**, its shared record of posts.
 It owns **Sessions**, each one Tag's thread of work, the **Tasks** that are their turns, and
 **Mailboxes**, where a Tag receives messages from other Tags. It also owns **Context Sets**, which
@@ -116,7 +116,7 @@ other replicas see the reply when it is recorded.
 ## How identity and access are decided
 
 A Tag is a non-human identity in SuperTag's access model. Its configured locations determine where
-it can be invoked. Roles describe enduring responsibilities. Context Sets declare reusable
+it can be invoked. Roles describe how a Tag works and what it may do. Context Sets declare reusable
 knowledge that may enter a Task, and Permission Sets declare surface-backed or runtime actions
 the Tag may take.
 

@@ -7,7 +7,7 @@ actions it may perform. Start with [Context Sets and Permission
 Sets](../concepts/context-and-permissions.md) for the plain-language model.
 
 Other terms on this page (see the [glossary](glossary.md)): a **Session** groups Tasks from the
-same conversation; a **Role** is an enduring responsibility assigned to a Tag; a **Skill** is a
+same conversation; a **Role** describes how a Tag works and what it may do; a **Skill** is a
 reusable instruction package; a captured artifact is reusable file content with a catalog entry
 recording its producer.
 

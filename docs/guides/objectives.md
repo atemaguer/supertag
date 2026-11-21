@@ -111,7 +111,7 @@ and `supertag apply` creates and starts it. See
 
 Runtime actions let the Objective's work act on a machine, such as `files:write` to edit files and
 `commands:execute` to run commands. By default, an Objective gets every runtime action the owner's
-Permission Sets allow through its **Roles**, the enduring responsibilities assigned to it. Each
+Permission Sets allow through its **Roles**, which describe how it works and what it may do. Each
 turn of the Objective runs with its Tag's Roles, narrowed to this list; a location's Permission
 Sets never apply, because the Objective is not a conversation there.
 

@@ -1,10 +1,11 @@
 # Roles
 
-> **A Role describes an enduring responsibility a Tag holds in the organization.**
+> **A Role describes how a Tag works and what it may do.**
 
-A **Tag** is a persistent AI actor with its own identity, responsibilities, permissions, and work history. A **Role** is a
-reusable description of how that actor should carry out an enduring responsibility. Other terms on
-this page (see the [glossary](../reference/glossary.md)): a **Task** is one accepted assignment; a
+A **Tag** is a persistent AI actor with its own identity, responsibilities, permissions, and work
+history. A **Role** is a reusable description of how that actor works: its standards, its
+knowledge, and its permissions. Other terms on this page (see the
+[glossary](../reference/glossary.md)): a **Task** is one accepted assignment; a
 **Mailbox** is the Tag's inbox for messages from other Tags; a **Team** is a flat list of member
 Tags; an **Objective** is an outcome owned by a Tag; a **Worker Host** is the machine that
 runs a Task. Together, your Teams of Tags make up an **autonomous organization**: Teams may
@@ -20,15 +21,21 @@ A Role does not act on its own. It cannot own Tasks, receive mail, run an agent 
 a Team. The Tag still performs the work. Team membership places the Tag in the organization, and
 each Task tells it what to do now.
 
-All active Roles listed on a Tag apply to that Tag's work. Assign only responsibilities that can
+A Role says how a Tag works. What the Tag must achieve or maintain is an **Objective**. A
+`Reliability Engineer` Role holds the standards and permissions for reliability work; an ongoing
+Objective such as "keep main green" names the outcome, and the alerts and reports that reach it
+wake the Tag. A Role alone never starts work. If a statement would make sense on two Tags, put it
+in a Role; if it has a trigger or a status, make it an Objective.
+
+All active Roles listed on a Tag apply to all of that Tag's work. Assign only Roles that can
 coexist. SuperTag captures the applicable Role policy when it admits a Task, so later configuration
 changes affect later Tasks without changing work already accepted.
 
 ## When to use a Tag or a Role
 
 Create a **Tag** when you need a distinct actor with its own name, Mailbox, Task history, Team
-membership, or accountability. Create a **Role** when you need a responsibility that can guide one
-or more existing actors.
+membership, or accountability. Create a **Role** when you need standards and permissions that can
+guide one or more existing actors.
 
 | Need | Use | Example |
 | --- | --- | --- |
@@ -43,7 +50,7 @@ as part of their existing work, assign both Tags the `Security Reviewer` Role.
 
 ## Configure a Role
 
-A Role manifest defines the reusable responsibility:
+A Role manifest defines the reusable description:
 
 ```yaml
 apiVersion: supertag/v1
@@ -86,14 +93,14 @@ medium or high effort. A Tag's own settings override its Roles'. See
 [execution settings](../reference/resource-model.md#execution-settings).
 
 Apply the Tag manifest again whenever its Role list changes. Removing a Role from `Tag.spec.roles`
-removes that responsibility from future Tasks. A Role's status shows which Tags use it, but you edit
+removes its instructions and sets from future Tasks. A Role's status shows which Tags use it, but you edit
 the Tags to change that list.
 
 ## How a Role carries knowledge and permissions
 
 Use a direct Context Set or Permission Set activation for knowledge or authority that applies only
-at a particular location or situation. Put a set in a Role when it should follow an enduring
-responsibility. A Role does not bypass normal authorization: the Task's origin, requester, approval
+at a particular location or situation. Put a set in a Role when it should apply to all
+of the Tag's work. A Role does not bypass normal authorization: the Task's origin, requester, approval
 state, the Worker Host's harness sandbox, and provider-native access can still narrow what the Tag may do.
 
 ## Where to go next

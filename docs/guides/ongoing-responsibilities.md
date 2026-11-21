@@ -1,14 +1,14 @@
 # Maintain an ongoing responsibility
 
 A **Tag** is a persistent AI actor with its own identity, responsibilities, permissions, and work history. A **Role**
-describes a Tag's enduring responsibility. An **Objective** is an outcome owned by a Tag, with a
+describes how a Tag works and what it may do. An **Objective** is an outcome owned by a Tag, with a
 budget, a deadline, and a status; it works in **Sessions**, threads of **Tasks** with one Task per
 turn. A **Team** is a flat list of member Tags, and its **Workstream** is the Team's shared record
 of posts. A **Worker Host** is a machine or sandbox that runs work. See the
 [glossary](../reference/glossary.md) for other terms.
 
 Use this guide to keep a Tag responsible for work that becomes necessary again as conditions
-change. A Tag with an enduring responsibility acts on it without being asked: a new Sentry error,
+change. A Tag with an ongoing Objective acts on it without being asked: a new Sentry error,
 a PagerDuty alert, a failed CI run on main, or a dependency advisory wakes it, and it decides
 what to do. Each responsibility is its own ongoing Objective. Give related ones to the same
 Tag, so it can recall what it learned under each; give a Tag of its own only to work that needs
@@ -24,9 +24,10 @@ Only an operator can end it.
 
 - Tags for the manager (`support-manager`) and a specialist (`support-specialist`), each bound to
   a connected Worker Host.
-- A Role such as `Support Policy Owner` assigned to the manager. Its instructions should explain
-  the condition to watch, the evidence needed to change the policy, and who may apply changes. See
-  [Roles](../concepts/roles.md).
+- A Role such as `Support Policy Owner` assigned to the manager. Its instructions set the
+  standards for any policy work, such as how to cite evidence, and its Permission Sets say who
+  may apply changes. The condition to watch and the evidence a change needs belong in the
+  Objective's outcome. See [Roles](../concepts/roles.md).
 
 ## 1. Declare the Objective and the Team
 

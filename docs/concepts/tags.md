@@ -2,8 +2,9 @@
 
 > **Tags are the persistent AI actors that make up a SuperTag organization.**
 
-A **Tag** is a persistent AI actor with a stable identity, responsibilities, permissions, and
-work history. It exists independently of the model executing its work. For example, a reviewer Tag
+A **Tag** is a persistent AI actor that holds Roles, owns Objectives, and performs work under
+delegated authority. Its identity, work history, and memory outlive the models and machines that
+run its work. For example, a reviewer Tag
 may read a repository and review changes. It keeps that responsibility and its review history when
 its next Task runs on a different model. A Tag keeps the harness it was created with; to use
 another harness, create a new Tag, or have the Tag start a work Session on that harness.
@@ -19,7 +20,7 @@ A Tag is persistent, proactive, and multiplayer:
 
 - **Persistent.** It keeps its goal, responsibilities, and work history while different coding
   agents and machines do the work.
-- **Proactive.** Give it an enduring responsibility, as an ongoing
+- **Proactive.** Give it a responsibility, as an ongoing
   [Objective](../guides/ongoing-responsibilities.md), and it acts on new reports and alerts without
   being asked. Related responsibilities belong to the same Tag.
 - **Multiplayer.** Your teammates direct Tags on the same Control Plane, and Tags in a Team
@@ -33,7 +34,7 @@ attach to the Tag across harness sessions and execution processes.
 
 Terms used on this page (see the [glossary](../reference/glossary.md)):
 
-- A **Role** is an enduring responsibility assigned to a Tag.
+- A **Role** describes how a Tag works and what it may do.
 - A **Team** is a flat list of member Tags.
 - A **Session** groups Tasks from the same conversation.
 - A **Context Set** selects reusable knowledge that may be added to a Task; a **Permission Set**
@@ -58,7 +59,8 @@ channels, and platforms. Unrelated conversations still remain separate Sessions.
 | Availability | Where it can be invoked | Tag added to an exact channel, repository, chat, or team |
 | Knowledge | What a Task may know | Session continuity and Context Sets |
 | Permissions | What it may do | Permission Sets and provider-native authorization |
-| Responsibilities | Which enduring duties guide it | Roles listed on the Tag |
+| Standards | How it works, and to what standards | Roles listed on the Tag |
+| Responsibilities | What it must achieve or maintain | Objectives it owns |
 | Way of working | How each Task executes | Execution settings (harness, models, efforts), Skills, and environment |
 
 ## Where people can call on a Tag
