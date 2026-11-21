@@ -9,6 +9,8 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-11-20
+
 ### Added
 
 - Left and Right move between the terminal UI's Tag list and the conversation: → in the list
@@ -23,7 +25,7 @@ within the pre-1.0 compatibility policy described in
   `/fold`, `/help`, and `/quit`. The palette (Ctrl-K) and the Keyboard shortcuts screen list the
   same commands with their keys.
 - The desktop app names its SuperTag release at the foot of the sidebar, and the Gateway's when
-  it runs another (`SuperTag 0.3.4 · Gateway 0.3.3`); hovering shows both and the protocol
+  it runs another (`SuperTag 0.3.5 · Gateway 0.3.4`); hovering shows both and the protocol
   version. `supertag-ai`'s Gateway client gains `client.negotiation()`, which returns the protocol
   version and the Gateway's release.
 
@@ -1580,7 +1582,8 @@ within the pre-1.0 compatibility policy described in
 - Gateway control-plane support and Slack, GitHub, Linear, Microsoft Teams,
   and Lark Surfaces.
 
-[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/atemaguer/supertag/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/atemaguer/supertag/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/atemaguer/supertag/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/atemaguer/supertag/compare/v0.3.1...v0.3.2
