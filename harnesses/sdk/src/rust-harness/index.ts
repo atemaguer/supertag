@@ -62,6 +62,7 @@ export {
 export {
   copySkill,
   MAX_DELIVERED_SKILLS,
+  replaceSkillFrontmatter,
   type SelectedSkill,
   SKILL_WILDCARD,
   selectSkills,

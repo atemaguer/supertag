@@ -1,6 +1,6 @@
-import { cp, lstat, readFile } from "node:fs/promises";
+import { cp, lstat, readFile, writeFile } from "node:fs/promises";
 import { basename, isAbsolute } from "node:path";
-import { parse } from "yaml";
+import { parse, stringify } from "yaml";
 import { digestContextPackage } from "../index.js";
 import type { ResolvedSkill, Task } from "./gen/supertag/runtime/v2/runtime_pb.js";
 
@@ -109,12 +109,26 @@ export async function copySkill(skill: ResolvedSkill, destination: string): Prom
     throw new Error("Staged Skill differs from its pin");
 }
 
+const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
+
 /** The YAML frontmatter of a `SKILL.md`, or an empty object when it has none. */
 export async function skillFrontmatter(file: string): Promise<Record<string, unknown>> {
-  const markdown = await readFile(file, "utf8");
-  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(markdown)?.[1];
+  const frontmatter = FRONTMATTER.exec(await readFile(file, "utf8"))?.[1];
   const metadata = frontmatter ? (parse(frontmatter, { merge: true }) as unknown) : {};
   if (metadata === null || typeof metadata !== "object" || Array.isArray(metadata))
     throw new Error("Invalid Skill frontmatter");
   return metadata as Record<string, unknown>;
+}
+
+/**
+ * Replaces the frontmatter of a staged `SKILL.md` with `metadata`, keeping its instructions. The
+ * staged copy then differs from the Skill's pin, which still names the package it came from.
+ */
+export async function replaceSkillFrontmatter(
+  file: string,
+  metadata: Record<string, unknown>,
+): Promise<void> {
+  const markdown = await readFile(file, "utf8");
+  const body = markdown.slice(FRONTMATTER.exec(markdown)?.[0].length ?? 0);
+  await writeFile(file, `---\n${stringify(metadata)}---\n${body}`);
 }

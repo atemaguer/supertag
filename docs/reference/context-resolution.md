@@ -152,8 +152,22 @@ Skills its Task selected, never its own native, user, or repository Skills:
 | OpenCode | A private `skills.paths` directory; the `skill` permission allows only those names | Fails a named one; skips one only `*` selected |
 | Cursor | Not delivered | Records an optional item as an omission; a required one waits for another host |
 
-Claude Code cannot load a Skill whose frontmatter sets `hooks`, `context`, `agent`,
-`allowed-tools`, `model`, or `effort`. OpenCode needs a frontmatter `name` no other selected Skill
+A Skill gives a Task instructions and files, never authority. Claude Code acts on some of a
+Skill's `SKILL.md` frontmatter, so its copy keeps only the keys that describe the Skill:
+
+| Frontmatter | Claude Code Task |
+| --- | --- |
+| `name`, `description`, `when_to_use`, `argument-hint`, `arguments`, `license`, `compatibility`, `metadata`, `version` | Kept |
+| `allowed-tools` | Dropped. The Task's Permission Sets alone decide its tools |
+| `model`, `effort` | Dropped. The Task keeps its own model |
+| `disable-model-invocation: true` | Marks a Skill only a person may start. A `*` item skips it; an item that names it loads it and drops the key |
+| `user-invocable`, `paths`, `shell`, and any other key | Dropped. The Skill loads as if it did not set them |
+| `hooks`, `context`, `agent` | Cannot load. These run commands or start another agent |
+
+The recorded digest still identifies the Skill as its source holds it, with every key. The
+Task's record does not yet list a Skill its harness skipped at delivery.
+
+OpenCode needs a frontmatter `name` no other selected Skill
 has, and no nested `SKILL.md`. OpenCode loads no Skill in a remote Workspace. Cursor finds Skills
 by name in the workspace and its home directory, with no setting that limits it to selected ones,
 so SuperTag does not deliver Skills to it.

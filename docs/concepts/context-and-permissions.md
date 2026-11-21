@@ -70,6 +70,9 @@ configured. A `*` item is always optional. `supertag init` gives the Tag it crea
 named `skills` with one such item, so your own Skills work from the first Task. Without a Skill
 item, a Task loads no Skill, not even the harness's own.
 
+A Skill adds instructions, never authority. A Skill may ask for tools or a model in its own
+settings; a Task ignores that, and its Permission Sets still decide what it may do.
+
 Artifact selectors use exact collaboration-surface sources and same-Tag work. They are not
 available on an Objective's own Tasks through Roles; those Tasks use the catalog's Objective
 visibility rules instead.

@@ -329,6 +329,12 @@ async function inspectSkillPackage() {
   if (packages.length !== 1) throw new Error("Unexpected number of Skill packages");
   const markdown = await readFile(join(root, "skills", packages[0], "SKILL.md"), "utf8");
   if (!markdown.includes("Use the release checklist.")) throw new Error("Expected pinned Skill");
+  if (
+    /^(allowed-tools|model|effort|user-invocable|disable-model-invocation|paths|shell):/m.test(
+      markdown,
+    )
+  )
+    throw new Error("Skill kept settings Claude Code acts on");
   if (!(await hook("Skill", { skill: qualified }))) throw new Error("Admitted Skill denied");
   if (await hook("Skill", { skill: "ambient" })) throw new Error("Ambient Skill allowed");
   const reference = join(root, "skills", packages[0], "reference.md");

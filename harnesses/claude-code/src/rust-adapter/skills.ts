@@ -2,6 +2,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   copySkill,
+  replaceSkillFrontmatter,
   type SelectedSkill,
   skillDirectory,
   skillFrontmatter,
@@ -12,9 +13,34 @@ export { selectSkills } from "@supertag/worker-sdk/internal/rust-harness";
 const PLUGIN = "supertag-context";
 
 /**
- * Copies the selected Skills into an isolated plugin. A Skill only a `*` item loaded is left out
- * when Claude Code cannot load it within the Task policy, so one such Skill cannot fail the Task;
- * a named one fails it.
+ * Frontmatter that makes Claude Code run a command or start another agent for a Skill. A Task
+ * loads no Skill that sets one.
+ */
+const REFUSED = ["hooks", "context", "agent"];
+
+/**
+ * The frontmatter a staged Skill keeps: what describes it. Claude Code acts on other keys, such
+ * as `allowed-tools`, which approves tools, `model` and `effort`, which change how the turn runs,
+ * and `user-invocable`, which hides the Skill from the listing the adapter verifies. The staged
+ * copy drops those and every key not listed here, so a Skill adds nothing to a Task but
+ * instructions it can read.
+ */
+const KEPT = new Set([
+  "name",
+  "description",
+  "when_to_use",
+  "argument-hint",
+  "arguments",
+  "license",
+  "compatibility",
+  "metadata",
+  "version",
+]);
+
+/**
+ * Copies the selected Skills into an isolated plugin, each with only its descriptive frontmatter.
+ * A Skill only a `*` item loaded is left out when Claude Code cannot load it within the Task
+ * policy, so one such Skill cannot fail the Task; a named one fails it.
  */
 export async function stageSkills(
   selected: readonly SelectedSkill[],
@@ -41,7 +67,7 @@ export async function stageSkills(
     await copySkill(skill, destination);
     let qualified: string;
     try {
-      qualified = `${PLUGIN}:${await skillName(join(destination, "SKILL.md"), directory)}`;
+      qualified = `${PLUGIN}:${await skillName(join(destination, "SKILL.md"), directory, named)}`;
       if (names.has(qualified)) throw new Error("Duplicate Skill name");
     } catch (error) {
       if (named) throw error;
@@ -60,15 +86,23 @@ export async function stageSkills(
   };
 }
 
-/** The name Claude Code loads a staged Skill as, refusing frontmatter that widens the Task. */
-async function skillName(file: string, directory: string) {
+/**
+ * The name Claude Code loads a staged Skill as. Refuses frontmatter that runs code or another
+ * agent, and rewrites the staged file without the settings Claude Code would otherwise act on.
+ * `disable-model-invocation: true` marks a Skill for a person to start, and no person starts one
+ * in a Task: a `*` item leaves such a Skill out, and an item that names it loads it, since its
+ * operator chose it.
+ */
+async function skillName(file: string, directory: string, named: boolean) {
   const metadata = await skillFrontmatter(file);
-  if (
-    ["hooks", "context", "agent", "allowed-tools", "model", "effort"].some((key) =>
-      Object.hasOwn(metadata, key),
-    )
-  )
+  if (REFUSED.some((key) => Object.hasOwn(metadata, key)))
     throw new Error("Skill requests execution settings outside the Task policy");
+  const manual = metadata["disable-model-invocation"];
+  if (!named && (manual === true || manual === "true"))
+    throw new Error("Skill sets disable-model-invocation, so only a person may start it");
+  const kept = Object.entries(metadata).filter(([key]) => KEPT.has(key));
+  if (kept.length !== Object.keys(metadata).length)
+    await replaceSkillFrontmatter(file, Object.fromEntries(kept));
   const { name } = metadata;
   if (
     name !== undefined &&

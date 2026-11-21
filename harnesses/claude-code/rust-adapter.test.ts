@@ -1,6 +1,16 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { createServer, type ServerHttp2Session } from "node:http2";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -46,6 +56,7 @@ import {
   NetworkRules,
   ObjectiveSignal,
   type ResolvedSkill,
+  ResolvedSkillSchema,
   type SessionCheckpoint,
   TagMessageOrigin,
   TaskEventKind,
@@ -64,6 +75,7 @@ import {
   networkSandbox,
   permissionHook,
 } from "./src/rust-adapter/adapter.js";
+import { stageSkills } from "./src/rust-adapter/skills.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const native = join(here, "fixtures/rust-native-claude.mjs");
@@ -1576,7 +1588,69 @@ it("fails before native launch when a required Context Item has no resolver", as
   await expect(readFile(join(run.workspace, "native-started"))).rejects.toThrow();
 }, 30000);
 
-it.each(["valid", "tampered", "hooks"] as const)(
+/** Frontmatter Claude Code would act on, which a staged Skill must not carry. */
+const SKILL_SETTINGS =
+  "allowed-tools: Bash, Read\nmodel: opus\neffort: high\nuser-invocable: false\n" +
+  "disable-model-invocation: false\npaths: src/**\nshell: bash\n";
+const SKILL_FRONTMATTER = {
+  valid: "",
+  tampered: "",
+  settings: `argument-hint: "[version]"\nlicense: MIT\n${SKILL_SETTINGS}metadata:\n  owner: release\n`,
+  // Marked for a person to start: loaded when named, left out by a * item.
+  manual: "disable-model-invocation: true\nallowed-tools: Bash\n",
+  hooks: "hooks: {}\n",
+  context: "context: fork\n",
+  agent: "agent: Explore\n",
+};
+const skillMarkdown = (kind: keyof typeof SKILL_FRONTMATTER) =>
+  `---\nname: release-runbook\ndescription: Verify the release.\n${SKILL_FRONTMATTER[kind]}---\nUse the release checklist.\n`;
+
+it("stages a Skill with only its descriptive frontmatter", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "supertag-claude-skills-"));
+  cleanups.push(() => rm(directory, { recursive: true, force: true }));
+  const stage = async (kind: keyof typeof SKILL_FRONTMATTER, named = true) => {
+    const localPath = join(directory, `${kind}-${named}`, `skill-${"a".repeat(64)}`);
+    await mkdir(localPath, { recursive: true, mode: 0o700 });
+    await writeFile(join(localPath, "SKILL.md"), skillMarkdown(kind), { mode: 0o600 });
+    const digest = await digestContextPackage(localPath, { maxFiles: 2, maxBytes: 4096 });
+    const scratch = join(directory, `${kind}-${named}`, "scratch");
+    await mkdir(scratch, { mode: 0o700 });
+    const pin = create(ContextPinSchema, { reference: "release-runbook", version: "1", digest });
+    const skill = create(ResolvedSkillSchema, { localPath, pin });
+    const staged = await stageSkills([{ skill, named }], scratch, new AbortController().signal);
+    return {
+      names: [...staged.names],
+      source: await readFile(join(localPath, "SKILL.md"), "utf8"),
+      staged: staged.roots[0] && (await readFile(join(staged.roots[0], "SKILL.md"), "utf8")),
+    };
+  };
+  // A Skill with nothing to drop is delivered byte for byte.
+  const plain = await stage("valid");
+  expect(plain.staged).toBe(plain.source);
+  const settings = await stage("settings");
+  expect(settings.names).toEqual(["supertag-context:release-runbook"]);
+  // The Worker Host's copy, which the Task's digest names, is untouched.
+  expect(settings.source).toBe(skillMarkdown("settings"));
+  expect(settings.staged).toBe(
+    "---\nname: release-runbook\ndescription: Verify the release.\n" +
+      'argument-hint: "[version]"\nlicense: MIT\nmetadata:\n  owner: release\n' +
+      "---\nUse the release checklist.\n",
+  );
+  const plainMarkdown = "---\nname: release-runbook\ndescription: Verify the release.\n---\n";
+  expect((await stage("settings", false)).staged).toBe(settings.staged);
+  // A Skill only a person may start loads when an item names it, and a * item leaves it out.
+  expect((await stage("manual")).staged).toBe(`${plainMarkdown}Use the release checklist.\n`);
+  expect(await stage("manual", false)).toMatchObject({ names: [], staged: undefined });
+  await expect(
+    readdir(join(directory, "manual-false/scratch/supertag-context/skills")),
+  ).resolves.toEqual([]);
+  for (const kind of ["hooks", "context", "agent"] as const) {
+    await expect(stage(kind)).rejects.toThrow("outside the Task policy");
+    expect((await stage(kind, false)).names).toEqual([]);
+  }
+});
+
+it.each(["valid", "settings", "manual", "tampered", "hooks", "context"] as const)(
   "stages only admitted static Skills before the Claude SDK launches (%s)",
   async (kind) => {
     const policySnapshot = create(TaskPolicySnapshotSchema, {
@@ -1601,7 +1675,7 @@ it.each(["valid", "tampered", "hooks"] as const)(
       prompt: "inspect-skill-package",
       policySnapshot,
       skill: {
-        markdown: `---\nname: release-runbook\ndescription: Verify the release.\n${kind === "hooks" ? "hooks: {}\n" : ""}---\nUse the release checklist.\n`,
+        markdown: skillMarkdown(kind),
         tamper: kind === "tampered",
       },
     });
@@ -1610,8 +1684,8 @@ it.each(["valid", "tampered", "hooks"] as const)(
       await readFile(join(run.workspace, "fixture-error.txt"), "utf8").catch(
         () => run.completions[0]?.result,
       ),
-    ).toBe(kind === "valid");
-    if (kind === "valid") {
+    ).toBe(["valid", "settings", "manual"].includes(kind));
+    if (["valid", "settings", "manual"].includes(kind)) {
       expect(run.completions[0]?.result).toBe("fixture verified Skill package");
     } else {
       await expect(readFile(join(run.workspace, "native-started"))).rejects.toThrow();
@@ -1620,7 +1694,7 @@ it.each(["valid", "tampered", "hooks"] as const)(
   30000,
 );
 
-it.each(["valid", "hooks"] as const)(
+it.each(["valid", "settings", "manual", "hooks", "agent"] as const)(
   "loads the Skills a * Context Item delivers, leaving out one it cannot load (%s)",
   async (kind) => {
     const policySnapshot = create(TaskPolicySnapshotSchema, {
@@ -1642,16 +1716,18 @@ it.each(["valid", "hooks"] as const)(
       ],
     });
     const run = await invoke({
-      prompt: kind === "valid" ? "inspect-skill-package" : "first",
+      prompt: kind === "valid" || kind === "settings" ? "inspect-skill-package" : "first",
       policySnapshot,
       skill: {
-        markdown: `---\nname: release-runbook\ndescription: Verify the release.\n${kind === "hooks" ? "hooks: {}\n" : ""}---\nUse the release checklist.\n`,
+        markdown: skillMarkdown(kind),
       },
     });
     // A Skill only a * item loaded does not fail the Task when Claude Code cannot load it.
     expect(run.completions[0]?.succeeded, run.completions[0]?.result).toBe(true);
     expect(run.completions[0]?.result).toBe(
-      kind === "valid" ? "fixture verified Skill package" : "fixture first turn",
+      kind === "valid" || kind === "settings"
+        ? "fixture verified Skill package"
+        : "fixture first turn",
     );
   },
   30000,

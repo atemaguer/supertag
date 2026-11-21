@@ -27,6 +27,10 @@ within the pre-1.0 compatibility policy described in
   source and digest, and what it skipped. `supertag init` gives the lead's Role a `skills` Context
   Set with one such item, and adds it to an existing setup when run again. OpenCode Tasks now load
   their selected Skills, and Codex Tasks that may edit files or run commands receive theirs.
+  Claude Code Tasks now load a Skill whose frontmatter sets `allowed-tools`, `model`, or similar
+  settings, and ignore those settings: a Skill grants no tool and changes no model. They still
+  refuse one that sets `hooks`, `context`, or `agent`, and a `*` item skips one that sets
+  `disable-model-invocation: true`, which only a person may start.
   Cursor still loads none: it skips an optional Skill item and records the omission. See
   [Skills](docs/reference/context-resolution.md#skills).
 
