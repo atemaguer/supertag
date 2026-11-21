@@ -1513,7 +1513,7 @@ wheels = [
 
 [[package]]
 name = "supertag"
-version = "0.3.6"
+version = "0.3.7"
 source = { editable = "." }
 
 [package.optional-dependencies]

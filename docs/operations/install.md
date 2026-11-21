@@ -49,7 +49,7 @@ To choose the locations or a version, set these before `sh`:
 
 | Variable | Default |
 | --- | --- |
-| `SUPERTAG_VERSION` | The release the script came from. Set a version, such as `0.3.6`, to install that release |
+| `SUPERTAG_VERSION` | The release the script came from. Set a version, such as `0.3.7`, to install that release |
 | `SUPERTAG_INSTALL_ROOT` | `$XDG_DATA_HOME/supertag` when `XDG_DATA_HOME` is set, otherwise `~/.local/share/supertag` |
 | `SUPERTAG_BIN_DIR` | `$XDG_BIN_HOME` when it is set, otherwise `~/.local/bin` |
 
@@ -185,7 +185,7 @@ The Python SDK is `supertag` on PyPI, in Python 3.10 or newer. Install the versi
 your CLI:
 
 ```sh
-python -m pip install 'supertag==0.3.6'
+python -m pip install 'supertag==0.3.7'
 ```
 
 Each SDK connects to SuperTag and lets a custom harness adapter talk to the [Worker](../reference/glossary.md#worker) that started it;
@@ -234,7 +234,7 @@ with the new one:
 ```text
 SuperTag 0.3.0 runs in /Users/you/.supertag, a different build than this CLI, so it restarts with this one.
 Stopped SuperTag 0.3.0 services (protocol 2) without draining through the Control Plane, because this CLI speaks protocol 5. Their Worker Hosts stopped gracefully; Task Attempts they were running follow the recovery rules.
-Restarted SuperTag: 0.3.2 (protocol 6) → 0.3.6 (protocol 7).
+Restarted SuperTag: 0.3.2 (protocol 6) → 0.3.7 (protocol 7).
 Started SuperTag in the background (process 4242).
 Migrated the database schema from version 82 to 83.
 ```
