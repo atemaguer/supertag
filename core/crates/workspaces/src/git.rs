@@ -1984,15 +1984,22 @@ pub(crate) async fn pipeline(
                     limited(stdout, maximum, &operations[last], "output"),
                 );
                 let stdout = stdout?;
-                // A failing stage makes the stages before it fail writing to it, so a failure
-                // with an exit code of its own, not a signal, is the one that explains the rest.
+                // A failing stage makes the stages before it die writing to it, by SIGPIPE or,
+                // through a shell or Git's own check, with code 141 (128 + SIGPIPE). The first
+                // failure that is not such a broken pipe explains the rest.
                 let mut failures = Vec::new();
+                let mut broken_pipes = Vec::new();
                 for ((child, errors), operation) in
                     children.iter_mut().zip(&mut errors).zip(&operations)
                 {
                     let status = child.wait().await?;
                     let stderr = errors.await.context("read Git error output")??;
                     if !status.success() {
+                        broken_pipes.push(
+                            std::os::unix::process::ExitStatusExt::signal(&status)
+                                == Some(libc::SIGPIPE)
+                                || status.code() == Some(128 + libc::SIGPIPE),
+                        );
                         failures.push(GitExit {
                             code: status.code(),
                             operation: operation.clone(),
@@ -2001,9 +2008,9 @@ pub(crate) async fn pipeline(
                     }
                 }
                 if !failures.is_empty() {
-                    let explaining = failures
+                    let explaining = broken_pipes
                         .iter()
-                        .position(|failure| failure.code.is_some())
+                        .position(|broken| !broken)
                         .unwrap_or(0);
                     return Err(failures.swap_remove(explaining).into());
                 }
@@ -2199,6 +2206,23 @@ mod tests {
         assert_eq!(
             error.downcast_ref::<GitExit>().and_then(|exit| exit.code),
             Some(4)
+        );
+        // A stage that a shell or Git reports as 141 (128 + SIGPIPE) broke on its pipe too.
+        let error = pipeline(
+            vec![
+                shell("/bin/cat >/dev/null; exit 141"),
+                shell("/bin/cat >/dev/null; exit 5"),
+            ],
+            b"input",
+            &CancellationToken::new(),
+            64,
+            COMMAND_TIMEOUT,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<GitExit>().and_then(|exit| exit.code),
+            Some(5)
         );
         Ok(())
     }
