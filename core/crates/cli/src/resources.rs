@@ -14,6 +14,9 @@ use clap::{Args, Subcommand, ValueEnum};
 use serde_json::Value;
 use supertag_protocol::v2::objective_overviews_client::ObjectiveOverviewsClient;
 use supertag_protocol::v2::{GetObjectiveOverviewRequest, PrincipalRole};
+use supertag_protocol::v2::{
+    operator_client::OperatorClient, policy_catalog_client::PolicyCatalogClient,
+};
 use supertag_protocol::{MAX_MESSAGE_BYTES, negotiation::ProtocolChannel};
 
 use crate::observe::{Output, describe_text};
@@ -894,7 +897,24 @@ pub async fn describe(connection: Connection, args: DescribeArgs) -> Result<()> 
         }
         return Ok(());
     }
-    let mut value = fetch(channel, &token, args.kind, args.id.clone()).await?;
+    let mut value = fetch(channel.clone(), &token, args.kind, args.id.clone()).await?;
+    // What the Tag may do and what grants it, and how its Tasks run or why they cannot.
+    if args.kind == Kind::Tag {
+        let policy = crate::tag_policy::read(
+            &mut OperatorClient::new(channel.clone())
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+            &mut PolicyCatalogClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+            &token,
+            &args.id,
+        )
+        .await?;
+        let (permissions, execution) = policy.describe();
+        value["permissions"] = permissions;
+        value["execution"] = execution;
+    }
     // How the Tag's memory is used, from the Worker Hosts on this machine: counts only.
     if args.kind == Kind::Tag
         && let Some(stores) = memories::local_stats(state.as_deref(), Some(&args.id)).await?

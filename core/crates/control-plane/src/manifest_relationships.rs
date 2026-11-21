@@ -384,6 +384,7 @@ impl Store {
                         .execute(&mut **tx).await?;
                 }
             }
+            crate::policy::check_tag_execution_in(tx, &input.tag_id).await?;
         }
         Ok(ReconcileTagRelationshipsResponse { changes })
     }

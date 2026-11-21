@@ -112,18 +112,26 @@ async fn contract(url: &str) {
         .unwrap();
     assert_eq!(original.execution.as_ref(), Some(&direct));
 
-    // Role IDs and assignment order disagree with names. Alpha supplies effort
-    // even though its model belongs to another harness, and Beta precedes Zulu.
+    // Roles that set a field to equal values agree. Alpha supplies effort even though its
+    // model belongs to another harness, so its models do not meet the codex Roles'.
     for (id, name, execution) in [
         (
             "a-zulu",
             "Zulu",
-            settings(Some("codex"), &["role-zulu"], &["low"]),
+            settings(
+                Some("codex"),
+                &["role-beta", "role-backup"],
+                &["high", "medium"],
+            ),
         ),
         (
             "y-beta",
             "Beta",
-            settings(Some("codex"), &["role-beta", "role-backup"], &["medium"]),
+            settings(
+                Some("codex"),
+                &["role-beta", "role-backup"],
+                &["high", "medium"],
+            ),
         ),
         (
             "z-alpha",
@@ -246,6 +254,61 @@ async fn contract(url: &str) {
         &task,
         HarnessKind::Cursor,
         settings(Some("cursor"), &[], &["high", "medium"]),
+    );
+
+    // Roles that set one field differently conflict: every write that would make the conflict
+    // is refused, naming the Tag, the field, and the Roles, until the Tag sets the field itself.
+    let conflict = "Tag conflicted gets execution.efforts from Roles a-zulu, x-low with different values; set execution.efforts on the Tag, or give the Roles the same value";
+    fn refused<T: std::fmt::Debug>(result: Result<T, StoreError>, conflict: &str) {
+        match result {
+            Err(StoreError::FailedPrecondition(reason)) => assert_eq!(reason, conflict),
+            other => panic!("{other:?}"),
+        }
+    }
+    role(
+        &store,
+        "x-low",
+        "Low",
+        settings(Some("codex"), &[], &["low"]),
+    )
+    .await;
+    store
+        .put_tag_spec(tag("conflicted", HarnessKind::Codex, None))
+        .await
+        .unwrap();
+    assign(&store, "conflicted", "a-zulu").await;
+    let assignment = AssignRoleRequest {
+        operation_id: "conflicted-x-low".into(),
+        tag_id: "conflicted".into(),
+        role: "x-low".into(),
+    };
+    refused(store.assign_role(OPERATOR, &assignment).await, conflict);
+    let overridden = settings(Some("codex"), &[], &["medium"]);
+    let resolved = store
+        .put_tag_spec(PutTagRequest {
+            expected_revision: None,
+            ..tag("conflicted", HarnessKind::Codex, Some(overridden.clone()))
+        })
+        .await
+        .unwrap();
+    store.assign_role(OPERATOR, &assignment).await.unwrap();
+    let task = store
+        .submit_task(OPERATOR, &turn("conflicted", "overridden"))
+        .await
+        .unwrap();
+    assert_eq!(
+        task.policy_snapshot.unwrap().execution.unwrap().efforts,
+        ["medium"]
+    );
+    // Dropping the override would bring the conflict back.
+    refused(
+        store
+            .put_tag_spec(PutTagRequest {
+                expected_revision: Some(resolved.revision),
+                ..tag("conflicted", HarnessKind::Codex, None)
+            })
+            .await,
+        conflict,
     );
 
     store

@@ -28,7 +28,11 @@ wake the Tag. A Role alone never starts work. If a statement would make sense on
 in a Role; if it has a trigger or a status, make it an Objective.
 
 All active Roles listed on a Tag apply to all of that Tag's work. Assign only Roles that can
-coexist. SuperTag captures the applicable Role policy when it admits a Task, so later configuration
+coexist. Two Roles that set one execution setting, such as the model, to different values
+conflict, and SuperTag refuses the assignment unless the Tag sets that value itself. A Tag's
+permissions are those of all its Roles together: `supertag describe tag` lists each permission
+with the Roles and Permission Sets that grant it, and `supertag apply` and
+`supertag role-assignment create` say when a Tag gains one. SuperTag captures the applicable Role policy when it admits a Task, so later configuration
 changes affect later Tasks without changing work already accepted.
 
 ## When to use a Tag or a Role

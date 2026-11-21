@@ -1095,6 +1095,7 @@ impl Store {
                 .await?;
             }
         }
+        check_role_holders_in(&mut tx, &value.role_id).await?;
         receipt(&mut tx, principal, &input.operation_id, &hash, &value).await?;
         tx.commit().await?;
         Ok(value)
@@ -1263,6 +1264,7 @@ impl Store {
             .await?;
         }
         save_assignment(&mut tx, &assignment).await?;
+        check_tag_execution_in(&mut tx, &assignment.tag_id).await?;
         receipt(&mut tx, principal, &input.operation_id, &hash, &assignment).await?;
         tx.commit().await?;
         Ok(assignment)
@@ -1392,6 +1394,160 @@ pub(crate) struct AdmissionPolicy {
     pub effective_digest: String,
 }
 
+/// A Tag's execution settings: its own `execution` field by field, else the one value its Roles
+/// set for that field. Roles that set one field to different values conflict unless the Tag sets
+/// it: the error names the Tag, the field, and the Roles. `None` when neither sets anything.
+pub fn compose_execution(
+    tag_id: &str,
+    harness_kind: i32,
+    tag: Option<&PolicyExecutionSettings>,
+    roles: &[&Role],
+) -> std::result::Result<Option<PolicyExecutionSettings>, String> {
+    let roles: Vec<(&str, &PolicyExecutionSettings)> = roles
+        .iter()
+        .filter_map(|role| Some((role.role_id.as_str(), role.execution.as_ref()?)))
+        .collect();
+    // The one value the Roles give a field the Tag leaves unset, or the conflict.
+    fn single<T: PartialEq + Clone>(
+        tag_id: &str,
+        field: &str,
+        values: Vec<(&str, T)>,
+    ) -> std::result::Result<Option<T>, String> {
+        let Some((_, first)) = values.first() else {
+            return Ok(None);
+        };
+        if values.iter().all(|(_, value)| value == first) {
+            return Ok(Some(first.clone()));
+        }
+        let mut names: Vec<&str> = values.iter().map(|(role, _)| *role).collect();
+        names.sort_unstable();
+        names.dedup();
+        Err(format!(
+            "Tag {tag_id} gets execution.{field} from Roles {} with different values; set execution.{field} on the Tag, or give the Roles the same value",
+            names.join(", ")
+        ))
+    }
+    let tag_harness = BUILTIN_HARNESSES
+        .iter()
+        .find(|(kind, _)| *kind as i32 == harness_kind)
+        .map(|(_, name)| (*name).to_owned())
+        .or_else(|| tag.and_then(|settings| settings.harness.clone()));
+    let mut harness = match tag_harness {
+        Some(harness) => Some(harness),
+        None => single(
+            tag_id,
+            "harness",
+            roles
+                .iter()
+                .filter_map(|(role, e)| Some((*role, e.harness.clone()?)))
+                .collect(),
+        )?,
+    };
+    let shared_execution_environment_id = match tag
+        .and_then(|settings| settings.shared_execution_environment_id.clone())
+    {
+        Some(id) => Some(id),
+        None => single(
+            tag_id,
+            "sharedExecutionEnvironmentId",
+            roles
+                .iter()
+                .filter_map(|(role, e)| Some((*role, e.shared_execution_environment_id.clone()?)))
+                .collect(),
+        )?,
+    };
+    if shared_execution_environment_id.is_some() {
+        if harness.as_deref().is_some_and(|name| name != "cursor") {
+            return Err("shared execution currently requires Cursor".into());
+        }
+        harness = Some("cursor".into());
+    }
+    // A Role's models apply only to its own harness.
+    let models = match tag.filter(|settings| !settings.models.is_empty()) {
+        Some(settings) => settings.models.clone(),
+        None => single(
+            tag_id,
+            "models",
+            roles
+                .iter()
+                .filter(|(_, e)| {
+                    !e.models.is_empty() && (e.harness.is_none() || e.harness == harness)
+                })
+                .map(|(role, e)| (*role, e.models.clone()))
+                .collect(),
+        )?
+        .unwrap_or_default(),
+    };
+    let efforts = match tag.filter(|settings| !settings.efforts.is_empty()) {
+        Some(settings) => settings.efforts.clone(),
+        None => single(
+            tag_id,
+            "efforts",
+            roles
+                .iter()
+                .filter(|(_, e)| !e.efforts.is_empty())
+                .map(|(role, e)| (*role, e.efforts.clone()))
+                .collect(),
+        )?
+        .unwrap_or_else(|| vec!["low".into(), "medium".into(), "high".into()]),
+    };
+    if tag.is_none() && roles.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(PolicyExecutionSettings {
+        harness,
+        models,
+        efforts,
+        shared_execution_environment_id,
+    }))
+}
+
+/// Refuses a write that leaves the Tag's active Roles with conflicting execution settings.
+pub(crate) async fn check_tag_execution_in(
+    tx: &mut Transaction<'_, Any>,
+    tag_id: &str,
+) -> Result<()> {
+    let Some(row) =
+        sqlx::query("SELECT harness_kind,execution FROM supertag_v2_tags WHERE tag_id=$1")
+            .bind(tag_id)
+            .fetch_optional(&mut **tx)
+            .await?
+    else {
+        return Ok(());
+    };
+    let harness_kind = row.try_get::<i64, _>("harness_kind")? as i32;
+    let execution = crate::store::tag_execution_from_row(&row)?;
+    let ids: Vec<String> = sqlx::query_scalar("SELECT a.role_id FROM supertag_v2_role_assignments a JOIN supertag_v2_roles r ON a.role_id=r.role_id WHERE a.tag_id=$1 AND a.status=1 AND r.status=1 ORDER BY a.role_id")
+        .bind(tag_id)
+        .fetch_all(&mut **tx)
+        .await?;
+    let mut roles = Vec::with_capacity(ids.len());
+    for id in ids {
+        roles.push(resource::<Role>(tx, &id).await?);
+    }
+    let roles: Vec<&Role> = roles.iter().collect();
+    compose_execution(tag_id, harness_kind, execution.as_ref(), &roles)
+        .map(|_| ())
+        .map_err(StoreError::FailedPrecondition)
+}
+
+/// Checks every Tag that holds `role_id` after the Role changes.
+pub(crate) async fn check_role_holders_in(
+    tx: &mut Transaction<'_, Any>,
+    role_id: &str,
+) -> Result<()> {
+    let tags: Vec<String> = sqlx::query_scalar(
+        "SELECT tag_id FROM supertag_v2_role_assignments WHERE role_id=$1 AND status=1 ORDER BY tag_id",
+    )
+    .bind(role_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    for tag in tags {
+        check_tag_execution_in(tx, &tag).await?;
+    }
+    Ok(())
+}
+
 pub(crate) async fn admission_in(
     tx: &mut Transaction<'_, Any>,
     tag_id: &str,
@@ -1485,55 +1641,17 @@ pub(crate) async fn admission_in(
             }
         }
     }
-    let mut execution_roles: Vec<&Role> = snapshot
+    let roles: Vec<&Role> = snapshot
         .roles
         .iter()
         .filter_map(|r| r.role.as_ref())
         .collect();
-    execution_roles.sort_by(|a, b| a.name.cmp(&b.name).then(a.role_id.cmp(&b.role_id)));
-    let base_harness = BUILTIN_HARNESSES
-        .iter()
-        .find(|(kind, _)| *kind as i32 == base.harness_kind)
-        .map(|(_, name)| *name);
-    let sources = base.execution.into_iter().chain(
-        execution_roles
-            .iter()
-            .filter_map(|role| role.execution.as_ref()),
-    );
-    let mut harness = base_harness.map(str::to_owned).or_else(|| {
-        sources
-            .clone()
-            .find_map(|settings| settings.harness.clone())
-    });
-    let shared_execution_environment_id = sources
-        .clone()
-        .find_map(|settings| settings.shared_execution_environment_id.clone());
-    if shared_execution_environment_id.is_some() {
-        if harness.as_deref().is_some_and(|name| name != "cursor") {
-            return Err(StoreError::FailedPrecondition(
-                "shared execution currently requires Cursor".into(),
-            ));
-        }
-        harness = Some("cursor".into());
-    }
-    let models = sources
-        .clone()
-        .find(|e| !e.models.is_empty() && (e.harness.is_none() || e.harness == harness))
-        .map(|e| e.models.clone())
-        .unwrap_or_default();
-    let efforts = sources
-        .clone()
-        .find(|e| !e.efforts.is_empty())
-        .map(|e| e.efforts.clone())
-        .unwrap_or_else(|| vec!["low".into(), "medium".into(), "high".into()]);
-    if sources.clone().next().is_some() {
-        snapshot.execution = Some(PolicyExecutionSettings {
-            harness: harness.clone(),
-            models,
-            efforts,
-            shared_execution_environment_id,
-        });
-    }
+    let execution = compose_execution(tag_id, base.harness_kind, base.execution, &roles)
+        .map_err(StoreError::FailedPrecondition)?;
+    let harness = execution
+        .as_ref()
+        .and_then(|settings| settings.harness.clone());
+    snapshot.execution = execution;
     let harness_kind = match harness.as_deref() {
         None => base.harness_kind,
         Some(name) => harness_for_name(name).ok_or_else(|| {

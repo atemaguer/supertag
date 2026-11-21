@@ -640,7 +640,13 @@ async fn previous_schema(url: &str) {
 
 async fn composition(store: &Store) {
     store
-        .put_tag("composed", "Base", vec!["files:write".into()])
+        .put_tag_configured(
+            "composed",
+            "Base",
+            vec!["files:write".into()],
+            None,
+            HarnessKind::ClaudeCode,
+        )
         .await
         .unwrap();
     // A required grant wins over both direct and other reusable grants.
@@ -686,9 +692,84 @@ async fn composition(store: &Store) {
     z.execution = Some(PolicyExecutionSettings {
         harness: Some("codex".into()),
         models: vec!["codex-model".into()],
-        efforts: vec!["low".into()],
+        efforts: vec!["high".into()],
         shared_execution_environment_id: None,
     });
+    // On a Tag that names no harness, Roles that name different harnesses conflict, and the
+    // assignment that would make the conflict is refused; no ordering rule picks one.
+    store
+        .put_tag("composed-open", "Base", vec![])
+        .await
+        .unwrap();
+    for r in [&alpha, &zulu] {
+        store.put_role(OP, r).await.unwrap();
+    }
+    store
+        .assign_role(
+            OP,
+            &AssignRoleRequest {
+                operation_id: "assign-open-alpha".into(),
+                role: "z-alpha".into(),
+                tag_id: "composed-open".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let refused = store
+        .assign_role(
+            OP,
+            &AssignRoleRequest {
+                operation_id: "assign-open-zulu".into(),
+                role: "a-zulu".into(),
+                tag_id: "composed-open".into(),
+            },
+        )
+        .await;
+    assert!(
+        matches!(&refused, Err(StoreError::FailedPrecondition(reason))
+            if reason == "Tag composed-open gets execution.harness from Roles a-zulu, z-alpha with different values; set execution.harness on the Tag, or give the Roles the same value"),
+        "{refused:?}"
+    );
+    // A Role change that would make the conflict on a Tag that holds it is refused too.
+    let mut changed = role("z-alpha", &["named"], &[]);
+    changed.operation_id = "change-alpha".into();
+    let alpha_now = store.get_role(OP, "z-alpha").await.unwrap();
+    changed.expected_revision = Some(alpha_now.revision);
+    let c = changed.role.as_mut().unwrap();
+    c.name = "Alpha".into();
+    c.execution = Some(PolicyExecutionSettings {
+        efforts: vec!["low".into()],
+        ..alpha_now.execution.clone().unwrap()
+    });
+    store
+        .assign_role(
+            OP,
+            &AssignRoleRequest {
+                operation_id: "assign-composed-alpha-early".into(),
+                role: "z-alpha".into(),
+                tag_id: "composed".into(),
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .assign_role(
+            OP,
+            &AssignRoleRequest {
+                operation_id: "assign-composed-zulu-early".into(),
+                role: "a-zulu".into(),
+                tag_id: "composed".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let refused = store.put_role(OP, &changed).await;
+    assert!(
+        matches!(&refused, Err(StoreError::FailedPrecondition(reason))
+            if reason.starts_with("Tag composed gets execution.efforts from Roles a-zulu, z-alpha")),
+        "{refused:?}"
+    );
+    assert_eq!(store.get_role(OP, "z-alpha").await.unwrap(), alpha_now);
     for r in [&alpha, &zulu] {
         store.put_role(OP, r).await.unwrap();
         store
@@ -756,8 +837,8 @@ async fn composition(store: &Store) {
             if reason.contains("a Tag keeps its harness. Create a new Tag for codex")),
         "{refused:?}"
     );
-    // Tag choice overrides Role harness; models belong to their named harness,
-    // while the first Role's effort range remains authoritative.
+    // Tag choice overrides Role harness, and models belong to their named harness; the Roles
+    // agree on effort.
     store
         .put_tag_configured(
             "composed-codex",

@@ -47,6 +47,7 @@ mod service_manager;
 mod status;
 mod surface_policy;
 mod surface_setup;
+mod tag_policy;
 mod tags;
 mod task_artifact_inputs;
 mod tasks;

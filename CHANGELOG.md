@@ -38,6 +38,20 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- Roles that set one execution field to different values now conflict, instead of the first
+  Role by name winning. When two of a Tag's active Roles set `harness`, `models`, `efforts`, or
+  `sharedExecutionEnvironmentId` differently and the Tag does not set it, SuperTag refuses the
+  change that makes the conflict: assigning the Role, putting or applying the Tag or the Role,
+  `supertag diff`, and `supertag up`'s provisioning. The error names the Tag, the field, and the
+  Roles, and says to set the field on the Tag or give the Roles the same value. Equal values
+  agree. A Tag that already holds conflicting Roles accepts no Task until you resolve it, and
+  `supertag describe tag` shows the conflict. See
+  [Execution settings](docs/reference/resource-model.md#execution-settings).
+- `supertag describe tag` lists each permission the Tag holds with the Roles and Permission Sets
+  that grant it, and its composed execution settings. `supertag diff`, `supertag apply`, and
+  `supertag role-assignment create` say what an existing Tag gains, such as
+  `Tag/builder gains files:write (Role/reviewer via PermissionSet/write-access)`. See
+  [Effective authorization](docs/reference/iam.md#effective-authorization).
 - Every resource you name has an ID that follows one rule: a DNS-1123 label of 1–63 lowercase
   letters, digits, and hyphens, starting and ending with a letter or digit, such as `10x` or
   `security-reviewer`. It covers Tags, Roles, Permission Sets, Context Sets, Teams, Objectives,

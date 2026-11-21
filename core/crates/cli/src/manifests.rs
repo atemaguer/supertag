@@ -589,11 +589,13 @@ pub async fn run(args: ManifestArgs, apply: bool) -> Result<()> {
     )?;
     let changes = catalog.plan(manifests).await?;
     let conflicts = catalog.field_conflicts(args.force_conflicts).await?;
+    let gains = std::mem::take(&mut catalog.gains);
     if !apply {
         let mut lines = changes
             .iter()
             .map(plan::Change::preview)
             .collect::<Vec<_>>();
+        lines.extend(gains.iter().map(|line| crate::terminal::text(line)));
         lines.extend(conflicts.iter().map(|conflict| {
             format!(
                 "conflict {}  (use --force-conflicts)",
@@ -635,6 +637,9 @@ pub async fn run(args: ManifestArgs, apply: bool) -> Result<()> {
         }
     }
     catalog.record_fields().await?;
+    for line in &gains {
+        outln!("{}", crate::terminal::text(line));
+    }
     let pruned = catalog.reconcile_apply_set(args.prune, false).await?;
     if unchanged && pruned.is_empty() {
         outln!("No changes.");

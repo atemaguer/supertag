@@ -801,6 +801,11 @@ async fn exercise(database_url: &str) -> Result<()> {
         None,
     )
     .await?;
+    // describe adds what grants each permission and the composed execution settings.
+    let mut tag_json = tag_json;
+    let described = tag_json.as_object_mut().context("describe tag JSON")?;
+    assert_eq!(described.remove("permissions"), Some(serde_json::json!([])));
+    assert_eq!(described.remove("execution"), Some(Value::Null));
     assert_eq!(
         tag_json,
         json_of(

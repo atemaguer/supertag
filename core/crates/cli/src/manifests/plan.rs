@@ -39,6 +39,24 @@ pub(super) struct Catalog<'a> {
     planned_fields: Vec<ManifestField>,
     /// Each resource's fields, and whether its planned write (if any) succeeded.
     fields: BTreeMap<Key, (Vec<ManifestField>, bool)>,
+    /// Each declared Tag as this plan leaves it.
+    tag_plans: BTreeMap<String, TagPlan>,
+    /// Each declared Permission Set as this plan leaves it, by ID.
+    declared_sets: BTreeMap<String, PermissionSet>,
+    /// What the plan lets Tags do that they could not before, one line per permission.
+    pub(super) gains: Vec<String>,
+    /// Existing Tags whose update keeps every execution field they set: written before Roles, so
+    /// a Tag override that resolves a new Role conflict lands first.
+    early_tags: BTreeSet<String>,
+}
+
+/// A declared Tag's settings after the plan, and its Roles: exactly these, or the stored ones
+/// with these added and removed.
+struct TagPlan {
+    policy: crate::tag_policy::TagPolicy,
+    exactly: Option<BTreeSet<String>>,
+    add: BTreeSet<String>,
+    remove: BTreeSet<String>,
 }
 
 /// A declared resource of a prunable kind, as this apply leaves it.
@@ -207,6 +225,10 @@ impl<'a> Catalog<'a> {
             declared: BTreeMap::new(),
             planned_fields: Vec::new(),
             fields: BTreeMap::new(),
+            tag_plans: BTreeMap::new(),
+            declared_sets: BTreeMap::new(),
+            gains: Vec::new(),
+            early_tags: BTreeSet::new(),
         })
     }
 
@@ -294,7 +316,135 @@ impl<'a> Catalog<'a> {
             )
         });
         changes.splice(objectives..objectives, followups);
+        if let Some(roles) = changes
+            .iter()
+            .position(|change| matches!(change.write, Write::Role(_)))
+        {
+            let mut early = Vec::new();
+            let mut index = roles;
+            while index < changes.len() {
+                if matches!(&changes[index].write, Write::Tag(tag) if self.early_tags.contains(&tag.tag_id))
+                {
+                    early.push(changes.remove(index));
+                } else {
+                    index += 1;
+                }
+            }
+            changes.splice(roles..roles, early);
+        }
+        self.policy_effects(&declarations).await?;
         Ok(changes)
+    }
+
+    /// Refuses a plan that leaves a Tag's Roles with conflicting execution settings, and records
+    /// what it lets each existing Tag do that the Tag could not before. It looks at the declared
+    /// Tags, and the Tags that hold a declared Role or a Role naming a declared Permission Set.
+    async fn policy_effects(&mut self, declarations: &Declarations) -> Result<()> {
+        use crate::tag_policy::{TagPolicy, fill_sets, gains, holders, read};
+        let mut roles: BTreeSet<String> = declarations.roles.keys().cloned().collect();
+        if !self.declared_sets.is_empty() {
+            let mut cursor = String::new();
+            loop {
+                let page = self
+                    .policy
+                    .list_roles(request(
+                        ListPolicyResourcesRequest { limit: 100, cursor },
+                        self.token,
+                    )?)
+                    .await?
+                    .into_inner();
+                roles.extend(
+                    page.roles
+                        .iter()
+                        .filter(|role| {
+                            role.permission_set_ids
+                                .iter()
+                                .any(|id| self.declared_sets.contains_key(id))
+                        })
+                        .map(|role| role.role_id.clone()),
+                );
+                if page.next_cursor.is_empty() {
+                    break;
+                }
+                cursor = page.next_cursor;
+            }
+        }
+        let mut tags: BTreeSet<String> = self.tag_plans.keys().cloned().collect();
+        for role in &roles {
+            tags.extend(holders(&mut self.policy, self.token, role).await?);
+        }
+        for tag in tags {
+            let before = match self.tag(&tag).await? {
+                Some(_) => {
+                    Some(read(&mut self.operator, &mut self.policy, self.token, &tag).await?)
+                }
+                None => None,
+            };
+            let mut after = before.clone().unwrap_or_else(|| TagPolicy {
+                tag_id: tag.clone(),
+                ..Default::default()
+            });
+            let plan = self.tag_plans.get(&tag);
+            if let Some(plan) = plan {
+                after
+                    .allowed_actions
+                    .clone_from(&plan.policy.allowed_actions);
+                after.harness_kind = plan.policy.harness_kind;
+                after.execution.clone_from(&plan.policy.execution);
+            }
+            let ids: BTreeSet<String> = match plan {
+                Some(TagPlan {
+                    exactly: Some(ids), ..
+                }) => ids.clone(),
+                _ => {
+                    let mut ids: BTreeSet<String> = after
+                        .roles
+                        .iter()
+                        .map(|role| role.role_id.clone())
+                        .collect();
+                    if let Some(plan) = plan {
+                        ids.extend(plan.add.iter().cloned());
+                        ids.retain(|id| !plan.remove.contains(id));
+                    }
+                    ids
+                }
+            };
+            let stored = std::mem::take(&mut after.roles);
+            for id in ids {
+                let role = match declarations.roles.get(&id) {
+                    Some(role) => role.clone(),
+                    None => match stored.iter().find(|role| role.role_id == id) {
+                        Some(role) => role.clone(),
+                        None => self
+                            .policy
+                            .get_role(request(
+                                GetPolicyResourceRequest { reference: id },
+                                self.token,
+                            )?)
+                            .await?
+                            .into_inner(),
+                    },
+                };
+                if role.status == RoleStatus::Active as i32 {
+                    after.roles.push(role);
+                }
+            }
+            fill_sets(
+                &mut after,
+                &mut self.policy,
+                self.token,
+                &self.declared_sets,
+            )
+            .await?;
+            if let Err(conflict) = after.execution() {
+                bail!(conflict);
+            }
+            // A new Tag's permissions show as its creation and Role assignments.
+            if before.is_some() {
+                self.gains.extend(gains(before.as_ref(), &after));
+            }
+        }
+        Ok(())
     }
 
     async fn plan_resource(
@@ -528,6 +678,8 @@ impl<'a> Catalog<'a> {
                 declarations
                     .ids
                     .insert((Kind::PermissionSet, name.into()), value.set_id.clone());
+                self.declared_sets
+                    .insert(value.set_id.clone(), value.clone());
                 for grant in &mut value.permissions {
                     grant.permission_id.clear();
                 }
@@ -942,11 +1094,24 @@ impl<'a> Catalog<'a> {
             // Role it lists that this provisioning creates, such as a Role renamed to follow the
             // resource ID rule.
             references(&mut spec.roles, "a Role reference")?;
-            for role in spec
+            let created: BTreeSet<String> = spec
                 .roles
                 .iter()
                 .filter(|role| declarations.created_roles.contains(*role))
-            {
+                .cloned()
+                .collect();
+            if let Some(prior) = &prior {
+                self.tag_plans.insert(
+                    name.into(),
+                    TagPlan {
+                        policy: crate::tag_policy::TagPolicy::of(prior),
+                        exactly: None,
+                        add: created.clone(),
+                        remove: BTreeSet::new(),
+                    },
+                );
+            }
+            for role in &created {
                 followups.push(Change {
                     key: None,
                     label: format!("Tag/{name} Role/{role}"),
@@ -1158,6 +1323,21 @@ impl<'a> Catalog<'a> {
                 .filter(|_| !self.create_only)
                 .map(|labels| TagRunsOnLabels { labels }),
         };
+        self.tag_plans.insert(
+            name.into(),
+            TagPlan {
+                policy: crate::tag_policy::TagPolicy {
+                    tag_id: name.into(),
+                    allowed_actions: value.allowed_actions.clone(),
+                    harness_kind: value.harness_kind,
+                    execution: value.execution.clone(),
+                    ..Default::default()
+                },
+                exactly: prior.is_none().then(|| role_ids.keys().cloned().collect()),
+                add: BTreeSet::new(),
+                remove: BTreeSet::new(),
+            },
+        );
         if self.create_only {
             return Ok(Some((
                 false,
@@ -1175,6 +1355,21 @@ impl<'a> Catalog<'a> {
                     .reconcile_tag(request(reconciliation.clone(), self.token)?)
                     .await?
                     .into_inner();
+                if let Some(plan) = self.tag_plans.get_mut(name) {
+                    for change in response.changes.iter().filter(|c| !c.ownership_only) {
+                        if let Some(role) = change
+                            .path
+                            .strip_prefix("spec.roles[")
+                            .and_then(|value| value.strip_suffix(']'))
+                        {
+                            if change.present {
+                                plan.add.insert(role.into());
+                            } else {
+                                plan.remove.insert(role.into());
+                            }
+                        }
+                    }
+                }
                 response
                     .changes
                     .into_iter()
@@ -1294,6 +1489,22 @@ impl<'a> Catalog<'a> {
                     .is_none_or(|volume| *volume == old.volume)
                 && value.name.as_ref().is_none_or(|name| *name == old.name)
         });
+        if let Some(old) = &prior {
+            let set = |e: Option<&PolicyExecutionSettings>| {
+                e.map_or([false; 4], |e| {
+                    [
+                        e.harness.is_some(),
+                        !e.models.is_empty(),
+                        !e.efforts.is_empty(),
+                        e.shared_execution_environment_id.is_some(),
+                    ]
+                })
+            };
+            let (before, after) = (set(old.execution.as_ref()), set(value.execution.as_ref()));
+            if before.iter().zip(after).all(|(was, is)| !was || is) {
+                self.early_tags.insert(name.into());
+            }
+        }
         Ok((!unchanged).then_some((prior.is_some(), Write::Tag(value))))
     }
 

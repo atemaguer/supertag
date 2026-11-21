@@ -71,8 +71,8 @@ pub use audit_sink::AuditSink;
 pub use objectives::validate_manifest_objective;
 pub use operator_access::{AuditRecord, OPERATOR_TOKEN_LIFETIME_MS, OperatorAuthentication};
 pub use policy::{
-    normalize_manifest_context, normalize_manifest_permission, normalize_manifest_role,
-    normalize_tag_execution,
+    compose_execution, normalize_manifest_context, normalize_manifest_permission,
+    normalize_manifest_role, normalize_tag_execution,
 };
 pub use remote_workspaces::validate_manifest_workspace;
 pub use store::{AttemptAccess, AttemptCall, HostAuthority, Role, Store, StoreError};

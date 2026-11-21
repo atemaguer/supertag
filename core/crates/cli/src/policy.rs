@@ -508,23 +508,37 @@ pub(crate) async fn list_assignments(
 
 pub async fn run_assignment(connection: Connection, command: AssignmentCommand) -> Result<()> {
     let (channel, token) = connect_operator(connection).await?;
-    let mut client = client(channel);
+    let mut client = client(channel.clone());
     let assignment = match command {
         AssignmentCommand::Create {
             role,
             tag_id,
             operation_id: id,
-        } => client
-            .assign_role(request(
-                AssignRoleRequest {
-                    role,
-                    tag_id,
-                    operation_id: operation_id(id),
-                },
-                &token,
-            )?)
-            .await?
-            .into_inner(),
+        } => {
+            // Say what the Tag gains, on standard error so the assignment stays JSON.
+            let mut operator = operator_client::OperatorClient::new(channel.clone())
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES);
+            let before =
+                crate::tag_policy::read(&mut operator, &mut client, &token, &tag_id).await?;
+            let assignment = client
+                .assign_role(request(
+                    AssignRoleRequest {
+                        role,
+                        tag_id: tag_id.clone(),
+                        operation_id: operation_id(id),
+                    },
+                    &token,
+                )?)
+                .await?
+                .into_inner();
+            let after =
+                crate::tag_policy::read(&mut operator, &mut client, &token, &tag_id).await?;
+            for line in crate::tag_policy::gains(Some(&before), &after) {
+                errln!("{line}");
+            }
+            assignment
+        }
         AssignmentCommand::Deactivate {
             assignment_id,
             expected_revision,

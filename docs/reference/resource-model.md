@@ -420,12 +420,18 @@ default. Effort is different: when neither the Tag nor its Roles set `efforts`, 
 `low`, and `medium` and `high` stay allowed. An `efforts` list keeps its own first value as the
 default. Starting low keeps routine work cheap; the actors raise effort when work needs it. A Role sets
 the default and allowed range for its Tags. A Tag's own `spec.execution` overrides its Roles' field
-by field, so the Tag wins. When several Roles set a field, the first Role by name wins. A Role's
-models apply only to its own harness: a Tag on another harness does not inherit them.
+by field, so the Tag wins. Roles that set a field to the same value agree. When two of a Tag's
+Roles set a field to different values and the Tag does not set it, the Roles conflict, and no
+ordering rule picks one. SuperTag refuses every change that would make a conflict: assigning the
+Role, putting or applying the Tag or the Role, and `supertag diff`. The error names the Tag, the
+field, and the Roles; set the field on the Tag, or give the Roles the same value. A Tag that
+already holds conflicting Roles accepts no Task until you resolve it, and `supertag describe tag`
+shows the conflict under `execution`. A Role's models apply only to its own harness: a Tag on
+another harness does not inherit them, so they meet no other harness's models.
 A Tag keeps the harness it was created with; changing `harness` on an existing Tag is refused, so
 create a new Tag for another harness. A work Session may name another harness with
 `start_session`; see [work Sessions](../concepts/tasks.md#other-sessions).
-`supertag describe tag` prints the resulting range.
+`supertag describe tag` prints the resulting range under `execution`.
 
 Each harness maps effort to its own option. Codex receives it as `model_reasoning_effort`, and
 Claude Code receives it as its effort option. OpenCode has no effort option, so it ignores effort

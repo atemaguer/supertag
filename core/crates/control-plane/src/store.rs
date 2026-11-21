@@ -763,6 +763,7 @@ impl Store {
             .bind(volume.as_deref())
             .fetch_one(&mut **transaction).await?;
         let revision: i64 = row.try_get("revision")?;
+        crate::policy::check_tag_execution_in(transaction, tag_id).await?;
         Ok(Tag {
             tag_id: tag_id.into(),
             instructions: instructions.into(),

@@ -510,6 +510,7 @@ spec: {purpose: Observe releases.}
 
     prune_apply_set(root, &gateway).await?;
     field_managers(root, &gateway).await?;
+    role_composition(root, &gateway).await?;
     resume_apply_set(root, &gateway).await?;
     plane.kill().await?;
     Ok(())
@@ -826,6 +827,102 @@ spec: {{members: [resume-worker]}}
     for removed in ["resume-a", "resume-crashed"] {
         assert!(!volume_exists(gateway, removed).await?, "{removed}");
     }
+    Ok(())
+}
+
+/// Roles that set one execution field differently are refused on a Tag that does not set it;
+/// describe shows what grants each permission; apply and assignment say what a Tag gains.
+async fn role_composition(root: &Path, gateway: &str) -> Result<()> {
+    let manifest = |name: &str, body: &str| -> Result<String> {
+        let path = root.join(name);
+        std::fs::write(&path, body)?;
+        Ok(path.to_str().context("manifest path")?.to_owned())
+    };
+    let roles = |reviewer_efforts: &str, tag_execution: &str| {
+        format!(
+            "apiVersion: supertag/v1\nkind: PermissionSet\nmetadata: {{name: compose-read}}\nspec: {{permissions: [{{target: runtime, action: \"files:read\"}}]}}\n---\n\
+             apiVersion: supertag/v1\nkind: PermissionSet\nmetadata: {{name: compose-write}}\nspec: {{permissions: [{{target: runtime, action: \"files:write\"}}]}}\n---\n\
+             apiVersion: supertag/v1\nkind: Role\nmetadata: {{name: compose-builder}}\nspec: {{purpose: Build., permissionSets: [compose-read], execution: {{efforts: [high]}}}}\n---\n\
+             apiVersion: supertag/v1\nkind: Role\nmetadata: {{name: compose-reviewer}}\nspec: {{purpose: Review., permissionSets: [compose-read, compose-write], execution: {{efforts: [{reviewer_efforts}]}}}}\n---\n\
+             apiVersion: supertag/v1\nkind: Tag\nmetadata: {{name: composer}}\nspec: {{roles: [compose-builder]{tag_execution}}}\n"
+        )
+    };
+    let conflict = "Tag composer gets execution.efforts from Roles compose-builder, compose-reviewer with different values; set execution.efforts on the Tag, or give the Roles the same value";
+
+    // The Tag holds one Role, so the other Role's effort conflicts with nothing yet.
+    let first = manifest("compose-a.yaml", &roles("low", ""))?;
+    command(gateway, &["apply", "-f", &first], true).await?;
+    // Assigning a Role with another effort is refused on every path, diff included.
+    let both = roles("low", "").replace("[compose-builder]", "[compose-builder, compose-reviewer]");
+    let both = manifest("compose-b.yaml", &both)?;
+    for verb in ["diff", "apply"] {
+        let refused = command(gateway, &[verb, "-f", &both], false).await?;
+        assert!(refused.contains(conflict), "{verb}: {refused}");
+    }
+    let refused = command(
+        gateway,
+        &["role-assignment", "create", "compose-reviewer", "composer"],
+        false,
+    )
+    .await?;
+    assert!(refused.contains(conflict), "{refused}");
+    // Equal values agree, and the apply says what the Tag gains through the new Role.
+    let equal =
+        roles("high", "").replace("[compose-builder]", "[compose-builder, compose-reviewer]");
+    let equal = manifest("compose-c.yaml", &equal)?;
+    let preview = command(gateway, &["diff", "-f", &equal], true).await?;
+    let gain =
+        "Tag/composer gains files:write (Role/compose-reviewer via PermissionSet/compose-write)";
+    assert!(preview.contains(gain), "{preview}");
+    assert!(!preview.contains("gains files:read"), "{preview}");
+    let applied = command(gateway, &["apply", "-f", &equal], true).await?;
+    assert!(applied.contains(gain), "{applied}");
+    // Nothing new: the apply stays quiet about gains.
+    assert_eq!(
+        command(gateway, &["apply", "-f", &equal], true)
+            .await?
+            .trim(),
+        "No changes."
+    );
+    // A Role change that would conflict on a Tag that holds it is refused.
+    let changed =
+        roles("low", "").replace("[compose-builder]", "[compose-builder, compose-reviewer]");
+    let changed = manifest("compose-d.yaml", &changed)?;
+    let refused = command(gateway, &["apply", "-f", &changed], false).await?;
+    assert!(refused.contains(conflict), "{refused}");
+    // The Tag's own setting resolves it.
+    let overridden = roles("low", ", execution: {efforts: [medium]}")
+        .replace("[compose-builder]", "[compose-builder, compose-reviewer]");
+    let overridden = manifest("compose-e.yaml", &overridden)?;
+    command(gateway, &["apply", "-f", &overridden], true).await?;
+
+    // describe shows each permission with what grants it, and the composed execution.
+    let described: Value = serde_json::from_str(
+        &command(
+            gateway,
+            &["describe", "tag", "composer", "--output", "json"],
+            true,
+        )
+        .await?,
+    )?;
+    let read = described["permissions"]
+        .as_array()
+        .context("permissions")?
+        .iter()
+        .find(|entry| entry["permission"] == "files:read")
+        .context("files:read")?;
+    assert_eq!(
+        read["granted_by"],
+        serde_json::json!([
+            "Role/compose-builder via PermissionSet/compose-read",
+            "Role/compose-reviewer via PermissionSet/compose-read"
+        ]),
+        "{described}"
+    );
+    assert_eq!(
+        described["execution"]["efforts"],
+        serde_json::json!(["medium"])
+    );
     Ok(())
 }
 

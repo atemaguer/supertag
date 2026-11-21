@@ -61,6 +61,14 @@ origin-activated Permission Sets
 
 Everything outside the intersection is denied. Prompt wording, channel membership, or a broad installed credential cannot widen it.
 
+`supertag describe tag TAG` lists each permission the Tag holds under `permissions`, with what
+grants it in `granted_by`: the Tag itself, or `Role/ROLE via PermissionSet/SET`. Several may
+grant one permission. A location's Sets apply only to Tasks from that location, so the list
+leaves them out. A change that adds a permission says so: `supertag diff` and `supertag apply`
+print a line such as
+`Tag/builder gains files:write (Role/reviewer via PermissionSet/write-access)` for each existing
+Tag, and `supertag role-assignment create` prints it on standard error.
+
 ## Approval
 
 A permission can require a recorded decision before each use. Add `approvalRequired: true` to a
