@@ -225,6 +225,7 @@ esac`,
     localStateOf: async () => {
       throw "not the local Gateway";
     },
+    update: { installed: () => false, done() {} },
   };
   return { calls, deps };
 }
@@ -254,6 +255,56 @@ it("starts stopped services that were set up, and only those", async () => {
   expect(await localHandlers(fresh.deps).localStartNeeded({})).toBe(false);
   expect(await localHandlers(fresh.deps).startLocalServices({})).toBe(false);
   expect(await readFile(fresh.calls, "utf8")).not.toContain("up --state-directory");
+});
+
+it("restarts running services with the updated app's CLI on the first launch after an update", async () => {
+  const running = {
+    protocol: "local-gateway.v2",
+    running: true,
+    state_directory: "/tmp/au-state",
+    set_up: true,
+    machine_id: null,
+    url: "http://127.0.0.1:9",
+    token: "t",
+  };
+  const { calls, deps } = await fakeCli("after-update", running);
+  // An ordinary launch leaves running services alone.
+  expect(await localHandlers(deps).localUpdatePending({})).toBe(false);
+  expect(await localHandlers(deps).startLocalServices({})).toBe(false);
+  expect(await readFile(calls, "utf8")).not.toContain("up --state-directory");
+
+  let installed = true;
+  const updated = localHandlers({
+    ...deps,
+    update: {
+      installed: () => installed,
+      done() {
+        installed = false;
+      },
+    },
+  });
+  expect(await updated.localUpdatePending({})).toBe(true);
+  // `supertag up` restarts services of another build with this one.
+  expect(await updated.startLocalServices({})).toBe(true);
+  expect(await readFile(calls, "utf8")).toContain("up --state-directory /tmp/au-state\n");
+  // Once.
+  expect(await updated.localUpdatePending({})).toBe(false);
+  expect(await updated.startLocalServices({})).toBe(false);
+
+  // Nothing set up here: nothing to restart, and the note is spent.
+  const fresh = await fakeCli("after-update-fresh", { ...running, running: false, set_up: false });
+  installed = true;
+  const none = localHandlers({
+    ...fresh.deps,
+    update: {
+      installed: () => installed,
+      done() {
+        installed = false;
+      },
+    },
+  });
+  expect(await none.startLocalServices({})).toBe(false);
+  expect(installed).toBe(false);
 });
 
 it("restarts only an older local release, reporting each step", async () => {

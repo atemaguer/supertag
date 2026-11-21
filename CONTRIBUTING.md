@@ -477,9 +477,10 @@ release without its archives:
    (`release.yml`) builds and verifies the four archives with `native-release-check.yml`, checks
    the pinned installer against them, builds the desktop app's disk images for Apple silicon and
    Intel (`SuperTag-VERSION-darwin-arm64.dmg`, `SuperTag-VERSION-darwin-amd64.dmg`) and Debian
-   packages
-   (`SuperTag-VERSION-linux-amd64.deb`, `SuperTag-VERSION-linux-arm64.deb`), and attaches them
-   with their `SHA256SUMS` and an
+   packages (`SuperTag-VERSION-linux-amd64.deb`, `SuperTag-VERSION-linux-arm64.deb`), and each
+   Mac's update zip (`SuperTag-VERSION-darwin-arm64.zip`, `SuperTag-VERSION-darwin-amd64.zip`, the
+   signed app, with its `.blockmap`) and `latest-mac.yml`, from which installed Mac apps update
+   themselves once the release is published. It attaches them with their `SHA256SUMS` and an
    `install.sh` pinned to the release to a draft GitHub Release for the tag. It never changes a
    published release.
 2. Review the draft's notes and assets, then publish it as the latest release, for example with

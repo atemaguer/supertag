@@ -35,6 +35,7 @@ import type {
   WatchUpdate,
 } from "@supertag/client/model";
 import type { SetupCheck } from "../src/gateway";
+import type { UpdateStatus } from "./update-state";
 
 /** A call that takes no arguments; the window passes `{}`. */
 export type NoArgs = Record<string, never>;
@@ -126,6 +127,8 @@ export interface Commands {
   localCliProblem: Call<NoArgs, string | null>;
   localGatewayUpgrade: Call<NoArgs, LocalUpgrade | null>;
   restartLocalServices: Progress<NoArgs, void, RestartStep>;
+  /** This launch is the first after the app updated itself, so the local services restart. */
+  localUpdatePending: Call<NoArgs, boolean>;
   // Onboarding
   checkSetup: Call<{ directory?: string; harness?: string }, SetupCheck>;
   chooseProjectFolder: Call<NoArgs, string | null>;
@@ -134,6 +137,11 @@ export interface Commands {
   notify: Call<NotificationRequest, void>;
   setBadge: Call<{ count: number }, void>;
   openExternal: Call<{ url: string }, void>;
+  // The app's own updates; `onUpdateStatus` hears each change.
+  updateStatus: Call<NoArgs, UpdateStatus>;
+  checkForUpdates: Call<NoArgs, void>;
+  /** Restarts into a downloaded update, or else opens the release page. */
+  installUpdate: Call<NoArgs, void>;
 }
 
 export type Channel = keyof Commands;
@@ -187,12 +195,16 @@ export const CHANNELS = {
   localCliProblem: "call",
   localGatewayUpgrade: "call",
   restartLocalServices: "progress",
+  localUpdatePending: "call",
   checkSetup: "call",
   chooseProjectFolder: "call",
   setUpSupertag: "call",
   notify: "call",
   setBadge: "call",
   openExternal: "call",
+  updateStatus: "call",
+  checkForUpdates: "call",
+  installUpdate: "call",
 } as const satisfies { [K in Channel]: Kind<Commands[K]> };
 
 /** The IPC channel a table entry is invoked on. */
@@ -203,6 +215,8 @@ export const STREAM_UPDATE = "supertag:stream";
 export const STREAM_END = "supertag:stream-end";
 /** Main says a notification was clicked, with its Tag ID. */
 export const NOTIFICATION_CLICK = "supertag:notification-click";
+/** Main says the app's update status changed, with the new one. */
+export const UPDATE_STATUS = "supertag:update-status";
 
 /** What a handler sends back over IPC; the preload turns an error into a rejected string. */
 export type Reply<R> = { ok: true; value: R } | { ok: false; error: string };
@@ -214,8 +228,10 @@ type Method<C> =
       ? (args: A) => Promise<R>
       : never;
 
-/** `window.supertag`: one method per channel, and notification clicks. */
+/** `window.supertag`: one method per channel, notification clicks, and update statuses. */
 export type SupertagApi = { readonly [K in Channel]: Method<Commands[K]> } & {
   /** Calls `open` with the Tag of each clicked notification, until the returned stop. */
   readonly onNotificationClick: (open: (tagId: string) => void) => () => void;
+  /** Calls `changed` with each new update status, until the returned stop. */
+  readonly onUpdateStatus: (changed: (status: UpdateStatus) => void) => () => void;
 };

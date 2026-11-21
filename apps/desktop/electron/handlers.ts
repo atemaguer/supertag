@@ -1,5 +1,6 @@
 /**
- * The main process's handler for every channel: the shell's own channels, the Gateway
+ * The main process's handler for every channel: the shell's own channels (with the app's own
+ * updates), the Gateway
  * connection (`gateway/`, on `supertag-ai`), and the local services and onboarding (`local/`,
  * on the app's CLI).
  */
@@ -10,6 +11,7 @@ import { gatewayHandlers } from "./gateway/handlers";
 import type { Handlers } from "./ipc";
 import { type LocalDependencies, localHandlers } from "./local/handlers";
 import { badgeCount, notificationRequest, webUrl } from "./shell";
+import type { UpdateStatus } from "./update-state";
 
 export interface Shell {
   notify(request: NotificationRequest): void;
@@ -18,6 +20,12 @@ export interface Shell {
   chooseFolder(): Promise<string | null>;
   /** Shows a file in Finder or the file manager. */
   reveal(path: string): void;
+  /** The app's own updates (`updater.ts`). */
+  updates: {
+    readonly status: UpdateStatus;
+    check(manual: boolean): Promise<void>;
+    install(): Promise<void>;
+  };
 }
 
 /** The Gateway connection the window's Gateway channels use, and where it caches. */
@@ -43,6 +51,9 @@ export function handlers(
       const checked = badgeCount(count);
       if (checked !== undefined) shell.setBadge(checked);
     },
+    updateStatus: async () => shell.updates.status,
+    checkForUpdates: () => shell.updates.check(true),
+    installUpdate: () => shell.updates.install(),
     async openExternal({ url }) {
       const link = webUrl(url);
       if (!link) throw "Only web links open in the browser.";

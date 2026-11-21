@@ -34,4 +34,15 @@ for platform in darwin-arm64 darwin-amd64; do
     printf '::warning::%s has no SuperTag-%s-%s.dmg asset\n' "$release_tag" "$version" "$platform"
   fi
 done
+# The desktop app's update feed and each Mac's update zip and blockmap, which installed Mac apps
+# update from; they warn like the disk image.
+if ! grep -Fxq -- latest-mac.yml <<<"$assets"; then
+  printf '::warning::%s has no latest-mac.yml asset, so installed Mac apps will not update to it\n' \
+    "$release_tag"
+fi
+while IFS= read -r zip; do
+  if ! grep -Fxq -- "$zip.blockmap" <<<"$assets"; then
+    printf '::warning::%s has %s but no %s.blockmap\n' "$release_tag" "$zip" "$zip"
+  fi
+done < <(grep -E "^SuperTag-${version//./\\.}-darwin-[a-z0-9_]+\.zip$" <<<"$assets" || true)
 exit "$missing"

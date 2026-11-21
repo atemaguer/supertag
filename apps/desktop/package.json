@@ -39,6 +39,7 @@
     "cn": "0.5.2",
     "electron": "44.11.4",
     "electron-builder": "26.18.0",
+    "electron-updater": "6.8.11",
     "lucide-react": "1.72.0",
     "playwright-core": "1.65.1",
     "react": "19.3.1",

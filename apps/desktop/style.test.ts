@@ -42,3 +42,15 @@ it("marks the open Tag's row with a fill alone, without a border", () => {
   expect(rule).toContain("background: var(--selected);");
   expect(rule).not.toContain("border");
 });
+
+it("pins the update banner to the bottom right corner, above the composer and under dialogs", () => {
+  const rule = /\n\.update-banner \{([^}]*)\}/u.exec(css)?.[1] ?? "";
+  expect(rule).toContain("position: fixed;");
+  expect(rule).toMatch(/^\s+right: 18px;$/mu);
+  // The composer is about 86px tall with its footer; the banner clears its send button.
+  expect(rule).toMatch(/^\s+bottom: 100px;$/mu);
+  // Dialogs sit at z-index 50 (components/ui/dialog.tsx); the banner stays below them.
+  const z = Number(/z-index: (\d+);/u.exec(rule)?.[1]);
+  expect(z).toBeGreaterThan(0);
+  expect(z).toBeLessThan(50);
+});

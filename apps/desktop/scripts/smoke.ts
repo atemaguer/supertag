@@ -179,7 +179,7 @@ try {
   const api = await page.evaluate(() =>
     Object.keys((window as unknown as { supertag?: object }).supertag ?? {}).sort(),
   );
-  const keys = [...Object.keys(CHANNELS), "onNotificationClick"].sort();
+  const keys = [...Object.keys(CHANNELS), "onNotificationClick", "onUpdateStatus"].sort();
   if (JSON.stringify(api) !== JSON.stringify(keys)) {
     fail(`window.supertag is ${JSON.stringify(api)}, expected ${JSON.stringify(keys)}`);
   }

@@ -1,20 +1,26 @@
 import type { MenuItemConstructorOptions } from "electron";
 
 /**
- * The app's menu, in place of Electron's default: the app menu on macOS, Edit (without it the
- * standard copy, paste and undo shortcuts stop working), View with zoom (and the developer tools
- * only in development), and Window.
+ * The app's menu, in place of Electron's default: the app menu on macOS (File elsewhere), with
+ * "Check for Updates…"; Edit (without it the standard copy, paste and undo shortcuts stop
+ * working); View with zoom (and the developer tools only in development); and Window.
  */
 export function menuTemplate(options: {
   mac: boolean;
   development: boolean;
+  /** "Check for Updates…": in the app menu on macOS, in File elsewhere. */
+  onCheckForUpdates?: () => void;
 }): MenuItemConstructorOptions[] {
   const template: MenuItemConstructorOptions[] = [];
+  const check: MenuItemConstructorOptions[] = options.onCheckForUpdates
+    ? [{ label: "Check for Updates…", click: options.onCheckForUpdates }]
+    : [];
   if (options.mac) {
     template.push({
       role: "appMenu",
       submenu: [
         { role: "about" },
+        ...check,
         { type: "separator" },
         { role: "hide" },
         { role: "hideOthers" },
@@ -24,7 +30,14 @@ export function menuTemplate(options: {
       ],
     });
   } else {
-    template.push({ role: "fileMenu", submenu: [{ role: "quit" }] });
+    template.push({
+      role: "fileMenu",
+      submenu: [
+        ...check,
+        ...(check.length > 0 ? [{ type: "separator" } as const] : []),
+        { role: "quit" },
+      ],
+    });
   }
   template.push({
     role: "editMenu",

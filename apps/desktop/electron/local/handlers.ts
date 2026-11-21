@@ -34,6 +34,8 @@ export interface LocalDependencies {
    * string for any other connection. The Gateway backend's `GatewayState.localStateOf`.
    */
   localStateOf(connectionId: string): Promise<string>;
+  /** Whether this launch is the first after the app updated itself, until `done`. */
+  update: { installed(): boolean; done(): void };
 }
 
 type LocalChannels =
@@ -42,6 +44,7 @@ type LocalChannels =
   | "localCliProblem"
   | "localGatewayUpgrade"
   | "restartLocalServices"
+  | "localUpdatePending"
   | "checkSetup"
   | "setUpSupertag"
   | "addLocalWorkspace"
@@ -67,9 +70,17 @@ export function localHandlers(deps: LocalDependencies): Pick<Handlers, LocalChan
     // belongs to onboarding.
     localStartNeeded: async () => shouldStart(await discover()),
 
+    localUpdatePending: async () => deps.update.installed(),
+
+    // After the app updated itself its CLI is newer than the services it left running, so
+    // `supertag up` restarts them with it, as it restarts services of a different build from a
+    // terminal. The user asked for that when they restarted to update.
     async startLocalServices() {
+      const updated = deps.update.installed();
       const local = await discover();
-      if (!shouldStart(local) || local === undefined) return false;
+      if (updated) deps.update.done();
+      const restart = updated && local !== undefined && (local.running || local.setUp);
+      if ((!restart && !shouldStart(local)) || local === undefined) return false;
       const { cli, path } = await usableCli(app);
       await startLocal(cli, local.stateDirectory, { path });
       return true;

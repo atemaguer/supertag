@@ -80,6 +80,7 @@ esac
 function table(
   dir: string,
   env: NodeJS.ProcessEnv,
+  update = { installed: () => false, done() {} },
 ): Pick<Handlers, "listGateways"> & ReturnType<typeof localHandlers> {
   const app: AppIdentity = { version: "0.3.2", execPath: "/nonexistent/SuperTag", env };
   const state = new GatewayState({
@@ -96,6 +97,7 @@ function table(
       probe: async () => undefined,
       chooseWorkspaceFolder: async () => null,
       localStateOf: (id) => state.localStateOf(id),
+      update,
     }),
   };
 }
@@ -115,6 +117,7 @@ async function first(handlers: ReturnType<typeof table>) {
     {
       list: () => handlers.listGateways({}),
       localStartNeeded: () => handlers.localStartNeeded({}),
+      updatePending: () => handlers.localUpdatePending({}),
       startLocal: () => handlers.startLocalServices({}),
       select: async () => {
         throw "no saved Gateway";
@@ -166,4 +169,29 @@ it("starts the stopped services of a set-up machine, then connects", async () =>
   expect(await readFile(calls, "utf8")).toContain(`up --state-directory ${state}\n`);
   expect(result.activation).toEqual(connected);
   expect(result.setup).toBeUndefined();
+});
+
+it("restarts the running services with the updated app's CLI on its first launch", async () => {
+  const { dir, state, calls } = await cli("updated");
+  await mkdir(state, { recursive: true });
+  await writeFile(path.join(state, "supertag.yaml"), "version: 1\n");
+  await writeFile(path.join(state, "running"), "");
+  const env = { PATH: `${dir}:/usr/bin:/bin` };
+  // An ordinary launch connects to the running services as they are.
+  const ordinary = await first(table(dir, env));
+  expect(ordinary.starting).toEqual([]);
+  expect(await readFile(calls, "utf8")).not.toContain("up --state-directory");
+
+  let installed = true;
+  const update = {
+    installed: () => installed,
+    done() {
+      installed = false;
+    },
+  };
+  const { result, starting } = await first(table(dir, env, update));
+  expect(starting).toEqual([true, false]);
+  expect(await readFile(calls, "utf8")).toContain(`up --state-directory ${state}\n`);
+  expect(installed).toBe(false);
+  expect(result.activation).toEqual(connected);
 });

@@ -8,6 +8,8 @@ import type {
   TagAdmin,
   TaskEvent,
 } from "@supertag/client/model";
+import type { UpdateStatus } from "../electron/update-state";
+import type { UpdateSource } from "./components/update";
 import { APP_VERSION } from "./components/version";
 
 const tags: Tag[] = [
@@ -351,4 +353,25 @@ export function withoutLead() {
 /** The sample Gateway's release: the app's own, or `build` when the preview names another. */
 export function previewRelease(build?: string | null): GatewayRelease {
   return { build: build || APP_VERSION, protocol: 7 };
+}
+
+/** A fixed status for `?preview&update=STATE`, so each state can be seen without a release. */
+export function previewUpdates(state: string | null): UpdateSource | undefined {
+  const version = "0.3.6";
+  const fixtures: Record<string, UpdateStatus> = {
+    downloading: { state: "downloading", version, percent: 42 },
+    ready: { state: "ready", version },
+    available: { state: "available", version },
+    installing: { state: "installing", version },
+    error: { state: "error", stage: "download", version },
+    "install-error": { state: "error", stage: "install", version },
+    "check-error": { state: "error", stage: "check" },
+  };
+  const status = state === null ? undefined : fixtures[state];
+  if (!status) return undefined;
+  return {
+    status: async () => status,
+    subscribe: () => () => {},
+    install: async () => {},
+  };
 }

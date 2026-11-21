@@ -29,7 +29,9 @@ pnpm --filter @supertag/desktop electron          # the built app
 ```
 
 `dev` serves the renderer from `http://127.0.0.1:1420` and points Electron at it; closing the
-window stops the server. Check a change with `pnpm --filter @supertag/desktop build` and
+window stops the server. With `--preview`, add `&update=STATE` to the page's URL to see the
+update banner and sidebar button in each state: `downloading`, `ready`, `installing`,
+`available` (Linux), `error`, `install-error`, or `check-error`. Check a change with `pnpm --filter @supertag/desktop build` and
 `pnpm vitest run apps/client apps/desktop`. CI runs them in `.github/workflows/desktop.yml`.
 
 `electron/main.ts` opens the window, serves the built renderer from `app://supertag/` with its
@@ -67,9 +69,31 @@ pnpm --filter @supertag/desktop package:mac --x64  # release/mac/SuperTag.app, f
 pnpm --filter @supertag/desktop package:linux      # release/SuperTag-VERSION-linux-ARCH.deb
 ```
 
-On macOS, `scripts/package-desktop-macos.sh APP CLI_DIRECTORY IMAGE` puts an extracted release
-archive in the app, then builds the disk image; without `SIGNED=true` it skips signing and
-notarization, which is enough for a local check. The Debian package installs the AppArmor profile
+On macOS, `scripts/package-desktop-macos.sh APP CLI_DIRECTORY IMAGE [ZIP]` puts an extracted
+release archive in the app, then builds the disk image, and with ZIP the update zip of the signed
+app; without `SIGNED=true` it skips signing and notarization, which is enough for a local check.
+
+## Updates
+
+`electron/updater.ts` checks for a newer published release 15 seconds after launch and then
+every four hours, and `electron/update-state.ts` turns what it hears into the status the window
+shows (`src/components/update.tsx`). On macOS it runs electron-updater against the GitHub
+Release that `Resources/app-update.yml` names (written in `afterPack`): it downloads the zip
+that `latest-mac.yml` lists for the Mac's architecture, and Squirrel.Mac installs it on
+"Restart to update". Squirrel.Mac accepts only an update whose signature satisfies the running
+app's, so only a Developer ID build checks; development and ad-hoc signed builds don't. On Linux
+it reads the latest release's version and opens its page. Restarting to update leaves
+`update.json` in the app's configuration directory, and the new version's first launch restarts
+the local services with `supertag up`. The main process logs to `main.log` in Electron's logs
+directory (`~/Library/Logs/SuperTag` on macOS).
+
+To try the flow before a signed release, serve a `latest-mac.yml` and zip from this machine and
+open a packaged, unsigned app with `SUPERTAG_DESKTOP_UPDATE_FEED=http://127.0.0.1:PORT/`. A
+signed build ignores the variable. It checks and downloads, then Squirrel.Mac refuses the
+unsigned app at install and the banner shows the install's error. Make the zip with
+`ditto -c -k --sequesterRsrc --keepParent SuperTag.app SuperTag-VERSION-darwin-arm64.zip`, its
+blockmap with `node build/blockmap.mjs ZIP`, and the feed with
+`python3 scripts/desktop_update_feed.py --version VERSION --output latest-mac.yml ZIP`. The Debian package installs the AppArmor profile
 in `build/linux/` so Chromium's sandbox can start under Ubuntu's restriction on unprivileged user
 namespaces, and keeps `chrome-sandbox` setuid root as its fallback. `scripts/check-desktop-deb.sh
 DEB` installs a package, launches it sandboxed, and removes it.

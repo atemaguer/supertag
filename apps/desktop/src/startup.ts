@@ -5,6 +5,8 @@ import type { SetupCheck } from "./gateway";
 export interface StartupApi {
   list(): Promise<GatewayList>;
   localStartNeeded(): Promise<boolean>;
+  /** This launch is the first after the app updated itself. */
+  updatePending(): Promise<boolean>;
   startLocal(): Promise<boolean>;
   select(origin: string): Promise<GatewayActivation>;
   connectLocal(): Promise<GatewayActivation>;
@@ -21,7 +23,8 @@ export interface Startup {
 /**
  * Decides the first screen on launch. The last saved Gateway used wins; with none, the local one
  * when it runs. SuperTag set up here with its services stopped starts them first (`starting`
- * hears it begin and end). With no Gateway at all and no SuperTag set up here, it is the setup
+ * hears it begin and end); so does the first launch after the app updated itself, whose CLI
+ * restarts the services the older app left running. With no Gateway at all and no SuperTag set up here, it is the setup
  * screen. `gateways` hears each list as it arrives. Rejects with what failed.
  */
 export async function startup(
@@ -31,7 +34,8 @@ export async function startup(
   let saved = await api.list();
   if (!hooks.live()) return { gateways: saved };
   hooks.gateways(saved);
-  if (!saved.active && !saved.local?.origin && (await api.localStartNeeded())) {
+  const updated = await api.updatePending();
+  if (updated || (!saved.active && !saved.local?.origin && (await api.localStartNeeded()))) {
     hooks.starting(true);
     try {
       await api.startLocal();

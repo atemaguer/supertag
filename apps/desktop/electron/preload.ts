@@ -13,11 +13,14 @@ import {
   STREAM_END,
   STREAM_UPDATE,
   type SupertagApi,
+  UPDATE_STATUS,
 } from "./channels";
+import type { UpdateStatus } from "./update-state";
 
 const streams = new Map<string, (update: unknown) => void>();
 let nextStream = 0;
 const clicks = new Set<(tagId: string) => void>();
+const updates = new Set<(status: UpdateStatus) => void>();
 
 ipcRenderer.on(STREAM_UPDATE, (_event, key: unknown, update: unknown) => {
   if (typeof key === "string") streams.get(key)?.(update);
@@ -28,6 +31,11 @@ ipcRenderer.on(STREAM_END, (_event, key: unknown) => {
 ipcRenderer.on(NOTIFICATION_CLICK, (_event, tagId: unknown) => {
   if (typeof tagId !== "string") return;
   for (const open of clicks) open(tagId);
+});
+
+ipcRenderer.on(UPDATE_STATUS, (_event, status: unknown) => {
+  if (status === null || typeof status !== "object") return;
+  for (const changed of updates) changed(status as UpdateStatus);
 });
 
 async function call(name: Channel, args: unknown, key?: string): Promise<unknown> {
@@ -58,6 +66,13 @@ api["onNotificationClick"] = (open: (tagId: string) => void) => {
   clicks.add(open);
   return () => {
     clicks.delete(open);
+  };
+};
+
+api["onUpdateStatus"] = (changed: (status: UpdateStatus) => void) => {
+  updates.add(changed);
+  return () => {
+    updates.delete(changed);
   };
 };
 

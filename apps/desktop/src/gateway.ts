@@ -93,7 +93,10 @@ export const nativeGateway = {
   connectLocal: () => desktop().connectLocalGateway({}),
   /** Whether SuperTag is set up on this machine but its local services are stopped. */
   localStartNeeded: () => desktop().localStartNeeded({}),
-  /** Starts the stopped local services with `supertag up`; false when nothing needed starting. */
+  /** Whether this launch is the first after the app updated itself. */
+  updatePending: () => desktop().localUpdatePending({}),
+  /** Starts the stopped local services with `supertag up`, or after the app updated itself
+   * restarts them with its new CLI; false when nothing needed starting. */
   startLocal: () => desktop().startLocalServices({}),
   /** Why the app can't run the `supertag` CLI (missing, or another version), with the command
    * that installs the right one; null when it can. */

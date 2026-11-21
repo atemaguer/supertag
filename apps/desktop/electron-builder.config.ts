@@ -5,14 +5,32 @@
  * and turns into that architecture's disk image, and a Debian package for each Linux release
  * platform. The renderer and the main process are already
  * bundled (`pnpm build`), so the app carries only `dist/`, `dist-electron/` and its manifest, and no
- * `node_modules`. The fuses are flipped in `afterPack`, before anything signs the binary.
+ * `node_modules`. The fuses are flipped, and the Mac app's update configuration written, in
+ * `afterPack`, before anything signs the app.
  */
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Configuration } from "electron-builder";
 import { applyFuses } from "./electron/fuses";
 
 /** The Linux executable: /usr/bin/supertag-desktop, never /usr/bin/supertag, which is the CLI. */
 const LINUX_EXECUTABLE = "supertag-desktop";
+
+/**
+ * Resources/app-update.yml of the Mac app: where electron-updater finds releases, published ones
+ * only, and the cache directory it downloads them to. electron-builder writes it only for its dmg
+ * and zip targets, which the release doesn't use: their zip would hold the app before
+ * scripts/package-desktop-macos.sh signs it, so that script zips the signed app instead, and the
+ * release writes latest-mac.yml (scripts/desktop_update_feed.py).
+ */
+export const APP_UPDATE_YML = [
+  "provider: github",
+  "owner: atemaguer",
+  "repo: supertag",
+  "releaseType: release",
+  "updaterCacheDirName: supertag-desktop-updater",
+  "",
+].join("\n");
 
 const config: Configuration = {
   appId: "ai.supertag.desktop",
@@ -41,6 +59,11 @@ const config: Configuration = {
       ? path.join(context.appOutDir, `${name}.app`, "Contents/MacOS", name)
       : path.join(context.appOutDir, LINUX_EXECUTABLE);
     await applyFuses(binary, mac ? "darwin" : "linux");
+    // A Debian package never updates itself, so only the Mac app needs it.
+    if (mac) {
+      const resources = path.join(context.appOutDir, `${name}.app`, "Contents/Resources");
+      await writeFile(path.join(resources, "app-update.yml"), APP_UPDATE_YML);
+    }
   },
   mac: {
     // Apple silicon unless `--x64` asks for the Intel app; never a universal app.

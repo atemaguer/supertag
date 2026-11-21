@@ -1,7 +1,7 @@
 #!/bin/bash
 # Put the supertag CLI inside the desktop app, sign it, and build, sign, and notarize its disk image.
 #
-#   package-desktop-macos.sh APP CLI_DIRECTORY IMAGE
+#   package-desktop-macos.sh APP CLI_DIRECTORY IMAGE [ZIP]
 #
 # APP is the unsigned SuperTag.app from `pnpm --filter @supertag/desktop package:mac`
 # (apps/desktop/release/mac-arm64/SuperTag.app, or release/mac/SuperTag.app with --x64 for Intel),
@@ -9,16 +9,19 @@
 # architecture: supertag, supertag-shared-execution, node-bridges/, and supertag-tui when
 # the release ships it (SHIP_TUI in scripts/native_archive.py).
 # The CLI goes to SuperTag.app/Contents/Resources/supertag/, where the app looks for it first.
-# IMAGE is the disk image to write.
+# IMAGE is the disk image to write. ZIP, when given, is the signed app zipped for the app's own
+# updates: Squirrel.Mac installs an update from a zip of the app, not from a disk image, and checks
+# its signature against the running app's. It is written last, from the app the image holds.
 #
 # With SIGNED=true it needs IDENTITY (a "Developer ID Application: ..." name), APPLE_DEVELOPER_ID_P12,
 # APPLE_DEVELOPER_ID_P12_PASSWORD, NOTARY_KEY_PATH, APPLE_NOTARY_KEY_ID and APPLE_NOTARY_ISSUER_ID.
 # Without it, the app keeps electron-builder's ad-hoc signature, which is only good for local checks.
 set -euo pipefail
 
-app=${1:?Usage: package-desktop-macos.sh APP CLI_DIRECTORY IMAGE}
-cli=${2:?Usage: package-desktop-macos.sh APP CLI_DIRECTORY IMAGE}
-image=${3:?Usage: package-desktop-macos.sh APP CLI_DIRECTORY IMAGE}
+app=${1:?Usage: package-desktop-macos.sh APP CLI_DIRECTORY IMAGE [ZIP]}
+cli=${2:?Usage: package-desktop-macos.sh APP CLI_DIRECTORY IMAGE [ZIP]}
+image=${3:?Usage: package-desktop-macos.sh APP CLI_DIRECTORY IMAGE [ZIP]}
+zip=${4:-}
 signed=${SIGNED:-false}
 
 binaries=(supertag supertag-shared-execution)
@@ -63,9 +66,18 @@ create_image() {
   rm -rf "$scratch"
 }
 
+# The update zip, as electron-builder's zip target makes it: ditto keeps the bundle's symlinks,
+# extended attributes and signature.
+create_zip() {
+  [[ -n "$zip" ]] || return 0
+  rm -f "$zip"
+  ditto -c -k --sequesterRsrc --keepParent "$app" "$zip"
+}
+
 if [[ "$signed" != true ]]; then
   echo "SIGNED is not true: leaving the app unsigned for a local check."
   create_image
+  create_zip
   exit 0
 fi
 
@@ -175,3 +187,4 @@ for attempt in 1 2 3 4 5; do
 done
 hdiutil detach -quiet "$mount"
 [[ "$assessed" == true ]] || { echo "Gatekeeper rejected the app inside $image" >&2; exit 1; }
+create_zip

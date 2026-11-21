@@ -1,6 +1,7 @@
 /**
  * The desktop app's main process: one window loading the renderer from `app://supertag/`, locked
- * to it, with the channel table's guarded handlers as its only way to reach this process.
+ * to it, with the channel table's guarded handlers as its only way to reach this process. A
+ * signed build updates itself (`updater.ts`).
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,19 +19,36 @@ import {
   Menu,
   Notification,
   nativeTheme,
+  net,
   protocol,
   session,
   shell,
   type WebContents,
 } from "electron";
-import { NOTIFICATION_CLICK } from "./channels";
+import { MacUpdater } from "electron-updater";
+import { NOTIFICATION_CLICK, UPDATE_STATUS } from "./channels";
 import { handlers } from "./handlers";
 import { originOf, registerChannels, Streams } from "./ipc";
 import { type AppIdentity, appCli } from "./local/cli";
+import { FileLog, guardStdio } from "./log";
 import { menuTemplate } from "./menu";
 import { cacheDirectory, configDirectory, gatewayStore } from "./paths";
 import { APP_ORIGIN, APP_SCHEME, APP_URL, appResponse, contentSecurityPolicy } from "./protocol";
 import { chooseFolder, FOLDER_TITLES, Notifications, webUrl } from "./shell";
+import type { UpdateStatus } from "./update-state";
+import {
+  InstallNote,
+  latestRelease,
+  localFeed,
+  teamSigned,
+  UPDATES_OFF,
+  Updater,
+  type UpdaterHost,
+} from "./updater";
+
+// A closed stdout or stderr (an app opened from Finder, or a terminal that went away) must never
+// turn a log line into an uncaught exception.
+guardStdio();
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const mac = process.platform === "darwin";
@@ -76,6 +94,74 @@ const appIdentity: AppIdentity = {
 
 let mainWindow: BrowserWindow | undefined;
 const streams = new Streams();
+
+/** The app's own log: ~/Library/Logs/SuperTag/main.log on macOS, under userData elsewhere. */
+const log = new FileLog(path.join(app.getPath("logs"), "main.log"));
+
+/** Restarting to update leaves this, so the new version restarts the local services once. */
+const installNote = new InstallNote(configDirectory(), app.getVersion());
+
+/**
+ * How this build updates: macOS installs a downloaded release, but only when Developer ID
+ * signed, as Squirrel.Mac requires; a Linux package opens the release page; development builds
+ * never check. A packaged but unsigned Mac build may name a local feed in
+ * SUPERTAG_DESKTOP_UPDATE_FEED, so the flow can be tried before a signed release; a signed
+ * build ignores it and reads the GitHub Release its app-update.yml names.
+ */
+async function updateMode(): Promise<{ mode: UpdaterHost["mode"]; feed?: string }> {
+  if (development) return { mode: "off" };
+  if (process.platform === "linux") return { mode: "download" };
+  if (!mac) return { mode: "off" };
+  const bundle = path.resolve(process.execPath, "..", "..", "..");
+  if (await teamSigned(bundle)) return { mode: "install" };
+  const feed = localFeed(process.env["SUPERTAG_DESKTOP_UPDATE_FEED"]);
+  return feed ? { mode: "install", feed } : { mode: "off" };
+}
+const updating = updateMode();
+let updater: Updater | undefined;
+
+/** The window's view of the updater, which is off until `updating` decides. */
+const updates = {
+  get status(): UpdateStatus {
+    return updater?.status ?? { state: "off" };
+  },
+  check: (manual: boolean) => (updater ? updater.check(manual) : Promise.resolve()),
+  install: () => (updater ? updater.install() : Promise.reject(UPDATES_OFF)),
+};
+
+function say(message: string) {
+  const options = { type: "info" as const, message, buttons: ["OK"] };
+  void (mainWindow ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options));
+}
+
+async function startUpdates() {
+  const { mode, feed } = await updating;
+  updater = new Updater({
+    version: app.getVersion(),
+    mode,
+    engine() {
+      const engine = new MacUpdater(feed ? { provider: "generic", url: feed } : undefined);
+      engine.autoDownload = true;
+      // Only "Restart to update" installs, since it also restarts the local services.
+      engine.autoInstallOnAppQuit = false;
+      engine.logger = { info() {}, warn: log.warn, error: log.error, debug() {} };
+      return engine;
+    },
+    latestRelease: () => latestRelease((url, init) => net.fetch(url, init)),
+    publish: (status) => mainContents()?.send(UPDATE_STATUS, status),
+    openExternal: (url) => shell.openExternal(url),
+    say,
+    noteInstall: (from, to) => installNote.write(from, to),
+    forgetInstall: () => installNote.done(),
+    log: (message, error) => log.error(message, error),
+    setTimeout: (run, ms) => setTimeout(run, ms),
+    setInterval: (run, ms) => setInterval(run, ms),
+  });
+  if (mode === "off") return;
+  // The window may have read "off" before this decided.
+  mainContents()?.send(UPDATE_STATUS, updater.status);
+  updater.start();
+}
 
 const gateway = new GatewayState({
   store: gatewayStore(),
@@ -168,7 +254,11 @@ function createWindow() {
 
 function start() {
   nativeTheme.themeSource = "dark";
-  Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate({ mac, development })));
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      menuTemplate({ mac, development, onCheckForUpdates: () => void updates.check(true) }),
+    ),
+  );
   app.setAboutPanelOptions({ applicationName: "SuperTag", applicationVersion: app.getVersion() });
 
   const renderer = path.join(app.getAppPath(), "dist");
@@ -206,6 +296,7 @@ function start() {
         openExternal: (url) => shell.openExternal(url),
         chooseFolder: () => chooseFolder(dialog, mainWindow),
         reveal: (file) => shell.showItemInFolder(file),
+        updates,
       },
       { state: gateway, cacheRoot: cacheDirectory() },
       {
@@ -214,12 +305,14 @@ function start() {
         probe: (url, token) => probeGateway(url, token, app.getVersion()),
         chooseWorkspaceFolder: () => chooseFolder(dialog, mainWindow, FOLDER_TITLES.workspace),
         localStateOf: (connectionId) => gateway.localStateOf(connectionId),
+        update: installNote,
       },
     ),
     { mainWindow: mainContents, trusted, streams },
   );
 
   createWindow();
+  void startUpdates();
 }
 
 if (!app.requestSingleInstanceLock()) {

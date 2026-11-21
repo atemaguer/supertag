@@ -97,8 +97,8 @@ it("registers exactly the table's channels", () => {
       .map((name) => `supertag:${name}`)
       .sort(),
   );
-  // 40 app commands, and the shell's notification, badge and link channels.
-  expect(registered).toHaveLength(43);
+  // 41 app commands, the shell's notification, badge and link channels, and the app's updates.
+  expect(registered).toHaveLength(47);
 });
 
 function shell() {
@@ -108,6 +108,11 @@ function shell() {
     openExternal: vi.fn(async () => {}),
     chooseFolder: vi.fn(async () => "/tmp/project"),
     reveal: vi.fn(),
+    updates: {
+      status: { state: "off" } as const,
+      check: vi.fn(async () => {}),
+      install: vi.fn(async () => {}),
+    },
   };
 }
 
@@ -121,6 +126,7 @@ function local(): LocalDependencies {
     localStateOf: async () => {
       throw "not the local Gateway";
     },
+    update: { installed: () => false, done() {} },
   };
 }
 

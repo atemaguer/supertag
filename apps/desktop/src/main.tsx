@@ -23,6 +23,13 @@ import { GatewaySelector, gatewayActions } from "./components/gateway-selector";
 import { LocalUpgradeOffer } from "./components/local-upgrade";
 import { Onboarding } from "./components/onboarding";
 import type { SidebarMode } from "./components/sidebar";
+import {
+  nativeUpdates,
+  UpdateBanner,
+  UpdateButton,
+  type UpdateSource,
+  useUpdates,
+} from "./components/update";
 import { VersionLabel } from "./components/version";
 import { EmptyWorkspace, Workspace, WorkspaceShell } from "./components/workspace";
 import { gatewaySession, nativeGateway, nativeSetup, type SetupCheck } from "./gateway";
@@ -49,8 +56,15 @@ interface Connection {
 /** How often a window connected to the local Gateway checks that it still runs where it did. */
 const LOCAL_CHECK_MS = 3_000;
 
-function App({ initialConnection }: { initialConnection?: Connection }) {
+function App({
+  initialConnection,
+  updateSource = nativeUpdates,
+}: {
+  initialConnection?: Connection;
+  updateSource?: UpdateSource;
+}) {
   const [connection, setConnection] = useState(initialConnection);
+  const updates = useUpdates(updateSource);
   const [gateways, setGateways] = useState<GatewayList>({ profiles: [] });
   const [editor, setEditor] = useState<{ profile?: GatewayProfile }>();
   const [error, setError] = useState("");
@@ -115,6 +129,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
           {
             list: nativeGateway.list,
             localStartNeeded: nativeGateway.localStartNeeded,
+            updatePending: nativeGateway.updatePending,
             startLocal: nativeGateway.startLocal,
             select: nativeGateway.select,
             connectLocal,
@@ -274,6 +289,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
           nativeGateway.list().then(setGateways, () => {});
         }}
       />
+      <UpdateButton updates={updates} wide={mode === "expanded"} />
       <VersionLabel wide={mode === "expanded"} gateway={connection?.release} />
     </>
   );
@@ -362,6 +378,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
           onForget={(origin) => void clear(origin)}
         />
       )}
+      <UpdateBanner updates={updates} />
     </>
   );
 }
@@ -374,10 +391,13 @@ async function start() {
   const target = document.getElementById("app");
   if (!target) throw new Error("Desktop root is missing");
   let initialConnection: Connection | undefined;
+  let updateSource: UpdateSource | undefined;
   if (import.meta.env.DEV && new URLSearchParams(location.search).has("preview")) {
-    const { previewGateway, previewRelease, previewTagAdmin, withoutLead } = await import(
-      "./preview"
-    );
+    const { previewGateway, previewRelease, previewTagAdmin, previewUpdates, withoutLead } =
+      await import("./preview");
+    // `?preview&update=ready` shows an update in that state: downloading, ready, installing,
+    // available (Linux), error (a download's), install-error, or check-error.
+    updateSource = previewUpdates(new URLSearchParams(location.search).get("update"));
     // `?preview&nolead` shows a Gateway without a lead Tag.
     if (new URLSearchParams(location.search).has("nolead")) withoutLead();
     initialConnection = {
@@ -391,7 +411,7 @@ async function start() {
   }
   createRoot(target).render(
     <PlatformProvider value={windowPlatform}>
-      <App initialConnection={initialConnection} />
+      <App initialConnection={initialConnection} updateSource={updateSource} />
     </PlatformProvider>,
   );
 }

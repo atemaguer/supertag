@@ -156,6 +156,33 @@ it("builds the menu with edit shortcuts, and developer tools only in development
   expect(roles(true, true)).toContain("toggleDevTools");
 });
 
+it("offers Check for Updates… in the app menu on macOS and in File elsewhere", () => {
+  const check = vi.fn();
+  for (const mac of [true, false]) {
+    const [first] = menuTemplate({ mac, development: false, onCheckForUpdates: check });
+    expect(first?.role).toBe(mac ? "appMenu" : "fileMenu");
+    const items = first?.submenu as { label?: string; click?: () => void }[];
+    const item = items.find((entry) => entry.label === "Check for Updates…");
+    item?.click?.();
+  }
+  expect(check).toHaveBeenCalledTimes(2);
+  expect(JSON.stringify(menuTemplate({ mac: true, development: true }))).not.toContain(
+    "Check for Updates",
+  );
+});
+
+it("points the Mac app's updater at published GitHub Releases only", async () => {
+  const { APP_UPDATE_YML } = await import("../electron-builder.config");
+  expect(APP_UPDATE_YML.split("\n")).toEqual([
+    "provider: github",
+    "owner: atemaguer",
+    "repo: supertag",
+    "releaseType: release",
+    "updaterCacheDirName: supertag-desktop-updater",
+    "",
+  ]);
+});
+
 it("packages Electron without its Node escape hatches", () => {
   expect(FUSES).toMatchObject({
     strictlyRequireAllFuses: true,

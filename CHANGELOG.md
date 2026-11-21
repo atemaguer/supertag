@@ -15,6 +15,12 @@ within the pre-1.0 compatibility policy described in
   shared execution provider, and the Node.js bridges, and a signed and notarized
   `SuperTag-VERSION-darwin-amd64.dmg` desktop app. The installer script picks it on an Intel Mac,
   and still installs the Apple silicon build from a Rosetta terminal on Apple silicon.
+- The desktop app updates itself on macOS. It checks for a newer published release after it opens
+  and every four hours, downloads it in the background, and shows a banner and an **Update to
+  VERSION** button at the sidebar's foot. **Restart to update** installs it, and the new version
+  restarts your local services with its own build. On Linux the app offers **Download VERSION**,
+  which opens the release's page. Each release now attaches `latest-mac.yml` and the signed app's
+  update zip and blockmap. See [Updating](docs/operations/install.md#updating).
 
 ### Fixed
 
