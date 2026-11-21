@@ -96,7 +96,7 @@ name in `supertag audit`.
 
 | Service | For |
 | --- | --- |
-| `Operator` | Tags and their [portraits](#tag-portraits), Tasks, Worker Hosts, Auth Keys, Task events and usage, reply deliveries, and recovery decisions |
+| `Operator` | Tags, Tasks, Worker Hosts, Auth Keys, Task events and usage, reply deliveries, and recovery decisions |
 | `Conversations` | Your conversation with each Tag: its messages, sending one, following it as it changes, and how far you have read |
 | `OperatorEvents` | `Watch`: change notices with a resume token |
 | `Objectives` | Create an Objective, read and list them, change limits, pause, resume, cancel, review, and complete |
@@ -211,37 +211,6 @@ changes in one call.
 
 A message carries its turn's messages and only its latest activity or plan. `Operator.ListEvents`
 returns every event of a turn, including the activity a conversation page leaves out.
-
-## Tag portraits
-
-A Tag's portrait is the felt mascot the apps draw for it. The Control Plane keeps it as a recipe:
-one component ID of each kind from an art catalog that the apps bundle. It never stores or relays
-images. `GetTag` and `ListTags` return the recipe with each Tag:
-
-| `Tag` field | Meaning |
-| --- | --- |
-| `appearance` | A `TagAppearance`, or absent when nobody gave the Tag a portrait. Apps then draw a default they derive from the Tag ID, and nothing is stored. |
-| `appearance_revision` | How many times the portrait was saved; `0` before the first save. |
-
-| `TagAppearance` field | Meaning |
-| --- | --- |
-| `version` | The recipe's schema version: `1`. |
-| `catalog` | The art catalog the IDs come from: `felt-v1`. |
-| `head`, `color`, `expression` | One of each: `pear` or `bean`; `moss`, `coral`, or `ocean`; `cheerful`, `curious`, or `sleepy`. |
-| `hat`, `glasses`, `headphones` | One accessory of each kind, or empty for none: `plum-beanie`, `round-charcoal`, `navy-over-ear`. The beanie and the headphones can't be worn together. |
-
-`Operator.SetTagAppearance(tag_id, appearance, expected_revision)` saves a portrait. An absent
-`appearance` returns the Tag to its default. Only a caller that may write the Tag with `PutTag`
-may call it: an operator, not a client. Who the Tag works for gives no right to change it. The call
-changes nothing else: the Tag's instructions, execution settings, `revision`, and accepted work
-stay as they were. A `PutTag`, such as a rename, keeps the portrait.
-
-`expected_revision` is the `appearance_revision` you read. When someone saved since, the call fails
-with `ALREADY_EXISTS`; read the Tag again before you write. An unknown catalog, schema version,
-or component ID, or two accessories that can't be worn together, fail with `INVALID_ARGUMENT`. A
-saved portrait is a Tag change on the [Watch](#watch-for-changes). A recipe from a newer catalog
-is returned as it was saved. An app without that catalog draws a fallback and leaves the recipe
-alone.
 
 ## Watch for changes
 

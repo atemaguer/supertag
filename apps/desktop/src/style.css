@@ -142,9 +142,6 @@ button:disabled {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* A Tag's portrait: felt mascot layers composed on a round tint of its felt color. The art fills
-   a little more than the frame, so the head reads at sidebar sizes; every piece stays inside the
-   circle. */
 .avatar {
   position: relative;
   display: grid;
@@ -153,39 +150,80 @@ button:disabled {
   height: 31px;
   flex: 0 0 auto;
   overflow: hidden;
-  border-radius: 50%;
-  background: #3a363d;
+  border-radius: 9px;
+  color: #4b3129;
+  background: #e8a685;
 }
-.avatar[data-color="moss"] {
-  background: #39432f;
+.avatar.mint {
+  color: #294137;
+  background: #b3ccba;
 }
-.avatar[data-color="coral"] {
-  background: #4a3430;
+.avatar.lilac {
+  color: #49374e;
+  background: #d2badc;
 }
-.avatar[data-color="ocean"] {
-  background: #2d3a4c;
+.avatar.blue {
+  color: #29374d;
+  background: #a8bfe5;
+}
+.avatar.yellow {
+  color: #4a3b21;
+  background: #dbc493;
 }
 .avatar.large {
   width: 61px;
   height: 61px;
+  border-radius: 18px;
 }
-/* Where the layer sits is its head shape's crop (avatars/felt.ts), set on the image. */
-.portrait-layer {
+.mark {
+  display: block;
+  position: relative;
+  width: 47%;
+  aspect-ratio: 1;
+  color: inherit;
+}
+.mark-0 {
+  border: 0.12em solid currentColor;
+  transform: rotate(45deg);
+  border-radius: 32%;
+}
+.mark-0::after {
+  content: "";
   position: absolute;
-  inset: -4%;
-  width: 108%;
-  height: 108%;
-  max-width: none;
-  pointer-events: none;
-  user-select: none;
+  inset: 26%;
+  border-radius: 50%;
+  background: currentColor;
 }
-.portrait-fallback {
-  color: var(--muted);
-  font-size: 0.9em;
-  font-weight: 650;
+.mark-1 {
+  background: currentColor;
+  border-radius: 52% 52% 22% 22%;
 }
-.avatar.large .portrait-fallback {
-  font-size: 24px;
+.mark-1::after {
+  content: "";
+  position: absolute;
+  width: 110%;
+  height: 25%;
+  left: -5%;
+  top: 43%;
+  background: #fff9;
+  transform: rotate(-36deg);
+}
+.mark-2 {
+  border: 0.12em solid currentColor;
+  border-radius: 50%;
+}
+.mark-2::after {
+  content: "";
+  position: absolute;
+  width: 120%;
+  height: 0.12em;
+  top: 42%;
+  left: -10%;
+  transform: rotate(-44deg);
+  background: currentColor;
+}
+.avatar.large .mark {
+  font-size: 26px;
 }
 
 /* The sidebar: full height, its separator running to the top of the window. Expanded, it lists
@@ -291,6 +329,10 @@ button:disabled {
 .lead-avatar .avatar.large {
   width: 46px;
   height: 46px;
+  border-radius: 14px;
+}
+.lead-avatar .avatar.large .mark {
+  font-size: 20px;
 }
 .lead-badge {
   position: absolute;
@@ -335,7 +377,7 @@ button:disabled {
   padding: 4px 8px 12px;
   scrollbar-width: none;
 }
-/* A row on the 4px grid: 8px around a 40px portrait, 12px to the text. */
+/* A row on the 4px grid: 8px around a 40px avatar, 12px to the text. */
 .tag-row {
   display: flex;
   align-items: center;
@@ -358,6 +400,7 @@ button:disabled {
 .tag-row-avatar .avatar {
   width: 40px;
   height: 40px;
+  border-radius: 12px;
 }
 .tag-row-text {
   display: grid;
@@ -576,6 +619,7 @@ button:disabled {
 .shell[data-sidebar="rail"] .tag-row-avatar .avatar {
   width: 36px;
   height: 36px;
+  border-radius: 11px;
 }
 /* The releases, small and muted under the Gateway menu. */
 .sidebar-version {
@@ -599,6 +643,10 @@ button:disabled {
 .shell[data-sidebar="expanded"] .lead-avatar .avatar.large {
   width: 84px;
   height: 84px;
+  border-radius: 26px;
+}
+.shell[data-sidebar="expanded"] .lead-avatar .avatar.large .mark {
+  font-size: 36px;
 }
 .shell[data-sidebar="expanded"] .lead-badge {
   width: 26px;
@@ -743,6 +791,7 @@ button:disabled {
 .identity-pill .avatar {
   width: 28px;
   height: 28px;
+  border-radius: 50%;
 }
 .tag-name {
   flex-shrink: 0;
@@ -1937,203 +1986,5 @@ button.identity-pill[aria-expanded="true"] {
 @keyframes spin {
   to {
     transform: rotate(360deg);
-  }
-}
-
-/* The Tag details panel's portrait, and the way into its editor. */
-.details-avatar {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-.details-avatar .avatar.large {
-  width: 64px;
-  height: 64px;
-}
-
-/* The avatar editor: the live portrait and its sidebar-size previews beside the choices. */
-.workspace-dialog.avatar-dialog {
-  width: min(820px, calc(100vw - 30px));
-  max-width: none;
-}
-.avatar-editor {
-  display: grid;
-  gap: 14px;
-}
-.avatar-editor-body {
-  display: grid;
-  grid-template-columns: 236px minmax(0, 1fr);
-  gap: 24px;
-  align-items: start;
-}
-.avatar-previews {
-  display: grid;
-  gap: 12px;
-}
-.avatar.avatar-preview {
-  width: 236px;
-  height: 236px;
-}
-.avatar-row-preview {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: var(--hover);
-}
-.avatar.avatar-preview-row {
-  width: 48px;
-  height: 48px;
-}
-.avatar.avatar-preview-small {
-  width: 32px;
-  height: 32px;
-  margin-left: auto;
-}
-.avatar-row-name {
-  min-width: 0;
-  overflow: hidden;
-  font-size: 13px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.avatar-choices {
-  display: grid;
-  gap: 12px;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-.avatar-tabs {
-  display: flex;
-  gap: 4px;
-  border-bottom: 1px solid var(--line);
-}
-.avatar-tab {
-  padding: 8px 10px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  background: none;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 600;
-}
-.avatar-tab[aria-selected="true"] {
-  border-bottom-color: var(--accent);
-  color: var(--text);
-}
-.avatar-panel {
-  display: grid;
-  gap: 10px;
-  min-height: 150px;
-}
-.avatar-group {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-.avatar-group-label {
-  margin: 0 0 6px;
-  padding: 0;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-.avatar-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.avatar-option {
-  display: grid;
-  justify-items: center;
-  gap: 4px;
-  width: 92px;
-  padding: 8px 6px 6px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: transparent;
-  color: var(--text);
-  font-size: 12px;
-}
-.avatar-option:hover {
-  background: var(--hover);
-}
-.avatar-option[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-}
-.avatar-option[aria-disabled="true"] {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.avatar.avatar-option-image,
-.avatar-option-none {
-  width: 56px;
-  height: 56px;
-}
-.avatar-option-none {
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--hover);
-  color: var(--muted);
-}
-.avatar-option-label {
-  text-align: center;
-  line-height: 1.25;
-}
-.avatar-presets .avatar-option {
-  width: 112px;
-}
-.avatar-accessory {
-  display: grid;
-  gap: 4px;
-}
-.avatar-conflict {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-.avatar-swap {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--accent);
-  font-size: 12px;
-  text-decoration: underline;
-}
-.avatar-unknown {
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.5;
-}
-.avatar-status {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.avatar-status .field-error {
-  margin: 0;
-}
-.avatar-actions .avatar-randomize {
-  margin-right: auto;
-}
-@media (max-width: 720px) {
-  .avatar-editor-body {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .avatar.avatar-preview {
-    width: 160px;
-    height: 160px;
   }
 }

@@ -117,11 +117,6 @@ class OperatorStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RetireTagRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RetireTagResponse.FromString,
                 _registered_method=True)
-        self.SetTagAppearance = channel.unary_unary(
-                '/supertag.runtime.v2.Operator/SetTagAppearance',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SetTagAppearanceRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Tag.FromString,
-                _registered_method=True)
         self.GetReplyDelivery = channel.unary_unary(
                 '/supertag.runtime.v2.Operator/GetReplyDelivery',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReplyDeliveryRequest.SerializeToString,
@@ -244,15 +239,6 @@ class OperatorServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def SetTagAppearance(self, request, context):
-        """Saves a Tag's portrait and nothing else: its instructions, execution settings, revision and
-        accepted work stay as they were. Whoever may write the Tag with PutTag may. A different
-        `expected_revision` than the stored one is refused with ALREADY_EXISTS.
-        """
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
     def GetReplyDelivery(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -353,11 +339,6 @@ def add_OperatorServicer_to_server(servicer, server):
                     servicer.RetireTag,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RetireTagRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RetireTagResponse.SerializeToString,
-            ),
-            'SetTagAppearance': grpc.unary_unary_rpc_method_handler(
-                    servicer.SetTagAppearance,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SetTagAppearanceRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Tag.SerializeToString,
             ),
             'GetReplyDelivery': grpc.unary_unary_rpc_method_handler(
                     servicer.GetReplyDelivery,
@@ -810,33 +791,6 @@ class Operator:
             '/supertag.runtime.v2.Operator/RetireTag',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.RetireTagRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.RetireTagResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def SetTagAppearance(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.Operator/SetTagAppearance',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.SetTagAppearanceRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Tag.FromString,
             options,
             channel_credentials,
             insecure,

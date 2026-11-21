@@ -22,9 +22,6 @@ import {
 } from "./ui/dialog";
 import { Input } from "./ui/input";
 
-/** What creating a Tag needs of the connection. */
-export type TagCreation = Pick<TagAdmin, "options" | "create" | "addFolder">;
-
 /** The Workspace picker's entry that adds a folder of this machine; no Workspace ID has a space. */
 const CHOOSE_FOLDER = " choose-folder";
 
@@ -40,7 +37,7 @@ export function NewTagDialog({
   onOpenChange,
   onCreated,
 }: {
-  admin: TagCreation;
+  admin: TagAdmin;
   open: boolean;
   onOpenChange(open: boolean): void;
   onCreated(tag: Tag): void;
@@ -69,7 +66,7 @@ export function NewTagDialog({
   );
 }
 
-function NewTagForm({ admin, onCreated }: { admin: TagCreation; onCreated(tag: Tag): void }) {
+function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag): void }) {
   const [options, setOptions] = useState<TagOptions>();
   const [name, setName] = useState("");
   const [harness, setHarness] = useState("");

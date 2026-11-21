@@ -52,7 +52,6 @@ import {
 import { type StickToBottomContext, useStickToBottomContext } from "use-stick-to-bottom";
 import { Conversation, ConversationContent } from "./ai-elements/conversation";
 import { Message } from "./ai-elements/message";
-import type { AvatarEditing } from "./avatar-editor";
 import { Bubble, LiveConversationEntry } from "./conversation-entry";
 import { clamp, ResizeHandle, useStoredWidth } from "./resize";
 import { TagAvatar } from "./tag-avatar";
@@ -84,8 +83,6 @@ interface ConversationProps {
   /** The Tag details panel, with its memory, shows beside the conversation. */
   details?: boolean;
   onCloseDetails?(): void;
-  /** Changes the Tag's portrait from its details, when this connection may manage Tags. */
-  avatar?: AvatarEditing;
 }
 
 export function ConversationPane({
@@ -98,7 +95,6 @@ export function ConversationPane({
   onSummary,
   details,
   onCloseDetails,
-  avatar,
 }: ConversationProps) {
   const tagId = tag.tagId;
   // A conversation shown before renders at once from the cache, then revalidates.
@@ -470,7 +466,6 @@ export function ConversationPane({
                 gateway={gateway}
                 watch={watch}
                 tag={tag}
-                avatar={avatar}
                 onClose={() => onCloseDetails?.()}
               />
             )}
@@ -549,7 +544,7 @@ function JumpToLatest({ messages }: { messages: number }) {
 function EmptyConversation({ tag }: { tag: Tag }) {
   return (
     <div className="empty">
-      <TagAvatar tag={tag} large />
+      <TagAvatar tagId={tag.tagId} large />
       <h2>Message {tag.name ?? tag.tagId}</h2>
       {tag.instructions && <p className="tag-instructions">{tag.instructions}</p>}
       <details className="permissions">

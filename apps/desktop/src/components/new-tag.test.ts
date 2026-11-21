@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 
 import type { Tag } from "@supertag/client/model";
-import { tagAdminRefusal, tagIdFor } from "@supertag/client/model";
+import { type TagAdmin, tagAdminRefusal, tagIdFor } from "@supertag/client/model";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { NewTagDialog, type TagCreation } from "./new-tag";
+import { NewTagDialog } from "./new-tag";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -30,7 +30,7 @@ const created: Tag = {
   harnessKind: "codex",
 };
 
-async function open(admin: TagCreation, onCreated = vi.fn(), onOpenChange = vi.fn()) {
+async function open(admin: TagAdmin, onCreated = vi.fn(), onOpenChange = vi.fn()) {
   await act(async () => {
     root.render(createElement(NewTagDialog, { admin, open: true, onOpenChange, onCreated }));
   });
@@ -52,7 +52,7 @@ function choose(select: HTMLSelectElement, value: string) {
 }
 
 it("creates a Tag from a name, an offered harness, and the only Workspace", async () => {
-  const admin: TagCreation = {
+  const admin: TagAdmin = {
     // The Worker Hosts' harnesses arrive sorted by name; Codex and Claude Code are offered first.
     options: async () => ({
       harnesses: ["claude_code", "codex", "opencode"],
@@ -90,7 +90,7 @@ it("creates a Tag from a name, an offered harness, and the only Workspace", asyn
 });
 
 it("offers every harness when no Worker Host is connected, and shows a refusal", async () => {
-  const admin: TagCreation = {
+  const admin: TagAdmin = {
     options: async () => ({ harnesses: [], workspaces: [] }),
     create: vi.fn(async () => {
       throw "A Tag with that ID or name already exists.";
@@ -120,7 +120,7 @@ it("offers every harness when no Worker Host is connected, and shows a refusal",
 });
 
 it("offers no folder outside the local Gateway, and says when a harness runs no commands", async () => {
-  const admin: TagCreation = {
+  const admin: TagAdmin = {
     options: async () => ({
       harnesses: ["claude_code", "codex"],
       workspaces: ["supertag", "site"],
@@ -143,7 +143,7 @@ it("offers no folder outside the local Gateway, and says when a harness runs no 
 });
 
 it("gives web access by default, and warns when Codex is left without it", async () => {
-  const admin: TagCreation = {
+  const admin: TagAdmin = {
     options: async () => ({ harnesses: ["claude_code", "codex"], workspaces: [] }),
     create: vi.fn(async () => created),
   };
@@ -169,7 +169,7 @@ it("gives web access by default, and warns when Codex is left without it", async
 });
 
 it("leaves web access off where the harness's hosts have no network", async () => {
-  const admin: TagCreation = {
+  const admin: TagAdmin = {
     options: async () => ({
       harnesses: ["claude_code", "codex"],
       workspaces: [],
@@ -188,7 +188,7 @@ it("leaves web access off where the harness's hosts have no network", async () =
 });
 
 it("offers Cursor no web access", async () => {
-  const admin: TagCreation = {
+  const admin: TagAdmin = {
     options: async () => ({ harnesses: ["cursor"], workspaces: [] }),
     create: vi.fn(async () => created),
   };
@@ -201,7 +201,7 @@ it("offers Cursor no web access", async () => {
 
 it("adds a chosen folder as a Workspace and starts the Tag on its branch", async () => {
   let finish: (added: { workspace: string; workspaceRef: string } | null) => void = () => {};
-  const admin: TagCreation = {
+  const admin: TagAdmin = {
     options: async () => ({ harnesses: ["codex"], workspaces: ["supertag"] }),
     create: vi.fn(async () => created),
     addFolder: vi.fn(
@@ -252,7 +252,7 @@ it("keeps the Workspace when choosing a folder is cancelled, and shows why addin
     .fn<() => Promise<null>>()
     .mockResolvedValueOnce(null)
     .mockRejectedValueOnce("/tmp/x is not in a git repository. Choose one.");
-  const admin: TagCreation = {
+  const admin: TagAdmin = {
     options: async () => ({ harnesses: ["codex"], workspaces: ["supertag"] }),
     create: vi.fn(async () => created),
     addFolder,

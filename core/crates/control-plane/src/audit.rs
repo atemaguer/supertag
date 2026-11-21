@@ -189,12 +189,6 @@ fn rule(path: &str) -> Option<Rule> {
                 &value.tag_id
             ))
         }
-        ("Operator", "SetTagAppearance") => rule!(
-            "tag.set-appearance",
-            "Tag",
-            SetTagAppearanceRequest,
-            |value| named("Tag", &value.tag_id)
-        ),
         ("Operator", "RetireTag") => rule!("tag.retire", "Tag", RetireTagRequest, |value| {
             if value.dry_run {
                 Some(Target::Skip)

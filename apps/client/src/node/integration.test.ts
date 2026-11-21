@@ -4,7 +4,6 @@
  * ports.
  */
 
-import { execFile } from "node:child_process";
 import { once } from "node:events";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createServer as createHttp2Server, type Http2Server } from "node:http2";
@@ -51,41 +50,6 @@ import { GatewayState, type GatewayStateOptions, type Subscriber } from "./state
 import { runWatch } from "./watch";
 
 const VERSION = "0.3.2";
-const READER = {
-  version: 1,
-  catalog: "felt-v1",
-  head: "pear",
-  color: "moss",
-  expression: "curious",
-  hat: "plum-beanie",
-  glasses: "round-charcoal",
-  headphones: null,
-};
-const POSTGRES = process.env["SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"];
-
-/** A new, empty database on the test PostgreSQL server. */
-async function postgresDatabase(): Promise<string> {
-  const admin = new URL((await readFile(POSTGRES as string, "utf8")).trim());
-  const name = `supertag_desktop_avatar_${Date.now()}_${process.pid}`;
-  await new Promise<void>((resolve, reject) =>
-    execFile("psql", [admin.toString(), "-c", `CREATE DATABASE ${name}`], (error) =>
-      error ? reject(error) : resolve(),
-    ),
-  );
-  admin.pathname = `/${name}`;
-  return admin.toString();
-}
-
-async function dropPostgres(url: string): Promise<void> {
-  const database = new URL(url);
-  const name = database.pathname.slice(1);
-  database.pathname = "/postgres";
-  await new Promise<void>((resolve) =>
-    execFile("psql", [database.toString(), "-c", `DROP DATABASE ${name} WITH (FORCE)`], () =>
-      resolve(),
-    ),
-  );
-}
 const CHANGED = "The connection changed. Refresh this view.";
 
 let root: string;
@@ -631,125 +595,6 @@ describe.skipIf(CLI === undefined)(
           expect((await relaunched.conversations(id)).map((c) => c.tagId)).toEqual([tag]);
           expect(await relaunched.cached(id, "roster")).toEqual([tag]);
         }
-      } finally {
-        await alpha.stop();
-        await beta.stop();
-      }
-    });
-
-    for (const backend of ["sqlite", "postgres"] as const) {
-      it.skipIf(backend === "postgres" && POSTGRES === undefined)(
-        `shares a Tag's portrait across apps and restarts, on ${backend}`,
-        async () => {
-          const home = await directory(`avatar-${backend}`);
-          const databaseUrl = backend === "postgres" ? await postgresDatabase() : undefined;
-          const stack = await Stack.start({
-            root: home,
-            name: "state",
-            token: "avatar-operator",
-            ...(databaseUrl && { databaseUrl }),
-          });
-          try {
-            await stack.putTag("patch");
-            const alex = app(path.join(home, "alex"));
-            const sam = app(path.join(home, "sam"));
-            const a = await alex.saveGateway(stack.url, "Work", "avatar-operator");
-            const s = await sam.saveGateway(stack.url, "Work", "avatar-operator");
-            const before = (await alex.tags(a.connectionId))[0];
-            // A Tag nobody gave a portrait has none stored: the app draws its default.
-            expect(before?.appearance).toBeUndefined();
-            expect(before?.appearanceRevision).toBe(0);
-
-            // Sam's app watches; Alex saves a portrait, and Sam's app is told the Tag changed.
-            const watch = collect<WatchUpdate>();
-            sam.startWatch(s.connectionId, 1, watch.subscriber);
-            await next(watch.received, (update) => update.kind === "ready");
-            const saved = await alex.setTagAppearance(a.connectionId, "patch", READER, 0);
-            expect(saved).toMatchObject({
-              saved: { appearance: READER, appearanceRevision: 1, revision: before?.revision },
-            });
-            await next(watch.received, (update) => update.kind === "tag");
-            const seen = (await sam.tags(s.connectionId))[0];
-            expect(seen?.appearance).toEqual(READER);
-            expect(seen?.instructions).toBe(before?.instructions);
-
-            // Both edit from revision 1: one is saved, the other is told the latest look.
-            const [first, second] = await Promise.all([
-              alex.setTagAppearance(a.connectionId, "patch", { ...READER, color: "coral" }, 1),
-              sam.setTagAppearance(s.connectionId, "patch", { ...READER, head: "bean" }, 1),
-            ]);
-            const outcomes = [first, second];
-            const won = outcomes.find((outcome) => "saved" in outcome);
-            const lost = outcomes.find((outcome) => "conflict" in outcome);
-            expect(won && lost).toBeTruthy();
-            if (!won || !("saved" in won) || !lost || !("conflict" in lost)) return;
-            expect(lost.conflict.appearance).toEqual(won.saved.appearance);
-            expect(lost.conflict.appearanceRevision).toBe(2);
-
-            // A client principal sees the portrait and can't change it through the API.
-            const created = await runCli(
-              [
-                "auth-key",
-                "create",
-                "--role",
-                "client",
-                "--tag",
-                "patch",
-                "--gateway",
-                stack.url,
-                "viewers",
-              ],
-              { ...baseEnv(home), SUPERTAG_OPERATOR_TOKEN: "avatar-operator" },
-            );
-            const key = (JSON.parse(created) as { auth_key: string }).auth_key;
-            const viewer = app(path.join(home, "viewer"));
-            const v = await viewer.saveGateway(stack.url, "Work", key);
-            expect(v.principal).toMatch(/^client:/u);
-            expect((await viewer.tags(v.connectionId))[0]?.appearance).toEqual(
-              won.saved.appearance,
-            );
-            await expect(viewer.setTagAppearance(v.connectionId, "patch", READER, 2)).rejects.toBe(
-              "Only an operator can change a Tag's avatar.",
-            );
-            expect((await alex.tag(a.connectionId, "patch")).appearanceRevision).toBe(2);
-
-            // It survives a restart of both services, read by a relaunched app.
-            await stack.restart();
-            const relaunched = app(path.join(home, "alex"));
-            const again = await relaunched.selectGateway(stack.url);
-            const reopened = await relaunched.tag(again.connectionId, "patch");
-            expect(reopened.appearance).toEqual(won.saved.appearance);
-            expect(reopened.appearanceRevision).toBe(2);
-          } finally {
-            await stack.stop();
-            if (databaseUrl) await dropPostgres(databaseUrl);
-          }
-        },
-      );
-    }
-
-    it("leaves the same Tag ID on another Gateway alone when the app switches mid-save", async () => {
-      const home = await directory("avatar-switch");
-      const alpha = await Stack.start({ root: home, name: "alpha", token: "alpha-operator" });
-      const beta = await Stack.start({ root: home, name: "beta", token: "beta-operator" });
-      try {
-        await alpha.putTag("patch");
-        await beta.putTag("patch");
-        const state = app(home);
-        const a = await state.saveGateway(alpha.url, "Alpha", "alpha-operator");
-        const saving = state.setTagAppearance(a.connectionId, "patch", READER, 0).then(
-          () => "saved",
-          (error: unknown) => error,
-        );
-        const b = await state.saveGateway(beta.url, "Beta", "beta-operator");
-        // The save went to Alpha, whose connection it was sent on; an answer arriving after the
-        // switch is refused rather than shown under Beta.
-        expect(["saved", CHANGED]).toContain(await saving);
-        const untouched = await state.tag(b.connectionId, "patch");
-        expect(untouched.appearance).toBeUndefined();
-        expect(untouched.appearanceRevision).toBe(0);
-        const back = await state.selectGateway(alpha.url);
-        expect((await state.tag(back.connectionId, "patch")).appearance).toEqual(READER);
       } finally {
         await alpha.stop();
         await beta.stop();

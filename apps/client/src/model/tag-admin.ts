@@ -1,5 +1,5 @@
 /** Creating Tags: the form's options, the new Tag, and who may create one. */
-import type { Tag, TagAppearance } from "./gateway";
+import type { Tag } from "./gateway";
 
 /** What a new Tag can run on: the harnesses and Workspaces the connected Worker Hosts offer. */
 export interface TagOptions {
@@ -35,27 +35,10 @@ export interface NewTag {
   webAccess?: boolean;
 }
 
-/**
- * What saving a Tag's portrait did: `saved` holds the Tag with it; `conflict` holds the Tag as
- * it is now, when someone saved another portrait since the editor read `expectedRevision`.
- */
-export type AppearanceSave = { saved: Tag } | { conflict: Tag };
-
-/** Creating Tags and changing their portraits, which only an operator may do. */
+/** Creating Tags, which only an operator may do. */
 export interface TagAdmin {
   options(): Promise<TagOptions>;
   create(tag: NewTag): Promise<Tag>;
-  /**
-   * Saves a Tag's portrait, or its default with `null`, if it is still at `expectedRevision`
-   * (its `appearanceRevision`). Nothing else of the Tag changes.
-   */
-  setAppearance(
-    tagId: string,
-    appearance: TagAppearance | null,
-    expectedRevision: number,
-  ): Promise<AppearanceSave>;
-  /** The Tag as the Gateway has it now, to check what an unanswered save did. */
-  tag(tagId: string): Promise<Tag>;
   /**
    * Asks for a folder and adds its git repository as a Workspace of this machine; `null` when
    * the person cancelled. Only the local Gateway has it.

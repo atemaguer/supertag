@@ -10,7 +10,6 @@
  */
 import type {
   AddedWorkspace,
-  AppearanceSave,
   AttemptDecisionName,
   Conversation,
   FollowUpdate,
@@ -29,7 +28,6 @@ import type {
   ScheduleAction,
   Tag,
   TagActivity,
-  TagAppearance,
   TagOptions,
   TaskEvent,
   TaskFileEntry,
@@ -94,12 +92,6 @@ export interface Commands {
   tagActivity: Call<Connected & { tagId: string }, TagActivity>;
   listTagOptions: Call<Connected, TagOptions>;
   createTag: Call<Connected & { tag: NewTag }, Tag>;
-  getTag: Call<Connected & { tagId: string }, Tag>;
-  /** Saves a Tag's portrait at an expected revision, or reports the newer one saved since. */
-  setTagAppearance: Call<
-    Connected & { tagId: string; appearance: TagAppearance | null; expectedRevision: number },
-    AppearanceSave
-  >;
   /** Local Gateway only: picks a folder and adds its repository as a Workspace. */
   addLocalWorkspace: Call<Connected, AddedWorkspace | null>;
   // Memory
@@ -177,8 +169,6 @@ export const CHANNELS = {
   tagActivity: "call",
   listTagOptions: "call",
   createTag: "call",
-  getTag: "call",
-  setTagAppearance: "call",
   addLocalWorkspace: "call",
   listHarnessMemory: "call",
   deleteHarnessMemory: "call",

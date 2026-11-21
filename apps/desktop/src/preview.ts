@@ -18,17 +18,6 @@ const tags: Tag[] = [
     allowedActions: ["Read build logs", "Inspect repositories"],
     revision: 1,
     harnessKind: "codex",
-    appearance: {
-      version: 1,
-      catalog: "felt-v1",
-      head: "pear",
-      color: "moss",
-      expression: "curious",
-      hat: "plum-beanie",
-      glasses: "round-charcoal",
-      headphones: null,
-    },
-    appearanceRevision: 1,
   },
   {
     tagId: "moss",
@@ -351,25 +340,6 @@ export const previewTagAdmin: TagAdmin = {
     };
     tags.push(tag);
     return tag;
-  },
-  async setAppearance(tagId, appearance, expectedRevision) {
-    const index = tags.findIndex((tag) => tag.tagId === tagId);
-    const current = tags[index];
-    if (!current) throw new Error(`Tag ${tagId} was not found.`);
-    if ((current.appearanceRevision ?? 0) !== expectedRevision) return { conflict: current };
-    const saved: Tag = {
-      ...current,
-      ...(appearance ? { appearance } : { appearance: undefined }),
-      appearanceRevision: expectedRevision + 1,
-    };
-    if (!appearance) delete saved.appearance;
-    tags[index] = saved;
-    return { saved };
-  },
-  async tag(tagId) {
-    const found = tags.find((tag) => tag.tagId === tagId);
-    if (!found) throw new Error(`Tag ${tagId} was not found.`);
-    return found;
   },
 };
 

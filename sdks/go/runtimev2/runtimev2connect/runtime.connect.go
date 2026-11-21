@@ -126,9 +126,6 @@ const (
 	OperatorGetTagProcedure = "/supertag.runtime.v2.Operator/GetTag"
 	// OperatorRetireTagProcedure is the fully-qualified name of the Operator's RetireTag RPC.
 	OperatorRetireTagProcedure = "/supertag.runtime.v2.Operator/RetireTag"
-	// OperatorSetTagAppearanceProcedure is the fully-qualified name of the Operator's SetTagAppearance
-	// RPC.
-	OperatorSetTagAppearanceProcedure = "/supertag.runtime.v2.Operator/SetTagAppearance"
 	// OperatorGetReplyDeliveryProcedure is the fully-qualified name of the Operator's GetReplyDelivery
 	// RPC.
 	OperatorGetReplyDeliveryProcedure = "/supertag.runtime.v2.Operator/GetReplyDelivery"
@@ -523,10 +520,6 @@ type OperatorClient interface {
 	ResolveAttempt(context.Context, *connect.Request[runtimev2.ResolveAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error)
 	GetTag(context.Context, *connect.Request[runtimev2.GetTagRequest]) (*connect.Response[runtimev2.Tag], error)
 	RetireTag(context.Context, *connect.Request[runtimev2.RetireTagRequest]) (*connect.Response[runtimev2.RetireTagResponse], error)
-	// Saves a Tag's portrait and nothing else: its instructions, execution settings, revision and
-	// accepted work stay as they were. Whoever may write the Tag with PutTag may. A different
-	// `expected_revision` than the stored one is refused with ALREADY_EXISTS.
-	SetTagAppearance(context.Context, *connect.Request[runtimev2.SetTagAppearanceRequest]) (*connect.Response[runtimev2.Tag], error)
 	GetReplyDelivery(context.Context, *connect.Request[runtimev2.GetReplyDeliveryRequest]) (*connect.Response[runtimev2.ReplyDelivery], error)
 	ListReplyDeliveries(context.Context, *connect.Request[runtimev2.ListReplyDeliveriesRequest]) (*connect.Response[runtimev2.ListReplyDeliveriesResponse], error)
 	ResolveReply(context.Context, *connect.Request[runtimev2.ResolveReplyRequest]) (*connect.Response[runtimev2.ReplyDelivery], error)
@@ -639,12 +632,6 @@ func NewOperatorClient(httpClient connect.HTTPClient, baseURL string, opts ...co
 			connect.WithSchema(operatorMethods.ByName("RetireTag")),
 			connect.WithClientOptions(opts...),
 		),
-		setTagAppearance: connect.NewClient[runtimev2.SetTagAppearanceRequest, runtimev2.Tag](
-			httpClient,
-			baseURL+OperatorSetTagAppearanceProcedure,
-			connect.WithSchema(operatorMethods.ByName("SetTagAppearance")),
-			connect.WithClientOptions(opts...),
-		),
 		getReplyDelivery: connect.NewClient[runtimev2.GetReplyDeliveryRequest, runtimev2.ReplyDelivery](
 			httpClient,
 			baseURL+OperatorGetReplyDeliveryProcedure,
@@ -684,7 +671,6 @@ type operatorClient struct {
 	resolveAttempt      *connect.Client[runtimev2.ResolveAttemptRequest, runtimev2.AttemptResolution]
 	getTag              *connect.Client[runtimev2.GetTagRequest, runtimev2.Tag]
 	retireTag           *connect.Client[runtimev2.RetireTagRequest, runtimev2.RetireTagResponse]
-	setTagAppearance    *connect.Client[runtimev2.SetTagAppearanceRequest, runtimev2.Tag]
 	getReplyDelivery    *connect.Client[runtimev2.GetReplyDeliveryRequest, runtimev2.ReplyDelivery]
 	listReplyDeliveries *connect.Client[runtimev2.ListReplyDeliveriesRequest, runtimev2.ListReplyDeliveriesResponse]
 	resolveReply        *connect.Client[runtimev2.ResolveReplyRequest, runtimev2.ReplyDelivery]
@@ -770,11 +756,6 @@ func (c *operatorClient) RetireTag(ctx context.Context, req *connect.Request[run
 	return c.retireTag.CallUnary(ctx, req)
 }
 
-// SetTagAppearance calls supertag.runtime.v2.Operator.SetTagAppearance.
-func (c *operatorClient) SetTagAppearance(ctx context.Context, req *connect.Request[runtimev2.SetTagAppearanceRequest]) (*connect.Response[runtimev2.Tag], error) {
-	return c.setTagAppearance.CallUnary(ctx, req)
-}
-
 // GetReplyDelivery calls supertag.runtime.v2.Operator.GetReplyDelivery.
 func (c *operatorClient) GetReplyDelivery(ctx context.Context, req *connect.Request[runtimev2.GetReplyDeliveryRequest]) (*connect.Response[runtimev2.ReplyDelivery], error) {
 	return c.getReplyDelivery.CallUnary(ctx, req)
@@ -811,10 +792,6 @@ type OperatorHandler interface {
 	ResolveAttempt(context.Context, *connect.Request[runtimev2.ResolveAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error)
 	GetTag(context.Context, *connect.Request[runtimev2.GetTagRequest]) (*connect.Response[runtimev2.Tag], error)
 	RetireTag(context.Context, *connect.Request[runtimev2.RetireTagRequest]) (*connect.Response[runtimev2.RetireTagResponse], error)
-	// Saves a Tag's portrait and nothing else: its instructions, execution settings, revision and
-	// accepted work stay as they were. Whoever may write the Tag with PutTag may. A different
-	// `expected_revision` than the stored one is refused with ALREADY_EXISTS.
-	SetTagAppearance(context.Context, *connect.Request[runtimev2.SetTagAppearanceRequest]) (*connect.Response[runtimev2.Tag], error)
 	GetReplyDelivery(context.Context, *connect.Request[runtimev2.GetReplyDeliveryRequest]) (*connect.Response[runtimev2.ReplyDelivery], error)
 	ListReplyDeliveries(context.Context, *connect.Request[runtimev2.ListReplyDeliveriesRequest]) (*connect.Response[runtimev2.ListReplyDeliveriesResponse], error)
 	ResolveReply(context.Context, *connect.Request[runtimev2.ResolveReplyRequest]) (*connect.Response[runtimev2.ReplyDelivery], error)
@@ -923,12 +900,6 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 		connect.WithSchema(operatorMethods.ByName("RetireTag")),
 		connect.WithHandlerOptions(opts...),
 	)
-	operatorSetTagAppearanceHandler := connect.NewUnaryHandler(
-		OperatorSetTagAppearanceProcedure,
-		svc.SetTagAppearance,
-		connect.WithSchema(operatorMethods.ByName("SetTagAppearance")),
-		connect.WithHandlerOptions(opts...),
-	)
 	operatorGetReplyDeliveryHandler := connect.NewUnaryHandler(
 		OperatorGetReplyDeliveryProcedure,
 		svc.GetReplyDelivery,
@@ -981,8 +952,6 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 			operatorGetTagHandler.ServeHTTP(w, r)
 		case OperatorRetireTagProcedure:
 			operatorRetireTagHandler.ServeHTTP(w, r)
-		case OperatorSetTagAppearanceProcedure:
-			operatorSetTagAppearanceHandler.ServeHTTP(w, r)
 		case OperatorGetReplyDeliveryProcedure:
 			operatorGetReplyDeliveryHandler.ServeHTTP(w, r)
 		case OperatorListReplyDeliveriesProcedure:
@@ -1060,10 +1029,6 @@ func (UnimplementedOperatorHandler) GetTag(context.Context, *connect.Request[run
 
 func (UnimplementedOperatorHandler) RetireTag(context.Context, *connect.Request[runtimev2.RetireTagRequest]) (*connect.Response[runtimev2.RetireTagResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.RetireTag is not implemented"))
-}
-
-func (UnimplementedOperatorHandler) SetTagAppearance(context.Context, *connect.Request[runtimev2.SetTagAppearanceRequest]) (*connect.Response[runtimev2.Tag], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.SetTagAppearance is not implemented"))
 }
 
 func (UnimplementedOperatorHandler) GetReplyDelivery(context.Context, *connect.Request[runtimev2.GetReplyDeliveryRequest]) (*connect.Response[runtimev2.ReplyDelivery], error) {

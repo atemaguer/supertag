@@ -11,13 +11,6 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
-- Tag avatars: every Tag wears a felt mascot portrait in the desktop app, in place of the colored
-  mark, the same in the sidebar, the rail, the ⌘K search, the conversation, and its details. An
-  operator chooses one with **Edit avatar** in the Tag details: presets, Shape, Color,
-  Expression, Accessories, and Randomize. It is saved on the Control Plane, so every teammate sees
-  it; a Tag without one wears a default derived from its ID. `Tag` gains `appearance` and
-  `appearance_revision`, and `Operator.SetTagAppearance` saves one at an expected revision.
-
 - Left and Right move between the terminal UI's Tag list and the conversation: → in the list
   moves to the composer (or the Objective, inbox item, or Team in front), and ← moves back when
   the field is empty or its cursor is at the start, otherwise it moves the cursor. ← also closes
@@ -43,8 +36,7 @@ within the pre-1.0 compatibility policy described in
   Tasks is queued or running, and **Needs you** while its latest message is a question you have
   not answered. Screen readers hear the state with the name ("moss, Working"), and the collapsed
   rail keeps a dot. The open Tag's row is a soft fill instead of a bordered card, rows sit on an
-  even 4px rhythm with the unread dot under the time, and each portrait is cropped to its head
-  shape so every Tag fills its circle alike.
+  even 4px rhythm with the unread dot under the time.
 - In the terminal UI, `/` on an empty message no longer opens the palette (Ctrl-K does), so a
   message can start with `/`: a path such as `/usr/bin`, or a `/` later in a message, is sent as
   text.

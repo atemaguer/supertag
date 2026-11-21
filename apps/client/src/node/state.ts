@@ -34,12 +34,11 @@ import type {
   ScheduleAction,
   Tag,
   TagActivity,
-  TagAppearance,
   TaskEvent,
   TaskFilesPlace,
   WatchUpdate,
 } from "../model/gateway";
-import type { AppearanceSave, NewTag, TagOptions } from "../model/tag-admin";
+import type { NewTag, TagOptions } from "../model/tag-admin";
 import { CACHE_ERROR, type CacheScope, entryPath, readEntry, validKey, writeEntry } from "./cache";
 import { conversation, event, message, messages, tag } from "./convert";
 import * as coordination from "./coordination";
@@ -462,51 +461,6 @@ export class GatewayState {
   }
 
   // Tags
-
-  /** One Tag as the Gateway has it now. */
-  tag(connectionId: string, tagId: string): Promise<Tag> {
-    return this.call(connectionId, async (session) =>
-      tag(await rpc(() => session.client.operator.getTag({ tagId }, CALL))),
-    );
-  }
-
-  /**
-   * Saves a Tag's portrait if it is still at `expectedRevision`. When someone saved another one
-   * since, it reads the Tag as it is now instead, for the editor to show.
-   */
-  setTagAppearance(
-    connectionId: string,
-    tagId: string,
-    recipe: TagAppearance | null,
-    expectedRevision: number,
-  ): Promise<AppearanceSave> {
-    const appearance = recipe && {
-      version: recipe.version,
-      catalog: recipe.catalog,
-      head: recipe.head,
-      color: recipe.color,
-      expression: recipe.expression,
-      hat: recipe.hat ?? "",
-      glasses: recipe.glasses ?? "",
-      headphones: recipe.headphones ?? "",
-    };
-    return this.call(connectionId, async (session) => {
-      try {
-        const saved = await session.client.operator.setTagAppearance(
-          { tagId, expectedRevision: BigInt(expectedRevision), ...(appearance && { appearance }) },
-          CALL,
-        );
-        return { saved: tag(saved) };
-      } catch (error) {
-        const code = statusOf(error).code;
-        if (code === Code.PermissionDenied) throw "Only an operator can change a Tag's avatar.";
-        if (code !== Code.AlreadyExists) throw rpcError(error);
-      }
-      return {
-        conflict: tag(await rpc(() => session.client.operator.getTag({ tagId }, CALL))),
-      };
-    });
-  }
 
   /** The Tag's activity, read fresh each time the panel asks. */
   tagActivity(connectionId: string, tagId: string): Promise<TagActivity> {

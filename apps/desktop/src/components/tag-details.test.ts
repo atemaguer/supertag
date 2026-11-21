@@ -244,7 +244,7 @@ it("words a period, the unprompted messages, and a start rate", () => {
   );
 });
 
-it("shows the Tag's activity first after its portrait and rereads it when one of its turns ends", async () => {
+it("shows the Tag's activity first and rereads it when one of its turns ends", async () => {
   let activity: TagActivity = { windowDays: 30, posted: 0, read: 0, answered: 0, quiet: 0 };
   const tagActivity = vi.fn(async () => activity);
   const feed = watchFeed();
@@ -252,9 +252,7 @@ it("shows the Tag's activity first after its portrait and rereads it when one of
   act(() => root.render(createElement(TagDetails, { gateway, watch: feed, tag, onClose() {} })));
   await settle();
   const section = host.querySelector('[aria-labelledby="tag-details-activity"]');
-  const sections = host.querySelectorAll(".details-section");
-  expect(sections[0]?.classList.contains("details-avatar")).toBe(true);
-  expect(sections[1]).toBe(section);
+  expect(host.querySelector(".details-section")).toBe(section);
   expect(section?.textContent).toContain("Lead sent nothing unprompted.");
   expect(section?.textContent).toContain("Start rate");
   expect(section?.textContent).toContain("None");

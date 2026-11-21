@@ -209,7 +209,7 @@ export function Sidebar({
             onClick={() => onSelectTag?.(lead.tagId)}
           >
             <span className="lead-avatar">
-              <TagAvatar tag={lead} large />
+              <TagAvatar tagId={lead.tagId} large />
               <span className="lead-badge" aria-hidden>
                 <Star size={10} fill="currentColor" strokeWidth={0} />
               </span>
@@ -277,7 +277,7 @@ function TagRow({
       onClick={onSelect}
     >
       <span className="tag-row-avatar">
-        <TagAvatar tag={tag} />
+        <TagAvatar tagId={tag.tagId} />
         {!expanded && status && <span className="tag-row-badge" aria-hidden />}
       </span>
       {expanded && (

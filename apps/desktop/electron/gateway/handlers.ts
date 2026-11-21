@@ -2,7 +2,7 @@
  * The Gateway channels of the table, on the main process's {@link GatewayState}. Each checks
  * its arguments' types before anything runs.
  */
-import type { NewTag, ReadMessages, ScheduleAction, TagAppearance } from "@supertag/client/model";
+import type { NewTag, ReadMessages, ScheduleAction } from "@supertag/client/model";
 import type { GatewayState } from "@supertag/client/node";
 import { forget, taskFiles } from "@supertag/client/node";
 import type { Handlers } from "../ipc";
@@ -67,25 +67,6 @@ function newTag(value: unknown): NewTag {
   return checked;
 }
 
-/** A portrait recipe: its IDs are checked by the Control Plane; here only their types. */
-function appearance(value: unknown): TagAppearance | null {
-  if (value === null) return null;
-  const recipe = record(value);
-  const version = whole(recipe["version"]);
-  if (version > 0xffff_ffff) throw INVALID_REQUEST;
-  const accessory = (key: string) => optionalText(recipe[key]) ?? null;
-  return {
-    version,
-    catalog: text(recipe["catalog"]),
-    head: text(recipe["head"]),
-    color: text(recipe["color"]),
-    expression: text(recipe["expression"]),
-    hat: accessory("hat"),
-    glasses: accessory("glasses"),
-    headphones: accessory("headphones"),
-  };
-}
-
 export interface GatewayShell {
   /** Shows a file in Finder or the file manager. */
   reveal(path: string): void;
@@ -111,8 +92,6 @@ type GatewayChannels =
   | "tagActivity"
   | "listTagOptions"
   | "createTag"
-  | "getTag"
-  | "setTagAppearance"
   | "listNetworkLogs"
   | "listSchedules"
   | "changeSchedule"
@@ -187,14 +166,6 @@ export function gatewayHandlers(
     tagActivity: (args) => state.tagActivity(text(args.connectionId), text(args.tagId)),
     listTagOptions: (args) => state.tagOptions(text(args.connectionId)),
     createTag: (args) => state.createTag(text(args.connectionId), newTag(args.tag)),
-    getTag: (args) => state.tag(text(args.connectionId), text(args.tagId)),
-    setTagAppearance: (args) =>
-      state.setTagAppearance(
-        text(args.connectionId),
-        text(args.tagId),
-        appearance(args.appearance),
-        whole(args.expectedRevision),
-      ),
     listNetworkLogs: (args) => state.networkLogs(text(args.connectionId), text(args.tagId)),
     listSchedules: (args) => state.schedules(text(args.connectionId), text(args.tagId)),
     changeSchedule: (args) =>

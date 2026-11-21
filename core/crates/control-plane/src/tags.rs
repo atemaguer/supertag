@@ -69,7 +69,6 @@ pub(crate) async fn active_name_in(
 
 pub(crate) fn tag_from_row(row: &AnyRow) -> Result<Tag> {
     let tag_id: String = row.try_get("tag_id")?;
-    let (appearance, appearance_revision) = crate::tag_appearance::from_row(row)?;
     Ok(Tag {
         name: row
             .try_get::<Option<String>, _>("name")?
@@ -100,8 +99,6 @@ pub(crate) fn tag_from_row(row: &AnyRow) -> Result<Tag> {
         volume: row
             .try_get::<Option<String>, _>("volume")?
             .unwrap_or_default(),
-        appearance,
-        appearance_revision,
     })
 }
 
