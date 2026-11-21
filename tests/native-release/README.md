@@ -10,8 +10,8 @@ installed. Set `SUPERTAG_RELEASE_TUI=0` (or `1`) to override it for one local bu
 tests the terminal UI either way. These contributor commands build and execute local archives without publishing them or changing an installed command.
 Optional model credentials remain external and are not used by these checks.
 
-The supported archive platforms are `linux-amd64`, `linux-arm64`, and `darwin-arm64`. Intel
-Macs have no archive. Each build records its exact source commit and lockfile digests. A separate
+The supported archive platforms are `linux-amd64`, `linux-arm64`, `darwin-arm64`, and
+`darwin-amd64`. Each build records its exact source commit and lockfile digests. A separate
 build receipt records the Rust, Cargo, Node, pnpm, Bun, and Python versions. The CLI, terminal UI,
 provider, and native helper assets must match the selected platform. A cross-compiled
 binary alone is not a completed platform verification.
@@ -38,17 +38,19 @@ remains as a reusable cache. Its identity is recorded in the builder receipt.
 
 ## macOS
 
-Use native tools on an Apple silicon Mac. Select Node 22.13 or later in the 22.x line, pnpm
-11.18.0, Bun at the version in `.bun-version`, Python 3.13, and the Rust toolchain pinned in
-`core/rust-toolchain.toml`.
+Use native tools on a Mac of the archive's architecture: an Apple silicon Mac for `darwin-arm64`,
+an Intel Mac for `darwin-amd64`. Select Node 22.13 or later in the 22.x line, pnpm 11.18.0, Bun at
+the version in `.bun-version` (on Intel, Bun's `darwin-x64-baseline` build, which needs no AVX2,
+as the release uses), Python 3.13, and the Rust toolchain pinned in `core/rust-toolchain.toml`.
 
 ```sh
 uv run scripts/native_release.py package --repo . --commit FULL_COMMIT_SHA \
   --expect-platform darwin-arm64 --output /tmp/supertag-macos-verification --install-smoke
 ```
 
-The preflight refuses x86_64 Python, Node, or Rust, such as tools running under Rosetta, before a
-build; it does not silently relabel their output.
+The preflight refuses Python, Node, Bun, or Rust of another architecture before a build, such as
+x86_64 tools running under Rosetta for `--expect-platform darwin-arm64`; it does not silently
+relabel their output. The release builds `darwin-amd64` on an Intel runner, never under Rosetta.
 
 ## Reuse dependency builds
 
@@ -85,7 +87,7 @@ build's crates and compiles only the adapter. `test-fixtures` includes it and ad
 and test-only behavior of the other crates, which would rebuild all of them.
 
 The `native-release-check.yml` workflow has a fast `contracts` mode and a full
-three-platform `package` mode, which builds the three platforms at once. Run it manually, or add
+four-platform `package` mode, which builds the four platforms at once. Run it manually, or add
 the `release-check` label to a pull request to run the full `package` mode on its head commit. Its
 explicit host labels follow the
 [GitHub runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).

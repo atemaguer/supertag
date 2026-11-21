@@ -1,11 +1,12 @@
 name: Release SuperTag
 
-# Pushing a release tag builds the native archives for macOS on Apple silicon and Linux (arm64,
-# amd64), the desktop app's macOS disk image and Linux Debian packages, and attaches them, their
-# SHA256SUMS, and an install.sh pinned to the release to a draft GitHub Release. The archives hold
-# the supertag CLI, the supertag-tui terminal UI, the shared execution provider, and the Node.js
-# bridges; the Mac app carries the macOS archive's contents, so it needs no separate install. The
-# terminal UI's native library statically links FFmpeg (LGPL-2.1), so the release also attaches the
+# Pushing a release tag builds the native archives for macOS (Apple silicon, Intel) and Linux
+# (arm64, amd64), the desktop app's macOS disk images (one per Mac architecture) and Linux Debian
+# packages, and attaches them, their SHA256SUMS, and an install.sh pinned to the release to a draft
+# GitHub Release. The archives hold the supertag CLI, the supertag-tui terminal UI, the shared
+# execution provider, and the Node.js bridges; each Mac app carries the contents of the macOS
+# archive for its architecture, so it needs no separate install. The terminal UI's native library
+# statically links FFmpeg (LGPL-2.1), so the release also attaches the
 # exact FFmpeg source tarball it was built from, verified against the SHA-256 that OpenTUI's
 # FFMPEG-SOURCE.md in the archives records (scripts/ffmpeg_source.py). A maintainer publishes the draft
 # once every asset is attached; publishing runs the installer check and the SDK publish
@@ -73,24 +74,40 @@ jobs:
       APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
       APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
 
-  # The Electron desktop app for Apple silicon (macOS 13 or later), as
-  # SuperTag-VERSION-darwin-arm64.dmg. Intel Macs get no build: releases ship no Intel Mac CLI.
+  # The Electron desktop app for macOS 13 or later, as SuperTag-VERSION-darwin-arm64.dmg for Apple
+  # silicon and SuperTag-VERSION-darwin-amd64.dmg for Intel, each built and launched on a runner of
+  # its own architecture. One image per architecture rather than a universal one: a universal app
+  # doubles the Electron framework and every CLI binary, so each download would be about twice the
+  # size, and the two archives' Node bridges hold different native packages that can't be merged.
   # electron-builder packages an unsigned SuperTag.app with its fuses flipped; the app carries the
-  # package job's signed macOS archive under Contents/Resources/supertag/, so it needs no separate
-  # install. scripts/package-desktop-macos.sh signs the bridges' executables, the CLI and the
-  # terminal UI (allow-jit only), then the
+  # package job's signed macOS archive for the same architecture under
+  # Contents/Resources/supertag/, so it needs no separate install. scripts/package-desktop-macos.sh
+  # signs the bridges' executables, the CLI and the terminal UI (allow-jit only), then the
   # Electron frameworks, helpers and the app, with the Developer ID certificate and the hardened
   # runtime, builds and signs the disk image, and notarizes and staples only the disk image, which
   # covers the app inside it; Gatekeeper then accepts the app inside the mounted image. Without
   # any Apple secret the image is unsigned, with a warning, as for the archives; an incomplete set
-  # fails this job. For now a failure here leaves the image out of the release with a warning
+  # fails this job. For now a failure here leaves that image out of the release with a warning
   # instead of stopping it.
   desktop:
     needs: [source, package]
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin-arm64
+            runner: macos-15
+            arch: arm64
+            app: mac-arm64
+          - platform: darwin-amd64
+            runner: macos-15-intel
+            arch: x64
+            app: mac
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     env:
       VERSION: ${{ needs.source.outputs.version }}
+      PLATFORM: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -149,12 +166,12 @@ jobs:
           } >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v4
         with:
-          name: supertag-native-darwin-arm64
+          name: supertag-native-${{ matrix.platform }}
           path: ${{ runner.temp }}/native
       - name: Unpack the signed macOS archive
         run: |
-          archives=("$RUNNER_TEMP"/native/supertag-"$VERSION"-darwin-arm64*.tar.gz)
-          [ "${#archives[@]}" = 1 ] && [ -f "${archives[0]}" ] || { echo "::error::expected one darwin-arm64 archive"; exit 1; }
+          archives=("$RUNNER_TEMP"/native/supertag-"$VERSION"-"$PLATFORM"*.tar.gz)
+          [ "${#archives[@]}" = 1 ] && [ -f "${archives[0]}" ] || { echo "::error::expected one $PLATFORM archive"; exit 1; }
           mkdir -p "$RUNNER_TEMP/cli"
           tar -xzf "${archives[0]}" -C "$RUNNER_TEMP/cli"
           roots=("$RUNNER_TEMP"/cli/*/)
@@ -163,9 +180,13 @@ jobs:
           echo "CLI_DIRECTORY=${roots[0]%/}" >> "$GITHUB_ENV"
       - name: Build the app
         # Unsigned, with its fuses flipped; the next step signs it once the CLI is inside it.
-        run: pnpm --filter @supertag/desktop package:mac
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: pnpm --filter @supertag/desktop package:mac --"$ARCH"
       - name: Put the CLI in the app, sign it, then build, sign, notarize, and check the disk image
         env:
+          APP: ${{ matrix.app }}
+          EXPECTED_ARCH: ${{ matrix.arch == 'x64' && 'x86_64' || 'arm64' }}
           SIGNED: ${{ steps.signing.outputs.signed }}
           IDENTITY: ${{ steps.signing.outputs.identity }}
           APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
@@ -173,11 +194,14 @@ jobs:
           APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
           APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
         run: |
-          app=apps/desktop/release/mac-arm64/SuperTag.app
+          app=apps/desktop/release/$APP/SuperTag.app
           plist="$app/Contents/Info.plist"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" = "$VERSION"
           test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$plist")" = 13.0
-          image="SuperTag-$VERSION-darwin-arm64.dmg"
+          # The app and the CLI inside it are both built for this runner's architecture.
+          lipo -archs "$app/Contents/MacOS/SuperTag" | grep -Fxq "$EXPECTED_ARCH"
+          lipo -archs "$CLI_DIRECTORY/supertag" | grep -Fxq "$EXPECTED_ARCH"
+          image="SuperTag-$VERSION-$PLATFORM.dmg"
           mkdir -p "$RUNNER_TEMP/desktop"
           NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey.p8" scripts/package-desktop-macos.sh \
             "$app" "$CLI_DIRECTORY" "$RUNNER_TEMP/desktop/$image"
@@ -193,7 +217,7 @@ jobs:
           mount="$RUNNER_TEMP/desktop-mount"
           mkdir -p "$mount"
           hdiutil attach -quiet -readonly -nobrowse -noautoopen -mountpoint "$mount" \
-            "$RUNNER_TEMP/desktop/SuperTag-$VERSION-darwin-arm64.dmg"
+            "$RUNNER_TEMP/desktop/SuperTag-$VERSION-$PLATFORM.dmg"
           trap 'hdiutil detach -quiet "$mount"' EXIT
           app="$mount/SuperTag.app"
           test "$("$app/Contents/Resources/supertag/supertag" --version)" = "supertag $VERSION"
@@ -202,17 +226,17 @@ jobs:
           [ "$broken" -eq 0 ] || { echo "::error::$broken symlinks in the bundled CLI are broken"; exit 1; }
           # A fresh home with the bundled CLI opens on setup.
           pnpm --filter @supertag/desktop smoke "$app/Contents/MacOS/SuperTag" --expect="Set up SuperTag"
-          du -sh "$app" "$RUNNER_TEMP/desktop/SuperTag-$VERSION-darwin-arm64.dmg"
+          du -sh "$app" "$RUNNER_TEMP/desktop/SuperTag-$VERSION-$PLATFORM.dmg"
       - uses: actions/upload-artifact@v4
         with:
-          name: supertag-desktop-darwin-arm64
+          name: supertag-desktop-${{ matrix.platform }}
           path: |
             ${{ runner.temp }}/desktop/*.dmg
             ${{ runner.temp }}/desktop/*.dmg.sha256
           if-no-files-found: error
           retention-days: 7
 
-  # A failed desktop job leaves the disk image out with a warning; the CLI archives still attach.
+  # A failed desktop job leaves its disk image out with a warning; the CLI archives still attach.
   # The Electron desktop app for Linux, as a Debian package for each release platform, and no
   # AppImage: Chromium's sandbox can't start from one under Ubuntu's restriction on unprivileged
   # user namespaces. The package installs an AppArmor profile that lets the app's own executable
@@ -303,13 +327,19 @@ jobs:
           path: release
           merge-multiple: true
       - uses: actions/download-artifact@v4
-        if: needs.desktop.result == 'success'
+        if: needs.desktop.result != 'skipped'
+        continue-on-error: true
         with:
-          name: supertag-desktop-darwin-arm64
+          pattern: supertag-desktop-darwin-*
           path: release
-      - name: Warn when the desktop app is missing
-        if: needs.desktop.result != 'success'
-        run: echo "::warning::The desktop app did not build; this release attaches no disk image."
+          merge-multiple: true
+      - name: Warn when a macOS disk image is missing
+        working-directory: release
+        run: |
+          for platform in darwin-arm64 darwin-amd64; do
+            [ -f "SuperTag-$VERSION-$platform.dmg" ] ||
+              echo "::warning::This release attaches no SuperTag-$VERSION-$platform.dmg."
+          done
       - uses: actions/download-artifact@v4
         if: needs.desktop-linux.result != 'skipped'
         continue-on-error: true
@@ -328,29 +358,29 @@ jobs:
         working-directory: release
         run: |
           : > SHA256SUMS
-          for platform in darwin-arm64 linux-arm64 linux-amd64; do
+          for platform in darwin-arm64 darwin-amd64 linux-arm64 linux-amd64; do
             archive="supertag-$VERSION-$platform-complete.tar.gz"
             sha256sum --check "$archive.sha256"
             cat "$archive.sha256" >> SHA256SUMS
           done
-          test "$(wc -l < SHA256SUMS)" -eq 3
+          test "$(wc -l < SHA256SUMS)" -eq 4
           # The FFmpeg source the terminal UI's native library links, as every archive's
           # licenses/opentui/FFMPEG-SOURCE.md names it; the script fails unless the download
           # matches the SHA-256 recorded there. The LGPL asks for it beside the binaries.
           source=$(python ../scripts/ffmpeg_source.py --output . \
-            supertag-"$VERSION"-{darwin-arm64,linux-arm64,linux-amd64}-complete.tar.gz)
+            supertag-"$VERSION"-{darwin-arm64,darwin-amd64,linux-arm64,linux-amd64}-complete.tar.gz)
           echo "$source"
           ffmpeg=$(printf '%s' "$source" | python -c 'import json, sys; print(json.load(sys.stdin)["name"])')
           sha256sum --check "$ffmpeg.sha256"
           cat "$ffmpeg.sha256" >> SHA256SUMS
           rm "$ffmpeg.sha256"
-          test "$(wc -l < SHA256SUMS)" -eq 4
+          test "$(wc -l < SHA256SUMS)" -eq 5
           unexpected=$(find . -maxdepth 1 -type f -name 'ffmpeg-*' ! -name "$ffmpeg")
           [ -z "$unexpected" ] || { echo "::error::unexpected FFmpeg source files: $unexpected"; exit 1; }
           echo "FFMPEG_SOURCE=$ffmpeg" >> "$GITHUB_ENV"
-          # The desktop app: the dmg and the two debs, whichever built.
-          for image in SuperTag-"$VERSION"-darwin-arm64.dmg SuperTag-"$VERSION"-linux-amd64.deb \
-            SuperTag-"$VERSION"-linux-arm64.deb; do
+          # The desktop app: the two dmgs and the two debs, whichever built.
+          for image in SuperTag-"$VERSION"-darwin-arm64.dmg SuperTag-"$VERSION"-darwin-amd64.dmg \
+            SuperTag-"$VERSION"-linux-amd64.deb SuperTag-"$VERSION"-linux-arm64.deb; do
             if [ -f "$image" ]; then
               sha256sum --check "$image.sha256"
               cat "$image.sha256" >> SHA256SUMS
@@ -358,7 +388,8 @@ jobs:
           done
           # Nothing else, such as an AppImage, rides along.
           unexpected=$(find . -maxdepth 1 -type f -name 'SuperTag-*' ! -name "SuperTag-$VERSION-darwin-arm64.dmg*" \
-            ! -name "SuperTag-$VERSION-linux-amd64.deb*" ! -name "SuperTag-$VERSION-linux-arm64.deb*")
+            ! -name "SuperTag-$VERSION-darwin-amd64.dmg*" ! -name "SuperTag-$VERSION-linux-amd64.deb*" \
+            ! -name "SuperTag-$VERSION-linux-arm64.deb*")
           [ -z "$unexpected" ] || { echo "::error::unexpected desktop files: $unexpected"; exit 1; }
       - name: Pin the installer to this release
         run: |

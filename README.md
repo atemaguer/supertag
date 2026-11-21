@@ -130,7 +130,7 @@ toward the same Objective.
 
 ## Run your first Tag
 
-On an Apple silicon Mac or Linux, install Git and [Claude Code](https://code.claude.com/docs/en/setup)
+On a Mac or Linux, install Git and [Claude Code](https://code.claude.com/docs/en/setup)
 or [Codex](https://developers.openai.com/codex/cli/), and sign in to it. For Claude Code, run
 `claude` and log in. For Codex, sign in with `codex -c 'cli_auth_credentials_store="file"' login`,
 which keeps the login in a file SuperTag's Tasks can use; a plain `codex login` on macOS keeps it
@@ -175,7 +175,7 @@ supertag objective review OBJECTIVE_ID approve
 supertag objective review OBJECTIVE_ID request-changes --feedback "Also cover the empty case."
 ```
 
-Prefer a window to the terminal? On an Apple silicon Mac or Linux, [install the desktop app](docs/operations/install.md#install-the-desktop-app):
+Prefer a window to the terminal? On a Mac (Apple silicon or Intel) or Linux, [install the desktop app](docs/operations/install.md#install-the-desktop-app):
 it carries its own `supertag`, sets SuperTag up on first launch, and talks to the same Tags.
 
 [Installation options](docs/operations/install.md) · [Talk to a Tag](docs/guides/talk-to-a-tag.md) · [Run your first Team](docs/guides/first-team.md) · [Direct SuperTag from your coding agent](docs/guides/coding-agent-operator.md)

@@ -1,10 +1,10 @@
 #!/bin/sh
-# Installs SuperTag's native release for macOS on Apple silicon or Linux on arm64 or amd64: the
-# supertag CLI, the shared execution provider, the Node.js bridges for Claude Code, Cursor, OpenCode,
-# E2B, and Modal, and, in a release that ships it, the supertag-tui terminal UI. The archive must
-# match the release's SHA256SUMS before it is unpacked, and the CLI and any terminal UI must report
-# the release's version before the command is linked. The installer never starts services or reads
-# SuperTag state.
+# Installs SuperTag's native release for macOS on Apple silicon or Intel, or Linux on arm64 or
+# amd64: the supertag CLI, the shared execution provider, the Node.js bridges for Claude Code,
+# Cursor, OpenCode, E2B, and Modal, and, in a release that ships it, the supertag-tui terminal UI.
+# The archive must match the release's SHA256SUMS before it is unpacked, and the CLI and any
+# terminal UI must report the release's version before the command is linked. The installer never
+# starts services or reads SuperTag state.
 set -eu
 umask 022
 
@@ -60,13 +60,11 @@ case "$(uname -m)" in
   x86_64 | amd64) arch=amd64 ;;
   *) fail "SuperTag supports arm64 and amd64; this is $(uname -m)" ;;
 esac
-if [ "$os" = darwin ] && [ "$arch" = amd64 ]; then
-  # A shell running under Rosetta reports x86_64 on Apple silicon; install the native build.
-  if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" = 1 ]; then
-    arch=arm64
-  else
-    fail "SuperTag releases do not support Intel Macs. Build the CLI from source instead: https://github.com/$REPOSITORY/blob/main/docs/operations/install.md#build-only-the-cli"
-  fi
+# A shell running under Rosetta reports x86_64 on Apple silicon; install the native arm64 build.
+# An Intel Mac has no sysctl.proc_translated and keeps the amd64 build.
+if [ "$os" = darwin ] && [ "$arch" = amd64 ] &&
+  [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" = 1 ]; then
+  arch=arm64
 fi
 PLATFORM="$os-$arch"
 

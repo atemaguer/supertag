@@ -51,12 +51,73 @@ class ReleasePlatformContracts(unittest.TestCase):
                 with self.assertRaisesRegex(ArchiveError, 'platform'):
                     release.tool_versions(self.root, {'PATH': '/fixture'}, 'darwin-arm64')
 
-    def test_intel_mac_is_not_a_release_platform(self):
-        self.assertNotIn('darwin-amd64', native_archive.PLATFORMS)
+    def test_intel_mac_build_requires_x64_node_rust_and_bun(self):
+        intel = dict(node_arch='x64', rust_host='x86_64-apple-darwin', bun_arch='x64')
+        with patch.object(release.subprocess, 'check_output', side_effect=self.tools(**intel)):
+            result = release.tool_versions(self.root, {'PATH': '/fixture'}, 'darwin-amd64')
+        self.assertEqual(result['rust']['host'], 'x86_64-apple-darwin')
+        self.assertEqual(result['node']['arch'], 'x64')
+        # Any Apple silicon tool would build or embed arm64 code in the Intel archive.
+        for key, value in (('node_arch', 'arm64'), ('rust_host', 'aarch64-apple-darwin'), ('bun_arch', 'arm64')):
+            with self.subTest(key), patch.object(release.subprocess, 'check_output',
+                                                 side_effect=self.tools(**{**intel, key: value})):
+                with self.assertRaisesRegex(ArchiveError, 'platform'):
+                    release.tool_versions(self.root, {'PATH': '/fixture'}, 'darwin-amd64')
+
+    def test_intel_mac_is_a_release_platform(self):
+        self.assertEqual(native_archive.PLATFORMS, {'linux-arm64', 'linux-amd64', 'darwin-arm64', 'darwin-amd64'})
+        self.assertEqual(native_archive.OPENTUI_PACKAGES['darwin-amd64'], ('core-darwin-x64', 'libopentui.dylib'))
         with patch.object(native_archive.host_platform, 'system', return_value='Darwin'), \
              patch.object(native_archive.host_platform, 'machine', return_value='x86_64'):
-            with self.assertRaisesRegex(ArchiveError, 'macOS on arm64'):
+            self.assertEqual(native_archive.native_platform(), 'darwin-amd64')
+        with patch.object(native_archive.host_platform, 'system', return_value='Windows'), \
+             patch.object(native_archive.host_platform, 'machine', return_value='AMD64'):
+            with self.assertRaisesRegex(ArchiveError, 'Linux and macOS'):
                 native_archive.native_platform()
+
+    def test_mach_o_architecture_matches_the_mac_platform(self):
+        arm64 = b'\xcf\xfa\xed\xfe' + (0x100000C).to_bytes(4, 'little') + bytes(24)
+        x86_64 = b'\xcf\xfa\xed\xfe' + (0x1000007).to_bytes(4, 'little') + bytes(24)
+        native_archive.check_architecture(arm64, 'darwin-arm64')
+        native_archive.check_architecture(x86_64, 'darwin-amd64')
+        for header, platform in ((arm64, 'darwin-amd64'), (x86_64, 'darwin-arm64')):
+            with self.subTest(platform), self.assertRaisesRegex(ArchiveError, 'architecture'):
+                native_archive.check_architecture(header, platform)
+
+    def test_every_platform_is_built_released_and_checked(self):
+        import yaml
+        workflows = native_archive.REPO / '.github/workflows'
+        check = yaml.safe_load((workflows / 'native-release-check.yml').read_text())
+        built = {entry['platform']: entry['runner'] for entry in check['jobs']['package']['strategy']['matrix']['include']}
+        # Each archive is built and smoked by native tools on its own hardware, never under Rosetta.
+        self.assertEqual(built, {'linux-amd64': 'ubuntu-24.04', 'linux-arm64': 'ubuntu-24.04-arm',
+                                 'darwin-arm64': 'macos-15', 'darwin-amd64': 'macos-15-intel'})
+        self.assertEqual(set(built), native_archive.PLATFORMS)
+        release_workflow = yaml.safe_load((workflows / 'release.yml').read_text())
+        desktop = {entry['platform']: entry['runner']
+                   for entry in release_workflow['jobs']['desktop']['strategy']['matrix']['include']}
+        self.assertEqual(desktop, {'darwin-arm64': 'macos-15', 'darwin-amd64': 'macos-15-intel'})
+        publish = '\n'.join(step.get('run', '') for step in release_workflow['jobs']['publish']['steps'])
+        checked = publish.split('archive="supertag-$VERSION-$platform-complete.tar.gz"', 1)[0]
+        self.assertEqual(set(checked.rsplit('for platform in ', 1)[1].split('; do', 1)[0].split()),
+                         native_archive.PLATFORMS)
+        ffmpeg = publish.split('supertag-"$VERSION"-{', 1)[1].split('}', 1)[0]
+        self.assertEqual(set(ffmpeg.split(',')), native_archive.PLATFORMS)
+        self.assertIn('test "$(wc -l < SHA256SUMS)" -eq 4\n', publish)
+        self.assertIn('test "$(wc -l < SHA256SUMS)" -eq 5\n', publish)
+        assets = (native_archive.REPO / 'scripts/check-release-assets.sh').read_text()
+        for platform in native_archive.PLATFORMS:
+            self.assertIn(f'supertag-$version-{platform}-complete.tar.gz', assets)
+        self.assertIn('for platform in darwin-arm64 darwin-amd64; do\n'
+                      '  if ! grep -Fxq -- "SuperTag-$version-$platform.dmg"', assets)
+
+    def test_the_intel_mac_terminal_ui_embeds_the_baseline_bun(self):
+        # Bun embeds its own runtime in supertag-tui; the baseline build runs on Intel Macs without
+        # AVX2, as on linux-amd64. Its download is pinned to .bun-version and a checksum.
+        pin = (native_archive.REPO / '.bun-version').read_text().strip()
+        text = (native_archive.REPO / '.github/workflows/native-release-check.yml').read_text()
+        self.assertIn(f'/bun-v{pin}/bun-darwin-x64-baseline.zip', text)
+        self.assertRegex(text, r'bun_sha=[0-9a-f]{64}')
 
     def test_wrong_expected_platform_fails_before_source_or_output_is_touched(self):
         with patch.object(release, 'native_platform', return_value='linux-arm64'), \

@@ -1,6 +1,7 @@
 name: Verify native releases
 
-# Builds and verifies the three native archives. On its own this uploads nothing.
+# Builds and verifies the four native archives: Linux on amd64 and arm64, and macOS on Apple
+# silicon and Intel, each on a runner of its own architecture. On its own this uploads nothing.
 # release.yml calls it with upload_artifacts and sign_macos to produce the
 # archives it attaches to a GitHub Release.
 on:
@@ -41,7 +42,7 @@ on:
         description: Full source commit (leave empty for the selected workflow revision)
         type: string
       mode:
-        description: Contract checks, or full three-platform package/extract/install verification
+        description: Contract checks, or full four-platform package/extract/install verification
         type: choice
         options: [contracts, package]
         default: contracts
@@ -87,6 +88,11 @@ jobs:
             runner: ubuntu-24.04-arm
           - platform: darwin-arm64
             runner: macos-15
+          # An Intel runner, not a cross-build on Apple silicon: pnpm installs the bridges' x64
+          # native packages, Bun embeds its own x64 runtime, and the smoke runs every binary on
+          # Intel hardware rather than under Rosetta.
+          - platform: darwin-amd64
+            runner: macos-15-intel
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     env:
@@ -115,9 +121,25 @@ jobs:
       # The terminal UI is compiled by the Bun pinned in .bun-version; the Linux builder image
       # installs the same version from a checksummed download.
       - uses: oven-sh/setup-bun@v2
-        if: runner.os == 'macOS'
+        if: matrix.platform == 'darwin-arm64'
         with:
           bun-version-file: .bun-version
+      # Bun embeds its own runtime in supertag-tui, so on Intel Macs, as on linux-amd64, the build
+      # uses Bun's baseline build, which runs on x86-64 processors without AVX2. The version must
+      # equal .bun-version.
+      - name: Install Bun's baseline build
+        if: matrix.platform == 'darwin-amd64'
+        run: |
+          bun_sha=fb0121739a7e80e7511b6bfe4d2116422b48ba18a013acadef0c425348e95891
+          test "$(cat .bun-version)" = 1.4.5
+          curl --fail --location --retry 3 -o "$RUNNER_TEMP/bun.zip" \
+            https://github.com/oven-sh/bun/releases/download/bun-v1.4.5/bun-darwin-x64-baseline.zip
+          printf '%s  %s\n' "$bun_sha" "$RUNNER_TEMP/bun.zip" | shasum -a 256 --check -
+          mkdir -p "$RUNNER_TEMP/bun/bin"
+          unzip -q -j "$RUNNER_TEMP/bun.zip" bun-darwin-x64-baseline/bun -d "$RUNNER_TEMP/bun/bin"
+          chmod 0755 "$RUNNER_TEMP/bun/bin/bun"
+          rm "$RUNNER_TEMP/bun.zip"
+          echo "$RUNNER_TEMP/bun/bin" >> "$GITHUB_PATH"
       # Release builds restore Cargo's registry and third-party dependency builds from a cache
       # with its own key prefix, kept under the checkout but outside the tracked files the build
       # snapshots. rust-cache never saves workspace crates, and --cargo-cache stamps every

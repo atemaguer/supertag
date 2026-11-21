@@ -14,8 +14,8 @@ if [[ $assets == draft ]]; then
 fi
 missing=0
 for name in install.sh SHA256SUMS \
-  "supertag-$version-darwin-arm64-complete.tar.gz" "supertag-$version-linux-arm64-complete.tar.gz" \
-  "supertag-$version-linux-amd64-complete.tar.gz"; do
+  "supertag-$version-darwin-arm64-complete.tar.gz" "supertag-$version-darwin-amd64-complete.tar.gz" \
+  "supertag-$version-linux-arm64-complete.tar.gz" "supertag-$version-linux-amd64-complete.tar.gz"; do
   if ! grep -Fxq -- "$name" <<<"$assets"; then
     printf '%s has no %s asset\n' "$release_tag" "$name" >&2
     missing=1
@@ -27,9 +27,11 @@ if ! grep -Eq '^ffmpeg-[0-9][0-9.]*\.tar\.(xz|gz|bz2)$' <<<"$assets"; then
   printf '%s has no FFmpeg source (ffmpeg-VERSION.tar.xz) asset\n' "$release_tag" >&2
   missing=1
 fi
-# The desktop app's disk image only warns for now, so a signing or notarization failure in its
-# job never holds back the CLI and SDK releases.
-if ! grep -Fxq -- "SuperTag-$version-darwin-arm64.dmg" <<<"$assets"; then
-  printf '::warning::%s has no SuperTag-%s-darwin-arm64.dmg asset\n' "$release_tag" "$version"
-fi
+# The desktop app's disk images only warn for now, so a signing or notarization failure in their
+# jobs never holds back the CLI and SDK releases.
+for platform in darwin-arm64 darwin-amd64; do
+  if ! grep -Fxq -- "SuperTag-$version-$platform.dmg" <<<"$assets"; then
+    printf '::warning::%s has no SuperTag-%s-%s.dmg asset\n' "$release_tag" "$version" "$platform"
+  fi
+done
 exit "$missing"

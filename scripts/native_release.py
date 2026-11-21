@@ -90,7 +90,7 @@ def tool_versions(source, env, platform):
     rust_output = probe(["rustc", "-vV"])
     rust = dict(line.split(": ", 1) for line in rust_output.splitlines() if ": " in line)
     expected_host = {"linux-arm64": "aarch64-unknown-linux-gnu", "linux-amd64": "x86_64-unknown-linux-gnu",
-                     "darwin-arm64": "aarch64-apple-darwin"}[platform]
+                     "darwin-arm64": "aarch64-apple-darwin", "darwin-amd64": "x86_64-apple-darwin"}[platform]
     pinned = tomllib.loads((source / "core/rust-toolchain.toml").read_text())["toolchain"]["channel"]
     require(rust.get("host") == expected_host, "Rust host does not match the expected platform")
     require(rust.get("release") == pinned, "Rust version differs from the source pin")

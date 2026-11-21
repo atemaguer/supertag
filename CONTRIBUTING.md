@@ -106,7 +106,7 @@ the terminal UI either way, and the script tests run in both states.
 
 OpenTUI's native library statically links FFmpeg, under the LGPL 2.1, so every release must carry
 the exact FFmpeg source. The release workflow's publish job runs `scripts/ffmpeg_source.py` on the
-three archives: it reads the source URL and SHA-256 from each archive's
+four archives: it reads the source URL and SHA-256 from each archive's
 `licenses/opentui/FFMPEG-SOURCE.md`, requires them to agree, downloads the tarball, and fails the
 release unless its SHA-256 matches. The tarball is listed in `SHA256SUMS` and attached as a
 release asset. When you upgrade `@opentui/core`, update the OpenTUI version, tag, and FFmpeg
@@ -474,9 +474,10 @@ A release takes three steps, so the README's `releases/latest` installer URL nev
 release without its archives:
 
 1. Push the release tag, for example `git push origin v0.3.0`. **Release SuperTag**
-   (`release.yml`) builds and verifies the three archives with `native-release-check.yml`, checks
-   the pinned installer against them, builds the desktop app's Apple silicon disk image
-   (`SuperTag-VERSION-darwin-arm64.dmg`) and Debian packages
+   (`release.yml`) builds and verifies the four archives with `native-release-check.yml`, checks
+   the pinned installer against them, builds the desktop app's disk images for Apple silicon and
+   Intel (`SuperTag-VERSION-darwin-arm64.dmg`, `SuperTag-VERSION-darwin-amd64.dmg`) and Debian
+   packages
    (`SuperTag-VERSION-linux-amd64.deb`, `SuperTag-VERSION-linux-arm64.deb`), and attaches them
    with their `SHA256SUMS` and an
    `install.sh` pinned to the release to a draft GitHub Release for the tag. It never changes a
@@ -535,8 +536,9 @@ hardened runtime, builds and signs the disk image, and notarizes and staples onl
 Apple notarizes the outermost container, and its ticket covers the app and everything nested in
 it, so the app is not submitted on its own; the script checks that Gatekeeper accepts the app
 inside the mounted image, and the release job then launches it from there
-(`pnpm --filter @supertag/desktop smoke`). The app is built for Apple silicon only and needs macOS
-13 or later. The Debian packages need no signing; each release job installs its package, launches
+(`pnpm --filter @supertag/desktop smoke`). Each Mac architecture gets its own app and disk image,
+built and launched on a runner of that architecture with that architecture's archive inside; both
+need macOS 13 or later. The Debian packages need no signing; each release job installs its package, launches
 it with Chromium's sandbox under Ubuntu's user-namespace restriction, and removes it
 (`scripts/check-desktop-deb.sh`). For now a failed desktop build or notarization leaves that file
 out of the draft release with a warning, and the SDK publish workflows only warn when it is

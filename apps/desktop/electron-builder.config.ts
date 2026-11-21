@@ -1,7 +1,9 @@
 /**
- * How electron-builder packages the app: an unsigned `SuperTag.app` for Apple silicon, which
- * `scripts/package-desktop-macos.sh` fills with the CLI, signs and turns into the disk image, and a
- * Debian package for each Linux release platform. The renderer and the main process are already
+ * How electron-builder packages the app: an unsigned `SuperTag.app` for Apple silicon
+ * (`release/mac-arm64/`) and one for Intel (`--x64`, `release/mac/`), which
+ * `scripts/package-desktop-macos.sh` fills with the macOS archive of the same architecture, signs
+ * and turns into that architecture's disk image, and a Debian package for each Linux release
+ * platform. The renderer and the main process are already
  * bundled (`pnpm build`), so the app carries only `dist/`, `dist-electron/` and its manifest, and no
  * `node_modules`. The fuses are flipped in `afterPack`, before anything signs the binary.
  */
@@ -41,6 +43,7 @@ const config: Configuration = {
     await applyFuses(binary, mac ? "darwin" : "linux");
   },
   mac: {
+    // Apple silicon unless `--x64` asks for the Intel app; never a universal app.
     target: [{ target: "dir", arch: ["arm64"] }],
     // Unsigned here: the release signs the app once the CLI is inside it, with per-file
     // entitlements electron-builder can't express.

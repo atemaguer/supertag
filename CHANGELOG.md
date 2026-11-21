@@ -9,6 +9,13 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Added
+
+- Releases for Intel Macs: a `darwin-amd64` archive with the `supertag` CLI, the terminal UI, the
+  shared execution provider, and the Node.js bridges, and a signed and notarized
+  `SuperTag-VERSION-darwin-amd64.dmg` desktop app. The installer script picks it on an Intel Mac,
+  and still installs the Apple silicon build from a Rosetta terminal on Apple silicon.
+
 ## [0.3.5] - 2026-11-20
 
 ### Added

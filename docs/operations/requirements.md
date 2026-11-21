@@ -24,9 +24,9 @@ Check this page before [installing SuperTag](install.md).
   OpenCode Tasks run commands in [local-vm containers](../reference/supertag-yaml.md#local-vm-containers).
   The first run doesn't need it. On macOS, Docker Desktop provides the Linux virtual machine.
   Allow about 1 GB for the container image and Workspace copies.
-- **macOS on Apple silicon, or Linux on arm64 or amd64.** Linux needs glibc 2.36 or newer, as in
-  Debian 12 or Ubuntu 24.04. Intel Macs have no release; [build the CLI](install.md#build-only-the-cli)
-  there instead. The [desktop app](install.md#install-the-desktop-app) needs macOS 13 or later.
+- **macOS on Apple silicon or Intel, or Linux on arm64 or amd64.** Linux needs glibc 2.36 or
+  newer, as in Debian 12 or Ubuntu 24.04. The [desktop app](install.md#install-the-desktop-app)
+  needs macOS 13 or later.
   Restarting background services uses launchd on macOS and systemd user services on Linux. Native
   Windows is not supported; use a Linux host.
 - **Disk space for the release and your work.** Allow about 1 GB for each installed release, plus

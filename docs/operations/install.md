@@ -20,10 +20,18 @@ a **harness**, the connection to an agent system such as Claude Code or Codex.
 
 ## Install a release archive
 
-A SuperTag release is one archive per platform: `linux-amd64`, `linux-arm64`, or `darwin-arm64`,
-attached to its GitHub Release with a `SHA256SUMS` file and an installer script. The installer
-script works on Linux and on Apple silicon Macs; Intel Macs have no release, so
-[build the CLI](#build-only-the-cli) there instead:
+A SuperTag release is one archive per platform, attached to its GitHub Release with a
+`SHA256SUMS` file and an installer script:
+
+| Platform | Archive |
+| --- | --- |
+| macOS on Apple silicon | `darwin-arm64` |
+| macOS on Intel | `darwin-amd64` |
+| Linux on arm64 | `linux-arm64` |
+| Linux on amd64 | `linux-amd64` |
+
+The installer script picks your platform's archive. In a terminal running under Rosetta on an
+Apple silicon Mac, it still installs the Apple silicon build:
 
 ```sh
 curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
@@ -80,15 +88,16 @@ reads the same `SUPERTAG_INSTALL_ROOT` and `SUPERTAG_BIN_DIR`.
 
 ## Install the desktop app
 
-The desktop app gives your conversations with Tags a window of their own, on an Apple silicon Mac
-with macOS 13 or later, or on Linux (amd64 or arm64) with `apt`, such as Ubuntu or Debian. Intel
-Macs have no desktop app; use the CLI there. Get the files from the
+The desktop app gives your conversations with Tags a window of their own, on a Mac with macOS 13
+or later, or on Linux (amd64 or arm64) with `apt`, such as Ubuntu or Debian. Get the files from the
 [latest release](https://github.com/atemaguer/supertag/releases/latest).
 
 On a Mac:
 
-1. Download `SuperTag-VERSION-darwin-arm64.dmg`, open it, and drag **SuperTag** to
-   **Applications**.
+1. Download `SuperTag-VERSION-darwin-arm64.dmg` for Apple silicon, or
+   `SuperTag-VERSION-darwin-amd64.dmg` for an Intel Mac. **About This Mac** in the Apple menu
+   shows which you have: an Apple chip, such as M1, or an Intel processor. Open the image and drag
+   **SuperTag** to **Applications**.
 2. Open SuperTag from Applications.
 
 The Mac app carries its own `supertag` CLI and Node.js bridges, so it needs no
@@ -126,8 +135,8 @@ remote Gateway from another release gets the error alone: upgrade it where it ru
 
 ## Build only the CLI
 
-For a server or container that runs only the Control Plane or a Gateway, or on an Intel Mac,
-which has no release archive, build the CLI alone. It also runs Codex Tasks:
+For a server or container that runs only the Control Plane or a Gateway, build the CLI alone.
+It also runs Codex Tasks:
 
 ```sh
 cargo build --release --locked --manifest-path core/Cargo.toml -p supertag-cli --bin supertag

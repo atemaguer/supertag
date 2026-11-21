@@ -158,18 +158,34 @@ class InstallScript(unittest.TestCase):
             tool.chmod(0o755)
         return f"{tools}:{os.defpath}"
 
-    def test_refuses_an_intel_mac_and_points_to_a_source_build(self):
-        self.release()
-        self.assert_refused("SuperTag releases do not support Intel Macs. Build the CLI from source instead: "
-                            "https://github.com/atemaguer/supertag/blob/main/docs/operations/install.md#build-only-the-cli",
-                            PATH=self.mac_tools(0))
+    def mac_release(self):
+        # Both macOS builds are listed, as in a real release, so the installer must pick one.
+        for platform in ("darwin-arm64", "darwin-amd64"):
+            self.platform = platform
+            self.release()
+
+    @unittest.skipUnless(host.system() == "Darwin", "the macOS install path runs only on macOS")
+    def test_an_intel_mac_installs_the_intel_release(self):
+        self.mac_release()
+        # An Intel Mac has no sysctl.proc_translated; sysctl fails, as there.
+        result = self.run_installer(PATH=self.mac_tools("; exit 1"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("for darwin-amd64", result.stdout)
+        self.assertIn("darwin-amd64", self.installed().resolve().as_posix())
+
+    @unittest.skipUnless(host.system() == "Darwin", "the macOS install path runs only on macOS")
+    def test_an_untranslated_intel_shell_installs_the_intel_release(self):
+        self.mac_release()
+        result = self.run_installer(PATH=self.mac_tools(0))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("darwin-amd64", self.installed().resolve().as_posix())
 
     @unittest.skipUnless(host.system() == "Darwin", "the macOS install path runs only on macOS")
     def test_a_rosetta_shell_installs_the_apple_silicon_release(self):
-        self.platform = "darwin-arm64"
-        self.release()
+        self.mac_release()
         result = self.run_installer(PATH=self.mac_tools(1))
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("for darwin-arm64", result.stdout)
         self.assertIn("darwin-arm64", self.installed().resolve().as_posix())
 
     def test_never_replaces_a_command_it_did_not_install(self):

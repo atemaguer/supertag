@@ -4,8 +4,9 @@
 #   package-desktop-macos.sh APP CLI_DIRECTORY IMAGE
 #
 # APP is the unsigned SuperTag.app from `pnpm --filter @supertag/desktop package:mac`
-# (apps/desktop/release/mac-arm64/SuperTag.app), its fuses already flipped. CLI_DIRECTORY is an extracted
-# complete release archive: supertag, supertag-shared-execution, node-bridges/, and supertag-tui when
+# (apps/desktop/release/mac-arm64/SuperTag.app, or release/mac/SuperTag.app with --x64 for Intel),
+# its fuses already flipped. CLI_DIRECTORY is an extracted complete release archive for the same
+# architecture: supertag, supertag-shared-execution, node-bridges/, and supertag-tui when
 # the release ships it (SHIP_TUI in scripts/native_archive.py).
 # The CLI goes to SuperTag.app/Contents/Resources/supertag/, where the app looks for it first.
 # IMAGE is the disk image to write.
@@ -27,6 +28,13 @@ for name in "${binaries[@]}"; do
 done
 [[ -f "$cli/node-bridges/manifest.json" ]] || { echo "$cli has no node-bridges/manifest.json" >&2; exit 1; }
 [[ -d "$app/Contents/MacOS" ]] || { echo "$app is not an app bundle" >&2; exit 1; }
+# An Intel app must carry the Intel archive, and an Apple silicon app the Apple silicon one.
+app_arch=$(lipo -archs "$app/Contents/MacOS/SuperTag")
+for name in "${binaries[@]}"; do
+  cli_arch=$(lipo -archs "$cli/$name")
+  [[ "$cli_arch" == "$app_arch" ]] ||
+    { echo "$cli/$name is built for $cli_arch, but the app for $app_arch" >&2; exit 1; }
+done
 
 resources="$app/Contents/Resources/supertag"
 rm -rf "$resources"

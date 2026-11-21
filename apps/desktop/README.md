@@ -2,7 +2,7 @@
 
 SuperTag's desktop app, built with Electron: a main process in `electron/` and a React and
 TypeScript renderer in `src/`. It shows your conversations with Tags in a window of their own,
-on an Apple silicon Mac or on Linux. To install it, see
+on a Mac (Apple silicon or Intel) or on Linux. To install it, see
 [Install the desktop app](../../docs/operations/install.md#install-the-desktop-app).
 
 ## How it finds SuperTag
@@ -62,8 +62,9 @@ Releases ship the app (`.github/workflows/release.yml`). electron-builder
 flips the fuses in `electron/fuses.ts` after packing:
 
 ```sh
-pnpm --filter @supertag/desktop package:mac     # release/mac-arm64/SuperTag.app, unsigned
-pnpm --filter @supertag/desktop package:linux   # release/SuperTag-VERSION-linux-ARCH.deb
+pnpm --filter @supertag/desktop package:mac        # release/mac-arm64/SuperTag.app, unsigned
+pnpm --filter @supertag/desktop package:mac --x64  # release/mac/SuperTag.app, for Intel Macs
+pnpm --filter @supertag/desktop package:linux      # release/SuperTag-VERSION-linux-ARCH.deb
 ```
 
 On macOS, `scripts/package-desktop-macos.sh APP CLI_DIRECTORY IMAGE` puts an extracted release

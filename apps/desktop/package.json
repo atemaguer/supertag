@@ -14,7 +14,7 @@
     "dev": "tsx scripts/dev.ts",
     "build": "tsc --noEmit && tsc --build electron && vite build && tsup",
     "electron": "tsup && electron .",
-    "package:mac": "pnpm build && electron-builder --config electron-builder.config.ts --publish never --mac --arm64",
+    "package:mac": "pnpm build && electron-builder --config electron-builder.config.ts --publish never --mac dir",
     "package:linux": "pnpm build && electron-builder --config electron-builder.config.ts --publish never --linux",
     "smoke": "tsx scripts/smoke.ts"
   },

@@ -17,8 +17,7 @@ prompt for Claude Code. Cursor and OpenCode also work; their setup is under
 
 ## 1. Install
 
-Releases cover Linux on arm64 or amd64 and macOS on Apple silicon; on an Intel Mac, build the CLI
-as [the installation guide](../../docs/operations/install.md#build-only-the-cli) shows. Otherwise:
+Releases cover Linux on arm64 or amd64 and macOS on Apple silicon or Intel:
 
 ```sh
 curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh

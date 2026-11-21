@@ -30,7 +30,7 @@ FORMAT = "supertag-native-archive-v1"
 MAX_BINARY_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024
 MAX_MANIFEST_BYTES = 16 * 1024
-PLATFORMS = {"linux-arm64", "linux-amd64", "darwin-arm64"}
+PLATFORMS = {"linux-arm64", "linux-amd64", "darwin-arm64", "darwin-amd64"}
 # The release switch for the terminal UI. While it is True, release archives, the installer
 # checks, the release smoke, and the desktop app carry supertag-tui and licenses/opentui/, and the
 # release attaches the FFmpeg source it links (scripts/ffmpeg_source.py). Set to False, they carry
@@ -45,6 +45,7 @@ REPO = Path(__file__).resolve().parents[1]
 TUI_ENTRY = "apps/tui/src/main.tsx"
 # OpenTUI's native library for each platform, in the package Bun embeds for that platform.
 OPENTUI_PACKAGES = {"darwin-arm64": ("core-darwin-arm64", "libopentui.dylib"),
+                    "darwin-amd64": ("core-darwin-x64", "libopentui.dylib"),
                     "linux-arm64": ("core-linux-arm64", "libopentui.so"),
                     "linux-amd64": ("core-linux-x64", "libopentui.so")}
 OPENTUI_PLATFORMS = ("darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64", "linux-x64-musl",
@@ -66,7 +67,7 @@ def native_platform():
     system = host_platform.system().lower()
     machine = {"aarch64": "arm64", "arm64": "arm64", "x86_64": "amd64", "amd64": "amd64"}.get(host_platform.machine())
     name = f"{system}-{machine}"
-    require(name in PLATFORMS, "native packaging supports Linux on arm64/amd64 and macOS on arm64")
+    require(name in PLATFORMS, "native packaging supports Linux and macOS on arm64 or amd64")
     return name
 
 
@@ -103,7 +104,7 @@ def check_architecture(header, platform):
         expected = 183 if arch == "arm64" else 62
         valid = header[:6] == b"\x7fELF\x02\x01" and int.from_bytes(header[18:20], "little") == expected
     else:
-        expected = 0x100000C  # CPU_TYPE_ARM64; macOS releases are Apple silicon only
+        expected = 0x100000C if arch == "arm64" else 0x1000007  # CPU_TYPE_ARM64, CPU_TYPE_X86_64
         valid = header[:4] == b"\xcf\xfa\xed\xfe" and int.from_bytes(header[4:8], "little") == expected
     require(len(header) >= 32 and valid, "binary architecture does not match the package platform")
 
@@ -431,7 +432,7 @@ def build_tui(output, repo=REPO, env=None, *, sign_library=None):
     """Compile the terminal UI for this platform into OUTPUT, a path that must not exist yet.
 
     The pinned Bun compiles for the platform it runs on, so the embedded runtime is the builder's
-    own (the baseline x64 build on linux-amd64) and nothing is downloaded. Only this platform's
+    own (the baseline x64 build on linux-amd64 and darwin-amd64) and nothing is downloaded. Only this platform's
     OpenTUI package is embedded. SIGN_LIBRARY, given on macOS, is called with the path of
     OpenTUI's native library to sign it before Bun embeds it: Bun extracts
     it byte for byte at run time, so a library signed with the release identity passes the
@@ -460,7 +461,8 @@ def build_tui(output, repo=REPO, env=None, *, sign_library=None):
         shutil.copyfile(real, private)
         os.replace(private, real)
         sign_library(real)
-    own = {"darwin-arm64": "darwin-arm64", "linux-arm64": "linux-arm64", "linux-amd64": "linux-x64"}[platform]
+    own = {"darwin-arm64": "darwin-arm64", "darwin-amd64": "darwin-x64", "linux-arm64": "linux-arm64",
+           "linux-amd64": "linux-x64"}[platform]
     externals = [argument for other in OPENTUI_PLATFORMS if other != own
                  for argument in ("--external", f"@opentui/core-{other}")]
     version = version_from_repo(repo)

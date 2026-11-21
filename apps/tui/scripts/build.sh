@@ -1,7 +1,7 @@
 #!/bin/sh
 # Compiles supertag-tui with Bun for one target, for trying and measuring it locally. The release
 # build compiles the same entry with the same flags (scripts/native_archive.py).
-#   build.sh [darwin-arm64|linux-arm64|linux-x64] [extra bun build flags...]
+#   build.sh [darwin-arm64|darwin-x64|linux-arm64|linux-x64] [extra bun build flags...]
 # Only the target's OpenTUI native package is embedded; the others are marked external (they sit
 # behind process.platform branches and are never reached). Output: $OUT (default
 # /tmp/supertag-tui/dist)/supertag-tui-TARGET.
