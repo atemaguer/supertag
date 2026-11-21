@@ -359,13 +359,13 @@ impl<'a> Runtime<'a> {
         let set = directory.join(format!("{tag_id}-grants.json"));
         std::fs::write(
             &set,
-            json!({"setId": format!("{tag_id}-grants"), "name": format!("{tag_id}-grants"), "permissions": permissions})
+            json!({"setId": format!("{tag_id}-grants"), "displayName": format!("{tag_id}-grants"), "permissions": permissions})
                 .to_string(),
         )?;
         let role = directory.join(format!("{tag_id}-role.json"));
         std::fs::write(
             &role,
-            json!({"roleId": format!("{tag_id}-role"), "name": format!("{tag_id}-role"), "purpose": "Use Workspace MCP tools", "permissionSets": [format!("{tag_id}-grants")]})
+            json!({"roleId": format!("{tag_id}-role"), "displayName": format!("{tag_id}-role"), "purpose": "Use Workspace MCP tools", "permissionSets": [format!("{tag_id}-grants")]})
                 .to_string(),
         )?;
         let set = set.to_str().context("permission set path")?;

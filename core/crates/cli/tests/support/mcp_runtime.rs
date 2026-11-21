@@ -28,7 +28,7 @@ async fn grant(
     std::fs::write(
         &permissions,
         serde_json::json!({
-            "setId": format!("{tag}-grants"), "name": format!("{tag}-grants"),
+            "setId": format!("{tag}-grants"), "displayName": format!("{tag}-grants"),
             "permissions": actions
                 .iter()
                 .map(|action| serde_json::json!({"target":"mcp","action":action}))
@@ -40,7 +40,7 @@ async fn grant(
     std::fs::write(
         &role,
         serde_json::json!({
-            "roleId": format!("{tag}-role"), "name": format!("{tag}-role"),
+            "roleId": format!("{tag}-role"), "displayName": format!("{tag}-role"),
             "purpose": "Use MCP tools", "permissionSets": [format!("{tag}-grants")]
         })
         .to_string(),
@@ -297,7 +297,7 @@ async fn exercise_oauth_mcp(directory: &Path, database: &str) -> Result<()> {
         .await?;
     let permissions = directory.join("mcp-grants.json");
     std::fs::write(&permissions, serde_json::json!({
-        "setId":"mcp-grants", "name":"mcp-grants", "approvers":["operator:local"],
+        "setId":"mcp-grants", "displayName":"mcp-grants", "approvers":["operator:local"],
         "permissions":[
             {"target":"mcp","action":"catalog/list_*","resource":"repository:acme/docs"},
             {"target":"mcp","action":"catalog/publish"},
@@ -306,7 +306,7 @@ async fn exercise_oauth_mcp(directory: &Path, database: &str) -> Result<()> {
     }).to_string())?;
     let role = directory.join("mcp-role.json");
     std::fs::write(&role, serde_json::json!({
-        "roleId":"mcp-role", "name":"mcp-role", "purpose":"Read the catalog", "permissionSets":["mcp-grants"]
+        "roleId":"mcp-role", "displayName":"mcp-role", "purpose":"Read the catalog", "permissionSets":["mcp-grants"]
     }).to_string())?;
     services
         .operator(&[

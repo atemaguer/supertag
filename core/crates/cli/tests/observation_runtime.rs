@@ -897,15 +897,15 @@ async fn exercise(database_url: &str) -> Result<()> {
     };
     let permission = spec(
         "permission.json",
-        json!({"setId":"edit","name":"edit","permissions":[{"target":"runtime","action":"files:write"}]}),
+        json!({"setId":"edit","displayName":"edit","permissions":[{"target":"runtime","action":"files:write"}]}),
     )?;
     let context = spec(
         "context.json",
-        json!({"setId":"notes","name":"notes","items":[{"itemKey":"policy","type":"example/notes","version":1,"config":{"text":"Review the diff"}}]}),
+        json!({"setId":"notes","displayName":"notes","items":[{"itemKey":"policy","type":"example/notes","version":1,"config":{"text":"Review the diff"}}]}),
     )?;
     let role = spec(
         "role.json",
-        json!({"roleId":"review","name":"review","purpose":"Review changes","permissionSets":["edit"],"contextSets":["notes"]}),
+        json!({"roleId":"review","displayName":"review","purpose":"Review changes","permissionSets":["edit"],"contextSets":["notes"]}),
     )?;
     for (kind, file) in [
         ("permission-set", &permission),

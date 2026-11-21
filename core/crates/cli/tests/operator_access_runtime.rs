@@ -528,15 +528,16 @@ async fn audit_names_every_changed_resource(database: &str) -> Result<()> {
     let secret = create_token(&credentials, &services.public, "auditor")?;
     let actor = "operator:token:auditor";
 
-    // IDs at the 256-byte limit still name their resource: the target is longer than any one ID.
-    let long_tag = "t".repeat(253);
-    let sender = "s".repeat(128);
-    let recipient = "r".repeat(128);
+    // IDs at the 63-character limit still name their resource: the target is longer than any
+    // one ID.
+    let long_tag = "t".repeat(63);
+    let sender = "s".repeat(63);
+    let recipient = "r".repeat(63);
     for tag in [&long_tag, &sender, &recipient] {
         operator.put_tag(request(put_tag(tag), &secret)?).await?;
     }
     let grant = format!("MailboxGrant/{sender}->{recipient}");
-    assert!(grant.len() > 256);
+    assert!(grant.len() > 2 * 63);
     mailbox
         .change_grant(request(
             ChangeMailboxGrantRequest {

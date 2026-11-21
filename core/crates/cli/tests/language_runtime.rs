@@ -505,7 +505,7 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
         .write_all(config.to_string().as_bytes())?;
     let permissions = directory.path().join("mcp-grants.json");
     std::fs::write(&permissions, serde_json::json!({
-        "setId":"mcp-grants", "name":"mcp-grants", "approvers":["operator:local"],
+        "setId":"mcp-grants", "displayName":"mcp-grants", "approvers":["operator:local"],
         "permissions":[
             {"target":"mcp","action":"catalog/list_*","resource":"repository:acme/docs"},
             {"target":"mcp","action":"catalog/publish"},
@@ -514,7 +514,7 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
     }).to_string())?;
     let role = directory.path().join("mcp-role.json");
     std::fs::write(&role, serde_json::json!({
-        "roleId":"mcp-role", "name":"mcp-role", "purpose":"Read the catalog", "permissionSets":["mcp-grants"]
+        "roleId":"mcp-role", "displayName":"mcp-role", "purpose":"Read the catalog", "permissionSets":["mcp-grants"]
     }).to_string())?;
     services
         .operator(&[
@@ -717,7 +717,7 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
         .write_all(config.to_string().as_bytes())?;
     let permissions = directory.join("mcp-grants.json");
     std::fs::write(&permissions, serde_json::json!({
-        "setId":"mcp-grants", "name":"mcp-grants", "approvers":["operator:local"],
+        "setId":"mcp-grants", "displayName":"mcp-grants", "approvers":["operator:local"],
         "permissions":[
             {"target":"mcp","action":"catalog/list_*","resource":"repository:acme/docs"},
             {"target":"mcp","action":"catalog/publish"},
@@ -726,7 +726,7 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
     }).to_string())?;
     let role = directory.join("mcp-role.json");
     std::fs::write(&role, serde_json::json!({
-        "roleId":"mcp-role", "name":"mcp-role", "purpose":"Read the catalog", "permissionSets":["mcp-grants"]
+        "roleId":"mcp-role", "displayName":"mcp-role", "purpose":"Read the catalog", "permissionSets":["mcp-grants"]
     }).to_string())?;
     services
         .operator(&[

@@ -661,7 +661,7 @@ async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Resul
                 "--reusable",
                 "--all-tags",
             ],
-            "Auth Key name must be 1-63 lowercase",
+            "Auth Key name must be 1–63 lowercase letters, digits, and hyphens, starting and ending with a letter or digit",
         ),
     ] {
         let refused = output(cli(&args)).await?;
