@@ -18,7 +18,7 @@ operators, Worker Hosts ── wss://WORKSPACE--supertag.modal.run ──> web e
                                                                     Control Plane
                                                                     Gateway (optional)
                                                                       │
-                                    external PostgreSQL, Modal Volume, HashiCorp Vault
+                                    external PostgreSQL, Modal Volume
 ```
 
 [`app.py`](../../deploy/modal/app.py) runs one container (`min_containers=1`,
@@ -26,7 +26,7 @@ operators, Worker Hosts ── wss://WORKSPACE--supertag.modal.run ──> web e
 `/var/lib/supertag` holds the Gateway's connector state. With the Gateway on, it runs in the same container and
 reaches the Control Plane on `https://127.0.0.1:3434`. The Gateway is not given the database URL,
 the operator token, or the Control Plane's TLS settings, and the Control Plane is not given the
-surface settings. Both run as one user in one container, though, so either could read the other's
+surface settings or surface credentials. Both run as one user in one container, though, so either could read the other's
 files, including the TLS key: they share one trust boundary.
 
 The function supervises the service: if the Control Plane, or the Gateway beside it, exits, the
@@ -43,9 +43,7 @@ Control Plane runs. See [Run a harness in a sandbox](workers.md#run-a-harness-in
   [`requirements.txt`](../../deploy/modal/requirements.txt).
 - The `hosted` service image for `linux/amd64` in a registry Modal can pull, with its digest. See
   [Build the hosted image](../../deploy/native/README.md#build-the-hosted-image).
-- A PostgreSQL database reachable from Modal with TLS, and HashiCorp Vault (KV v2) for the
-  Gateway's connector credentials. Setup requires Vault, because a Modal Volume does not give the
-  file credential vault's atomic, durable writes.
+- A PostgreSQL database reachable from Modal with TLS.
 - `openssl`, to issue certificates from your own CA.
 
 ## 1. Issue certificates
@@ -69,13 +67,19 @@ Gateway, each operator, and each Worker Host a client certificate.
 
 ```sh
 export SUPERTAG_DATABASE_URL='postgresql://...?sslmode=require'
-export VAULT_ADDR=https://vault.example.com VAULT_TOKEN=...
 supertag setup deployment modal --output supertag-deployment
 supertag check deployment modal --directory supertag-deployment
 ```
 
 Setup writes `control-plane.env`, `gateway.env`, and `operator.env`, each readable only by you,
 and generates the Gateway's credential and the operator token.
+
+The services read the credentials of collaboration surfaces, remote Workspaces, and S3 Volumes
+from Modal secrets: the two service files carry them. A Modal Volume does not give a credential
+file atomic, durable writes, so setup refuses `--credential-vault file`. To keep credentials in
+HashiCorp Vault instead, export `VAULT_ADDR` and `VAULT_TOKEN` and add
+`--credential-vault vault`; see
+[Credential vault backends](../reference/credential-storage.md#credential-vault-backends).
 
 ## 3. Create the secrets and deploy
 
@@ -99,6 +103,22 @@ an unprivileged user.
 
 The deploy refuses an image reference without a digest. Modal's web endpoint checks that port 8080
 is listening; `GET /healthz` on it answers `200 ok` for your own checks.
+
+### Change a credential
+
+Store the credential in the deployment directory and export it, as
+[Store credentials](deployment-setup.md#store-credentials) shows. Then replace the secrets and
+deploy again:
+
+```sh
+supertag gateway credential export --directory supertag-deployment
+modal secret create --force supertag-control-plane \
+  --from-dotenv supertag-deployment/control-plane.env
+```
+
+Create `supertag-gateway` again the same way, from the new `gateway.env` plus your connector
+settings: `--force` replaces every value of a secret. Then run the `modal deploy` command again.
+Anyone with access to the Modal workspace's secrets can read these credentials.
 
 ## 4. Verify
 
@@ -143,14 +163,15 @@ that connect outbound:
   `SUPERTAG_LARK_DOMAIN` (`lark` or `feishu`), `SUPERTAG_LARK_APP_ID`, `SUPERTAG_LARK_TENANT_KEY`,
   `SUPERTAG_LARK_BOT_OPEN_ID`, `SUPERTAG_LARK_CHAT_ID`, `SUPERTAG_LARK_TAG_ID`, and
   `SUPERTAG_LARK_ALLOWED_USERS` (comma-separated) in the `supertag-gateway` secret. The app
-  secret comes from the credential vault, where [`supertag setup surface lark`](../surfaces/lark.md) stores it, or from
-  `SUPERTAG_LARK_APP_SECRET`.
+  secret comes from the credential vault, where [`supertag setup surface lark`](../surfaces/lark.md) stores it
+  (see [Change a credential](#change-a-credential)), or from `SUPERTAG_LARK_APP_SECRET`.
 - **Slack**, over Socket Mode: `--slack-socket-mode --slack-state-directory
   /var/lib/supertag/slack`, with `SUPERTAG_SLACK_ACCOUNT_ID`, `SUPERTAG_SLACK_TEAM_ID`,
   `SUPERTAG_SLACK_CHANNEL_ID`, `SUPERTAG_SLACK_TAG_ID`, and `SUPERTAG_SLACK_ALLOWED_USERS`
   (comma-separated) in the `supertag-gateway` secret. The bot token and app-level token come
-  from the credential vault, where [`supertag setup surface slack`](../surfaces/slack.md) stores them, or from
-  `SUPERTAG_SLACK_BOT_TOKEN` and `SUPERTAG_SLACK_APP_TOKEN`.
+  from the credential vault, where [`supertag setup surface slack`](../surfaces/slack.md) stores them
+  (see [Change a credential](#change-a-credential)), or from `SUPERTAG_SLACK_BOT_TOKEN` and
+  `SUPERTAG_SLACK_APP_TOKEN`.
 - **Operator notifications to a webhook**: `--notify webhook:HTTPS_URL#NAME`, with the bearer
   secret in `SUPERTAG_NOTIFY_SECRET_NAME` (the name uppercased, `-` as `_`).
 
@@ -206,7 +227,7 @@ modal secret delete supertag-control-plane-tls
 ```
 
 Delete `supertag-gateway` and `supertag-gateway-tls` too if you created them, then the database
-and Vault path if they were dedicated to this deployment. `modal app list` and
+if it was dedicated to this deployment, and the deployment directory, which holds the credentials. `modal app list` and
 `modal volume list` confirm the removal.
 
 ## If something goes wrong
@@ -220,6 +241,9 @@ and Vault path if they were dedicated to this deployment. `modal app list` and
   the Gateway on, check its credential (`SUPERTAG_GATEWAY_CREDENTIAL` must match
   `SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL`), its connector settings, and that the certificate names
   `IP:127.0.0.1`.
+- **A connector says its credentials are missing.** The secrets hold an older export. Follow
+  [Change a credential](#change-a-credential); `supertag check deployment modal` reports service
+  files that are out of date.
 
 ## Next
 

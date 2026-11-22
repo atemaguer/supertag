@@ -941,27 +941,52 @@ async fn deploys_and_verifies_behind_an_http_only_edge(database: String) -> Resu
         "{refused}"
     );
 
-    // Cloudflare and Modal keep connector credentials in Vault: setup asks for it, and a file
+    // Cloudflare and Modal have no disk for the file vault. By default the services read
+    // credentials from the platform's own secrets, so setup needs no HashiCorp Vault; a file
     // set with the file vault is refused for them.
     let cloudflare = root.join("cloudflare");
     let database_env = [("SUPERTAG_DATABASE_URL", setup_database.as_str())];
-    let refused = fail(setup("cloudflare", &cloudflare, &database_env)).await?;
+    let message = succeed(setup("cloudflare", &cloudflare, &database_env)).await?;
+    assert!(message.contains("https://127.0.0.1:3434"), "{message}");
+    assert!(
+        message.contains("supertag gateway credential export --directory"),
+        "{message}"
+    );
+    for (file, document) in [
+        ("gateway.env", "SUPERTAG_GATEWAY_CREDENTIALS"),
+        ("control-plane.env", "SUPERTAG_CONTROL_PLANE_CREDENTIALS"),
+    ] {
+        let environment = env_file(&cloudflare.join(file))?;
+        assert_eq!(environment["SUPERTAG_CREDENTIAL_VAULT"], "env", "{file}");
+        assert!(environment.contains_key(document), "{file}");
+        assert!(!environment.contains_key("VAULT_ADDR"), "{file}");
+    }
+    succeed(check("cloudflare", &cloudflare)).await?;
+    succeed(check("modal", &cloudflare)).await?;
+    // --credential-vault vault keeps them in HashiCorp Vault instead, and asks for it.
+    let vaulted = root.join("cloudflare-vault");
+    let mut with_vault = setup("cloudflare", &vaulted, &database_env);
+    with_vault.args(["--credential-vault", "vault"]);
+    let refused = fail(with_vault).await?;
     assert!(refused.contains("Missing VAULT_ADDR"), "{refused}");
-    assert!(!cloudflare.exists());
-    let message = succeed(setup(
+    assert!(!vaulted.exists());
+    let mut with_vault = setup(
         "cloudflare",
-        &cloudflare,
+        &vaulted,
         &[
             ("SUPERTAG_DATABASE_URL", setup_database.as_str()),
             ("VAULT_ADDR", "https://vault.example.com"),
             ("VAULT_TOKEN", "private-vault-token"),
         ],
-    ))
-    .await?;
-    assert!(message.contains("https://127.0.0.1:3434"), "{message}");
+    );
+    with_vault.args(["--credential-vault", "vault"]);
+    let message = succeed(with_vault).await?;
     assert!(!message.contains("private-vault-token"), "{message}");
-    succeed(check("cloudflare", &cloudflare)).await?;
-    succeed(check("modal", &cloudflare)).await?;
+    assert_eq!(
+        env_file(&vaulted.join("gateway.env"))?["SUPERTAG_CREDENTIAL_VAULT"],
+        "vault"
+    );
+    succeed(check("modal", &vaulted)).await?;
     let fly = root.join("fly");
     succeed(setup("fly", &fly, &database_env)).await?;
     for platform in ["cloudflare", "modal"] {

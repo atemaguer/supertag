@@ -25,7 +25,10 @@ Settings read at deploy time:
 Modal secrets: supertag-control-plane holds control-plane.env from `supertag setup deployment
 modal`, and supertag-control-plane-tls the Control Plane's TLS PEM values. With the Gateway on,
 supertag-gateway holds gateway.env, the connector settings, and supertag-gateway-tls the Gateway's
-PEM values.
+PEM values. By default the two .env files also carry each service's credentials
+(SUPERTAG_CREDENTIAL_VAULT=env), which `supertag gateway credential export` writes; the image's
+pair script gives the Gateway only its surface credentials and the Control Plane only its
+Workspace and Volume credentials. No HashiCorp Vault is needed.
 
 The container's service is supervised: when it exits, this container exits too, so Modal starts a
 replacement (min_containers=1). Container shutdown stops the service with SIGTERM.

@@ -36,8 +36,8 @@ fn client(channel: ProtocolChannel) -> EnrollmentsClient<ProtocolChannel> {
 /// `supertag gateway enroll|revoke|rotate-credential|credential`.
 #[derive(Subcommand)]
 pub enum GatewayCommand {
-    /// Store or delete this machine's Gateway collaboration credentials in the configured
-    /// credential vault.
+    /// Store or delete credentials in the configured credential vault, or export a deployment
+    /// directory's credentials into its service files.
     Credential {
         #[command(subcommand)]
         command: crate::gateway_credentials::GatewayCredentialCommand,

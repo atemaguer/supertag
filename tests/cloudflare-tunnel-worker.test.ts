@@ -66,6 +66,12 @@ describe("Cloudflare tunnel Worker", () => {
       SUPERTAG_LARK_: "no name",
       SUPERTAG_SLACK_APP_TOKEN: "xapp-socket-mode",
       SUPERTAG_LINEAR_WEBHOOK_SECRET: "no Linear ingress here",
+      SUPERTAG_GATEWAY_CREDENTIALS: "parts:2",
+      SUPERTAG_GATEWAY_CREDENTIALS_1: "c3VyZmFjZQ",
+      SUPERTAG_GATEWAY_CREDENTIALS_2: "c2VjcmV0cw",
+      SUPERTAG_GATEWAY_CREDENTIALS_9: "beyond the eight parts",
+      SUPERTAG_GATEWAY_CREDENTIALS_EXTRA: "not a part",
+      SUPERTAG_CONTROL_PLANE_CREDENTIALS: "d29ya3NwYWNl",
       SUPERTAG_GATEWAY: "on",
       SUPERTAG_GATEWAY_FLAGS: "--lark-state-directory /x",
       SUPERTAG: { binding: true },
@@ -78,6 +84,10 @@ describe("Cloudflare tunnel Worker", () => {
       SUPERTAG_LARK_APP_ID: "cli_app",
       SUPERTAG_SLACK_APP_TOKEN: "xapp-socket-mode",
       SUPERTAG_NOTIFY_SECRET_OPS: "hook-secret",
+      SUPERTAG_GATEWAY_CREDENTIALS: "parts:2",
+      SUPERTAG_GATEWAY_CREDENTIALS_1: "c3VyZmFjZQ",
+      SUPERTAG_GATEWAY_CREDENTIALS_2: "c2VjcmV0cw",
+      SUPERTAG_CONTROL_PLANE_CREDENTIALS: "d29ya3NwYWNl",
     });
     expect(CONTAINER_KEYS).not.toContain("SUPERTAG_TLS_CERT_FILE");
   });

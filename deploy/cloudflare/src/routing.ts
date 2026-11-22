@@ -35,8 +35,8 @@ export const PAIR_COMMAND = [ENTRYPOINT, "pair", "0.0.0.0:8080"];
 /**
  * Worker secrets and variables passed into the container: the settings from
  * `supertag setup deployment cloudflare`, the TLS PEM values the image entrypoint writes to
- * files, and the Gateway's connector settings ({@link CONTAINER_KEY_PREFIXES}). Anything else
- * stays in the Worker.
+ * files, each service's credential document ({@link CREDENTIAL_DOCUMENT}), and the Gateway's
+ * connector settings ({@link CONTAINER_KEY_PREFIXES}). Anything else stays in the Worker.
  */
 export const CONTAINER_KEYS = [
   "SUPERTAG_DATABASE_URL",
@@ -71,14 +71,23 @@ export const CONTAINER_KEY_PREFIXES = [
 ] as const;
 
 /**
- * The container's environment: {@link CONTAINER_KEYS} and names starting with
- * {@link CONTAINER_KEY_PREFIXES}, when set to a non-empty string.
+ * The credential documents of the `env` credential vault, which `supertag gateway credential
+ * export` writes into gateway.env and control-plane.env: one variable for each service, or
+ * `parts:N` and up to eight numbered parts when a document is longer than the 5 KB a Worker
+ * variable holds. The pair gives each service only its own document.
+ */
+export const CREDENTIAL_DOCUMENT = /^SUPERTAG_(GATEWAY|CONTROL_PLANE)_CREDENTIALS(_[1-8])?$/u;
+
+/**
+ * The container's environment: {@link CONTAINER_KEYS}, {@link CREDENTIAL_DOCUMENT}, and names
+ * starting with {@link CONTAINER_KEY_PREFIXES}, when set to a non-empty string.
  */
 export function containerEnvironment(env: Record<string, unknown>): Record<string, string> {
   const environment: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
     const passed =
       (CONTAINER_KEYS as readonly string[]).includes(key) ||
+      CREDENTIAL_DOCUMENT.test(key) ||
       CONTAINER_KEY_PREFIXES.some((prefix) => key.startsWith(prefix) && key.length > prefix.length);
     if (passed && typeof value === "string" && value !== "") environment[key] = value;
   }

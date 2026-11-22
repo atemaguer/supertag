@@ -31,15 +31,28 @@ Setup reads these variables and prompts, masked, for a missing required value:
 | `SUPERTAG_OPERATOR_TOKEN` | The admin Operator Token. Generated when unset |
 | `SUPERTAG_OPERATOR_PRINCIPAL` | The admin operator's name in the audit log |
 | `SUPERTAG_GATEWAY_CREDENTIAL` | The Gateway's credential. Generated when unset |
-| `SUPERTAG_CREDENTIAL_VAULT`, `VAULT_*` | `vault` keeps connector credentials in HashiCorp Vault instead of the Gateway's volume. Cloudflare and Modal require it |
+| `VAULT_ADDR`, `VAULT_TOKEN`, and the optional `VAULT_NAMESPACE`, `SUPERTAG_VAULT_MOUNT`, `SUPERTAG_VAULT_PATH_PREFIX` | HashiCorp Vault's settings, read only with `--credential-vault vault` |
+
+`--credential-vault` chooses where the services read the credentials of collaboration surfaces,
+remote Workspaces, and S3 Volumes:
+
+| Value | The services read | Default on |
+| --- | --- | --- |
+| `env` | The platform's own secrets, as environment variables. No other service to run | Cloudflare and Modal, which have no disk for a credential file |
+| `file` | A private file on the service's disk | Compose, Fly.io, Railway, and Render |
+| `vault` | HashiCorp Vault | Never; choose it for rotation without a redeploy, an audit trail, or access policy |
+
+[Credential vault backends](../reference/credential-storage.md#credential-vault-backends)
+compares them. A platform with a disk accepts `env` too, which saves running commands inside the
+service to store a credential.
 
 Secrets are never accepted as flags or printed. `--non-interactive` fails instead of prompting.
 Setup writes a new directory, never replaces one, and creates each file readable only by you:
 
 | File | For | Holds |
 | --- | --- | --- |
-| `control-plane.env` | Control Plane | Database URL, the Gateway's bootstrap credential, the operator token, its state directory |
-| `gateway.env` | Gateway | Its credential, state directory, and credential vault settings |
+| `control-plane.env` | Control Plane | Database URL, the Gateway's bootstrap credential, the operator token, its state directory, and, with `env`, its Workspace and Volume credentials |
+| `gateway.env` | Gateway | Its credential, state directory, credential vault settings, and, with `env`, its surface credentials |
 | `operator.env` | Your machine | The admin Operator Token, for `verify deployment` and `supertag connect` |
 | `postgres.env` | Compose's PostgreSQL | A generated database password, when you supplied no database URL |
 
@@ -54,7 +67,49 @@ supertag check deployment fly --directory supertag-deployment
 
 `check` validates the files without connecting. It refuses unknown keys, settings meant for
 another platform, files that others can read, and values Compose would change, such as double
-quotes or an unquoted `$`.
+quotes or an unquoted `$`. With `env`, it also refuses service files that are out of date with
+the credentials you stored.
+
+## Store credentials
+
+Skip this section unless setup chose `env`. The services then read credentials from their
+environment and cannot store one themselves. You keep the credentials in
+`gateway-credentials.json` in the deployment directory, on your machine, and export them into
+the two service files.
+
+1. Point the operator commands at that file, by absolute path:
+
+   ```sh
+   export SUPERTAG_CREDENTIAL_FILE=$PWD/supertag-deployment/gateway-credentials.json
+   ```
+
+2. Store what the deployment needs, against the deployed Control Plane once it runs. Each
+   command works as it does on a local setup:
+
+   | Credential | Command |
+   | --- | --- |
+   | A collaboration surface's secrets | [`supertag setup surface`](../surfaces/README.md), or `supertag gateway credential store ID` |
+   | A remote Workspace's git credential | [`supertag workspace credential add`](workspaces.md) |
+   | An S3 Volume's signing credential | [`supertag volume credential set`](../reference/artifacts.md#keep-every-capture-on-a-volume) |
+
+3. Export them, then check:
+
+   ```sh
+   supertag gateway credential export --directory supertag-deployment
+   supertag check deployment modal --directory supertag-deployment
+   ```
+
+   Export rewrites `gateway.env` with the surface secrets and `control-plane.env` with the
+   Workspace and Volume credentials. Neither file gets the other's. It prints the credential
+   IDs each file now carries, never a value.
+
+4. Upload both files to the platform's secrets again and redeploy, as your platform's guide
+   shows. The services read credentials only when they start.
+
+Repeat steps 2 to 4 after every credential change. `check deployment` fails when the service
+files no longer match `gateway-credentials.json`, and names the export command.
+[Environment credential vault](../reference/credential-storage.md#environment-credential-vault)
+gives the format and its size limit.
 
 ## 3. Add TLS and deploy
 
@@ -100,6 +155,11 @@ supertag verify deployment https://supertag.example.com \
   `SUPERTAG_SERVER_CA_FILE` must name the authority that issued it.
 - **Verification says the operator token was refused.** Use the `operator.env` from the same
   setup run as the deployed `control-plane.env`.
+- **A command says the env credential vault is read-only.** The command ran with the services'
+  own settings. Unset `SUPERTAG_CREDENTIAL_VAULT`, set `SUPERTAG_CREDENTIAL_FILE` as in
+  [Store credentials](#store-credentials), and run it again.
+- **A connector says its credentials are missing after you stored them.** Export, upload both
+  service files, and redeploy; `check deployment` reports files that are out of date.
 
 ## Next
 

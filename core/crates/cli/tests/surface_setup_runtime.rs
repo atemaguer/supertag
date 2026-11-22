@@ -1505,8 +1505,9 @@ async fn every_provider_setup_reaches_the_gateway_through_the_vault(
 }
 
 /// Without a local Control Plane the account's Gateway runs elsewhere and cannot read this
-/// machine's credential file, so setup accepts only a shared HashiCorp Vault, and refuses the
-/// file vault before any credential is read or sent to the provider.
+/// machine's credential file, so setup accepts only a shared HashiCorp Vault, or the credential
+/// file of a deployment directory that `supertag gateway credential export` renders, and
+/// refuses the file vault before any credential is read or sent to the provider.
 async fn setup_without_a_local_control_plane_requires_a_shared_vault(
     database: String,
 ) -> Result<()> {
@@ -1569,6 +1570,46 @@ async fn setup_without_a_local_control_plane_requires_a_shared_vault(
     ensure!(
         account["identity"] == json!({"provider": "slack", "team_id": SLACK_TEAM}),
         "{account}"
+    );
+
+    // A deployment whose Gateway reads credentials from its environment: setup stores them
+    // in the deployment directory's file, named explicitly, and says to export it.
+    let deployment = services.directory.path().join("deployment");
+    std::fs::create_dir(&deployment)?;
+    let file = deployment.join("gateway-credentials.json");
+    let output = services.cli_in(
+        &remote,
+        &args,
+        &[
+            &tokens[..],
+            &[(
+                "SUPERTAG_CREDENTIAL_FILE",
+                file.to_str().context("deployment path")?,
+            )],
+        ]
+        .concat(),
+        "",
+    )?;
+    let stdout = String::from_utf8(output.stdout)?;
+    let stderr = String::from_utf8(output.stderr)?;
+    ensure!(output.status.success(), "{stdout}{stderr}");
+    no_secrets(&format!("{stdout}{stderr}"))?;
+    ensure!(
+        stdout.contains("run `supertag gateway credential export` for that deployment directory")
+            && stdout.contains(
+                "SUPERTAG_CREDENTIAL_VAULT=env and SUPERTAG_*_CREDENTIAL_ID=surface/slack/remote"
+            ),
+        "{stdout}"
+    );
+    let stored = CredentialVault::File(FileCredentialVault::new(file))
+        .resolve("surface/slack/remote")
+        .await?
+        .context("the deployment file holds no Slack credential")?;
+    ensure!(stored["botToken"] == SLACK_BOT && stored["appToken"] == SLACK_APP);
+    ensure!(
+        !remote.join("gateway-credentials.json").exists()
+            && !remote.join("supertag.yaml").exists()
+            && !home_vault.exists()
     );
     Ok(())
 }

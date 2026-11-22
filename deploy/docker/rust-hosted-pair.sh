@@ -12,9 +12,11 @@
 # dials that loopback listener as gateway:local with its enrolled credential (and a client
 # certificate when the Control Plane requires one), so the Control Plane's certificate must also
 # name IP 127.0.0.1. Each process is given only its own role's settings: the Gateway is not given
-# the database URL, the operator token, the bootstrap credentials, or the Control Plane's TLS
-# settings, and the Control Plane is not given the Gateway's credential or surface settings. Both run as the same user in one container, so they
-# share one trust boundary: either could read the other's files, including the TLS key.
+# the database URL, the operator token, the bootstrap credentials, the Control Plane's TLS
+# settings, or its credential document, and the Control Plane is not given the Gateway's
+# credential, surface settings, or credential document. Both run as the same user in one
+# container, so they share one trust boundary: either could read the other's files, including
+# the TLS key.
 #
 # When either process exits, the other is stopped and this script exits non-zero; the caller
 # (tini on Cloudflare, the Modal function's supervisor) then ends the container so the platform
@@ -39,13 +41,22 @@ stop() {
 }
 trap stop TERM INT
 
+# With SUPERTAG_CREDENTIAL_VAULT=env each service reads its own credential document from its
+# environment: one variable, or `parts:N` and numbered parts. The Gateway's holds collaboration
+# surface secrets; the Control Plane's holds Workspace and Volume credentials.
+gateway_documents=$(env | sed -n \
+  -e 's/^\(SUPERTAG_GATEWAY_CREDENTIALS\)=.*/-u \1/p' \
+  -e 's/^\(SUPERTAG_GATEWAY_CREDENTIALS_[0-9]*\)=.*/-u \1/p')
+control_plane_documents=$(env | sed -n \
+  -e 's/^\(SUPERTAG_CONTROL_PLANE_CREDENTIALS\)=.*/-u \1/p' \
+  -e 's/^\(SUPERTAG_CONTROL_PLANE_CREDENTIALS_[0-9]*\)=.*/-u \1/p')
 # The Gateway's view: none of the Control Plane's credentials or server TLS settings. A plain
 # command (not a function), so a background Gateway's PID is the Gateway itself.
 as_gateway="env -u SUPERTAG_DATABASE_URL -u SUPERTAG_OPERATOR_TOKEN
   -u SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL -u SUPERTAG_BOOTSTRAP_HOST_TOKEN -u SUPERTAG_TLS_CERT_FILE
-  -u SUPERTAG_TLS_KEY_FILE -u SUPERTAG_TLS_CLIENT_CA_FILE"
-# The Control Plane's view: no client identity, no Gateway credential, and no surface settings,
-# which only the Gateway reads. A line inside a multi-line value that looks like such a setting only adds an `-u` for a
+  -u SUPERTAG_TLS_KEY_FILE -u SUPERTAG_TLS_CLIENT_CA_FILE $control_plane_documents"
+# The Control Plane's view: no client identity, no Gateway credential, and no surface settings
+# or surface credential document, which only the Gateway reads. A line inside a multi-line value that looks like such a setting only adds an `-u` for a
 # name that is not set, which changes nothing.
 surface_settings=$(env | sed -n \
   -e 's/^\(SUPERTAG_SLACK_[A-Z0-9_]*\)=.*/-u \1/p' \
@@ -61,7 +72,7 @@ pause() {
 
 # shellcheck disable=SC2086 # each -u NAME is two words
 env -u SUPERTAG_CLIENT_CERT_FILE -u SUPERTAG_CLIENT_KEY_FILE -u SUPERTAG_SERVER_CA_FILE \
-  -u SUPERTAG_GATEWAY_CREDENTIAL $surface_settings \
+  -u SUPERTAG_GATEWAY_CREDENTIAL $surface_settings $gateway_documents \
   "$supertag" control-plane --listen 127.0.0.1:3434 --websocket-listen "$tunnel" &
 control=$!
 

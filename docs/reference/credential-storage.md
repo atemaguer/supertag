@@ -20,7 +20,7 @@ surface secrets, an operator's token, and a Worker Host's keys never share a sto
 
 | Boundary | Owner | Examples | Default implementation |
 | --- | --- | --- | --- |
-| Gateway credential vault | The Gateway | Collaboration surface secrets, such as a Slack bot token | `~/.supertag/gateway-credentials.json`, or HashiCorp Vault |
+| Gateway credential vault | The Gateway | Collaboration surface secrets, such as a Slack bot token | `~/.supertag/gateway-credentials.json`, the Gateway's environment, or HashiCorp Vault; see [Credential vault backends](#credential-vault-backends) |
 | Operator credentials | Operator's CLI and desktop app | The admin token, an [Operator Token](resource-model.md#operator-tokens), or a client device credential | The saved Gateway stores of the CLI and the desktop app, or `SUPERTAG_OPERATOR_TOKEN` |
 | Worker Host enrollment credential | One Worker Host | Its connection to the Control Plane | The host's own state directory, on that host |
 | MCP and git credentials | One Worker Host | MCP server and git credentials | The host's environment, owner-only files, or `~/.supertag/.env`; see [MCP and git credentials](#mcp-and-git-credentials) |
@@ -89,7 +89,9 @@ The Gateway reads each collaboration surface's secrets from its vault when it st
 logical ID `surface/PROVIDER/ACCOUNT`, such as `surface/slack/T123`. A variable set in the Gateway's
 environment still wins for that secret. `supertag setup surface` and
 `supertag gateway credential store` write the vault; `supertag gateway credential delete` removes
-an entry. A rotated secret takes effect when the Gateway restarts.
+an entry. A rotated secret takes effect when the Gateway restarts. A hosted Gateway usually
+reads the vault from its environment; see
+[Environment credential vault](#environment-credential-vault).
 
 The vault never reaches the Control Plane, the CLI after setup, or a Worker Host. In a local
 deployment the file vault sits beside the other local state; any process that can read the file
@@ -191,12 +193,14 @@ its resolved `env`, so it never inherits the Worker Host's credentials either. S
 
 A SurfaceAccount manifest, applied with `supertag apply -f`, records an account's identity and the
 Gateway that serves it, never a secret. Its credentials reach that Gateway's vault only through
-`supertag setup surface` or `supertag gateway credential store` on the Gateway's machine. See
+`supertag setup surface` or `supertag gateway credential store`, run on the Gateway's machine or
+against a deployment's credential file. See
 [Declare Surface Accounts](../operations/resources.md#declare-surface-accounts).
 
 ## API invariants
 
-- Collaboration surface secrets go only to a Gateway's vault, from the Gateway's own machine.
+- Collaboration surface secrets go only to a Gateway's vault: from the Gateway's own machine, or
+  through the platform secret that `supertag gateway credential export` renders for it.
 - Auth Key creation and Worker Host, Gateway, and client enrollment or rotation return a secret
   once; revocation and ordinary reads never return it.
 - Surface Account responses expose configuration and verification status, never credential values
@@ -208,6 +212,74 @@ Gateway that serves it, never a secret. Its credentials reach that Gateway's vau
   its harness adapter.
 - A shared backend must enforce distinct workload identities and policies; namespace names alone
   are not a security boundary.
+
+## Credential vault backends
+
+`SUPERTAG_CREDENTIAL_VAULT` selects where a service reads credentials. The Gateway reads
+collaboration surface secrets. The Control Plane reads
+[Workspace Credentials](resource-model.md#workspace-credentials) and S3 [Volume](glossary.md#volume) credentials the
+same way. Every backend holds the same logical IDs.
+
+| Backend | The service reads | You write it with | Fits |
+| --- | --- | --- | --- |
+| `file`, the default | `gateway-credentials.json` in its state directory | Operator commands on the service's machine | A local setup, or a server whose disk you can run commands on |
+| `env` | Its environment variables, which the platform's own secrets supply | Operator commands on your machine, then `supertag gateway credential export` and the platform's secret controls | A hosted platform. The default on Cloudflare and Modal |
+| `vault` | HashiCorp Vault KV v2 | Operator commands with the same `VAULT_*` settings | A team that already runs Vault, or needs what the comparison below gives |
+
+### Compare env and Vault
+
+| | `env` | `vault` |
+| --- | --- | --- |
+| Who can read a credential | Anyone who can read the platform's secrets or the service's environment, and anyone who can read your deployment directory | Whoever a Vault policy allows, with a token you can scope and expire |
+| Change a credential | Export, upload the secret, and redeploy | Store it. Workspace and Volume credentials apply at their next use, and a surface secret when the Gateway restarts |
+| Audit trail | None from SuperTag. The platform may record that a secret changed, not who read it | Vault's audit devices record every read and write |
+| Copies at rest | The platform's secret store, and `gateway-credentials.json` and the service files on your machine | Vault only |
+| Another service to run | No | Vault |
+
+Choose `env` to deploy without running Vault. Choose `vault` when you need rotation without a
+redeploy, an audit trail, or access policy narrower than the platform account.
+
+## Environment credential vault
+
+With `SUPERTAG_CREDENTIAL_VAULT=env`, a service reads one credential document from its
+environment when it starts. The backend is read-only: storing or deleting through it fails and
+names the steps below. [Configure a deployment](../guides/deployment-setup.md#store-credentials)
+walks through them.
+
+Each service has its own document, so neither receives the other's credentials:
+
+| Variable | Read by | Holds |
+| --- | --- | --- |
+| `SUPERTAG_GATEWAY_CREDENTIALS` | The Gateway | Collaboration surface secrets, and every ID not listed in the next row |
+| `SUPERTAG_CONTROL_PLANE_CREDENTIALS` | The Control Plane | `workspace-credential/NAME` and `volume-credential/ID` |
+
+A service refuses to start when its document holds the other service's credentials.
+
+`supertag gateway credential export` writes both variables into `gateway.env` and
+`control-plane.env` from the deployment directory's `gateway-credentials.json`. Operator
+commands write that file when `SUPERTAG_CREDENTIAL_FILE` names it by absolute path. Upload the
+two files with the platform's secret controls, then redeploy.
+
+The value is the base64 of the file vault's JSON, `{"version":1,"gateway":{ID:{FIELD:VALUE}}}`.
+Base64 survives dotenv parsers, platform dashboards, and shells unchanged. JSON's quotes, `$`,
+backslashes, and the line breaks of a private key do not. A variable set by hand may hold the
+JSON itself.
+
+One variable carries at most 4,096 characters, which fits the smallest platform limit:
+
+| Platform | Limit for one secret value |
+| --- | --- |
+| Cloudflare Workers | 5 KB |
+| Modal | 32,768 characters |
+| Fly.io, Railway, Render | None documented; Linux allows 128 KiB for one variable |
+
+A longer document is split. The variable then holds `parts:N`, and
+`SUPERTAG_GATEWAY_CREDENTIALS_1` to `_N` hold the parts, up to eight. A part left over from an
+earlier, longer document is never read. One service's document can therefore hold 32,768
+characters of base64, about 24 KiB of JSON. That fits about ten GitHub App private keys or
+dozens of surface accounts. Export refuses a larger set and names Vault.
+
+Errors name the variable and never include a value.
 
 ## HashiCorp Vault KV v2
 

@@ -17,6 +17,7 @@ use std::{
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::{Args, Subcommand, ValueEnum};
+use supertag_credential_vault::{EnvironmentCredentialVault, Holder};
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
@@ -49,6 +50,9 @@ const CONTROL_PLANE_FILE: &str = "control-plane.env";
 const GATEWAY_FILE: &str = "gateway.env";
 const OPERATOR_FILE: &str = "operator.env";
 const POSTGRES_FILE: &str = "postgres.env";
+/// The operator's file credential vault in a deployment directory. With the `env` credential
+/// vault, `supertag gateway credential export` renders it into the two service files.
+const CREDENTIAL_FILE: &str = "gateway-credentials.json";
 
 /// TLS settings each service reads. Compose names files in the env files; the hosted entrypoint
 /// derives them from the matching `..._PEM` secrets, so hosted env files must not name them.
@@ -61,7 +65,8 @@ const TLS_KEYS: [&str; 6] = [
     "SUPERTAG_CLIENT_KEY_FILE",
 ];
 /// Git delivery keeps its state under `SUPERTAG_STATE_DIR` and reads Workspace Credentials from
-/// the credential vault these select.
+/// the credential vault these select. With `env`, the file also carries the Control Plane's
+/// credential document (`Holder::ControlPlane`).
 const CONTROL_PLANE_KEYS: [&str; 11] = [
     "SUPERTAG_DATABASE_URL",
     "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
@@ -76,7 +81,8 @@ const CONTROL_PLANE_KEYS: [&str; 11] = [
     "SUPERTAG_VAULT_PATH_PREFIX",
 ];
 /// The Gateway holds no operator credential: it acts as `gateway:local` with the enrolled
-/// credential the Control Plane seeds from `SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL`.
+/// credential the Control Plane seeds from `SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL`. With `env`,
+/// the file also carries the Gateway's credential document (`Holder::Gateway`).
 const GATEWAY_KEYS: [&str; 8] = [
     "SUPERTAG_GATEWAY_CREDENTIAL",
     "SUPERTAG_STATE_DIR",
@@ -172,9 +178,19 @@ impl Platform {
 
     /// Platforms with no disk the Gateway's file credential vault can rely on: Cloudflare
     /// Containers have no persistent disk, and a Modal Volume does not give the file vault's
-    /// atomic, durable replacement.
-    fn requires_vault(self) -> bool {
+    /// atomic, durable replacement. Their credentials come from the platform's secrets (`env`)
+    /// or HashiCorp Vault.
+    fn lacks_durable_disk(self) -> bool {
         matches!(self, Self::Cloudflare | Self::Modal)
+    }
+
+    /// Where setup keeps credentials unless `--credential-vault` says otherwise.
+    fn default_vault(self) -> Backend {
+        if self.lacks_durable_disk() {
+            Backend::Env
+        } else {
+            Backend::File
+        }
     }
 
     fn next_steps(self) -> &'static str {
@@ -192,10 +208,10 @@ impl Platform {
                 "Set the hosted image digest in deploy/render/render.yaml and create the Blueprint; its database supplies SUPERTAG_DATABASE_URL. Render subdomains are global, so read the Control Plane's hostname on its service page; if it is not supertag-control-plane.onrender.com, issue the certificate for it and change the Gateway's --control-plane. Then add control-plane.env and the TLS PEM variables to supertag-control-plane, and, for Lark or webhook notifications, gateway.env, its connector settings, and its PEM variables to supertag-gateway, with its connector flags appended to its dockerCommand (see docs/guides/deploy-render.md)."
             }
             Self::Cloudflare => {
-                "Tag the hosted image as supertag-hosted:local, upload control-plane.env and the TLS PEM values as Worker secrets with `wrangler secret bulk`, then run `wrangler deploy` in deploy/cloudflare. For Lark or webhook notifications, also upload gateway.env and the connector settings and set SUPERTAG_GATEWAY to on and SUPERTAG_GATEWAY_FLAGS in wrangler.json (see docs/guides/deploy-cloudflare.md)."
+                "Tag the hosted image as supertag-hosted:local, upload control-plane.env and the TLS PEM values as Worker secrets with `wrangler secret bulk`, then run `wrangler deploy` in deploy/cloudflare. For Lark, Slack Socket Mode, or webhook notifications, also upload gateway.env and the connector settings and set SUPERTAG_GATEWAY to on and SUPERTAG_GATEWAY_FLAGS in wrangler.json (see docs/guides/deploy-cloudflare.md)."
             }
             Self::Modal => {
-                "Create the Modal secrets supertag-control-plane from control-plane.env plus its TLS PEM values and, for Lark or webhook notifications, supertag-gateway from gateway.env plus the connector settings and supertag-gateway-tls from its PEM values, then run `modal deploy deploy/modal/app.py` with SUPERTAG_MODAL_IMAGE set to the hosted image by digest, plus SUPERTAG_MODAL_GATEWAY=on and SUPERTAG_MODAL_GATEWAY_FLAGS for the Gateway (see docs/guides/deploy-modal.md)."
+                "Create the Modal secrets supertag-control-plane from control-plane.env and supertag-control-plane-tls from its TLS PEM values and, for Lark, Slack Socket Mode, or webhook notifications, supertag-gateway from gateway.env plus the connector settings and supertag-gateway-tls from its PEM values, then run `modal deploy deploy/modal/app.py` with SUPERTAG_MODAL_IMAGE set to the hosted image by digest, plus SUPERTAG_MODAL_GATEWAY=on and SUPERTAG_MODAL_GATEWAY_FLAGS for the Gateway (see docs/guides/deploy-modal.md)."
             }
         }
     }
@@ -221,16 +237,44 @@ pub enum VerifyCommand {
 
 #[derive(Args)]
 #[command(
-    after_help = "Setup reads SUPERTAG_DATABASE_URL, SUPERTAG_GATEWAY_CREDENTIAL, SUPERTAG_OPERATOR_TOKEN, SUPERTAG_OPERATOR_PRINCIPAL, SUPERTAG_CREDENTIAL_VAULT, and VAULT_* from the environment and prompts for missing required values (secrets are masked). Tokens that are not supplied are generated. Secrets are never accepted as flags or printed. Compose generates its own PostgreSQL password when SUPERTAG_DATABASE_URL is not set, and Render's Blueprint supplies the database URL itself. Cloudflare and Modal keep connector credentials in HashiCorp Vault (SUPERTAG_CREDENTIAL_VAULT=vault). Setup never replaces an existing directory. Upload the files through your provider's secret controls; do not shell-source them."
+    after_help = "Setup reads SUPERTAG_DATABASE_URL, SUPERTAG_GATEWAY_CREDENTIAL, SUPERTAG_OPERATOR_TOKEN, SUPERTAG_OPERATOR_PRINCIPAL, and, with --credential-vault vault, VAULT_* from the environment and prompts for missing required values (secrets are masked). Tokens that are not supplied are generated. Secrets are never accepted as flags or printed. Compose generates its own PostgreSQL password when SUPERTAG_DATABASE_URL is not set, and Render's Blueprint supplies the database URL itself. Cloudflare and Modal have no disk for the file credential vault, so they default to env. Setup never replaces an existing directory. Upload the files through your provider's secret controls; do not shell-source them."
 )]
 pub struct SetupArgs {
     platform: Platform,
+    /// Where the services read collaboration surface, Workspace, and Volume credentials:
+    /// `file` on the service's disk, `env` from the platform's own secrets, or `vault` from
+    /// HashiCorp Vault. Defaults to env on Cloudflare and Modal, and to file elsewhere.
+    #[arg(long, value_enum)]
+    credential_vault: Option<Backend>,
     /// New private directory for the environment files.
     #[arg(long, default_value = "supertag-deployment")]
     output: PathBuf,
     /// Fail instead of prompting when a required value is missing.
     #[arg(long)]
     non_interactive: bool,
+}
+
+/// A credential vault backend; see `supertag_credential_vault::CredentialVault`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum Backend {
+    /// A private file on the service's persistent disk.
+    File,
+    /// The platform's own secrets: environment variables that
+    /// `supertag gateway credential export` writes into the service files. Read-only for the
+    /// services, so a credential change needs the secret updated and a redeploy.
+    Env,
+    /// HashiCorp Vault KV v2, from VAULT_ADDR and VAULT_TOKEN.
+    Vault,
+}
+
+impl Backend {
+    fn name(self) -> &'static str {
+        match self {
+            Self::File => "file",
+            Self::Env => "env",
+            Self::Vault => "vault",
+        }
+    }
 }
 
 #[derive(Args)]
@@ -277,6 +321,17 @@ pub async fn setup(command: SetupCommand) -> Result<()> {
             .filter(|value| !value.is_empty())
     };
     let interactive = !args.non_interactive && io::stdin().is_terminal();
+    // The backend is a flag, not a secret, so the environment does not select it.
+    let backend = args
+        .credential_vault
+        .unwrap_or_else(|| args.platform.default_vault());
+    let supplied = |key: &str| {
+        if key == "SUPERTAG_CREDENTIAL_VAULT" {
+            Some(backend.name().to_owned())
+        } else {
+            supplied(key)
+        }
+    };
     let files = configure(args.platform, &supplied, &mut |key| {
         ensure!(
             interactive,
@@ -305,10 +360,28 @@ pub async fn setup(command: SetupCommand) -> Result<()> {
         .split(':')
         .next()
         .unwrap_or_default();
+    let credentials = match backend {
+        Backend::File => format!(
+            "The services keep credentials in the file credential vault on their disk at {STATE_DIRECTORY}."
+        ),
+        Backend::Vault => {
+            "The Gateway reads credentials from HashiCorp Vault with the settings in gateway.env."
+                .to_owned()
+        }
+        Backend::Env => {
+            let file = directory.join(CREDENTIAL_FILE);
+            format!(
+                "The services read credentials from their environment: gateway.env and control-plane.env carry them, and hold none yet. To add or change one, set SUPERTAG_CREDENTIAL_FILE={} and run `supertag setup surface`, `supertag workspace credential add`, or `supertag volume credential set`; then run `supertag gateway credential export --directory {}`, upload both files again, and redeploy.",
+                file.display(),
+                directory.display()
+            )
+        }
+    };
     out!(
         "Saved {platform} deployment configuration to {} (contains secrets; keep private).\n\
          {listener}\n\
          A Gateway reaches the Control Plane at {upstream}, so the certificate must also name {host}. It signs in as gateway:local with the credential in gateway.env; client certificates are optional.\n\
+         {credentials}\n\
          {}\n",
         directory.display(),
         args.platform.next_steps(),
@@ -385,13 +458,17 @@ pub fn configure(
     if let Some(principal) = supplied("SUPERTAG_OPERATOR_PRINCIPAL") {
         control_plane.insert("SUPERTAG_OPERATOR_PRINCIPAL".into(), principal);
     }
-    let vault = supplied("SUPERTAG_CREDENTIAL_VAULT").unwrap_or_else(|| {
-        if platform.requires_vault() {
-            "vault".into()
-        } else {
-            "file".into()
-        }
-    });
+    let vault = supplied("SUPERTAG_CREDENTIAL_VAULT")
+        .unwrap_or_else(|| platform.default_vault().name().to_owned());
+    if vault == "env" {
+        // Each service reads its own document, empty until credentials are exported into it.
+        let (key, value) = supertag_credential_vault::empty_environment_variable(Holder::Gateway);
+        gateway.insert(key, value);
+        let (key, value) =
+            supertag_credential_vault::empty_environment_variable(Holder::ControlPlane);
+        control_plane.insert(key, value);
+        control_plane.insert("SUPERTAG_CREDENTIAL_VAULT".into(), vault.clone());
+    }
     if vault == "vault" {
         for key in ["VAULT_ADDR", "VAULT_TOKEN"] {
             gateway.insert(key.into(), required(key)?);
@@ -433,10 +510,15 @@ pub fn configure(
 pub fn validate(platform: Platform, files: &Files) -> Result<()> {
     let mut issues = Vec::new();
     let tls_allowed = !platform.hosted();
-    let mut known = |file: &str, environment: &Environment, keys: &[&str], tls: bool| {
+    let mut known = |file: &str,
+                     environment: &Environment,
+                     keys: &[&str],
+                     tls: bool,
+                     holder: Option<Holder>| {
         for key in environment.keys() {
             let tls_key = TLS_KEYS.contains(&key.as_str());
-            if !(keys.contains(&key.as_str()) || tls && tls_key) {
+            let document = holder.is_some_and(|holder| holder.is_variable(key));
+            if !(keys.contains(&key.as_str()) || tls && tls_key || document) {
                 let service = file == CONTROL_PLANE_FILE || file == GATEWAY_FILE;
                 issues.push(if tls_key && service && !tls_allowed {
                     format!(
@@ -453,11 +535,18 @@ pub fn validate(platform: Platform, files: &Files) -> Result<()> {
         &files.control_plane,
         &CONTROL_PLANE_KEYS,
         tls_allowed,
+        Some(Holder::ControlPlane),
     );
-    known(GATEWAY_FILE, &files.gateway, &GATEWAY_KEYS, tls_allowed);
-    known(OPERATOR_FILE, &files.operator, &OPERATOR_KEYS, false);
+    known(
+        GATEWAY_FILE,
+        &files.gateway,
+        &GATEWAY_KEYS,
+        tls_allowed,
+        Some(Holder::Gateway),
+    );
+    known(OPERATOR_FILE, &files.operator, &OPERATOR_KEYS, false, None);
     if let Some(postgres) = &files.postgres {
-        known(POSTGRES_FILE, postgres, &POSTGRES_KEYS, false);
+        known(POSTGRES_FILE, postgres, &POSTGRES_KEYS, false, None);
     }
     let control = |key: &str| files.control_plane.get(key).map(String::as_str);
     let gateway = |key: &str| files.gateway.get(key).map(String::as_str);
@@ -544,11 +633,53 @@ pub fn validate(platform: Platform, files: &Files) -> Result<()> {
             "{CONTROL_PLANE_FILE}: the Control Plane's state requires the persistent mount at SUPERTAG_STATE_DIR={STATE_DIRECTORY}"
         ));
     }
+    // The environment backend is deployment-wide: each service reads its own document, which
+    // must decode and hold only that service's credentials. Messages never include a value.
+    let env = gateway("SUPERTAG_CREDENTIAL_VAULT") == Some("env");
+    if env != (control("SUPERTAG_CREDENTIAL_VAULT") == Some("env")) {
+        issues.push(format!(
+            "{CONTROL_PLANE_FILE} and {GATEWAY_FILE} must both set SUPERTAG_CREDENTIAL_VAULT=env, or neither"
+        ));
+    }
+    for (file, environment, holder) in [
+        (
+            CONTROL_PLANE_FILE,
+            &files.control_plane,
+            Holder::ControlPlane,
+        ),
+        (GATEWAY_FILE, &files.gateway, Holder::Gateway),
+    ] {
+        if environment
+            .get("SUPERTAG_CREDENTIAL_VAULT")
+            .map(String::as_str)
+            == Some("env")
+        {
+            if let Err(error) = EnvironmentCredentialVault::from_environment(holder, &|key| {
+                environment.get(key).cloned()
+            }) {
+                issues.push(format!("{file}: {error}"));
+            }
+        } else if environment.keys().any(|key| holder.is_variable(key)) {
+            issues.push(format!(
+                "{file}: {} requires SUPERTAG_CREDENTIAL_VAULT=env",
+                holder.variable()
+            ));
+        }
+    }
     match gateway("SUPERTAG_CREDENTIAL_VAULT") {
-        Some("file") if platform.requires_vault() => issues.push(format!(
-            "{GATEWAY_FILE}: {} has no disk the file credential vault can rely on; set SUPERTAG_CREDENTIAL_VAULT=vault with VAULT_ADDR and VAULT_TOKEN",
+        Some("file") if platform.lacks_durable_disk() => issues.push(format!(
+            "{GATEWAY_FILE}: {} has no disk the file credential vault can rely on; set SUPERTAG_CREDENTIAL_VAULT=env, or vault with VAULT_ADDR and VAULT_TOKEN",
             platform.name()
         )),
+        Some("env") => {
+            for key in ["VAULT_ADDR", "VAULT_TOKEN"] {
+                if gateway(key).is_some() {
+                    issues.push(format!(
+                        "{GATEWAY_FILE}: {key} requires SUPERTAG_CREDENTIAL_VAULT=vault"
+                    ));
+                }
+            }
+        }
         Some("file") => {
             if gateway("SUPERTAG_STATE_DIR") != Some(STATE_DIRECTORY) {
                 issues.push(format!(
@@ -576,7 +707,7 @@ pub fn validate(platform: Platform, files: &Files) -> Result<()> {
             }
         }
         _ => issues.push(format!(
-            "{GATEWAY_FILE}: SUPERTAG_CREDENTIAL_VAULT must be file or vault"
+            "{GATEWAY_FILE}: SUPERTAG_CREDENTIAL_VAULT must be file, env, or vault"
         )),
     }
     if !platform.hosted() {
@@ -813,6 +944,92 @@ fn write_directory(directory: &Path, files: &Files) -> Result<()> {
     Ok(())
 }
 
+/// The two service files and the service whose credential document each carries.
+const CREDENTIAL_HOLDERS: [(&str, Holder); 2] = [
+    (GATEWAY_FILE, Holder::Gateway),
+    (CONTROL_PLANE_FILE, Holder::ControlPlane),
+];
+
+/// `supertag gateway credential export`: renders the deployment directory's file credential
+/// vault into the service files of a deployment that reads credentials from its environment.
+/// Each file gets only its own service's credentials, and is replaced atomically. Returns each
+/// file's name and the IDs of the credentials it now carries.
+pub fn export_credentials(directory: &Path) -> Result<Vec<(&'static str, Vec<String>)>> {
+    let source = directory.join(CREDENTIAL_FILE);
+    let mut written = Vec::new();
+    for (name, holder) in CREDENTIAL_HOLDERS {
+        let mut environment = read_private(&directory.join(name))?;
+        let backend = environment
+            .get("SUPERTAG_CREDENTIAL_VAULT")
+            .map_or("file", String::as_str);
+        ensure!(
+            backend == "env",
+            "{name} sets the {backend} credential vault, so its service does not read credentials from its environment; only a deployment set up with --credential-vault env is exported"
+        );
+        environment.retain(|key, _| !holder.is_variable(key));
+        environment.extend(supertag_credential_vault::environment_variables(
+            holder, &source,
+        )?);
+        written.push((
+            name,
+            serialize(&environment)?,
+            supertag_credential_vault::credential_ids(holder, &source)?,
+        ));
+    }
+    // Both files are rendered before either is replaced.
+    let mut exported = Vec::new();
+    for (name, text, ids) in written {
+        let mut temporary = tempfile::Builder::new()
+            .prefix(".export-")
+            .permissions(fs::Permissions::from_mode(0o600))
+            .tempfile_in(directory)
+            .with_context(|| format!("update {name}"))?;
+        temporary.write_all(text.as_bytes())?;
+        temporary.as_file().sync_all()?;
+        temporary
+            .persist(directory.join(name))
+            .map_err(|error| anyhow::anyhow!("replace {name}: {}", error.error))?;
+        exported.push((name, ids));
+    }
+    fs::File::open(directory)?.sync_all()?;
+    Ok(exported)
+}
+
+/// Refuses service files whose credential documents differ from what the directory's file
+/// credential vault renders now: a credential was stored or removed and not exported.
+fn credentials_current(directory: &Path, files: &Files) -> Result<()> {
+    let source = directory.join(CREDENTIAL_FILE);
+    if files
+        .gateway
+        .get("SUPERTAG_CREDENTIAL_VAULT")
+        .map(String::as_str)
+        != Some("env")
+        || !source.exists()
+    {
+        return Ok(());
+    }
+    for (name, holder) in CREDENTIAL_HOLDERS {
+        let environment = if name == GATEWAY_FILE {
+            &files.gateway
+        } else {
+            &files.control_plane
+        };
+        let carried: Vec<(String, String)> = environment
+            .iter()
+            .filter(|(key, _)| holder.is_variable(key))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        let mut rendered = supertag_credential_vault::environment_variables(holder, &source)?;
+        rendered.sort();
+        ensure!(
+            carried == rendered,
+            "{name} is out of date: {CREDENTIAL_FILE} has changed since it was exported. Run `supertag gateway credential export --directory {}`, upload {GATEWAY_FILE} and {CONTROL_PLANE_FILE} again, and redeploy",
+            directory.display()
+        );
+    }
+    Ok(())
+}
+
 fn read_private(path: &Path) -> Result<Environment> {
     let metadata =
         fs::symlink_metadata(path).with_context(|| format!("read {}", path.display()))?;
@@ -844,6 +1061,7 @@ pub fn read_directory(platform: Platform, directory: &Path) -> Result<Files> {
         );
     }
     validate(platform, &files)?;
+    credentials_current(directory, &files)?;
     Ok(files)
 }
 
@@ -1048,17 +1266,11 @@ mod tests {
     }
 
     /// The values each platform needs from the operator: a database URL unless the platform
-    /// supplies it, and Vault where the file credential vault has no reliable disk.
+    /// supplies it. No platform needs HashiCorp Vault.
     fn minimal(platform: Platform) -> Vec<(&'static str, &'static str)> {
         let mut values = Vec::new();
         if !platform.database_from_platform() {
             values.push(("SUPERTAG_DATABASE_URL", DATABASE));
-        }
-        if platform.requires_vault() {
-            values.extend([
-                ("VAULT_ADDR", "https://vault.example.com"),
-                ("VAULT_TOKEN", "private-vault-token"),
-            ]);
         }
         values
     }
@@ -1089,23 +1301,47 @@ mod tests {
             assert!(!files.gateway.contains_key("SUPERTAG_OPERATOR_PRINCIPAL"));
             // A Gateway never holds an operator credential.
             assert!(!files.gateway.contains_key("SUPERTAG_OPERATOR_TOKEN"));
+            // Platforms without a durable disk read credentials from their own secrets.
+            let env = platform.lacks_durable_disk();
             assert_eq!(
                 files.gateway["SUPERTAG_CREDENTIAL_VAULT"],
-                if platform.requires_vault() {
-                    "vault"
-                } else {
-                    "file"
-                }
+                if env { "env" } else { "file" }
             );
+            assert_eq!(
+                files
+                    .control_plane
+                    .get("SUPERTAG_CREDENTIAL_VAULT")
+                    .map(String::as_str),
+                env.then_some("env")
+            );
+            assert!(!files.gateway.contains_key("VAULT_ADDR"));
             assert_eq!(files.gateway["SUPERTAG_STATE_DIR"], STATE_DIRECTORY);
             assert_eq!(files.control_plane["SUPERTAG_STATE_DIR"], STATE_DIRECTORY);
             // Role separation: only the Control Plane holds the database credential, and only
-            // the Gateway holds surface credentials.
+            // the Gateway holds surface credentials: each file carries its own service's
+            // credential document and never the other's.
             assert!(!files.gateway.contains_key("SUPERTAG_DATABASE_URL"));
+            assert_eq!(
+                files.gateway.contains_key("SUPERTAG_GATEWAY_CREDENTIALS"),
+                env
+            );
+            assert_eq!(
+                files
+                    .control_plane
+                    .contains_key("SUPERTAG_CONTROL_PLANE_CREDENTIALS"),
+                env
+            );
             assert!(
                 !files
                     .control_plane
-                    .contains_key("SUPERTAG_CREDENTIAL_VAULT")
+                    .keys()
+                    .any(|key| Holder::Gateway.is_variable(key))
+            );
+            assert!(
+                !files
+                    .gateway
+                    .keys()
+                    .any(|key| Holder::ControlPlane.is_variable(key))
             );
             assert!(files.postgres.is_none());
             // Client certificates are an optional filter, never generated by setup.
@@ -1212,11 +1448,20 @@ mod tests {
         assert!(!error.contains("private-password"), "{error}");
         // The same file set is valid where the operator supplies the database.
         validate(Platform::Fly, &files)?;
-        // Cloudflare and Modal default to Vault and refuse the file credential vault.
+        // Cloudflare and Modal default to their own secrets, take Vault when asked, and refuse
+        // the file credential vault.
         for platform in [Platform::Cloudflare, Platform::Modal] {
-            let error = configured(platform, &[("SUPERTAG_DATABASE_URL", DATABASE)])
-                .unwrap_err()
-                .to_string();
+            let files = configured(platform, &[("SUPERTAG_DATABASE_URL", DATABASE)])?;
+            assert_eq!(files.gateway["SUPERTAG_CREDENTIAL_VAULT"], "env");
+            let error = configured(
+                platform,
+                &[
+                    ("SUPERTAG_DATABASE_URL", DATABASE),
+                    ("SUPERTAG_CREDENTIAL_VAULT", "vault"),
+                ],
+            )
+            .unwrap_err()
+            .to_string();
             assert_eq!(error, "Missing VAULT_ADDR", "{platform:?}");
             let error = configured(
                 platform,
@@ -1231,9 +1476,18 @@ mod tests {
                 error.contains("has no disk the file credential vault can rely on"),
                 "{error}"
             );
-            let files = configured(platform, &minimal(platform))?;
+            let files = configured(
+                platform,
+                &[
+                    ("SUPERTAG_DATABASE_URL", DATABASE),
+                    ("SUPERTAG_CREDENTIAL_VAULT", "vault"),
+                    ("VAULT_ADDR", "https://vault.example.com"),
+                    ("VAULT_TOKEN", "private-vault-token"),
+                ],
+            )?;
             assert_eq!(files.gateway["VAULT_ADDR"], "https://vault.example.com");
             assert!(!files.control_plane.contains_key("VAULT_TOKEN"));
+            assert!(!files.gateway.contains_key("SUPERTAG_GATEWAY_CREDENTIALS"));
             // Hosted TLS still arrives as PEM secrets.
             assert!(
                 !files
@@ -1271,7 +1525,7 @@ mod tests {
             (
                 "SUPERTAG_CREDENTIAL_VAULT",
                 "private-typo",
-                "SUPERTAG_CREDENTIAL_VAULT must be file or vault",
+                "SUPERTAG_CREDENTIAL_VAULT must be file, env, or vault",
             ),
             (
                 "SUPERTAG_OPERATOR_PRINCIPAL",
@@ -1359,6 +1613,197 @@ mod tests {
         assert!(error.contains("operator.env: SUPERTAG_OPERATOR_TOKEN differs"));
         files.postgres = Some(Environment::new());
         assert!(validate(Platform::Fly, &files).is_err());
+        Ok(())
+    }
+
+    /// Stores `value` at `id` in a deployment directory's file credential vault.
+    fn store(directory: &Path, id: &str, value: &[(&str, &str)]) -> Result<()> {
+        let path = directory.join(CREDENTIAL_FILE);
+        let vault = supertag_credential_vault::CredentialVault::from_environment(|key| {
+            (key == "SUPERTAG_CREDENTIAL_FILE").then(|| path.to_string_lossy().into_owned())
+        })?;
+        let value = value
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect();
+        tokio::runtime::Runtime::new()?.block_on(vault.store(id, &value))
+    }
+
+    fn resolves(environment: &Environment, holder: Holder, id: &str) -> Result<bool> {
+        let vault =
+            supertag_credential_vault::CredentialVault::from_environment_for(holder, |key| {
+                environment.get(key).cloned()
+            })?;
+        Ok(tokio::runtime::Runtime::new()?
+            .block_on(vault.resolve(id))?
+            .is_some())
+    }
+
+    #[test]
+    fn export_gives_each_service_file_only_its_own_credentials_and_check_detects_a_stale_one()
+    -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let directory = root.path().join("deployment");
+        write_directory(
+            &directory,
+            &configured(Platform::Modal, &minimal(Platform::Modal))?,
+        )?;
+        read_directory(Platform::Modal, &directory)?;
+        // Nothing stored yet: exporting changes nothing.
+        let before = fs::read_to_string(directory.join(GATEWAY_FILE))?;
+        assert_eq!(
+            export_credentials(&directory)?,
+            [(GATEWAY_FILE, vec![]), (CONTROL_PLANE_FILE, vec![])]
+        );
+        assert_eq!(fs::read_to_string(directory.join(GATEWAY_FILE))?, before);
+
+        // Values dotenv parsers and shells would change survive the files unchanged.
+        store(
+            &directory,
+            "surface/slack/T123",
+            &[("botToken", "xoxb-private 'q' \"d\" $HOME\n#x")],
+        )?;
+        store(
+            &directory,
+            "workspace-credential/deploy",
+            &[("private_key_pem", &"private-key\n".repeat(700))],
+        )?;
+        let stale = read_directory(Platform::Modal, &directory)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            stale.contains("gateway.env is out of date")
+                && stale.contains("supertag gateway credential export --directory"),
+            "{stale}"
+        );
+        assert!(!stale.contains("private"), "{stale}");
+
+        let exported = export_credentials(&directory)?;
+        assert_eq!(
+            exported,
+            [
+                (GATEWAY_FILE, vec!["surface/slack/T123".to_owned()]),
+                (
+                    CONTROL_PLANE_FILE,
+                    vec!["workspace-credential/deploy".to_owned()]
+                ),
+            ]
+        );
+        for name in [GATEWAY_FILE, CONTROL_PLANE_FILE] {
+            let path = directory.join(name);
+            assert_eq!(fs::metadata(&path)?.permissions().mode() & 0o777, 0o600);
+            let text = fs::read_to_string(&path)?;
+            assert!(
+                !text.contains("private-key") && !text.contains("xoxb"),
+                "{name}"
+            );
+        }
+        let files = read_directory(Platform::Modal, &directory)?;
+        // The rest of each file is untouched.
+        assert_eq!(
+            files.gateway["SUPERTAG_GATEWAY_CREDENTIAL"],
+            files.control_plane["SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL"]
+        );
+        assert!(resolves(
+            &files.gateway,
+            Holder::Gateway,
+            "surface/slack/T123"
+        )?);
+        assert!(!resolves(
+            &files.gateway,
+            Holder::Gateway,
+            "workspace-credential/deploy"
+        )?);
+        // The Workspace Credential is longer than one variable carries, so it is split.
+        assert_eq!(
+            files.control_plane["SUPERTAG_CONTROL_PLANE_CREDENTIALS"],
+            "parts:3"
+        );
+        assert!(resolves(
+            &files.control_plane,
+            Holder::ControlPlane,
+            "workspace-credential/deploy"
+        )?);
+        assert!(!resolves(
+            &files.control_plane,
+            Holder::ControlPlane,
+            "surface/slack/T123"
+        )?);
+
+        // A shorter document leaves no part behind.
+        store(
+            &directory,
+            "workspace-credential/deploy",
+            &[("token", "private-short")],
+        )?;
+        assert!(read_directory(Platform::Modal, &directory).is_err());
+        export_credentials(&directory)?;
+        let files = read_directory(Platform::Modal, &directory)?;
+        assert!(
+            !files
+                .control_plane
+                .contains_key("SUPERTAG_CONTROL_PLANE_CREDENTIALS_1")
+        );
+
+        // A service file holding the other service's credentials, or a document that does not
+        // decode, is refused without its value.
+        let mut crossed = read_directory(Platform::Modal, &directory)?;
+        let document = crossed.control_plane["SUPERTAG_CONTROL_PLANE_CREDENTIALS"].clone();
+        crossed
+            .gateway
+            .insert("SUPERTAG_GATEWAY_CREDENTIALS".into(), document.clone());
+        let error = validate(Platform::Modal, &crossed).unwrap_err().to_string();
+        assert!(
+            error.contains(
+                "gateway.env: SUPERTAG_GATEWAY_CREDENTIALS holds a credential the Control Plane reads"
+            ),
+            "{error}"
+        );
+        assert!(!error.contains(&document), "{error}");
+        crossed.gateway.insert(
+            "SUPERTAG_GATEWAY_CREDENTIALS".into(),
+            "private-garbage!".into(),
+        );
+        crossed
+            .gateway
+            .insert("SUPERTAG_CONTROL_PLANE_CREDENTIALS".into(), document);
+        let error = validate(Platform::Modal, &crossed).unwrap_err().to_string();
+        for expected in [
+            "gateway.env: SUPERTAG_GATEWAY_CREDENTIALS is not a credential document",
+            "gateway.env: unknown deployment environment key SUPERTAG_CONTROL_PLANE_CREDENTIALS",
+        ] {
+            assert!(error.contains(expected), "{expected}: {error}");
+        }
+        assert!(!error.contains("private"), "{error}");
+
+        // Only an env deployment is exported, and both services use env or neither does.
+        let fly = root.path().join("fly");
+        let mut files = configured(Platform::Fly, &minimal(Platform::Fly))?;
+        write_directory(&fly, &files)?;
+        let error = export_credentials(&fly).unwrap_err().to_string();
+        assert!(
+            error.contains("gateway.env sets the file credential vault"),
+            "{error}"
+        );
+        files
+            .gateway
+            .insert("SUPERTAG_CREDENTIAL_VAULT".into(), "env".into());
+        let error = validate(Platform::Fly, &files).unwrap_err().to_string();
+        for expected in [
+            "must both set SUPERTAG_CREDENTIAL_VAULT=env, or neither",
+            "gateway.env: SUPERTAG_GATEWAY_CREDENTIALS is required when SUPERTAG_CREDENTIAL_VAULT=env",
+        ] {
+            assert!(error.contains(expected), "{expected}: {error}");
+        }
+        // A platform with a disk may read credentials from its environment too.
+        let files = configured(
+            Platform::Fly,
+            &[
+                ("SUPERTAG_DATABASE_URL", DATABASE),
+                ("SUPERTAG_CREDENTIAL_VAULT", "env"),
+            ],
+        )?;
+        assert_eq!(files.control_plane["SUPERTAG_CREDENTIAL_VAULT"], "env");
         Ok(())
     }
 
@@ -1925,6 +2370,28 @@ mod tests {
         for key in pem {
             let name = key.trim_start_matches("SUPERTAG_").trim_end_matches("_PEM");
             assert!(entrypoint.contains(&format!("\"{name} ")), "{key}");
+        }
+        // Plus each service's credential document, which the pair gives that service alone.
+        assert!(routing.contains(
+            "CREDENTIAL_DOCUMENT = /^SUPERTAG_(GATEWAY|CONTROL_PLANE)_CREDENTIALS(_[1-8])?$/u"
+        ));
+        assert_eq!(supertag_credential_vault::ENVIRONMENT_MAX_PARTS, 8);
+        for (holder, removal) in [
+            // Removed from the Control Plane's environment and from the Gateway's.
+            (Holder::Gateway, "$surface_settings $gateway_documents \\\n"),
+            (
+                Holder::ControlPlane,
+                "-u SUPERTAG_TLS_CLIENT_CA_FILE $control_plane_documents\"\n",
+            ),
+        ] {
+            let variable = holder.variable();
+            for pattern in [
+                format!("^\\({variable}\\)="),
+                format!("^\\({variable}_[0-9]*\\)="),
+            ] {
+                assert!(pair.contains(&pattern), "{pattern}");
+            }
+            assert!(pair.contains(removal), "{removal}");
         }
         // Plus the outbound connectors' settings, which the pair gives the Gateway alone.
         let prefixes = [

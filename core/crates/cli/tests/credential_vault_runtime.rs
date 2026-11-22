@@ -329,6 +329,214 @@ async fn gateway_resolves_slack_credentials_from_hashicorp_vault_and_fails_close
     Ok(())
 }
 
+/// The `KEY=VALUE` lines of a deployment environment file whose key is a credential document
+/// variable or the vault selection.
+fn credential_settings(path: &Path) -> Result<Vec<(String, String)>> {
+    Ok(std::fs::read_to_string(path)?
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .filter(|(key, _)| key.contains("_CREDENTIALS") || *key == "SUPERTAG_CREDENTIAL_VAULT")
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect())
+}
+
+/// A hosted deployment without HashiCorp Vault: the operator stores credentials in the
+/// deployment directory's file, exports them into the service files, and the Gateway reads its
+/// own from its environment, as a platform's secrets deliver them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn gateway_resolves_slack_credentials_from_its_environment_after_an_export() -> Result<()> {
+    let services = Services::start().await?;
+    let deployment = services.directory.path().join("deployment");
+    let cli = |args: &[&str], environment: &[(&str, &str)], input: &str| -> Result<_> {
+        let mut child = reaped(Command::new(BINARY))
+            .args(args)
+            .env_clear()
+            .envs(environment.iter().copied())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        child
+            .stdin
+            .take()
+            .context("stdin")?
+            .write_all(input.as_bytes())?;
+        let output = child.wait_with_output()?;
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        ensure!(!text.contains(SIGNING) && !text.contains(BOT), "{text}");
+        Ok((output.status.success(), text))
+    };
+    let directory = deployment.to_str().context("deployment path")?;
+    // Modal has no disk for the file vault; setup needs no Vault address or token.
+    let (ok, text) = cli(
+        &[
+            "setup",
+            "deployment",
+            "modal",
+            "--non-interactive",
+            "--output",
+            directory,
+        ],
+        &[(
+            "SUPERTAG_DATABASE_URL",
+            "postgresql://supertag:synthetic@db.example.com/supertag",
+        )],
+        "",
+    )?;
+    ensure!(
+        ok && text.contains("supertag gateway credential export"),
+        "{text}"
+    );
+    let file = deployment.join("gateway-credentials.json");
+    let file_text = file.to_str().context("file path")?;
+    let pointed = [("SUPERTAG_CREDENTIAL_FILE", file_text)];
+    let id = format!("surface/slack/{ACCOUNT}");
+    let secrets = json!({"botToken": BOT, "signingSecret": SIGNING}).to_string();
+    let (ok, text) = cli(&["gateway", "credential", "store", &id], &pointed, &secrets)?;
+    ensure!(ok, "{text}");
+    let (ok, text) = cli(
+        &[
+            "gateway",
+            "credential",
+            "store",
+            "workspace-credential/deploy",
+        ],
+        &pointed,
+        r#"{"kind":"https","token":"synthetic-workspace-token"}"#,
+    )?;
+    ensure!(ok, "{text}");
+
+    // The stored credentials are not in the service files until they are exported.
+    let check = ["check", "deployment", "modal", "--directory", directory];
+    let (ok, text) = cli(&check, &[], "")?;
+    ensure!(
+        !ok && text.contains("is out of date")
+            && text.contains("supertag gateway credential export --directory"),
+        "{text}"
+    );
+    let (ok, text) = cli(
+        &["gateway", "credential", "export", "--directory", directory],
+        &[],
+        "",
+    )?;
+    ensure!(ok, "{text}");
+    let exported: Value = serde_json::from_str(&text)?;
+    ensure!(
+        exported["credentials"]
+            == json!({
+                "gateway.env": [id],
+                "control-plane.env": ["workspace-credential/deploy"],
+            }),
+        "{exported}"
+    );
+    let (ok, text) = cli(&check, &[], "")?;
+    ensure!(ok, "{text}");
+
+    // The Gateway's file carries the Slack secrets and not the Workspace Credential; the
+    // Control Plane's file carries neither Slack secret.
+    let gateway_settings = credential_settings(&deployment.join("gateway.env"))?;
+    let control_settings = credential_settings(&deployment.join("control-plane.env"))?;
+    ensure!(
+        gateway_settings
+            .iter()
+            .all(|(key, _)| !key.starts_with("SUPERTAG_CONTROL_PLANE_"))
+            && control_settings
+                .iter()
+                .all(|(key, _)| !key.starts_with("SUPERTAG_GATEWAY_")),
+        "{gateway_settings:?} {control_settings:?}"
+    );
+    use base64::Engine as _;
+    let decoded = |settings: &[(String, String)], key: &str| -> Result<String> {
+        let value = &settings
+            .iter()
+            .find(|(name, _)| name == key)
+            .with_context(|| format!("{key} is missing"))?
+            .1;
+        Ok(String::from_utf8(
+            base64::engine::general_purpose::STANDARD.decode(value)?,
+        )?)
+    };
+    let gateway_document = decoded(&gateway_settings, "SUPERTAG_GATEWAY_CREDENTIALS")?;
+    let control_document = decoded(&control_settings, "SUPERTAG_CONTROL_PLANE_CREDENTIALS")?;
+    ensure!(
+        gateway_document.contains(SIGNING) && !gateway_document.contains("synthetic-workspace")
+    );
+    ensure!(
+        control_document.contains("synthetic-workspace-token")
+            && !control_document.contains(SIGNING)
+            && !control_document.contains(BOT)
+    );
+
+    // The Gateway reads its secrets from the environment alone: no state directory, no Vault.
+    let environment: Vec<(&str, &str)> = gateway_settings
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let mut gateway = services.gateway(&environment)?;
+    let endpoints = gateway.endpoints(2).await?;
+    let (status, body) = challenge(&endpoints[1], SIGNING).await?;
+    ensure!(status == reqwest::StatusCode::OK, "{status}: {body}");
+    let (status, _) = challenge(&endpoints[1], "a-different-signing-key").await?;
+    ensure!(status == reqwest::StatusCode::UNAUTHORIZED, "{status}");
+    drop(gateway);
+
+    // Given the Control Plane's document instead, or none, the Gateway does not start, and
+    // its diagnostics hold no credential.
+    let crossed = [
+        ("SUPERTAG_CREDENTIAL_VAULT", "env"),
+        (
+            "SUPERTAG_GATEWAY_CREDENTIALS",
+            control_settings
+                .iter()
+                .find(|(key, _)| key == "SUPERTAG_CONTROL_PLANE_CREDENTIALS")
+                .context("control document")?
+                .1
+                .as_str(),
+        ),
+    ];
+    for (environment, message) in [
+        (&crossed[..], "holds a credential the Control Plane reads"),
+        (
+            &[("SUPERTAG_CREDENTIAL_VAULT", "env")][..],
+            "SUPERTAG_GATEWAY_CREDENTIALS is required",
+        ),
+        (
+            &[
+                ("SUPERTAG_CREDENTIAL_VAULT", "env"),
+                (
+                    "SUPERTAG_GATEWAY_CREDENTIALS",
+                    "synthetic-malformed-secret!",
+                ),
+            ][..],
+            "is not a credential document",
+        ),
+    ] {
+        let logs = services.gateway(environment)?.failure().await?;
+        ensure!(logs.contains(message), "{message}: {logs}");
+        ensure!(
+            !logs.contains("synthetic-workspace-token") && !logs.contains("synthetic-malformed"),
+            "{logs}"
+        );
+    }
+
+    // The services' backend is read-only: a store against it says how to change a credential.
+    let (ok, text) = cli(
+        &["gateway", "credential", "store", &id],
+        &environment,
+        &secrets,
+    )?;
+    ensure!(
+        !ok && text.contains("read-only") && text.contains("SUPERTAG_CREDENTIAL_FILE"),
+        "{text}"
+    );
+    drop(services.control_plane);
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn operator_stores_slack_credentials_in_the_file_vault_for_the_gateway() -> Result<()> {
     let services = Services::start().await?;

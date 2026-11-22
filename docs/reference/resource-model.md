@@ -525,7 +525,8 @@ Tokens are never stored. The key is a separate copy from any the GitHub surface 
 
 The secret goes to the credential vault the Control Plane reads (`SUPERTAG_CREDENTIAL_VAULT`,
 in `SUPERTAG_STATE_DIR` by default) under `workspace-credential/NAME`, never to the database or a
-harness. A Worklet that reads the Workspace gets it, or a minted GitHub App token, for that one
+harness. A hosted Control Plane can read it from its environment instead; see
+[Environment credential vault](credential-storage.md#environment-credential-vault). A Worklet that reads the Workspace gets it, or a minted GitHub App token, for that one
 read and keeps it only in memory; a credential helper is never handed to a host, so hosts can't
 read with one. An SSH key without `--known-hosts` trusts the server's first host key and
 remembers it, on the Control Plane and in each Worklet separately. `supertag workspace credential remove NAME` refuses while a Workspace names it.

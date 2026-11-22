@@ -92,8 +92,11 @@ with the deployment's owner.
 - PostgreSQL for every shared deployment. SQLite serves one local process.
 - One Control Plane process per platform service unless you follow
   [Control Plane replicas](../../deploy/native/README.md#control-plane-replicas).
-- A persistent volume for the Gateway's state, or Vault for the Gateway's credentials where the
-  platform has no persistent disk.
+- A persistent volume for the Gateway's state. Where the platform has no persistent disk
+  (Cloudflare, Modal), the services read credentials from the platform's own secrets by default:
+  store them with `SUPERTAG_CREDENTIAL_FILE` naming the deployment directory's
+  `gateway-credentials.json`, run `supertag gateway credential export`, upload both service
+  files, and redeploy. HashiCorp Vault is optional (`--credential-vault vault`).
 - Persistent state directories for Worker Hosts. The Control Plane stores no artifact or
   Workspace delivery bytes and relays none: each Worker Host keeps what its Tasks produce, or its
   Worklet writes it to a shared Volume or pushes deliveries to the Workspace's git remote. Files on an

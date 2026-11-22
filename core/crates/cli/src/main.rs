@@ -78,7 +78,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use supertag_api::{Api, transfers::ApiTransfers};
 use supertag_control_plane::ControlPlane;
-use supertag_credential_vault::CredentialVault;
+use supertag_credential_vault::{CredentialVault, Holder};
 use supertag_gateway::{
     github::{Github, GithubConfig},
     lark::{Lark, LarkConfig},
@@ -1270,7 +1270,7 @@ async fn control_plane(
     // The Control Plane signs S3 Volume object URLs with credentials from its vault; it maps no
     // Volume and carries no Volume bytes.
     // Without a state directory there is no vault, and an S3 Volume's capture fails, naming why.
-    let signers = CredentialVault::from_process_environment()
+    let signers = CredentialVault::from_process_environment_for(Holder::ControlPlane)
         .map(supertag_api::transfers::volumes::VolumeSigners::new)
         .unwrap_or_default();
     let mut transfers = ApiTransfers::new(api.clone()).with_volume_signers(signers);
@@ -1494,7 +1494,7 @@ fn git_delivery(directory: Option<PathBuf>) -> Result<Option<supertag_git_delive
             None => return Ok(None),
         },
     };
-    let vault = supertag_credential_vault::CredentialVault::from_process_environment()?;
+    let vault = CredentialVault::from_process_environment_for(Holder::ControlPlane)?;
     Ok(Some(supertag_git_delivery::GitDelivery::new(
         &directory,
         supertag_git_delivery::Credentials::new(vault),

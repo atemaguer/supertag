@@ -962,8 +962,8 @@ GUIDANCE = {
     "environment": "put harness variables in env_file (STATE_DIRECTORY/.env by default)",
     "mcp": "write the servers to a JSON MCP catalog for `supertag worklet --mcp-catalog`; "
            "check it with `supertag mcp list --mcp-catalog PATH`",
-    "credentials": "the local supervisor keeps credentials in files; a deployed Control Plane chooses "
-                   "Vault with `supertag setup deployment` (SUPERTAG_CREDENTIAL_VAULT=vault)",
+    "credentials": "the local supervisor keeps credentials in files; a deployment chooses the platform's "
+                   "secrets or Vault with `supertag setup deployment --credential-vault env|vault`",
     "volume-credentials": "declare Volumes with `supertag volume put`",
     "artifact-volume": "declare Volumes with `supertag volume put`",
     "local-mount-root": "live mounts are not supported",

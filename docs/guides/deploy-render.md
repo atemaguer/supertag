@@ -22,7 +22,7 @@ supertag-gateway (background worker, optional) ── wss:// ──┘
 | Service | Render type | Runs | State |
 | --- | --- | --- | --- |
 | `supertag-control-plane` | Web service, port 8080 | `control-plane --websocket-listen 0.0.0.0:8080`; native gRPC on loopback only | Render PostgreSQL; a 1 GB disk at `/var/lib/supertag` |
-| `supertag-gateway` | Background worker, optional | `gateway --control-plane wss://supertag-control-plane.onrender.com` plus its connector flags | A 1 GB disk for connector state and the file credential vault |
+| `supertag-gateway` | Background worker, optional | `gateway --control-plane wss://supertag-control-plane.onrender.com` plus its connector flags | A 1 GB disk for connector state and the file credential vault. Set up with `--credential-vault env`, it reads credentials from its environment instead |
 | `supertag-postgres` | PostgreSQL | | Private network only (`ipAllowList: []`) |
 
 ## Before you start

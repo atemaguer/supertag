@@ -184,7 +184,10 @@ only while it holds the landing.
 
 1. Store a **Workspace Credential**: what git delivery presents to the server. Run this on the
    machine that runs the Control Plane, because the secret stays in that machine's credential vault
-   and the Control Plane's database keeps only its name and a non-secret identifier:
+   and the Control Plane's database keeps only its name and a non-secret identifier. For a hosted
+   Control Plane that reads credentials from its environment, store it in the deployment
+   directory instead and export it; see
+   [Store credentials](deployment-setup.md#store-credentials):
 
    ```sh
    supertag workspace credential add handbook-rw --ssh-key ~/.ssh/handbook_deploy

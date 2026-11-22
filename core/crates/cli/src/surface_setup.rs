@@ -340,18 +340,25 @@ impl Local {
     /// With a local Control Plane, that is the vault `supertag up` gives its Gateway: the
     /// selection from this shell or else `env_file`, falling back to this state directory's
     /// file. Without one, the Gateway runs elsewhere and cannot read this machine's file, so
-    /// only a shared HashiCorp Vault is accepted.
+    /// only a shared HashiCorp Vault is accepted, or the credential file of a deployment
+    /// directory, which `supertag gateway credential export` renders for a Gateway that reads
+    /// credentials from its environment.
     fn vault(&self) -> Result<CredentialVault> {
         let Some(config) = self.services_file() else {
+            let selected = std::env::var("SUPERTAG_CREDENTIAL_VAULT").unwrap_or_default();
+            let deployment_file =
+                std::env::var("SUPERTAG_CREDENTIAL_FILE").is_ok_and(|path| !path.trim().is_empty());
             ensure!(
-                std::env::var("SUPERTAG_CREDENTIAL_VAULT")
-                    .is_ok_and(|selected| selected.trim() == "vault"),
-                "{} has no control-plane service, so the Gateway that serves this account cannot read this machine's credential file. Run setup where the Control Plane runs, or select the HashiCorp Vault that Gateway reads with SUPERTAG_CREDENTIAL_VAULT=vault, VAULT_ADDR, and VAULT_TOKEN.",
+                match selected.trim() {
+                    "vault" => true,
+                    "" | "file" => deployment_file,
+                    _ => false,
+                },
+                "{} has no control-plane service, so the Gateway that serves this account cannot read this machine's credential file. Run setup where the Control Plane runs; or, for a deployment that reads credentials from its environment, set SUPERTAG_CREDENTIAL_FILE to the deployment directory's gateway-credentials.json; or select the HashiCorp Vault that Gateway reads with SUPERTAG_CREDENTIAL_VAULT=vault, VAULT_ADDR, and VAULT_TOKEN.",
                 self.services_path().display()
             );
             return CredentialVault::from_environment(|key| {
-                CREDENTIAL_VAULT_ENVIRONMENT
-                    .contains(&key)
+                (CREDENTIAL_VAULT_ENVIRONMENT.contains(&key) || key == "SUPERTAG_CREDENTIAL_FILE")
                     .then(|| std::env::var(key).ok())
                     .flatten()
             });
@@ -1048,6 +1055,10 @@ async fn finish(
         .into_inner();
     let credential = entry.credential_id(&name);
     vault.store(&credential, &verified.secrets).await?;
+    let deployment_file = match &vault {
+        CredentialVault::File(file) => Some(file.path().to_owned()),
+        _ => None,
+    };
     let recorded = match edit {
         Some(edit) => {
             let path = edit.path.clone();
@@ -1069,10 +1080,17 @@ async fn finish(
             account.revision,
             path.display()
         ),
-        None => outln!(
-            "Saved Surface Account {} with credentials in Vault at {credential}. No local Control Plane is configured, so configure its Gateway with SUPERTAG_CREDENTIAL_VAULT=vault and SUPERTAG_*_CREDENTIAL_ID={credential}.",
-            account.account_id
-        ),
+        None => match deployment_file {
+            Some(file) => outln!(
+                "Saved Surface Account {} with credentials in {} at {credential}. No local Control Plane is configured, so run `supertag gateway credential export` for that deployment directory, upload its service files again, and redeploy; configure its Gateway with SUPERTAG_CREDENTIAL_VAULT=env and SUPERTAG_*_CREDENTIAL_ID={credential}.",
+                account.account_id,
+                file.display()
+            ),
+            None => outln!(
+                "Saved Surface Account {} with credentials in Vault at {credential}. No local Control Plane is configured, so configure its Gateway with SUPERTAG_CREDENTIAL_VAULT=vault and SUPERTAG_*_CREDENTIAL_ID={credential}.",
+                account.account_id
+            ),
+        },
     }
     Ok(())
 }

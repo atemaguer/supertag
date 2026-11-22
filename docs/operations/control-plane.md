@@ -228,7 +228,8 @@ message when it is recorded.
   it belongs in the copy, which copying the whole directory does. A database from an earlier
   release switches to the write-ahead log the first time the Control Plane opens it.
 - **Gateway**: back up its volume, which holds the file credential vault and connector state, or
-  use HashiCorp Vault.
+  use HashiCorp Vault. A deployment that reads credentials from its environment keeps them in
+  the deployment directory on your machine and in the platform's secrets; back up the directory.
 
 ## Upgrade a deployment
 

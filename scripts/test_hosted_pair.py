@@ -49,6 +49,12 @@ class HostedPair(unittest.TestCase):
             "SUPERTAG_CLIENT_CERT_FILE": "/run/supertag-tls/client.pem",
             "SUPERTAG_LARK_APP_ID": "cli_app",
             "SUPERTAG_NOTIFY_SECRET_OPS": "hook-secret",
+            "SUPERTAG_CREDENTIAL_VAULT": "env",
+            "SUPERTAG_GATEWAY_CREDENTIALS": "parts:2",
+            "SUPERTAG_GATEWAY_CREDENTIALS_1": "surface",
+            "SUPERTAG_GATEWAY_CREDENTIALS_2": "secrets",
+            "SUPERTAG_CONTROL_PLANE_CREDENTIALS": "parts:1",
+            "SUPERTAG_CONTROL_PLANE_CREDENTIALS_1": "workspace",
             "SUPERTAG_SERVER_CA_PEM_NOTE": "line one\nSUPERTAG_LARK_FAKE=not a name",
         }
         process = subprocess.Popen([str(self.pair), "0.0.0.0:8080", *flags], env=environment)
@@ -75,13 +81,19 @@ class HostedPair(unittest.TestCase):
             "control-plane", "--listen", "127.0.0.1:3434", "--websocket-listen", "0.0.0.0:8080"])
         control, gateway = self.environment("control-plane"), self.environment("gateway")
         for name in ("SUPERTAG_LARK_APP_ID", "SUPERTAG_NOTIFY_SECRET_OPS", "SUPERTAG_CLIENT_CERT_FILE",
-                     "SUPERTAG_GATEWAY_CREDENTIAL"):
+                     "SUPERTAG_GATEWAY_CREDENTIAL", "SUPERTAG_GATEWAY_CREDENTIALS",
+                     "SUPERTAG_GATEWAY_CREDENTIALS_1", "SUPERTAG_GATEWAY_CREDENTIALS_2"):
             self.assertNotIn(name, control)
             self.assertIn(name, gateway)
+        # Each service reads only its own credential document.
         for name in ("SUPERTAG_DATABASE_URL", "SUPERTAG_OPERATOR_TOKEN", "SUPERTAG_TLS_KEY_FILE",
-                     "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", "SUPERTAG_BOOTSTRAP_HOST_TOKEN"):
+                     "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", "SUPERTAG_BOOTSTRAP_HOST_TOKEN",
+                     "SUPERTAG_CONTROL_PLANE_CREDENTIALS", "SUPERTAG_CONTROL_PLANE_CREDENTIALS_1"):
             self.assertIn(name, control)
             self.assertNotIn(name, gateway)
+        for name in ("SUPERTAG_CREDENTIAL_VAULT",):
+            self.assertIn(name, control)
+            self.assertIn(name, gateway)
         # A line inside a multi-line value is not taken for a variable name.
         self.assertIn("SUPERTAG_SERVER_CA_PEM_NOTE", control)
         self.assertEqual(self.read("control-plane.env").count("SUPERTAG_LARK_FAKE=not a name"), 1)

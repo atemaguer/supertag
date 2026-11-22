@@ -9,6 +9,26 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Added
+
+- Hosted deployments no longer need HashiCorp Vault. A third credential vault,
+  `SUPERTAG_CREDENTIAL_VAULT=env`, lets the services read the credentials of collaboration
+  surfaces, remote Workspaces, and S3 Volumes from the platform's own secrets, as environment
+  variables. Set `SUPERTAG_CREDENTIAL_FILE` to the deployment directory's
+  `gateway-credentials.json`, store credentials with the usual commands, then run the new
+  `supertag gateway credential export`, upload `gateway.env` and `control-plane.env` again, and
+  redeploy. The Gateway's file carries only surface secrets and the Control Plane's only
+  Workspace and Volume credentials. `supertag check deployment` refuses service files that are
+  out of date. Vault remains for rotation without a redeploy, an audit trail, and access policy.
+  See [Credential vault backends](docs/reference/credential-storage.md#credential-vault-backends).
+
+### Changed
+
+- `supertag setup deployment` chooses the credential vault with `--credential-vault
+  file|env|vault` and no longer reads `SUPERTAG_CREDENTIAL_VAULT` from the environment.
+  `cloudflare` and `modal` now default to `env` instead of requiring `VAULT_ADDR` and
+  `VAULT_TOKEN`; pass `--credential-vault vault` to keep using Vault.
+
 ## [0.3.7] - 2026-11-22
 
 ### Added

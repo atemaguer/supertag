@@ -73,8 +73,8 @@ Setup writes a new private directory and never replaces one. Each file is mode 0
 
 | File | For | Holds |
 | --- | --- | --- |
-| `control-plane.env` | Control Plane | Database URL (except Render, whose Blueprint supplies it), the Gateway's bootstrap credential, operator token, state directory |
-| `gateway.env` | Gateway | Its enrolled credential, state directory, credential vault settings |
+| `control-plane.env` | Control Plane | Database URL (except Render, whose Blueprint supplies it), the Gateway's bootstrap credential, operator token, state directory, and, with the `env` credential vault, its Workspace and Volume credentials |
+| `gateway.env` | Gateway | Its enrolled credential, state directory, credential vault settings, and, with the `env` credential vault, its surface credentials |
 | `operator.env` | Your machine | Operator token, for `verify deployment` and operator commands |
 | `postgres.env` | Compose PostgreSQL | Generated database password (Compose only, when no database URL is supplied) |
 
@@ -84,12 +84,18 @@ database URL as `%27`. If you edit a file by hand, `check deployment` refuses do
 unquoted `$`, quotes, or spaces, because Compose would expand or change them.
 
 Only the Control Plane holds the database credential, and only the Gateway holds surface
-credentials. On Cloudflare and Modal, which have no disk the file credential vault can rely on,
-setup defaults to `SUPERTAG_CREDENTIAL_VAULT=vault` and `check` refuses the file vault. Render's
+credentials. `--credential-vault` chooses where the services read the credentials of
+collaboration surfaces, remote Workspaces, and S3 Volumes: `file` on the service's volume, `env`
+from the platform's own secrets, or `vault` from HashiCorp Vault, with `VAULT_ADDR` and
+`VAULT_TOKEN` in the environment. On Cloudflare and Modal, which have no disk the file credential
+vault can rely on, setup defaults to `env` and `check` refuses the file vault; elsewhere it
+defaults to `file`. With `env`, `supertag gateway credential export` writes the Gateway's
+credentials into `gateway.env` and the Control Plane's into `control-plane.env`, and `check`
+refuses files that are out of date; see
+[Store credentials](../../docs/guides/deployment-setup.md#store-credentials). Render's
 setup refuses `SUPERTAG_DATABASE_URL`, because the Blueprint sets it from its own database. Setup
 generates the Gateway's credential and the operator token unless `SUPERTAG_GATEWAY_CREDENTIAL` or
-`SUPERTAG_OPERATOR_TOKEN` is set. It reads `SUPERTAG_CREDENTIAL_VAULT=vault` and `VAULT_*` to keep
-connector credentials in HashiCorp Vault instead of the Gateway's volume. Without a terminal, or
+`SUPERTAG_OPERATOR_TOKEN` is set. Without a terminal, or
 with `--non-interactive`, a missing value fails instead of prompting.
 
 `verify deployment` connects to the public Control Plane: an `https://` URL for native gRPC, or a
@@ -289,14 +295,15 @@ hostname. Render's health check probes `/healthz` on the tunnel listener. See th
 any client choice of container port. The Container is the hosted image, built by `wrangler deploy`
 from `supertag-hosted:local`. Worker secrets become the container's environment. A cron trigger
 starts the container after a deploy and keeps it awake. Cloudflare Containers have no persistent
-disk, so the Gateway needs Vault. See the
+disk, so the services read credentials from Worker secrets, or from Vault. See the
 [Cloudflare guide](../../docs/guides/deploy-cloudflare.md).
 
 ## Modal
 
 [`../modal/app.py`](../modal/app.py) runs one always-on, non-preemptible container behind a
 labelled web endpoint, which gives the stable URL `wss://WORKSPACE--LABEL.modal.run`. A Modal
-Volume at `/var/lib/supertag` holds the Gateway's connector state. PostgreSQL is external. See the
+Volume at `/var/lib/supertag` holds the Gateway's connector state. The services read credentials
+from Modal secrets, or from Vault. PostgreSQL is external. See the
 [Modal guide](../../docs/guides/deploy-modal.md).
 
 ## One container: Cloudflare and Modal

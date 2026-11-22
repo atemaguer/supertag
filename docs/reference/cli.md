@@ -407,6 +407,14 @@ Arguments:
           - modal:      A Modal app whose web endpoint carries the tunnel to one container that runs the Control Plane and the optional Gateway: deploy/modal
 
 Options:
+      --credential-vault <CREDENTIAL_VAULT>
+          Where the services read collaboration surface, Workspace, and Volume credentials: `file` on the service's disk, `env` from the platform's own secrets, or `vault` from HashiCorp Vault. Defaults to env on Cloudflare and Modal, and to file elsewhere
+
+          Possible values:
+          - file:  A private file on the service's persistent disk
+          - env:   The platform's own secrets: environment variables that `supertag gateway credential export` writes into the service files. Read-only for the services, so a credential change needs the secret updated and a redeploy
+          - vault: HashiCorp Vault KV v2, from VAULT_ADDR and VAULT_TOKEN
+
       --output <OUTPUT>
           New private directory for the environment files
           
@@ -418,7 +426,7 @@ Options:
   -h, --help
           Print help (see a summary with '-h')
 
-Setup reads SUPERTAG_DATABASE_URL, SUPERTAG_GATEWAY_CREDENTIAL, SUPERTAG_OPERATOR_TOKEN, SUPERTAG_OPERATOR_PRINCIPAL, SUPERTAG_CREDENTIAL_VAULT, and VAULT_* from the environment and prompts for missing required values (secrets are masked). Tokens that are not supplied are generated. Secrets are never accepted as flags or printed. Compose generates its own PostgreSQL password when SUPERTAG_DATABASE_URL is not set, and Render's Blueprint supplies the database URL itself. Cloudflare and Modal keep connector credentials in HashiCorp Vault (SUPERTAG_CREDENTIAL_VAULT=vault). Setup never replaces an existing directory. Upload the files through your provider's secret controls; do not shell-source them.
+Setup reads SUPERTAG_DATABASE_URL, SUPERTAG_GATEWAY_CREDENTIAL, SUPERTAG_OPERATOR_TOKEN, SUPERTAG_OPERATOR_PRINCIPAL, and, with --credential-vault vault, VAULT_* from the environment and prompts for missing required values (secrets are masked). Tokens that are not supplied are generated. Secrets are never accepted as flags or printed. Compose generates its own PostgreSQL password when SUPERTAG_DATABASE_URL is not set, and Render's Blueprint supplies the database URL itself. Cloudflare and Modal have no disk for the file credential vault, so they default to env. Setup never replaces an existing directory. Upload the files through your provider's secret controls; do not shell-source them.
 ```
 
 ## `supertag setup surface`
@@ -2137,7 +2145,7 @@ Usage: supertag gateway [OPTIONS] --control-plane <CONTROL_PLANE>
        supertag gateway <COMMAND>
 
 Commands:
-  credential         Store or delete this machine's Gateway collaboration credentials in the configured credential vault
+  credential         Store or delete credentials in the configured credential vault, or export a deployment directory's credentials into its service files
   enroll             Enroll this Gateway with a gateway Auth Key. Its own --control-plane and --state-directory name the Control Plane to enroll with and the Gateway's private state, which `supertag gateway --state-directory` then reads
   revoke             Revoke a Gateway. Its credential is refused at once, and the connector accounts it served alone pass to the next Gateway that serves them
   rotate-credential  Replace a Gateway's credential: this machine's own stopped Gateway with --gateway-state-directory, or any Gateway as an operator with NAME and --out
@@ -2198,13 +2206,14 @@ Options:
 ## `supertag gateway credential`
 
 ```text
-Store or delete this machine's Gateway collaboration credentials in the configured credential vault
+Store or delete credentials in the configured credential vault, or export a deployment directory's credentials into its service files
 
 Usage: supertag gateway credential <COMMAND>
 
 Commands:
   store   Store or replace a credential from a JSON object of strings on standard input, such as `{"botToken":"...","signingSecret":"..."}` for `surface/slack/<account>`
   delete  Delete a credential. Deleting a missing credential succeeds
+  export  Write a deployment directory's credentials into its gateway.env and control-plane.env, for services that read credentials from their environment (SUPERTAG_CREDENTIAL_VAULT=env). Reads gateway-credentials.json in the directory, which operator commands write when SUPERTAG_CREDENTIAL_FILE names it. Each file gets only its own service's credentials. Run it after every credential change, then upload both files to the platform's secrets again and redeploy. Prints credential IDs, never values
   help    Print this message or the help of the given subcommand(s)
 
 Options:
@@ -2237,6 +2246,18 @@ Arguments:
 
 Options:
   -h, --help  Print help
+```
+
+## `supertag gateway credential export`
+
+```text
+Write a deployment directory's credentials into its gateway.env and control-plane.env, for services that read credentials from their environment (SUPERTAG_CREDENTIAL_VAULT=env). Reads gateway-credentials.json in the directory, which operator commands write when SUPERTAG_CREDENTIAL_FILE names it. Each file gets only its own service's credentials. Run it after every credential change, then upload both files to the platform's secrets again and redeploy. Prints credential IDs, never values
+
+Usage: supertag gateway credential export [OPTIONS]
+
+Options:
+      --directory <DIRECTORY>  Directory written by `supertag setup deployment` [default: supertag-deployment]
+  -h, --help                   Print help
 ```
 
 ## `supertag gateway enroll`

@@ -6,6 +6,10 @@
 //! `apps/cli/src/credential-vault.ts` `createCredentialVaultFromEnvironment`). A credential is a
 //! flat string map addressed by a logical ID such as `surface/slack/<account>`. Values never enter
 //! errors, logs, or Worker Host sandboxes: only the Gateway resolves them.
+//!
+//! Three backends hold the same logical IDs: a private file, HashiCorp Vault, and a read-only
+//! document in the process environment, for platforms whose own secret store is the easy place
+//! to keep credentials.
 
 use std::{
     collections::BTreeMap,
@@ -20,6 +24,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
+use base64::Engine as _;
 use reqwest::{Method, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -31,19 +36,88 @@ const FILE_NAME: &str = "gateway-credentials.json";
 const FILE_VERSION: u32 = 1;
 const VAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The configured backend. Do not derive Debug: the Vault variant holds a token.
+/// The most characters of an environment credential document one variable carries. Cloudflare
+/// limits a Worker variable to 5 KB, the smallest limit among the supported platforms; Modal
+/// allows 32,768 characters, and Linux 128 KiB for one environment string.
+pub const ENVIRONMENT_PART_CHARACTERS: usize = 4096;
+/// The most variables one document is split across, so a document is at most 32,768 base64
+/// characters: about 24 KiB of JSON.
+pub const ENVIRONMENT_MAX_PARTS: usize = 8;
+
+/// The service that reads a credential. With the environment backend each service is given its
+/// own document, so the Control Plane never receives collaboration surface secrets and the
+/// Gateway never receives Workspace or Volume credentials.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Holder {
+    /// Collaboration surface secrets, and every ID the Control Plane does not hold.
+    Gateway,
+    /// Workspace Credentials (`workspace-credential/NAME`) and S3 Volume credentials
+    /// (`volume-credential/ID`).
+    ControlPlane,
+}
+
+impl Holder {
+    /// The environment variable that holds this service's document.
+    pub fn variable(self) -> &'static str {
+        match self {
+            Self::Gateway => "SUPERTAG_GATEWAY_CREDENTIALS",
+            Self::ControlPlane => "SUPERTAG_CONTROL_PLANE_CREDENTIALS",
+        }
+    }
+
+    /// The variable of one part of a split document; parts count from 1.
+    pub fn part_variable(self, part: usize) -> String {
+        format!("{}_{part}", self.variable())
+    }
+
+    /// Whether `key` is this service's document variable or one of its parts.
+    pub fn is_variable(self, key: &str) -> bool {
+        key == self.variable()
+            || (1..=ENVIRONMENT_MAX_PARTS).any(|part| key == self.part_variable(part))
+    }
+
+    /// The service that reads the credential `id`.
+    pub fn of(id: &str) -> Self {
+        if id.starts_with("workspace-credential/") || id.starts_with("volume-credential/") {
+            Self::ControlPlane
+        } else {
+            Self::Gateway
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Gateway => "Gateway",
+            Self::ControlPlane => "Control Plane",
+        }
+    }
+}
+
+/// The configured backend. Do not derive Debug: the Vault variant holds a token and the
+/// environment variant holds credentials.
 pub enum CredentialVault {
     File(FileCredentialVault),
     Vault(HashicorpVault),
+    Environment(EnvironmentCredentialVault),
 }
 
 impl CredentialVault {
-    /// Selects the backend the way the TypeScript Control Plane does:
-    /// `SUPERTAG_CREDENTIAL_VAULT` is `file` (the default) or `vault`. The file backend lives in
-    /// `SUPERTAG_STATE_DIR`, else `~/.supertag`. The Vault backend requires `VAULT_ADDR` and
-    /// `VAULT_TOKEN` and accepts `SUPERTAG_VAULT_MOUNT`, `SUPERTAG_VAULT_PATH_PREFIX`, and
-    /// `VAULT_NAMESPACE`.
+    /// Selects the backend: `SUPERTAG_CREDENTIAL_VAULT` is `file` (the default), `vault`, or
+    /// `env`. The file backend is the file `SUPERTAG_CREDENTIAL_FILE` names, else
+    /// `gateway-credentials.json` in `SUPERTAG_STATE_DIR`, else in `~/.supertag`. The Vault
+    /// backend requires `VAULT_ADDR` and `VAULT_TOKEN` and accepts `SUPERTAG_VAULT_MOUNT`,
+    /// `SUPERTAG_VAULT_PATH_PREFIX`, and `VAULT_NAMESPACE`. The environment backend is read-only
+    /// and reads the Gateway's document; see [`EnvironmentCredentialVault`].
     pub fn from_environment(environment: impl Fn(&str) -> Option<String>) -> Result<Self> {
+        Self::from_environment_for(Holder::Gateway, environment)
+    }
+
+    /// As [`Self::from_environment`], for the service `holder`: the environment backend reads
+    /// that service's document. The other backends are the same for both services.
+    pub fn from_environment_for(
+        holder: Holder,
+        environment: impl Fn(&str) -> Option<String>,
+    ) -> Result<Self> {
         let value = |key: &str| {
             environment(key)
                 .map(|value| value.trim().to_owned())
@@ -54,6 +128,13 @@ impl CredentialVault {
             .unwrap_or("file")
         {
             "file" => {
+                if let Some(path) = value("SUPERTAG_CREDENTIAL_FILE").map(PathBuf::from) {
+                    ensure!(
+                        path.is_absolute(),
+                        "SUPERTAG_CREDENTIAL_FILE must be an absolute path"
+                    );
+                    return Ok(Self::File(FileCredentialVault::new(path)));
+                }
                 let directory = value("SUPERTAG_STATE_DIR")
                     .map(PathBuf::from)
                     .or_else(|| value("HOME").map(|home| PathBuf::from(home).join(".supertag")))
@@ -78,13 +159,21 @@ impl CredentialVault {
                     namespace: value("VAULT_NAMESPACE"),
                 })?))
             }
-            _ => bail!("SUPERTAG_CREDENTIAL_VAULT must be file or vault"),
+            "env" => Ok(Self::Environment(
+                EnvironmentCredentialVault::from_environment(holder, &environment)?,
+            )),
+            _ => bail!("SUPERTAG_CREDENTIAL_VAULT must be file, env, or vault"),
         }
     }
 
-    /// The process environment.
+    /// The process environment, for the Gateway and for operator commands.
     pub fn from_process_environment() -> Result<Self> {
-        Self::from_environment(|key| std::env::var(key).ok())
+        Self::from_process_environment_for(Holder::Gateway)
+    }
+
+    /// The process environment, for the service `holder`.
+    pub fn from_process_environment_for(holder: Holder) -> Result<Self> {
+        Self::from_environment_for(holder, |key| std::env::var(key).ok())
     }
 
     pub async fn store(&self, id: &str, value: &CredentialValue) -> Result<()> {
@@ -93,6 +182,7 @@ impl CredentialVault {
         match self {
             Self::File(file) => file.store(id, value).await,
             Self::Vault(vault) => vault.store(id, value).await,
+            Self::Environment(environment) => Err(environment.read_only()),
         }
     }
 
@@ -107,6 +197,7 @@ impl CredentialVault {
         match self {
             Self::File(file) => file.store_if_absent(id, value).await,
             Self::Vault(vault) => vault.store_if_absent(id, value).await,
+            Self::Environment(environment) => Err(environment.read_only()),
         }
     }
 
@@ -115,6 +206,7 @@ impl CredentialVault {
         match self {
             Self::File(file) => file.resolve(id).await,
             Self::Vault(vault) => vault.resolve(id).await,
+            Self::Environment(environment) => Ok(environment.resolve(id)),
         }
     }
 
@@ -123,6 +215,7 @@ impl CredentialVault {
         match self {
             Self::File(file) => file.delete(id).await,
             Self::Vault(vault) => vault.delete(id).await,
+            Self::Environment(environment) => Err(environment.read_only()),
         }
     }
 }
@@ -321,6 +414,168 @@ fn write_file(path: &Path, file: &CredentialFile) -> Result<()> {
         .map_err(|error| anyhow!("replace credential vault: {}", error.error))?;
     File::open(directory)?.sync_all()?;
     Ok(())
+}
+
+/// A read-only credential document in the process environment, for platforms that inject
+/// secrets as environment variables. Do not derive Debug: it holds credentials.
+///
+/// The document is the file backend's JSON, `{"version":1,"gateway":{ID:{FIELD:VALUE}}}`, in
+/// the variable [`Holder::variable`] names. Its value is one of:
+///
+/// - the JSON's base64 (standard alphabet, padding optional), which is what
+///   [`environment_variables`] writes: dotenv parsers, platform dashboards, and shells pass it
+///   unchanged, where JSON's quotes, `$`, and backslashes are not safe;
+/// - the JSON itself, starting with `{`, for a value set by hand;
+/// - `parts:N`, when the base64 is longer than [`ENVIRONMENT_PART_CHARACTERS`]: it is then the
+///   concatenation of the variables `..._1` to `..._N`. Naming the count means a part left over
+///   from a longer document is never read.
+///
+/// The process reads the document once, when it starts. Errors name the variable, never a
+/// value.
+pub struct EnvironmentCredentialVault {
+    holder: Holder,
+    credentials: BTreeMap<String, CredentialValue>,
+}
+
+impl EnvironmentCredentialVault {
+    pub fn from_environment(
+        holder: Holder,
+        environment: &impl Fn(&str) -> Option<String>,
+    ) -> Result<Self> {
+        let variable = holder.variable();
+        let read = |key: &str| {
+            environment(key)
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty())
+        };
+        let value = read(variable)
+            .ok_or_else(|| anyhow!("{variable} is required when SUPERTAG_CREDENTIAL_VAULT=env"))?;
+        let invalid = || {
+            anyhow!(
+                "{variable} is not a credential document; expected the base64 of JSON with only version {FILE_VERSION} and gateway fields, as `supertag gateway credential export` writes"
+            )
+        };
+        let encoded = match value.strip_prefix("parts:") {
+            Some(count) => {
+                let count = count
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|count| (1..=ENVIRONMENT_MAX_PARTS).contains(count))
+                    .ok_or_else(|| {
+                        anyhow!("{variable} must name between 1 and {ENVIRONMENT_MAX_PARTS} parts")
+                    })?;
+                let mut joined = String::new();
+                for part in 1..=count {
+                    let key = holder.part_variable(part);
+                    joined.push_str(&read(&key).ok_or_else(|| {
+                        anyhow!("{key} is missing; {variable} names {count} parts")
+                    })?);
+                }
+                joined
+            }
+            None => value,
+        };
+        let limit = ENVIRONMENT_PART_CHARACTERS * ENVIRONMENT_MAX_PARTS;
+        ensure!(
+            encoded.len() <= limit,
+            "{variable} is larger than {limit} characters"
+        );
+        let json = if encoded.starts_with('{') {
+            encoded.into_bytes()
+        } else {
+            base64::engine::general_purpose::STANDARD_NO_PAD
+                .decode(encoded.trim_end_matches('='))
+                .map_err(|_| invalid())?
+        };
+        // Parsing errors stay generic because the document contains credentials.
+        let file: CredentialFile = serde_json::from_slice(&json).map_err(|_| invalid())?;
+        if file.version != FILE_VERSION {
+            return Err(invalid());
+        }
+        for (id, value) in &file.gateway {
+            if validate_id(id).is_err() || validate_value(value).is_err() {
+                return Err(invalid());
+            }
+            ensure!(
+                Holder::of(id) == holder,
+                "{variable} holds a credential the {} reads; only the {}'s credentials belong in it",
+                Holder::of(id).label(),
+                holder.label()
+            );
+        }
+        Ok(Self {
+            holder,
+            credentials: file.gateway,
+        })
+    }
+
+    fn resolve(&self, id: &str) -> Option<CredentialValue> {
+        self.credentials.get(id).cloned()
+    }
+
+    fn read_only(&self) -> anyhow::Error {
+        anyhow!(
+            "The env credential vault is read-only: this process reads {} from its environment. To change a credential, set SUPERTAG_CREDENTIAL_FILE to the deployment directory's gateway-credentials.json and run the command again, then run `supertag gateway credential export`, update the platform's secret, and redeploy.",
+            self.holder.variable()
+        )
+    }
+}
+
+/// The environment variables that carry `holder`'s credentials from the file vault at `path`,
+/// for [`EnvironmentCredentialVault`] to read: the document's base64 in one variable, or
+/// `parts:N` and N part variables when it is longer than [`ENVIRONMENT_PART_CHARACTERS`]. A
+/// missing file is an empty vault. The same file always gives the same variables.
+pub fn environment_variables(holder: Holder, path: &Path) -> Result<Vec<(String, String)>> {
+    let mut file = read_file(path)?;
+    file.gateway.retain(|id, _| Holder::of(id) == holder);
+    encode(holder, &file)
+}
+
+/// The variable of a document with no credentials, for a deployment that has stored none yet.
+pub fn empty_environment_variable(holder: Holder) -> (String, String) {
+    let file = CredentialFile {
+        version: FILE_VERSION,
+        ..Default::default()
+    };
+    let mut variables = encode(holder, &file).expect("an empty document fits one variable");
+    variables.remove(0)
+}
+
+/// The IDs of the credentials `holder` reads in the file vault at `path`. IDs are not secret.
+pub fn credential_ids(holder: Holder, path: &Path) -> Result<Vec<String>> {
+    Ok(read_file(path)?
+        .gateway
+        .into_keys()
+        .filter(|id| Holder::of(id) == holder)
+        .collect())
+}
+
+fn encode(holder: Holder, file: &CredentialFile) -> Result<Vec<(String, String)>> {
+    let encoded = base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(file)?);
+    let variable = holder.variable();
+    if encoded.len() <= ENVIRONMENT_PART_CHARACTERS {
+        return Ok(vec![(variable.to_owned(), encoded)]);
+    }
+    let limit = ENVIRONMENT_PART_CHARACTERS * ENVIRONMENT_MAX_PARTS;
+    ensure!(
+        encoded.len() <= limit,
+        "The {}'s credentials take {} characters as environment variables and the limit is {limit}; keep them in HashiCorp Vault instead (SUPERTAG_CREDENTIAL_VAULT=vault)",
+        holder.label(),
+        encoded.len()
+    );
+    // Base64 is ASCII, so every byte offset is a character boundary.
+    let parts: Vec<&str> = (0..encoded.len())
+        .step_by(ENVIRONMENT_PART_CHARACTERS)
+        .map(|start| &encoded[start..encoded.len().min(start + ENVIRONMENT_PART_CHARACTERS)])
+        .collect();
+    let mut variables = vec![(variable.to_owned(), format!("parts:{}", parts.len()))];
+    variables.extend(
+        parts
+            .iter()
+            .enumerate()
+            .map(|(index, part)| (holder.part_variable(index + 1), (*part).to_owned())),
+    );
+    Ok(variables)
 }
 
 /// Options for [`HashicorpVault`]. Do not derive Debug: it holds the token.
@@ -665,7 +920,7 @@ mod tests {
         ]))
         .err()
         .unwrap();
-        assert!(error.to_string().contains("must be file or vault"));
+        assert!(error.to_string().contains("must be file, env, or vault"));
     }
 
     #[test]
@@ -814,6 +1069,283 @@ mod tests {
             "Vault could not store Gateway credentials (HTTP 403)"
         );
         assert!(!error.contains("echoed-body-detail"));
+    }
+
+    /// A file vault holding one surface credential, a Workspace Credential, and a Volume
+    /// credential, with values dotenv parsers and shells would change.
+    async fn mixed_file(directory: &Path) -> (PathBuf, CredentialValue, CredentialValue) {
+        let path = directory.join("gateway-credentials.json");
+        let vault = CredentialVault::from_environment(environment(&[(
+            "SUPERTAG_CREDENTIAL_FILE",
+            path.to_str().unwrap(),
+        )]))
+        .unwrap();
+        let surface = credential(&[
+            ("botToken", "xoxb-'quoted' \"double\" $HOME \\n `x`"),
+            ("signingSecret", "line one\nline two # not a comment"),
+        ]);
+        let workspace = credential(&[(
+            "private_key_pem",
+            "-----BEGIN KEY-----\nabc+/=\n-----END KEY-----\n",
+        )]);
+        vault.store("surface/slack/T123", &surface).await.unwrap();
+        vault
+            .store("workspace-credential/deploy", &workspace)
+            .await
+            .unwrap();
+        vault
+            .store(
+                "volume-credential/artifacts",
+                &credential(&[("region", "auto")]),
+            )
+            .await
+            .unwrap();
+        (path, surface, workspace)
+    }
+
+    fn variables(pairs: Vec<(String, String)>) -> impl Fn(&str) -> Option<String> {
+        let mut map: HashMap<String, String> = pairs.into_iter().collect();
+        map.insert("SUPERTAG_CREDENTIAL_VAULT".into(), "env".into());
+        move |key| map.get(key).cloned()
+    }
+
+    #[tokio::test]
+    async fn environment_vault_gives_each_service_only_its_own_credentials_and_is_read_only() {
+        let directory = tempfile::tempdir().unwrap();
+        let (path, surface, workspace) = mixed_file(directory.path()).await;
+        let gateway = environment_variables(Holder::Gateway, &path).unwrap();
+        let control = environment_variables(Holder::ControlPlane, &path).unwrap();
+        // One variable each, in characters every dotenv parser and dashboard passes unchanged.
+        for (name, rendered) in [
+            ("SUPERTAG_GATEWAY_CREDENTIALS", &gateway),
+            ("SUPERTAG_CONTROL_PLANE_CREDENTIALS", &control),
+        ] {
+            assert_eq!(rendered.len(), 1);
+            assert_eq!(rendered[0].0, name);
+            assert!(
+                rendered[0]
+                    .1
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"+/=".contains(&byte))
+            );
+        }
+        // Rendering is deterministic, so a stale rendering is detectable.
+        assert_eq!(
+            gateway,
+            environment_variables(Holder::Gateway, &path).unwrap()
+        );
+
+        let vault = CredentialVault::from_environment(variables(gateway.clone())).unwrap();
+        assert_eq!(
+            vault.resolve("surface/slack/T123").await.unwrap(),
+            Some(surface.clone())
+        );
+        assert_eq!(
+            vault.resolve("workspace-credential/deploy").await.unwrap(),
+            None
+        );
+        let vault =
+            CredentialVault::from_environment_for(Holder::ControlPlane, variables(control.clone()))
+                .unwrap();
+        assert_eq!(
+            vault.resolve("workspace-credential/deploy").await.unwrap(),
+            Some(workspace)
+        );
+        assert!(
+            vault
+                .resolve("volume-credential/artifacts")
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(vault.resolve("surface/slack/T123").await.unwrap(), None);
+
+        // Writes fail and say how to change a credential.
+        for error in [
+            vault.store("surface/slack/T123", &surface).await.err(),
+            vault
+                .store_if_absent("surface/slack/T123", &surface)
+                .await
+                .err(),
+            vault.delete("surface/slack/T123").await.err(),
+        ] {
+            let error = error.unwrap().to_string();
+            assert!(error.contains("read-only"), "{error}");
+            assert!(error.contains("supertag gateway credential export"));
+            assert!(error.contains("redeploy"));
+        }
+
+        // A service refuses a document holding the other service's credentials.
+        let crossed = vec![(
+            "SUPERTAG_GATEWAY_CREDENTIALS".to_owned(),
+            control[0].1.clone(),
+        )];
+        let error = CredentialVault::from_environment(variables(crossed))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("the Control Plane reads"), "{error}");
+
+        // A missing file is an empty vault, which still needs its variable.
+        let empty =
+            environment_variables(Holder::Gateway, &directory.path().join("absent.json")).unwrap();
+        assert_eq!(empty, [empty_environment_variable(Holder::Gateway)]);
+        assert_eq!(
+            credential_ids(Holder::ControlPlane, &path).unwrap(),
+            ["volume-credential/artifacts", "workspace-credential/deploy"]
+        );
+        let vault = CredentialVault::from_environment(variables(empty)).unwrap();
+        assert_eq!(vault.resolve("surface/slack/T123").await.unwrap(), None);
+        let error = CredentialVault::from_environment(variables(Vec::new()))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("SUPERTAG_GATEWAY_CREDENTIALS is required"));
+    }
+
+    #[tokio::test]
+    async fn environment_vault_splits_large_documents_and_ignores_leftover_parts() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("gateway-credentials.json");
+        let file = CredentialVault::from_environment(environment(&[(
+            "SUPERTAG_CREDENTIAL_FILE",
+            path.to_str().unwrap(),
+        )]))
+        .unwrap();
+        let key = credential(&[("private_key_pem", &"k".repeat(3000))]);
+        for name in ["one", "two", "three"] {
+            file.store(&format!("workspace-credential/{name}"), &key)
+                .await
+                .unwrap();
+        }
+        let rendered = environment_variables(Holder::ControlPlane, &path).unwrap();
+        assert_eq!(
+            rendered[0],
+            (
+                "SUPERTAG_CONTROL_PLANE_CREDENTIALS".to_owned(),
+                "parts:3".to_owned()
+            )
+        );
+        assert_eq!(rendered.len(), 4);
+        assert_eq!(rendered[1].0, "SUPERTAG_CONTROL_PLANE_CREDENTIALS_1");
+        assert!(
+            rendered[1..]
+                .iter()
+                .all(|(_, part)| part.len() <= ENVIRONMENT_PART_CHARACTERS)
+        );
+        let mut all = rendered.clone();
+        // A part left over from an earlier, longer document is never read.
+        all.push((
+            "SUPERTAG_CONTROL_PLANE_CREDENTIALS_4".to_owned(),
+            "leftover".to_owned(),
+        ));
+        let vault =
+            CredentialVault::from_environment_for(Holder::ControlPlane, variables(all)).unwrap();
+        assert_eq!(
+            vault.resolve("workspace-credential/two").await.unwrap(),
+            Some(key.clone())
+        );
+        let error = CredentialVault::from_environment_for(
+            Holder::ControlPlane,
+            variables(rendered[..3].to_vec()),
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(error.contains("SUPERTAG_CONTROL_PLANE_CREDENTIALS_3 is missing"));
+
+        // More than eight parts is refused, naming the size and never a value.
+        for index in 0..8 {
+            file.store(&format!("workspace-credential/more-{index}"), &key)
+                .await
+                .unwrap();
+        }
+        let error = environment_variables(Holder::ControlPlane, &path)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("the limit is 32768") && !error.contains("kkk"));
+        // The Gateway's document is unaffected by the Control Plane's credentials.
+        assert_eq!(
+            environment_variables(Holder::Gateway, &path).unwrap().len(),
+            1
+        );
+    }
+
+    #[test]
+    fn environment_vault_reads_json_set_by_hand_and_never_echoes_a_malformed_value() {
+        let json = r#"{"version":1,"gateway":{"surface/lark/main":{"appSecret":"hand-set"}}}"#;
+        let one = |value: &str| {
+            CredentialVault::from_environment(variables(vec![(
+                "SUPERTAG_GATEWAY_CREDENTIALS".to_owned(),
+                value.to_owned(),
+            )]))
+        };
+        let resolved = |vault: CredentialVault| {
+            let CredentialVault::Environment(vault) = vault else {
+                panic!("expected the environment vault")
+            };
+            vault.resolve("surface/lark/main")
+        };
+        let expected = Some(credential(&[("appSecret", "hand-set")]));
+        assert_eq!(resolved(one(json).unwrap()), expected);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(json);
+        assert_eq!(resolved(one(&format!("  {encoded}\n")).unwrap()), expected);
+        assert_eq!(
+            resolved(one(encoded.trim_end_matches('=')).unwrap()),
+            expected
+        );
+        let encode = |json: &str| base64::engine::general_purpose::STANDARD.encode(json);
+        for malformed in [
+            "leak-not-base64!".to_owned(),
+            r#"{"version":1,"gateway":{"surface/x/y":{"token":"leak"}},"operator":{}}"#.to_owned(),
+            r#"{"version":2,"gateway":{"surface/x/y":{"token":"leak"}}}"#.to_owned(),
+            encode(r#"{"version":1,"gateway":{"surface/x/y":{"token":7,"other":"leak"}}}"#),
+            encode(r#"{"version":1,"gateway":{"bad id":{"token":"leak"}}}"#),
+            encode(r#"{"version":1,"gateway":{"surface/x/y":{}}}"#),
+            encode("leak"),
+        ] {
+            let error = one(&malformed).err().unwrap().to_string();
+            assert!(
+                error.contains("SUPERTAG_GATEWAY_CREDENTIALS is not a credential document"),
+                "{error}"
+            );
+            assert!(!error.contains("leak") && !error.contains(&malformed));
+        }
+        for (value, message) in [
+            ("parts:0", "between 1 and 8 parts"),
+            ("parts:9", "between 1 and 8 parts"),
+            ("parts:many", "between 1 and 8 parts"),
+        ] {
+            assert!(one(value).err().unwrap().to_string().contains(message));
+        }
+        let error = one(&"A".repeat(32_769)).err().unwrap().to_string();
+        assert!(error.contains("larger than 32768 characters"));
+    }
+
+    #[test]
+    fn the_file_vault_reads_the_named_credential_file() {
+        let vault = CredentialVault::from_environment(environment(&[
+            ("SUPERTAG_STATE_DIR", "/state"),
+            (
+                "SUPERTAG_CREDENTIAL_FILE",
+                "/deployment/gateway-credentials.json",
+            ),
+        ]))
+        .unwrap();
+        let CredentialVault::File(file) = vault else {
+            panic!("expected the file vault")
+        };
+        assert_eq!(
+            file.path(),
+            Path::new("/deployment/gateway-credentials.json")
+        );
+        let error = CredentialVault::from_environment(environment(&[(
+            "SUPERTAG_CREDENTIAL_FILE",
+            "relative.json",
+        )]))
+        .err()
+        .unwrap();
+        assert!(error.to_string().contains("absolute path"));
     }
 
     #[tokio::test]

@@ -16,7 +16,7 @@ operators, Worker Hosts ── wss:// ──> Worker ──> Durable Object ─�
                                                                      Control Plane
                                                                      Gateway (optional)
                                                                        │
-                                                       external PostgreSQL, HashiCorp Vault
+                                                       external PostgreSQL
 ```
 
 [`deploy/cloudflare`](../../deploy/cloudflare/README.md) holds:
@@ -31,7 +31,7 @@ operators, Worker Hosts ── wss:// ──> Worker ──> Durable Object ─�
 Cloudflare gives containers no network to each other, so the Gateway, when on, runs in the same
 container as the Control Plane and reaches it on `https://127.0.0.1:3434`. The Gateway is not
 given the database URL, the operator token, or the Control Plane's TLS settings, and the Control
-Plane is not given the surface settings. Both run as one user in one container, though, so either
+Plane is not given the surface settings or surface credentials. Both run as one user in one container, though, so either
 could read the other's files, including the TLS key: they share one trust boundary. When either
 exits, the container stops, and the next request or cron run starts it again.
 
@@ -43,9 +43,7 @@ exits, the container stops, and the next request or cron run starts it again.
 - Docker, and the `hosted` service image for `linux/amd64` (see
   [Build the hosted image](../../deploy/native/README.md#build-the-hosted-image)), tagged locally:
   `docker tag IMAGE@sha256:DIGEST supertag-hosted:local`.
-- A PostgreSQL database reachable from the internet with TLS, and HashiCorp Vault (KV v2) for the
-  Gateway's connector credentials. A Container's disk does not survive a restart, so setup
-  requires Vault.
+- A PostgreSQL database reachable from the internet with TLS.
 - `openssl`, to issue certificates from your own CA.
 
 ## 1. Issue certificates
@@ -66,13 +64,18 @@ Gateway, each operator, and each Worker Host a client certificate.
 
 ```sh
 export SUPERTAG_DATABASE_URL='postgresql://...?sslmode=require'
-export VAULT_ADDR=https://vault.example.com VAULT_TOKEN=...
 supertag setup deployment cloudflare --output supertag-deployment
 supertag check deployment cloudflare --directory supertag-deployment
 ```
 
 Setup writes `control-plane.env`, `gateway.env`, and `operator.env`, each readable only by you,
 and generates the Gateway's credential and the operator token.
+
+The services read the credentials of collaboration surfaces, remote Workspaces, and S3 Volumes
+from Worker secrets: the two service files carry them. A Container's disk does not survive a
+restart, so setup refuses `--credential-vault file`. To keep credentials in HashiCorp Vault
+instead, export `VAULT_ADDR` and `VAULT_TOKEN` and add `--credential-vault vault`; see
+[Credential vault backends](../reference/credential-storage.md#credential-vault-backends).
 
 ## 3. Upload secrets and deploy
 
@@ -90,9 +93,25 @@ With the Gateway on, set `"SUPERTAG_GATEWAY": "on"` and `SUPERTAG_GATEWAY_FLAGS`
 `wrangler.json` (see [Collaboration surfaces](#collaboration-surfaces)), and also upload
 `gateway.env` and the connector settings with `wrangler secret bulk`, and
 `SUPERTAG_SERVER_CA_PEM` (your CA). The Worker passes only the deployment settings, these PEM
-values, and settings named `SUPERTAG_LARK_*`, `SUPERTAG_SLACK_*`, or `SUPERTAG_NOTIFY_SECRET_*`
-into the container; the image entrypoint writes each PEM value to a file and runs the services as
-an unprivileged user.
+values, the credential variables, and settings named `SUPERTAG_LARK_*`, `SUPERTAG_SLACK_*`, or
+`SUPERTAG_NOTIFY_SECRET_*` into the container; the image entrypoint writes each PEM value to a
+file and runs the services as an unprivileged user.
+
+### Change a credential
+
+Store the credential in the deployment directory and export it, as
+[Store credentials](deployment-setup.md#store-credentials) shows. Then upload both service files
+and deploy again, from `deploy/cloudflare`:
+
+```sh
+supertag gateway credential export --directory ../../supertag-deployment
+npx wrangler secret bulk ../../supertag-deployment/control-plane.env
+npx wrangler secret bulk ../../supertag-deployment/gateway.env
+npx wrangler deploy
+```
+
+A Worker variable holds 5 KB, so export splits a longer set of credentials across numbered
+variables. Anyone with access to the Worker's secrets can read these credentials.
 
 `wrangler deploy` builds the image from `supertag-hosted:local` and pushes it to Cloudflare's
 registry. The Worker forwards WebSocket upgrades on any path and `GET /healthz` unchanged,
@@ -143,15 +162,16 @@ start the Gateway without one.
   `SUPERTAG_LARK_DOMAIN` (`lark` or `feishu`), `SUPERTAG_LARK_APP_ID`, `SUPERTAG_LARK_TENANT_KEY`,
   `SUPERTAG_LARK_BOT_OPEN_ID`, `SUPERTAG_LARK_CHAT_ID`, `SUPERTAG_LARK_TAG_ID`, and
   `SUPERTAG_LARK_ALLOWED_USERS` (comma-separated) as Worker secrets. The app secret comes from the
-  credential vault, where [`supertag setup surface lark`](../surfaces/lark.md) stores it, or from
-  `SUPERTAG_LARK_APP_SECRET`. The container's disk does not survive a restart, so the
+  credential vault, where [`supertag setup surface lark`](../surfaces/lark.md) stores it (see
+  [Change a credential](#change-a-credential)), or from `SUPERTAG_LARK_APP_SECRET`. The container's disk does not survive a restart, so the
   reply receipts in the state directory do not either.
 - **Slack**, over Socket Mode: `--slack-socket-mode --slack-state-directory
   /var/lib/supertag/slack`, with `SUPERTAG_SLACK_ACCOUNT_ID`, `SUPERTAG_SLACK_TEAM_ID`,
   `SUPERTAG_SLACK_CHANNEL_ID`, `SUPERTAG_SLACK_TAG_ID`, and `SUPERTAG_SLACK_ALLOWED_USERS`
   (comma-separated) as Worker secrets. The bot token and app-level token come from the credential vault,
-  where [`supertag setup surface slack`](../surfaces/slack.md) stores them, or from
-  `SUPERTAG_SLACK_BOT_TOKEN` and `SUPERTAG_SLACK_APP_TOKEN`.
+  where [`supertag setup surface slack`](../surfaces/slack.md) stores them (see
+  [Change a credential](#change-a-credential)), or from `SUPERTAG_SLACK_BOT_TOKEN` and
+  `SUPERTAG_SLACK_APP_TOKEN`.
 - **Operator notifications to a webhook**: `--notify webhook:HTTPS_URL#NAME`, with the bearer
   secret in `SUPERTAG_NOTIFY_SECRET_NAME` (the name uppercased, `-` as `_`).
 
@@ -211,7 +231,8 @@ npx wrangler containers list   # confirm the instances are gone
 npx wrangler containers images list   # then delete the pushed image
 ```
 
-Then delete the database and the Vault path if they were dedicated to this deployment.
+Then delete the database if it was dedicated to this deployment, and the deployment directory,
+which holds the credentials.
 
 ## If something goes wrong
 

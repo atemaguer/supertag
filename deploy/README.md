@@ -46,8 +46,8 @@ respective code.
 | Fly.io | Control Plane and optional Gateway apps | PostgreSQL and attached volumes | [Native services](native/README.md) |
 | Railway | Control Plane and optional Gateway services | PostgreSQL and attached volumes | [Native services](native/README.md) |
 | Render | Control Plane web service, optional Gateway worker | PostgreSQL and attached disks | [Render](render/README.md) |
-| Modal | One always-on container | External PostgreSQL, a Modal Volume, and Vault | [Modal](modal/README.md) |
-| Cloudflare | Worker plus one Container | External PostgreSQL and Vault | [Cloudflare](cloudflare/README.md) |
+| Modal | One always-on container | External PostgreSQL, a Modal Volume, and Modal secrets | [Modal](modal/README.md) |
+| Cloudflare | Worker plus one Container | External PostgreSQL and Worker secrets | [Cloudflare](cloudflare/README.md) |
 
 Hosting the Control Plane and supplying Worker Hosts are independent choices. Modal sandbox
 execution support does not require a Modal-hosted Control Plane. Render, Modal, and Cloudflare

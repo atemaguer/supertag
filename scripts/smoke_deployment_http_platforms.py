@@ -264,8 +264,7 @@ def rehearse(args):
             supertag("check", "deployment", "render", "--directory", str(render))
             pair_files = root / "cloudflare"
             supertag("setup", "deployment", "cloudflare", "--non-interactive", "--output", str(pair_files), env={
-                "SUPERTAG_DATABASE_URL": database, "VAULT_ADDR": "https://vault.example.com",
-                "VAULT_TOKEN": "rehearsal-vault-token"})
+                "SUPERTAG_DATABASE_URL": database})
             for platform in ("cloudflare", "modal"):
                 supertag("check", "deployment", platform, "--directory", str(pair_files))
             receipt["setup_checked"] = ["render", "cloudflare", "modal"]
