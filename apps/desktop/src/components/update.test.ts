@@ -95,6 +95,20 @@ it("shows download progress at the sidebar's foot, without a banner", async () =
   expect(shown.button()?.getAttribute("aria-valuenow")).toBe("80");
 });
 
+it("says a downloaded update is being prepared, and offers no restart until it is ready", async () => {
+  const updates = source({ state: "preparing", version: "0.3.6" });
+  const shown = await show(updates);
+  expect(shown.banner()).toBeNull();
+  const progress = shown.button();
+  expect(progress?.getAttribute("role")).toBe("progressbar");
+  expect(progress?.hasAttribute("aria-valuenow")).toBe(false);
+  expect(progress?.textContent).toBe("Preparing 0.3.6…");
+  expect(host.querySelectorAll("button")).toHaveLength(0);
+  updates.push({ state: "ready", version: "0.3.6" });
+  expect(shown.banner()?.textContent).toContain("it installs when you quit");
+  expect(shown.button()?.textContent).toBe("Update to 0.3.6");
+});
+
 it("offers a downloaded update in a banner and at the sidebar's foot", async () => {
   const updates = source({ state: "ready", version: "0.3.6" });
   const shown = await show(updates);

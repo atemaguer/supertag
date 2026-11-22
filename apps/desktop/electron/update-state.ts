@@ -2,8 +2,9 @@
  * The app's own updates, as the main process tracks them and the window shows them. It imports
  * nothing from Node or Electron, so the renderer and its tests share it.
  *
- * On macOS the app downloads a published release in the background and installs it when the
- * user restarts it. A Debian package can't replace itself, so on Linux the app only says a newer
+ * On macOS the app downloads a published release in the background, has Squirrel.Mac unpack and
+ * verify it, and only then says it is ready; it installs when the user restarts the app, or
+ * quits it. A Debian package can't replace itself, so on Linux the app only says a newer
  * release exists and opens its page.
  */
 
@@ -25,9 +26,11 @@ export type UpdateStatus =
   | { state: "checking"; manual: boolean }
   /** macOS: downloading `version` in the background. */
   | { state: "downloading"; version: string; percent: number }
-  /** macOS: `version` is downloaded and installs when the app restarts. */
+  /** macOS: `version` is downloaded; Squirrel.Mac is unpacking and verifying it. */
+  | { state: "preparing"; version: string }
+  /** macOS: `version` is unpacked and verified, and installs when the app restarts or quits. */
   | { state: "ready"; version: string }
-  /** macOS: the user restarted to update; Squirrel.Mac is checking and installing `version`. */
+  /** macOS: the user restarted to update; the app quits and Squirrel.Mac installs `version`. */
   | { state: "installing"; version: string }
   /** Linux: `version` is published; the user downloads it from its release page. */
   | { state: "available"; version: string }
@@ -43,6 +46,8 @@ export type UpdateEvent =
   | { kind: "found"; version: string; download: boolean }
   | { kind: "progress"; percent: number }
   | { kind: "downloaded"; version: string }
+  /** Squirrel.Mac unpacked and verified the download: restarting now only swaps the app. */
+  | { kind: "staged"; version: string }
   /** The user restarted to update. */
   | { kind: "installing" }
   /** Whatever failed; the main process logs why. */
@@ -54,23 +59,26 @@ export function statusVersion(status: UpdateStatus): string | undefined {
 }
 
 /**
- * The status after `event`. A downloaded update stays ready whatever a later check says, a
- * known release outlives a failed background check, and only a check from the menu shows that
- * it runs or that it failed. A failure while installing is the install's.
+ * The status after `event`. An update is ready only once Squirrel.Mac staged it, and stays ready
+ * whatever a later check says. A known release outlives a failed background check, and only a
+ * check from the menu shows that it runs or that it failed. A failure while preparing or
+ * installing is the install's; later checks try that release again without a word, and say so
+ * only when it is ready after all.
  */
 export function nextUpdateStatus(status: UpdateStatus, event: UpdateEvent): UpdateStatus {
   if (status.state === "off") return status;
   const known = statusVersion(status);
+  const refused = status.state === "error" && status.stage === "install";
   switch (event.kind) {
     case "checking":
-      return status.state === "idle" || status.state === "error"
+      return status.state === "idle" || (status.state === "error" && !refused)
         ? { state: "checking", manual: event.manual }
         : status;
     case "none":
       return status.state === "checking" ? { state: "idle" } : status;
     case "found":
       // The same release again changes nothing; a newer one replaces what was known.
-      if (known === event.version && status.state !== "error") return status;
+      if (known === event.version && (status.state !== "error" || refused)) return status;
       if (
         known !== undefined &&
         status.state !== "error" &&
@@ -86,6 +94,10 @@ export function nextUpdateStatus(status: UpdateStatus, event: UpdateEvent): Upda
         ? { ...status, percent: Math.max(status.percent, clampPercent(event.percent)) }
         : status;
     case "downloaded":
+      return status.state === "ready" || status.state === "installing" || refused
+        ? status
+        : { state: "preparing", version: event.version };
+    case "staged":
       return status.state === "installing" ? status : { state: "ready", version: event.version };
     case "installing":
       return status.state === "ready" ? { state: "installing", version: status.version } : status;
@@ -93,7 +105,7 @@ export function nextUpdateStatus(status: UpdateStatus, event: UpdateEvent): Upda
       if (status.state === "downloading") {
         return { state: "error", stage: "download", version: status.version };
       }
-      if (status.state === "installing") {
+      if (status.state === "preparing" || status.state === "installing") {
         return { state: "error", stage: "install", version: status.version };
       }
       if (status.state === "checking") {

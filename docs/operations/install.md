@@ -135,23 +135,28 @@ remote Gateway from another release gets the error alone: upgrade it where it ru
 
 ### Updating
 
-The app checks for a newer published release shortly after it opens, then every four hours while
-it stays open. It never offers drafts. It offers pre-releases only when it is a pre-release
+The app checks for a newer published release shortly after it opens, then every hour while it
+stays open and when you come back to its window. It never offers drafts. It offers pre-releases only when it is a pre-release
 itself. **Check for Updates…** in the app menu (the **File** menu on Linux) checks now.
 
-On a Mac, the app downloads the new release in the background. The sidebar shows the download's
-progress at its foot. When the download finishes, a banner in the window's bottom right corner
-says **SuperTag VERSION is ready**:
+On a Mac, the app downloads the new release in the background without asking. The sidebar shows
+the download's progress at its foot, then **Preparing VERSION…** while the app unpacks the
+release and checks its signature. After that, a banner in the window's bottom right corner says
+**SuperTag VERSION is ready**:
 
-- **Restart to update** installs it and opens the new version. That version then runs
-  `supertag up` with its own CLI, which restarts your local services with the new build, as in
-  [Upgrade](#upgrade). Tasks running then are interrupted and follow the recovery rules.
+- **Restart to update** closes the app, installs the release, and opens the new version. The
+  window is gone for some seconds meanwhile.
 - **Later** hides the banner until the app opens again or a newer release arrives. **Update to
   VERSION** stays at the sidebar's foot until you install the update.
 
-The app installs an update only when you choose to restart; quitting it doesn't. If a download or
-an install fails, the banner says so and offers **Download from GitHub**, which opens the
-release's page. Download the disk image there and install it as above.
+A ready update also installs when you quit the app, so the next time it opens it is the new
+version. Either way, the new version first runs `supertag up` with its own CLI, which restarts
+your local services with the new build, as in [Upgrade](#upgrade). Tasks running then are
+interrupted and follow the recovery rules.
+
+If a download or an install fails, the banner says so and offers **Download from GitHub**, which
+opens the release's page. Download the disk image there and install it as above. The app also
+tries again at its next check.
 
 A Debian package can't update itself. On Linux the banner and the sidebar offer **Download
 VERSION** instead, which opens the release's page. Install the new `.deb` there with `apt`, and

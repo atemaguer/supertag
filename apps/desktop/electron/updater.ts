@@ -1,13 +1,19 @@
 /**
- * The app's own updates, in the main process. A check runs shortly after launch and then every
- * few hours while the app is open. On macOS a newer published release downloads in the background
- * (electron-updater, from the GitHub Release's latest-mac.yml and zip) and installs when the user
- * restarts the app from the window; on Linux the app only says a newer release exists and opens
- * its page, because a Debian package can't replace itself. Development and unsigned builds never
- * check.
+ * The app's own updates, in the main process. A check runs shortly after launch, then every hour
+ * while the app is open and when its window comes to the front. On macOS a newer published
+ * release downloads in the background (electron-updater, from the GitHub Release's latest-mac.yml
+ * and zip). Squirrel.Mac then stages it: it takes the zip from electron-updater, unpacks it and
+ * verifies its signature, which takes many seconds for an app this size. Only then is the update
+ * ready, so "Restart to update" has nothing left to do but quit, swap the app and open it. A
+ * staged update also installs when the app quits for any other reason: Squirrel.Mac offers no
+ * staging without that. On Linux the app only says a newer release exists and opens its page,
+ * because a Debian package can't replace itself. Development and unsigned builds never check.
  *
- * Restarting to update leaves a note, so the next launch restarts the local services with the
- * new build's CLI (`supertag up` restarts services that run a different build).
+ * A staged update leaves a note, so the next launch restarts the local services with the new
+ * build's CLI (`supertag up` restarts services that run a different build).
+ *
+ * Each phase writes a line with its duration to the app's log, and the first launch of the new
+ * version says how long the restart took.
  */
 import { spawn } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -18,6 +24,7 @@ import {
   nextUpdateStatus,
   RELEASES_URL,
   releasePage,
+  statusVersion,
   type UpdateEvent,
   type UpdateStatus,
   validVersion,
@@ -26,9 +33,11 @@ import {
 /** How long after launch the first check waits, so it never slows the window down. */
 export const FIRST_CHECK_MS = 15_000;
 /** How often the app checks again while it is open. */
-export const CHECK_EVERY_MS = 4 * 60 * 60 * 1000;
+export const CHECK_EVERY_MS = 60 * 60 * 1000;
+/** The window coming to the front checks too, unless a check ran within this. */
+export const FOCUS_CHECK_MS = 15 * 60 * 1000;
 
-/** What the app hears from electron-updater's macOS updater. */
+/** What the app hears from electron-updater's macOS updater, and from Squirrel.Mac under it. */
 export interface MacEngine {
   on(event: "checking-for-update", listener: () => void): unknown;
   on(event: "update-available", listener: (info: { version: string }) => void): unknown;
@@ -36,6 +45,11 @@ export interface MacEngine {
   on(event: "download-progress", listener: (progress: { percent: number }) => void): unknown;
   on(event: "update-downloaded", listener: (info: { version: string }) => void): unknown;
   on(event: "error", listener: (error: Error) => void): unknown;
+  /**
+   * Squirrel.Mac staged the downloaded update: Electron's own `autoUpdater` saying
+   * "update-downloaded", which electron-updater keeps to itself.
+   */
+  onStaged(listener: () => void): unknown;
   checkForUpdates(): Promise<unknown>;
   quitAndInstall(): void;
 }
@@ -54,11 +68,17 @@ export interface UpdaterHost {
   openExternal(url: string): Promise<void>;
   /** Answers a check from the menu that shows nothing in the window: up to date, or off. */
   say(message: string): void;
-  /** Notes that the next launch runs `to`, after this one's `from`. */
-  noteInstall(from: string, to: string): void;
-  /** Drops that note: the install failed and this version runs on. */
-  forgetInstall(): void;
+  /**
+   * Notes that the next launch runs `to`, after this one's `from`; `restartedAt` is when the user
+   * restarted to update, and absent while the update only waits for a restart or a quit.
+   */
+  noteInstall(from: string, to: string, restartedAt?: number): void;
+  /** Logs a failure. */
   log(message: string, error?: unknown): void;
+  /** Logs a phase of an update and how long it took. */
+  info(message: string): void;
+  /** The time, in milliseconds. */
+  now(): number;
   setTimeout(run: () => void, ms: number): unknown;
   setInterval(run: () => void, ms: number): unknown;
 }
@@ -75,6 +95,10 @@ export class Updater {
   private engine: MacEngine | undefined;
   private checking: Promise<void> | undefined;
   private manual = false;
+  private checkedAt: number | undefined;
+  /** When the phase the log times next began. */
+  private since: number | undefined;
+  private restartedAt: number | undefined;
 
   constructor(private readonly host: UpdaterHost) {
     this.current = host.mode === "off" ? { state: "off" } : { state: "idle" };
@@ -84,19 +108,74 @@ export class Updater {
     return this.current;
   }
 
-  /** Starts checking: once shortly after launch, then every few hours. */
+  /** Starts checking: once shortly after launch, then every hour. */
   start() {
     if (this.host.mode === "off") return;
+    // The first check is the timer's, not the window's first focus.
+    this.checkedAt = this.host.now();
     this.host.setTimeout(() => void this.check(false), FIRST_CHECK_MS);
     this.host.setInterval(() => void this.check(false), CHECK_EVERY_MS);
   }
 
+  /** The window came to the front: checks, unless a check ran a short while ago. */
+  noticed() {
+    if (this.host.mode === "off") return;
+    if (this.checkedAt !== undefined && this.host.now() - this.checkedAt < FOCUS_CHECK_MS) return;
+    void this.check(false);
+  }
+
+  /** The app is quitting: says so in the log when that installs an update. */
+  quitting() {
+    const status = this.current;
+    if (this.host.mode !== "install") return;
+    if (status.state === "installing" && this.restartedAt !== undefined) {
+      const took = this.host.now() - this.restartedAt;
+      this.host.info(
+        `Update ${status.version}: quitting to install, ${took} ms after the restart was requested.`,
+      );
+    } else if (status.state === "ready") {
+      this.host.info(`Update ${status.version}: installs now that SuperTag quits.`);
+    }
+  }
+
   private apply(event: UpdateEvent) {
-    const next = nextUpdateStatus(this.current, event);
-    if (next === this.current) return;
+    const previous = this.current;
+    const next = nextUpdateStatus(previous, event);
+    if (next === previous) return;
     this.current = next;
-    if (next.state === "error" && next.stage === "install") this.host.forgetInstall();
+    this.entered(previous, next);
     this.host.publish(next);
+  }
+
+  /** Logs the phase `next` begins with how long the last one took, and notes a staged update. */
+  private entered(previous: UpdateStatus, next: UpdateStatus) {
+    if (this.host.mode !== "install") return;
+    if (next.state === previous.state && statusVersion(next) === statusVersion(previous)) return;
+    const now = this.host.now();
+    const took = this.since === undefined ? "" : ` in ${now - this.since} ms`;
+    this.since = undefined;
+    switch (next.state) {
+      case "downloading":
+        this.since = now;
+        this.host.info(`Update ${next.version}: found, downloading.`);
+        break;
+      case "preparing":
+        this.since = now;
+        this.host.info(`Update ${next.version}: downloaded${took}, staging.`);
+        break;
+      case "ready":
+        // From here a quit installs it too, so the next launch must know.
+        this.host.noteInstall(this.host.version, next.version);
+        this.host.info(`Update ${next.version}: staged${took}, installs on restart or quit.`);
+        break;
+      case "installing":
+        this.restartedAt = now;
+        this.host.noteInstall(this.host.version, next.version, now);
+        this.host.info(`Update ${next.version}: restart requested.`);
+        break;
+      default:
+        break;
+    }
   }
 
   private mac(): MacEngine {
@@ -110,8 +189,12 @@ export class Updater {
     engine.on("update-not-available", () => this.apply({ kind: "none" }));
     engine.on("download-progress", ({ percent }) => this.apply({ kind: "progress", percent }));
     engine.on("update-downloaded", ({ version }) => this.apply({ kind: "downloaded", version }));
-    // Squirrel.Mac's own failures, such as a signature it refuses, come here too, after
-    // "Restart to update"; they make the install's error state.
+    engine.onStaged(() => {
+      const version = statusVersion(this.current);
+      if (version !== undefined) this.apply({ kind: "staged", version });
+    });
+    // Squirrel.Mac's own failures, such as a signature it refuses, come here too, while it
+    // stages the update or after "Restart to update"; they make the install's error state.
     engine.on("error", (error) => {
       this.host.log(`The update failed (${this.current.state}):`, error);
       this.apply({ kind: "failed" });
@@ -122,15 +205,21 @@ export class Updater {
 
   /**
    * Checks for a newer release; `manual` when the user asked from the menu, which then says
-   * when there is none, or that the check failed. A check while one runs joins it, and a
-   * downloaded update is never checked past.
+   * when there is none, or that the check failed. A check while one runs joins it. An update
+   * that is downloading, staging or ready is never checked past: a second check would have
+   * electron-updater hand Squirrel.Mac the zip again while it works on it.
    */
   check(manual: boolean): Promise<void> {
     if (this.current.state === "off") {
       if (manual) this.host.say(UPDATES_OFF);
       return Promise.resolve();
     }
-    if (this.current.state === "ready" || this.current.state === "installing") {
+    if (
+      this.current.state === "downloading" ||
+      this.current.state === "preparing" ||
+      this.current.state === "ready" ||
+      this.current.state === "installing"
+    ) {
       return Promise.resolve();
     }
     if (this.checking) {
@@ -138,6 +227,7 @@ export class Updater {
       return this.checking;
     }
     this.manual = manual;
+    this.checkedAt = this.host.now();
     this.checking = this.run().finally(() => {
       const asked = this.manual;
       this.checking = undefined;
@@ -172,7 +262,7 @@ export class Updater {
   }
 
   /**
-   * The window's "Restart to update" or "Download": restarts into a downloaded update, or else
+   * The window's "Restart to update" or "Download": restarts into a staged update, or else
    * opens the release page.
    */
   async install(): Promise<void> {
@@ -181,10 +271,9 @@ export class Updater {
     if (status.state === "installing") return;
     if (status.state === "ready" && this.host.mode === "install") {
       this.apply({ kind: "installing" });
-      this.host.noteInstall(this.host.version, status.version);
       try {
-        // Squirrel.Mac verifies and installs the zip, then quits and relaunches the app; a
-        // failure arrives as an "error" event instead.
+        // The update is staged, so this quits the app at once; Squirrel.Mac's ShipIt then swaps
+        // the app and opens it. A failure arrives as an "error" event instead.
         this.mac().quitAndInstall();
       } catch (error) {
         this.host.log("Could not install the update:", error);
@@ -263,23 +352,32 @@ export function localFeed(value: string | undefined): string | undefined {
 }
 
 /**
- * The note restarting to update leaves for the next launch, `update.json` beside the app's other
- * configuration: the version it updated from and to. The first launch of the new version finds
- * it and restarts the local services once.
+ * The note a staged update leaves for the next launch, `update.json` beside the app's other
+ * configuration: the version it updates from and to, and when the user restarted to update, if
+ * they did rather than quit. The first launch of the new version finds it and restarts the local
+ * services once. A launch of any other version drops it: the install never happened.
  */
 export class InstallNote {
   private readonly file: string;
   private pending: boolean;
+  private readonly update: { from: string; restartedAt?: number } | undefined;
 
   constructor(directory: string, version: string) {
     this.file = path.join(directory, "update.json");
-    let note: { from?: unknown; to?: unknown } | undefined;
+    let note: { from?: unknown; to?: unknown; restartedAt?: unknown } | undefined;
     try {
-      note = JSON.parse(readFileSync(this.file, "utf8")) as { from?: unknown; to?: unknown };
+      note = JSON.parse(readFileSync(this.file, "utf8")) as typeof note;
     } catch {
       note = undefined;
     }
     this.pending = note?.to === version && note.from !== version;
+    if (this.pending && typeof note?.from === "string" && validVersion(note.from)) {
+      const at = note.restartedAt;
+      this.update = {
+        from: note.from,
+        ...(typeof at === "number" && Number.isFinite(at) ? { restartedAt: at } : {}),
+      };
+    }
     // A note this launch isn't the new version of: the install never happened.
     if (note !== undefined && !this.pending) this.done();
   }
@@ -289,12 +387,37 @@ export class InstallNote {
     return this.pending;
   }
 
+  /** What this launch updated from, when it is the first of a new version; `done` keeps it. */
+  updated(): { from: string; restartedAt?: number } | undefined {
+    return this.update;
+  }
+
   done() {
     this.pending = false;
     rmSync(this.file, { force: true });
   }
 
-  write(from: string, to: string) {
-    writeFileSync(this.file, `${JSON.stringify({ from, to })}\n`, { mode: 0o600 });
+  write(from: string, to: string, restartedAt?: number) {
+    const note = restartedAt === undefined ? { from, to } : { from, to, restartedAt };
+    writeFileSync(this.file, `${JSON.stringify(note)}\n`, { mode: 0o600 });
   }
+}
+
+/**
+ * The log line of the first launch after an update: how long the window took from the launch,
+ * and from "Restart to update" when that is what installed it. Times are in milliseconds.
+ */
+export function updatedLine(
+  update: { from: string; restartedAt?: number },
+  to: string,
+  launchedAt: number,
+  shownAt: number,
+): string {
+  const shown = `window shown ${Math.round(shownAt - launchedAt)} ms after launch`;
+  if (update.restartedAt === undefined) {
+    return `Updated from ${update.from} to ${to}, installed when SuperTag quit: ${shown}.`;
+  }
+  const launched = Math.round(launchedAt - update.restartedAt);
+  const all = Math.round(shownAt - update.restartedAt);
+  return `Updated from ${update.from} to ${to}: launched ${launched} ms after the restart was requested, ${shown}, ${all} ms in all.`;
 }

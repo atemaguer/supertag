@@ -360,6 +360,7 @@ export function previewUpdates(state: string | null): UpdateSource | undefined {
   const version = "0.3.6";
   const fixtures: Record<string, UpdateStatus> = {
     downloading: { state: "downloading", version, percent: 42 },
+    preparing: { state: "preparing", version },
     ready: { state: "ready", version },
     available: { state: "available", version },
     installing: { state: "installing", version },

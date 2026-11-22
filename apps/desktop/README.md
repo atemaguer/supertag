@@ -75,22 +75,28 @@ app; without `SIGNED=true` it skips signing and notarization, which is enough fo
 
 ## Updates
 
-`electron/updater.ts` checks for a newer published release 15 seconds after launch and then
-every four hours, and `electron/update-state.ts` turns what it hears into the status the window
+`electron/updater.ts` checks for a newer published release 15 seconds after launch, then every
+hour and when the window comes to the front, and `electron/update-state.ts` turns what it hears into the status the window
 shows (`src/components/update.tsx`). On macOS it runs electron-updater against the GitHub
 Release that `Resources/app-update.yml` names (written in `afterPack`): it downloads the zip
-that `latest-mac.yml` lists for the Mac's architecture, and Squirrel.Mac installs it on
-"Restart to update". Squirrel.Mac accepts only an update whose signature satisfies the running
+that `latest-mac.yml` lists for the Mac's architecture and hands it to Squirrel.Mac at once
+(`autoInstallOnAppQuit`). Squirrel.Mac unpacks it and verifies its signature, and only then is
+the update ready, so "Restart to update" has only to quit, swap the app and open it. A staged
+update also installs when the app quits. Squirrel.Mac accepts only an update whose signature satisfies the running
 app's, so only a Developer ID build checks; development and ad-hoc signed builds don't. On Linux
-it reads the latest release's version and opens its page. Restarting to update leaves
+it reads the latest release's version and opens its page. A staged update leaves
 `update.json` in the app's configuration directory, and the new version's first launch restarts
 the local services with `supertag up`. The main process logs to `main.log` in Electron's logs
-directory (`~/Library/Logs/SuperTag` on macOS).
+directory (`~/Library/Logs/SuperTag` on macOS). Each phase of an update writes a line there with
+how long it took: found, downloaded, staged, restart requested, quitting, and on the new
+version's first launch `Updated from X to Y`, with the time from the restart to the launch and
+to the window. Squirrel.Mac's installer logs the part in between to
+`~/Library/Caches/ai.supertag.desktop.ShipIt/ShipIt_stderr.log`.
 
 To try the flow before a signed release, serve a `latest-mac.yml` and zip from this machine and
 open a packaged, unsigned app with `SUPERTAG_DESKTOP_UPDATE_FEED=http://127.0.0.1:PORT/`. A
 signed build ignores the variable. It checks and downloads, then Squirrel.Mac refuses the
-unsigned app at install and the banner shows the install's error. Make the zip with
+unsigned app while it stages the download and the banner shows the install's error. Make the zip with
 `ditto -c -k --sequesterRsrc --keepParent SuperTag.app SuperTag-VERSION-darwin-arm64.zip`, its
 blockmap with `node build/blockmap.mjs ZIP`, and the feed with
 `python3 scripts/desktop_update_feed.py --version VERSION --output latest-mac.yml ZIP`. The Debian package installs the AppArmor profile

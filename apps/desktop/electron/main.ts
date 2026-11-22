@@ -13,6 +13,7 @@ import {
 } from "@supertag/client/node";
 import {
   app,
+  autoUpdater,
   BrowserWindow,
   dialog,
   ipcMain,
@@ -44,6 +45,7 @@ import {
   UPDATES_OFF,
   Updater,
   type UpdaterHost,
+  updatedLine,
 } from "./updater";
 
 // A closed stdout or stderr (an app opened from Finder, or a terminal that went away) must never
@@ -98,8 +100,17 @@ const streams = new Streams();
 /** The app's own log: ~/Library/Logs/SuperTag/main.log on macOS, under userData elsewhere. */
 const log = new FileLog(path.join(app.getPath("logs"), "main.log"));
 
-/** Restarting to update leaves this, so the new version restarts the local services once. */
+/** A staged update leaves this, so the new version restarts the local services once. */
 const installNote = new InstallNote(configDirectory(), app.getVersion());
+
+/** On the first launch after an update, logs how long the window took, once. */
+let updatedFrom = installNote.updated();
+function logUpdated() {
+  if (!updatedFrom) return;
+  const launchedAt = process.getCreationTime() ?? Date.now() - performance.now();
+  log.info(updatedLine(updatedFrom, app.getVersion(), launchedAt, Date.now()));
+  updatedFrom = undefined;
+}
 
 /**
  * How this build updates: macOS installs a downloaded release, but only when Developer ID
@@ -142,18 +153,24 @@ async function startUpdates() {
     engine() {
       const engine = new MacUpdater(feed ? { provider: "generic", url: feed } : undefined);
       engine.autoDownload = true;
-      // Only "Restart to update" installs, since it also restarts the local services.
-      engine.autoInstallOnAppQuit = false;
+      // What makes electron-updater hand Squirrel.Mac the zip as soon as it is downloaded. Left
+      // off, Squirrel.Mac would fetch, unpack and verify it only after "Restart to update",
+      // while the user waits. A staged update also installs on an ordinary quit; the install
+      // note has the next launch restart the local services either way.
+      engine.autoInstallOnAppQuit = true;
       engine.logger = { info() {}, warn: log.warn, error: log.error, debug() {} };
-      return engine;
+      return Object.assign(engine, {
+        onStaged: (listener: () => void) => autoUpdater.on("update-downloaded", () => listener()),
+      });
     },
     latestRelease: () => latestRelease((url, init) => net.fetch(url, init)),
     publish: (status) => mainContents()?.send(UPDATE_STATUS, status),
     openExternal: (url) => shell.openExternal(url),
     say,
-    noteInstall: (from, to) => installNote.write(from, to),
-    forgetInstall: () => installNote.done(),
+    noteInstall: (from, to, restartedAt) => installNote.write(from, to, restartedAt),
     log: (message, error) => log.error(message, error),
+    info: (message) => log.info(message),
+    now: () => Date.now(),
     setTimeout: (run, ms) => setTimeout(run, ms),
     setInterval: (run, ms) => setInterval(run, ms),
   });
@@ -244,7 +261,12 @@ function createWindow() {
     if (event.isMainFrame && !event.isSameDocument) resetWindow();
   });
   contents.on("render-process-gone", resetWindow);
-  window.once("ready-to-show", () => window.show());
+  window.once("ready-to-show", () => {
+    window.show();
+    logUpdated();
+  });
+  // Coming back to the app is a good moment to find a new release.
+  window.on("focus", () => updater?.noticed());
   window.on("closed", () => {
     resetWindow();
     if (mainWindow === window) mainWindow = undefined;
@@ -322,6 +344,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on("second-instance", focusMain);
   app.on("web-contents-created", (_event, contents) => lockNavigation(contents));
   app.on("window-all-closed", () => app.quit());
+  app.on("will-quit", () => updater?.quitting());
   app.on("activate", () => {
     if (!app.isReady()) return;
     if (!mainWindow) createWindow();

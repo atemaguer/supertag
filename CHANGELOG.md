@@ -24,6 +24,13 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- The desktop app on macOS restarts into an update sooner. It now unpacks and verifies a
+  downloaded release in the background, shows **Preparing VERSION…** meanwhile, and offers
+  **Restart to update** only once that is done, so the restart no longer waits for it. A ready
+  update also installs when you quit the app, and the new version restarts your local services
+  on its next launch either way. The app checks for a release every hour and when you come back
+  to its window, instead of every four hours, and tries a failed download again at the next
+  check. `~/Library/Logs/SuperTag/main.log` records how long each phase of an update took.
 - `supertag setup deployment` chooses the credential vault with `--credential-vault
   file|env|vault` and no longer reads `SUPERTAG_CREDENTIAL_VAULT` from the environment.
   `cloudflare` and `modal` now default to `env` instead of requiring `VAULT_ADDR` and

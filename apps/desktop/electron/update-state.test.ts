@@ -11,7 +11,7 @@ import {
 const run = (start: UpdateStatus, ...events: UpdateEvent[]) =>
   events.reduce(nextUpdateStatus, start);
 
-it("downloads a newer release on macOS and is ready once it has", () => {
+it("downloads a newer release on macOS and is ready once Squirrel.Mac has staged it", () => {
   const idle: UpdateStatus = { state: "idle" };
   expect(
     run(
@@ -34,7 +34,42 @@ it("downloads a newer release on macOS and is ready once it has", () => {
       { kind: "progress", percent: 100 },
       { kind: "downloaded", version: "0.3.6" },
     ),
-  ).toEqual({ state: "ready", version: "0.3.6" });
+  ).toEqual({ state: "preparing", version: "0.3.6" });
+  // Downloaded is not ready: only a staged update restarts fast.
+  const preparing: UpdateStatus = { state: "preparing", version: "0.3.6" };
+  expect(
+    run(preparing, { kind: "progress", percent: 100 }, { kind: "checking", manual: true }),
+  ).toBe(preparing);
+  expect(run(preparing, { kind: "staged", version: "0.3.6" })).toEqual({
+    state: "ready",
+    version: "0.3.6",
+  });
+});
+
+it("shows an update Squirrel.Mac can't prepare as the install's error, and retries it quietly", () => {
+  const refused = run({ state: "preparing", version: "0.3.6" }, { kind: "failed" });
+  expect(refused).toEqual({ state: "error", stage: "install", version: "0.3.6" });
+  // A later check downloads and prepares it again; the banner stays as it is meanwhile.
+  expect(
+    run(
+      refused,
+      { kind: "checking", manual: false },
+      { kind: "found", version: "0.3.6", download: true },
+      { kind: "progress", percent: 50 },
+      { kind: "downloaded", version: "0.3.6" },
+      { kind: "failed" },
+    ),
+  ).toBe(refused);
+  expect(run(refused, { kind: "staged", version: "0.3.6" })).toEqual({
+    state: "ready",
+    version: "0.3.6",
+  });
+  // A newer release starts over.
+  expect(run(refused, { kind: "found", version: "0.3.7", download: true })).toEqual({
+    state: "downloading",
+    version: "0.3.7",
+    percent: 0,
+  });
 });
 
 it("keeps progress within 0 to 100 and never moving back", () => {
@@ -63,6 +98,7 @@ it("stays ready whatever a later check says", () => {
       { kind: "failed" },
       { kind: "found", version: "0.3.6", download: true },
       { kind: "found", version: "0.3.5", download: true },
+      { kind: "downloaded", version: "0.3.6" },
     ),
   ).toBe(ready);
 });
@@ -104,6 +140,7 @@ it("installs a ready update, and shows a failed install as the install's error",
       { kind: "checking", manual: true },
       { kind: "none" },
       { kind: "downloaded", version: "0.3.6" },
+      { kind: "staged", version: "0.3.6" },
     ),
   ).toBe(installing);
   // Squirrel.Mac refusing the update.

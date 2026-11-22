@@ -32,10 +32,13 @@ export interface UpdateBannerView {
   busy?: boolean;
 }
 
-/** The button at the sidebar's foot, beside the version; `progress` is not a button. */
+/**
+ * The button at the sidebar's foot, beside the version; `progress` is not a button, and has no
+ * `percent` while the app prepares a downloaded update, which reports none.
+ */
 export type UpdateButtonView =
   | { kind: "install" | "download"; label: string; busy?: boolean }
-  | { kind: "progress"; label: string; percent: number };
+  | { kind: "progress"; label: string; percent?: number };
 
 /** What the window shows for an update status: a banner, the sidebar's button, both, or neither. */
 export function updateView(status: UpdateStatus): {
@@ -53,13 +56,17 @@ export function updateView(status: UpdateStatus): {
           percent: status.percent,
         },
       };
+    case "preparing":
+      // Downloaded, but restarting now would wait for Squirrel.Mac: no banner until it is done.
+      return { button: { kind: "progress", label: `Preparing ${status.version}` } };
     case "ready":
       return {
         banner: {
           key,
           tone: "ready",
           title: `SuperTag ${status.version} is ready`,
-          detail: "Restarting also restarts SuperTag's local services with the new version.",
+          detail:
+            "Restart now, or it installs when you quit. SuperTag's local services then restart with the new version.",
           action: "Restart to update",
         },
         button: { kind: "install", label: `Update to ${status.version}` },
@@ -70,7 +77,7 @@ export function updateView(status: UpdateStatus): {
           key,
           tone: "ready",
           title: `Installing SuperTag ${status.version}…`,
-          detail: "SuperTag restarts once the update is in place.",
+          detail: "SuperTag closes while the update goes in, then opens again by itself.",
           action: "Restarting…",
           busy: true,
         },
@@ -223,22 +230,24 @@ export function UpdateButton({ updates, wide }: { updates: Updates; wide: boolea
   const { button, installing } = updates;
   if (!button) return null;
   if (button.kind === "progress") {
-    const text = `${button.label} · ${button.percent}%`;
+    const text =
+      button.percent === undefined ? `${button.label}…` : `${button.label} · ${button.percent}%`;
     return (
       <div
         className="sidebar-update"
         data-wide={wide}
         data-kind="progress"
         role="progressbar"
-        aria-label={`Downloading the update, ${button.label}`}
+        aria-label={`SuperTag update, ${button.label}`}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={button.percent}
+        aria-busy={button.percent === undefined}
         title={text}
       >
         {wide ? <span>{text}</span> : <ArrowDownToLine size={14} aria-hidden />}
         <span className="sidebar-update-bar" aria-hidden>
-          <span style={{ width: `${button.percent}%` }} />
+          <span style={{ width: `${button.percent ?? 100}%` }} />
         </span>
       </div>
     );
