@@ -17,17 +17,17 @@ Python dependencies are declared in [pyproject.toml](pyproject.toml).
 Install the published SDK from PyPI, pinned to the version of your CLI:
 
 ```sh
-python -m pip install 'supertag==0.3.7'
-python -m pip install 'supertag[runtime]==0.3.7'
+python -m pip install 'supertag==0.3.8'
+python -m pip install 'supertag[runtime]==0.3.8'
 ```
 
 The `runtime` extra installs gRPC and protobuf for the adapter and Gateway clients. Add the
 harness integrations you use:
 
 ```sh
-python -m pip install 'supertag[codex]==0.3.7'
-python -m pip install 'supertag[agents]==0.3.7'
-python -m pip install 'supertag[codex,agents]==0.3.7'
+python -m pip install 'supertag[codex]==0.3.8'
+python -m pip install 'supertag[agents]==0.3.8'
+python -m pip install 'supertag[codex,agents]==0.3.8'
 ```
 
 `agents` installs the OpenAI Agents SDK and `codex` the `openai-codex` SDK. For source development, see [CONTRIBUTING.md](../../CONTRIBUTING.md).

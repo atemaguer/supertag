@@ -9,6 +9,8 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-11-22
+
 ### Added
 
 - `supertag deploy` deploys the Control Plane and its optional Gateway on Modal from one file,
@@ -1727,7 +1729,8 @@ within the pre-1.0 compatibility policy described in
 - Gateway control-plane support and Slack, GitHub, Linear, Microsoft Teams,
   and Lark Surfaces.
 
-[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.7...HEAD
+[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.8...HEAD
+[0.3.8]: https://github.com/atemaguer/supertag/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/atemaguer/supertag/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/atemaguer/supertag/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/atemaguer/supertag/compare/v0.3.4...v0.3.5

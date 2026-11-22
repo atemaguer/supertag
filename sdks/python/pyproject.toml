@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "supertag"
-version = "0.3.7"
+version = "0.3.8"
 description = "Python SDK for SuperTag: harness adapters for Worker Hosts and a Gateway client"
 readme = "README.md"
 requires-python = ">=3.10"
