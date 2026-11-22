@@ -82,6 +82,19 @@ fn config_directory() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".config"))
 }
 
+/// The private directory this machine keeps for the deployment `name` that `supertag deploy`
+/// manages: beside the CLI's saved Gateways, never in a repository.
+pub(crate) fn deployment_directory(name: &str) -> Result<PathBuf> {
+    ensure!(
+        !name.is_empty()
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'),
+        "invalid deployment name"
+    );
+    Ok(config_directory()?.join("supertag/deployments").join(name))
+}
+
 pub fn cli_store() -> Result<PathBuf> {
     Ok(config_directory()?.join("supertag/gateways.json"))
 }

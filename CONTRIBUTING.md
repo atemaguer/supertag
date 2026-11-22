@@ -186,6 +186,70 @@ complete-archive images, TLS, gRPC health, and restart persistence on disposable
 The [native release platform checks](tests/native-release/README.md) build and execute
 complete archives and their installed command paths without publishing them.
 
+### Adding a deployment target
+
+`supertag deploy` deploys the Control Plane and its optional Gateway from `supertag-deploy.yaml`.
+Modal is the one target today. The command is built so that another platform, a server or
+cluster of your own, or a managed service is one more implementation, not a change to the
+command or to the configuration's shape.
+
+| Part | File in `core/crates/cli/src` | Owns |
+| --- | --- | --- |
+| The command | `deploy.rs` | Everything that is the same everywhere: reading the configuration, validating it, generating each secret once, issuing or publishing the certificate, waiting for health, verifying, and printing the next steps |
+| The configuration | `deploy/config.rs` | `supertag-deploy.yaml`. Top-level keys mean the same on every target (`version`, `image`, `gateway`, `credential-vault`, `env`, `tls`); each target's own settings sit in a block named after it |
+| The interfaces | `deploy/target.rs` | `Target`, the compute, and `SecretStore`, where the secrets are kept. They are separate so that a target without a secret store can pair with another one |
+| The Modal target | `deploy/modal.rs` | Every use of the `modal` program, and its store, Modal secrets |
+| Certificates and images | `deploy/tls.rs`, `deploy/image.rs` | Issuing a certificate in process, and resolving a release to its published image |
+
+A `Target` says which platform's rules apply, checks that this machine can deploy, names the
+hosts the endpoint may have, and rolls out an image with its settings and named secrets,
+returning the endpoint. A `SecretStore` lists, reads, writes, and deletes secrets by the
+command's own names, such as `operator-token` and `tls`.
+
+A target also declares its `Capabilities`, and the command chooses defaults from them, never
+from the target's name: without a durable disk, credentials default to the secret store
+(`credential-vault: env`); without native gRPC, clients get a `wss://` tunnel URL. Add a flag
+when the command gains a decision that needs one, such as a stable URL or scale-to-zero.
+
+To add a target:
+
+1. Add a block for its settings to `Config` in `deploy/config.rs`, and its name to `scaffold`. Do
+   not add a top-level key for something only this target understands.
+2. Implement `Target` in a new file under `deploy/`, and `SecretStore` if the target keeps
+   secrets itself. Keep every call to the platform's tooling or API in that file, so it can be
+   audited in one place. An implementation never generates a secret or prints one's value.
+3. Return the target from `load` in `deploy.rs`.
+4. Reuse what `deployment.rs` knows about the platform through `Platform`: the role contract and
+   its validation, where the Gateway reaches the Control Plane, whether clients use the tunnel,
+   and which credential vaults it supports. Do not copy those rules into the target.
+5. Test it as `tests/deploy_runtime.rs` tests Modal: a stand-in for the platform's tooling, and
+   the real Control Plane started from exactly the secrets and settings a rollout names.
+
+What the command does not assume, and where that shows:
+
+- **A CLI to shell out to.** A target may call an API instead; only `deploy/modal.rs` starts a
+  program.
+- **A secret store on the target.** `Target::secrets` may return `None`. Another store, such as
+  HashiCorp Vault, Kubernetes Secrets, or private env files on a server, is then a new
+  `SecretStore`, selected by a new top-level `secrets` key that defaults to the target's own.
+- **A platform edge that terminates TLS.** `Endpoint` carries the URL clients use, `wss://` or
+  `https://`, and an optional plain health URL. Without one, the command goes straight to
+  verification.
+- **That SuperTag issues the certificate.** `tls.mode: provided` publishes files the user issued.
+  A managed service that supplies its own certificate, secrets, and sign-in would add a `tls`
+  mode and return no secret store; its block may be only a name and a plan.
+
+The lifecycle commands sit on the same interfaces. `supertag deploy check` and `--dry-run` run
+`deploy/preflight.rs`, which asks the target and changes nothing; `supertag deploy status`
+(`deploy/deployed.rs`) reports `Target::deployment`, the target being the source of truth and this
+machine's files only compared with it. The subcommand names `logs` and `down` are reserved: each
+becomes a `Target` method, so do not use the names for anything else.
+
+Still specific to Modal, to generalize when a second target needs it: the hosted image is
+published for `linux/amd64` only; the `SUPERTAG_*_PEM` variables that carry the certificate are
+the hosted image entrypoint's contract, which Compose does not use; and the endpoint's host is
+checked against the certificate only after a rollout, when Modal reports it.
+
 ## Test your change
 
 Before opening a pull request, run:

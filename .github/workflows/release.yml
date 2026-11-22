@@ -13,6 +13,9 @@ name: Release SuperTag
 # workflows, so the README's latest installer URL never points at a release without its archives.
 # The desktop app updates itself from published releases: on macOS from latest-mac.yml and the
 # signed app's update zip (with its blockmap), which the release attaches beside the disk image.
+# The release also publishes the hosted service image for linux/amd64 to the GitHub Container
+# Registry and attaches supertag-hosted-image.txt, the image's reference with its digest, which
+# `supertag deploy` reads to run a release without anyone building an image.
 on:
   push:
     tags:
@@ -317,11 +320,92 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # The hosted service image (target "hosted" of deploy/docker/rust-service.Dockerfile) for
+  # linux/amd64, built from the supertag binary in the package job's Linux archive, so the image
+  # runs exactly the released binary. It is pushed to ghcr.io/OWNER/REPO-hosted as VERSION, and
+  # its reference by digest becomes the release asset supertag-hosted-image.txt, which
+  # SHA256SUMS lists: `version: X.Y.Z` in supertag-deploy.yaml resolves through it. The image is
+  # pushed only when the release's assets are attached. For now a failure here leaves the image
+  # out of the release with a warning instead of stopping it; `supertag deploy` then asks for
+  # an explicit `image:`.
+  hosted-image:
+    needs: [source, package]
+    if: github.event_name == 'push' || inputs.upload_assets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.source.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: supertag-native-linux-amd64
+          path: ${{ runner.temp }}/native
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Build the image from the release's Linux binary and check it
+        run: |
+          archive="supertag-$VERSION-linux-amd64-complete.tar.gz"
+          (cd "$RUNNER_TEMP/native" && sha256sum --check "$archive.sha256")
+          mkdir -p "$RUNNER_TEMP/unpacked" "$RUNNER_TEMP/hosted"
+          tar -xzf "$RUNNER_TEMP/native/$archive" -C "$RUNNER_TEMP/unpacked"
+          roots=("$RUNNER_TEMP"/unpacked/*/)
+          [ "${#roots[@]}" = 1 ] && [ -x "${roots[0]}supertag" ] || { echo "::error::the archive has no supertag at its root"; exit 1; }
+          cp "${roots[0]}supertag" deploy/docker/rust-hosted-entrypoint.sh deploy/docker/rust-hosted-pair.sh \
+            "$RUNNER_TEMP/hosted/"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}-hosted"
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+          docker buildx build --platform linux/amd64 --load --provenance=false --sbom=false \
+            --file deploy/docker/rust-service.Dockerfile --target hosted \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.version=$VERSION" \
+            -t "$image:$VERSION" "$RUNNER_TEMP/hosted"
+          # The image runs the released binary, and its entrypoint starts it as the service user.
+          test "$(docker run --rm --entrypoint /usr/local/bin/supertag "$image:$VERSION" --version)" = "supertag $VERSION"
+          docker run --rm "$image:$VERSION" --version | grep -Fxq "supertag $VERSION"
+      - name: Publish to the GitHub Container Registry and record the digest
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          # The same build, from the builder's cache, pushed as one linux/amd64 manifest.
+          docker buildx build --platform linux/amd64 --push --provenance=false --sbom=false \
+            --file deploy/docker/rust-service.Dockerfile --target hosted \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.version=$VERSION" \
+            --metadata-file "$RUNNER_TEMP/image.json" \
+            -t "$IMAGE:$VERSION" "$RUNNER_TEMP/hosted"
+          digest=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["containerimage.digest"])' "$RUNNER_TEMP/image.json")
+          [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::the push reported no digest"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/image"
+          cd "$RUNNER_TEMP/image"
+          printf '%s@%s\n' "$IMAGE" "$digest" > supertag-hosted-image.txt
+          sha256sum supertag-hosted-image.txt > supertag-hosted-image.txt.sha256
+          cat supertag-hosted-image.txt
+          # The reference pulls, and is what was built.
+          docker pull --quiet "$(cat supertag-hosted-image.txt)"
+          test "$(docker run --rm --entrypoint /usr/local/bin/supertag "$(cat supertag-hosted-image.txt)" --version)" = "supertag $VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supertag-hosted-image
+          path: |
+            ${{ runner.temp }}/image/supertag-hosted-image.txt
+            ${{ runner.temp }}/image/supertag-hosted-image.txt.sha256
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
     if: >-
       always() && needs.source.result == 'success' && needs.package.result == 'success' &&
       (github.event_name == 'push' || inputs.upload_assets)
-    needs: [source, package, desktop, desktop-linux]
+    needs: [source, package, desktop, desktop-linux, hosted-image]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -407,6 +491,24 @@ jobs:
             ! -name "SuperTag-$VERSION-darwin-amd64.dmg*" ! -name "SuperTag-$VERSION-linux-amd64.deb*" \
             ! -name "SuperTag-$VERSION-linux-arm64.deb*" ! -name "SuperTag-$VERSION-darwin-*.zip*")
           [ -z "$unexpected" ] || { echo "::error::unexpected desktop files: $unexpected"; exit 1; }
+      - uses: actions/download-artifact@v4
+        if: needs.hosted-image.result != 'skipped'
+        continue-on-error: true
+        with:
+          name: supertag-hosted-image
+          path: release
+      - name: List the hosted image's reference, or warn that it is missing
+        working-directory: release
+        run: |
+          if [ ! -f supertag-hosted-image.txt ]; then
+            echo "::warning::This release attaches no supertag-hosted-image.txt; supertag deploy needs an explicit image for it."
+            exit 0
+          fi
+          sha256sum --check supertag-hosted-image.txt.sha256
+          grep -Eq "^ghcr\.io/${GITHUB_REPOSITORY,,}-hosted@sha256:[0-9a-f]{64}$" supertag-hosted-image.txt
+          test "$(wc -l < supertag-hosted-image.txt)" -eq 1
+          cat supertag-hosted-image.txt.sha256 >> SHA256SUMS
+          rm supertag-hosted-image.txt.sha256
       - name: Write the desktop app's update feed
         # latest-mac.yml lists each Mac's update zip; installed Mac apps read it from the published
         # release (scripts/desktop_update_feed.py). Like the disk image, a missing zip only warns.
@@ -452,7 +554,7 @@ jobs:
           esac
           assets=(install.sh SHA256SUMS ./*-complete.tar.gz "./$FFMPEG_SOURCE")
           for image in ./*.dmg ./*.deb; do [ -f "$image" ] && assets+=("$image"); done
-          for update in ./latest-mac.yml ./*.zip ./*.zip.blockmap; do
+          for update in ./latest-mac.yml ./*.zip ./*.zip.blockmap ./supertag-hosted-image.txt; do
             if [ -f "$update" ]; then assets+=("$update"); fi
           done
           gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"

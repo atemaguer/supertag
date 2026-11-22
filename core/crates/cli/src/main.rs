@@ -5,6 +5,7 @@ mod artifacts;
 mod auth_keys;
 mod conversation_message;
 mod delivery_branches;
+mod deploy;
 mod deployment;
 mod enrollments;
 mod gateway_credentials;
@@ -239,6 +240,12 @@ enum Command {
         #[command(subcommand)]
         command: deployment::VerifyCommand,
     },
+    /// Deploy the Control Plane and its optional Gateway from supertag-deploy.yaml, wait until
+    /// it is healthy, and print its URL.
+    ///
+    /// Running it again with nothing changed only rolls the same deployment out again: it
+    /// creates no secret that exists and never replaces one.
+    Deploy(deploy::DeployArgs),
     /// Preview an organization manifest through the Control Plane.
     Diff(manifests::ManifestArgs),
     /// Apply an organization manifest through the Control Plane.
@@ -780,6 +787,7 @@ fn dispatch(gateway: Option<String>, command: Command) -> Result<()> {
                     }
                     | Command::Check { .. }
                     | Command::Verify { .. }
+                    | Command::Deploy(_)
                     | Command::Up { .. }
                     | Command::Update(_)
                     | Command::ControlPlane { .. }
@@ -832,6 +840,7 @@ async fn run(command: Command) -> Result<()> {
         } => deployment::setup(command).await?,
         Command::Check { command } => deployment::check(command)?,
         Command::Verify { command } => deployment::verify(command).await?,
+        Command::Deploy(args) => deploy::run(args).await?,
         Command::Spend { connection, args } => observe::spend(connection, args).await?,
         Command::Metrics { connection, args } => observe::metrics(connection, args).await?,
         Command::Test { command } => notifications::run(command).await?,
@@ -2982,9 +2991,18 @@ mod tests {
     ];
 
     /// Top-level groups that are not a resource kind: deployment and surface setup and checks,
-    /// placement rules, this host's MCP catalog, and test sends. Every other group is named after
-    /// a kind in `resources::KINDS`.
-    const OTHER_GROUPS: [&str; 6] = ["setup", "check", "verify", "placement", "mcp", "test"];
+    /// `deploy` (which deploys when given no subcommand, and whose subcommands write its
+    /// configuration and manage its secrets), placement rules, this host's MCP catalog, and test
+    /// sends. Every other group is named after a kind in `resources::KINDS`.
+    const OTHER_GROUPS: [&str; 7] = [
+        "setup",
+        "check",
+        "verify",
+        "deploy",
+        "placement",
+        "mcp",
+        "test",
+    ];
 
     /// Groups of this machine's local state rather than Control Plane resources, which `get` does
     /// not read: `mcp list` lists the host's MCP catalog.

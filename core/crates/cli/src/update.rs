@@ -132,7 +132,7 @@ pub async fn run(args: UpdateArgs) -> Result<()> {
 }
 
 /// `v0.3.5` or `0.3.5` as `0.3.5`, with `install.sh`'s character rule.
-fn normalized(version: &str) -> Result<String> {
+pub(crate) fn normalized(version: &str) -> Result<String> {
     let version = version.strip_prefix('v').unwrap_or(version);
     ensure!(
         !version.is_empty()
@@ -187,7 +187,7 @@ fn translated() -> bool {
 }
 
 /// The directory holding a release's assets.
-fn release_url(version: Option<&str>) -> Result<String> {
+pub(crate) fn release_url(version: Option<&str>) -> Result<String> {
     let configured = std::env::var(RELEASES_VARIABLE).ok();
     let base = configured
         .as_deref()
@@ -219,7 +219,7 @@ fn allowed(url: &url::Url) -> bool {
     }
 }
 
-fn client() -> Result<reqwest::Client> {
+pub(crate) fn client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .user_agent(concat!("supertag/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(30))

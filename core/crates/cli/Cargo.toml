@@ -41,6 +41,7 @@ clap.workspace = true
 futures-util = { version = "0.3", features = ["sink"] }
 libc.workspace = true
 prost.workspace = true
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -59,6 +60,7 @@ supertag-transport.workspace = true
 supertag-worker-host.workspace = true
 supertag-workspaces.workspace = true
 tempfile.workspace = true
+time = "0.3"
 tokio.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
@@ -307,4 +309,9 @@ required-features = ["test-fixtures"]
 [[test]]
 name = "deployment_runtime"
 path = "tests/deployment_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "deploy_runtime"
+path = "tests/deploy_runtime.rs"
 required-features = ["test-fixtures"]

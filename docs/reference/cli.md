@@ -25,6 +25,7 @@ Commands:
   setup                 Prepare a deployment of the Control Plane and Gateway, or connect a collaboration surface account
   check                 Validate a deployment's configuration without connecting
   verify                Check a running deployment through its public Control Plane endpoint
+  deploy                Deploy the Control Plane and its optional Gateway from supertag-deploy.yaml, wait until it is healthy, and print its URL
   diff                  Preview an organization manifest through the Control Plane
   apply                 Apply an organization manifest through the Control Plane
   workspace             Add local git repositories as Workspaces, declare remote Workspaces on any git server and their Workspace Credentials, and check them
@@ -686,6 +687,192 @@ Options:
   -h, --help                 Print help
 
 The operator token comes from SUPERTAG_OPERATOR_TOKEN or --env-file (the operator.env setup wrote). Use SUPERTAG_SERVER_CA_FILE when the Control Plane's certificate comes from a private CA, and SUPERTAG_CLIENT_CERT_FILE and SUPERTAG_CLIENT_KEY_FILE when the Control Plane requires client certificates. Verification registers no Worker Host and runs no Task.
+```
+
+## `supertag deploy`
+
+```text
+Deploy the Control Plane and its optional Gateway from supertag-deploy.yaml, wait until it is healthy, and print its URL.
+
+Running it again with nothing changed only rolls the same deployment out again: it creates no secret that exists and never replaces one.
+
+Usage: supertag deploy [OPTIONS]
+       supertag deploy <COMMAND>
+
+Commands:
+  init    Write a starting supertag-deploy.yaml for a deployment target
+  check   Check that this machine can deploy, without changing anything
+  status  Report what the target runs now: whether it is deployed, its endpoint and health, the running SuperTag release, the names of its secrets, and whether the committed CA file belongs to the deployed certificate
+  secret  Set, list, and remove the deployment's secrets in the target's secret store
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --config <FILE>
+          The deployment configuration (default: supertag-deploy.yaml in the current directory)
+
+      --non-interactive
+          Fail instead of prompting when a required secret is not stored yet
+
+      --renew-certificate
+          Issue a new certificate authority and certificate (or publish the provided files again), replacing the stored ones. Every client and Worker Host then needs the new CA file
+
+      --dry-run
+          Print what a deploy would do and stop: the image by digest, the endpoint, each secret and the certificate it would create or keep, and what would roll out. Creates nothing
+
+      --wait-seconds <WAIT_SECONDS>
+          How long to wait for the deployment to become healthy
+          
+          [default: 300]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Reads supertag-deploy.yaml from the current directory; `supertag deploy init TARGET` writes one. The file holds no secret. The first deploy generates the admin Operator Token and the Gateway's credential straight into the target's secret store, issues the Control Plane's certificate, and writes the public CA certificate beside the configuration. It asks for SUPERTAG_DATABASE_URL, or reads it from the environment, when the store does not hold it yet. Later deploys change no secret. In CI, give the target's own credentials (Modal: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET) and optionally SUPERTAG_OPERATOR_TOKEN, without which only the checks that need no credential run.
+```
+
+## `supertag deploy init`
+
+```text
+Write a starting supertag-deploy.yaml for a deployment target
+
+Usage: supertag deploy init [OPTIONS] <TARGET>
+
+Arguments:
+  <TARGET>  The deployment target: modal
+
+Options:
+      --config <FILE>  The deployment configuration (default: supertag-deploy.yaml in the current directory)
+  -h, --help           Print help
+```
+
+## `supertag deploy check`
+
+```text
+Check that this machine can deploy, without changing anything.
+
+Checks that the target's tooling is present and signed in to the account the configuration names, that the configuration is valid, and which secrets the target holds: for each missing one, whether deploy would generate it or how to supply it. Every deploy runs the same checks first. Prints one line per problem and fails when there is one.
+
+Usage: supertag deploy check [OPTIONS]
+
+Options:
+      --non-interactive
+          Treat a secret deploy would ask for at a terminal as missing
+
+      --config <FILE>
+          The deployment configuration (default: supertag-deploy.yaml in the current directory)
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `supertag deploy status`
+
+```text
+Report what the target runs now: whether it is deployed, its endpoint and health, the running SuperTag release, the names of its secrets, and whether the committed CA file belongs to the deployed certificate.
+
+The target is asked each time; this machine's files are only compared with it. Prints JSON, and fails only when the target cannot be asked.
+
+Usage: supertag deploy status [OPTIONS]
+
+Options:
+      --config <FILE>
+          The deployment configuration (default: supertag-deploy.yaml in the current directory)
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `supertag deploy secret`
+
+```text
+Set, list, and remove the deployment's secrets in the target's secret store
+
+Usage: supertag deploy secret [OPTIONS] <COMMAND>
+
+Commands:
+  set    Store one secret the services read from their environment, from standard input
+  list   Print the names of the deployment's secrets, never a value
+  unset  Remove one secret
+  push   Upload the surface, Workspace, and Volume credentials stored on this machine
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+      --config <FILE>  The deployment configuration (default: supertag-deploy.yaml in the current directory)
+  -h, --help           Print help
+```
+
+## `supertag deploy secret set`
+
+```text
+Store one secret the services read from their environment, from standard input.
+
+For example SUPERTAG_DATABASE_URL, or a connector's token. The value comes from standard input (a masked prompt in a terminal) and is never printed or accepted as an argument. Run `supertag deploy` afterwards: the services read secrets only when they start.
+
+Usage: supertag deploy secret set [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          The environment variable's name
+
+Options:
+      --config <FILE>
+          The deployment configuration (default: supertag-deploy.yaml in the current directory)
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `supertag deploy secret list`
+
+```text
+Print the names of the deployment's secrets, never a value
+
+Usage: supertag deploy secret list [OPTIONS]
+
+Options:
+      --config <FILE>  The deployment configuration (default: supertag-deploy.yaml in the current directory)
+  -h, --help           Print help
+```
+
+## `supertag deploy secret unset`
+
+```text
+Remove one secret.
+
+Run `supertag deploy` afterwards. It generates the Operator Token or the Gateway's credential again when that was the one removed, which is how to rotate either.
+
+Usage: supertag deploy secret unset [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          The environment variable's name
+
+Options:
+      --config <FILE>
+          The deployment configuration (default: supertag-deploy.yaml in the current directory)
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `supertag deploy secret push`
+
+```text
+Upload the surface, Workspace, and Volume credentials stored on this machine.
+
+For services that read credentials from their environment (credential-vault: env). Store them first with `supertag setup surface`, `supertag workspace credential add`, or `supertag volume credential set` while SUPERTAG_CREDENTIAL_FILE names the file. Push replaces what was uploaded before with the file's contents and prints credential IDs, never values. Run `supertag deploy` afterwards.
+
+Usage: supertag deploy secret push [OPTIONS]
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          The credential file (default: SUPERTAG_CREDENTIAL_FILE, else this deployment's private file on this machine)
+
+      --config <FILE>
+          The deployment configuration (default: supertag-deploy.yaml in the current directory)
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## `supertag diff`

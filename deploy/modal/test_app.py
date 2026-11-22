@@ -51,6 +51,39 @@ class ServiceCommandTest(unittest.TestCase):
         self.assertEqual(app.gateway_flags, "--lark-state-directory /x")
 
 
+class DeploySettingsTest(unittest.TestCase):
+    def test_the_secrets_are_the_named_ones_or_the_ones_the_guide_creates(self):
+        app = load()
+        self.assertEqual(app.service_secrets("", "off"), ["supertag-control-plane", "supertag-control-plane-tls"])
+        self.assertEqual(
+            app.service_secrets("", "on"),
+            ["supertag-control-plane", "supertag-control-plane-tls", "supertag-gateway", "supertag-gateway-tls"],
+        )
+        self.assertEqual(
+            app.service_secrets("tags-operator-token,tags-tls,tags-env-vault-token", "on"),
+            ["tags-operator-token", "tags-tls", "tags-env-vault-token"],
+        )
+        self.assertEqual(len(load(SUPERTAG_MODAL_SECRETS="a,b,c").secrets), 3)
+
+    def test_settings_are_a_json_object_of_strings(self):
+        app = load()
+        self.assertEqual(app.service_settings(""), {})
+        self.assertEqual(
+            app.service_settings('{"SUPERTAG_STATE_DIR": "/var/lib/supertag", "SUPERTAG_CREDENTIAL_VAULT": "env"}'),
+            {"SUPERTAG_STATE_DIR": "/var/lib/supertag", "SUPERTAG_CREDENTIAL_VAULT": "env"},
+        )
+        for text, message in [
+            ("not json", "JSON object of strings"),
+            ("[]", "JSON object of strings"),
+            ('{"A": 1}', "JSON object of strings"),
+            ('{"SUPERTAG_MODAL_IMAGE": "x"}', "must not set SUPERTAG_MODAL_IMAGE"),
+        ]:
+            with self.assertRaisesRegex(ValueError, message):
+                app.service_settings(text)
+        with self.assertRaisesRegex(SystemExit, "JSON object of strings"):
+            load(SUPERTAG_MODAL_SETTINGS="[]")
+
+
 class ServiceTest(unittest.TestCase):
     def setUp(self):
         self.app = load()

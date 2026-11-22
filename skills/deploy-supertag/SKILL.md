@@ -31,16 +31,51 @@ Install the `supertag` CLI first; see [installation](../../docs/operations/insta
 | Railway | `https://` through a TCP Proxy | [Railway](../../docs/guides/deploy-railway.md) |
 | Render | `wss://` WebSocket tunnel | [Render](../../docs/guides/deploy-render.md) |
 | Cloudflare | `wss://` WebSocket tunnel | [Cloudflare](../../docs/guides/deploy-cloudflare.md) |
-| Modal | `wss://` WebSocket tunnel | [Modal](../../docs/guides/deploy-modal.md) |
+| Modal | `wss://` WebSocket tunnel | [Modal](../../docs/guides/deploy-modal.md), with `supertag deploy` |
 
 Render, Cloudflare, and Modal forward only HTTP/1.1, so the Control Plane carries gRPC in a
 WebSocket and runs its own TLS inside it. Their Gateway receives no inbound traffic, so it serves
 only Lark, Slack Socket Mode, and webhook notifications; webhook surfaces need a Gateway on
 another host. Every
-platform except Compose uses the `hosted` container image, built from a Linux `supertag` binary
-as [Build the hosted image](../../deploy/native/README.md#build-the-hosted-image) shows.
+platform except Compose uses the `hosted` container image. Each release publishes it for
+`linux/amd64` as `ghcr.io/atemaguer/supertag-hosted`; build it for another architecture, or from
+your own binary, as
+[Build the hosted image](../../deploy/native/README.md#build-the-hosted-image) shows.
+
+## Deploy on Modal with one command
+
+```sh
+supertag deploy init modal      # writes supertag-deploy.yaml, which holds no secret
+export SUPERTAG_DATABASE_URL='postgresql://...?sslmode=require'   # first deploy only
+supertag deploy
+```
+
+- **One file, no secrets.** `supertag-deploy.yaml` names the target, the release or image, the
+  Gateway's connector flags, and non-secret settings. Commit it and the
+  `supertag-deploy-ca.pem` deploy writes beside it.
+  [supertag-deploy.yaml](../../docs/reference/supertag-deploy-yaml.md) lists every key.
+- **Secrets stay on the platform.** The first deploy generates the admin Operator Token and the
+  Gateway's credential straight into Modal secrets and issues the Control Plane's certificate.
+  Later deploys create only what is missing and never replace a secret. Change one with
+  `supertag deploy secret set NAME` (value from standard input), `secret unset NAME`, or, for
+  surface, Workspace, and Volume credentials, `secret push`; then deploy again.
+- **Deploy waits and verifies.** It waits for `/healthz`, runs `verify deployment`'s checks,
+  prints the `wss://` URL and the next commands, and saves the deployment for the CLI under the
+  app's name (`--gateway supertag`).
+- **Check first.** `supertag deploy check` says whether this machine can deploy and lists every
+  problem, one per line; `supertag deploy --dry-run` prints the full plan. Neither changes
+  anything. `supertag deploy status` asks the target what runs now: deployed or not, endpoint,
+  health, release, secret names, and whether the CA file matches.
+- **CI.** The same command with `--non-interactive`, `MODAL_TOKEN_ID`, and `MODAL_TOKEN_SECRET`,
+  after a first deploy from a laptop; `--dry-run` on pull requests. `SUPERTAG_OPERATOR_TOKEN` is
+  optional there.
+- **Don't** put a secret in `supertag-deploy.yaml` or its `env` map, and don't delete
+  `supertag-deploy-ca.pem`: clients and Worker Hosts trust the deployment through it
+  (`SUPERTAG_SERVER_CA_FILE`). `--renew-certificate` replaces it for everyone.
 
 ## Configure, check, deploy, verify
+
+The other platforms, and Modal by hand:
 
 ```sh
 export SUPERTAG_DATABASE_URL='postgresql://...'   # not for Compose or Render
@@ -96,7 +131,9 @@ with the deployment's owner.
   (Cloudflare, Modal), the services read credentials from the platform's own secrets by default:
   store them with `SUPERTAG_CREDENTIAL_FILE` naming the deployment directory's
   `gateway-credentials.json`, run `supertag gateway credential export`, upload both service
-  files, and redeploy. HashiCorp Vault is optional (`--credential-vault vault`).
+  files, and redeploy. With `supertag deploy`, name the file deploy prints instead and run
+  `supertag deploy secret push`, then `supertag deploy`. HashiCorp Vault is optional
+  (`--credential-vault vault`, or `credential-vault: vault` in `supertag-deploy.yaml`).
 - Persistent state directories for Worker Hosts. The Control Plane stores no artifact or
   Workspace delivery bytes and relays none: each Worker Host keeps what its Tasks produce, or its
   Worklet writes it to a shared Volume or pushes deliveries to the Workspace's git remote. Files on an

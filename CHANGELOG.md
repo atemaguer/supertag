@@ -11,6 +11,27 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- `supertag deploy` deploys the Control Plane and its optional Gateway on Modal from one file,
+  `supertag-deploy.yaml`, which holds no secret and is committed with your repository;
+  `supertag deploy init modal` writes it. The first deploy generates the admin Operator Token and
+  the Gateway's credential straight into Modal secrets, issues the Control Plane's certificate
+  itself (no `openssl`) and writes the public CA certificate beside the file, rolls out the
+  release's image by digest, waits for health, verifies the deployment, saves it for your CLI,
+  and prints its `wss://` URL and the next commands. Running it again changes no secret. The same
+  command deploys from CI with only `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`.
+  `supertag deploy check` says whether this machine can deploy, one line per problem;
+  `supertag deploy --dry-run` prints what a deploy would create and roll out; and
+  `supertag deploy status` asks the target what runs now. None of the three changes anything.
+  `supertag deploy secret set NAME`, `list`, `unset`, and `push` manage the deployment's secrets
+  and credentials without files to upload. `supertag setup deployment`, `check deployment`, and
+  `verify deployment` work as before, for the other platforms and for deploying by hand. See
+  [Deploy on Modal](docs/guides/deploy-modal.md) and
+  [supertag-deploy.yaml](docs/reference/supertag-deploy-yaml.md).
+- Each release publishes the hosted service image for `linux/amd64` to
+  `ghcr.io/atemaguer/supertag-hosted` and attaches its reference by digest as
+  `supertag-hosted-image.txt`, so a hosted deployment no longer starts with building and pushing
+  an image.
+
 - Hosted deployments no longer need HashiCorp Vault. A third credential vault,
   `SUPERTAG_CREDENTIAL_VAULT=env`, lets the services read the credentials of collaboration
   surfaces, remote Workspaces, and S3 Volumes from the platform's own secrets, as environment

@@ -40,6 +40,12 @@ if ! grep -Fxq -- latest-mac.yml <<<"$assets"; then
   printf '::warning::%s has no latest-mac.yml asset, so installed Mac apps will not update to it\n' \
     "$release_tag"
 fi
+# The hosted service image's reference, which `supertag deploy` resolves a release's version
+# through; it warns like the desktop app, and deploy then asks for an explicit image.
+if ! grep -Fxq -- supertag-hosted-image.txt <<<"$assets"; then
+  printf '::warning::%s has no supertag-hosted-image.txt asset, so supertag deploy cannot run it by version\n' \
+    "$release_tag"
+fi
 while IFS= read -r zip; do
   if ! grep -Fxq -- "$zip.blockmap" <<<"$assets"; then
     printf '::warning::%s has %s but no %s.blockmap\n' "$release_tag" "$zip" "$zip"

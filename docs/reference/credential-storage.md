@@ -223,7 +223,7 @@ same way. Every backend holds the same logical IDs.
 | Backend | The service reads | You write it with | Fits |
 | --- | --- | --- | --- |
 | `file`, the default | `gateway-credentials.json` in its state directory | Operator commands on the service's machine | A local setup, or a server whose disk you can run commands on |
-| `env` | Its environment variables, which the platform's own secrets supply | Operator commands on your machine, then `supertag gateway credential export` and the platform's secret controls | A hosted platform. The default on Cloudflare and Modal |
+| `env` | Its environment variables, which the platform's own secrets supply | Operator commands on your machine, then `supertag deploy secret push`, or `supertag gateway credential export` and the platform's secret controls | A hosted platform. The default on Cloudflare and Modal |
 | `vault` | HashiCorp Vault KV v2 | Operator commands with the same `VAULT_*` settings | A team that already runs Vault, or needs what the comparison below gives |
 
 ### Compare env and Vault
@@ -259,6 +259,11 @@ A service refuses to start when its document holds the other service's credentia
 `control-plane.env` from the deployment directory's `gateway-credentials.json`. Operator
 commands write that file when `SUPERTAG_CREDENTIAL_FILE` names it by absolute path. Upload the
 two files with the platform's secret controls, then redeploy.
+
+A deployment that `supertag deploy` manages has no service files. There,
+`supertag deploy secret push` renders the same two variables from the credential file and writes
+them straight into the platform's secret store; then `supertag deploy` restarts the services
+with them. See [Change a credential](../guides/deploy-modal.md#change-a-credential).
 
 The value is the base64 of the file vault's JSON, `{"version":1,"gateway":{ID:{FIELD:VALUE}}}`.
 Base64 survives dotenv parsers, platform dashboards, and shells unchanged. JSON's quotes, `$`,

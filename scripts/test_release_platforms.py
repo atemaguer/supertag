@@ -111,6 +111,38 @@ class ReleasePlatformContracts(unittest.TestCase):
         self.assertIn('for platform in darwin-arm64 darwin-amd64; do\n'
                       '  if ! grep -Fxq -- "SuperTag-$version-$platform.dmg"', assets)
 
+    def test_the_release_publishes_the_hosted_image_and_lists_its_reference(self):
+        # `supertag deploy` resolves a release's version to ghcr.io/atemaguer/supertag-hosted by
+        # digest through the asset this job writes (core/crates/cli/src/deploy/image.rs).
+        import yaml
+        workflow = yaml.safe_load((native_archive.REPO / '.github/workflows/release.yml').read_text())
+        image = workflow['jobs']['hosted-image']
+        self.assertEqual(image['needs'], ['source', 'package'])
+        self.assertEqual(image['permissions'], {'contents': 'read', 'packages': 'write'})
+        # Pushed only when the release's assets are attached.
+        self.assertEqual(image['if'], "github.event_name == 'push' || inputs.upload_assets")
+        steps = image['steps']
+        self.assertIn({'name': 'supertag-native-linux-amd64', 'path': '${{ runner.temp }}/native'},
+                      [step.get('with') for step in steps])
+        build, push = (step['run'] for step in steps if 'buildx build' in step.get('run', ''))
+        for run in (build, push):
+            self.assertIn('--platform linux/amd64', run)
+            self.assertIn('--file deploy/docker/rust-service.Dockerfile --target hosted', run)
+            # One manifest, so the recorded digest is the image's own.
+            self.assertIn('--provenance=false --sbom=false', run)
+        self.assertIn('image="ghcr.io/${GITHUB_REPOSITORY,,}-hosted"', build)
+        self.assertIn('sha256sum --check "$archive.sha256"', build)
+        self.assertNotIn('--push', build)
+        self.assertIn("printf '%s@%s\\n' \"$IMAGE\" \"$digest\" > supertag-hosted-image.txt", push)
+        publish = workflow['jobs']['publish']
+        self.assertIn('hosted-image', publish['needs'])
+        listed = '\n'.join(step.get('run', '') for step in publish['steps'])
+        self.assertIn('cat supertag-hosted-image.txt.sha256 >> SHA256SUMS', listed)
+        self.assertIn('./supertag-hosted-image.txt', listed)
+        cli = (native_archive.REPO / 'core/crates/cli/src/deploy/image.rs').read_text()
+        self.assertIn('const ASSET: &str = "supertag-hosted-image.txt";', cli)
+        self.assertIn('const OFFICIAL: &str = "ghcr.io/atemaguer/supertag-hosted@sha256:";', cli)
+
     def test_the_intel_mac_terminal_ui_embeds_the_baseline_bun(self):
         # Bun embeds its own runtime in supertag-tui; the baseline build runs on Intel Macs without
         # AVX2, as on linux-amd64. Its download is pinned to .bun-version and a checksum.

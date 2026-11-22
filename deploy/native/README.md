@@ -51,7 +51,7 @@ Gateway named `local`.
 | Railway | [`railway/control-plane.json`](railway/control-plane.json), [`railway/gateway.json`](railway/gateway.json) | TCP Proxy to port 3434 | Private network, `supertag-control-plane.railway.internal:3434` |
 | Render | [`../render/render.yaml`](../render/render.yaml) | Web service: the WebSocket tunnel on port 8080 | Background worker, through the public `wss://` URL |
 | Cloudflare | [`../cloudflare/`](../cloudflare/README.md): Worker, Wrangler configuration, container image | Worker forwarding the tunnel to one Container on port 8080 | Same container, `127.0.0.1:3434` |
-| Modal | [`../modal/app.py`](../modal/app.py) | Web endpoint forwarding the tunnel to port 8080 | Same container, `127.0.0.1:3434` |
+| Modal | [`../modal/app.py`](../modal/app.py), deployed by `supertag deploy` | Web endpoint forwarding the tunnel to port 8080 | Same container, `127.0.0.1:3434` |
 
 Render, Cloudflare, and Modal forward only HTTP, so their Control Plane serves the
 [WebSocket tunnel](#websocket-tunnel-for-http-only-platforms) and keeps native gRPC on loopback.
@@ -149,8 +149,13 @@ own path when it receives it. Set these secrets per role:
 
 ### Build the hosted image
 
-Build it from a Linux `supertag` binary with the two scripts beside it, and push it to a registry
-your platform can pull from. Deploy it by digest. Take the binary from the release's Linux archive
+Each release publishes the image for `linux/amd64` as `ghcr.io/atemaguer/supertag-hosted`, tagged
+with the release's version. The release asset `supertag-hosted-image.txt` holds its reference
+with the digest, and the release's `SHA256SUMS` lists that asset; `supertag deploy` resolves a
+release's version through it. Deploy the image by that digest.
+
+For another architecture or your own binary, build it from a Linux `supertag` binary with the two
+scripts beside it, and push it to a registry your platform can pull from. Deploy it by digest. Take the binary from the release's Linux archive
 for your platform's architecture (`linux-amd64` or `linux-arm64`), or build it from a checkout of
 the release you deploy, in the Rust image whose Debian release matches the runtime image:
 

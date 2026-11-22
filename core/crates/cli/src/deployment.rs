@@ -56,7 +56,7 @@ const CREDENTIAL_FILE: &str = "gateway-credentials.json";
 
 /// TLS settings each service reads. Compose names files in the env files; the hosted entrypoint
 /// derives them from the matching `..._PEM` secrets, so hosted env files must not name them.
-const TLS_KEYS: [&str; 6] = [
+pub(crate) const TLS_KEYS: [&str; 6] = [
     "SUPERTAG_TLS_CERT_FILE",
     "SUPERTAG_TLS_KEY_FILE",
     "SUPERTAG_TLS_CLIENT_CA_FILE",
@@ -95,7 +95,7 @@ const GATEWAY_KEYS: [&str; 8] = [
 ];
 const OPERATOR_KEYS: [&str; 1] = ["SUPERTAG_OPERATOR_TOKEN"];
 const POSTGRES_KEYS: [&str; 3] = ["POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD"];
-const SECRET_KEYS: [&str; 6] = [
+pub(crate) const SECRET_KEYS: [&str; 6] = [
     "SUPERTAG_DATABASE_URL",
     "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
     "SUPERTAG_GATEWAY_CREDENTIAL",
@@ -180,7 +180,7 @@ impl Platform {
     /// Containers have no persistent disk, and a Modal Volume does not give the file vault's
     /// atomic, durable replacement. Their credentials come from the platform's secrets (`env`)
     /// or HashiCorp Vault.
-    fn lacks_durable_disk(self) -> bool {
+    pub(crate) fn lacks_durable_disk(self) -> bool {
         matches!(self, Self::Cloudflare | Self::Modal)
     }
 
@@ -302,7 +302,7 @@ pub struct VerifyArgs {
 }
 
 /// One role's validated environment, in a fixed order.
-type Environment = BTreeMap<String, String>;
+pub(crate) type Environment = BTreeMap<String, String>;
 
 #[derive(Debug)]
 pub struct Files {
@@ -310,6 +310,17 @@ pub struct Files {
     gateway: Environment,
     operator: Environment,
     postgres: Option<Environment>,
+}
+
+impl Files {
+    /// Every setting the Control Plane and the Gateway read, as one environment: what a
+    /// deployment that runs both from one set of secrets and settings distributes
+    /// (`supertag deploy`). The two roles never give one key different values.
+    pub(crate) fn services(&self) -> Environment {
+        let mut services = self.control_plane.clone();
+        services.extend(self.gateway.clone());
+        services
+    }
 }
 
 pub async fn setup(command: SetupCommand) -> Result<()> {
@@ -781,14 +792,14 @@ pub fn validate(platform: Platform, files: &Files) -> Result<()> {
     }
 }
 
-fn postgres_url(url: &str) -> bool {
+pub(crate) fn postgres_url(url: &str) -> bool {
     (url.starts_with("postgres://") || url.starts_with("postgresql://"))
         && url.split_once("://").is_some_and(|(_, rest)| {
             !rest.is_empty() && !rest.starts_with('/') && !rest.chars().any(char::is_whitespace)
         })
 }
 
-fn strong_token(token: &str) -> bool {
+pub(crate) fn strong_token(token: &str) -> bool {
     token.len() >= 32
         && token.len() <= 512
         && token
@@ -945,7 +956,7 @@ fn write_directory(directory: &Path, files: &Files) -> Result<()> {
 }
 
 /// The two service files and the service whose credential document each carries.
-const CREDENTIAL_HOLDERS: [(&str, Holder); 2] = [
+pub(crate) const CREDENTIAL_HOLDERS: [(&str, Holder); 2] = [
     (GATEWAY_FILE, Holder::Gateway),
     (CONTROL_PLANE_FILE, Holder::ControlPlane),
 ];
@@ -995,6 +1006,29 @@ pub fn export_credentials(directory: &Path) -> Result<Vec<(&'static str, Vec<Str
     Ok(exported)
 }
 
+/// The variables that carry both services' credentials from the file credential vault at
+/// `source`, as `export_credentials` renders them, and each service's credential IDs: for a
+/// deployment that keeps them in one secret rather than in two service files.
+pub(crate) fn credential_documents(
+    source: &Path,
+) -> Result<(Environment, BTreeMap<&'static str, Vec<String>>)> {
+    let mut variables = Environment::new();
+    let mut ids = BTreeMap::new();
+    for (holder, service) in [
+        (Holder::Gateway, "gateway"),
+        (Holder::ControlPlane, "control-plane"),
+    ] {
+        variables.extend(supertag_credential_vault::environment_variables(
+            holder, source,
+        )?);
+        ids.insert(
+            service,
+            supertag_credential_vault::credential_ids(holder, source)?,
+        );
+    }
+    Ok((variables, ids))
+}
+
 /// Refuses service files whose credential documents differ from what the directory's file
 /// credential vault renders now: a credential was stored or removed and not exported.
 fn credentials_current(directory: &Path, files: &Files) -> Result<()> {
@@ -1030,7 +1064,7 @@ fn credentials_current(directory: &Path, files: &Files) -> Result<()> {
     Ok(())
 }
 
-fn read_private(path: &Path) -> Result<Environment> {
+pub(crate) fn read_private(path: &Path) -> Result<Environment> {
     let metadata =
         fs::symlink_metadata(path).with_context(|| format!("read {}", path.display()))?;
     ensure!(
@@ -1065,8 +1099,16 @@ pub fn read_directory(platform: Platform, directory: &Path) -> Result<Files> {
     Ok(files)
 }
 
-fn prompt(key: &str) -> Result<String> {
-    let secret = SECRET_KEYS.contains(&key);
+pub(crate) fn prompt(key: &str) -> Result<String> {
+    read_answer(key, SECRET_KEYS.contains(&key))
+}
+
+/// Asks for `key` without showing what is typed.
+pub(crate) fn prompt_masked(key: &str) -> Result<String> {
+    read_answer(key, true)
+}
+
+fn read_answer(key: &str, secret: bool) -> Result<String> {
     out!("{key}: ");
     let echo = secret.then(EchoOff::new).transpose()?;
     let mut line = String::new();
@@ -1143,15 +1185,17 @@ pub async fn verify(command: VerifyCommand) -> Result<()> {
     .context("could not reach the Control Plane over TLS; check the URL, its certificate, and SUPERTAG_SERVER_CA_FILE (a wss:// URL also needs the platform edge to forward the WebSocket upgrade)")?;
     out!(
         "{}",
-        verify_channel(channel, &token, args.require_ready).await?
+        verify_channel(channel, Some(&token), args.require_ready).await?
     );
     Ok(())
 }
 
-/// The verification steps over a connected channel. Each failure names what failed.
+/// The verification steps over a connected channel. Each failure names what failed. Without an
+/// operator token only the checks that need no credential run: health, and that an anonymous
+/// operator request and an invalid Worker Host credential are refused.
 pub async fn verify_channel(
     channel: supertag_protocol::negotiation::ProtocolChannel,
-    token: &str,
+    token: Option<&str>,
     require_ready: bool,
 ) -> Result<String> {
     let health = HealthClient::new(channel.clone())
@@ -1191,6 +1235,16 @@ pub async fn verify_channel(
         Err(status) => bail!("Worker Host credential check failed ({:?})", status.code()),
         Ok(_) => bail!("Control Plane accepted an invalid Worker Host credential"),
     }
+    let Some(token) = token else {
+        ensure!(
+            !require_ready,
+            "SUPERTAG_OPERATOR_TOKEN is required to check readiness"
+        );
+        return Ok(
+            "Control Plane health and anonymous and invalid Worker Host credential rejection passed. Operator authentication and readiness were not checked: no operator token was given.\n"
+                .into(),
+        );
+    };
     // An authenticated read reaches the Control Plane's state.
     let mut ready = 0usize;
     let mut cursor = String::new();
@@ -2020,7 +2074,7 @@ mod tests {
             .connect()
             .await?;
         let channel = supertag_protocol::negotiation::bind_current(channel);
-        let outcome = verify_channel(channel, &"t".repeat(40), false).await;
+        let outcome = verify_channel(channel, Some(&"t".repeat(40)), false).await;
         server.abort();
         let seen = seen.lock().unwrap().clone();
         Ok((outcome, seen))

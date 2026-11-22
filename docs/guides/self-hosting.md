@@ -35,8 +35,10 @@ directories.
   per Control Plane process; a transaction-mode pooler drops the settings and notifications the
   Control Plane relies on. See [Replicas](../operations/control-plane.md#replicas).
 - The container images: the `hosted` image for every platform except Compose, and the
-  `control-plane` and `gateway` images for Compose. See
-  [Build the hosted image](../../deploy/native/README.md#build-the-hosted-image).
+  `control-plane` and `gateway` images for Compose. Each release publishes the `hosted` image for
+  `linux/amd64`; see
+  [Build the hosted image](../../deploy/native/README.md#build-the-hosted-image) for the others
+  and for your own build.
 
 ## 1. Choose a platform
 
@@ -47,7 +49,7 @@ directories.
 | Railway | Native gRPC through a TCP Proxy | [Deploy on Railway](deploy-railway.md) |
 | Render | The WebSocket tunnel, `wss://` | [Deploy on Render](deploy-render.md) |
 | Cloudflare | The WebSocket tunnel, `wss://` | [Deploy on Cloudflare](deploy-cloudflare.md) |
-| Modal | The WebSocket tunnel, `wss://` | [Deploy on Modal](deploy-modal.md) |
+| Modal | The WebSocket tunnel, `wss://` | [Deploy on Modal](deploy-modal.md), with one command: `supertag deploy` |
 
 Render, Cloudflare, and Modal terminate TLS at their edge and forward only HTTP/1.1. There the
 Control Plane carries gRPC inside a WebSocket, the **tunnel**, and runs its own TLS end to end
@@ -56,8 +58,14 @@ shows `https://`.
 
 ## 2. Prepare and check the configuration
 
-Every platform shares one workflow. See [Configure a deployment](deployment-setup.md) for what
-each file holds.
+On Modal, `supertag deploy` does steps 2 to 5 from one configuration file that holds no secret,
+[`supertag-deploy.yaml`](../reference/supertag-deploy-yaml.md): it checks the configuration,
+keeps the secrets in Modal, issues the certificate, deploys, verifies, and saves the deployment
+for your CLI. Follow [Deploy on Modal](deploy-modal.md), then continue at
+[Connect a Worker Host](#6-connect-a-worker-host).
+
+Every other platform shares one workflow. See [Configure a deployment](deployment-setup.md) for
+what each file holds.
 
 ```sh
 export SUPERTAG_DATABASE_URL='postgresql://supertag@db.example.com/supertag'  # not for Compose or Render

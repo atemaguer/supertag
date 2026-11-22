@@ -7,7 +7,8 @@ wss://WORKSPACE--LABEL.modal.run, a stable URL; the service certificate must nam
 comes from your own CA, given to every client as SUPERTAG_SERVER_CA_FILE. Native gRPC stays on
 loopback. See README.md.
 
-Deploy, with the hosted image (rust-service.Dockerfile target "hosted") by digest:
+`supertag deploy` deploys this file, which is compiled into the CLI, and sets everything below.
+To deploy it by hand, with the hosted image (rust-service.Dockerfile target "hosted") by digest:
 
     SUPERTAG_MODAL_IMAGE=REGISTRY/IMAGE@sha256:DIGEST modal deploy deploy/modal/app.py
 
@@ -21,8 +22,12 @@ Settings read at deploy time:
     SUPERTAG_MODAL_LABEL           web endpoint label, the URL's last part (default supertag)
     SUPERTAG_MODAL_REGISTRY_SECRET Modal secret with REGISTRY_USERNAME and REGISTRY_PASSWORD
                                    for a private registry (optional)
+    SUPERTAG_MODAL_SECRETS         the Modal secrets the services read, comma-separated, instead
+                                   of the four named below (`supertag deploy` sets it)
+    SUPERTAG_MODAL_SETTINGS        a JSON object of non-secret environment variables for the
+                                   services (`supertag deploy` sets it)
 
-Modal secrets: supertag-control-plane holds control-plane.env from `supertag setup deployment
+Modal secrets, unless SUPERTAG_MODAL_SECRETS names others: supertag-control-plane holds control-plane.env from `supertag setup deployment
 modal`, and supertag-control-plane-tls the Control Plane's TLS PEM values. With the Gateway on,
 supertag-gateway holds gateway.env, the connector settings, and supertag-gateway-tls the Gateway's
 PEM values. By default the two .env files also carry each service's credentials
@@ -34,6 +39,7 @@ The container's service is supervised: when it exits, this container exits too, 
 replacement (min_containers=1). Container shutdown stops the service with SIGTERM.
 """
 
+import json
 import os
 import shlex
 import subprocess
@@ -77,6 +83,33 @@ def service_command(gateway: str, gateway_flags: str) -> list[str]:
     raise ValueError("SUPERTAG_MODAL_GATEWAY must be on or off")
 
 
+def service_secrets(names: str, gateway: str) -> list[str]:
+    """The Modal secrets the services read: the ones named, else those the guide creates by hand."""
+    if names:
+        return [name for name in names.split(",") if name]
+    default = ["supertag-control-plane", "supertag-control-plane-tls"]
+    if gateway == "on":
+        default += ["supertag-gateway", "supertag-gateway-tls"]
+    return default
+
+
+def service_settings(text: str) -> dict[str, str]:
+    """Non-secret environment variables for the services, from a JSON object of strings."""
+    if not text:
+        return {}
+    message = "SUPERTAG_MODAL_SETTINGS must be a JSON object of strings"
+    try:
+        settings = json.loads(text)
+    except ValueError:
+        raise ValueError(message) from None
+    if not isinstance(settings, dict) or not all(isinstance(value, str) for value in settings.values()):
+        raise ValueError(message)
+    for name in settings:
+        if name.startswith("SUPERTAG_MODAL_"):
+            raise ValueError(f"SUPERTAG_MODAL_SETTINGS must not set {name}")
+    return settings
+
+
 class Service:
     """The service process. When it exits unasked, `exit` ends this container (by default the
     whole Python process at once), because Modal keeps a container whose web server died."""
@@ -111,12 +144,15 @@ gateway_flags = os.environ.get("SUPERTAG_MODAL_GATEWAY_FLAGS", "")
 app_name = os.environ.get("SUPERTAG_MODAL_APP", "supertag")
 label = os.environ.get("SUPERTAG_MODAL_LABEL", "supertag")
 registry_secret = os.environ.get("SUPERTAG_MODAL_REGISTRY_SECRET")
+secret_names = os.environ.get("SUPERTAG_MODAL_SECRETS", "")
+settings_text = os.environ.get("SUPERTAG_MODAL_SETTINGS", "")
 
 if modal.is_local():
     if "@sha256:" not in image_ref:
         raise SystemExit("Set SUPERTAG_MODAL_IMAGE to the hosted image pinned by digest (IMAGE@sha256:...)")
     try:
         service_command(gateway, gateway_flags)
+        service_settings(settings_text)
     except ValueError as error:
         raise SystemExit(str(error)) from None
 
@@ -128,8 +164,12 @@ image = (
     )
     # Modal runs the class; the service command names the image entrypoint.
     .entrypoint([])
-    # The container re-imports this file, so it carries the deploy-time settings.
+    # The services' non-secret settings. The container re-imports this file, so it also
+    # carries the deploy-time settings.
     .env({
+        **service_settings(settings_text),
+        "SUPERTAG_MODAL_SECRETS": secret_names,
+        "SUPERTAG_MODAL_SETTINGS": settings_text,
         "SUPERTAG_MODAL_IMAGE": image_ref,
         "SUPERTAG_MODAL_GATEWAY": gateway,
         "SUPERTAG_MODAL_GATEWAY_FLAGS": gateway_flags,
@@ -137,10 +177,8 @@ image = (
         "SUPERTAG_MODAL_LABEL": label,
     })
 )
-# Settings from setup, and the TLS PEM values the image entrypoint writes to files.
-secrets = [modal.Secret.from_name("supertag-control-plane"), modal.Secret.from_name("supertag-control-plane-tls")]
-if gateway == "on":
-    secrets += [modal.Secret.from_name("supertag-gateway"), modal.Secret.from_name("supertag-gateway-tls")]
+# The services' secrets, with the TLS PEM values the image entrypoint writes to files.
+secrets = [modal.Secret.from_name(name) for name in service_secrets(secret_names, gateway)]
 state = modal.Volume.from_name(f"{app_name}-state", create_if_missing=True)
 app = modal.App(app_name)
 

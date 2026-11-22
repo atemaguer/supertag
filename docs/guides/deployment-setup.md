@@ -6,6 +6,11 @@ service that connects collaboration surfaces such as Slack. Every platform uses 
 commands. A Tag is a persistent AI actor with its own identity, responsibilities, permissions, and work history; see the
 [glossary](../reference/glossary.md) for other terms.
 
+On Modal, one command runs all of this for you: `supertag deploy` checks the configuration with
+the same rules, keeps the secrets in Modal instead of in files, issues the certificate, deploys,
+and verifies. Follow [Deploy on Modal](deploy-modal.md) there, and this page for the other
+platforms or to deploy on Modal by hand.
+
 ## Before you start
 
 - The `supertag` CLI, from the release you deploy. See [Install SuperTag](../operations/install.md).
@@ -34,7 +39,8 @@ Setup reads these variables and prompts, masked, for a missing required value:
 | `VAULT_ADDR`, `VAULT_TOKEN`, and the optional `VAULT_NAMESPACE`, `SUPERTAG_VAULT_MOUNT`, `SUPERTAG_VAULT_PATH_PREFIX` | HashiCorp Vault's settings, read only with `--credential-vault vault` |
 
 `--credential-vault` chooses where the services read the credentials of collaboration surfaces,
-remote Workspaces, and S3 Volumes:
+remote Workspaces, and S3 Volumes (`credential-vault` in
+[`supertag-deploy.yaml`](../reference/supertag-deploy-yaml.md) for `supertag deploy`):
 
 | Value | The services read | Default on |
 | --- | --- | --- |
@@ -72,7 +78,9 @@ the credentials you stored.
 
 ## Store credentials
 
-Skip this section unless setup chose `env`. The services then read credentials from their
+Skip this section unless setup chose `env`. With `supertag deploy`, follow
+[Change a credential](deploy-modal.md#change-a-credential) instead: one command uploads them.
+The services then read credentials from their
 environment and cannot store one themselves. You keep the credentials in
 `gateway-credentials.json` in the deployment directory, on your machine, and export them into
 the two service files.

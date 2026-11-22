@@ -118,7 +118,8 @@ Choose the tool your team already uses:
 - [Fly.io](guides/deploy-fly.md) — Control Plane and optional Gateway as Machines, with PostgreSQL
 - [Railway](guides/deploy-railway.md) — Control Plane behind a TCP Proxy, with PostgreSQL
 - [Render](guides/deploy-render.md) — Blueprint-managed Control Plane, optional Gateway, and PostgreSQL, over the WebSocket tunnel
-- [Modal](guides/deploy-modal.md) — always-on Control Plane behind a web endpoint, with external PostgreSQL and Vault
+- [Modal](guides/deploy-modal.md) — always-on Control Plane behind a web endpoint, deployed from one file with `supertag deploy`, with external PostgreSQL
+- [supertag-deploy.yaml](reference/supertag-deploy-yaml.md) — the configuration `supertag deploy` reads: target, release, Gateway, settings, and TLS
 - [Cloudflare](guides/deploy-cloudflare.md) — Control Plane in a Container behind a Worker, with external PostgreSQL and Vault
 - [Control Plane operations](operations/control-plane.md) — health, persistence, deployment, and databases
 - [Operator notifications](guides/notifications.md) — alert the operator about inbox items
