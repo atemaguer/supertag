@@ -558,7 +558,7 @@ function JumpToLatest({ messages }: { messages: number }) {
 function EmptyConversation({ tag }: { tag: Tag }) {
   return (
     <div className="empty">
-      <TagAvatar tagId={tag.tagId} large />
+      <TagAvatar tag={tag} size="xl" />
       <h2>Message {tag.name ?? tag.tagId}</h2>
       {tag.instructions && <p className="tag-instructions">{tag.instructions}</p>}
       <details className="permissions">

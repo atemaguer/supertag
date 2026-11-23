@@ -16,7 +16,8 @@
     "electron": "tsup && electron .",
     "package:mac": "pnpm build && electron-builder --config electron-builder.config.ts --publish never --mac dir",
     "package:linux": "pnpm build && electron-builder --config electron-builder.config.ts --publish never --linux",
-    "smoke": "tsx scripts/smoke.ts"
+    "smoke": "tsx scripts/smoke.ts",
+    "shots": "tsx scripts/shots.ts"
   },
   "devDependencies": {
     "@bufbuild/protobuf": "2.15.0",

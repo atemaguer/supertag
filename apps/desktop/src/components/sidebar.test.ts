@@ -5,6 +5,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { isSidebarShortcut, relativeTime, type SidebarMode, tagShortcut } from "./sidebar";
+import { monogram, tagColor } from "./tag-avatar";
 import { WorkspaceShell } from "./workspace";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -184,30 +185,67 @@ it("starts as the rail when that was the saved choice", () => {
   expect(shell().dataset.sidebar).toBe("rail");
 });
 
-it("opens the lead from the first roster row and exposes its name in rail mode", () => {
+it("pins the lead first in one list under one heading, and opens it expanded or as the rail", () => {
   const { onSelectTag } = render({
     tag: tags[1],
     summaries: { lead: { preview: "Review is ready.", unread: true } },
   });
   const lead = host.querySelector('.tag-row[data-lead="true"]') as HTMLButtonElement;
   expect(rows()).toEqual(["Lead, lead Tag", "finch", "moss"]);
-  expect(lead.getAttribute("aria-current")).toBe("true");
-  expect(lead.closest(".sidebar-tags")?.previousElementSibling?.className).toBe("sidebar-heading");
-  expect(host.querySelector(".sidebar-gateway .connection")).not.toBeNull();
-  expect(lead.nextElementSibling?.textContent).toBe("Conversations");
-  expect(lead.querySelector(".lead-badge")).not.toBeNull();
-  expect(lead.querySelector(".tag-monogram")?.textContent).toBe("LE");
-  expect(lead.querySelector(".tag-row-name")?.textContent).toBe("Lead");
-  expect(lead.querySelector(".tag-row-preview")?.textContent).toBe("Review is ready.");
+  // The selected row, and only it, is the current one.
+  const current = [...host.querySelectorAll('.tag-row[aria-current="true"]')];
+  expect(current).toEqual([lead]);
+  const headings = [...host.querySelectorAll(".sidebar h2, .sidebar h3")];
+  expect(headings.map((heading) => heading.textContent)).toEqual(["Tags"]);
+  expect(host.querySelector(".sidebar .connection")).not.toBeNull();
   act(() => lead.click());
   expect(onSelectTag).toHaveBeenCalledWith("lead");
 
   key("Enter");
   const folded = host.querySelector('.tag-row[data-lead="true"]') as HTMLButtonElement;
   expect(folded.getAttribute("aria-label")).toBe("Lead, lead Tag");
-  expect(folded.querySelector(".tag-row-name")).toBeNull();
+  expect(folded.textContent).toBe("LE");
   act(() => folded.click());
   expect(onSelectTag).toHaveBeenCalledTimes(2);
+});
+
+it("gives every row the same avatar and two lines, whatever its state", () => {
+  const now = Date.now();
+  render({
+    summaries: {
+      lead: { working: true, preview: "You: Ship it", lastActivityMs: now },
+      finch: { asking: true, unread: true, preview: "Close #812?", lastActivityMs: now - 1_000 },
+    },
+  });
+  const all = [...host.querySelectorAll(".tag-row")];
+  expect(all).toHaveLength(3);
+  for (const row of all) {
+    expect(row.querySelectorAll(".avatar")).toHaveLength(1);
+    expect(row.querySelectorAll(".tag-row-line")).toHaveLength(2);
+  }
+  // The second line: the state word before the latest message, or that there is none yet.
+  expect(all.map((row) => row.querySelector(".tag-row-preview")?.textContent)).toEqual([
+    "Working · You: Ship it",
+    "Needs you · Close #812?",
+    "No messages yet",
+  ]);
+  expect(all.map((row) => row.querySelector(".avatar-monogram")?.textContent)).toEqual([
+    "LE",
+    "FI",
+    "MO",
+  ]);
+  // Only the lead carries the pin.
+  expect(all.map((row) => row.querySelector(".avatar-pin") !== null)).toEqual([true, false, false]);
+});
+
+it("draws a Tag's monogram from its name and keeps its colour from its ID", () => {
+  expect(monogram("finch")).toBe("FI");
+  expect(monogram("release-notes")).toBe("RN");
+  expect(monogram("Security reviewer")).toBe("SR");
+  expect(monogram("  é ")).toBe("É");
+  expect(tagColor("finch")).toBe(tagColor("finch"));
+  const used = new Set(["finch", "moss", "wren", "kite", "heron", "otter", "pika"].map(tagColor));
+  expect(used.size).toBeGreaterThan(1);
 });
 
 it("starts with the most recently active Tag when there is no lead", () => {
@@ -247,7 +285,7 @@ it("shows a row's preview, time, unread, and working state when it has them", ()
   expect(finch?.getAttribute("aria-description")).toBe("Unread messages");
   expect(moss?.dataset.status).toBe("working");
   expect(moss?.querySelector(".tag-state")?.textContent).toBe("Working");
-  expect(moss?.querySelector(".tag-state")?.getAttribute("aria-hidden")).toBe("true");
+  expect(moss?.querySelector(".tag-row-unread")).toBeNull();
 });
 
 it("says a Tag needs you while its question is unanswered, before that it is working", () => {
@@ -284,6 +322,8 @@ it("names the lead Tag's state with it, and keeps a dot for each state on the ra
 
 it("has no search field of its own: the search button beside New Tag opens the palette", () => {
   render({ onNewTag: vi.fn() });
+  // The mascot heads the sidebar, named for the app; the list keeps a heading for screen readers.
+  expect(host.querySelector('.sidebar img[alt="SuperTag"]')).not.toBeNull();
   expect(host.querySelector(".sidebar h2")?.textContent).toBe("Tags");
   expect(host.querySelector(".sidebar input")).toBeNull();
   const actions = [...host.querySelectorAll(".sidebar-top-actions button")].map((button) =>
@@ -361,11 +401,10 @@ it("opens Tags with Ctrl+1…9 and Ctrl+↑/↓, and New Tag with Ctrl+N", () =>
   });
 });
 
-it("shows a working Tag's row by its state word, never a line of its activity", () => {
+it("puts a working Tag's state word before its latest message", () => {
   render({ summaries: { moss: { working: true, preview: "You: Run the tests" } } });
   const moss = [...host.querySelectorAll(".tag-row")].find(
     (row) => row.getAttribute("aria-label") === "moss, Working",
   ) as HTMLElement;
-  expect(moss.querySelector(".tag-state")?.textContent).toBe("Working");
-  expect(moss.textContent).not.toMatch(/Run/);
+  expect(moss.querySelector(".tag-row-preview")?.textContent).toBe("Working · You: Run the tests");
 });

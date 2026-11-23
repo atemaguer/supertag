@@ -397,13 +397,21 @@ async function start() {
   let initialConnection: Connection | undefined;
   let updateSource: UpdateSource | undefined;
   if (import.meta.env.DEV && new URLSearchParams(location.search).has("preview")) {
-    const { previewGateway, previewRelease, previewTagAdmin, previewUpdates, withoutLead } =
-      await import("./preview");
+    const {
+      previewGateway,
+      previewRelease,
+      previewTagAdmin,
+      previewUpdates,
+      withManyTags,
+      withoutLead,
+    } = await import("./preview");
     // `?preview&update=ready` shows an update in that state: downloading, ready, installing,
     // available (Linux), error (a download's), install-error, or check-error.
     updateSource = previewUpdates(new URLSearchParams(location.search).get("update"));
     // `?preview&nolead` shows a Gateway without a lead Tag.
     if (new URLSearchParams(location.search).has("nolead")) withoutLead();
+    // `?preview&many` shows a long sidebar: more Tags, long names and previews, every row state.
+    if (new URLSearchParams(location.search).has("many")) withManyTags();
     initialConnection = {
       gateway: previewGateway,
       tags: await previewGateway.tags(),

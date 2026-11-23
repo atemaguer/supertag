@@ -1,7 +1,9 @@
 import { orderTags, type Tag, type TagSummary } from "@supertag/client/model";
-import { Pin, Plus, Search } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import mark from "../assets/supertag-mark@2x.png";
 import { clamp, KEY_STEP, ResizeHandle, useStoredWidth } from "./resize";
+import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
 
 /** The sidebar is expanded, with a row per Tag, or a rail of Tag avatars. */
@@ -128,6 +130,7 @@ export function Sidebar({
   onSearch?(): void;
 }) {
   const expanded = mode === "expanded";
+  // One list: the lead Tag pinned first, then the others, most recently active first.
   const { lead, others } = orderTags(tags, summaries);
   const ordered = [...(lead ? [lead] : []), ...others];
   const shortcuts = useRef({ ordered, tag, onSelectTag, onNewTag, onSearch });
@@ -189,10 +192,16 @@ export function Sidebar({
   return (
     <nav id="sidebar" className="sidebar" data-mode={mode} aria-label="Tags">
       <div className="sidebar-top drag-region" />
-      <div className="sidebar-gateway">{selector}</div>
       {expanded && (
         <div className="sidebar-heading">
-          <h2>Tags</h2>
+          {/* The brand heads the sidebar; the list keeps its heading for screen readers. */}
+          <span className="sidebar-brand">
+            <img src={mark} alt="SuperTag" width={26} height={26} draggable={false} />
+            <span className="sidebar-wordmark" aria-hidden>
+              SuperTag
+            </span>
+          </span>
+          <h2 className="visually-hidden">Tags</h2>
           <div className="sidebar-top-actions">
             {search}
             {newTag}
@@ -205,20 +214,7 @@ export function Sidebar({
             {connected ? "No Tags available" : "Connect to see your Tags"}
           </p>
         )}
-        {lead && (
-          <TagRow
-            key={lead.tagId}
-            tag={lead}
-            summary={summaries[lead.tagId]}
-            expanded={expanded}
-            current={tag?.tagId === lead.tagId}
-            onSelect={() => onSelectTag?.(lead.tagId)}
-          />
-        )}
-        {expanded && lead && others.length > 0 && (
-          <h3 className="sidebar-conversations">Conversations</h3>
-        )}
-        {others.map((entry) => (
+        {ordered.map((entry) => (
           <TagRow
             key={entry.tagId}
             tag={entry}
@@ -232,7 +228,10 @@ export function Sidebar({
       <div className="sidebar-bottom">
         {!expanded && search}
         {!expanded && newTag}
-        {footer}
+        <div className="sidebar-foot">
+          {selector}
+          {footer}
+        </div>
       </div>
     </nav>
   );
@@ -254,16 +253,6 @@ function TagRow({
   const name = tagName(tag);
   const status = tagStatus(summary);
   const state = stateWord(summary);
-  const words = name
-    .trim()
-    .split(/[\s_-]+/u)
-    .filter(Boolean);
-  const [first = tag.tagId, second] = words;
-  const initials = (
-    second ? [...first].slice(0, 1).concat([...second].slice(0, 1)) : [...first].slice(0, 2)
-  )
-    .join("")
-    .toLocaleUpperCase();
   const label = [name, tag.lead && "lead Tag", state].filter(Boolean).join(", ");
   return (
     <Button
@@ -279,31 +268,31 @@ function TagRow({
       onClick={onSelect}
     >
       <span className="tag-row-avatar" aria-hidden>
-        <span className="tag-monogram">{initials}</span>
-        {!expanded && tag.lead && <Pin className="lead-badge" size={12} />}
+        <TagAvatar tag={tag} />
         {!expanded && status && <span className="tag-row-badge" />}
       </span>
       {expanded && (
+        // Every row has the same two lines: the name and time, then the state and latest message.
         <span className="tag-row-text">
-          <span className="tag-row-title">
+          <span className="tag-row-line">
             <span className="tag-row-name">{name}</span>
-            {tag.lead && <Pin className="lead-badge" size={13} aria-hidden />}
-            {summary?.unread && <span className="tag-row-unread" aria-hidden />}
+            {summary?.lastActivityMs !== undefined && (
+              <span className="tag-row-time">{relativeTime(summary.lastActivityMs)}</span>
+            )}
           </span>
-          {(state || summary?.preview || summary?.lastActivityMs !== undefined) && (
-            <span className="tag-row-detail">
-              {state ? (
-                <span className="tag-state" data-state={status} aria-hidden>
+          <span className="tag-row-line">
+            <span className="tag-row-preview">
+              {state && (
+                <span className="tag-state" data-state={status}>
                   {state}
                 </span>
-              ) : (
-                <span className="tag-row-preview">{summary?.preview}</span>
               )}
-              {summary?.lastActivityMs !== undefined && (
-                <span className="tag-row-time">{relativeTime(summary.lastActivityMs)}</span>
-              )}
+              {state && summary?.preview && " · "}
+              {summary?.preview ||
+                (!state && <span className="tag-row-none">No messages yet</span>)}
             </span>
-          )}
+            {summary?.unread && <span className="tag-row-unread" />}
+          </span>
         </span>
       )}
     </Button>
@@ -320,7 +309,7 @@ export function tagStatus(summary?: TagSummary): "asking" | "working" | "unread"
   return summary?.unread ? "unread" : undefined;
 }
 
-/** The word below a Tag's name for its state, when the state has one. */
+/** The word before a Tag's latest message for its state, when the state has one. */
 export function stateWord(summary?: TagSummary): string | undefined {
   const status = tagStatus(summary);
   return status === "asking" ? "Needs you" : status === "working" ? "Working" : undefined;

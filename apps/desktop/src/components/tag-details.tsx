@@ -98,7 +98,7 @@ function Inspector({ gateway, watch, tag, onClose }: InspectorProps) {
   return (
     <aside id="tag-details" className="activity tag-details" aria-label={`${name} details`}>
       <div className="inspector-profile">
-        <TagAvatar tagId={tag.tagId} large />
+        <TagAvatar tag={tag} size="lg" />
         <div className="inspector-identity">
           <h2>{name}</h2>
           {(tag.lead || name !== tag.tagId) && (
@@ -193,6 +193,8 @@ function Overview({ gateway, watch, tag }: Pick<InspectorProps, "gateway" | "wat
       </dl>
       <DetailsDisclosure
         title="Permissions"
+        // The short list a person opens the panel for; Activity stays closed until asked for.
+        defaultOpen
         icon={<ShieldCheck size={16} aria-hidden />}
         count={tag.allowedActions.length}
       >

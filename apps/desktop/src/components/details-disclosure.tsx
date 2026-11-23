@@ -6,15 +6,18 @@ export function DetailsDisclosure({
   title,
   icon,
   count,
+  defaultOpen,
   children,
 }: {
   title: string;
   icon: ReactNode;
   count?: number;
+  /** Shown open at first; a person can still close it. */
+  defaultOpen?: boolean;
   children: ReactNode;
 }) {
   return (
-    <details className="inspector-disclosure">
+    <details className="inspector-disclosure" open={defaultOpen}>
       <summary>
         {icon}
         <span>{title}</span>

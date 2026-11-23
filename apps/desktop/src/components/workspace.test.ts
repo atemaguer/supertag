@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 import type { Tag } from "@supertag/client/model";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -16,31 +18,34 @@ const tags: Tag[] = [
   },
 ];
 
-it("lists each Tag in the sidebar and puts just the selected Tag in the pill", () => {
-  const html = renderToStaticMarkup(
-    createElement(
-      WorkspaceShell,
-      {
-        tags,
-        tag: tags[1],
-        connected: true,
-        selector: () => null,
-      },
-      null,
-    ),
+/** The shell's markup as a document to query, as a first paint without effects. */
+function page(props: Partial<Parameters<typeof WorkspaceShell>[0]>) {
+  const host = document.createElement("div");
+  host.innerHTML = renderToStaticMarkup(
+    createElement(WorkspaceShell, { tags, connected: true, selector: () => null, ...props }, null),
   );
-  expect(html).toMatch(/<nav id="sidebar" class="sidebar" data-mode="expanded" aria-label="Tags">/);
-  expect(html).toMatch(/aria-label="finch"[^>]* aria-current="false"/);
-  expect(html).toMatch(/aria-label="Moss"[^>]* aria-current="true"/);
-  expect(html).toMatch(/<div class="identity-pill">.*<span class="tag-name">Moss<\/span><\/div>/);
-  expect(html).not.toContain("conversation-menu");
-  expect(html).not.toContain("New conversation");
-  expect(html).not.toContain("Release checks");
-  expect(html).toContain("Claude Code");
-  // The sidebar's top and the conversation's top strip drag the window.
-  expect(html).toMatch(/class="sidebar-top drag-region"/);
-  expect(html).toMatch(/class="topstrip drag-region"/);
-  expect(html).not.toContain('<header class="topbar"');
+  return host;
+}
+
+it("lists each Tag in the sidebar and puts just the selected Tag in the pill", () => {
+  const shell = page({ tag: tags[1] });
+  expect(shell.querySelector("nav")?.getAttribute("aria-label")).toBe("Tags");
+  const rows = [...shell.querySelectorAll("nav button[aria-current]")];
+  expect(
+    rows.map((row) => [row.getAttribute("aria-label"), row.getAttribute("aria-current")]),
+  ).toEqual([
+    ["finch", "false"],
+    ["Moss", "true"],
+  ]);
+  // The pill names the open Tag and its harness, and nothing of the other Tags.
+  const pill = shell.querySelector("header .identity-pill");
+  expect(pill?.querySelector(".tag-name")?.textContent).toBe("Moss");
+  expect(pill?.textContent).toContain("Claude Code");
+  expect(pill?.textContent).not.toContain("Codex");
+  expect(pill?.querySelector(".avatar")?.textContent).toBe("MO");
+  expect(shell.textContent).not.toContain("New conversation");
+  // The sidebar's top and the conversation's header band drag the window.
+  expect(shell.querySelectorAll(".drag-region")).toHaveLength(2);
 });
 
 it("shows an empty sidebar and no Tag pill before a Gateway connects", () => {
@@ -60,20 +65,11 @@ it("shows an empty sidebar and no Tag pill before a Gateway connects", () => {
 });
 
 it("offers New Tag in the sidebar only to a connection that may create Tags", () => {
-  const render = (props: Partial<Parameters<typeof WorkspaceShell>[0]>) =>
-    renderToStaticMarkup(
-      createElement(
-        WorkspaceShell,
-        { tags, tag: tags[0], connected: true, selector: () => null, ...props },
-        null,
-      ),
-    );
-  expect(render({ onNewTag: () => {} })).toMatch(
-    /aria-label="New Tag" aria-disabled="false" title="New Tag"/,
-  );
-  const refused = render({ newTagRefusal: "Only an operator can create Tags." });
-  expect(refused).toMatch(
-    /aria-label="New Tag" aria-description="Only an operator can create Tags." aria-disabled="true"/,
-  );
-  expect(render({})).not.toContain("New Tag");
+  const newTag = (props: Partial<Parameters<typeof WorkspaceShell>[0]>) =>
+    page({ tag: tags[0], ...props }).querySelector('nav button[aria-label="New Tag"]');
+  expect(newTag({ onNewTag: () => {} })?.getAttribute("aria-disabled")).toBe("false");
+  const refused = newTag({ newTagRefusal: "Only an operator can create Tags." });
+  expect(refused?.getAttribute("aria-disabled")).toBe("true");
+  expect(refused?.getAttribute("aria-description")).toBe("Only an operator can create Tags.");
+  expect(newTag({})).toBeNull();
 });

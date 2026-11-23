@@ -12,14 +12,46 @@
   --hover: #2d2c30;
   --selected: #343135;
   --line: #38363b;
+  /* Text, in four steps: what you read, what supports it, labels and state, times and versions. */
   --text: #f3f0eb;
+  --text-2: #cfcad2;
   --muted: #aba6ae;
+  --faint: #8d8993;
   --accent: #f1b291;
   --mint: #a9cbb4;
+  /* Type: sizes and weights. Headings and Tag names use --display. */
+  --font-2xs: 10px;
+  --font-xs: 11px;
+  --font-sm: 12px;
+  --font-md: 13px;
+  --font-base: 14px;
+  --font-lg: 18px;
+  --font-xl: 20px;
+  --weight-regular: 450;
+  --weight-medium: 550;
+  --weight-bold: 650;
+  /* Spacing and corner radii. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  /* A sidebar row, and the avatar at each of its sizes. */
+  --row-height: 52px;
+  --row-pad: 8px;
+  --row-gap: 10px;
+  --avatar-sm: 22px;
+  --avatar-md: 34px;
+  --avatar-lg: 40px;
+  --avatar-xl: 56px;
   --rail-width: 84px;
   --sidebar-width: 256px;
   --bubble: #2a292d;
-  --strip-height: 56px;
+  --header-height: 48px;
   --transcript-inset: 22px;
 }
 
@@ -142,88 +174,68 @@ button:disabled {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A Tag's avatar, the same everywhere: a rounded-square tile in the Tag's colour with its two
+   letters in a dark ink of the same hue (at least 7:1 on every fill), and a pin on the lead. */
 .avatar {
+  --avatar-size: var(--avatar-md);
+  --avatar-fill: #e8a685;
+  --avatar-ink: #3a231c;
   position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--avatar-size);
+  height: var(--avatar-size);
+  border-radius: calc(var(--avatar-size) * 0.28);
+  background: var(--avatar-fill);
+  color: var(--avatar-ink);
+  font-size: calc(var(--avatar-size) * 0.36);
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+.avatar[data-size="sm"] {
+  --avatar-size: var(--avatar-sm);
+}
+.avatar[data-size="lg"] {
+  --avatar-size: var(--avatar-lg);
+}
+.avatar[data-size="xl"] {
+  --avatar-size: var(--avatar-xl);
+}
+.avatar[data-color="mint"] {
+  --avatar-fill: #b3ccba;
+  --avatar-ink: #1f3329;
+}
+.avatar[data-color="lilac"] {
+  --avatar-fill: #d2badc;
+  --avatar-ink: #3a2a40;
+}
+.avatar[data-color="blue"] {
+  --avatar-fill: #a8bfe5;
+  --avatar-ink: #1f2c42;
+}
+.avatar[data-color="yellow"] {
+  --avatar-fill: #dbc493;
+  --avatar-ink: #3b2e16;
+}
+.avatar-pin {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
   display: grid;
   place-items: center;
-  width: 31px;
-  height: 31px;
-  flex: 0 0 auto;
-  overflow: hidden;
-  border-radius: 9px;
-  color: #4b3129;
-  background: #e8a685;
-}
-.avatar.mint {
-  color: #294137;
-  background: #b3ccba;
-}
-.avatar.lilac {
-  color: #49374e;
-  background: #d2badc;
-}
-.avatar.blue {
-  color: #29374d;
-  background: #a8bfe5;
-}
-.avatar.yellow {
-  color: #4a3b21;
-  background: #dbc493;
-}
-.avatar.large {
-  width: 61px;
-  height: 61px;
-  border-radius: 18px;
-}
-.mark {
-  display: block;
-  position: relative;
-  width: 47%;
-  aspect-ratio: 1;
-  color: inherit;
-}
-.mark-0 {
-  border: 0.12em solid currentColor;
-  transform: rotate(45deg);
-  border-radius: 32%;
-}
-.mark-0::after {
-  content: "";
-  position: absolute;
-  inset: 26%;
+  width: max(12px, calc(var(--avatar-size) * 0.3 + 4px));
+  height: max(12px, calc(var(--avatar-size) * 0.3 + 4px));
+  border: 1px solid var(--line);
   border-radius: 50%;
-  background: currentColor;
+  background: var(--background);
+  color: var(--text);
 }
-.mark-1 {
-  background: currentColor;
-  border-radius: 52% 52% 22% 22%;
-}
-.mark-1::after {
-  content: "";
-  position: absolute;
-  width: 110%;
-  height: 25%;
-  left: -5%;
-  top: 43%;
-  background: #fff9;
-  transform: rotate(-36deg);
-}
-.mark-2 {
-  border: 0.12em solid currentColor;
-  border-radius: 50%;
-}
-.mark-2::after {
-  content: "";
-  position: absolute;
-  width: 120%;
-  height: 0.12em;
-  top: 42%;
-  left: -10%;
-  transform: rotate(-44deg);
-  background: currentColor;
-}
-.avatar.large .mark {
-  font-size: 26px;
+.avatar-pin svg {
+  width: 62%;
+  height: 62%;
 }
 
 /* The sidebar: full height, its separator running to the top of the window. Expanded, it lists
@@ -260,20 +272,31 @@ button:disabled {
 .sidebar-top {
   height: 40px;
 }
-.sidebar-gateway {
-  display: grid;
-  justify-items: center;
-  padding: 0 12px 13px;
-}
 .sidebar-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 12px 3px 17px;
+  gap: var(--space-2);
+  padding: 0 var(--space-2) var(--space-2) var(--space-3);
 }
-.sidebar-heading h2 {
-  margin: 0;
-  font: 600 18px / 1.2 var(--display);
+/* The mascot and wordmark, on the row of the search and New Tag buttons, below the title bar. */
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  user-select: none;
+}
+.sidebar-brand img {
+  flex: none;
+  width: 26px;
+  height: 26px;
+}
+.sidebar-wordmark {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 var(--font-lg) / 1.2 var(--display);
   letter-spacing: -0.035em;
 }
 .sidebar-top-actions {
@@ -308,93 +331,60 @@ button:disabled {
   background: var(--selected);
   color: var(--text);
 }
-/* Names get the full first line. Status and the last message share the second with time. */
+/* One list: the lead Tag pinned first, a hairline, then the others. */
 .sidebar-tags {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 4px 10px 14px;
+  gap: 2px;
+  padding: var(--space-1) var(--space-2) var(--space-3);
   scrollbar-width: thin;
   scrollbar-color: var(--line) transparent;
 }
-.sidebar-conversations {
-  flex: none;
-  margin: 9px 5px 0;
-  padding: 7px 2px 4px;
-  border-top: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 550;
-}
 .sidebar-empty {
-  margin: 10px;
+  margin: var(--space-2);
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--font-md);
 }
+/* Every row is the same height and has the same two lines: name and time, then the state and
+   the latest message with the unread dot at its end. */
 .tag-row {
+  position: relative;
   display: flex;
   flex: none;
   align-items: center;
   justify-content: flex-start;
-  gap: 10px;
+  gap: var(--row-gap);
   width: 100%;
-  height: auto;
-  min-height: 49px;
-  padding: 6px 9px;
-  border: 1px solid transparent;
-  border-radius: 9px;
+  height: var(--row-height);
+  padding: 0 var(--row-pad);
+  border: 0;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text);
   text-align: left;
 }
-.tag-row[data-lead="true"] {
-  border-color: var(--line);
-  background: var(--panel);
-}
-.tag-row[data-lead="true"]:hover {
-  background: var(--hover);
-}
 .tag-row[aria-current="true"] {
-  border-color: transparent;
   background: var(--selected);
+}
+.tag-row:focus-visible {
+  outline-offset: -2px;
+}
+.sidebar[data-mode="expanded"] .tag-row[data-lead="true"]:not(:last-child) {
+  margin-bottom: 9px;
+}
+.sidebar[data-mode="expanded"] .tag-row[data-lead="true"]:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  inset: auto var(--row-pad) -6px;
+  border-top: 1px solid var(--line);
 }
 .tag-row-avatar {
   position: relative;
-  flex-shrink: 0;
-}
-.tag-monogram {
   display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  overflow: hidden;
-  border: 1px solid #53515b;
-  border-radius: 50%;
-  background: #303038;
-  color: #dfdce7;
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.015em;
-}
-.tag-row[data-lead="true"] .tag-monogram {
-  border-color: #597468;
-  background: #344840;
-  color: #c8e5d3;
-}
-.lead-badge {
   flex: none;
-  margin-inline-start: auto;
-  color: var(--mint);
-}
-.tag-row-avatar .lead-badge {
-  position: absolute;
-  right: -3px;
-  bottom: -3px;
-  border-radius: 3px;
-  background: var(--rail);
 }
 .tag-row-text {
   display: grid;
@@ -402,59 +392,65 @@ button:disabled {
   min-width: 0;
   gap: 2px;
 }
-.tag-row-title,
-.tag-row-detail {
+.tag-row-line {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
   min-width: 0;
+  height: 18px;
 }
 .tag-row-name {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 15px;
-  line-height: 19px;
-}
-.tag-state {
-  flex-shrink: 0;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 550;
-  line-height: 16px;
-  white-space: nowrap;
-}
-.tag-state[data-state="asking"] {
-  color: var(--accent);
-  font-weight: 650;
-}
-.tag-row-preview {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 450;
-  line-height: 16px;
-}
-.tag-row[data-status="unread"] .tag-row-preview {
-  color: var(--text);
-  font-weight: 600;
+  font: var(--weight-medium) var(--font-base) / 18px var(--display);
+  letter-spacing: -0.01em;
 }
 .tag-row-time {
   flex: none;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 16px;
+  color: var(--faint);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-regular);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+/* On the selected fill the faint step falls under 4.5:1, so the time takes the muted one. */
+.tag-row[aria-current="true"] .tag-row-time {
+  color: var(--muted);
+}
+.tag-row-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-regular);
+  line-height: 18px;
+}
+.tag-row[data-status="unread"] .tag-row-preview {
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}
+.tag-state {
+  color: var(--text-2);
+  font-weight: var(--weight-medium);
+}
+.tag-state[data-state="asking"] {
+  color: var(--accent);
+  font-weight: var(--weight-bold);
+}
+.tag-row-none {
+  color: var(--faint);
 }
 .tag-row-unread,
 .tag-row-badge {
-  width: 8px;
-  height: 8px;
-  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  flex: none;
   border-radius: 50%;
   background: var(--accent);
 }
@@ -522,12 +518,26 @@ button:disabled {
     animation-delay: 0s;
   }
 }
+/* The foot of the sidebar: the Gateway on one quiet line, the release beside or under it. */
 .sidebar-bottom {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) 0;
+  border-top: 1px solid var(--line);
+}
+.sidebar-foot {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px 0;
+  gap: 2px var(--space-2);
+  min-width: 0;
+}
+.sidebar-foot .sidebar-update {
+  order: -1;
+  flex: 1 0 100%;
+  margin-bottom: var(--space-1);
 }
 .connection {
   position: relative;
@@ -540,13 +550,22 @@ button:disabled {
   color: var(--muted);
 }
 .connection.wide {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 14px;
-  gap: 10px;
-  width: 100%;
-  height: 46px;
-  padding: 0 10px;
-  border-radius: 12px;
+  display: flex;
+  /* It keeps its name whole: when the release no longer fits beside it, that wraps under. */
+  flex: 1 0 auto;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
   text-align: left;
 }
 .connection[data-state="open"] {
@@ -556,31 +575,13 @@ button:disabled {
   display: grid;
   place-items: center;
 }
-.connection.wide .connection-icon {
-  height: 28px;
-  border-radius: 8px;
-  background: var(--hover);
-  color: var(--text);
-}
-.connection-text {
-  display: grid;
+.connection-name {
+  flex: 0 1 auto;
   min-width: 0;
-  gap: 3px;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.2;
-}
-.connection-status {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 450;
 }
 .connection-chevron {
-  color: var(--muted);
+  flex: none;
+  color: var(--faint);
 }
 .connection-dot {
   position: absolute;
@@ -595,8 +596,8 @@ button:disabled {
 .connection.wide .connection-dot {
   position: static;
   flex: none;
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border: 0;
 }
 .connection[data-connected="true"] .connection-dot {
@@ -617,26 +618,35 @@ button:disabled {
   min-height: 52px;
   padding: 0;
 }
-.shell[data-sidebar="rail"] .sidebar-gateway {
+.shell[data-sidebar="rail"] .sidebar-bottom {
+  align-items: center;
   padding-inline: 0;
+  border-top: 0;
 }
-/* The releases, small and muted at the foot of the sidebar. */
+.shell[data-sidebar="rail"] .sidebar-foot {
+  flex-direction: column;
+  gap: 10px;
+}
+/* The releases, small and faint beside the Gateway; a longer line wraps under it. */
 .sidebar-version {
-  margin: -4px 0 0;
-  color: var(--muted);
-  font-size: 10px;
+  flex: none;
+  margin: 0;
+  padding-inline: var(--space-2);
+  color: var(--faint);
+  font-size: var(--font-xs);
   line-height: 1.3;
-  text-align: center;
   font-variant-numeric: tabular-nums;
   cursor: default;
   user-select: none;
 }
+.sidebar-version[data-wide="false"] {
+  padding: 0;
+  font-size: var(--font-2xs);
+  text-align: center;
+}
 .sidebar-version[data-wide="false"] span[aria-hidden] {
   display: flex;
   flex-direction: column;
-}
-.shell[data-sidebar="rail"] .sidebar-bottom {
-  padding-inline: 0;
 }
 .gateway-menu {
   z-index: 40;
@@ -737,60 +747,58 @@ button:disabled {
   min-width: 0;
   min-height: 0;
 }
-/* The top of the conversation: no bar, a draggable strip with the Tag pill floating over it. */
+/* The top of the conversation: a solid, draggable band that holds the Tag's pill, so the pill
+   never sits over a message. */
 .topstrip {
-  position: absolute;
+  position: relative;
   z-index: 2;
-  inset: 0 0 auto;
+  flex: none;
   container: conversation-header / inline-size;
-  height: var(--strip-height);
+  height: var(--header-height);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 16px;
-  background: linear-gradient(var(--background) 45%, rgb(25 25 28 / 0%));
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--background);
+}
+.topstrip:empty {
+  border-bottom-color: transparent;
 }
 .identity-pill {
   display: flex;
   align-items: center;
-  gap: 8px;
-  max-width: min(440px, calc(100% - 164px));
-  height: 38px;
-  padding: 0 12px 0 4px;
+  gap: var(--space-2);
+  max-width: min(440px, 100%);
+  height: 32px;
+  padding: 0 var(--space-3) 0 5px;
   border: 1px solid var(--line);
-  border-radius: 999px;
-  background: rgb(37 37 40 / 88%);
-  backdrop-filter: blur(12px);
-  box-shadow: 0 6px 20px rgb(0 0 0 / 30%);
+  border-radius: var(--radius-pill);
+  background: var(--panel);
   color: var(--text);
-}
-.identity-pill .avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
 }
 .tag-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
+  font: var(--weight-medium) var(--font-base) / 1.2 var(--display);
 }
+/* The harness the Tag runs on, inside its pill after the name. */
 .harness {
-  position: absolute;
-  right: 16px;
-  padding: 5px 11px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: rgb(37 37 40 / 88%);
+  flex: none;
+  padding-left: var(--space-2);
+  border-left: 1px solid var(--line);
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-xs);
+  font-weight: var(--weight-regular);
+  line-height: 14px;
   white-space: nowrap;
 }
 .sync-error {
   position: absolute;
   z-index: 3;
-  top: calc(var(--strip-height) + 2px);
+  top: calc(var(--header-height) + 2px);
   left: 50%;
   transform: translateX(-50%);
   width: max-content;
@@ -831,8 +839,7 @@ button:disabled {
   width: 100%;
   min-height: 100%;
   /* The composer floats over the end of the conversation: the last message clears it. */
-  padding: calc(var(--strip-height) + 12px) var(--transcript-inset)
-    calc(var(--composer-height, 96px) + 16px);
+  padding: var(--space-4) var(--transcript-inset) calc(var(--composer-height, 96px) + 16px);
   display: flex;
   flex-direction: column;
   gap: 26px;
@@ -1105,6 +1112,59 @@ button:disabled {
 .markdown [data-streamdown="table-wrapper"] {
   max-width: 100%;
   overflow-x: auto;
+}
+/* A long line of code scrolls sideways, and the code fades out at the right edge while there is
+   more to the right. The fade follows the scroll position and nothing
+   else: a block that fits has no scroll timeline, so it has no fade. */
+@property --code-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes code-fade {
+  0%,
+  92% {
+    --code-fade: 48px;
+  }
+  100% {
+    --code-fade: 0px;
+  }
+}
+.markdown pre {
+  padding-bottom: var(--space-2);
+  mask-image: linear-gradient(to left, transparent, #000 var(--code-fade));
+  animation: code-fade linear both;
+  animation-timeline: scroll(self inline);
+}
+/* The copy and download buttons sit on the block without a frame of their own. */
+.markdown [data-streamdown="code-block-actions"] {
+  border-color: transparent;
+  background: transparent;
+  backdrop-filter: none;
+}
+.markdown [data-streamdown="code-block-actions"] button,
+.markdown [data-streamdown="table-wrapper"] button {
+  border-radius: var(--radius-sm);
+}
+/* A table's actions lie over its top right corner, shown on hover or keyboard focus, so no empty
+   row sits above the table. */
+.markdown [data-streamdown="table-wrapper"] {
+  position: relative;
+}
+.markdown [data-streamdown="table-wrapper"] > div:first-child:not(:only-child) {
+  position: absolute;
+  z-index: 1;
+  top: 13px;
+  right: 13px;
+  padding: 2px var(--space-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  opacity: 0;
+}
+.markdown [data-streamdown="table-wrapper"]:hover > div:first-child,
+.markdown [data-streamdown="table-wrapper"] > div:first-child:focus-within {
+  opacity: 1;
 }
 .message-link {
   color: var(--accent);
@@ -1395,11 +1455,6 @@ button:disabled {
   align-items: center;
   gap: 12px;
   padding: 20px 14px 16px;
-}
-.inspector-profile .avatar.large {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
 }
 .inspector-identity {
   flex: 1;
@@ -1865,7 +1920,7 @@ button.identity-pill[aria-expanded="true"] {
     --transcript-inset: 16px;
   }
   .conversation .topstrip {
-    right: min(var(--activity-width, 0px), 95%);
+    margin-right: min(var(--activity-width, 0px), 95%);
   }
   .activity-frame {
     position: absolute;
@@ -1875,24 +1930,10 @@ button.identity-pill[aria-expanded="true"] {
   }
 }
 
-/* When the inspector overlays a narrow window, stack the two labels within the visible strip. */
+/* When the inspector overlays a narrow window, the pill keeps the Tag's name and drops the harness. */
 @container conversation-header (max-width: 290px) {
-  .identity-pill {
-    align-self: flex-start;
-    margin-top: 3px;
-    max-width: 100%;
-    height: 29px;
-  }
-  .identity-pill .avatar {
-    width: 21px;
-    height: 21px;
-  }
   .harness {
-    inset: auto auto 3px;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    font-size: 10px;
+    display: none;
   }
 }
 
@@ -1932,11 +1973,6 @@ button.identity-pill[aria-expanded="true"] {
   border: 0;
   color: var(--text);
   font-size: 15px;
-}
-.palette-row .avatar {
-  width: 30px;
-  height: 30px;
-  flex-shrink: 0;
 }
 .palette-icon {
   display: grid;

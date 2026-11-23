@@ -18,6 +18,7 @@ within the pre-1.0 compatibility policy described in
   and a shortcut to **Applications** on the right, for both Apple silicon and Intel.
 - The terminal UI's dialogs (New Tag, Gateways, the command palette, Keyboard shortcuts, the Tag
   panels) open in the middle of the screen. They used to sit at the top.
+- The desktop app's sidebar is one **Tags** list. The lead Tag is pinned first, and every row shows the Tag's avatar, name, time, and latest message, with **Working** or **Needs you** before it. A Tag has one avatar everywhere: a tile in its own colour with its two letters. The Gateway switcher moves to the foot of the sidebar beside the release. The conversation's header names the Tag and its harness without covering messages, and the Tag details panel lists its facts in rows with Permissions and Activity sections.
 
 ## [0.3.9] - 2026-11-22
 

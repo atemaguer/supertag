@@ -212,31 +212,33 @@ export function GatewaySelector({
               ? `Current Gateway is ${selected.name}${client ? `, connected as ${client}` : ""}`
               : undefined
           }
-          title={client ? `${name} · ${selected?.address} · connected as ${client}` : name}
+          title={
+            client
+              ? `${name} · ${selected?.address} · connected as ${client}`
+              : `${name} · ${status}`
+          }
           disabled={busy || switching}
         >
-          <span className="connection-icon" aria-hidden>
-            <Server size={17} />
-          </span>
           {wide ? (
+            // One quiet line at the foot of the sidebar: the dot is the connection's state.
             <>
-              <span className="connection-text">
-                <span className="row-title">{name}</span>
-                <small className="connection-status">
-                  <span className="connection-dot" aria-hidden />
-                  {status}
-                </small>
-              </span>
-              <ChevronsUpDown className="connection-chevron" size={14} aria-hidden />
+              <span className="connection-dot" aria-hidden />
+              <span className="connection-name row-title">{name}</span>
+              <ChevronsUpDown className="connection-chevron" size={12} aria-hidden />
             </>
           ) : (
-            <span className="connection-dot" aria-hidden />
+            <>
+              <span className="connection-icon" aria-hidden>
+                <Server size={17} />
+              </span>
+              <span className="connection-dot" aria-hidden />
+            </>
           )}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         className="gateway-menu"
-        side={wide ? "bottom" : "right"}
+        side={wide ? "top" : "right"}
         align="start"
         sideOffset={wide ? 8 : 24}
       >

@@ -40,6 +40,10 @@ ends share. `sdks/` holds one directory per language, each
 with its hand-written SDK and generated bindings. The repo-orientation skill
 (`.claude/skills/repo-orientation/SKILL.md`) maps each directory.
 
+After a change to the desktop window, run `pnpm --filter @supertag/desktop shots` and look at the
+images in `apps/desktop/.shots/` before you report it; `apps/desktop/DESIGN.md` says what it should
+look like.
+
 ## Rules that are easy to violate
 
 **`supertag-ai` is the only public npm package.** It is the TypeScript SDK in `sdks/typescript`.

@@ -101,6 +101,8 @@ const messages = new Map<string, Message[]>([
 
 /** Conversations whose latest message is the Tag's question, still unanswered. */
 const asking = new Set(["wren"]);
+/** Conversations with a reply the person has not read. */
+const unread = new Set<string>();
 
 function conversationFor(tagId: string): Message[] {
   let entries = messages.get(tagId);
@@ -245,8 +247,8 @@ export const previewGateway: Gateway = {
           previewFromTag: reply !== undefined,
           lastActivityAtMs: latest.task.createdAtMs ?? 0,
           latestOrder: latest.order,
-          readOrder: asking.has(tagId) ? latest.order - 1 : latest.order,
-          unreadCount: asking.has(tagId) ? 1 : 0,
+          readOrder: asking.has(tagId) || unread.has(tagId) ? latest.order - 1 : latest.order,
+          unreadCount: asking.has(tagId) || unread.has(tagId) ? 1 : 0,
           working: latest.task.state === "running",
           ...(asking.has(tagId) ? { asking: true } : {}),
         },
@@ -344,6 +346,89 @@ export const previewTagAdmin: TagAdmin = {
     return tag;
   },
 };
+
+/** Minutes since each added Tag's latest message: today, yesterday, this week, and older. */
+const DAY = 24 * 60;
+const extraTags: [tagId: string, name?: string, ago?: number, prompt?: string, result?: string][] =
+  [
+    ["release-notes", "Release notes and changelog keeper", 4, "Draft the 0.4.0 notes."],
+    [
+      "heron",
+      undefined,
+      35,
+      "Why did the nightly fail?",
+      "The nightly failed in the PostgreSQL contract suite: the shared cluster was restarted mid-run, so every later case timed out waiting for a connection.",
+    ],
+    [
+      "dependency-updates",
+      "Dependency updates",
+      50,
+      "Anything risky this week?",
+      "Two majors: vite 8 and typescript 7. Should I open both, or vite first?",
+    ],
+    ["otter", undefined, 200, "Summarise yesterday's incident.", "Done. The summary is posted."],
+    [
+      "docs-site",
+      "Docs site",
+      26 * 60,
+      "Rebuild the reference pages.",
+      "Rebuilt 41 pages; three links were broken and are fixed.",
+    ],
+    ["lark"],
+    ["security-reviewer", "Security reviewer", 2, "Review the egress proxy change."],
+    [
+      "wolverine-long-running-migrations",
+      undefined,
+      3 * DAY,
+      "Plan the sessions table split.",
+      "Plan attached: four migrations, each reversible, with the backfill between the second and third.",
+    ],
+    ["pika", undefined, 5 * DAY, "Tell me when CI is green.", "CI is green on main."],
+    [
+      "onboarding",
+      "Onboarding buddy",
+      9 * DAY,
+      "Welcome Sam to the repository.",
+      "Sent Sam the setup guide and the first three issues to look at.",
+    ],
+    ["ibis"],
+    [
+      "cost-watch",
+      "Cost watch",
+      30 * DAY,
+      "What did the sandboxes cost this week?",
+      "$41.20, down 12% on last week; the snapshot cleanup accounts for most of it.",
+    ],
+    [
+      "quokka",
+      undefined,
+      60 * DAY,
+      "Tidy the flaky-test list.",
+      "Removed six entries that have passed 200 runs in a row.",
+    ],
+  ];
+
+/**
+ * Adds a dozen more Tags to the preview, to show a long sidebar: long names, long previews, and
+ * rows working, asking, unread, and without a message.
+ */
+export function withManyTags() {
+  extraTags.forEach(([tagId, name, ago, prompt, result], index) => {
+    tags.push({
+      tagId,
+      name,
+      instructions: "",
+      allowedActions: ["Read repositories"],
+      revision: 1,
+      harnessKind: index % 2 ? "codex" : "claude_code",
+    });
+    if (prompt !== undefined)
+      messages.set(tagId, [sample(`${tagId}-1`, prompt, result, ago, tagId)]);
+  });
+  asking.add("dependency-updates");
+  unread.add("heron");
+  unread.add("pika");
+}
 
 /** Clears the preview's lead Tag, to show the sidebar without one. */
 export function withoutLead() {

@@ -79,7 +79,7 @@ const noActions: readonly PaletteAction[] = [];
 
 /**
  * The window: the sidebar of Tags on the left, expanded or as a rail, and the conversation with
- * the selected Tag reaching the top of the window, with the Tag in a floating pill over it. A
+ * the selected Tag under a header band that names the Tag and its harness in a pill. A
  * person has one conversation with each Tag here, so selecting a Tag opens it.
  */
 export function WorkspaceShell({
@@ -136,6 +136,14 @@ export function WorkspaceShell({
     ],
     [onNewTag, newTagRefusal, actions],
   );
+  // Who the conversation is with: the Tag's avatar and name, and the harness it runs on.
+  const identity = tag && (
+    <>
+      <TagAvatar tag={tag} size="sm" />
+      <span className="tag-name">{tag.name ?? tag.tagId}</span>
+      {provider && <span className="harness">{provider}</span>}
+    </>
+  );
   const header = (
     <header className="topstrip drag-region">
       {tag &&
@@ -148,16 +156,11 @@ export function WorkspaceShell({
             title={detailsOpen ? "Hide Tag details" : "Show Tag details"}
             onClick={() => onTagDetails()}
           >
-            <TagAvatar tagId={tag.tagId} />
-            <span className="tag-name">{tag.name ?? tag.tagId}</span>
+            {identity}
           </button>
         ) : (
-          <div className="identity-pill">
-            <TagAvatar tagId={tag.tagId} />
-            <span className="tag-name">{tag.name ?? tag.tagId}</span>
-          </div>
+          <div className="identity-pill">{identity}</div>
         ))}
-      {provider && <span className="harness">{provider}</span>}
     </header>
   );
   return (

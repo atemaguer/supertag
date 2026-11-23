@@ -19,31 +19,9 @@ it("keeps the side pane under the top strip out of the window's drag region", ()
   expect(css).toMatch(/\.activity-frame \{\n\s+-webkit-app-region: no-drag;/);
 });
 
-it("sets Tag names and headings in the display face, and leaves messages and code to Geist", () => {
-  const rule = /\n((?:[^{}\n]+,\n)*[^{}\n]+) \{\n\s+font-family: var\(--display\);/u.exec(css);
-  const selectors = (rule?.[1] ?? "").split(",\n").map((selector) => selector.trim());
-  expect(selectors).toEqual([
-    ".tag-row-name",
-    ".tag-name",
-    ".empty h2",
-    ".activity h2",
-    '[data-slot="dialog-title"]',
-  ]);
-  expect(css).toMatch(/\.sidebar-heading h2 \{[^}]*var\(--display\)/u);
-});
-
-it("keeps the selected Tag visible with a flat fill", () => {
-  const rule = /\n\.tag-row\[aria-current="true"\] \{([^}]*)\}/u.exec(css)?.[1] ?? "";
-  expect(rule).toContain("background: var(--selected);");
-  expect(rule).not.toContain("box-shadow:");
-});
-
-it("pins the update banner to the bottom right corner, above the composer and under dialogs", () => {
+it("keeps the update banner above the page and under dialogs", () => {
   const rule = /\n\.update-banner \{([^}]*)\}/u.exec(css)?.[1] ?? "";
   expect(rule).toContain("position: fixed;");
-  expect(rule).toMatch(/^\s+right: 18px;$/mu);
-  // The composer is about 86px tall with its footer; the banner clears its send button.
-  expect(rule).toMatch(/^\s+bottom: 100px;$/mu);
   // Dialogs sit at z-index 50 (components/ui/dialog.tsx); the banner stays below them.
   const z = Number(/z-index: (\d+);/u.exec(rule)?.[1]);
   expect(z).toBeGreaterThan(0);

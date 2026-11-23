@@ -242,11 +242,15 @@ it("shows only features provided by the connected Gateway", () => {
   const summaries = [...host.querySelectorAll("summary")];
   expect(summaries).toHaveLength(1);
   expect(summaries[0]?.textContent).toContain("Permissions");
+  // Permissions start open, and close like any disclosure.
   const permissions = summaries[0]?.closest("details");
-  expect(permissions?.open).toBe(false);
-  act(() => summaries[0]?.click());
   expect(permissions?.open).toBe(true);
   expect(permissions?.querySelector("li")?.textContent).toBe("web:fetch");
+  act(() => summaries[0]?.click());
+  expect(permissions?.open).toBe(false);
+  // The panel is named for its Tag and carries the Tag's avatar.
+  expect(host.querySelector("aside")?.getAttribute("aria-label")).toBe("Lead details");
+  expect(host.querySelector("aside .avatar")?.textContent).toBe("LE");
 });
 
 it("exposes network logs for operator connections to the desktop app", () => {

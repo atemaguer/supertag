@@ -49,10 +49,11 @@ it. A currency budget stops a Claude Code turn when it is spent; with other
 ## Read the conversation and move around
 
 Select a name in the desktop app's **Tags** list to open that conversation.
-The Gateway switcher sits above the Tag list. The lead Tag has a pinned row, and other Tags
-follow in order of latest activity.
-Under each name, **Working** means a Task is queued or running. **Needs you** means the
-Tag's latest message is a question you have yet to answer. The folded rail shows a status dot. Your messages and the
+The lead Tag is pinned first, marked with a pin on its avatar, and other Tags follow in order of
+latest activity. Each row shows the Tag's latest message under its name, or **No messages yet**.
+Before the message, **Working** means a Task is queued or running. **Needs you** means the
+Tag's latest message is a question you have yet to answer. The folded rail shows a status dot.
+The Gateway switcher sits at the foot of the sidebar. Your messages and the
 Tag's are grouped by sender, and a time divider marks a pause of more than fifteen minutes.
 Under your last message it shows **Sent** once the Control Plane has it and **Seen** once a
 Worker Host's Worklet has taken it up, and the animated `···` stays at the end of the Tag's reply until
@@ -72,7 +73,7 @@ turn failed, was cancelled, or needs attention.
 In the desktop app, drag the sidebar's edge to resize it, or past its narrowest to fold it into a
 rail of avatars; ⌘B does the same. The Task activity pane resizes from its edge too. ⌘1 to ⌘9 open
 the Tags in order, ⌘↑ and ⌘↓ the previous and next, and ⌘N creates a Tag; use Ctrl in place of
-⌘ outside macOS. The foot of the sidebar names the app's SuperTag release, and the Gateway's
+⌘ outside macOS. Beside the Gateway switcher, the foot of the sidebar names the app's SuperTag release, and the Gateway's
 when it runs another one; hover over it to see both and the protocol version they agreed.
 
 To find a Tag, a message, or a setting, press ⌘K or the search button beside **+** at the top of

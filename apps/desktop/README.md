@@ -34,6 +34,37 @@ update banner and sidebar button in each state: `downloading`, `ready`, `install
 `available` (Linux), `error`, `install-error`, or `check-error`. Check a change with `pnpm --filter @supertag/desktop build` and
 `pnpm vitest run apps/client apps/desktop`. CI runs them in `.github/workflows/desktop.yml`.
 
+### Look at a change
+
+Tests cannot tell you how the window looks. Before you report a change to the window, take the
+screenshots and look at them:
+
+```sh
+pnpm --filter @supertag/desktop shots              # every state, into apps/desktop/.shots/
+pnpm --filter @supertag/desktop shots narrow rail  # only the named states
+```
+
+`scripts/shots.ts` serves the renderer with Vite on a free port, opens the preview in your
+installed Chrome, headless, and writes one PNG per state at twice the pixel density. It never
+starts Electron, and git ignores `.shots/`. It exits 1 when a state does not render. The states:
+
+| State | Shows |
+| --- | --- |
+| `default` | the sample Tags and a conversation with a code block and a table, at 1280×820 |
+| `inspector` | the Tag details panel |
+| `gateway-selector` | the Gateway menu, opened from the foot of the sidebar |
+| `many-tags` | seventeen Tags with long names and previews, in every row state (`?preview&many`) |
+| `no-lead` | a Gateway without a lead Tag (`?preview&nolead`) |
+| `needs-you` | the conversation of a Tag whose question is unanswered |
+| `narrow`, `narrow-inspector`, `narrow-many-tags` | the same at 900×700 |
+| `search` | the command palette |
+| `rail` | the sidebar folded into its rail |
+| `update-banner` | an update ready to install (`?preview&update=ready`) |
+
+[DESIGN.md](DESIGN.md) records what the window should look like: the avatar, the sidebar's rows,
+the header band, and the spacing and type tokens. The sample data is in `src/preview.ts`, and
+`src/main.tsx` reads the preview's parameters; add a state to `scripts/shots.ts` when you add one.
+
 `electron/main.ts` opens the window, serves the built renderer from `app://supertag/` with its
 Content Security Policy, and keeps the window on it; `preload.ts` exposes `window.supertag`, one
 method per entry of the channel table in `channels.ts`; `ipc.ts` refuses any call that isn't from
