@@ -115,7 +115,6 @@ export function LocalPanel({
       borderColor={status.kind === "startFailed" ? color.error : color.focus}
       backgroundColor="#151515"
       title={title}
-      marginTop={2}
     >
       {lines.map((line, index) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: the lines are fixed for one state.

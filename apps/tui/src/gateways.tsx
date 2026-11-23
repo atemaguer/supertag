@@ -179,7 +179,6 @@ export function Gateways({
       borderColor={color.focus}
       backgroundColor="#151515"
       title="Gateways"
-      marginTop={2}
     >
       {adding ? (
         <AddGateway

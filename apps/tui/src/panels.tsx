@@ -64,7 +64,6 @@ function Frame({
       borderColor={color.focus}
       backgroundColor="#151515"
       title={title}
-      marginTop={2}
     >
       {children}
       {problem ? <text fg={color.error}>{safe(problem)}</text> : null}

@@ -16,6 +16,8 @@ within the pre-1.0 compatibility policy described in
   to a chosen release's. The GitHub address keeps working.
 - The Mac desktop app's disk image is a standard drag-to-install window: **SuperTag** on the left
   and a shortcut to **Applications** on the right, for both Apple silicon and Intel.
+- The terminal UI's dialogs (New Tag, Gateways, the command palette, Keyboard shortcuts, the Tag
+  panels) open in the middle of the screen. They used to sit at the top.
 
 ## [0.3.9] - 2026-11-22
 

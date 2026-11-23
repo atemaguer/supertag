@@ -956,3 +956,19 @@ test("Keyboard shortcuts lists the new keys", async () => {
   expect(frame).toContain("← at the start of a message");
   await screen.close();
 });
+
+test("an overlay sits in the middle of the screen, not at the top", async () => {
+  current = setup(new FakeGateway(TAGS));
+  const screen = await render(current, { width: 120, height: 40 });
+  await screen.waitFor("Message lead");
+  await screen.press("n", { ctrl: true });
+  const rows = (await screen.waitFor("Esc close")).split("\n");
+  const top = rows.findIndex((row) => row.includes("─New Tag─"));
+  // The dialog's bottom border is the row after its last line of help.
+  const bottom = rows.findIndex((row) => row.includes("Esc close")) + 1;
+  const above = top;
+  const below = 40 - 1 - bottom;
+  expect(above).toBeGreaterThan(5);
+  expect(Math.abs(above - below)).toBeLessThanOrEqual(1);
+  await screen.close();
+});

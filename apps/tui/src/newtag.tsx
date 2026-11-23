@@ -193,7 +193,6 @@ export function NewTagForm({
       borderColor={color.focus}
       backgroundColor="#151515"
       title="New Tag"
-      marginTop={2}
     >
       {refusal ? (
         <>

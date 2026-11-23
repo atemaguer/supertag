@@ -176,7 +176,6 @@ export function WorkSessions({
         borderColor={color.focus}
         backgroundColor="#151515"
         title={`Diff · ${clip(diff.work.title || diff.work.workSessionId, 40)}`}
-        marginTop={1}
       >
         <text fg={color.muted}>{clip(`Branch ${diff.branch.branch}`, inner)}</text>
         {result?.note ? <text fg={color.warning}>{safe(result.note)}</text> : null}
@@ -234,7 +233,6 @@ export function WorkSessions({
       borderColor={color.focus}
       backgroundColor="#151515"
       title="Work Sessions"
-      marginTop={1}
     >
       {sessions === undefined && !problem ? (
         <text fg={color.muted}>Loading Work Sessions…</text>

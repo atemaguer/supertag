@@ -212,6 +212,7 @@ function Centered({ children }: { children: React.ReactNode }) {
       zIndex={10}
       flexDirection="column"
       alignItems="center"
+      justifyContent="center"
     >
       {children}
     </box>
@@ -241,7 +242,6 @@ function Help({ onClose }: { onClose(): void }) {
       borderColor={color.focus}
       backgroundColor="#151515"
       title="Keyboard shortcuts"
-      marginTop={1}
     >
       <text fg={color.faint}>Commands</text>
       {COMMANDS.map((entry) => (
@@ -717,7 +717,8 @@ function Workspace({
       <StatusLine controller={controller} hosts={hosts} unread={unread} lost={lost} brief />
       {overlay === "palette" ? (
         <Centered>
-          <box marginTop={2}>
+          {/* A fixed height keeps the top edge still while the matches change. */}
+          <box height={Math.min(24, Math.max(6, height - 2))}>
             <Palette
               items={paletteItems}
               width={Math.min(72, Math.max(30, width - 4))}

@@ -352,7 +352,6 @@ export function ObjectiveForm({
       borderColor={color.focus}
       backgroundColor="#151515"
       title={`New Objective for ${clip(ownerName, 30)}`}
-      marginTop={2}
     >
       {created ? (
         <>
