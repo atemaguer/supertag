@@ -812,11 +812,7 @@ button:disabled {
   align-items: center;
   justify-content: center;
   padding: 0 var(--space-4);
-  border-bottom: 1px solid var(--line);
   background: var(--background);
-}
-.topstrip:empty {
-  border-bottom-color: transparent;
 }
 .identity-pill {
   display: flex;

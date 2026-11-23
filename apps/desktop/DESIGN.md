@@ -79,7 +79,7 @@ From top to bottom: the title row, search, the **Tags** heading, the list, the f
 
 ## Conversation
 
-- A solid header band (`--header-height`) with a hairline under it holds the Tag's pill: avatar,
+- A solid header band (`--header-height`), with no rule under it, holds the Tag's pill: avatar,
   name, and the harness after a divider. The transcript starts below the band, so the pill never
   covers a message. Selecting the pill opens the inspector.
 - Under the composer, one muted read-only line says where the Tag's work runs: the Worker Host
