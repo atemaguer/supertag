@@ -1,7 +1,5 @@
 import type {
   Gateway,
-  HarnessMemory,
-  HarnessMemoryList,
   NetworkLog,
   NetworkRequest,
   Tag,
@@ -10,7 +8,7 @@ import type {
 } from "@supertag/client/model";
 import { describe, harnessLabel } from "@supertag/client/model";
 import { useWatchRefresh, type WatchFeed } from "@supertag/client/react";
-import { Activity, Lock, ShieldCheck, Trash2, X } from "lucide-react";
+import { Activity, ShieldCheck, X } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   useCallback,
@@ -25,13 +23,11 @@ import { relativeTime } from "./sidebar";
 import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
 
-export type InspectorTab = "overview" | "memory" | "network";
+type InspectorTab = "overview" | "network";
 interface InspectorProps {
   gateway: Gateway;
   watch?: WatchFeed;
   tag: Tag;
-  tab?: InspectorTab;
-  onTabChange?(tab: InspectorTab): void;
   onClose(): void;
 }
 
@@ -39,18 +35,13 @@ export function TagDetails(props: InspectorProps) {
   return <Inspector key={JSON.stringify([props.gateway.scope, props.tag.tagId])} {...props} />;
 }
 
-function Inspector({ gateway, watch, tag, tab, onTabChange, onClose }: InspectorProps) {
+function Inspector({ gateway, watch, tag, onClose }: InspectorProps) {
   const id = useId();
-  const [localTab, setLocalTab] = useState<InspectorTab>("overview");
+  const [tab, select] = useState<InspectorTab>("overview");
   const tabs: InspectorTab[] = ["overview"];
-  if (gateway.harnessMemory) tabs.push("memory");
   if (gateway.networkLogs) tabs.push("network");
-  const selected = tabs.includes(tab ?? localTab) ? (tab ?? localTab) : "overview";
+  const selected = tabs.includes(tab) ? tab : "overview";
 
-  function select(next: InspectorTab) {
-    setLocalTab(next);
-    onTabChange?.(next);
-  }
   function navigate(event: ReactKeyboardEvent<HTMLButtonElement>, current: InspectorTab) {
     const index = tabs.indexOf(current);
     let next: InspectorTab | undefined;
@@ -129,45 +120,50 @@ function Inspector({ gateway, watch, tag, tab, onTabChange, onClose }: Inspector
           <X size={16} aria-hidden />
         </Button>
       </div>
-      <div className="inspector-tabs" role="tablist" aria-label="Tag details">
-        {tabs.map((item) => (
-          <button
-            key={item}
-            type="button"
-            role="tab"
-            id={`${id}-${item}`}
-            aria-controls={`${id}-panel-${item}`}
-            aria-selected={selected === item}
-            tabIndex={selected === item ? 0 : -1}
-            onClick={() => select(item)}
-            onKeyDown={(event) => navigate(event, item)}
-          >
-            {item === "overview" ? "Overview" : item === "memory" ? "Memory" : "Network"}
-          </button>
-        ))}
-      </div>
-      {tabs.map((item) => (
-        <div
-          key={item}
-          className="inspector-content"
-          role="tabpanel"
-          id={`${id}-panel-${item}`}
-          aria-labelledby={`${id}-${item}`}
-          hidden={selected !== item}
-          // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users can focus and scroll the selected ARIA tabpanel.
-          tabIndex={0}
-        >
-          {selected === item && item === "overview" && (
-            <Overview gateway={gateway} watch={watch} tag={tag} />
-          )}
-          {selected === item && item === "memory" && (
-            <MemorySection gateway={gateway} watch={watch} tag={tag} />
-          )}
-          {selected === item && item === "network" && (
-            <NetworkSection gateway={gateway} watch={watch} tag={tag} />
-          )}
+      {gateway.networkLogs ? (
+        <>
+          <div className="inspector-tabs" role="tablist" aria-label="Tag details">
+            {tabs.map((item) => (
+              <button
+                key={item}
+                type="button"
+                role="tab"
+                id={`${id}-${item}`}
+                aria-controls={`${id}-panel-${item}`}
+                aria-selected={selected === item}
+                tabIndex={selected === item ? 0 : -1}
+                onClick={() => select(item)}
+                onKeyDown={(event) => navigate(event, item)}
+              >
+                {item === "overview" ? "Overview" : "Network"}
+              </button>
+            ))}
+          </div>
+          {tabs.map((item) => (
+            <div
+              key={item}
+              className="inspector-content"
+              role="tabpanel"
+              id={`${id}-panel-${item}`}
+              aria-labelledby={`${id}-${item}`}
+              hidden={selected !== item}
+              // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users can focus and scroll the selected ARIA tabpanel.
+              tabIndex={0}
+            >
+              {selected === item && item === "overview" && (
+                <Overview gateway={gateway} watch={watch} tag={tag} />
+              )}
+              {selected === item && item === "network" && (
+                <NetworkSection gateway={gateway} watch={watch} tag={tag} />
+              )}
+            </div>
+          ))}
+        </>
+      ) : (
+        <div className="inspector-content">
+          <Overview gateway={gateway} watch={watch} tag={tag} />
         </div>
-      ))}
+      )}
     </aside>
   );
 }
@@ -213,160 +209,6 @@ function Overview({ gateway, watch, tag }: Pick<InspectorProps, "gateway" | "wat
       <ScheduleList gateway={gateway} watch={watch} tagId={tag.tagId} />
       <ActivitySection gateway={gateway} watch={watch} tag={tag} />
     </>
-  );
-}
-
-/** How often the Tag's memory is read again; a turn that changes it is also a conversation change. */
-const MEMORY_INTERVAL = 30_000;
-
-const HARNESS_NAMES: Record<string, string> = {
-  "claude-code": "Claude Code",
-  codex: "Codex",
-  opencode: "OpenCode",
-  cursor: "Cursor",
-};
-
-/**
- * What the details panel says of a memory: whose harness keeps it, what it is about, who sees it,
- * whether it waits for the Tag's daily memory review or a turn that may not write the Tag's
- * memory last changed it, and when.
- */
-export function memoryCaption(memory: HarnessMemory, now = Date.now()): string {
-  const parts = [
-    HARNESS_NAMES[memory.harness] ?? memory.harness,
-    memory.kind,
-    memory.private ? "Only you" : "Shared",
-  ];
-  if (memory.status === "proposed") parts.push("waits for the daily memory review");
-  else if (memory.trust === "proposed-only") parts.push("changed by a Work Session");
-  parts.push(`kept ${relativeTime(memory.updatedAtMs, now)}`);
-  return parts.join(" · ");
-}
-
-/** What deleting a memory does: a proposal is dropped before the review merges it. */
-function deleteLabel(memory: HarnessMemory): string {
-  return memory.status === "proposed" ? "Drop proposed memory" : "Delete memory";
-}
-
-/**
- * The Tag's memory, which its harness keeps, such as Claude Code's auto-memory, as this Mac's
- * Worker Host reads it from the harness's files, with the changes Work Sessions proposed to it;
- * each can be deleted. It never passes through the Control Plane, so a shared Gateway's Tags show
- * none here.
- */
-export function MemorySection({
-  gateway,
-  watch,
-  tag,
-}: {
-  gateway: Gateway;
-  watch?: WatchFeed;
-  tag: Tag;
-}) {
-  const [list, setList] = useState<HarnessMemoryList>();
-  const [error, setError] = useState("");
-  const [deleting, setDeleting] = useState<string>();
-  const tagId = tag.tagId;
-  const read = useCallback(
-    async (signal: AbortSignal) => {
-      if (!gateway.harnessMemory) return;
-      try {
-        const next = await gateway.harnessMemory(tagId);
-        if (signal.aborted) return;
-        setList(next);
-        setError("");
-      } catch (error) {
-        if (!signal.aborted) setError(describe(error));
-        return false;
-      }
-    },
-    [gateway, tagId],
-  );
-  // A finished turn is when the harness may have changed its memory.
-  const affected = useCallback(
-    (update: WatchUpdate) => update.kind === "conversation" && update.tagId === tagId,
-    [tagId],
-  );
-  const refresh = useWatchRefresh(read, MEMORY_INTERVAL, watch, affected);
-
-  async function remove(memory: HarnessMemory) {
-    if (!gateway.deleteHarnessMemory || deleting) return;
-    setDeleting(memory.memoryId);
-    try {
-      await gateway.deleteHarnessMemory(memory.memoryId);
-      setList(
-        (prior) =>
-          prior && {
-            ...prior,
-            memories: prior.memories.filter(({ memoryId }) => memoryId !== memory.memoryId),
-          },
-      );
-      setError("");
-      refresh();
-    } catch (error) {
-      setError(describe(error));
-    } finally {
-      setDeleting(undefined);
-    }
-  }
-
-  if (!gateway.harnessMemory) return null;
-  const name = tag.name ?? tag.tagId;
-  const memories = list?.memories ?? [];
-  const status =
-    error ||
-    (list === undefined
-      ? "Loading memory…"
-      : (list.unavailable ?? (memories.length ? "" : `${name} keeps no memory on this Mac yet.`)));
-  return (
-    <section className="details-section" aria-labelledby="tag-details-memory">
-      <h3 id="tag-details-memory">Memory</h3>
-      <p className="tag-details-intro">
-        What {name} keeps between turns, on this Mac's Worker Host. Delete one to have it forget it.
-      </p>
-      {status && (
-        <p className="activity-status" role="status">
-          {status}
-        </p>
-      )}
-      {list && list.keptOn.length > 0 && (
-        <p className="activity-status">
-          More is kept on Worker Host {list.keptOn.join(", ")}, and shows only there.
-        </p>
-      )}
-      <ul className="memories" aria-label="Memory">
-        {memories.map((memory) => (
-          <li key={memory.memoryId} className="memory" data-status={memory.status}>
-            <p className="memory-text">
-              <strong>{memory.title}</strong>
-              {memory.title && memory.text ? " — " : ""}
-              {memory.text}
-              {memory.truncated ? "…" : ""}
-            </p>
-            <div className="details-footer">
-              <small>
-                {memory.status === "proposed" && <span className="memory-badge">Proposed</span>}
-                {memory.private && <Lock size={11} aria-hidden />}
-                {memoryCaption(memory)}
-              </small>
-              {gateway.deleteHarnessMemory && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="icon-button"
-                  aria-label={`${deleteLabel(memory)}: ${memory.title || memory.text}`}
-                  title={deleteLabel(memory)}
-                  disabled={deleting !== undefined}
-                  onClick={() => void remove(memory)}
-                >
-                  <Trash2 size={14} aria-hidden />
-                </Button>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
-    </section>
   );
 }
 

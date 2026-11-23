@@ -57,7 +57,7 @@ import { Message } from "./ai-elements/message";
 import { Bubble, LiveConversationEntry } from "./conversation-entry";
 import { clamp, ResizeHandle, useStoredWidth } from "./resize";
 import { TagAvatar } from "./tag-avatar";
-import { type InspectorTab, TagDetails } from "./tag-details";
+import { TagDetails } from "./tag-details";
 import { TaskFiles } from "./task-files";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
@@ -83,10 +83,8 @@ interface ConversationProps {
   onWriteChange(delta: 1 | -1): void;
   /** Reports what the sidebar shows for this conversation as its history changes. */
   onSummary?(summary: TagSummary): void;
-  /** The Tag details panel, with its memory, shows beside the conversation. */
+  /** The Tag details panel shows beside the conversation. */
   details?: boolean;
-  inspectorTab?: InspectorTab;
-  onInspectorTabChange?(tab: InspectorTab): void;
   onCloseDetails?(): void;
 }
 
@@ -100,8 +98,6 @@ export function ConversationPane({
   onWriteChange,
   onSummary,
   details,
-  inspectorTab,
-  onInspectorTabChange,
   onCloseDetails,
 }: ConversationProps) {
   const tagId = tag.tagId;
@@ -484,8 +480,6 @@ export function ConversationPane({
                 gateway={gateway}
                 watch={watch}
                 tag={tag}
-                tab={inspectorTab}
-                onTabChange={onInspectorTabChange}
                 onClose={() => onCloseDetails?.()}
               />
             )}

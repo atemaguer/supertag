@@ -18,7 +18,7 @@ import {
   useWatchRefresh,
   type WatchFeed,
 } from "@supertag/client/react";
-import { Keyboard, NotebookText, Plus } from "lucide-react";
+import { Keyboard, Plus } from "lucide-react";
 import {
   type CSSProperties,
   type MouseEvent,
@@ -42,7 +42,6 @@ import { ConversationPane, type Draft } from "./conversation";
 import { NewTagDialog } from "./new-tag";
 import { Sidebar, type SidebarMode, useSidebarShortcut, useSidebarWidth } from "./sidebar";
 import { TagAvatar } from "./tag-avatar";
-import type { InspectorTab } from "./tag-details";
 import { Button } from "./ui/button";
 
 const rosterInterval = 15_000;
@@ -69,9 +68,8 @@ interface ShellProps {
   /** The text of each cached message of a Tag's conversation, newest first, for search. */
   messageTexts?(tagId: string): readonly string[];
   /** Shows the Tag details panel, or hides it, from the Tag's name at the top; `open` sets it. */
-  onTagDetails?(open?: boolean, tab?: InspectorTab): void;
+  onTagDetails?(): void;
   detailsOpen?: boolean;
-  memoryAvailable?: boolean;
   /** A split conversation places the title strip inside its transcript column. */
   children?: ReactNode | ((header: ReactNode) => ReactNode);
 }
@@ -100,7 +98,6 @@ export function WorkspaceShell({
   messageTexts,
   onTagDetails,
   detailsOpen,
-  memoryAvailable = true,
   children,
 }: ShellProps) {
   useSidebarShortcut();
@@ -135,21 +132,9 @@ export function WorkspaceShell({
         keywords: "keys help",
         run: () => setListingShortcuts(true),
       },
-      ...(tag && memoryAvailable && onTagDetails
-        ? [
-            {
-              id: "tag-details",
-              label: "Memory",
-              caption: `what ${tag.name ?? tag.tagId} remembers · delete a memory`,
-              icon: <NotebookText aria-hidden />,
-              keywords: "memory remember forget tag details",
-              run: () => onTagDetails(true, "memory"),
-            },
-          ]
-        : []),
       ...actions,
     ],
-    [onNewTag, newTagRefusal, actions, tag, onTagDetails, memoryAvailable],
+    [onNewTag, newTagRefusal, actions],
   );
   const header = (
     <header className="topstrip drag-region">
@@ -160,7 +145,7 @@ export function WorkspaceShell({
             className="identity-pill"
             aria-expanded={Boolean(detailsOpen)}
             aria-controls="tag-details"
-            title={detailsOpen ? "Hide Tag details" : "Show Tag details and memory"}
+            title={detailsOpen ? "Hide Tag details" : "Show Tag details"}
             onClick={() => onTagDetails()}
           >
             <TagAvatar tagId={tag.tagId} />
@@ -529,19 +514,9 @@ function TagWorkspace({
 }) {
   const tagId = tag.tagId;
   const [details, setDetails] = useState(false);
-  const [tab, setTab] = useState<InspectorTab>("overview");
-  const toggleDetails = useCallback((open?: boolean, requestedTab: InspectorTab = "overview") => {
-    setTab(requestedTab);
-    setDetails((prior) => open ?? !prior);
-  }, []);
+  const toggleDetails = useCallback(() => setDetails((prior) => !prior), []);
   return (
-    <WorkspaceShell
-      {...shell}
-      tag={tag}
-      detailsOpen={details}
-      onTagDetails={toggleDetails}
-      memoryAvailable={Boolean(gateway.harnessMemory)}
-    >
+    <WorkspaceShell {...shell} tag={tag} detailsOpen={details} onTagDetails={toggleDetails}>
       {(header) => (
         <ConversationPane
           header={header}
@@ -554,8 +529,6 @@ function TagWorkspace({
           onSummary={(summary) => onSummary(tagId, summary)}
           onWriteChange={onWriteChange}
           details={details}
-          inspectorTab={tab}
-          onInspectorTabChange={setTab}
           onCloseDetails={() => setDetails(false)}
         />
       )}

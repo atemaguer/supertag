@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import type { Gateway, HarnessMemory, NetworkLog, Tag, TagActivity } from "@supertag/client/model";
+import type { Gateway, NetworkLog, Tag, TagActivity } from "@supertag/client/model";
 import { watchFeed } from "@supertag/client/react";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -8,7 +8,6 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { gatewaySession } from "../gateway";
 import {
   attentionLine,
-  memoryCaption,
   networkRequestLine,
   networkTotals,
   periodWords,
@@ -18,7 +17,6 @@ import {
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const DAY = 24 * 60 * 60 * 1000;
 const tag: Tag = {
   tagId: "lead",
   name: "Lead",
@@ -56,123 +54,6 @@ async function openTab(name: string) {
   await settle();
   expect(inspectorTab(name).getAttribute("aria-selected")).toBe("true");
 }
-
-const memory = (memoryId: string, extra: Partial<HarnessMemory> = {}): HarnessMemory => ({
-  memoryId,
-  tagId: "lead",
-  harness: "codex",
-  private: false,
-  kind: "fact",
-  title: `Memory ${memoryId}`,
-  text: "Staging runs in eu-north-1.",
-  truncated: false,
-  status: "owned",
-  path: "extensions/ad_hoc/notes/region.md",
-  updatedAtMs: Date.now() - DAY,
-  ...extra,
-});
-
-it("says whose harness keeps a memory, who sees it, and whether it waits for review", () => {
-  const now = Date.now();
-  expect(memoryCaption(memory("a", { private: true }), now)).toMatch(
-    /^Codex · fact · Only you · kept /,
-  );
-  expect(
-    memoryCaption(
-      memory("b", { harness: "claude-code", kind: "feedback", trust: "proposed-only" }),
-      now,
-    ),
-  ).toMatch(/^Claude Code · feedback · Shared · changed by a Work Session · kept /);
-  expect(memoryCaption(memory("c", { status: "proposed", trust: "proposed-only" }), now)).toMatch(
-    /^Codex · fact · Shared · waits for the daily memory review · kept /,
-  );
-  // OpenCode and Cursor keep the folder the Worker Host keeps for them.
-  expect(memoryCaption(memory("d", { harness: "opencode" }), now)).toMatch(/^OpenCode · fact /);
-  expect(memoryCaption(memory("e", { harness: "cursor" }), now)).toMatch(/^Cursor · fact /);
-});
-
-it("lists the Tag's memory on this Mac, marks proposals, and deletes one", async () => {
-  let held = [
-    memory("one"),
-    memory("two", { private: true }),
-    memory("three", { status: "proposed" }),
-  ];
-  const harnessMemory = vi.fn(async () => ({ memories: held, keptOn: ["laptop-2"] }));
-  const deleteHarnessMemory = vi.fn(async (memoryId: string) => {
-    const deleted = held.find((entry) => entry.memoryId === memoryId) as HarnessMemory;
-    held = held.filter((entry) => entry.memoryId !== memoryId);
-    return deleted;
-  });
-  const gateway = { harnessMemory, deleteHarnessMemory } as unknown as Gateway;
-  const feed = watchFeed();
-  const onClose = vi.fn();
-  act(() => root.render(createElement(TagDetails, { gateway, watch: feed, tag, onClose })));
-  await settle();
-  await openTab("Memory");
-  expect(harnessMemory).toHaveBeenCalledWith("lead");
-  // The panel is the Tag's: its name heads it, and Memory is one section of it.
-  expect(host.querySelector("aside h2")?.textContent).toBe("Lead");
-  const section = () => host.querySelector('[aria-label="Memory"]');
-  const texts = () =>
-    [...(section()?.querySelectorAll(".memory-text") ?? [])].map((n) => n.textContent);
-  expect(texts()).toEqual([
-    "Memory one — Staging runs in eu-north-1.",
-    "Memory two — Staging runs in eu-north-1.",
-    "Memory three — Staging runs in eu-north-1.",
-  ]);
-  expect(host.textContent).toContain("Only you");
-  const badges = [...host.querySelectorAll(".memory-badge")].map((n) => n.textContent);
-  expect(badges).toEqual(["Proposed"]);
-  expect(host.querySelector('[aria-label="Drop proposed memory: Memory three"]')).not.toBeNull();
-  expect(host.textContent).toContain("More is kept on Worker Host laptop-2");
-  await act(async () =>
-    host.querySelector<HTMLButtonElement>('[aria-label="Delete memory: Memory one"]')?.click(),
-  );
-  await settle();
-  expect(deleteHarnessMemory).toHaveBeenCalledWith("one");
-  expect(texts()).toEqual([
-    "Memory two — Staging runs in eu-north-1.",
-    "Memory three — Staging runs in eu-north-1.",
-  ]);
-  // A finished turn may have changed it: the list rereads, but not for another Tag's turn.
-  held = [memory("four"), ...held];
-  const reads = harnessMemory.mock.calls.length;
-  act(() => feed.publish({ kind: "conversation", tagId: "other" }));
-  await settle();
-  expect(harnessMemory.mock.calls.length).toBe(reads);
-  act(() => feed.publish({ kind: "conversation", tagId: "lead" }));
-  await settle();
-  expect(texts()).toHaveLength(3);
-
-  host.querySelector<HTMLButtonElement>('[aria-label="Close Tag details"]')?.click();
-  expect(onClose).toHaveBeenCalled();
-});
-
-it("says when the Tag keeps no memory on this Mac", async () => {
-  const gateway = {
-    harnessMemory: async () => ({ memories: [], keptOn: [] }),
-  } as unknown as Gateway;
-  act(() => root.render(createElement(TagDetails, { gateway, tag, onClose() {} })));
-  await settle();
-  await openTab("Memory");
-  expect(host.textContent).toContain("Lead keeps no memory on this Mac yet.");
-  expect(host.querySelector('[aria-label^="Delete memory"]')).toBeNull();
-});
-
-it("says why a shared Gateway shows no memory", async () => {
-  const gateway = {
-    harnessMemory: async () => ({
-      memories: [],
-      keptOn: [],
-      unavailable: "A Tag's memory is read only on the machine whose Worker Host keeps it.",
-    }),
-  } as unknown as Gateway;
-  act(() => root.render(createElement(TagDetails, { gateway, tag, onClose() {} })));
-  await settle();
-  await openTab("Memory");
-  expect(host.textContent).toContain("read only on the machine whose Worker Host keeps it");
-  expect(host.querySelector('[aria-label^="Delete memory"]')).toBeNull();
-});
 
 const networkLog: NetworkLog = {
   taskId: "9f1c2d3e4b5a",
@@ -304,18 +185,19 @@ it("opens the Activity disclosure and rereads it when one of the Tag's turns end
 });
 
 it("navigates the available inspector tabs with the keyboard and resets on Tag change", async () => {
+  const harnessMemory = vi.fn();
   const gateway = {
-    harnessMemory: async () => ({ memories: [memory("one")], keptOn: [] }),
+    harnessMemory,
     networkLogs: async () => [],
   } as unknown as Gateway;
   const render = (shown: Tag) =>
     act(() => root.render(createElement(TagDetails, { tag: shown, gateway, onClose() {} })));
   render(tag);
   const names = () => [...host.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent);
-  expect(names()).toEqual(["Overview", "Memory", "Network"]);
+  expect(names()).toEqual(["Overview", "Network"]);
   expect(inspectorTab("Overview").getAttribute("aria-selected")).toBe("true");
   expect(inspectorTab("Overview").tabIndex).toBe(0);
-  expect(inspectorTab("Memory").tabIndex).toBe(-1);
+  expect(inspectorTab("Network").tabIndex).toBe(-1);
 
   const press = async (name: string, key: string, next: string) => {
     act(() => {
@@ -331,16 +213,14 @@ it("navigates the available inspector tabs with the keyboard and resets on Tag c
       selected.getAttribute("aria-controls"),
     );
   };
-  await press("Overview", "ArrowRight", "Memory");
-  await press("Memory", "End", "Network");
+  await press("Overview", "ArrowRight", "Network");
   await press("Network", "ArrowRight", "Overview");
   await press("Overview", "ArrowLeft", "Network");
   await press("Network", "Home", "Overview");
-  await openTab("Memory");
-  expect(host.textContent).toContain("Memory one");
+  await openTab("Network");
+  expect(harnessMemory).not.toHaveBeenCalled();
   render({ ...tag, tagId: "reviewer", name: "Reviewer" });
   expect(inspectorTab("Overview").getAttribute("aria-selected")).toBe("true");
-  expect(host.textContent).not.toContain("Memory one");
 });
 
 it("shows only features provided by the connected Gateway", () => {
@@ -358,9 +238,7 @@ it("shows only features provided by the connected Gateway", () => {
     "0 of 2",
     configured.instructions,
   ]);
-  expect([...host.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent)).toEqual([
-    "Overview",
-  ]);
+  expect(host.querySelector('[role="tablist"]')).toBeNull();
   const summaries = [...host.querySelectorAll("summary")];
   expect(summaries).toHaveLength(1);
   expect(summaries[0]?.textContent).toContain("Permissions");

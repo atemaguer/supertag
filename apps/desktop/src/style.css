@@ -1659,25 +1659,6 @@ button.identity-pill[aria-expanded="true"] {
   margin: 0 0 6px;
   font-variant-numeric: tabular-nums;
 }
-.memories {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.memory {
-  margin-bottom: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--background);
-}
-.memory-text {
-  margin: 0 0 6px;
-  font-size: 13px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
 .details-footer {
   display: flex;
   align-items: center;
@@ -1690,16 +1671,6 @@ button.identity-pill[aria-expanded="true"] {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-}
-.memory[data-status="proposed"] {
-  border-style: dashed;
-}
-.memory-badge {
-  padding: 0 6px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  font-size: 10px;
-  line-height: 16px;
 }
 .network-logs {
   margin: 0;

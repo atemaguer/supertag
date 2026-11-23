@@ -114,13 +114,8 @@ checks that stayed quiet never notify.
 
 A Tag keeps a memory between turns, such as your preferences and decisions: what its harness,
 such as Claude Code or Codex, keeps itself, or for OpenCode and Cursor, a memory folder the Worker
-Host keeps for them, read from the Worker Host on your Mac. In the desktop
-app, select the Tag's name above the conversation, then select **Memory**. You can also choose
-**Memory** in the ⌘K search. Each entry shows its harness, what it is about, and who sees it. One marked **Proposed**
-is a change a Work Session suggested, which the Tag's daily review merges or drops. Delete one to
-have the Tag forget it. The conversation itself shows only messages. To add or change a memory,
-tell the Tag. Memory never passes through the Control Plane, so it shows only on the machine
-whose Worker Host keeps it. From a terminal, `supertag get memories --tag TAG` lists it. See
+Host keeps for them. From a terminal on the machine whose Worker Host keeps the memory,
+`supertag get memories --tag TAG` lists it. See
 [Reading and deleting memory](../reference/coordination.md#reading-and-deleting-memory).
 
 ## See how a Tag's messages land
