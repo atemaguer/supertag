@@ -30,8 +30,8 @@ it("lists each Tag in the sidebar and puts just the selected Tag in the pill", (
     ),
   );
   expect(html).toMatch(/<nav id="sidebar" class="sidebar" data-mode="expanded" aria-label="Tags">/);
-  expect(html).toMatch(/aria-label="finch" aria-current="false"/);
-  expect(html).toMatch(/aria-label="Moss" aria-current="true"/);
+  expect(html).toMatch(/aria-label="finch"[^>]* aria-current="false"/);
+  expect(html).toMatch(/aria-label="Moss"[^>]* aria-current="true"/);
   expect(html).toMatch(/<div class="identity-pill">.*<span class="tag-name">Moss<\/span><\/div>/);
   expect(html).not.toContain("conversation-menu");
   expect(html).not.toContain("New conversation");

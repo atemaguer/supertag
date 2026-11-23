@@ -4,7 +4,16 @@ import {
   type LocalGateway,
   type NotificationLevel,
 } from "@supertag/client/model";
-import { Bell, Check, ChevronRight, Pencil, Plus, Server, Unplug } from "lucide-react";
+import {
+  Bell,
+  Check,
+  ChevronRight,
+  ChevronsUpDown,
+  Pencil,
+  Plus,
+  Server,
+  Unplug,
+} from "lucide-react";
 import type { RefObject } from "react";
 import { useNotificationLevel } from "../lib/notifications";
 import type { PaletteAction } from "./command-palette";
@@ -182,9 +191,8 @@ export function GatewaySelector({
     (selected && (selected.origin !== LOCAL_GATEWAY || local?.origin)) || preview,
   );
   const client = selected && principal?.startsWith("client:") ? principal : undefined;
-  const name = switching
-    ? "Connecting…"
-    : (selected?.name ?? (preview ? "Preview workspace" : "Select Gateway"));
+  const name = selected?.name ?? (preview ? "Preview workspace" : "Select Gateway");
+  const status = switching ? "Connecting…" : connected ? "Connected" : "Not connected";
 
   return (
     <DropdownMenu
@@ -197,7 +205,7 @@ export function GatewaySelector({
           variant="outline"
           ref={trigger}
           className={wide ? "connection wide" : "connection"}
-          data-connected={connected}
+          data-connected={connected && !switching}
           aria-label={connected ? "Switch Gateway" : "Select Gateway"}
           aria-description={
             selected
@@ -207,13 +215,22 @@ export function GatewaySelector({
           title={client ? `${name} · ${selected?.address} · connected as ${client}` : name}
           disabled={busy || switching}
         >
-          <Server size={17} aria-hidden />
-          <span className="connection-dot" aria-hidden />
-          {wide && (
-            <span className="connection-text">
-              <span className="row-title">{name}</span>
-              <small>{connected ? (client ?? "Connected") : "Not connected"}</small>
-            </span>
+          <span className="connection-icon" aria-hidden>
+            <Server size={17} />
+          </span>
+          {wide ? (
+            <>
+              <span className="connection-text">
+                <span className="row-title">{name}</span>
+                <small className="connection-status">
+                  <span className="connection-dot" aria-hidden />
+                  {status}
+                </small>
+              </span>
+              <ChevronsUpDown className="connection-chevron" size={14} aria-hidden />
+            </>
+          ) : (
+            <span className="connection-dot" aria-hidden />
           )}
         </Button>
       </DropdownMenuTrigger>

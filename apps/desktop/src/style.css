@@ -256,32 +256,36 @@ button:disabled {
 .drag-region > * {
   -webkit-app-region: no-drag;
 }
-/* The top row holds the toggle, or the macOS window controls and the toggle, and the actions. */
+/* Leave the title bar available for the window controls and dragging. */
 .sidebar-top {
+  height: 40px;
+}
+.sidebar-heading {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  height: 56px;
-  padding: 0 12px;
+  justify-content: space-between;
+  padding: 0 12px 9px 17px;
+}
+.sidebar-heading h2 {
+  margin: 0;
+  font: 600 23px / 1.2 var(--display);
+  letter-spacing: -0.035em;
 }
 .sidebar-top-actions {
   display: flex;
-  gap: 6px;
+  gap: 2px;
 }
 .sidebar-button {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   padding: 0;
-  border-radius: 50%;
+  border: 0;
+  border-radius: 7px;
   background: transparent;
   color: var(--muted);
 }
-.sidebar-button {
-  border: 1px solid var(--line);
-}
 .sidebar-button:hover,
 .tag-row:hover,
-.lead-tag:hover,
 .connection:hover,
 .icon-button:hover {
   background: var(--hover);
@@ -299,129 +303,85 @@ button:disabled {
   background: var(--selected);
   color: var(--text);
 }
-/* The lead Tag, in the slot the SuperTag mascot takes when there is none. */
-.sidebar-lead {
-  display: flex;
-  justify-content: center;
-  padding: 4px 0 14px;
-}
-.lead-tag {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  height: auto;
-  padding: 7px;
-  border: 1px solid transparent;
-  border-radius: 18px;
-  background: transparent;
-  color: var(--text);
-}
-/* The open Tag's row is a soft fill, without a border. */
-.lead-tag[aria-current="true"],
-.tag-row[aria-current="true"] {
-  background: var(--selected);
-}
-.lead-avatar {
-  position: relative;
-  display: block;
-}
-.lead-avatar .avatar.large {
-  width: 46px;
-  height: 46px;
-  border-radius: 14px;
-}
-.lead-avatar .avatar.large .mark {
-  font-size: 20px;
-}
-.lead-badge {
-  position: absolute;
-  right: -4px;
-  bottom: -4px;
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border: 2px solid var(--rail);
-  border-radius: 50%;
-  background: var(--accent);
-  color: #3a2418;
-}
-.lead-name {
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 16px;
-  line-height: 20px;
-}
-.sidebar-mascot {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-}
-.sidebar-divider {
-  align-self: center;
-  width: 30px;
-  height: 1px;
-  margin-bottom: 10px;
-  background: var(--line);
-}
+/* Names get the full first line. Status and the last message share the second with time. */
 .sidebar-tags {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 4px 8px 12px;
-  scrollbar-width: none;
+  gap: 2px;
+  padding: 4px 7px 14px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
 }
-/* A row on the 4px grid: 8px around a 40px avatar, 12px to the text. */
+.sidebar-empty {
+  margin: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
 .tag-row {
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: flex-start;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
   height: auto;
-  min-height: 56px;
-  padding: 8px;
-  border: 1px solid transparent;
-  border-radius: 12px;
+  min-height: 43px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--text);
   text-align: left;
+}
+.tag-row[aria-current="true"] {
+  background: var(--selected);
+  box-shadow: inset 2px 0 var(--accent);
 }
 .tag-row-avatar {
   position: relative;
   flex-shrink: 0;
 }
 .tag-row-avatar .avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+}
+/* The lead shares the roster; its star remains visible when the sidebar folds to a rail. */
+.tag-row-avatar .lead-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 12px;
+  height: 12px;
+  padding: 1px;
+  border-radius: 50%;
+  background: var(--rail);
+  color: var(--accent);
 }
 .tag-row-text {
   display: grid;
   flex: 1;
   min-width: 0;
+  gap: 2px;
 }
-/* The name, and beside it the state in a word: Working, or Needs you. */
-.tag-row-title {
+.tag-row-title,
+.tag-row-detail {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
   min-width: 0;
 }
 .tag-row-name {
-  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 15px;
-  line-height: 20px;
+  line-height: 19px;
 }
 .tag-state {
   flex-shrink: 0;
@@ -434,10 +394,6 @@ button:disabled {
 .tag-state[data-state="asking"] {
   color: var(--accent);
   font-weight: 650;
-}
-/* Under the lead Tag's name, closer to it than the name is to its portrait. */
-.lead-tag .tag-state {
-  margin-top: -4px;
 }
 .tag-row-preview {
   overflow: hidden;
@@ -452,16 +408,8 @@ button:disabled {
   color: var(--text);
   font-weight: 600;
 }
-/* The time on the name's line, the unread dot under it. */
-.tag-row-meta {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  align-self: stretch;
-  gap: 4px;
-  padding-top: 2px;
-}
 .tag-row-time {
+  flex: none;
   color: var(--muted);
   font-size: 11px;
   line-height: 16px;
@@ -557,25 +505,47 @@ button:disabled {
   color: var(--muted);
 }
 .connection.wide {
-  justify-content: flex-start;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 14px;
   gap: 10px;
   width: 100%;
   height: 46px;
-  padding: 0 14px;
-  border-radius: 999px;
+  padding: 0 10px;
+  border-radius: 12px;
   text-align: left;
+}
+.connection[data-state="open"] {
+  background: var(--hover);
+}
+.connection-icon {
+  display: grid;
+  place-items: center;
+}
+.connection.wide .connection-icon {
+  height: 28px;
+  border-radius: 8px;
+  background: var(--hover);
+  color: var(--text);
 }
 .connection-text {
   display: grid;
   min-width: 0;
+  gap: 3px;
   color: var(--text);
   font-size: 13px;
   font-weight: 600;
+  line-height: 1.2;
 }
-.connection-text small {
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   color: var(--muted);
   font-size: 11px;
   font-weight: 450;
+}
+.connection-chevron {
+  color: var(--muted);
 }
 .connection-dot {
   position: absolute;
@@ -588,22 +558,18 @@ button:disabled {
   background: #89838e;
 }
 .connection.wide .connection-dot {
-  left: 30px;
-  right: auto;
-  bottom: 9px;
+  position: static;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border: 0;
 }
 .connection[data-connected="true"] .connection-dot {
   background: var(--mint);
 }
-/* The rail: the toggle sits beside the window controls, so the lead Tag starts below them. */
+/* Keep the collapsed roster clear of the window controls. */
 .shell[data-sidebar="rail"] .sidebar-top {
   height: 52px;
-}
-.shell[data-sidebar="rail"] .sidebar-lead {
-  padding-bottom: 12px;
-}
-.shell[data-sidebar="rail"] .lead-tag {
-  padding: 6px;
 }
 .shell[data-sidebar="rail"] .sidebar-tags {
   align-items: center;
@@ -638,30 +604,6 @@ button:disabled {
 }
 .shell[data-sidebar="rail"] .sidebar-bottom {
   padding-inline: 0;
-}
-/* Expanded, the lead Tag is large and named. */
-.shell[data-sidebar="expanded"] .lead-avatar .avatar.large {
-  width: 84px;
-  height: 84px;
-  border-radius: 26px;
-}
-.shell[data-sidebar="expanded"] .lead-avatar .avatar.large .mark {
-  font-size: 36px;
-}
-.shell[data-sidebar="expanded"] .lead-badge {
-  width: 26px;
-  height: 26px;
-  border-width: 3px;
-}
-.shell[data-sidebar="expanded"] .lead-tag {
-  padding: 10px 18px;
-}
-.shell[data-sidebar="expanded"] .sidebar-mascot {
-  width: 72px;
-  height: 72px;
-}
-.shell[data-sidebar="expanded"] .sidebar-divider {
-  width: calc(100% - 28px);
 }
 .gateway-menu {
   z-index: 40;
@@ -891,7 +833,6 @@ button:disabled {
 }
 /* Bricolage Grotesque, a little narrowed, for Tag names and headings. Small names use its
    neutral optical size; the larger headings set their own. */
-.lead-name,
 .tag-row-name,
 .tag-name,
 .empty h2,
@@ -901,7 +842,6 @@ button:disabled {
   font-stretch: 92%;
   font-weight: 600;
 }
-.lead-name,
 .tag-row-name,
 .tag-name,
 .activity h2 {

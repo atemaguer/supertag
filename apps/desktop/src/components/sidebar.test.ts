@@ -134,7 +134,7 @@ it("snaps to the rail when dragged past the threshold, and back out to the last 
   expect(shown()).toBe("84px");
   expect(localStorage.getItem("supertag.desktop.sidebar")).toBe("rail");
   // The rail keeps every Tag and the Gateway: nothing is hidden.
-  expect(rows()).toEqual(["finch", "moss"]);
+  expect(rows()).toEqual(["Lead, lead Tag", "finch", "moss"]);
   expect(host.querySelector(".sidebar .connection")?.textContent).toBe("rail");
 
   // A short drag outward stays the rail; past the threshold it expands.
@@ -184,27 +184,45 @@ it("starts as the rail when that was the saved choice", () => {
   expect(shell().dataset.sidebar).toBe("rail");
 });
 
-it("puts the lead Tag in the top slot, named when expanded, and opens it on click", () => {
-  const { onSelectTag } = render();
-  const lead = host.querySelector(".lead-tag") as HTMLButtonElement;
-  expect(lead.getAttribute("aria-label")).toBe("Lead, lead Tag");
+it("opens the lead from the first roster row and exposes its name in rail mode", () => {
+  const { onSelectTag } = render({
+    tag: tags[1],
+    summaries: { lead: { preview: "Review is ready.", unread: true } },
+  });
+  const lead = host.querySelector('.tag-row[data-lead="true"]') as HTMLButtonElement;
+  expect(rows()).toEqual(["Lead, lead Tag", "finch", "moss"]);
+  expect(lead.getAttribute("aria-current")).toBe("true");
   expect(lead.querySelector(".lead-badge")).not.toBeNull();
-  expect(lead.querySelector(".lead-name")?.textContent).toBe("Lead");
-  expect(rows()).not.toContain("Lead");
+  expect(lead.querySelector(".tag-row-name")?.textContent).toBe("Lead");
+  expect(lead.querySelector(".tag-row-preview")?.textContent).toBe("Review is ready.");
   act(() => lead.click());
   expect(onSelectTag).toHaveBeenCalledWith("lead");
 
-  act(() => {
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", ctrlKey: true }));
-  });
-  expect(host.querySelector(".lead-tag .lead-name")).toBeNull();
+  key("Enter");
+  const folded = host.querySelector('.tag-row[data-lead="true"]') as HTMLButtonElement;
+  expect(folded.getAttribute("aria-label")).toBe("Lead, lead Tag");
+  expect(folded.querySelector(".tag-row-name")).toBeNull();
+  act(() => folded.click());
+  expect(onSelectTag).toHaveBeenCalledTimes(2);
 });
 
-it("shows the SuperTag mascot in the top slot when there is no lead Tag", () => {
-  render({ tags: [tag("finch"), tag("moss")] });
-  expect(host.querySelector(".lead-tag")).toBeNull();
-  expect(host.querySelector(".sidebar-mascot")?.getAttribute("alt")).toBe("SuperTag");
-  expect(rows()).toEqual(["finch", "moss"]);
+it("starts with the most recently active Tag when there is no lead", () => {
+  render({
+    tags: [tag("finch"), tag("moss")],
+    summaries: { moss: { lastActivityMs: Date.now() } },
+  });
+  expect(rows()).toEqual(["moss", "finch"]);
+  expect(host.querySelector('.tag-row[data-lead="true"]')).toBeNull();
+});
+
+it.each([
+  [true, "No Tags available"],
+  [false, "Connect to see your Tags"],
+] as const)("explains an empty roster when connected is %s", (connected, message) => {
+  render({ tags: [], tag: undefined, connected });
+  expect(rows()).toEqual([]);
+  expect(host.querySelector(".sidebar-empty")?.textContent).toBe(message);
+  expect(host.querySelector(".sidebar .connection")).not.toBeNull();
 });
 
 it("shows a row's preview, time, unread, and working state when it has them", () => {
@@ -216,8 +234,8 @@ it("shows a row's preview, time, unread, and working state when it has them", ()
     },
   });
   // The newest activity first, below the lead; a state is announced with the name.
-  expect(rows()).toEqual(["moss, Working", "finch"]);
-  const [moss, finch] = [...host.querySelectorAll(".tag-row")] as HTMLElement[];
+  expect(rows()).toEqual(["Lead, lead Tag", "moss, Working", "finch"]);
+  const [, moss, finch] = [...host.querySelectorAll(".tag-row")] as HTMLElement[];
   expect(finch?.dataset.status).toBe("unread");
   expect(finch?.querySelector(".tag-row-preview")?.textContent).toBe("The lockfile is current.");
   expect(finch?.querySelector(".tag-row-time")?.textContent).toBeTruthy();
@@ -235,7 +253,7 @@ it("says a Tag needs you while its question is unanswered, before that it is wor
       moss: { unread: true, preview: "Done." },
     },
   });
-  const [finch, moss] = [...host.querySelectorAll(".tag-row")] as HTMLElement[];
+  const [, finch, moss] = [...host.querySelectorAll(".tag-row")] as HTMLElement[];
   expect(finch?.getAttribute("aria-label")).toBe("finch, Needs you");
   expect(finch?.dataset.status).toBe("asking");
   expect(finch?.querySelector(".tag-state")?.textContent).toBe("Needs you");
@@ -248,7 +266,7 @@ it("says a Tag needs you while its question is unanswered, before that it is wor
 
 it("names the lead Tag's state with it, and keeps a dot for each state on the rail", () => {
   render({ summaries: { lead: { working: true }, moss: { asking: true } } });
-  const lead = host.querySelector(".lead-tag") as HTMLElement;
+  const lead = host.querySelector('.tag-row[data-lead="true"]') as HTMLElement;
   expect(lead.getAttribute("aria-label")).toBe("Lead, lead Tag, Working");
   expect(lead.querySelector(".tag-state")?.textContent).toBe("Working");
   act(() => {
@@ -262,6 +280,7 @@ it("names the lead Tag's state with it, and keeps a dot for each state on the ra
 
 it("has no search field of its own: the search button beside New Tag opens the palette", () => {
   render({ onNewTag: vi.fn() });
+  expect(host.querySelector(".sidebar h2")?.textContent).toBe("Tags");
   expect(host.querySelector(".sidebar input")).toBeNull();
   const actions = [...host.querySelectorAll(".sidebar-top-actions button")].map((button) =>
     button.getAttribute("aria-label"),
@@ -271,7 +290,7 @@ it("has no search field of its own: the search button beside New Tag opens the p
   expect(document.querySelector('[role="dialog"] input')?.getAttribute("placeholder")).toBe(
     "Search Tags, conversations, settings…",
   );
-  expect(rows()).toEqual(["finch", "moss"]);
+  expect(rows()).toEqual(["Lead, lead Tag", "finch", "moss"]);
 });
 
 it("recognises the sidebar shortcut and orders and times rows", () => {

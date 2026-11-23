@@ -23,24 +23,19 @@ it("sets Tag names and headings in the display face, and leaves messages and cod
   const rule = /\n((?:[^{}\n]+,\n)*[^{}\n]+) \{\n\s+font-family: var\(--display\);/u.exec(css);
   const selectors = (rule?.[1] ?? "").split(",\n").map((selector) => selector.trim());
   expect(selectors).toEqual([
-    ".lead-name",
     ".tag-row-name",
     ".tag-name",
     ".empty h2",
     ".activity h2",
     '[data-slot="dialog-title"]',
   ]);
-  // Only that rule names the display face.
-  expect(css.match(/var\(--display\)/gu)).toHaveLength(1);
+  expect(css).toMatch(/\.sidebar-heading h2 \{[^}]*var\(--display\)/u);
 });
 
-it("marks the open Tag's row with a fill alone, without a border", () => {
-  const rule =
-    /\n\.lead-tag\[aria-current="true"\],\n\.tag-row\[aria-current="true"\] \{([^}]*)\}/u.exec(
-      css,
-    )?.[1];
+it("keeps the selected Tag visible with a fill and an inset accent", () => {
+  const rule = /\n\.tag-row\[aria-current="true"\] \{([^}]*)\}/u.exec(css)?.[1] ?? "";
   expect(rule).toContain("background: var(--selected);");
-  expect(rule).not.toContain("border");
+  expect(rule).toMatch(/box-shadow: inset [^;]*var\(--accent\)/u);
 });
 
 it("pins the update banner to the bottom right corner, above the composer and under dialogs", () => {

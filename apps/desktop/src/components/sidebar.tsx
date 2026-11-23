@@ -1,7 +1,6 @@
 import { orderTags, type Tag, type TagSummary } from "@supertag/client/model";
 import { Plus, Search, Star } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import mascot from "../../../../assets/images/supertag-mascot-round.png";
 import { clamp, KEY_STEP, ResizeHandle, useStoredWidth } from "./resize";
 import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
@@ -188,47 +187,23 @@ export function Sidebar({
 
   return (
     <nav id="sidebar" className="sidebar" data-mode={mode} aria-label="Tags">
-      <div className="sidebar-top drag-region">
-        {expanded && (
+      <div className="sidebar-top drag-region" />
+      {expanded && (
+        <div className="sidebar-heading">
+          <h2>Tags</h2>
           <div className="sidebar-top-actions">
             {search}
             {newTag}
           </div>
-        )}
-      </div>
-      <div className="sidebar-lead">
-        {lead ? (
-          <Button
-            variant="ghost"
-            className="lead-tag"
-            aria-label={[tagName(lead), "lead Tag", stateWord(summaries[lead.tagId])]
-              .filter(Boolean)
-              .join(", ")}
-            title={tagName(lead)}
-            aria-current={tag?.tagId === lead.tagId}
-            onClick={() => onSelectTag?.(lead.tagId)}
-          >
-            <span className="lead-avatar">
-              <TagAvatar tagId={lead.tagId} large />
-              <span className="lead-badge" aria-hidden>
-                <Star size={10} fill="currentColor" strokeWidth={0} />
-              </span>
-            </span>
-            {expanded && <span className="lead-name">{tagName(lead)}</span>}
-            {expanded && <TagState summary={summaries[lead.tagId]} />}
-          </Button>
-        ) : (
-          <img className="sidebar-mascot drag-region" src={mascot} alt="SuperTag" />
-        )}
-      </div>
-      <div className="sidebar-divider" aria-hidden />
+        </div>
+      )}
       <div className="sidebar-tags">
         {tags.length === 0 && (
-          <p className="visually-hidden">
+          <p className={expanded ? "sidebar-empty" : "visually-hidden"}>
             {connected ? "No Tags available" : "Connect to see your Tags"}
           </p>
         )}
-        {others.map((entry) => (
+        {ordered.map((entry) => (
           <TagRow
             key={entry.tagId}
             tag={entry}
@@ -264,41 +239,45 @@ function TagRow({
   const name = tagName(tag);
   const status = tagStatus(summary);
   const state = stateWord(summary);
+  const label = [name, tag.lead && "lead Tag", state].filter(Boolean).join(", ");
   return (
     <Button
       variant="ghost"
       className="tag-row"
       // The state is part of the name, so it is announced with it: "moss, Working".
-      aria-label={state ? `${name}, ${state}` : name}
+      aria-label={label}
       aria-description={summary?.unread ? "Unread messages" : undefined}
-      title={expanded ? undefined : state ? `${name}: ${state}` : name}
+      title={tag.lead ? label : state ? `${name}: ${state}` : name}
       aria-current={current}
+      data-lead={tag.lead || undefined}
       data-status={status}
       onClick={onSelect}
     >
       <span className="tag-row-avatar">
         <TagAvatar tagId={tag.tagId} />
+        {tag.lead && <Star className="lead-badge" aria-hidden fill="currentColor" />}
         {!expanded && status && <span className="tag-row-badge" aria-hidden />}
       </span>
       {expanded && (
         <span className="tag-row-text">
           <span className="tag-row-title">
             <span className="tag-row-name">{name}</span>
-            <TagState summary={summary} />
+            {summary?.unread && <span className="tag-row-unread" aria-hidden />}
           </span>
-          {/* A working Tag's row says so in its state word, never with a line of its activity. */}
-          {!summary?.working && summary?.preview && (
-            <span className="tag-row-preview">{summary.preview}</span>
+          {(state || summary?.preview || summary?.lastActivityMs !== undefined) && (
+            <span className="tag-row-detail">
+              {state ? (
+                <span className="tag-state" data-state={status} aria-hidden>
+                  {state}
+                </span>
+              ) : (
+                <span className="tag-row-preview">{summary?.preview}</span>
+              )}
+              {summary?.lastActivityMs !== undefined && (
+                <span className="tag-row-time">{relativeTime(summary.lastActivityMs)}</span>
+              )}
+            </span>
           )}
-        </span>
-      )}
-      {/* The time, with the unread dot under it, so the name and its state keep the width. */}
-      {expanded && (summary?.lastActivityMs !== undefined || summary?.unread) && (
-        <span className="tag-row-meta">
-          {summary?.lastActivityMs !== undefined && (
-            <span className="tag-row-time">{relativeTime(summary.lastActivityMs)}</span>
-          )}
-          {summary?.unread && <span className="tag-row-unread" aria-hidden />}
         </span>
       )}
     </Button>
@@ -315,21 +294,10 @@ export function tagStatus(summary?: TagSummary): "asking" | "working" | "unread"
   return summary?.unread ? "unread" : undefined;
 }
 
-/** The word beside a Tag's name for its state, when the state has one. */
+/** The word below a Tag's name for its state, when the state has one. */
 export function stateWord(summary?: TagSummary): string | undefined {
   const status = tagStatus(summary);
   return status === "asking" ? "Needs you" : status === "working" ? "Working" : undefined;
-}
-
-/** The state word beside the name. It is hidden from assistive technology: the name says it. */
-function TagState({ summary }: { summary?: TagSummary }) {
-  const state = stateWord(summary);
-  if (!state) return null;
-  return (
-    <span className="tag-state" data-state={tagStatus(summary)} aria-hidden>
-      {state}
-    </span>
-  );
 }
 
 /** A short time for a list row: the time today, "Yesterday", the weekday this week, else a date. */

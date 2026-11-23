@@ -48,10 +48,10 @@ it. A currency budget stops a Claude Code turn when it is spent; with other
 
 ## Read the conversation and move around
 
-The desktop app reads like a messaging app. The lead Tag sits at the top of
-the sidebar with a star, and the other Tags follow by their latest activity. Beside a Tag's name
-the sidebar says **Working** while one of its Tasks is queued or running, and **Needs you** while
-its latest message is a question you have not answered; the folded rail shows a dot. Your messages and the
+Select a name in the desktop app's **Tags** list to open that conversation.
+A star marks the lead Tag in the first row. Other Tags follow in order of latest activity.
+Under each name, **Working** means a Task is queued or running. **Needs you** means the
+Tag's latest message is a question you have yet to answer. The folded rail shows a status dot. Your messages and the
 Tag's are grouped by sender, and a time divider marks a pause of more than fifteen minutes.
 Under your last message it shows **Sent** once the Control Plane has it and **Seen** once a
 Worker Host's Worklet has taken it up, and the animated `···` stays at the end of the Tag's reply until
