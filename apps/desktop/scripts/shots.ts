@@ -29,6 +29,8 @@ interface State {
   act?(page: Page): Promise<void>;
   /** What must be in the page for the state to count as rendered. */
   expect: string[];
+  /** A panel over the page: it must be opaque and lie wholly inside the window. */
+  surface?: string;
 }
 
 const wide = { width: 1280, height: 820 };
@@ -53,9 +55,15 @@ const states: State[] = [
     expect: ["#tag-details", "#tag-details .avatar"],
   },
   {
+    // Two saved Gateways with their addresses, one selected, and every action.
     name: "gateway-selector",
+    query: "gateways",
     act: (page) => page.click("#sidebar button.connection"),
-    expect: ['[role="menu"]'],
+    expect: [
+      '[role="menu"] [role="menuitemradio"] >> nth=1',
+      '[role="menuitem"]:has-text("Disconnect")',
+    ],
+    surface: '[role="menu"]',
   },
   {
     name: "many-tags",
@@ -125,6 +133,50 @@ const states: State[] = [
     name: "search",
     act: (page) => page.click('#sidebar button[aria-label="Search"]'),
     expect: ['[role="dialog"] input'],
+    surface: '[role="dialog"]',
+  },
+  {
+    name: "rail-gateway-selector",
+    query: "gateways",
+    storage: { "supertag.desktop.sidebar": "rail" },
+    act: (page) => page.click("#sidebar button.connection"),
+    expect: ['[role="menu"] [role="menuitemradio"] >> nth=1'],
+    surface: '[role="menu"]',
+  },
+  {
+    name: "gateway-edit-menu",
+    query: "gateways",
+    act: async (page) => {
+      await page.click("#sidebar button.connection");
+      await page.hover('[role="menuitem"]:has-text("Edit Gateway")');
+    },
+    expect: ['[role="menu"] >> nth=1'],
+    surface: '[role="menu"] >> nth=1',
+  },
+  {
+    name: "new-tag",
+    act: (page) => page.click('#sidebar button[aria-label="New Tag"]'),
+    expect: ['[role="dialog"] input'],
+    surface: '[role="dialog"]',
+  },
+  {
+    name: "add-gateway",
+    query: "gateways",
+    act: async (page) => {
+      await page.click("#sidebar button.connection");
+      await page.click('[role="menuitem"]:has-text("Add Gateway")');
+    },
+    expect: ['[role="dialog"] input'],
+    surface: '[role="dialog"]',
+  },
+  {
+    name: "shortcuts",
+    act: async (page) => {
+      await page.click('#sidebar button[aria-label="Search"]');
+      await page.click('[role="option"]:has-text("Keyboard shortcuts")');
+    },
+    expect: ['[role="dialog"] .shortcut-list'],
+    surface: '[role="dialog"]',
   },
   {
     name: "rail",
@@ -140,6 +192,7 @@ const states: State[] = [
     name: "settings",
     act: (page) => page.click('#sidebar button[aria-label="Settings"]'),
     expect: ['[role="dialog"] .settings-facts', ":root:not(:has(.settings-button[data-pending]))"],
+    surface: '[role="dialog"]',
   },
   {
     // An update ready and a Gateway on another release: both show here, and dot the gear.
@@ -207,6 +260,20 @@ async function main() {
           await page.waitForSelector(selector, { state: "attached", timeout: 5_000 });
         // Let the transcript settle at its end and menus finish opening.
         await page.waitForTimeout(600);
+        if (state.surface) {
+          const problem = await page
+            .locator(state.surface)
+            .first()
+            .evaluate((panel) => {
+              const box = panel.getBoundingClientRect();
+              const fill = getComputedStyle(panel).backgroundColor;
+              if (/^(transparent|rgba\(.*,\s*0\))$/.test(fill)) return "has no background";
+              if (box.left < 0 || box.top < 0 || box.right > innerWidth || box.bottom > innerHeight)
+                return "is clipped by the window";
+              return "";
+            });
+          if (problem) throw new Error(`${state.surface} ${problem}`);
+        }
         if (errors.length) throw new Error(errors.join("; "));
         await page.screenshot({ path: path.join(out, `${state.name}.png`) });
         console.log(`ok    ${state.name}`);

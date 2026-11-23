@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 
 const css = readFileSync(new URL("./src/style.css", import.meta.url), "utf8");
@@ -26,4 +26,24 @@ it("keeps the update banner above the page and under dialogs", () => {
   const z = Number(/z-index: (\d+);/u.exec(rule)?.[1]);
   expect(z).toBeGreaterThan(0);
   expect(z).toBeLessThan(50);
+});
+
+it("styles every class a component names", () => {
+  // A deleted block of rules once left the Gateway menu unstyled: transparent, its icons and
+  // text unlaid-out. Classes here are named in a component and deliberately have no rule.
+  const hooks = new Set(["task-file-view", "palette-row", "shortcuts-dialog", "avatar-monogram"]);
+  const directory = new URL("./src/components/", import.meta.url);
+  const unstyled: string[] = [];
+  for (const file of readdirSync(directory)) {
+    if (!file.endsWith(".tsx")) continue;
+    const source = readFileSync(new URL(file, directory), "utf8");
+    for (const [, plain, template] of source.matchAll(/className=(?:"([^"]+)"|\{`([^`]+)`\})/gu)) {
+      const names = (plain ?? template ?? "").replace(/\$\{[^}]*\}/gu, " ").split(/\s+/u);
+      for (const name of names) {
+        if (!name || hooks.has(name)) continue;
+        if (!css.includes(`.${name}`)) unstyled.push(`${file}: ${name}`);
+      }
+    }
+  }
+  expect(unstyled).toEqual([]);
 });

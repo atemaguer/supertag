@@ -158,9 +158,12 @@ it("shows the releases, checks for updates, and returns to the gear on Esc", asy
       new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
     );
   });
-  await flush();
-  expect(dialog()).toBeNull();
-  expect(document.activeElement).toBe(gear());
+  // The dialog hands the focus back as it finishes closing.
+  await vi.waitFor(async () => {
+    await flush();
+    expect(dialog()).toBeNull();
+    expect(document.activeElement).toBe(gear());
+  });
 });
 
 it("offers a ready update and warns of a Gateway on another release, with a dot on the gear", async () => {

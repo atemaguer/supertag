@@ -65,16 +65,21 @@ interface Connection {
 /** How often a window connected to the local Gateway checks that it still runs where it did. */
 const LOCAL_CHECK_MS = 3_000;
 
+const noGateways: GatewayList = { profiles: [] };
+
 function App({
   initialConnection,
+  initialGateways = noGateways,
   updateSource = nativeUpdates,
 }: {
   initialConnection?: Connection;
+  /** The saved Gateways the preview shows in the Gateway menu. */
+  initialGateways?: GatewayList;
   updateSource?: UpdateSource;
 }) {
   const [connection, setConnection] = useState(initialConnection);
   const updates = useUpdates(updateSource);
-  const [gateways, setGateways] = useState<GatewayList>({ profiles: [] });
+  const [gateways, setGateways] = useState<GatewayList>(initialGateways);
   const [editor, setEditor] = useState<{ profile?: GatewayProfile }>();
   const [error, setError] = useState("");
   const [switching, setSwitching] = useState(!initialConnection);
@@ -455,9 +460,11 @@ async function start() {
   if (!target) throw new Error("Desktop root is missing");
   let initialConnection: Connection | undefined;
   let updateSource: UpdateSource | undefined;
+  let initialGateways: GatewayList | undefined;
   if (import.meta.env.DEV && new URLSearchParams(location.search).has("preview")) {
     const {
       previewGateway,
+      previewGateways,
       previewRelease,
       previewTagAdmin,
       previewUpdates,
@@ -479,10 +486,19 @@ async function start() {
       release: previewRelease(new URLSearchParams(location.search).get("gateway")),
       tagAdmin: previewTagAdmin,
     };
+    // `?preview&gateways` shows two saved Gateways with their addresses, the first one selected.
+    if (new URLSearchParams(location.search).has("gateways")) {
+      initialGateways = previewGateways;
+      initialConnection.origin = previewGateways.profiles[0]?.origin;
+    }
   }
   createRoot(target).render(
     <PlatformProvider value={windowPlatform}>
-      <App initialConnection={initialConnection} updateSource={updateSource} />
+      <App
+        initialConnection={initialConnection}
+        initialGateways={initialGateways}
+        updateSource={updateSource}
+      />
     </PlatformProvider>,
   );
 }

@@ -2,6 +2,7 @@ import type {
   ApprovalDetails,
   Conversation,
   Gateway,
+  GatewayList,
   GatewayRelease,
   HarnessMemory,
   Message,
@@ -484,6 +485,14 @@ export function withManyTags() {
   unread.add("heron");
   unread.add("pika");
 }
+
+/** Two saved Gateways with addresses, for the Gateway menu as a person with several sees it. */
+export const previewGateways: GatewayList = {
+  profiles: [
+    { name: "Local", origin: "http://127.0.0.1:55811" },
+    { name: "Platform team", origin: "https://supertag.platform.example.com" },
+  ],
+};
 
 /** Clears the preview's lead Tag, to show the sidebar without one. */
 export function withoutLead() {
