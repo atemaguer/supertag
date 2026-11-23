@@ -67,8 +67,9 @@ The desktop app's conversation shows only messages, as a messaging app does: you
 the Tag writes, its first sentence included, and its answer. What the Tag does on the way, such as
 the commands it runs and the files it reads, stays out of the conversation. While it works, a `···`
 bubble sits at the end of its reply; select it to see the Task's activity. Once the answer arrives,
-the reply's actions on hover open the activity, and a line under the reply appears only when the
-turn failed, was cancelled, or needs attention.
+the reply's actions on hover open the activity. A turn that took 30 seconds or more says so
+under its reply, such as "Worked for 2m 14s"; select it to open the same activity. Another line
+under the reply appears only when the turn failed, was cancelled, or needs attention.
 
 Under the message field, one line says where the Tag's work runs: the Worker Host of its latest
 turn, its [Workspace](workspaces.md) with the branch it follows, and its harness. It leaves out

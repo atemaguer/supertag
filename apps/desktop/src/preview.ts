@@ -55,6 +55,8 @@ function sample(
   result?: string,
   minutesAgo?: number,
   tagId = "finch",
+  /** How long the turn took, for one that finished. */
+  tookSeconds = 12,
 ): Message {
   const state = result === undefined ? "running" : "succeeded";
   const createdAtMs = minutesAgo === undefined ? undefined : Date.now() - minutesAgo * 60_000;
@@ -62,6 +64,9 @@ function sample(
   return {
     order,
     task: { taskId, tagId, sessionId: `preview/${tagId}`, prompt, state, result, createdAtMs },
+    ...(result !== undefined && createdAtMs !== undefined
+      ? { completedAtMs: createdAtMs + tookSeconds * 1000 }
+      : {}),
   };
 }
 
@@ -80,6 +85,8 @@ const messages = new Map<string, Message[]>([
         "Check whether the same race can affect SQLite.",
         "SQLite uses the same cancellation path. I’d cover both databases with one test:\n\n1. Release the deadline and cancellation paths together.\n2. Check that **one** abort was recorded in `objective_events`.\n\n```sh\nSUPERTAG_RUST_TEST_POSTGRES_URL_FILE=/tmp/pg-url cargo test -p supertag-control-plane --test objective_overview_contract -- --include-ignored postgres_objective_completion_and_overview\n```\n\n| Database | Aborts recorded | Expected |\n| --- | --- | --- |\n| SQLite | 1 | 1 |\n| PostgreSQL | 2 | 1 |",
         26 * 60 - 8,
+        "finch",
+        134,
       ),
       sample("ci-health-3", "Write that test for both databases.", undefined, 3),
     ],

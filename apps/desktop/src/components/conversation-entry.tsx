@@ -28,6 +28,7 @@ const REHYPE_PLUGINS = [
 ] as NonNullable<Parameters<typeof MessageResponse>[0]["rehypePlugins"]>;
 
 import { Button } from "./ui/button";
+import { WorkedFor, workedForMs } from "./worked-for";
 
 /**
  * A conversation entry that shows its turn's messages and what it is doing, as the conversation's
@@ -118,6 +119,8 @@ export function ConversationEntry({
   // While the turn runs the Tag is typing, after whatever it has written so far, until its result.
   const typing = working && !joined && !task.result;
   const openActivity = (trigger: HTMLButtonElement) => onActivity(activityTask, trigger);
+  // A turn that took a while says so under its reply, as a way to its activity.
+  const worked = joined ? undefined : workedForMs(shown);
   const activity = {
     expanded: activeTask === activityTask,
     controls: activeTask ? "activity" : undefined,
@@ -158,6 +161,14 @@ export function ConversationEntry({
                 activity={!typing && index === bubbles.length - 1 ? activity : undefined}
               />
             ))}
+            {!typing && bubbles.length > 0 && worked !== undefined && (
+              <WorkedFor
+                ms={worked}
+                expanded={activity.expanded}
+                controls={activity.controls}
+                onOpen={openActivity}
+              />
+            )}
             {typing && (
               // The dots alone say the Tag is working, as in a messaging app. They open the turn's
               // activity, and only their label names the current step.

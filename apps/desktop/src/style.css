@@ -1212,6 +1212,24 @@ button:disabled {
   gap: 8px;
   padding-left: 4px;
 }
+/* "Worked for 2m 14s" under a reply: one muted line that opens the turn's Task activity. */
+.worked-for {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  width: fit-content;
+  padding: 2px var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--faint);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+.worked-for:hover,
+.worked-for[aria-expanded="true"] {
+  color: var(--text-2);
+}
 /* An uncertain turn's decision: what happened, then Retry and Mark failed. */
 .uncertain-turn {
   flex-direction: column;

@@ -86,6 +86,9 @@ From top to bottom: the brand row with search and **+**, the list, the foot.
   - A question: "NAME is waiting for your answer." under the message that asks, and **Reply**.
   - **Reply** puts the cursor in the composer and adds a "Replying to: …" chip over it, which
     its × or Esc dismisses and sending clears. No red: Deny is an outline pill like any other.
+- Under a reply whose turn took 30 seconds or more, one faint line, "Worked for 2m 14s ›",
+  opens that turn's Task activity. It is a pointer and nothing else: it does not expand, and it
+  never shows a tool, a command or any other activity. The conversation shows only messages.
 - Code blocks: the copy and download buttons have no frame of their own. A long line scrolls
   sideways and fades at the right edge while more lies to the right.
 - Tables: the actions lie over the table's top right corner and show on hover or keyboard focus.

@@ -42,6 +42,8 @@ const states: State[] = [
       '#sidebar img[alt="SuperTag"]',
       row("finch"),
       ".timeline .bubble",
+      ".worked-for",
+      ".composer-where",
       ".composer textarea",
     ],
   },
