@@ -346,7 +346,7 @@ fn update_reports_a_current_install_and_refuses_what_it_cannot_install() -> Resu
     let unmanaged = machine.fails(Path::new(BIN), &["update"])?;
     assert!(
         unmanaged.contains("was not installed by SuperTag's install script")
-            && unmanaged.contains("install.sh | sh"),
+            && unmanaged.contains("supertag.sh/install | sh"),
         "{unmanaged}"
     );
     let app = machine

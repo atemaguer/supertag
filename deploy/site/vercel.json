@@ -1,0 +1,61 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "cleanUrls": false,
+  "trailingSlash": false,
+  "redirects": [
+    {
+      "source": "/install",
+      "destination": "https://github.com/atemaguer/supertag/releases/latest/download/install.sh",
+      "permanent": false
+    },
+    {
+      "source": "/install.sh",
+      "destination": "https://github.com/atemaguer/supertag/releases/latest/download/install.sh",
+      "permanent": false
+    },
+    {
+      "source": "/install/:version(\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.]+)?)",
+      "destination": "https://github.com/atemaguer/supertag/releases/download/v:version/install.sh",
+      "permanent": false
+    },
+    {
+      "source": "/releases/latest/download/:file",
+      "destination": "https://github.com/atemaguer/supertag/releases/latest/download/:file",
+      "permanent": false
+    },
+    {
+      "source": "/releases/download/:tag/:file",
+      "destination": "https://github.com/atemaguer/supertag/releases/download/:tag/:file",
+      "permanent": false
+    },
+    {
+      "source": "/releases",
+      "destination": "https://github.com/atemaguer/supertag/releases",
+      "permanent": false
+    },
+    {
+      "source": "/download",
+      "destination": "https://github.com/atemaguer/supertag/releases/latest",
+      "permanent": false
+    },
+    {
+      "source": "/docs",
+      "destination": "https://github.com/atemaguer/supertag/tree/main/docs",
+      "permanent": false
+    },
+    {
+      "source": "/",
+      "destination": "https://github.com/atemaguer/supertag",
+      "permanent": false
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" }
+      ]
+    }
+  ]
+}

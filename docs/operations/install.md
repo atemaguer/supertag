@@ -34,13 +34,14 @@ The installer script picks your platform's archive. In a terminal running under 
 Apple silicon Mac, it still installs the Apple silicon build:
 
 ```sh
-curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
+curl -fsSL https://supertag.sh/install | sh
 export PATH="$HOME/.local/bin:$PATH"
 supertag --version
 ```
 
-It downloads your platform's archive and checks it against the release's `SHA256SUMS` before
-unpacking it. It checks that `supertag` and `supertag-tui` report the release's version, then
+`supertag.sh/install` redirects to the latest release's `install.sh` on GitHub. The script
+downloads your platform's archive from that release and checks it against the release's
+`SHA256SUMS` before unpacking it. It checks that `supertag` and `supertag-tui` report the release's version, then
 installs the release under `~/.local/share/supertag` and links `supertag` into `~/.local/bin`.
 It never starts services or reads existing SuperTag state. Add the `export` line to your shell
 startup file to use the command in new terminals.

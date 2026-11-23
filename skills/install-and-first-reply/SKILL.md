@@ -20,7 +20,7 @@ prompt for Claude Code. Cursor and OpenCode also work; their setup is under
 Releases cover Linux on arm64 or amd64 and macOS on Apple silicon or Intel:
 
 ```sh
-curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
+curl -fsSL https://supertag.sh/install | sh
 export PATH="$HOME/.local/bin:$PATH"
 supertag --version
 ```

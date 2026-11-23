@@ -357,7 +357,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r https://raw.githubusercontent.com/atemaguer/supertag/main/deploy/modal/requirements.txt
-      - run: curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
+      - run: curl -fsSL https://supertag.sh/install | sh
       - run: ~/.local/bin/supertag deploy --non-interactive
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}

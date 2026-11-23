@@ -139,7 +139,7 @@ in the Keychain, which they can't. Claude Code also needs Node.js; see
 at least one commit.
 
 ```sh
-curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
+curl -fsSL https://supertag.sh/install | sh
 export PATH="$HOME/.local/bin:$PATH"
 supertag init
 supertag message lead "Read this repository and tell me what you would improve first."

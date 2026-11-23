@@ -30,8 +30,7 @@ use crate::{
 const RELEASES: &str = "https://github.com/atemaguer/supertag/releases";
 /// Replaces [`RELEASES`], for testing against a local server.
 const RELEASES_VARIABLE: &str = "SUPERTAG_RELEASES_URL";
-const INSTALL_SCRIPT: &str =
-    "curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh";
+const INSTALL_SCRIPT: &str = "curl -fsSL https://supertag.sh/install | sh";
 const RECEIPT: &str = ".supertag-install.json";
 const RECEIPT_FORMAT: &str = "supertag-native-install-v1";
 const MAX_SUMS_BYTES: u64 = 1024 * 1024;

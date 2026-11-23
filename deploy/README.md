@@ -20,6 +20,7 @@ deploy/
   render/render.yaml          Render Blueprint (WebSocket tunnel)
   modal/app.py                Modal app (WebSocket tunnel) and pinned Modal client
   cloudflare/                 Tunnel Worker, Wrangler configuration, container image
+  site/                       Redirects behind supertag.sh (the install script's short URL)
 ```
 
 The Workspace base image builds with `docker build -t supertag-worker-base:local deploy/docker/worker`.
