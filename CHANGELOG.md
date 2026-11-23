@@ -9,6 +9,11 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Changed
+
+- The Mac desktop app's disk image is a standard drag-to-install window: **SuperTag** on the left
+  and a shortcut to **Applications** on the right, for both Apple silicon and Intel.
+
 ## [0.3.9] - 2026-11-22
 
 ### Added

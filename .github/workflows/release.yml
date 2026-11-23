@@ -90,7 +90,9 @@ jobs:
   # signs the bridges' executables, the CLI and the terminal UI (allow-jit only), then the
   # Electron frameworks, helpers and the app, with the Developer ID certificate and the hardened
   # runtime, builds and signs the disk image, and notarizes and staples only the disk image, which
-  # covers the app inside it; Gatekeeper then accepts the app inside the mounted image. Without
+  # covers the app inside it; Gatekeeper then accepts the app inside the mounted image. The image
+  # is a drag-to-install volume: the app beside a link to /Applications, laid out by the .DS_Store
+  # that scripts/dmg_layout.py writes, so nothing scripts Finder on the runner. Without
   # any Apple secret the image is unsigned, with a warning, as for the archives; an incomplete set
   # fails this job. For now a failure here leaves that image out of the release with a warning
   # instead of stopping it.
@@ -225,6 +227,10 @@ jobs:
           hdiutil attach -quiet -readonly -nobrowse -noautoopen -mountpoint "$mount" \
             "$RUNNER_TEMP/desktop/SuperTag-$VERSION-$PLATFORM.dmg"
           trap 'hdiutil detach -quiet "$mount"' EXIT
+          # A drag-to-install image: the app, Applications -> /Applications, the window layout,
+          # and nothing else.
+          python3 scripts/dmg_layout.py check "$mount"
+          test "$(readlink "$mount/Applications")" = /Applications
           app="$mount/SuperTag.app"
           test "$("$app/Contents/Resources/supertag/supertag" --version)" = "supertag $VERSION"
           # ditto must have kept every relative symlink of the bridges' pnpm layout.

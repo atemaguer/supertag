@@ -598,6 +598,11 @@ keeps the bridges' relative symlinks, signs every executable of the CLI (only Cl
 entitlements), then the Electron frameworks, helpers, and the app with `@electron/osx-sign`
 (`apps/desktop/build/sign-mac.mjs`; the app and its helpers get only `allow-jit`), all with the
 hardened runtime, builds and signs the disk image, and notarizes and staples only the disk image.
+The image is a drag-to-install volume: the app, a symbolic link named `Applications` to
+`/Applications`, and a `.DS_Store` that lays the two out side by side in an icon-view window.
+`scripts/dmg_layout.py` writes that file directly, because scripting Finder is unreliable on a
+runner with no desktop session, and `dmg_layout.py check` fails the build when the mounted image
+holds anything else or the link points elsewhere. The update zip holds only the app.
 Apple notarizes the outermost container, and its ticket covers the app and everything nested in
 it, so the app is not submitted on its own; the script checks that Gatekeeper accepts the app
 inside the mounted image, and the release job then launches it from there

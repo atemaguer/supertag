@@ -9,9 +9,12 @@
 # architecture: supertag, supertag-shared-execution, node-bridges/, and supertag-tui when
 # the release ships it (SHIP_TUI in scripts/native_archive.py).
 # The CLI goes to SuperTag.app/Contents/Resources/supertag/, where the app looks for it first.
-# IMAGE is the disk image to write. ZIP, when given, is the signed app zipped for the app's own
+# IMAGE is the disk image to write: a drag-to-install volume that holds SuperTag.app, a symbolic
+# link named Applications to /Applications, and the .DS_Store from scripts/dmg_layout.py that makes
+# Finder show the two side by side. ZIP, when given, is the signed app zipped for the app's own
 # updates: Squirrel.Mac installs an update from a zip of the app, not from a disk image, and checks
-# its signature against the running app's. It is written last, from the app the image holds.
+# its signature against the running app's. It is written last, from the app the image holds, and
+# holds only the app.
 #
 # With SIGNED=true it needs IDENTITY (a "Developer ID Application: ..." name), APPLE_DEVELOPER_ID_P12,
 # APPLE_DEVELOPER_ID_P12_PASSWORD, NOTARY_KEY_PATH, APPLE_NOTARY_KEY_ID and APPLE_NOTARY_ISSUER_ID.
@@ -54,16 +57,46 @@ while IFS= read -r -d '' path; do
 done < <(find "$resources/node-bridges" -type f \( -perm -u+x -o -name '*.node' -o -name '*.dylib' \) -print0)
 echo "Found ${#machos[@]} executables in the Node bridges."
 
-# Write the app to a read-write image, then compress it into IMAGE. `hdiutil create -srcfolder`
-# straight to a compressed format leaves unused space in the file: for this app, a 293 MB image
-# held 78 MB of compressed data. Converting a finished image writes only the compressed data.
+layout="$(dirname "$0")/dmg_layout.py"
+
+# Stage the volume's contents, write them to a read-write image, then compress it into IMAGE.
+# The volume holds a copy of the app (ditto keeps its symlinks, extended attributes and signature),
+# the Applications link to drag it onto, and the window layout. dmg_layout.py writes the layout as
+# a .DS_Store file, so nothing has to script Finder, which a release runner cannot rely on.
+# `hdiutil create -srcfolder` straight to a compressed format leaves unused space in the file: for
+# this app, a 293 MB image held 78 MB of compressed data. Converting a finished image writes only
+# the compressed data.
 create_image() {
   local scratch
   scratch=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/supertag-app-image.XXXXXXXX")
-  hdiutil create -quiet -volname SuperTag -srcfolder "$app" -format UDRW "$scratch/SuperTag.dmg"
+  mkdir "$scratch/volume"
+  ditto "$app" "$scratch/volume/SuperTag.app"
+  ln -s /Applications "$scratch/volume/Applications"
+  python3 "$layout" write "$scratch/volume"
+  python3 "$layout" check "$scratch/volume"
+  hdiutil create -quiet -volname SuperTag -srcfolder "$scratch/volume" -format UDRW "$scratch/SuperTag.dmg"
   rm -f "$image"
   hdiutil convert -quiet "$scratch/SuperTag.dmg" -format ULMO -o "$image"
   rm -rf "$scratch"
+}
+
+# Mount IMAGE read-only where Finder does not show it, and run the given command on the mount point.
+# It always unmounts, and returns the command's status.
+with_mounted_image() {
+  local mount status=0
+  mount=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/supertag-app-mount.XXXXXXXX")
+  hdiutil attach -quiet -readonly -nobrowse -noautoopen -mountpoint "$mount" "$image" ||
+    { rmdir "$mount"; return 1; }
+  "$@" "$mount" || status=$?
+  hdiutil detach -quiet "$mount" || hdiutil detach -quiet -force "$mount"
+  rmdir "$mount"
+  return "$status"
+}
+
+# The finished image holds exactly the app, the Applications link to /Applications, and the layout.
+check_image() {
+  with_mounted_image python3 "$layout" check ||
+    { echo "$image is not a drag-to-install image" >&2; exit 1; }
 }
 
 # The update zip, as electron-builder's zip target makes it: ditto keeps the bundle's symlinks,
@@ -77,6 +110,7 @@ create_zip() {
 if [[ "$signed" != true ]]; then
   echo "SIGNED is not true: leaving the app unsigned for a local check."
   create_image
+  check_image
   create_zip
   exit 0
 fi
@@ -171,20 +205,19 @@ xcrun stapler staple "$image"
 xcrun stapler validate "$image"
 spctl --assess --type open --context context:primary-signature --verbose=2 "$image"
 
-# Check the app as shipped, inside the image. Its ticket is not stapled, so Gatekeeper looks it up
-# online; give a just-published ticket a moment to appear.
-mount="$work/mount"
-mkdir "$mount"
-hdiutil attach -quiet -readonly -nobrowse -noautoopen -mountpoint "$mount" "$image"
-assessed=false
-for attempt in 1 2 3 4 5; do
-  if spctl --assess --type execute --verbose=2 "$mount/SuperTag.app"; then
-    assessed=true
-    break
-  fi
-  echo "Gatekeeper has not accepted the app yet (attempt $attempt); retrying."
-  sleep 15
-done
-hdiutil detach -quiet "$mount"
-[[ "$assessed" == true ]] || { echo "Gatekeeper rejected the app inside $image" >&2; exit 1; }
+# Check the image as shipped: its contents and layout, then the app inside it. The app's ticket is
+# not stapled, so Gatekeeper looks it up online; give a just-published ticket a moment to appear.
+check_image
+assess_app() {
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if spctl --assess --type execute --verbose=2 "$1/SuperTag.app"; then
+      return 0
+    fi
+    echo "Gatekeeper has not accepted the app yet (attempt $attempt); retrying."
+    sleep 15
+  done
+  return 1
+}
+with_mounted_image assess_app || { echo "Gatekeeper rejected the app inside $image" >&2; exit 1; }
 create_zip

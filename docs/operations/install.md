@@ -96,9 +96,10 @@ On a Mac:
 
 1. Download `SuperTag-VERSION-darwin-arm64.dmg` for Apple silicon, or
    `SuperTag-VERSION-darwin-amd64.dmg` for an Intel Mac. **About This Mac** in the Apple menu
-   shows which you have: an Apple chip, such as M1, or an Intel processor. Open the image and drag
-   **SuperTag** to **Applications**.
-2. Open SuperTag from Applications.
+   shows which you have: an Apple chip, such as M1, or an Intel processor.
+2. Open the image. Its window shows **SuperTag** beside a shortcut to your **Applications** folder.
+   Drag **SuperTag** onto **Applications**.
+3. Eject the image, then open SuperTag from Applications.
 
 The Mac app carries its own `supertag` CLI and Node.js bridges, so it needs no
 separate SuperTag install. It doesn't carry Claude Code or Codex: install the ones you want to use
