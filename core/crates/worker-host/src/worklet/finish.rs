@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use tonic::Status;
 
 use crate::{
-    RegisteredHost, WorkerOptions, ensure_attempt, failures, request, retryable,
+    RegisteredHost, WorkerOptions, ensure_attempt, failures, lifecycle_request, request, retryable,
     worker::{remote, shared_execution},
     worklet::{
         authority::with_cleanup_authority,
@@ -209,7 +209,7 @@ pub(crate) async fn write_session_branch(
 ) {
     let written = async {
         let authority = host
-            .renew_attempt(request(attempt.inspect(), token)?)
+            .renew_attempt(lifecycle_request(attempt.inspect(), token)?)
             .await?
             .into_inner();
         let task = authority.task.context("Attempt authority names no Task")?;

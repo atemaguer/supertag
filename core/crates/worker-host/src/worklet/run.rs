@@ -44,8 +44,8 @@ use crate::worklet::recovery::{
 use crate::worklet::{HostSigner, HostStorage, background, registration, workers};
 use crate::{
     ArtifactSourceConfig, HostHeaders, McpCatalog, RegisteredHost, SharedExecutionConfig,
-    WorkerOptions, WorkletOptions, artifact_inputs, environment, failures, lost_ownership,
-    provider_environment_for, request, retryable, wait_for_work,
+    WorkerOptions, WorkletOptions, artifact_inputs, environment, failures, lifecycle_request,
+    lost_ownership, provider_environment_for, request, retryable, wait_for_work,
     worker::{adapter, remote},
     worklet::{
         HostToken, checkpoints, cleanup_failure, enrollment,
@@ -1358,22 +1358,23 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                     .filter(|pending| !pending.uploaded)
                     .cloned()
                 {
-                    let upload =
-                        async {
-                            // Obtain a fresh budget after the adapter and its descendants stop.
-                            host.renew_attempt(request(attempt.inspect(), token).map_err(
-                                |_| Status::internal("invalid upload authority request"),
-                            )?)
-                            .await?;
-                            let payload = journal.read_checkpoint(&pending).map_err(|error| {
-                                failures::noted(
-                                    Status::data_loss("staged checkpoint could not be read"),
-                                    &error,
-                                )
-                            })?;
-                            transfers.upload(&attempt, payload).await
-                        }
-                        .await;
+                    let upload = async {
+                        // Obtain a fresh budget after the adapter and its descendants stop.
+                        host.renew_attempt(
+                            lifecycle_request(attempt.inspect(), token).map_err(|_| {
+                                Status::internal("invalid upload authority request")
+                            })?,
+                        )
+                        .await?;
+                        let payload = journal.read_checkpoint(&pending).map_err(|error| {
+                            failures::noted(
+                                Status::data_loss("staged checkpoint could not be read"),
+                                &error,
+                            )
+                        })?;
+                        transfers.upload(&attempt, payload).await
+                    }
+                    .await;
                     match upload {
                         Ok(_) => {
                             pending.uploaded = true;
@@ -1441,7 +1442,7 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                         .await;
                 }
                 let outcome = host
-                    .finish_task(request(
+                    .finish_task(lifecycle_request(
                         FinishTaskRequest {
                             task_id: attempt.task_id.clone(),
                             attempt_id: attempt.attempt_id.clone(),
@@ -2029,7 +2030,7 @@ impl Serve for Serving<'_> {
             let encoded = |message: &dyn EncodeMessage| Bytes(message.encode());
             match call {
                 HostCall::Renew(Proto(attempt)) => {
-                    let result = match request(attempt, &token) {
+                    let result = match lifecycle_request(attempt, &token) {
                         Ok(request) => host
                             .renew_attempt(request)
                             .await

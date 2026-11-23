@@ -35,6 +35,8 @@ use tokio::{
 use uuid::Uuid;
 
 const START_TIMEOUT: Duration = Duration::from_secs(15);
+// A Worklet registers, reports capacity, and recovers its journal before signaling readiness.
+const WORKLET_START_TIMEOUT: Duration = Duration::from_secs(90);
 const STOP_TIMEOUT: Duration = Duration::from_secs(12);
 const KILL_TIMEOUT: Duration = Duration::from_secs(3);
 /// The Control Plane address an enrolled installation keeps across restarts.
@@ -394,6 +396,7 @@ impl Children {
             "Control Plane",
             &self.logs,
             lifecycle::CONTROL_PLANE,
+            START_TIMEOUT,
         )
         .await?;
         let endpoint = format!("http://{}", loopback_address(&address)?);
@@ -456,6 +459,7 @@ impl Children {
             "Gateway",
             &self.logs,
             lifecycle::GATEWAY,
+            START_TIMEOUT,
         )
         .await?;
         // The Gateway holds its listener now; this process's copy closes with the command.
@@ -522,6 +526,7 @@ impl Children {
             "Worklet",
             &self.logs,
             FLAGS_HOST,
+            WORKLET_START_TIMEOUT,
         )
         .await?;
         ensure!(ready == "ready", "invalid Worklet readiness signal");
@@ -642,6 +647,7 @@ async fn start_child(
     name: &str,
     logs: &Logs,
     service: &str,
+    startup_timeout: Duration,
 ) -> Result<String> {
     let mut process = command.spawn().with_context(|| format!("start {name}"))?;
     capture_log(&mut process, logs, service)?;
@@ -661,9 +667,12 @@ async fn start_child(
         .context("child readiness pipe missing")?;
     let mut stdout = BufReader::new(stdout);
     let mut line = String::new();
-    time::timeout(START_TIMEOUT, (&mut stdout).take(256).read_line(&mut line))
-        .await
-        .with_context(|| format!("{name} did not become ready"))??;
+    time::timeout(
+        startup_timeout,
+        (&mut stdout).take(256).read_line(&mut line),
+    )
+    .await
+    .with_context(|| format!("{name} did not become ready"))??;
     if !line.ends_with('\n') {
         // Say why when it exited, such as a database a newer release migrated.
         let exited = time::timeout(Duration::from_secs(5), child.wait())
@@ -1127,6 +1136,7 @@ impl ManagedHost {
             &name,
             &self.logs,
             &self.definition.name,
+            WORKLET_START_TIMEOUT,
         )
         .await;
         match started {

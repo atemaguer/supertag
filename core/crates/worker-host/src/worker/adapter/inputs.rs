@@ -17,6 +17,7 @@ use tonic::{Request, Response, Status};
 use crate::RegisteredInputs;
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
+const DATA_CALL_TIMEOUT: Duration = Duration::from_secs(15);
 const RETRY_PAUSE: Duration = Duration::from_millis(250);
 
 #[derive(Clone)]
@@ -174,7 +175,7 @@ impl InputLane {
     /// for calls the Control Plane deduplicates (an operation ID, a usage
     /// sequence, an exact receipt) or that only read, so a call whose answer
     /// the transport lost is safely sent again. Each try is bounded to
-    /// `CALL_TIMEOUT`; a refusal from the Control Plane is returned at once,
+    /// `DATA_CALL_TIMEOUT`; a refusal from the Control Plane is returned at once,
     /// and the call stops when the execution closes or its authority ends.
     pub(super) async fn retry<M, R, F, Fut>(
         &self,
@@ -191,7 +192,9 @@ impl InputLane {
         loop {
             let deadline = self.active_deadline()?;
             let sent = Instant::now();
-            let attempt_deadline = deadline.min(sent + CALL_TIMEOUT);
+            // A coordination write can wait for the Control Plane's write lock
+            // and run several queries before it can return a receipt.
+            let attempt_deadline = deadline.min(sent + DATA_CALL_TIMEOUT);
             let mut upstream = authenticated_request(message.clone(), token, None)?;
             upstream.set_timeout(attempt_deadline.saturating_duration_since(sent));
             // The channel would otherwise hold a call across a broken connection

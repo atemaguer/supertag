@@ -1649,6 +1649,10 @@ async fn monitor(
 
 async fn monitor_authority(bridge: &Bridge, valid_until: &mut Instant) -> Result<()> {
     const POLL: Duration = Duration::from_millis(250);
+    const INSPECT_TIMEOUT: Duration = Duration::from_secs(2);
+    // The Worklet can still be waiting for the Control Plane after a short local timeout.
+    // Give a renewal time to finish before asking the Worklet to send another one.
+    const RENEW_TIMEOUT: Duration = Duration::from_secs(15);
     let lease = &bridge.lease;
     let mut poll_at = Instant::now();
     let mut renew_at = renewal_time(*valid_until);
@@ -1656,9 +1660,8 @@ async fn monitor_authority(bridge: &Bridge, valid_until: &mut Instant) -> Result
         time::sleep_until(poll_at.min(renew_at).min(*valid_until)).await;
         let sent = Instant::now();
         ensure!(sent < *valid_until, "execution authority expired");
-        let call = Duration::from_secs(2);
         let observed = if sent >= renew_at {
-            let renewed = time::timeout_at(*valid_until, lease.renew(call))
+            let renewed = time::timeout_at(*valid_until, lease.renew(RENEW_TIMEOUT))
                 .await
                 .context("execution authority expired during renewal")?;
             ensure!(
@@ -1684,7 +1687,7 @@ async fn monitor_authority(bridge: &Bridge, valid_until: &mut Instant) -> Result
                 }
             }
         } else {
-            time::timeout_at(*valid_until, lease.inspect(call))
+            time::timeout_at(*valid_until, lease.inspect(INSPECT_TIMEOUT))
                 .await
                 .context("execution authority expired during inspection")?
         };

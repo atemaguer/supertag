@@ -159,6 +159,14 @@ fn request<T>(message: T, token: &str) -> Result<Request<T>> {
     Ok(request)
 }
 
+fn lifecycle_request<T>(message: T, token: &str) -> Result<Request<T>> {
+    let mut request = authenticated_request(message, token, None)?;
+    // Renewal and Finish can wait for a serialized Control Plane write. Let
+    // them use the API's full request budget while the lease still fences execution.
+    request.set_timeout(Duration::from_secs(10));
+    Ok(request)
+}
+
 fn lost_ownership(error: &Status) -> bool {
     matches!(
         error.code(),

@@ -1,6 +1,6 @@
 {
   "name": "@supertag/client",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "What SuperTag's front ends share: view types, transcript rules, React hooks, and Gateway connections.",
   "license": "Apache-2.0",
   "private": true,

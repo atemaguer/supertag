@@ -22,7 +22,7 @@ use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 
 use crate::{
-    RegisteredHost, ensure_attempt, request, retryable,
+    RegisteredHost, ensure_attempt, lifecycle_request, request, retryable,
     worklet::{
         HostToken, cleanup_failure,
         finish::save_finish,
@@ -99,7 +99,7 @@ impl<'a> Authority<'a> {
         &mut self,
         attempt: &Attempt,
     ) -> Result<Result<AttemptAuthority, Status>> {
-        let renew = request(attempt.inspect(), self.token.secret())?;
+        let renew = lifecycle_request(attempt.inspect(), self.token.secret())?;
         Ok(self
             .host
             .renew_attempt(renew)
@@ -354,9 +354,11 @@ pub(crate) async fn renew_running_attempt(
 ) -> Result<Instant, Status> {
     let sent = Instant::now();
     let response = host
-        .renew_attempt(request(attempt.inspect(), token).map_err(|error| {
-            crate::failures::noted(Status::internal("invalid authority request"), &error)
-        })?)
+        .renew_attempt(
+            lifecycle_request(attempt.inspect(), token).map_err(|error| {
+                crate::failures::noted(Status::internal("invalid authority request"), &error)
+            })?,
+        )
         .await?
         .into_inner();
     running_until(sent, &response, attempt)

@@ -9,9 +9,16 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-11-22
+
 ### Added
 
 - The README illustrates how multiple Worker Hosts claim work from a shared Control Plane.
+
+### Fixed
+
+- Worker Hosts allow slow Control Plane writes to finish when renewing leases, starting Work Sessions, and reporting Task completion. Execution still stops at lease expiry.
+- `supertag up` allows a Worklet up to 90 seconds to register and recover before reporting a startup timeout.
 
 ## [0.3.8] - 2026-11-22
 
@@ -1733,7 +1740,8 @@ within the pre-1.0 compatibility policy described in
 - Gateway control-plane support and Slack, GitHub, Linear, Microsoft Teams,
   and Lark Surfaces.
 
-[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.8...HEAD
+[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.9...HEAD
+[0.3.9]: https://github.com/atemaguer/supertag/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/atemaguer/supertag/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/atemaguer/supertag/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/atemaguer/supertag/compare/v0.3.5...v0.3.6
