@@ -1,8 +1,7 @@
 import { orderTags, type Tag, type TagSummary } from "@supertag/client/model";
-import { Plus, Search, Star } from "lucide-react";
+import { Pin, Plus, Search } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { clamp, KEY_STEP, ResizeHandle, useStoredWidth } from "./resize";
-import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
 
 /** The sidebar is expanded, with a row per Tag, or a rail of Tag avatars. */
@@ -109,6 +108,7 @@ export function Sidebar({
   connected,
   summaries = {},
   selector,
+  footer,
   onSelectTag,
   onNewTag,
   newTagRefusal,
@@ -120,6 +120,7 @@ export function Sidebar({
   connected: boolean;
   summaries?: Record<string, TagSummary>;
   selector: ReactNode;
+  footer?: ReactNode;
   onSelectTag?(tagId: string): void;
   onNewTag?(): void;
   newTagRefusal?: string;
@@ -188,6 +189,7 @@ export function Sidebar({
   return (
     <nav id="sidebar" className="sidebar" data-mode={mode} aria-label="Tags">
       <div className="sidebar-top drag-region" />
+      <div className="sidebar-gateway">{selector}</div>
       {expanded && (
         <div className="sidebar-heading">
           <h2>Tags</h2>
@@ -203,7 +205,20 @@ export function Sidebar({
             {connected ? "No Tags available" : "Connect to see your Tags"}
           </p>
         )}
-        {ordered.map((entry) => (
+        {lead && (
+          <TagRow
+            key={lead.tagId}
+            tag={lead}
+            summary={summaries[lead.tagId]}
+            expanded={expanded}
+            current={tag?.tagId === lead.tagId}
+            onSelect={() => onSelectTag?.(lead.tagId)}
+          />
+        )}
+        {expanded && lead && others.length > 0 && (
+          <h3 className="sidebar-conversations">Conversations</h3>
+        )}
+        {others.map((entry) => (
           <TagRow
             key={entry.tagId}
             tag={entry}
@@ -217,7 +232,7 @@ export function Sidebar({
       <div className="sidebar-bottom">
         {!expanded && search}
         {!expanded && newTag}
-        {selector}
+        {footer}
       </div>
     </nav>
   );
@@ -239,6 +254,16 @@ function TagRow({
   const name = tagName(tag);
   const status = tagStatus(summary);
   const state = stateWord(summary);
+  const words = name
+    .trim()
+    .split(/[\s_-]+/u)
+    .filter(Boolean);
+  const [first = tag.tagId, second] = words;
+  const initials = (
+    second ? [...first].slice(0, 1).concat([...second].slice(0, 1)) : [...first].slice(0, 2)
+  )
+    .join("")
+    .toLocaleUpperCase();
   const label = [name, tag.lead && "lead Tag", state].filter(Boolean).join(", ");
   return (
     <Button
@@ -253,15 +278,16 @@ function TagRow({
       data-status={status}
       onClick={onSelect}
     >
-      <span className="tag-row-avatar">
-        <TagAvatar tagId={tag.tagId} />
-        {tag.lead && <Star className="lead-badge" aria-hidden fill="currentColor" />}
-        {!expanded && status && <span className="tag-row-badge" aria-hidden />}
+      <span className="tag-row-avatar" aria-hidden>
+        <span className="tag-monogram">{initials}</span>
+        {!expanded && tag.lead && <Pin className="lead-badge" size={12} />}
+        {!expanded && status && <span className="tag-row-badge" />}
       </span>
       {expanded && (
         <span className="tag-row-text">
           <span className="tag-row-title">
             <span className="tag-row-name">{name}</span>
+            {tag.lead && <Pin className="lead-badge" size={13} aria-hidden />}
             {summary?.unread && <span className="tag-row-unread" aria-hidden />}
           </span>
           {(state || summary?.preview || summary?.lastActivityMs !== undefined) && (

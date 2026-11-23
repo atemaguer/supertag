@@ -32,10 +32,10 @@ it("sets Tag names and headings in the display face, and leaves messages and cod
   expect(css).toMatch(/\.sidebar-heading h2 \{[^}]*var\(--display\)/u);
 });
 
-it("keeps the selected Tag visible with a fill and an inset accent", () => {
+it("keeps the selected Tag visible with a flat fill", () => {
   const rule = /\n\.tag-row\[aria-current="true"\] \{([^}]*)\}/u.exec(css)?.[1] ?? "";
   expect(rule).toContain("background: var(--selected);");
-  expect(rule).toMatch(/box-shadow: inset [^;]*var\(--accent\)/u);
+  expect(rule).not.toContain("box-shadow:");
 });
 
 it("pins the update banner to the bottom right corner, above the composer and under dialogs", () => {

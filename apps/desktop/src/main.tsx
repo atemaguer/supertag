@@ -277,18 +277,20 @@ function App({
   });
 
   const selector = (mode: SidebarMode) => (
+    <GatewaySelector
+      {...menu}
+      wide={mode === "expanded"}
+      principal={connection?.principal}
+      trigger={trigger}
+      onOpen={() => {
+        if (pendingSwitch.current || connection?.preview) return;
+        // A local Gateway started or stopped since the list was read shows as it is now.
+        nativeGateway.list().then(setGateways, () => {});
+      }}
+    />
+  );
+  const sidebarFooter = (mode: SidebarMode) => (
     <>
-      <GatewaySelector
-        {...menu}
-        wide={mode === "expanded"}
-        principal={connection?.principal}
-        trigger={trigger}
-        onOpen={() => {
-          if (pendingSwitch.current || connection?.preview) return;
-          // A local Gateway started or stopped since the list was read shows as it is now.
-          nativeGateway.list().then(setGateways, () => {});
-        }}
-      />
       <UpdateButton updates={updates} wide={mode === "expanded"} />
       <VersionLabel wide={mode === "expanded"} gateway={connection?.release} />
     </>
@@ -303,6 +305,7 @@ function App({
           gateway={connection.gateway}
           initialTags={connection.tags}
           selector={selector}
+          sidebarFooter={sidebarFooter}
           draftScope={connection.origin ?? "preview"}
           tagAdmin={connection.tagAdmin}
           newTagRefusal={tagAdminRefusal(connection.principal)}
@@ -316,6 +319,7 @@ function App({
           tags={[]}
           connected={false}
           selector={selector}
+          sidebarFooter={sidebarFooter}
           actions={actions}
           switching={switching}
           // The restart offer says why the local Gateway was refused.

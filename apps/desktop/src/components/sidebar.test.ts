@@ -192,7 +192,11 @@ it("opens the lead from the first roster row and exposes its name in rail mode",
   const lead = host.querySelector('.tag-row[data-lead="true"]') as HTMLButtonElement;
   expect(rows()).toEqual(["Lead, lead Tag", "finch", "moss"]);
   expect(lead.getAttribute("aria-current")).toBe("true");
+  expect(lead.closest(".sidebar-tags")?.previousElementSibling?.className).toBe("sidebar-heading");
+  expect(host.querySelector(".sidebar-gateway .connection")).not.toBeNull();
+  expect(lead.nextElementSibling?.textContent).toBe("Conversations");
   expect(lead.querySelector(".lead-badge")).not.toBeNull();
+  expect(lead.querySelector(".tag-monogram")?.textContent).toBe("LE");
   expect(lead.querySelector(".tag-row-name")?.textContent).toBe("Lead");
   expect(lead.querySelector(".tag-row-preview")?.textContent).toBe("Review is ready.");
   act(() => lead.click());

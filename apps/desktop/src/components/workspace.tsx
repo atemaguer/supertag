@@ -57,6 +57,7 @@ interface ShellProps {
   summaries?: Record<string, TagSummary>;
   /** The Gateway button, round in the rail and wide in the expanded sidebar. */
   selector(mode: SidebarMode): ReactNode;
+  sidebarFooter?(mode: SidebarMode): ReactNode;
   error?: string;
   onSelectTag?(tagId: string): void;
   /** Opens the New Tag dialog, when this connection may create Tags. */
@@ -90,6 +91,7 @@ export function WorkspaceShell({
   switching,
   summaries,
   selector,
+  sidebarFooter,
   error,
   onSelectTag,
   onNewTag,
@@ -187,6 +189,7 @@ export function WorkspaceShell({
         connected={connected}
         summaries={summaries}
         selector={selector(mode)}
+        footer={sidebarFooter?.(mode)}
         onSelectTag={onSelectTag}
         onNewTag={onNewTag}
         newTagRefusal={newTagRefusal}
@@ -294,6 +297,7 @@ interface WorkspaceProps {
   gateway: Gateway;
   initialTags: Tag[];
   selector(mode: SidebarMode): ReactNode;
+  sidebarFooter?(mode: SidebarMode): ReactNode;
   /** Which Gateway the drafts are kept for across restarts. */
   draftScope: string;
   /** Creates Tags, when this connection may. */
@@ -312,6 +316,7 @@ export function Workspace({
   gateway,
   initialTags,
   selector,
+  sidebarFooter,
   draftScope,
   tagAdmin,
   newTagRefusal,
@@ -402,6 +407,7 @@ export function Workspace({
   const shell = {
     tags,
     selector,
+    sidebarFooter,
     switching,
     connected: true,
     onSelectTag: selectTag,

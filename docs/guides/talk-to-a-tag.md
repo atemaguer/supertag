@@ -49,7 +49,8 @@ it. A currency budget stops a Claude Code turn when it is spent; with other
 ## Read the conversation and move around
 
 Select a name in the desktop app's **Tags** list to open that conversation.
-A star marks the lead Tag in the first row. Other Tags follow in order of latest activity.
+The Gateway switcher sits above the Tag list. The lead Tag has a pinned row, and other Tags
+follow in order of latest activity.
 Under each name, **Working** means a Task is queued or running. **Needs you** means the
 Tag's latest message is a question you have yet to answer. The folded rail shows a status dot. Your messages and the
 Tag's are grouped by sender, and a time divider marks a pause of more than fifteen minutes.

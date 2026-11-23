@@ -236,8 +236,8 @@ export function GatewaySelector({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         className="gateway-menu"
-        side={wide ? "top" : "right"}
-        align={wide ? "start" : "end"}
+        side={wide ? "bottom" : "right"}
+        align="start"
         sideOffset={wide ? 8 : 24}
       >
         <div className="gateway-current">
