@@ -207,6 +207,9 @@ let approvals: ApprovalDetails[] = [
 const approvalTag = "moss";
 
 export const previewGateway: Gateway = {
+  async hostPhases() {
+    return { ready: 1, busy: 1, unreachable: 1 };
+  },
   async inbox() {
     return approvals
       .filter((approval) => approval.pending)

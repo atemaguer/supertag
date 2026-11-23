@@ -91,6 +91,7 @@ type GatewayChannels =
   | "listTags"
   | "tagActivity"
   | "listTagOptions"
+  | "hostPhases"
   | "createTag"
   | "listNetworkLogs"
   | "listSchedules"
@@ -168,6 +169,7 @@ export function gatewayHandlers(
     listTags: (args) => state.tags(text(args.connectionId)),
     tagActivity: (args) => state.tagActivity(text(args.connectionId), text(args.tagId)),
     listTagOptions: (args) => state.tagOptions(text(args.connectionId)),
+    hostPhases: (args) => state.hostPhases(text(args.connectionId)),
     createTag: (args) => state.createTag(text(args.connectionId), newTag(args.tag)),
     listNetworkLogs: (args) => state.networkLogs(text(args.connectionId), text(args.tagId)),
     listSchedules: (args) => state.schedules(text(args.connectionId), text(args.tagId)),

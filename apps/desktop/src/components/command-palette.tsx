@@ -1,6 +1,7 @@
 import type { Tag, TagSummary } from "@supertag/client/model";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { useMemo, useState } from "react";
+import { type SendKey, sendKeyWords } from "../lib/preferences";
 import { onMac, tagShortcut } from "./sidebar";
 import { TagAvatar } from "./tag-avatar";
 import {
@@ -12,7 +13,6 @@ import {
   CommandList,
   CommandShortcut,
 } from "./ui/command";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 
 /** What the search field says before anything is typed. */
 export const PALETTE_PLACEHOLDER = "Search Tags, conversations, settings…";
@@ -209,8 +209,9 @@ export function CommandPalette({
   );
 }
 
-/** Every key the desktop app answers to, as the Keyboard shortcuts dialog lists them. */
-export function keyboardShortcuts(mac = onMac()): [string, string][] {
+/** Every key the desktop app answers to, as Settings lists them under Keyboard shortcuts. */
+export function keyboardShortcuts(mac = onMac(), sendKey: SendKey = "enter"): [string, string][] {
+  const send = sendKeyWords(sendKey, mac);
   const key = (letter: string) => commandKeyLabel(letter, mac);
   return [
     [key("K"), "Search Tags, conversations, settings"],
@@ -219,38 +220,8 @@ export function keyboardShortcuts(mac = onMac()): [string, string][] {
     [key("N"), "New Tag"],
     [key("B"), "Fold the sidebar into a rail, or expand it"],
     [key(","), "Open Settings"],
-    ["Enter", "Send the message"],
-    ["Shift+Enter", "Start a new line"],
+    [send.send, "Send the message"],
+    [send.line, "Start a new line"],
     ["Esc", "Close a dialog or the search"],
   ];
-}
-
-/** Lists the app's keyboard shortcuts. */
-export function KeyboardShortcutsDialog({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange(open: boolean): void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="workspace-dialog shortcuts-dialog">
-        <DialogHeader>
-          <DialogTitle>Keyboard shortcuts</DialogTitle>
-          <DialogDescription>What each key does in the app.</DialogDescription>
-        </DialogHeader>
-        <dl className="shortcut-list">
-          {keyboardShortcuts().map(([keys, does]) => (
-            <div key={does} className="shortcut-row">
-              <dt>{does}</dt>
-              <dd>
-                <kbd>{keys}</kbd>
-              </dd>
-            </div>
-          ))}
-        </dl>
-      </DialogContent>
-    </Dialog>
-  );
 }

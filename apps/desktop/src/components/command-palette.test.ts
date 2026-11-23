@@ -4,7 +4,7 @@ import type { Tag } from "@supertag/client/model";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { keyboardShortcuts, type PaletteAction, searchPalette, snippet } from "./command-palette";
+import { type PaletteAction, searchPalette, snippet } from "./command-palette";
 import { gatewayActions } from "./gateway-selector";
 import { WorkspaceShell } from "./workspace";
 
@@ -108,7 +108,7 @@ it("opens with Ctrl+K, listing the Tags in sidebar order and then the actions", 
   expect(finch?.querySelector(".avatar")).not.toBeNull();
   expect(finch?.querySelector(".palette-caption")?.textContent).toBe("The lockfile is current.");
   expect(finch?.querySelector("[data-slot=command-shortcut]")?.textContent).toBe("Ctrl+2");
-  expect(labels("Actions")).toEqual(["New Tag", "Keyboard shortcuts", "Add Gateway"]);
+  expect(labels("Actions")).toEqual(["New Tag", "Add Gateway"]);
   expect(selected()).toBe("Lead");
 });
 
@@ -169,7 +169,7 @@ it("closes with Esc and with Ctrl+K, forgetting the search", () => {
   expect(dialog()).toBeNull();
 });
 
-it("runs actions: New Tag, the keyboard shortcuts, and the Gateway settings", () => {
+it("runs actions: New Tag and the Gateway settings", () => {
   const { onNewTag, addGateway } = render();
   press("k", { ctrlKey: true });
   type("new tag");
@@ -181,12 +181,6 @@ it("runs actions: New Tag, the keyboard shortcuts, and the Gateway settings", ()
   type("add gateway");
   press("Enter", {}, input());
   expect(addGateway).toHaveBeenCalledOnce();
-
-  press("k", { ctrlKey: true });
-  type("keyboard");
-  press("Enter", {}, input());
-  expect(dialog()?.textContent).toContain("Keyboard shortcuts");
-  expect(dialog()?.querySelectorAll(".shortcut-row").length).toBe(keyboardShortcuts().length);
 });
 
 it("keeps New Tag, without running it, when this connection cannot create Tags", () => {
@@ -204,7 +198,7 @@ it("offers actions without Tags while disconnected", () => {
   render({ tags: [], summaries: {}, connected: false });
   act(() => (document.querySelector('.sidebar [aria-label="Search"]') as HTMLElement).click());
   expect(section("Tags")).toBeUndefined();
-  expect(labels("Actions")).toEqual(["New Tag", "Keyboard shortcuts", "Add Gateway"]);
+  expect(labels("Actions")).toEqual(["New Tag", "Add Gateway"]);
 });
 
 it("searches names, IDs, previews and messages, needing every word", () => {

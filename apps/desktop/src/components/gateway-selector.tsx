@@ -4,18 +4,10 @@ import {
   type LocalGateway,
   type NotificationLevel,
 } from "@supertag/client/model";
-import {
-  Bell,
-  Check,
-  ChevronRight,
-  ChevronsUpDown,
-  Pencil,
-  Plus,
-  Server,
-  Unplug,
-} from "lucide-react";
+import { Bell, Check, ChevronsUpDown, Pencil, Plus, Server, Settings, Unplug } from "lucide-react";
 import type { RefObject } from "react";
 import type { PaletteAction } from "./command-palette";
+import { NOTIFICATION_CHOICES } from "./settings";
 import { Button } from "./ui/button";
 import {
   DropdownMenu,
@@ -25,9 +17,6 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 
@@ -47,16 +36,11 @@ interface GatewaySelectorProps {
   onSelect(origin: string): void;
   onEdit(profile?: GatewayProfile): void;
   onDisconnect(): void;
+  /** Opens Settings on its Gateways page, where Gateways are added, edited and disconnected. */
+  onManage(): void;
   /** Opening the menu checks the local Gateway again. */
   onOpen(): void;
 }
-
-/** What this device notifies about; the setting is kept on this device only. */
-export const NOTIFICATION_CHOICES: readonly [NotificationLevel, string][] = [
-  ["all", "All messages"],
-  ["questions", "Questions only"],
-  ["off", "Off"],
-];
 
 interface Choice extends GatewayProfile {
   /** The address shown under the name. */
@@ -178,8 +162,7 @@ export function GatewaySelector({
   switching,
   trigger,
   onSelect,
-  onEdit,
-  onDisconnect,
+  onManage,
   onOpen,
 }: GatewaySelectorProps) {
   const { localChoice, choices } = gatewayChoices(active, profiles, local);
@@ -283,34 +266,9 @@ export function GatewaySelector({
             <DropdownMenuSeparator className="gateway-separator" />
           </>
         )}
-        <DropdownMenuItem className="gateway-action" onSelect={() => onEdit()}>
-          <Plus size={15} aria-hidden /> Add Gateway
+        <DropdownMenuItem className="gateway-action" onSelect={onManage}>
+          <Settings size={15} aria-hidden /> Manage Gateways…
         </DropdownMenuItem>
-        {profiles.length > 0 && (
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger className="gateway-action">
-              <Pencil size={15} aria-hidden /> Edit Gateway
-              <ChevronRight className="gateway-edit-arrow" size={14} aria-hidden />
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="gateway-edit-menu" sideOffset={6}>
-              {profiles.map((profile) => (
-                <DropdownMenuItem
-                  className="gateway-action"
-                  key={profile.origin}
-                  onSelect={() => onEdit(profile)}
-                  title={profile.origin}
-                >
-                  <span className="row-title">{profile.name}</span>
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-        )}
-        {connected && (
-          <DropdownMenuItem className="gateway-action" onSelect={onDisconnect}>
-            <Unplug size={15} aria-hidden /> Disconnect
-          </DropdownMenuItem>
-        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

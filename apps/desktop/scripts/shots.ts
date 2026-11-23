@@ -62,7 +62,7 @@ const states: State[] = [
     act: (page) => page.click("#sidebar button.connection"),
     expect: [
       '[role="menu"] [role="menuitemradio"] >> nth=1',
-      '[role="menuitem"]:has-text("Disconnect")',
+      '[role="menuitem"]:has-text("Manage Gateways")',
     ],
     surface: '[role="menu"]',
   },
@@ -145,16 +145,6 @@ const states: State[] = [
     surface: '[role="menu"]',
   },
   {
-    name: "gateway-edit-menu",
-    query: "gateways",
-    act: async (page) => {
-      await page.click("#sidebar button.connection");
-      await page.hover('[role="menuitem"]:has-text("Edit Gateway")');
-    },
-    expect: ['[role="menu"] >> nth=1'],
-    surface: '[role="menu"] >> nth=1',
-  },
-  {
     name: "new-tag",
     act: (page) => page.click('#sidebar button[aria-label="New Tag"]'),
     expect: ['[role="dialog"] input'],
@@ -165,18 +155,10 @@ const states: State[] = [
     query: "gateways",
     act: async (page) => {
       await page.click("#sidebar button.connection");
-      await page.click('[role="menuitem"]:has-text("Add Gateway")');
+      await page.click('[role="menuitem"]:has-text("Manage Gateways")');
+      await page.click('[role="dialog"] button:has-text("Add Gateway")');
     },
-    expect: ['[role="dialog"] input'],
-    surface: '[role="dialog"]',
-  },
-  {
-    name: "shortcuts",
-    act: async (page) => {
-      await page.click('#sidebar button[aria-label="Search"]');
-      await page.click('[role="option"]:has-text("Keyboard shortcuts")');
-    },
-    expect: ['[role="dialog"] .shortcut-list'],
+    expect: ['[role="dialog"] input[type="password"], [role="dialog"] form input'],
     surface: '[role="dialog"]',
   },
   {
@@ -192,21 +174,128 @@ const states: State[] = [
   {
     name: "settings",
     act: (page) => page.click('#sidebar button[aria-label="Settings"]'),
-    expect: ['[role="dialog"] .settings-facts', ":root:not(:has(.settings-button[data-pending]))"],
+    expect: [
+      '[role="dialog"] [role="tab"][aria-selected="true"]:has-text("General")',
+      ".segmented",
+    ],
     surface: '[role="dialog"]',
   },
   {
-    // An update ready and a Gateway on another release: both show here, and dot the gear.
+    name: "settings-notifications",
+    act: async (page) => {
+      await page.click('#sidebar button[aria-label="Settings"]');
+      await page.click('[role="dialog"] [role="tab"]:has-text("Notifications")');
+    },
+    expect: [
+      '[role="dialog"] h2:has-text("Notifications")',
+      '.segmented [aria-checked="true"]:has-text("All messages")',
+    ],
+    surface: '[role="dialog"]',
+  },
+  {
+    name: "settings-shortcuts",
+    act: async (page) => {
+      await page.click('#sidebar button[aria-label="Settings"]');
+      await page.click('[role="dialog"] [role="tab"]:has-text("Keyboard shortcuts")');
+    },
+    expect: ['[role="dialog"] h2:has-text("Keyboard shortcuts")', ".settings-row kbd >> nth=5"],
+    surface: '[role="dialog"]',
+  },
+  {
+    name: "settings-updates",
+    act: async (page) => {
+      await page.click('#sidebar button[aria-label="Settings"]');
+      await page.click('[role="dialog"] [role="tab"]:has-text("Updates")');
+    },
+    expect: [
+      '[role="dialog"] h2:has-text("Updates")',
+      '.settings-row button:has-text("Check for updates")',
+    ],
+    surface: '[role="dialog"]',
+  },
+  {
+    name: "settings-about",
+    act: async (page) => {
+      await page.click('#sidebar button[aria-label="Settings"]');
+      await page.click('[role="dialog"] [role="tab"]:has-text("About")');
+    },
+    expect: ['[role="dialog"] h2:has-text("About")', ".settings-value >> nth=1"],
+    surface: '[role="dialog"]',
+  },
+  {
+    name: "settings-gateways",
+    query: "gateways",
+    act: async (page) => {
+      await page.click('#sidebar button[aria-label="Settings"]');
+      await page.click('[role="dialog"] [role="tab"]:has-text("Gateways")');
+    },
+    expect: [
+      '[role="dialog"] h2:has-text("Gateways")',
+      '.settings-row button:has-text("Disconnect")',
+    ],
+    surface: '[role="dialog"]',
+  },
+  {
+    name: "settings-tags",
+    act: async (page) => {
+      await page.click('#sidebar button[aria-label="Settings"]');
+      await page.click('[role="dialog"] [role="tab"]:has-text("Tags")');
+    },
+    expect: ['[role="dialog"] h2:has-text("Tags")', ".settings-row .avatar >> nth=3"],
+    surface: '[role="dialog"]',
+  },
+  {
+    name: "settings-hosts",
+    act: async (page) => {
+      await page.click('#sidebar button[aria-label="Settings"]');
+      await page.click('[role="dialog"] [role="tab"]:has-text("Worker Hosts")');
+    },
+    expect: ['[role="dialog"] h2:has-text("Worker Hosts")', '.settings-value:has-text("1 ready")'],
+    surface: '[role="dialog"]',
+  },
+  {
+    name: "settings-permissions",
+    act: async (page) => {
+      await page.click('#sidebar button[aria-label="Settings"]');
+      await page.click('[role="dialog"] [role="tab"]:has-text("Permissions")');
+    },
+    expect: ['[role="dialog"] h2:has-text("Permissions")', ".settings-card >> nth=3"],
+    surface: '[role="dialog"]',
+  },
+  {
+    // An update ready and a Gateway on another release: the gear is dotted and opens Updates.
     name: "settings-update",
     query: "update=ready&gateway=0.3.3",
     act: (page) => page.keyboard.press("Meta+,"),
-    expect: ['[role="dialog"] .settings-warning', ".settings-button[data-pending]"],
+    expect: [
+      '[role="dialog"] h2:has-text("Updates")',
+      'button:has-text("Restart to update") >> nth=0',
+      ".settings-button[data-pending]",
+    ],
+  },
+  {
+    name: "settings-search",
+    act: async (page) => {
+      await page.click('#sidebar button[aria-label="Settings"]');
+      await page.fill('[role="dialog"] input[type="search"]', "gateway");
+    },
+    expect: ['[role="dialog"] .settings-found >> nth=1'],
   },
   {
     name: "narrow-settings",
     size: narrow,
     act: (page) => page.click('#sidebar button[aria-label="Settings"]'),
-    expect: ['[role="dialog"] .settings-facts'],
+    expect: ['[role="dialog"] select', ".segmented"],
+    surface: '[role="dialog"]',
+  },
+  {
+    name: "narrow-settings-tags",
+    size: narrow,
+    act: async (page) => {
+      await page.click('#sidebar button[aria-label="Settings"]');
+      await page.selectOption('[role="dialog"] select', "tags");
+    },
+    expect: ['[role="dialog"] h2:has-text("Tags")'],
   },
 ];
 

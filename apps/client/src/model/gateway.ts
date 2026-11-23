@@ -155,6 +155,8 @@ export interface Gateway {
   revealTaskFile?(taskId: string, path: string): Promise<void>;
   /** The Tag's newest Task Attempts with a network log, newest first. Operators only. */
   networkLogs?(tagId: string): Promise<NetworkLog[]>;
+  /** How many Worker Hosts are in each phase. Operators only. */
+  hostPhases?(): Promise<HostPhases>;
   /** The Tag's Schedules the caller can see. */
   schedules?(tagId: string): Promise<Schedule[]>;
   /** Pauses, resumes, or deletes a Schedule. A deleted Schedule never fires again. */

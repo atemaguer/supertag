@@ -22,7 +22,10 @@ export function gatewaySession(connectionId: string, scope: string, principal?: 
     harnessMemory: (tagId) => api.listHarnessMemory({ connectionId, tagId }),
     deleteHarnessMemory: (memoryId) => api.deleteHarnessMemory({ connectionId, memoryId }),
     ...(principal?.startsWith("operator:")
-      ? { networkLogs: (tagId: string) => api.listNetworkLogs({ connectionId, tagId }) }
+      ? {
+          networkLogs: (tagId: string) => api.listNetworkLogs({ connectionId, tagId }),
+          hostPhases: () => api.hostPhases({ connectionId }),
+        }
       : {}),
     locateTaskFiles: (taskId) => api.locateTaskFiles({ connectionId, taskId }),
     listTaskFiles: (taskId, path) => api.listTaskFiles({ connectionId, taskId, path }),

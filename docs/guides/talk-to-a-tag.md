@@ -78,14 +78,16 @@ what it does not know, such as the host before the Tag's first turn.
 In the desktop app, drag the sidebar's edge to resize it, or past its narrowest to fold it into a
 rail of avatars; ⌘B does the same. The Task activity pane resizes from its edge too. ⌘1 to ⌘9 open
 the Tags in order, ⌘↑ and ⌘↓ the previous and next, and ⌘N creates a Tag; use Ctrl in place of
-⌘ outside macOS. The gear beside the Gateway switcher, or ⌘, opens **Settings**, which names the
-app's SuperTag release, the Gateway's and the protocol version they agreed, checks for updates,
-and sets notifications. A dot on the gear means an update waits or the Gateway runs another
-release than the app.
+⌘ outside macOS. The gear beside the Gateway switcher, or ⌘, opens **Settings**. Its pages
+set which key sends a message, how the sidebar shows, and what this device notifies about; list
+the keyboard shortcuts; check for updates; and name the app's SuperTag release and the Gateway's.
+They also manage the saved Gateways, and show the Gateway's Tags, each Tag's allowed actions
+and, to an operator, its Worker Hosts. A dot on the gear means an update waits or the Gateway
+runs another release than the app.
 
 To find a Tag, a message, or a setting, press ⌘K or the **Search** row at the top of
 the sidebar. The search lists your **Tags**, each with its latest message, and **Actions**: New
-Tag, Keyboard shortcuts, and the Gateway settings, such as switching or adding a **Gateway** (the
+Tag, Settings, Keyboard shortcuts, and the Gateway settings, such as switching or adding a **Gateway** (the
 service the app connects to) and what this device notifies about. Typing filters both lists and also finds Tags by the
 text of messages the app keeps on this device. The arrow keys move the selection, Enter opens
 it, ⌘1 to ⌘9 open a Tag directly, and Esc closes the search.

@@ -19,7 +19,7 @@ import {
   useWatchRefresh,
   type WatchFeed,
 } from "@supertag/client/react";
-import { Keyboard, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import {
   type CSSProperties,
   type MouseEvent,
@@ -33,12 +33,7 @@ import {
 import mascot from "../../../../assets/images/supertag-mascot-round.png";
 import { nativeGateway } from "../gateway";
 import { nativeNotifier, silentNotifier, useDesktopNotifications } from "../lib/notifications";
-import {
-  CommandPalette,
-  commandKeyLabel,
-  KeyboardShortcutsDialog,
-  type PaletteAction,
-} from "./command-palette";
+import { CommandPalette, commandKeyLabel, type PaletteAction } from "./command-palette";
 import { ConversationPane, type Draft } from "./conversation";
 import { type PendingApproval, tagApprovals } from "./needs-you";
 import { NewTagDialog } from "./new-tag";
@@ -106,7 +101,6 @@ export function WorkspaceShell({
   const { mode, width, resizing, separator } = useSidebarWidth();
   const provider = tag && harnessLabel(tag.harnessKind);
   const [searching, setSearching] = useState(false);
-  const [listingShortcuts, setListingShortcuts] = useState(false);
   const shownSummaries = summaries ?? noSummaries;
   const { lead, others } = orderTags(tags, shownSummaries);
   const ordered = [...(lead ? [lead] : []), ...others];
@@ -126,14 +120,6 @@ export function WorkspaceShell({
             },
           ]
         : []),
-      {
-        id: "keyboard-shortcuts",
-        label: "Keyboard shortcuts",
-        caption: "every key the app answers to",
-        icon: <Keyboard aria-hidden />,
-        keywords: "keys help",
-        run: () => setListingShortcuts(true),
-      },
       ...actions,
     ],
     [onNewTag, newTagRefusal, actions],
@@ -206,7 +192,6 @@ export function WorkspaceShell({
         messageTexts={messageTexts}
         onSelectTag={onSelectTag}
       />
-      <KeyboardShortcutsDialog open={listingShortcuts} onOpenChange={setListingShortcuts} />
     </div>
   );
 }
@@ -299,6 +284,8 @@ interface WorkspaceProps {
   switching: boolean;
   connectionError: string;
   onWriteChange(delta: 1 | -1): void;
+  /** A request, such as from Settings, to show a Tag with its details panel open. */
+  inspect?: { tagId: string; at: number };
 }
 
 export function Workspace({
@@ -314,6 +301,7 @@ export function Workspace({
   switching,
   connectionError,
   onWriteChange,
+  inspect,
 }: WorkspaceProps) {
   const [tags, setTags] = useState(initialTags);
   const [creatingTag, setCreatingTag] = useState(false);
@@ -335,6 +323,9 @@ export function Workspace({
     },
     [gateway],
   );
+  useEffect(() => {
+    if (inspect) selectTag(inspect.tagId);
+  }, [inspect, selectTag]);
   const [drafts, updateDraft] = useDrafts(draftScope);
   // What the open conversation's own history says of it, the freshest for its row.
   const [summaries, setSummaries] = useState<Record<string, TagSummary>>({});
@@ -445,6 +436,7 @@ export function Workspace({
       asking={conversations.find((entry) => entry.tagId === tag.tagId)?.asking}
       approvals={approvals}
       onApprovalDecided={refreshInbox}
+      inspectAt={inspect?.tagId === tag.tagId ? inspect.at : undefined}
     />
   ) : (
     <WorkspaceShell {...shell}>
@@ -526,6 +518,7 @@ function TagWorkspace({
   asking,
   approvals,
   onApprovalDecided,
+  inspectAt,
 }: {
   gateway: Gateway;
   watch?: WatchFeed;
@@ -538,10 +531,15 @@ function TagWorkspace({
   asking?: boolean;
   approvals: readonly PendingApproval[];
   onApprovalDecided(): void;
+  /** When its details panel was asked for from outside. */
+  inspectAt?: number;
 }) {
   const tagId = tag.tagId;
   const [details, setDetails] = useState(false);
   const toggleDetails = useCallback(() => setDetails((prior) => !prior), []);
+  useEffect(() => {
+    if (inspectAt !== undefined) setDetails(true);
+  }, [inspectAt]);
   return (
     <WorkspaceShell {...shell} tag={tag} detailsOpen={details} onTagDetails={toggleDetails}>
       {(header) => (

@@ -18,6 +18,7 @@ import type {
   GatewayList,
   HarnessMemory,
   HarnessMemoryList,
+  HostPhases,
   InboxItem,
   LocalUpgrade,
   Message,
@@ -94,6 +95,8 @@ export interface Commands {
   listTags: Call<Connected, Tag[]>;
   tagActivity: Call<Connected & { tagId: string }, TagActivity>;
   listTagOptions: Call<Connected, TagOptions>;
+  /** How many Worker Hosts are in each phase; refused for a connection that is not an operator. */
+  hostPhases: Call<Connected, HostPhases>;
   createTag: Call<Connected & { tag: NewTag }, Tag>;
   /** Local Gateway only: picks a folder and adds its repository as a Workspace. */
   addLocalWorkspace: Call<Connected, AddedWorkspace | null>;
@@ -186,6 +189,7 @@ export const CHANNELS = {
   listTags: "call",
   tagActivity: "call",
   listTagOptions: "call",
+  hostPhases: "call",
   createTag: "call",
   addLocalWorkspace: "call",
   listHarnessMemory: "call",

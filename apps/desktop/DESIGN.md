@@ -66,6 +66,8 @@ From top to bottom: the title row, search, the **Tags** heading, the list, the f
   accent. One slot, so a row never trades its message for its state.
 - The selected row has a soft fill (`--selected`) and `aria-current`. Rows are buttons, named
   with their state ("moss, Working"), and show the focus ring inside their edge.
+- The Gateway selector's menu is a quick switcher: the saved Gateways and **Manage Gateways…**,
+  which opens Settings. Adding, editing and disconnecting are done there.
 - The foot holds the Gateway selector on the left as one quiet line (a status dot, the Gateway's
   name, a chevron) and the Settings gear on the right, the size and colour of search and **+**.
   The sidebar shows no version. An offered update sits above them. Nothing in the foot is
@@ -105,19 +107,51 @@ From top to bottom: the title row, search, the **Tags** heading, the list, the f
 
 ## Settings
 
-- One modal dialog, the same as New Tag and Keyboard shortcuts, opened by the gear, ⌘, (Ctrl+,
-  outside macOS), **Settings…** in the app menu, and the command palette. Esc closes it and the
-  focus returns to the gear. On opening, the dialog itself has the focus, not a button.
-- It holds only what works, in short sections under small headings:
-  - **About**: the app's release, the connected Gateway's name, release and protocol, and a
-    warning in the accent when the Gateway runs another release.
-  - **Updates**: the updater's state in one line, the same action the banner offers, and
-    **Check for updates**. The banner and the sidebar's update button stay as they are.
-  - **Notifications**: what this device notifies about. This is its only home in the window;
-    the command palette offers the same choices.
-  - Links to the documentation and the release notes.
-- A setting goes here when it is about the app or this device. What belongs to a Gateway stays in
-  the Gateway menu; what belongs to a Tag stays in its inspector.
+One large modal dialog over the window, so the conversation stays behind it: at most 1040×720,
+opened by the gear, ⌘, (Ctrl+, outside macOS), **Settings…** in the app menu, and the command
+palette. Esc closes it and the focus returns to the gear. On opening, the dialog itself has the
+focus, not a control. Every page follows one anatomy; a new page reuses it and adds no styling.
+
+- **Navigation**, 220 px on the left on the sidebar's surface: a search field, then the pages
+  in groups under small uppercase labels (**App**, **SuperTag**), each an icon and a name. The
+  selected page has the soft fill. ↑ ↓ Home End move between pages.
+- **Page**, scrolling on the right: the title in the display face, one muted line saying what the
+  page is, then cards.
+- **Card**: a bordered panel of rows divided by hairlines, with an optional heading and an
+  optional last row holding a button that adds to the list.
+- **Row**: a label, one muted line of help under it, and its control or value right-aligned. A
+  row may lead with an avatar and carry a small chip after its label ("Lead", "Connected").
+- **Controls**: a segmented control for one choice out of a few, an outline button for an
+  action, the accent button only for the one action that matters now. No switch that does
+  nothing: a page shows a setting only when it works.
+- **Read-only pages** say so under the description with a "Read-only" chip, one line on how to
+  change what they show, and a link to the documentation. They show values, not disabled
+  controls.
+- **Search** filters rows across all pages: the right pane lists each page's matching rows under
+  the page's name, controls still working, and pages without a match dim in the navigation.
+- **Deep links**: each page has an ID (`general`, `notifications`, `shortcuts`, `updates`,
+  `about`, `gateways`, `tags`, `hosts`, `permissions`). The gear opens the page with something
+  waiting when it shows its dot; "Check for Updates…" opens `updates`; the Gateway menu's
+  **Manage Gateways…** opens `gateways`; the palette's Keyboard shortcuts opens `shortcuts`.
+- **Narrow window** (920 px and under): the navigation becomes a search field and a select
+  across the top, and a row's control wraps under its text.
+
+The pages, and what each lets you change:
+
+| Page | Shows | Editable |
+| --- | --- | --- |
+| General | which key sends a message; the sidebar expanded or as a rail | yes, on this device |
+| Notifications | what this device notifies about | yes, on this device |
+| Keyboard shortcuts | every key the app answers to | no |
+| Updates | the updater's state; Check for updates; Restart to update | actions |
+| About | the app's and the Gateway's release, a warning when they differ; documentation and release notes | no |
+| Gateways | the saved Gateways and the connected one | Connect, Edit, Disconnect, Add |
+| Tags | each Tag's avatar, harness and Workspace; Open shows its details | read-only |
+| Worker Hosts | how many hosts are in each state, the harnesses and Workspaces they offer; operators only | read-only |
+| Permissions | each Tag's allowed actions | read-only |
+
+A setting belongs here when it is about the app, this device, or the Gateway as a whole. What
+belongs to one Tag, such as its Schedules and activity, stays in its inspector.
 
 ## Inspector
 

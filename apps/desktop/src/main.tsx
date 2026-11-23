@@ -16,7 +16,7 @@ import {
   tagAdminRefusal,
 } from "@supertag/client/model";
 import { PlatformProvider } from "@supertag/client/react";
-import { Settings as SettingsIcon } from "lucide-react";
+import { Keyboard, Settings as SettingsIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { commandKeyLabel } from "./components/command-palette";
@@ -26,9 +26,10 @@ import { LocalUpgradeOffer } from "./components/local-upgrade";
 import { Onboarding } from "./components/onboarding";
 import {
   isSettingsShortcut,
+  pendingPage,
   SettingsButton,
   SettingsDialog,
-  settingsPending,
+  type SettingsPageId,
 } from "./components/settings";
 import { onMac, type SidebarMode } from "./components/sidebar";
 import {
@@ -91,23 +92,43 @@ function App({
   const trigger = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
   const [notifications, setNotifications] = useNotificationLevel();
-  const [settings, setSettings] = useState(false);
+  // Settings shows one page; none while it is closed. It reopens on the page it was left on.
+  const [settings, setSettings] = useState<SettingsPageId>();
+  const lastPage = useRef<SettingsPageId>("general");
+  const [inspect, setInspect] = useState<{ tagId: string; at: number }>();
   const gear = useRef<HTMLButtonElement>(null);
+  const showSettings = useCallback((page?: SettingsPageId) => {
+    if (page) lastPage.current = page;
+    setSettings(page);
+  }, []);
+  // What waits in Settings: the gear's dot, and the page the gear opens while it shows.
+  const pending = pendingPage(updates.status, APP_VERSION, connection?.release);
+  const waiting = useRef(pending);
+  waiting.current = pending;
+  const openSettings = useCallback(
+    (page?: SettingsPageId) => showSettings(page ?? waiting.current ?? lastPage.current),
+    [showSettings],
+  );
   // Settings opens from its gear, from the app menu, and with ⌘, (Ctrl+, outside macOS).
   useEffect(() => {
     const mac = onMac();
     function onKey(event: KeyboardEvent) {
       if (!isSettingsShortcut(event, mac)) return;
       event.preventDefault();
-      setSettings(true);
+      openSettings();
     }
     window.addEventListener("keydown", onKey);
-    const stop = desktop().onOpenSettings?.(() => setSettings(true));
+    const stop = desktop().onOpenSettings?.(() => openSettings());
     return () => {
       window.removeEventListener("keydown", onKey);
       stop?.();
     };
-  }, []);
+  }, [openSettings]);
+  // "Check for Updates…" in the app menu shows its answer on the Updates page.
+  const checking = updates.status.state === "checking" && updates.status.manual;
+  useEffect(() => {
+    if (checking) showSettings("updates");
+  }, [checking, showSettings]);
   /** First launch, with no SuperTag set up here: the setup screen, from the first check. */
   const [setup, setSetup] = useState<{ check: SetupCheck }>();
   /** The address of the local Gateway this window connected to, while it is connected to it. */
@@ -310,27 +331,27 @@ function App({
     {
       id: "settings",
       label: "Settings",
-      caption: "version, updates, notifications",
+      caption: "this app, this device, Gateways",
       icon: <SettingsIcon aria-hidden />,
       shortcut: commandKeyLabel(","),
       keywords: "preferences about version update",
-      run: () => setSettings(true),
+      run: () => openSettings(),
+    },
+    {
+      id: "keyboard-shortcuts",
+      label: "Keyboard shortcuts",
+      caption: "every key the app answers to",
+      icon: <Keyboard aria-hidden />,
+      keywords: "keys help",
+      run: () => openSettings("shortcuts"),
     },
   ];
-  const selectedGateway = gateways.profiles.find(
-    (profile) => profile.origin === connection?.origin,
-  );
-  const gatewayName = connection?.preview
-    ? "Preview workspace"
-    : connection?.origin === LOCAL_GATEWAY
-      ? "Local"
-      : (selectedGateway?.name ?? connection?.origin);
-
   const selector = (mode: SidebarMode) => (
     <GatewaySelector
       {...menu}
       wide={mode === "expanded"}
       principal={connection?.principal}
+      onManage={() => openSettings("gateways")}
       trigger={trigger}
       onOpen={() => {
         if (pendingSwitch.current || connection?.preview) return;
@@ -342,11 +363,7 @@ function App({
   const sidebarFooter = (mode: SidebarMode) => (
     <>
       <UpdateButton updates={updates} wide={mode === "expanded"} />
-      <SettingsButton
-        button={gear}
-        pending={settingsPending(updates.status, APP_VERSION, connection?.release)}
-        onOpen={() => setSettings(true)}
-      />
+      <SettingsButton button={gear} pending={pending !== undefined} onOpen={() => openSettings()} />
     </>
   );
 
@@ -367,6 +384,7 @@ function App({
           switching={switching}
           connectionError={editor ? "" : error}
           onWriteChange={updateWrites}
+          inspect={inspect}
         />
       ) : (
         <WorkspaceShell
@@ -437,13 +455,18 @@ function App({
         />
       )}
       <SettingsDialog
-        open={settings}
-        onOpenChange={setSettings}
-        gatewayName={gatewayName}
-        gateway={connection?.release}
+        page={settings}
+        onPage={showSettings}
+        connection={connection}
+        gateways={gateways}
+        busy={switching || writing}
+        onSelectGateway={menu.onSelect}
+        onEditGateway={(profile) => open(profile, gear.current)}
+        onDisconnect={menu.onDisconnect}
         updates={updates}
         notifications={notifications}
         onNotifications={setNotifications}
+        onOpenTag={(tagId) => setInspect({ tagId, at: Date.now() })}
         returnFocus={gear}
       />
       <UpdateBanner updates={updates} />

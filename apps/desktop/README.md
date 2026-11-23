@@ -52,8 +52,8 @@ starts Electron, and git ignores `.shots/`. It exits 1 when a state does not ren
 | --- | --- |
 | `default` | the sample Tags and a conversation with a code block and a table, at 1280×820 |
 | `inspector` | the Tag details panel |
-| `gateway-selector`, `gateway-edit-menu`, `rail-gateway-selector` | the Gateway menu with two saved Gateways (`?preview&gateways`), its Edit submenu, and the menu opened from the rail |
-| `new-tag`, `add-gateway`, `shortcuts` | the New Tag, Add Gateway and Keyboard shortcuts dialogs |
+| `gateway-selector`, `rail-gateway-selector` | the Gateway menu with two saved Gateways (`?preview&gateways`), and the menu opened from the rail |
+| `new-tag`, `add-gateway` | the New Tag and Add Gateway dialogs |
 | `many-tags` | seventeen Tags with long names and previews, in every row state (`?preview&many`) |
 | `no-lead` | a Gateway without a lead Tag (`?preview&nolead`) |
 | `runs-elsewhere` | a Tag without a Workspace whose turn runs on another Worker Host |
@@ -62,7 +62,8 @@ starts Electron, and git ignores `.shots/`. It exits 1 when a state does not ren
 | `narrow`, `narrow-inspector`, `narrow-many-tags` | the same at 900×700 |
 | `search` | the command palette |
 | `rail` | the sidebar folded into its rail |
-| `settings`, `settings-update`, `narrow-settings` | Settings; with an update ready and a Gateway on another release, which also dot the gear |
+| `settings`, `settings-notifications`, `settings-shortcuts`, `settings-updates`, `settings-about`, `settings-gateways`, `settings-tags`, `settings-hosts`, `settings-permissions` | each page of Settings |
+| `settings-update`, `settings-search`, `narrow-settings`, `narrow-settings-tags` | Settings with an update ready and a Gateway on another release, which also dot the gear; its search; and its narrow layout |
 | `update-banner` | an update ready to install (`?preview&update=ready`) |
 
 [DESIGN.md](DESIGN.md) records what the window should look like: the avatar, the sidebar's rows,

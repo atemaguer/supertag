@@ -140,8 +140,8 @@ remote Gateway from another release gets the error alone: upgrade it where it ru
 The app checks for a newer published release shortly after it opens, then every hour while it
 stays open and when you come back to its window. It never offers drafts. It offers pre-releases only when it is a pre-release
 itself. **Check for Updates…** in the app menu (the **File** menu on Linux) checks now, as does **Check
-for updates** in **Settings**, behind the gear at the foot of the sidebar. Settings also names
-the app's release.
+for updates** on the **Updates** page of **Settings**, behind the gear at the foot of the sidebar.
+Its **About** page names the app's release.
 
 On a Mac, the app downloads the new release in the background without asking. The sidebar shows
 the download's progress at its foot, then **Preparing VERSION…** while the app unpacks the

@@ -53,6 +53,7 @@ import {
   useState,
 } from "react";
 import { type StickToBottomContext, useStickToBottomContext } from "use-stick-to-bottom";
+import { sendKeyWords, sendsMessage, useSendKey } from "../lib/preferences";
 import { Conversation, ConversationContent } from "./ai-elements/conversation";
 import { Message } from "./ai-elements/message";
 import { Bubble, LiveConversationEntry } from "./conversation-entry";
@@ -66,6 +67,7 @@ import {
   useApprovalCards,
 } from "./needs-you";
 import { clamp, ResizeHandle, useStoredWidth } from "./resize";
+import { onMac } from "./sidebar";
 import { TagAvatar } from "./tag-avatar";
 import { TagDetails } from "./tag-details";
 import { TaskFiles } from "./task-files";
@@ -139,6 +141,8 @@ export function ConversationPane({
   const transcript = useRef<StickToBottomContext>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const hintId = useId();
+  const [sendKey] = useSendKey();
+  const sendWords = sendKeyWords(sendKey, onMac());
   // What the next message answers, once Reply was chosen on a card; a chip the person can dismiss.
   const [replyingTo, setReplyingTo] = useState<ReplyTarget>();
   const approvalCards = useApprovalCards(gateway, approvals, onApprovalDecided);
@@ -488,7 +492,7 @@ export function ConversationPane({
                     setReplyingTo(undefined);
                     return;
                   }
-                  if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing)
+                  if (event.nativeEvent.isComposing || !sendsMessage(event, sendKey, onMac()))
                     return;
                   event.preventDefault();
                   if (draft.text.trim() && !outgoing) event.currentTarget.form?.requestSubmit();
@@ -500,7 +504,7 @@ export function ConversationPane({
                 className="send"
                 aria-label="Send message"
                 aria-keyshortcuts="Enter"
-                title={blocked ?? "Send message (Enter)"}
+                title={blocked ?? `Send message (${sendWords.send})`}
                 disabled={Boolean(outgoing) || !draft.text.trim()}
               >
                 <ArrowUp size={18} aria-hidden />
@@ -510,7 +514,7 @@ export function ConversationPane({
               <WhereItRuns gateway={gateway} tag={tag} taskId={messages.at(-1)?.task.taskId} />
               {/* The keys show only while the composer is empty and has the cursor. */}
               <span className="composer-hint" id={hintId}>
-                Enter to send · Shift + Enter for a new line
+                {sendWords.send} to send · {sendWords.line} for a new line
               </span>
             </div>
           </form>
