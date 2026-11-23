@@ -8,30 +8,74 @@ import type {
   TagActivity,
   WatchUpdate,
 } from "@supertag/client/model";
-import { describe } from "@supertag/client/model";
+import { describe, harnessLabel } from "@supertag/client/model";
 import { useWatchRefresh, type WatchFeed } from "@supertag/client/react";
-import { Lock, Trash2, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Activity, Lock, ShieldCheck, Trash2, X } from "lucide-react";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
+import { DetailsDisclosure } from "./details-disclosure";
 import { ScheduleList } from "./schedules";
 import { relativeTime } from "./sidebar";
+import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
 
-/**
- * The Tag details panel beside the conversation, opened from the Tag's name: one section per
- * kind of thing the Tag keeps, each reading its own data. The conversation itself stays messages
- * only.
- */
-export function TagDetails({
-  gateway,
-  watch,
-  tag,
-  onClose,
-}: {
+export type InspectorTab = "overview" | "memory" | "network";
+interface InspectorProps {
   gateway: Gateway;
   watch?: WatchFeed;
   tag: Tag;
+  tab?: InspectorTab;
+  onTabChange?(tab: InspectorTab): void;
   onClose(): void;
-}) {
+}
+
+export function TagDetails(props: InspectorProps) {
+  return <Inspector key={JSON.stringify([props.gateway.scope, props.tag.tagId])} {...props} />;
+}
+
+function Inspector({ gateway, watch, tag, tab, onTabChange, onClose }: InspectorProps) {
+  const id = useId();
+  const [localTab, setLocalTab] = useState<InspectorTab>("overview");
+  const tabs: InspectorTab[] = ["overview"];
+  if (gateway.harnessMemory) tabs.push("memory");
+  if (gateway.networkLogs) tabs.push("network");
+  const selected = tabs.includes(tab ?? localTab) ? (tab ?? localTab) : "overview";
+
+  function select(next: InspectorTab) {
+    setLocalTab(next);
+    onTabChange?.(next);
+  }
+  function navigate(event: ReactKeyboardEvent<HTMLButtonElement>, current: InspectorTab) {
+    const index = tabs.indexOf(current);
+    let next: InspectorTab | undefined;
+    switch (event.key) {
+      case "ArrowRight":
+        next = tabs[(index + 1) % tabs.length];
+        break;
+      case "ArrowLeft":
+        next = tabs[(index + tabs.length - 1) % tabs.length];
+        break;
+      case "Home":
+        next = tabs[0];
+        break;
+      case "End":
+        next = tabs.at(-1);
+        break;
+      default:
+        return;
+    }
+    if (!next) return;
+    event.preventDefault();
+    select(next);
+    document.getElementById(`${id}-${next}`)?.focus();
+  }
+
   const close = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     // Focus moves into the panel, and back to what opened it once the panel closes.
@@ -62,8 +106,18 @@ export function TagDetails({
   const name = tag.name ?? tag.tagId;
   return (
     <aside id="tag-details" className="activity tag-details" aria-label={`${name} details`}>
-      <div className="activity-header">
-        <h2>{name}</h2>
+      <div className="inspector-profile">
+        <TagAvatar tagId={tag.tagId} large />
+        <div className="inspector-identity">
+          <h2>{name}</h2>
+          {(tag.lead || name !== tag.tagId) && (
+            <span>
+              {[tag.lead && "Lead Tag", name !== tag.tagId && tag.tagId]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          )}
+        </div>
         <Button
           variant="ghost"
           size="icon"
@@ -75,11 +129,90 @@ export function TagDetails({
           <X size={16} aria-hidden />
         </Button>
       </div>
-      <ActivitySection gateway={gateway} watch={watch} tag={tag} />
-      <MemorySection gateway={gateway} watch={watch} tag={tag} />
-      <ScheduleList gateway={gateway} watch={watch} tagId={tag.tagId} />
-      <NetworkSection gateway={gateway} watch={watch} tag={tag} />
+      <div className="inspector-tabs" role="tablist" aria-label="Tag details">
+        {tabs.map((item) => (
+          <button
+            key={item}
+            type="button"
+            role="tab"
+            id={`${id}-${item}`}
+            aria-controls={`${id}-panel-${item}`}
+            aria-selected={selected === item}
+            tabIndex={selected === item ? 0 : -1}
+            onClick={() => select(item)}
+            onKeyDown={(event) => navigate(event, item)}
+          >
+            {item === "overview" ? "Overview" : item === "memory" ? "Memory" : "Network"}
+          </button>
+        ))}
+      </div>
+      {tabs.map((item) => (
+        <div
+          key={item}
+          className="inspector-content"
+          role="tabpanel"
+          id={`${id}-panel-${item}`}
+          aria-labelledby={`${id}-${item}`}
+          hidden={selected !== item}
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users can focus and scroll the selected ARIA tabpanel.
+          tabIndex={0}
+        >
+          {selected === item && item === "overview" && (
+            <Overview gateway={gateway} watch={watch} tag={tag} />
+          )}
+          {selected === item && item === "memory" && (
+            <MemorySection gateway={gateway} watch={watch} tag={tag} />
+          )}
+          {selected === item && item === "network" && (
+            <NetworkSection gateway={gateway} watch={watch} tag={tag} />
+          )}
+        </div>
+      ))}
     </aside>
+  );
+}
+
+function Overview({ gateway, watch, tag }: Pick<InspectorProps, "gateway" | "watch" | "tag">) {
+  return (
+    <>
+      <dl className="inspector-facts">
+        <dt>Harness</dt>
+        <dd>{harnessLabel(tag.harnessKind) ?? tag.harnessKind}</dd>
+        {(tag.openWorkSessions !== undefined || tag.maxWorkSessions !== undefined) && (
+          <>
+            <dt>{tag.openWorkSessions === undefined ? "Work Session limit" : "Work Sessions"}</dt>
+            <dd>
+              {tag.openWorkSessions !== undefined && tag.maxWorkSessions !== undefined
+                ? `${tag.openWorkSessions} of ${tag.maxWorkSessions}`
+                : (tag.openWorkSessions ?? tag.maxWorkSessions)}
+            </dd>
+          </>
+        )}
+        {tag.instructions && (
+          <>
+            <dt>Instructions</dt>
+            <dd>{tag.instructions}</dd>
+          </>
+        )}
+      </dl>
+      <DetailsDisclosure
+        title="Permissions"
+        icon={<ShieldCheck size={16} aria-hidden />}
+        count={tag.allowedActions.length}
+      >
+        {tag.allowedActions.length ? (
+          <ul className="inspector-permissions">
+            {tag.allowedActions.map((action) => (
+              <li key={action}>{action}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="activity-status">No allowed actions.</p>
+        )}
+      </DetailsDisclosure>
+      <ScheduleList gateway={gateway} watch={watch} tagId={tag.tagId} />
+      <ActivitySection gateway={gateway} watch={watch} tag={tag} />
+    </>
   );
 }
 
@@ -434,8 +567,7 @@ export function ActivitySection({
   const days = activity?.windowDays || 30;
   const sent = activity && (activity.posted || activity.quiet);
   return (
-    <section className="details-section" aria-labelledby="tag-details-activity">
-      <h3 id="tag-details-activity">Activity</h3>
+    <DetailsDisclosure title="Activity" icon={<Activity size={16} aria-hidden />}>
       {error || !activity ? (
         <p className="activity-status" role="status">
           {error || "Loading activity…"}
@@ -460,6 +592,6 @@ export function ActivitySection({
           )}
         </dl>
       )}
-    </section>
+    </DetailsDisclosure>
   );
 }

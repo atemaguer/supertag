@@ -105,7 +105,7 @@ function App({
       localAddress.current = origin === LOCAL_GATEWAY ? gateways.local?.origin : undefined;
       setGateways(gateways);
       setConnection({
-        gateway: gatewaySession(connectionId, cacheScope(origin, principal)),
+        gateway: gatewaySession(connectionId, cacheScope(origin, principal), principal),
         tags,
         preview: false,
         id: connectionId,

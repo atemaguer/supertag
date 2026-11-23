@@ -41,7 +41,9 @@ import {
 } from "@supertag/client/react";
 import { ArrowDown, ArrowUp, CircleAlert, X } from "lucide-react";
 import {
+  type CSSProperties,
   type FormEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -55,7 +57,7 @@ import { Message } from "./ai-elements/message";
 import { Bubble, LiveConversationEntry } from "./conversation-entry";
 import { clamp, ResizeHandle, useStoredWidth } from "./resize";
 import { TagAvatar } from "./tag-avatar";
-import { TagDetails } from "./tag-details";
+import { type InspectorTab, TagDetails } from "./tag-details";
 import { TaskFiles } from "./task-files";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
@@ -72,6 +74,7 @@ export interface Draft {
 }
 
 interface ConversationProps {
+  header?: ReactNode;
   gateway: Gateway;
   watch?: WatchFeed;
   tag: Tag;
@@ -82,10 +85,13 @@ interface ConversationProps {
   onSummary?(summary: TagSummary): void;
   /** The Tag details panel, with its memory, shows beside the conversation. */
   details?: boolean;
+  inspectorTab?: InspectorTab;
+  onInspectorTabChange?(tab: InspectorTab): void;
   onCloseDetails?(): void;
 }
 
 export function ConversationPane({
+  header,
   gateway,
   watch,
   tag,
@@ -94,6 +100,8 @@ export function ConversationPane({
   onWriteChange,
   onSummary,
   details,
+  inspectorTab,
+  onInspectorTabChange,
   onCloseDetails,
 }: ConversationProps) {
   const tagId = tag.tagId;
@@ -272,6 +280,7 @@ export function ConversationPane({
   }
 
   function viewActivity(taskId: string, trigger: HTMLButtonElement) {
+    if (details) onCloseDetails?.();
     activityTrigger.current = trigger;
     setActiveTask(taskId);
   }
@@ -327,8 +336,17 @@ export function ConversationPane({
           {error}
         </div>
       )}
-      <div className="work-area" ref={workArea}>
+      <div
+        className="work-area"
+        ref={workArea}
+        style={
+          activeTask || details
+            ? ({ "--activity-width": `${activityShown}px` } as CSSProperties)
+            : undefined
+        }
+      >
         <div className="conversation" ref={conversationPane}>
+          {header}
           {history.loading ? (
             <div className="history">
               <div className="timeline">
@@ -431,7 +449,7 @@ export function ConversationPane({
           </form>
         </div>
         {(activeTask || details) && (
-          <div className="activity-frame" style={{ width: activityShown }}>
+          <div className="activity-frame">
             <ResizeHandle
               label="Resize Task activity"
               className="activity-resize"
@@ -448,7 +466,7 @@ export function ConversationPane({
               }}
               onDoubleClick={() => setActivityWidth(ACTIVITY_WIDTH.initial)}
             />
-            {activeTask ? (
+            {activeTask && !details ? (
               <ActivityPane
                 key={activeTask}
                 gateway={gateway}
@@ -466,6 +484,8 @@ export function ConversationPane({
                 gateway={gateway}
                 watch={watch}
                 tag={tag}
+                tab={inspectorTab}
+                onTabChange={onInspectorTabChange}
                 onClose={() => onCloseDetails?.()}
               />
             )}

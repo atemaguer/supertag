@@ -1,7 +1,8 @@
 import type { Gateway, Schedule, ScheduleAction, WatchUpdate } from "@supertag/client/model";
 import { useWatchRefresh, type WatchFeed } from "@supertag/client/react";
-import { Pause, Play, Trash2 } from "lucide-react";
+import { CalendarClock, Pause, Play, Trash2 } from "lucide-react";
 import { useCallback, useState } from "react";
+import { DetailsDisclosure } from "./details-disclosure";
 import { Button } from "./ui/button";
 
 /** How often the list is read while the Watch is down. */
@@ -70,8 +71,11 @@ export function ScheduleList({ gateway, watch, tagId }: ScheduleListProps) {
   const status =
     error || (!loaded ? "Loading…" : schedules.length ? "" : "No Schedules will wake this Tag.");
   return (
-    <section className="details-section" aria-labelledby="tag-details-schedules">
-      <h3 id="tag-details-schedules">Schedules</h3>
+    <DetailsDisclosure
+      title="Schedules"
+      icon={<CalendarClock size={16} aria-hidden />}
+      count={loaded && !error ? schedules.length : undefined}
+    >
       <div className="schedules">
         {schedules.map((schedule) => (
           <div key={schedule.scheduleId} className="schedule" data-state={schedule.state}>
@@ -85,7 +89,7 @@ export function ScheduleList({ gateway, watch, tagId }: ScheduleListProps) {
                 size="icon-xs"
                 title="Resume"
                 aria-label="Resume"
-                disabled={busy === schedule.scheduleId}
+                disabled={!gateway.changeSchedule || busy === schedule.scheduleId}
                 onClick={() => void change(schedule, "resume")}
               >
                 <Play />
@@ -96,7 +100,7 @@ export function ScheduleList({ gateway, watch, tagId }: ScheduleListProps) {
                 size="icon-xs"
                 title="Pause"
                 aria-label="Pause"
-                disabled={busy === schedule.scheduleId}
+                disabled={!gateway.changeSchedule || busy === schedule.scheduleId}
                 onClick={() => void change(schedule, "pause")}
               >
                 <Pause />
@@ -107,7 +111,7 @@ export function ScheduleList({ gateway, watch, tagId }: ScheduleListProps) {
               size="icon-xs"
               title="Delete"
               aria-label="Delete"
-              disabled={busy === schedule.scheduleId}
+              disabled={!gateway.changeSchedule || busy === schedule.scheduleId}
               onClick={() => void change(schedule, "delete")}
             >
               <Trash2 />
@@ -120,7 +124,7 @@ export function ScheduleList({ gateway, watch, tagId }: ScheduleListProps) {
           {status}
         </p>
       )}
-    </section>
+    </DetailsDisclosure>
   );
 }
 

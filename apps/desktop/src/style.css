@@ -709,6 +709,7 @@ button:disabled {
   position: absolute;
   z-index: 2;
   inset: 0 0 auto;
+  container: conversation-header / inline-size;
   height: var(--strip-height);
   display: flex;
   align-items: center;
@@ -720,7 +721,7 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: min(440px, 70%);
+  max-width: min(440px, calc(100% - 164px));
   height: 38px;
   padding: 0 12px 0 4px;
   border: 1px solid var(--line);
@@ -736,7 +737,10 @@ button:disabled {
   border-radius: 50%;
 }
 .tag-name {
-  flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 14px;
 }
 .harness {
@@ -1316,6 +1320,7 @@ button:disabled {
  */
 .activity-frame {
   -webkit-app-region: no-drag;
+  width: var(--activity-width);
   position: relative;
   z-index: 3;
   display: flex;
@@ -1345,6 +1350,151 @@ button:disabled {
   font-size: 15px;
   line-height: 20px;
 }
+.tag-details {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+.inspector-profile {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 14px 16px;
+}
+.inspector-profile .avatar.large {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+.inspector-identity {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.inspector-identity h2 {
+  font-size: 20px;
+  line-height: 1.15;
+}
+.inspector-identity span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.inspector-profile .icon-button {
+  align-self: flex-start;
+  flex: none;
+}
+.inspector-tabs {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  margin: 0 14px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.inspector-tabs button {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 550;
+}
+.inspector-tabs button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.inspector-tabs button[aria-selected="true"] {
+  background: var(--mint);
+  color: #20362a;
+}
+.inspector-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 14px 20px;
+  scrollbar-width: thin;
+}
+.inspector-content:focus-visible {
+  outline-offset: -2px;
+}
+.inspector-facts {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  margin: 0 0 18px;
+  border-top: 1px solid var(--line);
+}
+.inspector-facts dt,
+.inspector-facts dd {
+  margin: 0;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.inspector-facts dt {
+  padding-right: 8px;
+  color: var(--muted);
+}
+.inspector-facts dd {
+  white-space: pre-wrap;
+}
+.inspector-disclosure {
+  border-top: 1px solid var(--line);
+}
+.inspector-disclosure:last-child {
+  border-bottom: 1px solid var(--line);
+}
+.inspector-disclosure summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 3px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  list-style: none;
+}
+.inspector-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+.inspector-disclosure summary:focus-visible {
+  outline-offset: -2px;
+}
+.inspector-disclosure summary:hover {
+  background: var(--hover);
+}
+.inspector-disclosure summary > svg:first-child {
+  color: var(--mint);
+}
+.inspector-disclosure summary > span {
+  flex: 1;
+}
+.inspector-disclosure summary small,
+.inspector-chevron {
+  color: var(--muted);
+}
+.inspector-disclosure[open] .inspector-chevron {
+  transform: rotate(90deg);
+}
+.inspector-disclosure-body {
+  padding: 0 4px 12px;
+}
+.inspector-permissions {
+  margin: 0;
+  padding-inline-start: 20px;
+  font-size: 12px;
+}
+.inspector-permissions li {
+  margin: 4px 0;
+}
 .activity-status,
 .activity ol {
   color: var(--muted);
@@ -1373,6 +1523,9 @@ button.identity-pill[aria-expanded="true"] {
 }
 .details-section {
   margin-top: 16px;
+}
+.inspector-content .details-section {
+  margin-top: 0;
 }
 .details-section h3 {
   margin: 0;
@@ -1707,11 +1860,35 @@ button.identity-pill[aria-expanded="true"] {
   :root {
     --transcript-inset: 16px;
   }
+  .conversation .topstrip {
+    right: min(var(--activity-width, 0px), 95%);
+  }
   .activity-frame {
     position: absolute;
     inset: 0 0 0 auto;
     max-width: 95%;
     box-shadow: -12px 0 30px #0004;
+  }
+}
+
+/* When the inspector overlays a narrow window, stack the two labels within the visible strip. */
+@container conversation-header (max-width: 290px) {
+  .identity-pill {
+    align-self: flex-start;
+    margin-top: 3px;
+    max-width: 100%;
+    height: 29px;
+  }
+  .identity-pill .avatar {
+    width: 21px;
+    height: 21px;
+  }
+  .harness {
+    inset: auto auto 3px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font-size: 10px;
   }
 }
 

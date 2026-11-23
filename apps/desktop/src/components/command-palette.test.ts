@@ -257,14 +257,14 @@ it("offers the Gateway menu's choices as actions", () => {
   expect(onNotifications).toHaveBeenCalledWith("questions");
 });
 
-it("opens the shown Tag's memory, in its details panel, as the Tag's name does", () => {
+it("opens the Memory tab for the shown Tag from search", () => {
   const onTagDetails = vi.fn();
   render({ onTagDetails });
   press("k", { ctrlKey: true });
   type("remember");
   expect(labels("Actions")).toEqual(["Memory"]);
   press("Enter", {}, input());
-  expect(onTagDetails).toHaveBeenCalledWith(true);
+  expect(onTagDetails).toHaveBeenCalledWith(true, "memory");
   expect(dialog()).toBeNull();
   // Without the panel, or without a Tag in view, there is nothing to open.
   render();

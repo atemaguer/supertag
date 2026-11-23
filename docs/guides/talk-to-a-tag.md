@@ -114,8 +114,8 @@ checks that stayed quiet never notify.
 A Tag keeps a memory between turns, such as your preferences and decisions: what its harness,
 such as Claude Code or Codex, keeps itself, or for OpenCode and Cursor, a memory folder the Worker
 Host keeps for them, read from the Worker Host on your Mac. In the desktop
-app, select the Tag's name above the conversation, or choose **Memory** in the ⌘K search, to open
-its details: each memory, its harness, what it is about, and who sees it. One marked **Proposed**
+app, select the Tag's name above the conversation, then select **Memory**. You can also choose
+**Memory** in the ⌘K search. Each entry shows its harness, what it is about, and who sees it. One marked **Proposed**
 is a change a Work Session suggested, which the Tag's daily review merges or drops. Delete one to
 have the Tag forget it. The conversation itself shows only messages. To add or change a memory,
 tell the Tag. Memory never passes through the Control Plane, so it shows only on the machine
@@ -124,9 +124,10 @@ whose Worker Host keeps it. From a terminal, `supertag get memories --tag TAG` l
 
 ## See how a Tag's messages land
 
-A Tag's details in the desktop app open with **Activity**: over the last 30 days, how many of the
-messages it sent without being asked (Schedule wake-ups and Objective notices) were posted, read,
-and answered, and how many checks stayed quiet, and its start rate, if it has one. See
+Select the Tag's name above the conversation to open **Overview**, then expand **Activity**.
+For the last 30 days, you can see how many unprompted messages the Tag posted and how many of
+those messages people read or answered. You can also see how many checks stayed quiet and the Tag's
+start rate, if it has one. See
 [Quiet results](../reference/coordination.md#quiet-results).
 
 ## See a Task's files
@@ -145,7 +146,7 @@ each one uses.
 
 When a Tag's Permission Sets limit `web:fetch` to named hosts, each Task Attempt's web requests go
 through the egress proxy of its **Worker**, the process that runs it, which keeps a log of what it allowed and refused. Operators see it in the
-desktop app's Tag details, under **Network**. See [Network log](../reference/iam.md#network-log).
+desktop app by selecting the Tag's name above the conversation, then **Network**. See [Network log](../reference/iam.md#network-log).
 
 ## Ask a Tag to follow up
 
@@ -181,8 +182,8 @@ supertag delete schedule SCHEDULE_ID
 shows the next time, the missed occurrences, and the latest turn it queued. See
 [Schedules](../reference/coordination.md#schedules) for the rules.
 
-The Tag's details in the desktop app, opened from its name above the conversation, list its
-Schedules after its notes, with each one's next time, and let you pause, resume, or delete it.
+Select the Tag's name above the conversation, then expand **Schedules** in **Overview**.
+Each Schedule shows its next wake-up time. You can pause, resume, or delete it there.
 
 When SuperTag was down through several occurrences of a recurring Schedule, it fires once and
 counts the rest as missed. To run the missed ones after all:

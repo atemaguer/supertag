@@ -81,7 +81,10 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 // Chromium's own state sits beside the saved Gateways, in the directory the CLI reads them from.
-app.setPath("userData", configDirectory());
+const profileDirectory = devUrl?.searchParams.has("preview")
+  ? path.join(app.getPath("temp"), "supertag-desktop-preview")
+  : configDirectory();
+app.setPath("userData", profileDirectory);
 
 /**
  * This release and where it runs from, for the CLI it runs: the packaged app's bundled CLI is in
@@ -101,7 +104,7 @@ const streams = new Streams();
 const log = new FileLog(path.join(app.getPath("logs"), "main.log"));
 
 /** A staged update leaves this, so the new version restarts the local services once. */
-const installNote = new InstallNote(configDirectory(), app.getVersion());
+const installNote = new InstallNote(profileDirectory, app.getVersion());
 
 /** On the first launch after an update, logs how long the window took, once. */
 let updatedFrom = installNote.updated();

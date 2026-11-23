@@ -163,7 +163,8 @@ it("resizes the Task activity pane between its limits, remembers it, and resets 
     await flush();
   };
   await open();
-  const frame = () => host.querySelector(".activity-frame") as HTMLElement;
+  const paneWidth = () =>
+    host.querySelector<HTMLElement>(".work-area")?.style.getPropertyValue("--activity-width");
   const handle = () => host.querySelector(".activity-resize") as HTMLElement;
   const pointer = (type: string, clientX: number) =>
     act(() => {
@@ -177,41 +178,41 @@ it("resizes the Task activity pane between its limits, remembers it, and resets 
         }),
       );
     });
-  expect(frame().style.width).toBe("320px");
+  expect(paneWidth()).toBe("320px");
   expect(handle().getAttribute("aria-valuemin")).toBe("280");
 
   // Dragging the left edge left widens the pane.
   pointer("pointerdown", 500);
   pointer("pointermove", 400);
-  expect(frame().style.width).toBe("420px");
+  expect(paneWidth()).toBe("420px");
   // It stops where the conversation would be narrower than 420px, here 580px.
   pointer("pointerup", 0);
-  expect(frame().style.width).toBe("580px");
+  expect(paneWidth()).toBe("580px");
   expect(handle().getAttribute("aria-valuemax")).toBe("580");
   expect(localStorage.getItem("supertag.desktop.activity-width")).toBe("580");
   pointer("pointerdown", 0);
   pointer("pointerup", 900);
-  expect(frame().style.width).toBe("280px");
+  expect(paneWidth()).toBe("280px");
 
   const key = (key: string) =>
     act(() => {
       handle().dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
     });
   key("ArrowLeft");
-  expect(frame().style.width).toBe("296px");
+  expect(paneWidth()).toBe("296px");
   key("ArrowRight");
   key("ArrowRight");
-  expect(frame().style.width).toBe("280px");
+  expect(paneWidth()).toBe("280px");
 
   act(() => {
     handle().dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
   });
-  expect(frame().style.width).toBe("320px");
+  expect(paneWidth()).toBe("320px");
   key("ArrowLeft");
   act(() => root.unmount());
   root = createRoot(host);
   await open();
-  expect(frame().style.width).toBe("336px");
+  expect(paneWidth()).toBe("336px");
 });
 
 it("shows the Tag's messages and its result as the conversation's follow pushes them", async () => {
@@ -375,7 +376,13 @@ it("shows the Tag's Schedules in its details panel, never in the conversation", 
   act(() => root.render(render(true)));
   await flush();
   const details = host.querySelector("#tag-details");
-  expect(details?.querySelector("#tag-details-schedules")?.textContent).toBe("Schedules");
+  const summary = [...(details?.querySelectorAll("summary") ?? [])].find((entry) =>
+    entry.textContent?.includes("Schedules"),
+  );
+  expect(summary?.closest("details")?.open).toBe(false);
+  act(() => summary?.click());
+  await flush();
+  expect(summary?.closest("details")?.open).toBe(true);
   expect(details?.querySelector(".schedule-note")?.textContent).toBe("Summarise the week");
   expect(host.querySelector(".conversation .schedules")).toBeNull();
 });

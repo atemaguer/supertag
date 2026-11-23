@@ -5,6 +5,7 @@ import { watchFeed } from "@supertag/client/react";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { gatewaySession } from "../gateway";
 import {
   attentionLine,
   memoryCaption,
@@ -40,6 +41,20 @@ afterEach(() => {
 
 async function settle() {
   for (let i = 0; i < 5; i++) await act(async () => {});
+}
+
+function inspectorTab(name: string) {
+  const tab = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+    (element) => element.textContent === name,
+  );
+  if (!tab) throw new Error(`Missing ${name} tab`);
+  return tab;
+}
+
+async function openTab(name: string) {
+  act(() => inspectorTab(name).click());
+  await settle();
+  expect(inspectorTab(name).getAttribute("aria-selected")).toBe("true");
 }
 
 const memory = (memoryId: string, extra: Partial<HarnessMemory> = {}): HarnessMemory => ({
@@ -93,10 +108,10 @@ it("lists the Tag's memory on this Mac, marks proposals, and deletes one", async
   const onClose = vi.fn();
   act(() => root.render(createElement(TagDetails, { gateway, watch: feed, tag, onClose })));
   await settle();
+  await openTab("Memory");
   expect(harnessMemory).toHaveBeenCalledWith("lead");
   // The panel is the Tag's: its name heads it, and Memory is one section of it.
   expect(host.querySelector("aside h2")?.textContent).toBe("Lead");
-  expect(host.querySelector("section.details-section h3")?.textContent).toBe("Memory");
   const section = () => host.querySelector('[aria-label="Memory"]');
   const texts = () =>
     [...(section()?.querySelectorAll(".memory-text") ?? [])].map((n) => n.textContent);
@@ -139,6 +154,7 @@ it("says when the Tag keeps no memory on this Mac", async () => {
   } as unknown as Gateway;
   act(() => root.render(createElement(TagDetails, { gateway, tag, onClose() {} })));
   await settle();
+  await openTab("Memory");
   expect(host.textContent).toContain("Lead keeps no memory on this Mac yet.");
   expect(host.querySelector('[aria-label^="Delete memory"]')).toBeNull();
 });
@@ -153,6 +169,7 @@ it("says why a shared Gateway shows no memory", async () => {
   } as unknown as Gateway;
   act(() => root.render(createElement(TagDetails, { gateway, tag, onClose() {} })));
   await settle();
+  await openTab("Memory");
   expect(host.textContent).toContain("read only on the machine whose Worker Host keeps it");
   expect(host.querySelector('[aria-label^="Delete memory"]')).toBeNull();
 });
@@ -203,11 +220,8 @@ it("shows the Tag's network log as its own section and rereads when a turn ends"
   const feed = watchFeed();
   act(() => root.render(createElement(TagDetails, { gateway, watch: feed, tag, onClose() {} })));
   await settle();
+  await openTab("Network");
   expect(networkLogs).toHaveBeenCalledWith("lead");
-  const headings = [...host.querySelectorAll("section.details-section h3")].map(
-    (node) => node.textContent,
-  );
-  expect(headings).toEqual(["Network"]);
   expect(host.textContent).toContain("No network log yet.");
   held = [networkLog];
   act(() => feed.publish({ kind: "conversation", tagId: "lead" }));
@@ -228,6 +242,7 @@ it("tells a person who is not an operator that only operators see the network lo
   } as unknown as Gateway;
   act(() => root.render(createElement(TagDetails, { gateway, tag, onClose() {} })));
   await settle();
+  await openTab("Network");
   expect(host.textContent).toContain("Only operators can see the network log.");
 });
 
@@ -244,15 +259,21 @@ it("words a period, the unprompted messages, and a start rate", () => {
   );
 });
 
-it("shows the Tag's activity first and rereads it when one of its turns ends", async () => {
+it("opens the Activity disclosure and rereads it when one of the Tag's turns ends", async () => {
   let activity: TagActivity = { windowDays: 30, posted: 0, read: 0, answered: 0, quiet: 0 };
   const tagActivity = vi.fn(async () => activity);
   const feed = watchFeed();
   const gateway = { tagActivity } as unknown as Gateway;
   act(() => root.render(createElement(TagDetails, { gateway, watch: feed, tag, onClose() {} })));
   await settle();
-  const section = host.querySelector('[aria-labelledby="tag-details-activity"]');
-  expect(host.querySelector(".details-section")).toBe(section);
+  const summary = [...host.querySelectorAll("summary")].find((entry) =>
+    entry.textContent?.includes("Activity"),
+  );
+  const section = summary?.closest("details");
+  expect(section?.open).toBe(false);
+  act(() => summary?.click());
+  await settle();
+  expect(section?.open).toBe(true);
   expect(section?.textContent).toContain("Lead sent nothing unprompted.");
   expect(section?.textContent).toContain("Start rate");
   expect(section?.textContent).toContain("None");
@@ -280,6 +301,80 @@ it("shows the Tag's activity first and rereads it when one of its turns ends", a
   await settle();
   expect(section?.textContent).toContain("Idle Objectives");
   expect(section?.textContent).toMatch(/Ship SSO · idle since /);
+});
+
+it("navigates the available inspector tabs with the keyboard and resets on Tag change", async () => {
+  const gateway = {
+    harnessMemory: async () => ({ memories: [memory("one")], keptOn: [] }),
+    networkLogs: async () => [],
+  } as unknown as Gateway;
+  const render = (shown: Tag) =>
+    act(() => root.render(createElement(TagDetails, { tag: shown, gateway, onClose() {} })));
+  render(tag);
+  const names = () => [...host.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent);
+  expect(names()).toEqual(["Overview", "Memory", "Network"]);
+  expect(inspectorTab("Overview").getAttribute("aria-selected")).toBe("true");
+  expect(inspectorTab("Overview").tabIndex).toBe(0);
+  expect(inspectorTab("Memory").tabIndex).toBe(-1);
+
+  const press = async (name: string, key: string, next: string) => {
+    act(() => {
+      const tab = inspectorTab(name);
+      tab.focus();
+      tab.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+    });
+    await settle();
+    const selected = inspectorTab(next);
+    expect(document.activeElement).toBe(selected);
+    expect(selected.getAttribute("aria-selected")).toBe("true");
+    expect(host.querySelector('[role="tabpanel"]:not([hidden])')?.id).toBe(
+      selected.getAttribute("aria-controls"),
+    );
+  };
+  await press("Overview", "ArrowRight", "Memory");
+  await press("Memory", "End", "Network");
+  await press("Network", "ArrowRight", "Overview");
+  await press("Overview", "ArrowLeft", "Network");
+  await press("Network", "Home", "Overview");
+  await openTab("Memory");
+  expect(host.textContent).toContain("Memory one");
+  render({ ...tag, tagId: "reviewer", name: "Reviewer" });
+  expect(inspectorTab("Overview").getAttribute("aria-selected")).toBe("true");
+  expect(host.textContent).not.toContain("Memory one");
+});
+
+it("shows only features provided by the connected Gateway", () => {
+  const gateway = {} as Gateway;
+  const configured = {
+    ...tag,
+    instructions: "Review changes to the identity service.",
+    allowedActions: ["web:fetch"],
+    openWorkSessions: 0,
+    maxWorkSessions: 2,
+  };
+  act(() => root.render(createElement(TagDetails, { tag: configured, gateway, onClose() {} })));
+  expect([...host.querySelectorAll("dl dd")].map((fact) => fact.textContent)).toEqual([
+    "Codex",
+    "0 of 2",
+    configured.instructions,
+  ]);
+  expect([...host.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent)).toEqual([
+    "Overview",
+  ]);
+  const summaries = [...host.querySelectorAll("summary")];
+  expect(summaries).toHaveLength(1);
+  expect(summaries[0]?.textContent).toContain("Permissions");
+  const permissions = summaries[0]?.closest("details");
+  expect(permissions?.open).toBe(false);
+  act(() => summaries[0]?.click());
+  expect(permissions?.open).toBe(true);
+  expect(permissions?.querySelector("li")?.textContent).toBe("web:fetch");
+});
+
+it("exposes network logs for operator connections to the desktop app", () => {
+  expect(gatewaySession("c", "local", "operator:local").networkLogs).toBeTypeOf("function");
+  expect(gatewaySession("c", "prod", "client:mac").networkLogs).toBeUndefined();
+  expect(gatewaySession("c", "unknown").networkLogs).toBeUndefined();
 });
 
 it("closes on Esc, unless a dialog or menu is open and takes it first", async () => {

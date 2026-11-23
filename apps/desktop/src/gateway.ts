@@ -5,7 +5,7 @@
 import type { Gateway, RestartStep, WatchUpdate } from "@supertag/client/model";
 import { desktop } from "./desktop";
 
-export function gatewaySession(connectionId: string, scope: string): Gateway {
+export function gatewaySession(connectionId: string, scope: string, principal?: string): Gateway {
   const api = desktop();
   return {
     scope,
@@ -21,7 +21,9 @@ export function gatewaySession(connectionId: string, scope: string): Gateway {
     },
     harnessMemory: (tagId) => api.listHarnessMemory({ connectionId, tagId }),
     deleteHarnessMemory: (memoryId) => api.deleteHarnessMemory({ connectionId, memoryId }),
-    networkLogs: (tagId) => api.listNetworkLogs({ connectionId, tagId }),
+    ...(principal?.startsWith("operator:")
+      ? { networkLogs: (tagId: string) => api.listNetworkLogs({ connectionId, tagId }) }
+      : {}),
     locateTaskFiles: (taskId) => api.locateTaskFiles({ connectionId, taskId }),
     listTaskFiles: (taskId, path) => api.listTaskFiles({ connectionId, taskId, path }),
     readTaskFile: (taskId, path) => api.readTaskFile({ connectionId, taskId, path }),
