@@ -83,7 +83,7 @@ app's SuperTag release, the Gateway's and the protocol version they agreed, chec
 and sets notifications. A dot on the gear means an update waits or the Gateway runs another
 release than the app.
 
-To find a Tag, a message, or a setting, press ⌘K or the search button beside **+** at the top of
+To find a Tag, a message, or a setting, press ⌘K or the **Search** row at the top of
 the sidebar. The search lists your **Tags**, each with its latest message, and **Actions**: New
 Tag, Keyboard shortcuts, and the Gateway settings, such as switching or adding a **Gateway** (the
 service the app connects to) and what this device notifies about. Typing filters both lists and also finds Tags by the

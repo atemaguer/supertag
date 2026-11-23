@@ -47,6 +47,7 @@ import {
   type UpdaterHost,
   updatedLine,
 } from "./updater";
+import { TRAFFIC_LIGHT_POSITION } from "./window-chrome";
 
 // A closed stdout or stderr (an app opened from Finder, or a terminal that went away) must never
 // turn a log line into an uncaught exception.
@@ -241,7 +242,7 @@ function createWindow() {
     backgroundColor: "#19191c",
     show: false,
     // An overlay title bar: the page runs under it, with the window controls.
-    ...(mac ? { titleBarStyle: "hidden", trafficLightPosition: { x: 18, y: 22 } } : {}),
+    ...(mac ? { titleBarStyle: "hidden", trafficLightPosition: TRAFFIC_LIGHT_POSITION } : {}),
     webPreferences: {
       preload: path.join(here, "preload.cjs"),
       contextIsolation: true,

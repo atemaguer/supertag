@@ -331,21 +331,51 @@ it("names the lead Tag's state with it, and keeps a dot for each state on the ra
   expect(moss.getAttribute("title")).toBe("moss: Needs you");
 });
 
-it("has no search field of its own: the search button beside New Tag opens the palette", () => {
-  render({ onNewTag: vi.fn() });
-  // The mascot heads the sidebar, named for the app; the list keeps a heading for screen readers.
-  expect(host.querySelector('.sidebar img[alt="SuperTag"]')).not.toBeNull();
-  expect(host.querySelector(".sidebar h2")?.textContent).toBe("Tags");
-  expect(host.querySelector(".sidebar input")).toBeNull();
-  const actions = [...host.querySelectorAll(".sidebar-top-actions button")].map((button) =>
-    button.getAttribute("aria-label"),
-  );
-  expect(actions).toEqual(["Search", "New Tag"]);
-  act(() => (host.querySelector('.sidebar [aria-label="Search"]') as HTMLButtonElement).click());
+it("heads the sidebar with the brand, a search row that opens the palette, and the Tags heading", () => {
+  const onNewTag = vi.fn();
+  render({ onNewTag });
+  const sidebar = host.querySelector(".sidebar") as HTMLElement;
+  // The brand is in the row that drags the window, and is not something to press.
+  const brand = sidebar.querySelector('img[alt="SuperTag"]') as HTMLElement;
+  expect(brand.closest(".drag-region")).not.toBeNull();
+  expect(brand.closest("button, a")).toBeNull();
+  // One search: a button naming its key, no field of the sidebar's own.
+  expect(sidebar.querySelector("input")).toBeNull();
+  const search = sidebar.querySelectorAll('[aria-label="Search"]');
+  expect(search).toHaveLength(1);
+  expect(search[0]?.textContent).toMatch(/^Search(⌘K|Ctrl\+K)$/u);
+  expect(search[0]?.getAttribute("aria-keyshortcuts")).toMatch(/^(Meta|Control)\+K$/u);
+  // The list's heading is real, with New Tag beside it.
+  const heading = sidebar.querySelector("h2") as HTMLElement;
+  expect(heading.textContent).toBe("Tags");
+  expect(heading.classList.contains("visually-hidden")).toBe(false);
+  const newTag = heading.parentElement?.querySelector('[aria-label="New Tag"]') as HTMLElement;
+  act(() => newTag.click());
+  expect(onNewTag).toHaveBeenCalledTimes(1);
+  // In order: brand, search, heading, then the Tags.
+  const order = [brand, search[0], heading, sidebar.querySelector(".tag-row")] as Element[];
+  for (let i = 1; i < order.length; i++)
+    expect(
+      (order[i - 1] as Element).compareDocumentPosition(order[i] as Element) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+  act(() => (search[0] as HTMLButtonElement).click());
   expect(document.querySelector('[role="dialog"] input')?.getAttribute("placeholder")).toBe(
     "Search Tags, conversations, settings…",
   );
   expect(rows()).toEqual(["Lead, lead Tag", "finch", "moss"]);
+});
+
+it("keeps the mascot, search and New Tag in the rail, without the heading", () => {
+  localStorage.setItem("supertag.desktop.sidebar", "rail");
+  render({ onNewTag: vi.fn() });
+  const sidebar = host.querySelector(".sidebar") as HTMLElement;
+  expect(sidebar.querySelector('img[alt="SuperTag"]')).not.toBeNull();
+  expect(sidebar.textContent).not.toContain("SuperTag");
+  expect(sidebar.querySelector("h2")).toBeNull();
+  expect(sidebar.querySelectorAll('[aria-label="Search"]')).toHaveLength(1);
+  expect(sidebar.querySelectorAll('[aria-label="New Tag"]')).toHaveLength(1);
 });
 
 it("recognises the sidebar shortcut and orders and times rows", () => {

@@ -42,13 +42,19 @@ the inspector, the command palette, and an empty conversation.
 
 ## Sidebar
 
-From top to bottom: the brand row with search and **+**, the list, the foot.
+From top to bottom: the title row, search, the **Tags** heading, the list, the foot.
 
-- The brand row sits below the title bar, clear of the macOS window controls: the round mascot at
-  26 px (`src/assets/supertag-mark@2x.png`, a small copy of the brand art, named "SuperTag") and
-  the wordmark in the display face, left-aligned, with search and **+** at the right. The list's
-  **Tags** heading stays in the page for screen readers and is not drawn.
-
+- The title row is `--header-height` tall, like the conversation's header band, and drags the
+  window. On macOS the window controls sit at its left (`electron/window-chrome.ts` places
+  them, centred on the row) and the brand follows them: the round mascot at 22 px
+  (`src/assets/supertag-mark@2x.png`, named "SuperTag") and the wordmark in the display face.
+  The brand is not a button. Without left-hand window controls it starts at the sidebar's edge.
+- Search is one quiet row across the sidebar: a magnifier, "Search", and the key, ⌘K or Ctrl+K.
+  It opens the command palette; the sidebar has no search of its own.
+- The list's heading is a small uppercase label, "Tags", in `--faint`, with **+** (New Tag) at
+  its right. It is the real heading of the list.
+- In the rail the mascot sits alone under the window controls, and search and **+** are icons
+  at the foot.
 - One list. The lead Tag is pinned first, with a hairline after it. No heading is drawn over it.
   The other Tags follow, most recently active first.
 - Every row is `--row-height` tall and has the same parts: the avatar; the name in the display

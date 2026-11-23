@@ -176,36 +176,55 @@ export function Sidebar({
       <Plus size={17} aria-hidden />
     </Button>
   );
-  const search = onSearch && (
-    <Button
-      variant="ghost"
-      className="sidebar-button"
-      aria-label="Search"
-      aria-keyshortcuts={onMac() ? "Meta+K" : "Control+K"}
-      title="Search Tags, conversations, settings"
-      onClick={onSearch}
-    >
-      <Search size={16} aria-hidden />
-    </Button>
-  );
+  const searchKeys = onMac() ? "Meta+K" : "Control+K";
+  // Expanded, search is a row across the sidebar; in the rail, an icon. Both open the palette.
+  const search =
+    onSearch &&
+    (expanded ? (
+      <button
+        type="button"
+        className="sidebar-search"
+        aria-label="Search"
+        aria-keyshortcuts={searchKeys}
+        title="Search Tags, conversations, settings"
+        onClick={onSearch}
+      >
+        <Search size={14} aria-hidden />
+        <span>Search</span>
+        <kbd aria-hidden>{onMac() ? "⌘K" : "Ctrl+K"}</kbd>
+      </button>
+    ) : (
+      <Button
+        variant="ghost"
+        className="sidebar-button"
+        aria-label="Search"
+        aria-keyshortcuts={searchKeys}
+        title="Search Tags, conversations, settings"
+        onClick={onSearch}
+      >
+        <Search size={16} aria-hidden />
+      </Button>
+    ));
 
   return (
     <nav id="sidebar" className="sidebar" data-mode={mode} aria-label="Tags">
-      <div className="sidebar-top drag-region" />
-      {expanded && (
-        <div className="sidebar-heading">
-          {/* The brand heads the sidebar; the list keeps its heading for screen readers. */}
-          <span className="sidebar-brand">
-            <img src={mark} alt="SuperTag" width={26} height={26} draggable={false} />
+      {/* The title row: the brand beside the window controls, or under them in the rail. It
+          drags the window, and the brand is not a button. */}
+      <div className="sidebar-top drag-region">
+        <span className="sidebar-brand">
+          <img src={mark} alt="SuperTag" width={22} height={22} draggable={false} />
+          {expanded && (
             <span className="sidebar-wordmark" aria-hidden>
               SuperTag
             </span>
-          </span>
-          <h2 className="visually-hidden">Tags</h2>
-          <div className="sidebar-top-actions">
-            {search}
-            {newTag}
-          </div>
+          )}
+        </span>
+      </div>
+      {expanded && search}
+      {expanded && (
+        <div className="sidebar-heading">
+          <h2>Tags</h2>
+          {newTag}
         </div>
       )}
       <div className="sidebar-tags">

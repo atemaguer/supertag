@@ -52,6 +52,8 @@
   --sidebar-width: 256px;
   --bubble: #2a292d;
   --header-height: 48px;
+  /* The room the macOS window controls take at the sidebar's left; see electron/window-chrome.ts. */
+  --traffic-lights: 84px;
   --transcript-inset: 22px;
 }
 
@@ -268,40 +270,84 @@ button:disabled {
 .drag-region > * {
   -webkit-app-region: no-drag;
 }
-/* Leave the title bar available for the window controls and dragging. */
+/* The title row: as tall as the conversation's header band, with the brand beside the macOS
+   window controls and centred on them. Without those controls it starts at the sidebar's edge. */
 .sidebar-top {
-  height: 40px;
-}
-.sidebar-heading {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  padding: 0 var(--space-2) var(--space-2) var(--space-3);
+  height: var(--header-height);
+  padding: 0 var(--space-3) 0 var(--space-4);
 }
-/* The mascot and wordmark, on the row of the search and New Tag buttons, below the title bar. */
+:root[data-titlebar="overlay"] .sidebar-top {
+  padding-left: var(--traffic-lights);
+}
+/* The brand is part of the title bar: it drags the window like the row it sits in. */
 .sidebar-brand {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 7px;
   min-width: 0;
   user-select: none;
+  -webkit-app-region: drag;
 }
 .sidebar-brand img {
   flex: none;
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
 }
 .sidebar-wordmark {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font: 600 var(--font-lg) / 1.2 var(--display);
-  letter-spacing: -0.035em;
+  font: 600 var(--font-md) / 1.2 var(--display);
+  letter-spacing: -0.02em;
 }
-.sidebar-top-actions {
+/* Search across the sidebar: it opens the command palette, and names the key that does too. */
+.sidebar-search {
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: var(--space-2);
+  height: 30px;
+  margin: var(--space-1) var(--space-2) var(--space-3);
+  padding: 0 var(--space-2) 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--font-md);
+  text-align: left;
+}
+.sidebar-search:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.sidebar-search span {
+  flex: 1;
+}
+.sidebar-search kbd {
+  color: var(--faint);
+  font: inherit;
+  font-size: var(--font-xs);
+}
+/* The list's heading, a small label, with New Tag at its right. */
+.sidebar-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 26px;
+  padding: 0 var(--space-2) 0 var(--space-4);
+}
+.sidebar-heading h2 {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--font-2xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.sidebar-heading .sidebar-button {
+  width: 24px;
+  height: 24px;
 }
 .sidebar-button {
   width: 30px;
@@ -601,9 +647,14 @@ button:disabled {
 .connection[data-connected="true"] .connection-dot {
   background: var(--mint);
 }
-/* Keep the collapsed roster clear of the window controls. */
+/* In the rail the mascot sits alone, under the window controls where there are any. */
 .shell[data-sidebar="rail"] .sidebar-top {
-  height: 52px;
+  justify-content: center;
+  height: auto;
+  padding: var(--space-3) 0 var(--space-2);
+}
+:root[data-titlebar="overlay"] .shell[data-sidebar="rail"] .sidebar-top {
+  padding: 44px 0 var(--space-2);
 }
 .shell[data-sidebar="rail"] .sidebar-tags {
   align-items: center;

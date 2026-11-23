@@ -14,6 +14,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Page } from "playwright-core";
 import { createServer } from "vite";
+import { TRAFFIC_LIGHT_POSITION } from "../electron/window-chrome";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const out = path.join(root, ".shots");
@@ -255,6 +256,14 @@ async function main() {
         await page.goto(`${origin}/?preview${state.query ? `&${state.query}` : ""}`);
         await page.waitForSelector(".tag-row", { timeout: 20_000 });
         await page.evaluate(() => document.fonts.ready);
+        // Chrome draws no window controls: stand-ins show where macOS puts them over the page.
+        await page.evaluate(({ x, y }) => {
+          for (const [index, colour] of ["#ff5f57", "#febc2e", "#28c840"].entries()) {
+            const light = document.createElement("i");
+            light.style.cssText = `position:fixed;z-index:99;left:${x + index * 20}px;top:${y}px;width:12px;height:12px;border-radius:50%;background:${colour};pointer-events:none`;
+            document.body.append(light);
+          }
+        }, TRAFFIC_LIGHT_POSITION);
         await state.act?.(page);
         for (const selector of state.expect)
           await page.waitForSelector(selector, { state: "attached", timeout: 5_000 });
