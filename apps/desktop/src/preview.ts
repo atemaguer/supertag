@@ -514,5 +514,6 @@ export function previewUpdates(state: string | null): UpdateSource | undefined {
     status: async () => status,
     subscribe: () => () => {},
     install: async () => {},
+    check: async () => {},
   };
 }

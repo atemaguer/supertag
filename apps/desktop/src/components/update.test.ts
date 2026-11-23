@@ -30,6 +30,7 @@ function source(first: UpdateStatus) {
       return () => listeners.delete(changed);
     },
     install: vi.fn(async () => {}),
+    check: vi.fn(async () => {}),
     push(status: UpdateStatus) {
       act(() => {
         for (const changed of listeners) changed(status);

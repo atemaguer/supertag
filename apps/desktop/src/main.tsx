@@ -16,13 +16,21 @@ import {
   tagAdminRefusal,
 } from "@supertag/client/model";
 import { PlatformProvider } from "@supertag/client/react";
+import { Settings as SettingsIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { commandKeyLabel } from "./components/command-palette";
 import { ConnectionDialog } from "./components/connection";
 import { GatewaySelector, gatewayActions } from "./components/gateway-selector";
 import { LocalUpgradeOffer } from "./components/local-upgrade";
 import { Onboarding } from "./components/onboarding";
-import type { SidebarMode } from "./components/sidebar";
+import {
+  isSettingsShortcut,
+  SettingsButton,
+  SettingsDialog,
+  settingsPending,
+} from "./components/settings";
+import { onMac, type SidebarMode } from "./components/sidebar";
 import {
   nativeUpdates,
   UpdateBanner,
@@ -30,8 +38,9 @@ import {
   type UpdateSource,
   useUpdates,
 } from "./components/update";
-import { VersionLabel } from "./components/version";
+import { APP_VERSION } from "./components/version";
 import { EmptyWorkspace, Workspace, WorkspaceShell } from "./components/workspace";
+import { desktop } from "./desktop";
 import { gatewaySession, nativeGateway, nativeSetup, type SetupCheck } from "./gateway";
 import { useNotificationLevel } from "./lib/notifications";
 import { windowPlatform } from "./lib/platform";
@@ -77,6 +86,23 @@ function App({
   const trigger = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
   const [notifications, setNotifications] = useNotificationLevel();
+  const [settings, setSettings] = useState(false);
+  const gear = useRef<HTMLButtonElement>(null);
+  // Settings opens from its gear, from the app menu, and with ⌘, (Ctrl+, outside macOS).
+  useEffect(() => {
+    const mac = onMac();
+    function onKey(event: KeyboardEvent) {
+      if (!isSettingsShortcut(event, mac)) return;
+      event.preventDefault();
+      setSettings(true);
+    }
+    window.addEventListener("keydown", onKey);
+    const stop = desktop().onOpenSettings?.(() => setSettings(true));
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      stop?.();
+    };
+  }, []);
   /** First launch, with no SuperTag set up here: the setup screen, from the first check. */
   const [setup, setSetup] = useState<{ check: SetupCheck }>();
   /** The address of the local Gateway this window connected to, while it is connected to it. */
@@ -269,12 +295,31 @@ function App({
     onEdit: (profile?: GatewayProfile) => open(profile),
     onDisconnect: () => void clear(),
   };
-  // The command palette offers what the Gateway menu does.
-  const actions = gatewayActions({
-    ...menu,
-    notifications,
-    onNotifications: setNotifications,
-  });
+  // The command palette offers what the Gateway menu and Settings do.
+  const actions = [
+    ...gatewayActions({
+      ...menu,
+      notifications,
+      onNotifications: setNotifications,
+    }),
+    {
+      id: "settings",
+      label: "Settings",
+      caption: "version, updates, notifications",
+      icon: <SettingsIcon aria-hidden />,
+      shortcut: commandKeyLabel(","),
+      keywords: "preferences about version update",
+      run: () => setSettings(true),
+    },
+  ];
+  const selectedGateway = gateways.profiles.find(
+    (profile) => profile.origin === connection?.origin,
+  );
+  const gatewayName = connection?.preview
+    ? "Preview workspace"
+    : connection?.origin === LOCAL_GATEWAY
+      ? "Local"
+      : (selectedGateway?.name ?? connection?.origin);
 
   const selector = (mode: SidebarMode) => (
     <GatewaySelector
@@ -292,7 +337,11 @@ function App({
   const sidebarFooter = (mode: SidebarMode) => (
     <>
       <UpdateButton updates={updates} wide={mode === "expanded"} />
-      <VersionLabel wide={mode === "expanded"} gateway={connection?.release} />
+      <SettingsButton
+        button={gear}
+        pending={settingsPending(updates.status, APP_VERSION, connection?.release)}
+        onOpen={() => setSettings(true)}
+      />
     </>
   );
 
@@ -382,6 +431,16 @@ function App({
           onForget={(origin) => void clear(origin)}
         />
       )}
+      <SettingsDialog
+        open={settings}
+        onOpenChange={setSettings}
+        gatewayName={gatewayName}
+        gateway={connection?.release}
+        updates={updates}
+        notifications={notifications}
+        onNotifications={setNotifications}
+        returnFocus={gear}
+      />
       <UpdateBanner updates={updates} />
     </>
   );

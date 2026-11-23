@@ -171,6 +171,19 @@ it("offers Check for Updates… in the app menu on macOS and in File elsewhere",
   );
 });
 
+it("offers Settings… with its shortcut in the app menu on macOS and in File elsewhere", () => {
+  const open = vi.fn();
+  for (const mac of [true, false]) {
+    const [first] = menuTemplate({ mac, development: false, onSettings: open });
+    const items = first?.submenu as { label?: string; accelerator?: string; click?: () => void }[];
+    const item = items.find((entry) => entry.label === "Settings…");
+    expect(item?.accelerator).toBe("CmdOrCtrl+,");
+    item?.click?.();
+  }
+  expect(open).toHaveBeenCalledTimes(2);
+  expect(JSON.stringify(menuTemplate({ mac: true, development: false }))).not.toContain("Settings");
+});
+
 it("points the Mac app's updater at published GitHub Releases only", async () => {
   const { APP_UPDATE_YML } = await import("../electron-builder.config");
   expect(APP_UPDATE_YML.split("\n")).toEqual([

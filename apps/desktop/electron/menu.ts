@@ -2,7 +2,7 @@ import type { MenuItemConstructorOptions } from "electron";
 
 /**
  * The app's menu, in place of Electron's default: the app menu on macOS (File elsewhere), with
- * "Check for Updates…"; Edit (without it the standard copy, paste and undo shortcuts stop
+ * "Settings…" and "Check for Updates…"; Edit (without it the standard copy, paste and undo shortcuts stop
  * working); View with zoom (and the developer tools only in development); and Window.
  */
 export function menuTemplate(options: {
@@ -10,10 +10,15 @@ export function menuTemplate(options: {
   development: boolean;
   /** "Check for Updates…": in the app menu on macOS, in File elsewhere. */
   onCheckForUpdates?: () => void;
+  /** "Settings…", with ⌘, (Ctrl+, elsewhere): beside "Check for Updates…". */
+  onSettings?: () => void;
 }): MenuItemConstructorOptions[] {
   const template: MenuItemConstructorOptions[] = [];
   const check: MenuItemConstructorOptions[] = options.onCheckForUpdates
     ? [{ label: "Check for Updates…", click: options.onCheckForUpdates }]
+    : [];
+  const settings: MenuItemConstructorOptions[] = options.onSettings
+    ? [{ label: "Settings…", accelerator: "CmdOrCtrl+,", click: options.onSettings }]
     : [];
   if (options.mac) {
     template.push({
@@ -21,6 +26,8 @@ export function menuTemplate(options: {
       submenu: [
         { role: "about" },
         ...check,
+        ...(settings.length > 0 ? [{ type: "separator" } as const] : []),
+        ...settings,
         { type: "separator" },
         { role: "hide" },
         { role: "hideOthers" },
@@ -33,8 +40,9 @@ export function menuTemplate(options: {
     template.push({
       role: "fileMenu",
       submenu: [
+        ...settings,
         ...check,
-        ...(check.length > 0 ? [{ type: "separator" } as const] : []),
+        ...(check.length + settings.length > 0 ? [{ type: "separator" } as const] : []),
         { role: "quit" },
       ],
     });

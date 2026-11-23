@@ -78,8 +78,10 @@ what it does not know, such as the host before the Tag's first turn.
 In the desktop app, drag the sidebar's edge to resize it, or past its narrowest to fold it into a
 rail of avatars; ⌘B does the same. The Task activity pane resizes from its edge too. ⌘1 to ⌘9 open
 the Tags in order, ⌘↑ and ⌘↓ the previous and next, and ⌘N creates a Tag; use Ctrl in place of
-⌘ outside macOS. Beside the Gateway switcher, the foot of the sidebar names the app's SuperTag release, and the Gateway's
-when it runs another one; hover over it to see both and the protocol version they agreed.
+⌘ outside macOS. The gear beside the Gateway switcher, or ⌘, opens **Settings**, which names the
+app's SuperTag release, the Gateway's and the protocol version they agreed, checks for updates,
+and sets notifications. A dot on the gear means an update waits or the Gateway runs another
+release than the app.
 
 To find a Tag, a message, or a setting, press ⌘K or the search button beside **+** at the top of
 the sidebar. The search lists your **Tags**, each with its latest message, and **Actions**: New
@@ -112,8 +114,8 @@ The desktop app tells you when a Tag replies or asks you a question while you ar
 that conversation: the window is in the background, or another Tag's conversation is open. Several
 replies from one Tag make one notification, such as "lead: 3 new messages", and a question gets
 its own. Clicking a notification opens that Tag. The Dock badge shows how many replies you have
-not read. Choose **All messages**, **Questions only**, or **Off** under **Notifications** in the
-Gateway menu; the choice is kept on this device. Your own messages, the Tag's activity, and
+not read. Choose **All messages**, **Questions only**, or **Off** under **Notifications** in
+**Settings**; the choice is kept on this device. Your own messages, the Tag's activity, and
 checks that stayed quiet never notify.
 
 ## See what a Tag remembers

@@ -27,7 +27,7 @@ import {
   type WebContents,
 } from "electron";
 import { MacUpdater } from "electron-updater";
-import { NOTIFICATION_CLICK, UPDATE_STATUS } from "./channels";
+import { NOTIFICATION_CLICK, OPEN_SETTINGS, UPDATE_STATUS } from "./channels";
 import { handlers } from "./handlers";
 import { originOf, registerChannels, Streams } from "./ipc";
 import { type AppIdentity, appCli } from "./local/cli";
@@ -281,7 +281,12 @@ function start() {
   nativeTheme.themeSource = "dark";
   Menu.setApplicationMenu(
     Menu.buildFromTemplate(
-      menuTemplate({ mac, development, onCheckForUpdates: () => void updates.check(true) }),
+      menuTemplate({
+        mac,
+        development,
+        onCheckForUpdates: () => void updates.check(true),
+        onSettings: () => mainContents()?.send(OPEN_SETTINGS),
+      }),
     ),
   );
   app.setAboutPanelOptions({ applicationName: "SuperTag", applicationVersion: app.getVersion() });

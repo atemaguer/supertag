@@ -14,6 +14,7 @@ const absent = {
   ...Object.fromEntries(Object.keys(CHANNELS).map((name) => [name, () => Promise.reject(ABSENT)])),
   onNotificationClick: () => () => {},
   onUpdateStatus: () => () => {},
+  onOpenSettings: () => () => {},
 } as unknown as SupertagApi;
 
 /** The desktop app's bridge to its main process. */

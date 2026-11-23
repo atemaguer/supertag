@@ -60,11 +60,14 @@ From top to bottom: the brand row with search and **+**, the list, the foot.
   accent. One slot, so a row never trades its message for its state.
 - The selected row has a soft fill (`--selected`) and `aria-current`. Rows are buttons, named
   with their state ("moss, Working"), and show the focus ring inside their edge.
-- The foot holds the Gateway selector as one quiet line: a status dot, the Gateway's name, a
-  chevron. The release sits beside it in faint small type, and wraps under it when both do not
-  fit. An offered update sits above them. Nothing in the foot is heavier than a Tag row.
+- The foot holds the Gateway selector on the left as one quiet line (a status dot, the Gateway's
+  name, a chevron) and the Settings gear on the right, the size and colour of search and **+**.
+  The sidebar shows no version. An offered update sits above them. Nothing in the foot is
+  heavier than a Tag row.
+- A small accent dot on the gear says something in Settings waits: an update, or a Gateway on
+  another release than the app.
 - Folded into the rail, a row is its avatar with a status dot, and the foot stacks search, **+**,
-  the Gateway button and the release.
+  the gear and the Gateway button.
 
 ## Conversation
 
@@ -93,6 +96,22 @@ From top to bottom: the brand row with search and **+**, the list, the foot.
   sideways and fades at the right edge while more lies to the right.
 - Tables: the actions lie over the table's top right corner and show on hover or keyboard focus.
   No empty row above the table.
+
+## Settings
+
+- One modal dialog, the same as New Tag and Keyboard shortcuts, opened by the gear, ⌘, (Ctrl+,
+  outside macOS), **Settings…** in the app menu, and the command palette. Esc closes it and the
+  focus returns to the gear. On opening, the dialog itself has the focus, not a button.
+- It holds only what works, in short sections under small headings:
+  - **About**: the app's release, the connected Gateway's name, release and protocol, and a
+    warning in the accent when the Gateway runs another release.
+  - **Updates**: the updater's state in one line, the same action the banner offers, and
+    **Check for updates**. The banner and the sidebar's update button stay as they are.
+  - **Notifications**: what this device notifies about. This is its only home in the window;
+    the command palette offers the same choices.
+  - Links to the documentation and the release notes.
+- A setting goes here when it is about the app or this device. What belongs to a Gateway stays in
+  the Gateway menu; what belongs to a Tag stays in its inspector.
 
 ## Inspector
 

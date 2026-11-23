@@ -231,6 +231,9 @@ export const NOTIFICATION_CLICK = "supertag:notification-click";
 /** Main says the app's update status changed, with the new one. */
 export const UPDATE_STATUS = "supertag:update-status";
 
+/** Main says "Settings…" was chosen in the app menu. */
+export const OPEN_SETTINGS = "supertag:open-settings";
+
 /** What a handler sends back over IPC; the preload turns an error into a rejected string. */
 export type Reply<R> = { ok: true; value: R } | { ok: false; error: string };
 
@@ -241,10 +244,12 @@ type Method<C> =
       ? (args: A) => Promise<R>
       : never;
 
-/** `window.supertag`: one method per channel, notification clicks, and update statuses. */
+/** `window.supertag`: one method per channel, and what main tells the window unasked. */
 export type SupertagApi = { readonly [K in Channel]: Method<Commands[K]> } & {
   /** Calls `open` with the Tag of each clicked notification, until the returned stop. */
   readonly onNotificationClick: (open: (tagId: string) => void) => () => void;
   /** Calls `changed` with each new update status, until the returned stop. */
   readonly onUpdateStatus: (changed: (status: UpdateStatus) => void) => () => void;
+  /** Calls `open` each time "Settings…" is chosen in the app menu, until the returned stop. */
+  readonly onOpenSettings: (open: () => void) => () => void;
 };

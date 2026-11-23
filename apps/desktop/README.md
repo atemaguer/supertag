@@ -13,9 +13,9 @@ in the state directory (`SUPERTAG_STATE_DIR`, else `~/.supertag`), its setup scr
 launches it connects to the local Gateway, and starts the local services with `supertag up` when
 they are stopped. It runs only a `supertag` of its own version: the copy bundled in the Mac app,
 else the one on your login shell's `PATH` or in `~/.local/bin`. When it finds none, or another
-version, it names the install command for its own release. The foot of the sidebar names the
-app's release, from `package.json` as `app.getVersion()` reads it, and the Gateway's when it
-names another while negotiating.
+version, it names the install command for its own release. Settings, behind the gear at the foot of
+the sidebar, names the app's release, from `package.json` as `app.getVersion()` reads it, and
+the Gateway's, with a warning when the Gateway names another while negotiating.
 
 ## Develop
 
@@ -61,6 +61,7 @@ starts Electron, and git ignores `.shots/`. It exits 1 when a state does not ren
 | `narrow`, `narrow-inspector`, `narrow-many-tags` | the same at 900×700 |
 | `search` | the command palette |
 | `rail` | the sidebar folded into its rail |
+| `settings`, `settings-update`, `narrow-settings` | Settings; with an update ready and a Gateway on another release, which also dot the gear |
 | `update-banner` | an update ready to install (`?preview&update=ready`) |
 
 [DESIGN.md](DESIGN.md) records what the window should look like: the avatar, the sidebar's rows,

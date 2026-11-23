@@ -15,7 +15,6 @@ import {
   Unplug,
 } from "lucide-react";
 import type { RefObject } from "react";
-import { useNotificationLevel } from "../lib/notifications";
 import type { PaletteAction } from "./command-palette";
 import { Button } from "./ui/button";
 import {
@@ -53,7 +52,7 @@ interface GatewaySelectorProps {
 }
 
 /** What this device notifies about; the setting is kept on this device only. */
-const NOTIFICATION_CHOICES: readonly [NotificationLevel, string][] = [
+export const NOTIFICATION_CHOICES: readonly [NotificationLevel, string][] = [
   ["all", "All messages"],
   ["questions", "Questions only"],
   ["off", "Off"],
@@ -185,7 +184,6 @@ export function GatewaySelector({
 }: GatewaySelectorProps) {
   const { localChoice, choices } = gatewayChoices(active, profiles, local);
   const selected = choices.find((choice) => choice.origin === active);
-  const [notifications, setNotifications] = useNotificationLevel();
   // The local Gateway counts as connected only while it runs.
   const connected = Boolean(
     (selected && (selected.origin !== LOCAL_GATEWAY || local?.origin)) || preview,
@@ -308,36 +306,6 @@ export function GatewaySelector({
             </DropdownMenuSubContent>
           </DropdownMenuSub>
         )}
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger className="gateway-action">
-            <Bell size={15} aria-hidden /> Notifications
-            <ChevronRight className="gateway-edit-arrow" size={14} aria-hidden />
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="gateway-edit-menu" sideOffset={6}>
-            <DropdownMenuRadioGroup
-              value={notifications}
-              onValueChange={(value) => setNotifications(value as NotificationLevel)}
-            >
-              {NOTIFICATION_CHOICES.map(([level, label]) => (
-                <DropdownMenuRadioItem
-                  className="gateway-choice"
-                  key={level}
-                  value={level}
-                  textValue={label}
-                >
-                  <span className="gateway-indicator" aria-hidden>
-                    <DropdownMenuItemIndicator>
-                      <Check size={14} />
-                    </DropdownMenuItemIndicator>
-                  </span>
-                  <span className="gateway-choice-text">
-                    <span>{label}</span>
-                  </span>
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
         {connected && (
           <DropdownMenuItem className="gateway-action" onSelect={onDisconnect}>
             <Unplug size={15} aria-hidden /> Disconnect

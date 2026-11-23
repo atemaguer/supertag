@@ -9,6 +9,7 @@ import {
   type Channel,
   invokeChannel,
   NOTIFICATION_CLICK,
+  OPEN_SETTINGS,
   type Reply,
   STREAM_END,
   STREAM_UPDATE,
@@ -21,6 +22,7 @@ const streams = new Map<string, (update: unknown) => void>();
 let nextStream = 0;
 const clicks = new Set<(tagId: string) => void>();
 const updates = new Set<(status: UpdateStatus) => void>();
+const settings = new Set<() => void>();
 
 ipcRenderer.on(STREAM_UPDATE, (_event, key: unknown, update: unknown) => {
   if (typeof key === "string") streams.get(key)?.(update);
@@ -36,6 +38,10 @@ ipcRenderer.on(NOTIFICATION_CLICK, (_event, tagId: unknown) => {
 ipcRenderer.on(UPDATE_STATUS, (_event, status: unknown) => {
   if (status === null || typeof status !== "object") return;
   for (const changed of updates) changed(status as UpdateStatus);
+});
+
+ipcRenderer.on(OPEN_SETTINGS, () => {
+  for (const open of settings) open();
 });
 
 async function call(name: Channel, args: unknown, key?: string): Promise<unknown> {
@@ -73,6 +79,13 @@ api["onUpdateStatus"] = (changed: (status: UpdateStatus) => void) => {
   updates.add(changed);
   return () => {
     updates.delete(changed);
+  };
+};
+
+api["onOpenSettings"] = (open: () => void) => {
+  settings.add(open);
+  return () => {
+    settings.delete(open);
   };
 };
 

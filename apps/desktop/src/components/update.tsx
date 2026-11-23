@@ -11,6 +11,8 @@ export interface UpdateSource {
   subscribe(changed: (status: UpdateStatus) => void): () => void;
   /** Restarts into a downloaded update, or else opens the release page. */
   install(): Promise<void>;
+  /** Looks for a newer release now, as "Check for Updates…" in the app menu does. */
+  check(): Promise<void>;
 }
 
 /** The main process's updater; outside the desktop app, updates are off. */
@@ -18,6 +20,7 @@ export const nativeUpdates: UpdateSource = {
   status: () => desktop().updateStatus({}),
   subscribe: (changed) => desktop().onUpdateStatus(changed),
   install: () => desktop().installUpdate({}),
+  check: () => desktop().checkForUpdates({}),
 };
 
 /** The bottom-right banner: a title, a line under it, and its action beside "Later". */
@@ -173,8 +176,12 @@ export function useUpdates(source: UpdateSource) {
     );
   }, [source]);
 
+  // What the check finds arrives as a status; a check that cannot start changes nothing.
+  const check = useCallback(() => void source.check().catch(() => {}), [source]);
+
   return {
     status,
+    check,
     banner: view.banner && view.banner.key !== dismissed ? view.banner : undefined,
     button: view.button,
     installing,

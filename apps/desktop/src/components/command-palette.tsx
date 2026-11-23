@@ -218,6 +218,7 @@ export function keyboardShortcuts(mac = onMac()): [string, string][] {
     [`${key("↑")} ${key("↓")}`, "Open the previous or next Tag"],
     [key("N"), "New Tag"],
     [key("B"), "Fold the sidebar into a rail, or expand it"],
+    [key(","), "Open Settings"],
     ["Enter", "Send the message"],
     ["Shift+Enter", "Start a new line"],
     ["Esc", "Close a dialog or the search"],

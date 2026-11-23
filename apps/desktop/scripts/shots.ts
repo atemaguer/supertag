@@ -131,7 +131,29 @@ const states: State[] = [
     storage: { "supertag.desktop.sidebar": "rail" },
     expect: ['#sidebar[data-mode="rail"]', row("finch")],
   },
-  { name: "update-banner", query: "update=ready", expect: [".update-banner", ".sidebar-update"] },
+  {
+    name: "update-banner",
+    query: "update=ready",
+    expect: [".update-banner", ".sidebar-update", ".settings-button[data-pending]"],
+  },
+  {
+    name: "settings",
+    act: (page) => page.click('#sidebar button[aria-label="Settings"]'),
+    expect: ['[role="dialog"] .settings-facts', ":root:not(:has(.settings-button[data-pending]))"],
+  },
+  {
+    // An update ready and a Gateway on another release: both show here, and dot the gear.
+    name: "settings-update",
+    query: "update=ready&gateway=0.3.3",
+    act: (page) => page.keyboard.press("Meta+,"),
+    expect: ['[role="dialog"] .settings-warning', ".settings-button[data-pending]"],
+  },
+  {
+    name: "narrow-settings",
+    size: narrow,
+    act: (page) => page.click('#sidebar button[aria-label="Settings"]'),
+    expect: ['[role="dialog"] .settings-facts'],
+  },
 ];
 
 async function main() {
