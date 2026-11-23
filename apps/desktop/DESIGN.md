@@ -52,11 +52,12 @@ From top to bottom: the brand row with search and **+**, the list, the foot.
 - One list. The lead Tag is pinned first, with a hairline after it. No heading is drawn over it.
   The other Tags follow, most recently active first.
 - Every row is `--row-height` tall and has the same parts: the avatar; the name in the display
-  face with the time right-aligned; then one ellipsised line with the latest message and the
-  unread dot at its right.
-- When the Tag is working or needs you, the state word comes before the message: `Working · …`
-  in `--text-2`, `Needs you · …` in the accent. A Tag with no messages shows a faint
+  face with one slot right-aligned beside it; then one ellipsised line with the latest message
+  and the unread dot at its right. The second line is always the message, or a faint
   `No messages yet`. An unread row's message is brighter.
+- The slot beside the name shows the time of the latest message. While the Tag is working or
+  needs you, a compact state label takes its place: `Working` in `--text-2`, `Needs you` in the
+  accent. One slot, so a row never trades its message for its state.
 - The selected row has a soft fill (`--selected`) and `aria-current`. Rows are buttons, named
   with their state ("moss, Working"), and show the focus ring inside their edge.
 - The foot holds the Gateway selector as one quiet line: a status dot, the Gateway's name, a

@@ -272,24 +272,24 @@ function TagRow({
         {!expanded && status && <span className="tag-row-badge" />}
       </span>
       {expanded && (
-        // Every row has the same two lines: the name and time, then the state and latest message.
+        // Every row has the same two lines: the name with its state, or else the time of its
+        // latest message, at the right; then the latest message.
         <span className="tag-row-text">
           <span className="tag-row-line">
             <span className="tag-row-name">{name}</span>
-            {summary?.lastActivityMs !== undefined && (
-              <span className="tag-row-time">{relativeTime(summary.lastActivityMs)}</span>
+            {state ? (
+              <span className="tag-state" data-state={status}>
+                {state}
+              </span>
+            ) : (
+              summary?.lastActivityMs !== undefined && (
+                <span className="tag-row-time">{relativeTime(summary.lastActivityMs)}</span>
+              )
             )}
           </span>
           <span className="tag-row-line">
             <span className="tag-row-preview">
-              {state && (
-                <span className="tag-state" data-state={status}>
-                  {state}
-                </span>
-              )}
-              {state && summary?.preview && " · "}
-              {summary?.preview ||
-                (!state && <span className="tag-row-none">No messages yet</span>)}
+              {summary?.preview || <span className="tag-row-none">No messages yet</span>}
             </span>
             {summary?.unread && <span className="tag-row-unread" />}
           </span>
@@ -309,7 +309,7 @@ export function tagStatus(summary?: TagSummary): "asking" | "working" | "unread"
   return summary?.unread ? "unread" : undefined;
 }
 
-/** The word before a Tag's latest message for its state, when the state has one. */
+/** The words in place of a row's time for the Tag's state, when the state has them. */
 export function stateWord(summary?: TagSummary): string | undefined {
   const status = tagStatus(summary);
   return status === "asking" ? "Needs you" : status === "working" ? "Working" : undefined;

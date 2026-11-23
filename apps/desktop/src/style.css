@@ -435,9 +435,13 @@ button:disabled {
   color: var(--text);
   font-weight: var(--weight-medium);
 }
+/* The state takes the time's place on the first line while the Tag works or needs you. */
 .tag-state {
+  flex: none;
   color: var(--text-2);
+  font-size: var(--font-xs);
   font-weight: var(--weight-medium);
+  white-space: nowrap;
 }
 .tag-state[data-state="asking"] {
   color: var(--accent);

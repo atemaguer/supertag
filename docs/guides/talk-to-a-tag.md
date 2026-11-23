@@ -51,7 +51,7 @@ it. A currency budget stops a Claude Code turn when it is spent; with other
 Select a name in the desktop app's **Tags** list to open that conversation.
 The lead Tag is pinned first, marked with a pin on its avatar, and other Tags follow in order of
 latest activity. Each row shows the Tag's latest message under its name, or **No messages yet**.
-Before the message, **Working** means a Task is queued or running. **Needs you** means the
+Beside the name, in place of the time, **Working** means a Task is queued or running. **Needs you** means the
 Tag's latest message is a question you have yet to answer. The folded rail shows a status dot.
 The Gateway switcher sits at the foot of the sidebar. Your messages and the
 Tag's are grouped by sender, and a time divider marks a pause of more than fifteen minutes.

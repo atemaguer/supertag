@@ -223,11 +223,22 @@ it("gives every row the same avatar and two lines, whatever its state", () => {
     expect(row.querySelectorAll(".avatar")).toHaveLength(1);
     expect(row.querySelectorAll(".tag-row-line")).toHaveLength(2);
   }
-  // The second line: the state word before the latest message, or that there is none yet.
+  // The second line is always the latest message, or that there is none yet.
   expect(all.map((row) => row.querySelector(".tag-row-preview")?.textContent)).toEqual([
-    "Working · You: Ship it",
-    "Needs you · Close #812?",
+    "You: Ship it",
+    "Close #812?",
     "No messages yet",
+  ]);
+  // The first line ends with the state while the Tag works or needs you, and no time then.
+  expect(all.map((row) => row.querySelector(".tag-state")?.textContent)).toEqual([
+    "Working",
+    "Needs you",
+    undefined,
+  ]);
+  expect(all.map((row) => row.querySelector(".tag-row-time") !== null)).toEqual([
+    false,
+    false,
+    false,
   ]);
   expect(all.map((row) => row.querySelector(".avatar-monogram")?.textContent)).toEqual([
     "LE",
@@ -401,10 +412,23 @@ it("opens Tags with Ctrl+1…9 and Ctrl+↑/↓, and New Tag with Ctrl+N", () =>
   });
 });
 
-it("puts a working Tag's state word before its latest message", () => {
-  render({ summaries: { moss: { working: true, preview: "You: Run the tests" } } });
-  const moss = [...host.querySelectorAll(".tag-row")].find(
-    (row) => row.getAttribute("aria-label") === "moss, Working",
-  ) as HTMLElement;
-  expect(moss.querySelector(".tag-row-preview")?.textContent).toBe("Working · You: Run the tests");
+it("shows a working Tag's state in place of its time, and still its latest message", () => {
+  const now = Date.now();
+  render({
+    summaries: {
+      moss: { working: true, preview: "You: Run the tests", lastActivityMs: now },
+      finch: { preview: "Done.", lastActivityMs: now - 60_000 },
+    },
+  });
+  const row = (label: string) =>
+    [...host.querySelectorAll(".tag-row")].find(
+      (entry) => entry.getAttribute("aria-label") === label,
+    ) as HTMLElement;
+  const moss = row("moss, Working");
+  expect(moss.querySelector(".tag-row-preview")?.textContent).toBe("You: Run the tests");
+  expect(moss.querySelector(".tag-state")?.textContent).toBe("Working");
+  expect(moss.querySelector(".tag-row-time")).toBeNull();
+  // An idle Tag shows the time there instead.
+  expect(row("finch").querySelector(".tag-state")).toBeNull();
+  expect(row("finch").querySelector(".tag-row-time")?.textContent).toBeTruthy();
 });
