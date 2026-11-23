@@ -863,7 +863,7 @@ mod tests {
             error.contains("was not installed by SuperTag's install script"),
             "{error}"
         );
-        assert!(error.contains("install.sh | sh"), "{error}");
+        assert!(error.contains(INSTALL_SCRIPT), "{error}");
         let app = temp.join("SuperTag.app/Contents/Resources/bin/supertag");
         let error = locate_from(&app, &app, &bin).unwrap_err().to_string();
         assert!(error.contains("desktop app"), "{error}");
