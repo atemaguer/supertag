@@ -55,6 +55,7 @@ starts Electron, and git ignores `.shots/`. It exits 1 when a state does not ren
 | `gateway-selector` | the Gateway menu, opened from the foot of the sidebar |
 | `many-tags` | seventeen Tags with long names and previews, in every row state (`?preview&many`) |
 | `no-lead` | a Gateway without a lead Tag (`?preview&nolead`) |
+| `runs-elsewhere` | a Tag without a Workspace whose turn runs on another Worker Host |
 | `needs-you` | the conversation of a Tag whose question is unanswered |
 | `narrow`, `narrow-inspector`, `narrow-many-tags` | the same at 900×700 |
 | `search` | the command palette |

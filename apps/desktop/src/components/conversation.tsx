@@ -46,6 +46,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -61,6 +62,7 @@ import { TagDetails } from "./tag-details";
 import { TaskFiles } from "./task-files";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
+import { WhereItRuns } from "./where-it-runs";
 
 const interval = 2_500;
 
@@ -116,6 +118,7 @@ export function ConversationPane({
   const scrollOffset = useRef<{ height: number; top: number } | undefined>(undefined);
   const transcript = useRef<StickToBottomContext>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
+  const hintId = useId();
   const activityTrigger = useRef<HTMLButtonElement>(null);
   const setHistory = useCallback(
     (next: History) => {
@@ -415,6 +418,7 @@ export function ConversationPane({
                 rows={1}
                 required
                 aria-label="Message"
+                aria-describedby={hintId}
                 value={draft.text}
                 placeholder={`Message ${tag.name ?? tagId}`}
                 onChange={(event) => {
@@ -433,14 +437,19 @@ export function ConversationPane({
                 type="submit"
                 className="send"
                 aria-label="Send message"
-                title={blocked ?? "Send message"}
+                aria-keyshortcuts="Enter"
+                title={blocked ?? "Send message (Enter)"}
                 disabled={Boolean(outgoing) || !draft.text.trim()}
               >
                 <ArrowUp size={18} aria-hidden />
               </Button>
             </div>
             <div className="composer-footer">
-              Enter to send <span aria-hidden>·</span> Shift + Enter for a new line
+              <WhereItRuns gateway={gateway} tag={tag} taskId={messages.at(-1)?.task.taskId} />
+              {/* The keys show only while the composer is empty and has the cursor. */}
+              <span className="composer-hint" id={hintId}>
+                Enter to send · Shift + Enter for a new line
+              </span>
             </div>
           </form>
         </div>

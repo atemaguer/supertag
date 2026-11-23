@@ -71,6 +71,11 @@ From top to bottom: the brand row with search and **+**, the list, the foot.
 - A solid header band (`--header-height`) with a hairline under it holds the Tag's pill: avatar,
   name, and the harness after a divider. The transcript starts below the band, so the pill never
   covers a message. Selecting the pill opens the inspector.
+- Under the composer, one muted read-only line says where the Tag's work runs: the Worker Host
+  of its latest turn ("This Mac" when it is this machine), its Workspace with the branch it
+  follows, and its harness. A part the window does not know is left out. It offers no pickers.
+  The keys, "Enter to send · Shift + Enter for a new line", show at the right of that line only
+  while the composer is empty and has the cursor, and in the send button's tooltip.
 - Code blocks: the copy and download buttons have no frame of their own. A long line scrolls
   sideways and fades at the right edge while more lies to the right.
 - Tables: the actions lie over the table's top right corner and show on hover or keyboard focus.

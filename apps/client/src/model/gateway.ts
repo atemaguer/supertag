@@ -26,6 +26,8 @@ export interface Tag {
   /** How many Work Sessions the Tag may have open at once, and has open. */
   maxWorkSessions?: number;
   openWorkSessions?: number;
+  /** The Workspace its Tasks run in, and the branch it follows when it follows one. */
+  workspace?: { id: string; ref?: string };
 }
 
 export interface Task {

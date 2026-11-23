@@ -70,6 +70,12 @@ const states: State[] = [
     act: (page) => page.click(row("wren")),
     expect: [`${row("wren")}[aria-current="true"]`, ".timeline .bubble"],
   },
+  {
+    // A Tag without a Workspace, whose turn runs on another Worker Host.
+    name: "runs-elsewhere",
+    act: (page) => page.click(row("moss")),
+    expect: [`${row("moss")}[aria-current="true"]`, ".composer-where"],
+  },
   { name: "narrow", size: narrow, expect: [row("finch"), ".timeline .bubble"] },
   {
     name: "narrow-inspector",

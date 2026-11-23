@@ -20,6 +20,7 @@ const tags: Tag[] = [
     allowedActions: ["Read build logs", "Inspect repositories"],
     revision: 1,
     harnessKind: "codex",
+    workspace: { id: "supertag", ref: "main" },
   },
   {
     tagId: "moss",
@@ -41,6 +42,7 @@ const tags: Tag[] = [
     allowedActions: ["Read repositories"],
     revision: 1,
     harnessKind: "claude_code",
+    workspace: { id: "supertag" },
   },
 ];
 

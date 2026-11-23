@@ -70,6 +70,10 @@ bubble sits at the end of its reply; select it to see the Task's activity. Once 
 the reply's actions on hover open the activity, and a line under the reply appears only when the
 turn failed, was cancelled, or needs attention.
 
+Under the message field, one line says where the Tag's work runs: the Worker Host of its latest
+turn, its [Workspace](workspaces.md) with the branch it follows, and its harness. It leaves out
+what it does not know, such as the host before the Tag's first turn.
+
 In the desktop app, drag the sidebar's edge to resize it, or past its narrowest to fold it into a
 rail of avatars; ⌘B does the same. The Task activity pane resizes from its edge too. ⌘1 to ⌘9 open
 the Tags in order, ⌘↑ and ⌘↓ the previous and next, and ⌘N creates a Tag; use Ctrl in place of

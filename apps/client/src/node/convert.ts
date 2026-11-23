@@ -63,6 +63,14 @@ export function tag(value: Tag): WindowTag {
     lead: value.lead,
     maxWorkSessions: value.maxWorkSessions,
     openWorkSessions: value.openWorkSessions,
+    ...(value.workspace?.workspaceId
+      ? {
+          workspace: {
+            id: value.workspace.workspaceId,
+            ...(value.workspace.baseRef ? { ref: value.workspace.baseRef } : {}),
+          },
+        }
+      : {}),
   };
 }
 

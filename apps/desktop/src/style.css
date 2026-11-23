@@ -1378,14 +1378,33 @@ button:disabled {
 .primary:not(:disabled):hover {
   background: #ffc4a4;
 }
+/* Under the composer: where the Tag's work runs, and the keys while the composer is empty and
+   focused. */
 .composer-footer {
-  text-align: center;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 14px;
+  padding: var(--space-2) var(--space-4) 0;
   color: var(--muted);
-  font-size: 10px;
-  padding-top: 8px;
+  font-size: var(--font-xs);
+  line-height: 14px;
 }
-.composer-footer span {
-  padding: 0 4px;
+.composer-where {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-hint {
+  flex: none;
+  margin-left: auto;
+  color: var(--faint);
+  visibility: hidden;
+}
+.composer:has(textarea:focus:placeholder-shown) .composer-hint {
+  visibility: visible;
 }
 .earlier {
   align-self: center;
@@ -1945,7 +1964,7 @@ button.identity-pill[aria-expanded="true"] {
   .harness {
     display: none;
   }
-  .composer-footer {
+  .composer-hint {
     display: none;
   }
 }
