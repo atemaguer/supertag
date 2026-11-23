@@ -53,8 +53,6 @@ To move 12 services to short-lived credentials, give `lead` the rollout Objectiv
 Tags that update trust policy and service code, review tests and telemetry, and rehearse the
 cutover. You approve production cutovers and decide when to retire the shared keys.
 
-![The lead Tag owns the migration and messages the identity, migration, verification, and rollout Tags for their parts. A person approves production cutovers and retirement of shared keys.](assets/images/supertag-team-migration.png)
-
 Give each Tag its own job and permissions. You could let `lead` coordinate, give a builder
 permission to edit the repository, and give a reviewer read-only access.
 
@@ -185,6 +183,8 @@ it carries its own `supertag`, sets SuperTag up on first launch, and talks to th
 SuperTag is open source under Apache 2.0, and every part of it runs where you choose. A job
 needs access to your code, your services, and your accounts, so you decide where that access
 lives.
+
+![Clients and collaboration tools reach the Control Plane through the Gateway. The Control Plane stores Tags and permissions in SQLite or PostgreSQL and schedules work. On each Worker Host, a Worklet claims Tasks from the Control Plane and starts a Worker for each Task Attempt. The laptop runs Codex and the server runs Claude Code, each through a harness adapter.](assets/images/supertag-architecture.png)
 
 - **Your machines.** `supertag init` starts a local **Control Plane**, the service that stores
   your Tags and schedules their work, and connects your computer as a **Worker Host**, a machine

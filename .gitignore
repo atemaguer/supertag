@@ -41,6 +41,7 @@ changelog.d/
 
 # Only images the README uses are public; brand explorations and other artwork stay local.
 assets/images/*
+!assets/images/supertag-architecture.png
 !assets/images/supertag-mascot-round.png
 !assets/images/supertag-meet-the-tags.png
 !assets/images/supertag-shared-control-plane.png

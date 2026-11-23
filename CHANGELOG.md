@@ -9,6 +9,10 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Added
+
+- The README illustrates how multiple Worker Hosts claim work from a shared Control Plane.
+
 ## [0.3.8] - 2026-11-22
 
 ### Added
