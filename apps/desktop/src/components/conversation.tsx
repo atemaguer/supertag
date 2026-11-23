@@ -56,6 +56,15 @@ import { type StickToBottomContext, useStickToBottomContext } from "use-stick-to
 import { Conversation, ConversationContent } from "./ai-elements/conversation";
 import { Message } from "./ai-elements/message";
 import { Bubble, LiveConversationEntry } from "./conversation-entry";
+import {
+  ApprovalCard,
+  type PendingApproval,
+  QUESTION_KEY,
+  QuestionCard,
+  ReplyChip,
+  type ReplyTarget,
+  useApprovalCards,
+} from "./needs-you";
 import { clamp, ResizeHandle, useStoredWidth } from "./resize";
 import { TagAvatar } from "./tag-avatar";
 import { TagDetails } from "./tag-details";
@@ -85,10 +94,18 @@ interface ConversationProps {
   onWriteChange(delta: 1 | -1): void;
   /** Reports what the sidebar shows for this conversation as its history changes. */
   onSummary?(summary: TagSummary): void;
+  /** The Tag's latest message is a question the person has not answered. */
+  asking?: boolean;
+  /** The Tag's approval requests that wait on an operator. */
+  approvals?: readonly PendingApproval[];
+  /** An approval request was decided here: what waits on an operator changed. */
+  onApprovalDecided?(): void;
   /** The Tag details panel shows beside the conversation. */
   details?: boolean;
   onCloseDetails?(): void;
 }
+
+const noApprovals: readonly PendingApproval[] = [];
 
 export function ConversationPane({
   header,
@@ -99,6 +116,9 @@ export function ConversationPane({
   updateDraft,
   onWriteChange,
   onSummary,
+  asking,
+  approvals = noApprovals,
+  onApprovalDecided,
   details,
   onCloseDetails,
 }: ConversationProps) {
@@ -119,6 +139,13 @@ export function ConversationPane({
   const transcript = useRef<StickToBottomContext>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const hintId = useId();
+  // What the next message answers, once Reply was chosen on a card; a chip the person can dismiss.
+  const [replyingTo, setReplyingTo] = useState<ReplyTarget>();
+  const approvalCards = useApprovalCards(gateway, approvals, onApprovalDecided);
+  const reply = useCallback((target: ReplyTarget) => {
+    setReplyingTo(target);
+    composer.current?.focus();
+  }, []);
   const activityTrigger = useRef<HTMLButtonElement>(null);
   const setHistory = useCallback(
     (next: History) => {
@@ -267,6 +294,7 @@ export function ConversationPane({
     const text = draft.text.trim();
     if (!text || outgoing) return;
     updateDraft(() => ({ text: "" }));
+    setReplyingTo(undefined);
     void deliver(queue(gateway, tagId, text));
     composer.current?.focus();
   }
@@ -323,6 +351,7 @@ export function ConversationPane({
     if (!history.loading) reportSummary.current?.(conversationSummary(messages));
   }, [history.loading, messages]);
   const lastSent = outgoing ? undefined : lastOperatorMessage(messages);
+  const question = useMemo(() => lastTagText(messages.at(-1)), [messages]);
   const blocked = outgoing?.error
     ? "Retry or edit the message that was not delivered"
     : outgoing
@@ -399,6 +428,24 @@ export function ConversationPane({
                     />
                   );
                 })}
+                {approvalCards.cards.map((card) => (
+                  <ApprovalCard
+                    key={card.approvalId}
+                    gateway={gateway}
+                    card={card}
+                    replying={replyingTo?.key === card.approvalId}
+                    decide={approvalCards.decide}
+                    onReply={reply}
+                  />
+                ))}
+                {asking && !outgoing && question && (
+                  <QuestionCard
+                    name={tag.name ?? tagId}
+                    question={question}
+                    replying={replyingTo?.key === QUESTION_KEY}
+                    onReply={reply}
+                  />
+                )}
                 {outgoing && (
                   <OutgoingMessage
                     outgoing={outgoing}
@@ -412,6 +459,15 @@ export function ConversationPane({
           )}
           {/* The composer floats over the conversation, which scrolls under it. */}
           <form className="composer" ref={composerForm} onSubmit={send}>
+            {replyingTo && (
+              <ReplyChip
+                target={replyingTo}
+                onDismiss={() => {
+                  setReplyingTo(undefined);
+                  composer.current?.focus();
+                }}
+              />
+            )}
             <div className="composer-box">
               <Textarea
                 ref={composer}
@@ -426,6 +482,12 @@ export function ConversationPane({
                   updateDraft((current) => ({ ...current, text }));
                 }}
                 onKeyDown={(event) => {
+                  // Esc drops what the message answers, before it closes anything else.
+                  if (event.key === "Escape" && replyingTo && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    setReplyingTo(undefined);
+                    return;
+                  }
                   if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing)
                     return;
                   event.preventDefault();
@@ -497,6 +559,13 @@ export function ConversationPane({
       </div>
     </>
   );
+}
+
+/** The last thing the Tag wrote in a turn: its result, or else its latest message so far. */
+function lastTagText(message?: TagMessage): string | undefined {
+  if (!message) return undefined;
+  if (message.task.result) return message.task.result;
+  return message.events?.filter((event) => event.kind === "message").at(-1)?.text;
 }
 
 /** The operator's message while it is sent, or after it was not delivered, with a retry. */

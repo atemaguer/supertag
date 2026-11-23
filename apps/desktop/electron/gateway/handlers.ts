@@ -95,6 +95,9 @@ type GatewayChannels =
   | "listNetworkLogs"
   | "listSchedules"
   | "changeSchedule"
+  | "listInbox"
+  | "getApproval"
+  | "decideApproval"
   | "resolveAttempt"
   | "locateTaskFiles"
   | "listTaskFiles"
@@ -174,6 +177,15 @@ export function gatewayHandlers(
         text(args.scheduleId),
         text(args.action) as ScheduleAction,
       ),
+    listInbox: (args) => state.inbox(text(args.connectionId)),
+    getApproval: (args) => state.approval(text(args.connectionId), text(args.approvalId)),
+    decideApproval(args) {
+      // Only a literal true approves: anything else from the window is a denial.
+      const approve = args.approve === true;
+      const reason = text(args.reason).trim();
+      if (!approve && !reason) throw "Say why it is denied.";
+      return state.decideApproval(text(args.connectionId), text(args.approvalId), approve, reason);
+    },
     resolveAttempt(args) {
       const decision = text(args.decision);
       if (decision !== "retry" && decision !== "failed") throw "Choose retry or failed.";

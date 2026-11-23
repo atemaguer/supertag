@@ -14,6 +14,7 @@ import {
   storedRoster,
   useConversationList,
   useConversationPrefetch,
+  useCoordination,
   useGatewayWatch,
   useWatchRefresh,
   type WatchFeed,
@@ -39,6 +40,7 @@ import {
   type PaletteAction,
 } from "./command-palette";
 import { ConversationPane, type Draft } from "./conversation";
+import { type PendingApproval, tagApprovals } from "./needs-you";
 import { NewTagDialog } from "./new-tag";
 import { Sidebar, type SidebarMode, useSidebarShortcut, useSidebarWidth } from "./sidebar";
 import { TagAvatar } from "./tag-avatar";
@@ -346,6 +348,13 @@ export function Workspace({
   // Every conversation's row, from the cached list at once and then the Gateway, kept
   // current through the watch.
   const { conversations, fresh } = useConversationList(gateway, watch);
+  // What waits on an operator: a Tag's approval requests show in its conversation, and mark its
+  // row as needing you.
+  const { inbox, refresh: refreshInbox } = useCoordination(gateway, watch, true);
+  const waiting = useMemo(
+    () => new Set(inbox.flatMap((item) => (item.approval ? [item.approval.tagId] : []))),
+    [inbox],
+  );
   const tag = tags.find((entry) => entry.tagId === selectedTag) ?? tags[0];
   const tagName = useCallback(
     (tagId: string) => {
@@ -407,6 +416,7 @@ export function Workspace({
           ...(conversation.tagId === tag?.tagId ? summaries[conversation.tagId] : {}),
           // The open conversation is read as it is shown.
           unread: conversation.tagId !== tag?.tagId && conversation.unreadCount > 0,
+          ...(waiting.has(conversation.tagId) ? { asking: true } : {}),
         },
       ]),
     ),
@@ -416,6 +426,11 @@ export function Workspace({
     messageTexts,
     error: connectionError || error,
   };
+  const openTagId = tag?.tagId;
+  const approvals = useMemo(
+    () => (openTagId ? tagApprovals(inbox, openTagId) : []),
+    [inbox, openTagId],
+  );
   const workspace = tag ? (
     <TagWorkspace
       key={tag.tagId}
@@ -427,6 +442,9 @@ export function Workspace({
       updateDraft={(update) => updateDraft(tag.tagId, update)}
       onSummary={reportSummary}
       onWriteChange={onWriteChange}
+      asking={conversations.find((entry) => entry.tagId === tag.tagId)?.asking}
+      approvals={approvals}
+      onApprovalDecided={refreshInbox}
     />
   ) : (
     <WorkspaceShell {...shell}>
@@ -505,6 +523,9 @@ function TagWorkspace({
   updateDraft,
   onSummary,
   onWriteChange,
+  asking,
+  approvals,
+  onApprovalDecided,
 }: {
   gateway: Gateway;
   watch?: WatchFeed;
@@ -514,6 +535,9 @@ function TagWorkspace({
   updateDraft(update: (draft: Draft) => Draft): void;
   onSummary(tagId: string, summary: TagSummary): void;
   onWriteChange(delta: 1 | -1): void;
+  asking?: boolean;
+  approvals: readonly PendingApproval[];
+  onApprovalDecided(): void;
 }) {
   const tagId = tag.tagId;
   const [details, setDetails] = useState(false);
@@ -531,6 +555,9 @@ function TagWorkspace({
           updateDraft={updateDraft}
           onSummary={(summary) => onSummary(tagId, summary)}
           onWriteChange={onWriteChange}
+          asking={asking}
+          approvals={approvals}
+          onApprovalDecided={onApprovalDecided}
           details={details}
           onCloseDetails={() => setDetails(false)}
         />

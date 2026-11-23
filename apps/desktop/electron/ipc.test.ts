@@ -97,8 +97,8 @@ it("registers exactly the table's channels", () => {
       .map((name) => `supertag:${name}`)
       .sort(),
   );
-  // 41 app commands, the shell's notification, badge and link channels, and the app's updates.
-  expect(registered).toHaveLength(47);
+  // 44 app commands, the shell's notification, badge and link channels, and the app's updates.
+  expect(registered).toHaveLength(50);
 });
 
 function shell() {

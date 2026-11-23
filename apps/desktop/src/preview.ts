@@ -1,4 +1,5 @@
 import type {
+  ApprovalDetails,
   Conversation,
   Gateway,
   GatewayRelease,
@@ -183,7 +184,52 @@ const previewFiles: Record<string, import("@supertag/client/model").TaskFileEntr
   ],
 };
 
+/** What moss asks an operator to approve before its turn goes on. */
+let approvals: ApprovalDetails[] = [
+  {
+    approvalId: "apr_preview0000000000000001",
+    action: "commands:execute",
+    resource: "git push",
+    summary: "Push the deadline fix to origin so CI runs it",
+    arguments: JSON.stringify({ command: "git push origin fix/deadline-abort" }, null, 2),
+    pending: true,
+    state: "pending",
+  },
+];
+const approvalTag = "moss";
+
 export const previewGateway: Gateway = {
+  async inbox() {
+    return approvals
+      .filter((approval) => approval.pending)
+      .map((approval) => ({
+        key: approval.approvalId,
+        kind: "approval" as const,
+        objectiveId: "",
+        taskId: "moss-1",
+        reason: "",
+        actionableSinceMs: Date.now() - 60_000,
+        approval: {
+          approvalId: approval.approvalId,
+          tagId: approvalTag,
+          summary: `${approval.action} on ${approval.resource} · ${approval.summary}`,
+        },
+      }));
+  },
+  async approval(approvalId) {
+    const found = approvals.find((approval) => approval.approvalId === approvalId);
+    if (!found) throw new Error("No such approval request.");
+    return found;
+  },
+  async decideApproval(approvalId, approve) {
+    const decided = { ...(await previewGateway.approval?.(approvalId)) } as ApprovalDetails;
+    decided.pending = false;
+    decided.state = approve ? "approved" : "denied";
+    approvals = approvals.map((approval) =>
+      approval.approvalId === approvalId ? decided : approval,
+    );
+    return decided;
+  },
   async locateTaskFiles(taskId) {
     return taskId.startsWith("moss")
       ? {

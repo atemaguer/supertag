@@ -76,6 +76,16 @@ From top to bottom: the brand row with search and **+**, the list, the foot.
   follows, and its harness. A part the window does not know is left out. It offers no pickers.
   The keys, "Enter to send · Shift + Enter for a new line", show at the right of that line only
   while the composer is empty and has the cursor, and in the send button's tooltip.
+- What a Tag waits on a person for is a **Needs you** card at the end of the conversation, the
+  width of a message, with an accent hairline and label. Nothing in it has the focus or is the
+  default, and only the first action is filled with the accent.
+  - An approval request: the summary, the exact arguments in mono, then the pills **Approve
+    once**, **Deny**, **Reply**. Deny asks for a reason in place of the pills before it sends.
+    A decided request collapses to one muted line: "Approved once by you · …". The Gateway does
+    not say who decided a request elsewhere, so that line names only the outcome.
+  - A question: "NAME is waiting for your answer." under the message that asks, and **Reply**.
+  - **Reply** puts the cursor in the composer and adds a "Replying to: …" chip over it, which
+    its × or Esc dismisses and sending clears. No red: Deny is an outline pill like any other.
 - Code blocks: the copy and download buttons have no frame of their own. A long line scrolls
   sideways and fades at the right edge while more lies to the right.
 - Tables: the actions lie over the table's top right corner and show on hover or keyboard focus.

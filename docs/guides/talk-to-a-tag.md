@@ -52,7 +52,7 @@ Select a name in the desktop app's **Tags** list to open that conversation.
 The lead Tag is pinned first, marked with a pin on its avatar, and other Tags follow in order of
 latest activity. Each row shows the Tag's latest message under its name, or **No messages yet**.
 Beside the name, in place of the time, **Working** means a Task is queued or running. **Needs you** means the
-Tag's latest message is a question you have yet to answer. The folded rail shows a status dot.
+Tag's latest message is a question you have yet to answer, or it waits for an approval. The folded rail shows a status dot.
 The Gateway switcher sits at the foot of the sidebar. Your messages and the
 Tag's are grouped by sender, and a time divider marks a pause of more than fifteen minutes.
 Under your last message it shows **Sent** once the Control Plane has it and **Seen** once a
@@ -201,7 +201,16 @@ then queues one turn, at most 24.
 If the Tag asks which region a work Session should use, answer in the same conversation. The
 Tag passes your answer to the work Session and reports back after it continues.
 
-To decide a request, use `supertag get approval` to inspect it, then `supertag approval approve ID` or `supertag approval deny ID --reason TEXT` to decide.
+In the desktop app, a question shows a **Needs you** card under the Tag's message. **Reply**
+puts the cursor in the message field and marks what your next message answers; dismiss the mark
+with its **×** or Esc.
+
+An approval request shows as a card in the Tag's conversation, with what the Tag wants to do
+and the exact arguments. An operator chooses **Approve once**, or **Deny** and gives a reason;
+**Reply** writes to the Tag without deciding. A decided request becomes one line, such as
+"Approved once by you". The Tag's row says **Needs you** while a request waits.
+
+From the CLI, use `supertag get approval` to inspect a request, then `supertag approval approve ID` or `supertag approval deny ID --reason TEXT` to decide.
 A decision lets the work Session continue on its own. If it cannot continue, the conversation
 shows the reason.
 

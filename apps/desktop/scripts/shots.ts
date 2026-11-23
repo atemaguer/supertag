@@ -68,13 +68,48 @@ const states: State[] = [
   {
     name: "needs-you",
     act: (page) => page.click(row("wren")),
-    expect: [`${row("wren")}[aria-current="true"]`, ".timeline .bubble"],
+    expect: [`${row("wren")}[aria-current="true"]`, ".timeline .bubble", ".needs-you"],
   },
   {
     // A Tag without a Workspace, whose turn runs on another Worker Host.
     name: "runs-elsewhere",
     act: (page) => page.click(row("moss")),
     expect: [`${row("moss")}[aria-current="true"]`, ".composer-where"],
+  },
+  {
+    name: "approval",
+    act: (page) => page.click(row("moss")),
+    expect: [".needs-you .needs-you-detail", '.needs-you button:has-text("Approve once")'],
+  },
+  {
+    name: "approval-deny",
+    act: async (page) => {
+      await page.click(row("moss"));
+      await page.click('.needs-you button:has-text("Deny")');
+    },
+    expect: [".needs-you input:focus"],
+  },
+  {
+    name: "approval-decided",
+    act: async (page) => {
+      await page.click(row("moss"));
+      await page.click('.needs-you button:has-text("Approve once")');
+    },
+    expect: [".needs-you-decided", ":root:not(:has(.needs-you))"],
+  },
+  {
+    name: "replying",
+    act: async (page) => {
+      await page.click(row("wren"));
+      await page.click('.needs-you button:has-text("Reply")');
+    },
+    expect: [".composer-reply", ".composer textarea:focus"],
+  },
+  {
+    name: "narrow-approval",
+    size: narrow,
+    act: (page) => page.click(row("moss")),
+    expect: [".needs-you .needs-you-detail"],
   },
   { name: "narrow", size: narrow, expect: [row("finch"), ".timeline .bubble"] },
   {

@@ -32,6 +32,10 @@ export function gatewaySession(connectionId: string, scope: string, principal?: 
     schedules: (tagId) => api.listSchedules({ connectionId, tagId }),
     changeSchedule: (scheduleId, action) =>
       api.changeSchedule({ connectionId, scheduleId, action }),
+    inbox: () => api.listInbox({ connectionId }),
+    approval: (approvalId) => api.getApproval({ connectionId, approvalId }),
+    decideApproval: (approvalId, approve, reason) =>
+      api.decideApproval({ connectionId, approvalId, approve, reason }),
     resolveAttempt: (taskId, attemptId, decision) =>
       api.resolveAttempt({ connectionId, taskId, attemptId, decision }),
     readCache: (key) => api.readCache({ connectionId, key }),

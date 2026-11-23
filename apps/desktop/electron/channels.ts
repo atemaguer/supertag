@@ -10,6 +10,7 @@
  */
 import type {
   AddedWorkspace,
+  ApprovalDetails,
   AttemptDecisionName,
   Conversation,
   FollowUpdate,
@@ -17,6 +18,7 @@ import type {
   GatewayList,
   HarnessMemory,
   HarnessMemoryList,
+  InboxItem,
   LocalUpgrade,
   Message,
   MessagePage,
@@ -105,6 +107,14 @@ export interface Commands {
   // Schedules
   listSchedules: Call<Connected & { tagId: string }, Schedule[]>;
   changeSchedule: Call<Connected & { scheduleId: string; action: ScheduleAction }, Schedule>;
+  // Approval requests
+  /** What waits on an operator; refused for a connection that is not one. */
+  listInbox: Call<Connected, InboxItem[]>;
+  getApproval: Call<Connected & { approvalId: string }, ApprovalDetails>;
+  decideApproval: Call<
+    Connected & { approvalId: string; approve: boolean; reason: string },
+    ApprovalDetails
+  >;
   // Uncertain turns
   resolveAttempt: Call<
     Connected & { taskId: string; attemptId: string; decision: AttemptDecisionName },
@@ -183,6 +193,9 @@ export const CHANNELS = {
   listNetworkLogs: "call",
   listSchedules: "call",
   changeSchedule: "call",
+  listInbox: "call",
+  getApproval: "call",
+  decideApproval: "call",
   resolveAttempt: "call",
   locateTaskFiles: "call",
   listTaskFiles: "call",

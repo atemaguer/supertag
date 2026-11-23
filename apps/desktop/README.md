@@ -56,7 +56,8 @@ starts Electron, and git ignores `.shots/`. It exits 1 when a state does not ren
 | `many-tags` | seventeen Tags with long names and previews, in every row state (`?preview&many`) |
 | `no-lead` | a Gateway without a lead Tag (`?preview&nolead`) |
 | `runs-elsewhere` | a Tag without a Workspace whose turn runs on another Worker Host |
-| `needs-you` | the conversation of a Tag whose question is unanswered |
+| `needs-you`, `replying` | a Tag's unanswered question as a card, and the composer replying to it |
+| `approval`, `approval-deny`, `approval-decided`, `narrow-approval` | an approval request as a card: pending, asking why it is denied, and decided |
 | `narrow`, `narrow-inspector`, `narrow-many-tags` | the same at 900×700 |
 | `search` | the command palette |
 | `rail` | the sidebar folded into its rail |
