@@ -16,7 +16,7 @@
 [岗位，而非任务](#give-them-jobs-not-tasks) · [持久](#persistent) · [主动](#proactive) · [多人协作](#multiplayer) · [自己运行](#run-it-yourself) · [运行你的第一个 Tag](#run-your-first-tag) · [文档](../../docs/README.md)
 
 <p>
-  <img src="../../assets/images/supertag-meet-the-tags.png" alt="认识一下这些 Tag：九个 SuperTag 吉祥物，体型有圆有长，穿着彩色外套，戴着帽子和眼镜" width="900" height="360">
+  <img src="../../assets/images/supertag-meet-the-tags.zh-CN.webp" alt="认识一下这些 Tag：九个 SuperTag 吉祥物，体型有圆有长，穿着彩色外套，戴着帽子和眼镜" width="900" height="360">
 </p>
 
 </div>
@@ -88,7 +88,7 @@ Tag 拥有的则是一个岗位。岗位由两部分构成：Tag 持续承担的
 
 队友们的 Tag 会彼此协调，不需要你参与。当你的 Tag 需要队友的 Tag 提供些什么时，它会直接给那个 Tag 发消息。它们自行商定细节，并把达成的一致记录在所属 Team 共享的 Workstream 中。只有当某个决定该由你来做时，你才会收到通知。这些 Tag 可以运行在不同的编程智能体和机器上，所以你笔记本上运行 Claude Code 的 Tag，可以和队友机器上运行 Codex 的 Tag 为同一个 Objective 协作。
 
-![你、Alex 和 Sam 各自指挥自己的 Tag，此外还有团队或组织共享的 Tag，其中包括共享的专家 Tag。这些 Tag 彼此协调，它们的工作会话运行在多个 Worker Host 上，包括你的机器、队友的机器和虚拟机。一个共享的 Control Plane 负责协调整个团队。](../../assets/images/supertag-shared-control-plane.png)
+![你、Alex 和 Sam 各自指挥自己的 Tag，此外还有团队或组织共享的 Tag，其中包括共享的专家 Tag。这些 Tag 彼此协调，它们的工作会话运行在多个 Worker Host 上，包括你的机器、队友的机器和虚拟机。一个共享的 Control Plane 负责协调整个团队。](../../assets/images/supertag-shared-control-plane.zh-CN.webp)
 
 [多人协作的工作原理](../../docs/concepts/multiplayer.md) · [自托管 SuperTag](../../docs/guides/self-hosting.md)
 
@@ -137,7 +137,7 @@ supertag objective review OBJECTIVE_ID request-changes --feedback "Also cover th
 
 SuperTag 以 Apache 2.0 许可证开源，它的每个部分都运行在你选定的地方。岗位需要访问你的代码、服务和账号，所以这些访问权限放在哪里，由你决定。
 
-![客户端和协作工具通过 Gateway 访问 Control Plane。Control Plane 把 Tag 和权限存储在 SQLite 或 PostgreSQL 中，并负责调度工作。在每个 Worker Host 上，Worklet 从 Control Plane 认领 Task，并为每个 Task Attempt 启动一个 Worker。笔记本运行 Codex，服务器运行 Claude Code，两者各自通过一个 harness 适配器接入。](../../assets/images/supertag-architecture.png)
+![客户端和协作工具通过 Gateway 访问 Control Plane。Control Plane 把 Tag 和权限存储在 SQLite 或 PostgreSQL 中，并负责调度工作。在每个 Worker Host 上，Worklet 从 Control Plane 认领 Task，并为每个 Task Attempt 启动一个 Worker。笔记本运行 Codex，服务器运行 Claude Code，两者各自通过一个 harness 适配器接入。](../../assets/images/supertag-architecture.zh-CN.webp)
 
 - **你的机器**：`supertag init` 会启动一个本地 **Control Plane**，也就是存储 Tag 并调度其工作的服务，同时把你的电脑接入为 **Worker Host**，也就是实际运行工作的机器或沙箱。团队加入后，把 Control Plane 部署到所有人都能访问的地方，再把笔记本、服务器、CI 运行器或 Modal 和 E2B 沙箱接入为 Worker Host。像 `reliability` 这样承担持续性职责的 Tag，应放在始终在线的主机上。
 - **你的编程智能体和模型**：每个 Tag 都运行在你选定的编程智能体和模型上，用你自己的账号或密钥登录。

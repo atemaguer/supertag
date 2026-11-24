@@ -16,7 +16,7 @@ Open source et auto-hébergé, sur les agents de code que vous utilisez déjà.
 [Des missions, pas des tâches](#give-them-jobs-not-tasks) · [Persistant](#persistent) · [Proactif](#proactive) · [Multijoueur](#multiplayer) · [Chez vous](#run-it-yourself) · [Lancer votre premier Tag](#run-your-first-tag) · [Documentation](../../docs/README.md)
 
 <p>
-  <img src="../../assets/images/supertag-meet-the-tags.png" alt="Voici les Tags : neuf mascottes SuperTag, rondes ou élancées, avec vestes colorées, chapeaux et lunettes" width="900" height="360">
+  <img src="../../assets/images/supertag-meet-the-tags.fr.webp" alt="Voici les Tags : neuf mascottes SuperTag, rondes ou élancées, avec vestes colorées, chapeaux et lunettes" width="900" height="360">
 </p>
 
 </div>
@@ -139,7 +139,7 @@ Vous n'en entendez parler que lorsqu'une décision vous revient. Les Tags peuven
 agents de code et des machines différents : un Tag sur votre ordinateur portable, sous Claude
 Code, peut ainsi travailler au même Objective qu'un Tag sur la machine d'un collègue, sous Codex.
 
-![Vous, Alex et Sam dirigez chacun vos Tags, aux côtés de Tags partagés à l'échelle d'une équipe ou d'une organisation, dont des spécialistes partagés. Les Tags se coordonnent entre eux, et leurs sessions de travail s'exécutent sur des Worker Hosts : votre machine, celles de vos collègues et des VM. Un Control Plane partagé coordonne l'équipe.](../../assets/images/supertag-shared-control-plane.png)
+![Vous, Alex et Sam dirigez chacun vos Tags, aux côtés de Tags partagés à l'échelle d'une équipe ou d'une organisation, dont des spécialistes partagés. Les Tags se coordonnent entre eux, et leurs sessions de travail s'exécutent sur des Worker Hosts : votre machine, celles de vos collègues et des VM. Un Control Plane partagé coordonne l'équipe.](../../assets/images/supertag-shared-control-plane.fr.webp)
 
 [Comment fonctionne le multijoueur](../../docs/concepts/multiplayer.md) · [Auto-héberger SuperTag](../../docs/guides/self-hosting.md)
 
@@ -208,7 +208,7 @@ SuperTag est open source sous licence Apache 2.0, et chacun de ses composants s'
 vous le décidez. Une mission a besoin d'accéder à votre code, à vos services et à vos comptes :
 c'est donc vous qui décidez où réside cet accès.
 
-![Les clients et les outils de collaboration atteignent le Control Plane via la Gateway. Le Control Plane stocke les Tags et les permissions dans SQLite ou PostgreSQL et planifie le travail. Sur chaque Worker Host, un Worklet récupère des Tasks auprès du Control Plane et démarre un Worker pour chaque Task Attempt. L'ordinateur portable exécute Codex et le serveur Claude Code, chacun via un adaptateur de harness.](../../assets/images/supertag-architecture.png)
+![Les clients et les outils de collaboration atteignent le Control Plane via la Gateway. Le Control Plane stocke les Tags et les permissions dans SQLite ou PostgreSQL et planifie le travail. Sur chaque Worker Host, un Worklet récupère des Tasks auprès du Control Plane et démarre un Worker pour chaque Task Attempt. L'ordinateur portable exécute Codex et le serveur Claude Code, chacun via un adaptateur de harness.](../../assets/images/supertag-architecture.fr.webp)
 
 - **Vos machines.** `supertag init` démarre un **Control Plane** local, le service qui stocke vos
   Tags et planifie leur travail, et connecte votre ordinateur en tant que **Worker Host**, une

@@ -16,7 +16,7 @@
 [Работа, а не задачи](#give-them-jobs-not-tasks) · [Долгоживущие](#persistent) · [Проактивные](#proactive) · [Многопользовательские](#multiplayer) · [Всё на вашей стороне](#run-it-yourself) · [Запустите первый Tag](#run-your-first-tag) · [Документация](../../docs/README.md)
 
 <p>
-  <img src="../../assets/images/supertag-meet-the-tags.png" alt="Знакомьтесь, Tags — девять маскотов SuperTag, круглых и вытянутых, в разноцветных куртках, шляпах и очках" width="900" height="360">
+  <img src="../../assets/images/supertag-meet-the-tags.ru.webp" alt="Знакомьтесь, Tags — девять маскотов SuperTag, круглых и вытянутых, в разноцветных куртках, шляпах и очках" width="900" height="360">
 </p>
 
 </div>
@@ -134,7 +134,7 @@ Workstream своей Team. Вы узнаёте об этом, когда реш
 Tag на вашем ноутбуке с Claude Code может идти к одному Objective вместе с Tag на машине коллеги
 с Codex.
 
-![Вы, Алекс и Сэм направляете каждый свои Tags, рядом с ними — общие Tags команды или организации, в том числе общие специалисты. Tags координируются друг с другом, а их рабочие сессии выполняются на разных Worker Host: на вашей машине, машинах коллег и виртуальных машинах. Один общий Control Plane координирует всю команду.](../../assets/images/supertag-shared-control-plane.png)
+![Вы, Алекс и Сэм направляете каждый свои Tags, рядом с ними — общие Tags команды или организации, в том числе общие специалисты. Tags координируются друг с другом, а их рабочие сессии выполняются на разных Worker Host: на вашей машине, машинах коллег и виртуальных машинах. Один общий Control Plane координирует всю команду.](../../assets/images/supertag-shared-control-plane.ru.webp)
 
 [Как устроена совместная работа](../../docs/concepts/multiplayer.md) · [Разверните SuperTag у себя](../../docs/guides/self-hosting.md)
 
@@ -203,7 +203,7 @@ SuperTag — открытый проект под лицензией Apache 2.0,
 решите. Для работы нужен доступ к вашему коду, сервисам и аккаунтам, поэтому вы сами
 определяете, где этот доступ находится.
 
-![Клиенты и инструменты совместной работы обращаются к Control Plane через Gateway. Control Plane хранит Tags и права в SQLite или PostgreSQL и планирует работу. На каждом Worker Host Worklet забирает Tasks у Control Plane и запускает Worker для каждого Task Attempt. На ноутбуке работает Codex, на сервере — Claude Code, каждый через свой harness-адаптер.](../../assets/images/supertag-architecture.png)
+![Клиенты и инструменты совместной работы обращаются к Control Plane через Gateway. Control Plane хранит Tags и права в SQLite или PostgreSQL и планирует работу. На каждом Worker Host Worklet забирает Tasks у Control Plane и запускает Worker для каждого Task Attempt. На ноутбуке работает Codex, на сервере — Claude Code, каждый через свой harness-адаптер.](../../assets/images/supertag-architecture.ru.webp)
 
 - **Ваши машины.** `supertag init` запускает локальный **Control Plane** — сервис, который хранит
   ваши Tags и планирует их работу, — и подключает ваш компьютер как **Worker Host**, то есть

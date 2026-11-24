@@ -16,7 +16,7 @@ Açık kaynak, kendi altyapınızda, zaten kullandığınız kodlama ajanların�
 [Görev değil, iş](#give-them-jobs-not-tasks) · [Kalıcı](#persistent) · [Proaktif](#proactive) · [Çok kullanıcılı](#multiplayer) · [Kendiniz çalıştırın](#run-it-yourself) · [İlk Tag'inizi çalıştırın](#run-your-first-tag) · [Dokümantasyon](../../docs/README.md)
 
 <p>
-  <img src="../../assets/images/supertag-meet-the-tags.png" alt="Tag'lerle tanışın: yuvarlak ve uzun gövdeli, renkli ceketli, şapkalı ve gözlüklü dokuz SuperTag maskotu" width="900" height="360">
+  <img src="../../assets/images/supertag-meet-the-tags.tr.webp" alt="Tag'lerle tanışın: yuvarlak ve uzun gövdeli, renkli ceketli, şapkalı ve gözlüklü dokuz SuperTag maskotu" width="900" height="360">
 </p>
 
 </div>
@@ -134,7 +134,7 @@ size düştüğünde haberiniz olur. Tag'ler farklı kodlama ajanlarında ve mak
 böylece dizüstü bilgisayarınızda Claude Code ile çalışan bir Tag, bir ekip arkadaşınızın
 makinesinde Codex ile çalışan bir Tag'le aynı Objective için birlikte çalışabilir.
 
-![Siz, Alex ve Sam kendi Tag'lerinizi; bir ekibin veya kuruluşun ortak uzmanları da içeren ortak Tag'leriyle yan yana yönlendirirsiniz. Tag'ler birbirleriyle koordine olur; iş oturumları ise sizin makineniz, ekip arkadaşlarınızın makineleri ve sanal makineler gibi Worker Host'lara yayılır. Ekibi tek bir ortak Control Plane koordine eder.](../../assets/images/supertag-shared-control-plane.png)
+![Siz, Alex ve Sam kendi Tag'lerinizi; bir ekibin veya kuruluşun ortak uzmanları da içeren ortak Tag'leriyle yan yana yönlendirirsiniz. Tag'ler birbirleriyle koordine olur; iş oturumları ise sizin makineniz, ekip arkadaşlarınızın makineleri ve sanal makineler gibi Worker Host'lara yayılır. Ekibi tek bir ortak Control Plane koordine eder.](../../assets/images/supertag-shared-control-plane.tr.webp)
 
 [Çok kullanıcılı çalışma nasıl işler](../../docs/concepts/multiplayer.md) · [SuperTag'i kendi altyapınızda barındırın](../../docs/guides/self-hosting.md)
 
@@ -203,7 +203,7 @@ SuperTag, Apache 2.0 lisanslı açık kaynak bir projedir ve her parçası sizin
 çalışır. Bir iş kodunuza, servislerinize ve hesaplarınıza erişim gerektirir; bu erişimin nerede
 duracağına da siz karar verirsiniz.
 
-![İstemciler ve iş birliği araçları Control Plane'e Gateway üzerinden ulaşır. Control Plane, Tag'leri ve izinleri SQLite veya PostgreSQL'de saklar ve işi zamanlar. Her Worker Host'ta bir Worklet, Control Plane'den Task'leri üstlenir ve her Task Attempt için bir Worker başlatır. Dizüstü bilgisayar Codex'i, sunucu ise Claude Code'u birer harness adaptörü üzerinden çalıştırır.](../../assets/images/supertag-architecture.png)
+![İstemciler ve iş birliği araçları Control Plane'e Gateway üzerinden ulaşır. Control Plane, Tag'leri ve izinleri SQLite veya PostgreSQL'de saklar ve işi zamanlar. Her Worker Host'ta bir Worklet, Control Plane'den Task'leri üstlenir ve her Task Attempt için bir Worker başlatır. Dizüstü bilgisayar Codex'i, sunucu ise Claude Code'u birer harness adaptörü üzerinden çalıştırır.](../../assets/images/supertag-architecture.tr.webp)
 
 - **Sizin makineleriniz.** `supertag init`, Tag'lerinizi saklayan ve işlerini zamanlayan servis
   olan yerel bir **Control Plane** başlatır ve bilgisayarınızı bir **Worker Host** olarak, yani işi

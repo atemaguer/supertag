@@ -9,6 +9,10 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Changed
+
+- The Meet the Tags banner and both README diagrams now use the language of each translated README.
+
 ## [0.3.10] - 2026-11-23
 
 ### Added

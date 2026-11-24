@@ -16,7 +16,7 @@ Open source e auto-hospedado, sobre os agentes de código que você já usa.
 [Cargos, não tarefas](#give-them-jobs-not-tasks) · [Persistente](#persistent) · [Proativo](#proactive) · [Multiplayer](#multiplayer) · [Execute você mesmo](#run-it-yourself) · [Execute sua primeira Tag](#run-your-first-tag) · [Documentação](../../docs/README.md)
 
 <p>
-  <img src="../../assets/images/supertag-meet-the-tags.png" alt="Conheça as Tags — nove mascotes do SuperTag, uns redondos e outros alongados, com jaquetas coloridas, chapéus e óculos" width="900" height="360">
+  <img src="../../assets/images/supertag-meet-the-tags.pt.webp" alt="Conheça as Tags — nove mascotes do SuperTag, uns redondos e outros alongados, com jaquetas coloridas, chapéus e óculos" width="900" height="360">
 </p>
 
 </div>
@@ -138,7 +138,7 @@ quando a decisão é sua. As Tags podem rodar em agentes de código e máquinas 
 seu laptop, com Claude Code, pode trabalhar com outra na máquina de um colega, com Codex, rumo ao
 mesmo Objective.
 
-![Você, Alex e Sam direcionam suas respectivas Tags, ao lado de Tags compartilhadas de uma equipe ou organização, incluindo especialistas compartilhados. As Tags se coordenam entre si, e suas sessões de trabalho rodam em vários Worker Hosts, como a sua máquina, as máquinas dos colegas e VMs. Um único Control Plane compartilhado coordena a equipe.](../../assets/images/supertag-shared-control-plane.png)
+![Você, Alex e Sam direcionam suas respectivas Tags, ao lado de Tags compartilhadas de uma equipe ou organização, incluindo especialistas compartilhados. As Tags se coordenam entre si, e suas sessões de trabalho rodam em vários Worker Hosts, como a sua máquina, as máquinas dos colegas e VMs. Um único Control Plane compartilhado coordena a equipe.](../../assets/images/supertag-shared-control-plane.pt.webp)
 
 [Como o multiplayer funciona](../../docs/concepts/multiplayer.md) · [Hospede o SuperTag você mesmo](../../docs/guides/self-hosting.md)
 
@@ -207,7 +207,7 @@ O SuperTag é open source sob a licença Apache 2.0, e cada parte dele roda onde
 cargo precisa de acesso ao seu código, aos seus serviços e às suas contas; por isso, é você quem
 decide onde esse acesso fica.
 
-![Clientes e ferramentas de colaboração chegam ao Control Plane pelo Gateway. O Control Plane armazena Tags e permissões em SQLite ou PostgreSQL e agenda o trabalho. Em cada Worker Host, um Worklet reivindica Tasks do Control Plane e inicia um Worker para cada Task Attempt. O laptop roda o Codex e o servidor roda o Claude Code, cada um por meio de um adaptador de harness.](../../assets/images/supertag-architecture.png)
+![Clientes e ferramentas de colaboração chegam ao Control Plane pelo Gateway. O Control Plane armazena Tags e permissões em SQLite ou PostgreSQL e agenda o trabalho. Em cada Worker Host, um Worklet reivindica Tasks do Control Plane e inicia um Worker para cada Task Attempt. O laptop roda o Codex e o servidor roda o Claude Code, cada um por meio de um adaptador de harness.](../../assets/images/supertag-architecture.pt.webp)
 
 - **Suas máquinas.** `supertag init` inicia um **Control Plane** local, o serviço que armazena
   suas Tags e agenda o trabalho delas, e conecta seu computador como um **Worker Host**, uma

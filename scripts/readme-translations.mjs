@@ -1,6 +1,6 @@
 // Translated READMEs live in docs/readme/README.<language>.md. Prose is translated; commands,
-// link destinations, images, headings' structure, and tables' shape must match README.md, so a
-// change to the English README fails this check until every translation follows it.
+// link destinations, headings' structure, and tables' shape must match README.md.
+// Images with translated lettering have a file for each language.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
@@ -19,6 +19,12 @@ export const languages = [
 ];
 
 export const translationPath = (code) => `${translationDirectory}/README.${code}.md`;
+
+const localizedImages = new Set([
+  "assets/images/supertag-architecture.png",
+  "assets/images/supertag-meet-the-tags.png",
+  "assets/images/supertag-shared-control-plane.png",
+]);
 
 const isReadme = (path) => path === "README.md" || path.startsWith(`${translationDirectory}/`);
 
@@ -102,9 +108,15 @@ export function translationProblems(root) {
         problems.push(`${name}: link [${other.name}](README.${other.code}.md)`);
     const actual = structure(root, name, text);
     const report = (found) => problems.push(...found.map((problem) => `${name}: ${problem}`));
+    const targets = expected.targets.map((target) => {
+      if (!localizedImages.has(target)) return target;
+      const image = target.replace(/\.png$/u, `.${code}.webp`);
+      if (!existsSync(join(root, image))) report([`localized image file missing: ${image}`]);
+      return image;
+    });
     if (JSON.stringify(actual.blocks) !== JSON.stringify(expected.blocks))
       report(["command blocks differ from README.md; keep them byte for byte"]);
-    report(difference("link or image", expected.targets, actual.targets));
+    report(difference("link or image", targets, actual.targets));
     report(difference("inline code", expected.code, actual.code));
     // A translated heading has another anchor, so each linked heading carries its English one.
     report(

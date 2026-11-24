@@ -16,7 +16,7 @@
 [작업이 아닌 직무](#give-them-jobs-not-tasks) · [지속성](#persistent) · [능동성](#proactive) · [멀티플레이어](#multiplayer) · [직접 운영하기](#run-it-yourself) · [첫 Tag 실행하기](#run-your-first-tag) · [문서](../../docs/README.md)
 
 <p>
-  <img src="../../assets/images/supertag-meet-the-tags.png" alt="Tag들을 소개합니다 — 둥글거나 길쭉한 체형에 알록달록한 재킷, 모자, 안경을 걸친 아홉 SuperTag 마스코트" width="900" height="360">
+  <img src="../../assets/images/supertag-meet-the-tags.ko.webp" alt="Tag들을 소개합니다 — 둥글거나 길쭉한 체형에 알록달록한 재킷, 모자, 안경을 걸친 아홉 SuperTag 마스코트" width="900" height="360">
 </p>
 
 </div>
@@ -125,7 +125,7 @@ API로 알림과 보고를 Objective에 전달하거나, Slack, GitHub, Linear�
 머신에서 실행될 수 있으므로, 여러분의 노트북에서 Claude Code로 동작하는 Tag가 동료의 머신에서 Codex로
 동작하는 Tag와 같은 Objective를 향해 함께 일할 수 있습니다.
 
-![여러분과 Alex, Sam이 각자의 Tag에게 일을 지시하고, 그 옆에는 공용 전문가 Tag를 포함해 팀이나 조직이 함께 쓰는 Tag가 있습니다. Tag들은 서로 조율하며, 작업 세션은 여러분의 머신, 동료의 머신, VM 등 여러 Worker Host에서 실행됩니다. 공유 Control Plane 하나가 팀 전체를 조율합니다.](../../assets/images/supertag-shared-control-plane.png)
+![여러분과 Alex, Sam이 각자의 Tag에게 일을 지시하고, 그 옆에는 공용 전문가 Tag를 포함해 팀이나 조직이 함께 쓰는 Tag가 있습니다. Tag들은 서로 조율하며, 작업 세션은 여러분의 머신, 동료의 머신, VM 등 여러 Worker Host에서 실행됩니다. 공유 Control Plane 하나가 팀 전체를 조율합니다.](../../assets/images/supertag-shared-control-plane.ko.webp)
 
 [멀티플레이어의 동작 방식](../../docs/concepts/multiplayer.md) · [SuperTag 셀프 호스팅하기](../../docs/guides/self-hosting.md)
 
@@ -191,7 +191,7 @@ supertag objective review OBJECTIVE_ID request-changes --feedback "Also cover th
 SuperTag는 Apache 2.0 라이선스의 오픈 소스이며, 모든 구성 요소가 여러분이 고른 곳에서 실행됩니다. 직무에는
 여러분의 코드, 서비스, 계정에 대한 접근 권한이 필요하므로, 그 권한을 어디에 둘지는 여러분이 결정합니다.
 
-![클라이언트와 협업 도구는 Gateway를 거쳐 Control Plane에 연결됩니다. Control Plane은 Tag와 권한을 SQLite 또는 PostgreSQL에 저장하고 작업을 스케줄링합니다. 각 Worker Host에서는 Worklet이 Control Plane에서 Task를 가져와 Task Attempt마다 Worker를 시작합니다. 노트북은 Codex를, 서버는 Claude Code를 각각 harness 어댑터를 통해 실행합니다.](../../assets/images/supertag-architecture.png)
+![클라이언트와 협업 도구는 Gateway를 거쳐 Control Plane에 연결됩니다. Control Plane은 Tag와 권한을 SQLite 또는 PostgreSQL에 저장하고 작업을 스케줄링합니다. 각 Worker Host에서는 Worklet이 Control Plane에서 Task를 가져와 Task Attempt마다 Worker를 시작합니다. 노트북은 Codex를, 서버는 Claude Code를 각각 harness 어댑터를 통해 실행합니다.](../../assets/images/supertag-architecture.ko.webp)
 
 - **여러분의 머신.** `supertag init`은 로컬 **Control Plane**, 즉 Tag를 저장하고 그 작업을 스케줄링하는
   서비스를 시작하고, 여러분의 컴퓨터를 **Worker Host**, 즉 작업을 실행하는 머신이나 샌드박스로 연결합니다.

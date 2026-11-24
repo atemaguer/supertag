@@ -15,7 +15,7 @@
 [タスクではなく仕事を](#give-them-jobs-not-tasks) · [永続的](#persistent) · [能動的](#proactive) · [マルチプレイヤー](#multiplayer) · [自分で運用する](#run-it-yourself) · [最初の Tag を動かす](#run-your-first-tag) · [ドキュメント](../../docs/README.md)
 
 <p>
-  <img src="../../assets/images/supertag-meet-the-tags.png" alt="Tag たちの紹介 — 丸い体型や縦長の体型で、色とりどりのジャケットや帽子、メガネを身につけた 9 体の SuperTag マスコット" width="900" height="360">
+  <img src="../../assets/images/supertag-meet-the-tags.ja.webp" alt="Tag たちの紹介 — 丸い体型や縦長の体型で、色とりどりのジャケットや帽子、メガネを身につけた 9 体の SuperTag マスコット" width="900" height="360">
 </p>
 
 </div>
@@ -87,7 +87,7 @@ Sentry が新しいエラーを報告すると、`reliability` は 1 つ目の O
 
 チームメイトの Tag 同士は、あなたを介さずに連携します。あなたの Tag がチームメイトの Tag に頼みたいことがあれば、その Tag に直接メッセージを送ります。細部は Tag 同士で詰め、合意した内容をTeam 共有の Workstream に記録します。あなたに知らせが届くのは、あなたが判断すべきことがあるときです。Tag は異なるコーディングエージェントやマシンで動かせるので、あなたのノート PC で Claude Code を使う Tag と、チームメイトのマシンで Codex を使う Tag が、同じ Objective に向けて協力できます。
 
-![あなた、Alex、Sam がそれぞれ自分の Tag に指示を出し、その横には共有のスペシャリストを含む、チームや組織で共有する Tag が並ぶ。Tag 同士は互いに連携し、その作業セッションは、あなたのマシン、チームメイトのマシン、VM といった Worker Host にまたがって実行される。1 つの共有 Control Plane がチーム全体を調整する。](../../assets/images/supertag-shared-control-plane.png)
+![あなた、Alex、Sam がそれぞれ自分の Tag に指示を出し、その横には共有のスペシャリストを含む、チームや組織で共有する Tag が並ぶ。Tag 同士は互いに連携し、その作業セッションは、あなたのマシン、チームメイトのマシン、VM といった Worker Host にまたがって実行される。1 つの共有 Control Plane がチーム全体を調整する。](../../assets/images/supertag-shared-control-plane.ja.webp)
 
 [マルチプレイヤーの仕組み](../../docs/concepts/multiplayer.md) · [SuperTag をセルフホストする](../../docs/guides/self-hosting.md)
 
@@ -136,7 +136,7 @@ supertag objective review OBJECTIVE_ID request-changes --feedback "Also cover th
 
 SuperTag は Apache 2.0 ライセンスのオープンソースで、すべての構成要素を好きな場所で動かせます。仕事にはあなたのコード、サービス、アカウントへのアクセスが必要です。だからこそ、そのアクセスをどこに置くかはあなたが決めます。
 
-![クライアントとコラボレーションツールは Gateway を経由して Control Plane に接続する。Control Plane は Tag と権限を SQLite または PostgreSQL に保存し、作業をスケジュールする。各 Worker Host では、Worklet が Control Plane から Task を取得し、Task Attempt ごとに Worker を起動する。ノート PC では Codex、サーバーでは Claude Code が、それぞれ harness アダプターを介して動く。](../../assets/images/supertag-architecture.png)
+![クライアントとコラボレーションツールは Gateway を経由して Control Plane に接続する。Control Plane は Tag と権限を SQLite または PostgreSQL に保存し、作業をスケジュールする。各 Worker Host では、Worklet が Control Plane から Task を取得し、Task Attempt ごとに Worker を起動する。ノート PC では Codex、サーバーでは Claude Code が、それぞれ harness アダプターを介して動く。](../../assets/images/supertag-architecture.ja.webp)
 
 - **あなたのマシン。** `supertag init` はローカルの **Control Plane**（Tag を保存し、その作業をスケジュールするサービス）を起動し、あなたのコンピューターを **Worker Host**（作業を実行するマシンまたはサンドボックス）として接続します。チームが加わったら、全員がアクセスできる場所にControl Plane をデプロイし、ノート PC、サーバー、CI ランナー、Modal や E2B のサンドボックスを Worker Host として接続します。`reliability` のように継続的な責務を持つ Tag は、常時稼働のホストに置いてください。
 - **あなたのコーディングエージェントとモデル。** 各 Tag は、あなたが選んだコーディングエージェントとモデルで動き、あなた自身のアカウントまたはキーでサインインします。

@@ -75,6 +75,24 @@ test("matching translations pass", () => {
   assert.deepEqual(translationProblems(repository()), []);
 });
 
+test("a localized diagram must exist and match the README's language", () => {
+  const root = repository();
+  const image = "assets/images/supertag-architecture";
+  mkdirSync(join(root, dirname(image)), { recursive: true });
+  writeFileSync(join(root, "README.md"), english.replace("assets/picture.png", `${image}.png`));
+  for (const { code } of languages) {
+    const imageCode = code === "fr" ? "es" : code;
+    const text = translated(code).replace("assets/picture.png", `${image}.${imageCode}.webp`);
+    writeFileSync(join(root, translationPath(code)), text);
+    if (code !== "es") writeFileSync(join(root, `${image}.${code}.webp`), "");
+  }
+  assert.deepEqual(translationProblems(root), [
+    `${translationPath("es")}: localized image file missing: ${image}.es.webp`,
+    `${translationPath("fr")}: link or image missing: "${image}.fr.webp"`,
+    `${translationPath("fr")}: link or image not in README.md: "${image}.es.webp"`,
+  ]);
+});
+
 test("paths are compared from the repository root", () => {
   const root = repository();
   assert.deepEqual(
