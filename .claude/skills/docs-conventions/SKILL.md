@@ -90,5 +90,7 @@ Rules:
   on the page (headings don't count). Readers land on pages directly.
 - Every relative link resolves.
 - New pages are linked from `docs/README.md`.
+- A change to `README.md` is made in every translation under `docs/readme/` too; the check
+  compares their commands, links, inline code, headings, and tables with the English file.
 - No `pnpm supertag` outside `CONTRIBUTING.md`.
 - Every command and resource kind exists in the CLI.

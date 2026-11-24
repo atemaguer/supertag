@@ -11,6 +11,7 @@ import { deprecatedDocProblems } from "./docs-deprecations.mjs";
 import { checkLinks, checkOrphans, isContributorRecord } from "./docs-links.mjs";
 import { versionProblems, workspaceVersion } from "./docs-versions.mjs";
 import { checkDocumentationVocabulary } from "./docs-vocabulary.mjs";
+import { translationDirectory, translationProblems } from "./readme-translations.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 execFileSync(
@@ -25,6 +26,7 @@ execFileSync(
       "docs-links",
       "docs-versions",
       "docs-vocabulary",
+      "readme-translations",
     ].map((n) => join(root, `scripts/${n}.test.mjs`)),
   ],
   { stdio: "inherit" },
@@ -101,6 +103,7 @@ const problems = [
   ...checkDocumentationNodeVersions(root),
   ...checkDocumentationVocabulary(root),
   ...checkOrphans(root, markdownFiles(join(root, "docs"))),
+  ...translationProblems(root),
 ];
 // Explain the Objective-driven way of working before the quickstart.
 const readme = readFileSync(join(root, "README.md"), "utf8");
@@ -170,7 +173,8 @@ for (const file of files) {
           `${name}:${index + 1}: contributor command in user docs; move it to CONTRIBUTING.md`,
         );
     });
-  warnings.push(...longSections(name, text));
+  // Word counts mean little across languages, so only English pages are measured.
+  if (!name.startsWith(`${translationDirectory}/`)) warnings.push(...longSections(name, text));
   const { commands, flags } = commandsIn(text);
   for (const found of commands) {
     commandCount++;

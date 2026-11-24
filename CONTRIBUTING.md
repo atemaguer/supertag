@@ -57,6 +57,17 @@ Do not assume that a reader opened the pages in order. Briefly define a SuperTag
 using it in a landing page, and define the subject and neighboring concepts at the start of any page
 that readers may open directly.
 
+### Translated READMEs
+
+The README is offered in eight more languages under `docs/readme/`, one `README.<language>.md`
+each, linked from the language row at the top of `README.md`. When you change `README.md`, make
+the same change in every translation. The documentation check fails until their commands, links,
+images, inline code, headings, and tables match the English file again. Translate prose only:
+keep SuperTag's capitalized terms, such as Tag and Objective, and everything in code in English.
+To see what one translation still needs, run `node scripts/check-readme-translation.mjs ja`.
+To add a language, add it to `languages` in `scripts/readme-translations.mjs` and to every
+language row.
+
 ## Develop locally
 
 The public documentation uses the installed `supertag` command. To run your

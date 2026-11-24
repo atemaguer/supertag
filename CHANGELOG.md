@@ -9,6 +9,11 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Added
+
+- The README is available in Chinese, Japanese, Korean, Spanish, French, Portuguese, Turkish,
+  and Russian, linked from a language row at its top.
+
 ### Changed
 
 - The install command is shorter: `curl -fsSL https://supertag.sh/install | sh`. The address

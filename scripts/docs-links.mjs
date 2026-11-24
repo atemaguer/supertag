@@ -92,7 +92,12 @@ export function checkOrphans(root, files) {
   );
   return files
     .filter(
-      (file) => file !== index && !linked.has(file) && !isContributorRecord(relative(root, file)),
+      (file) =>
+        file !== index &&
+        !linked.has(file) &&
+        !isContributorRecord(relative(root, file)) &&
+        // Translated READMEs are linked from README.md's language row instead.
+        !relative(root, file).startsWith("docs/readme/"),
     )
     .map((file) => `${relative(root, file)}: not linked from docs/README.md`);
 }

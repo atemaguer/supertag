@@ -5,6 +5,8 @@
   SuperTag
 </h1>
 
+English · [中文](docs/readme/README.zh-CN.md) · [日本語](docs/readme/README.ja.md) · [한국어](docs/readme/README.ko.md) · [Español](docs/readme/README.es.md) · [Français](docs/readme/README.fr.md) · [Português](docs/readme/README.pt.md) · [Türkçe](docs/readme/README.tr.md) · [Русский](docs/readme/README.ru.md)
+
 **Persistent, proactive, multiplayer AI actors for engineering work.**
 
 Open source and self-hosted, on the coding agents you already use.
