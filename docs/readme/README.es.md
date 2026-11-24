@@ -261,7 +261,7 @@ aplicación con SuperTag y un adaptador de harness con el **Worker**, el proceso
 
 ```sh
 npm install supertag-ai
-python -m pip install 'supertag==0.3.11'
+python -m pip install 'supertag==0.3.12'
 ```
 
 [Escribe un adaptador de harness](../../docs/guides/harness-adapters.md) · [Conecta tu propia superficie de colaboración](../../docs/reference/connector-contract.md) · [Consulta la estabilidad de la API](../../docs/reference/api-stability.md)

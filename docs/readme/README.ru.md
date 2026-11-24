@@ -259,7 +259,7 @@ SuperTag, а harness-адаптер — с **Worker**, процессом, ко�
 
 ```sh
 npm install supertag-ai
-python -m pip install 'supertag==0.3.11'
+python -m pip install 'supertag==0.3.12'
 ```
 
 [Напишите harness-адаптер](../../docs/guides/harness-adapters.md) · [Подключите собственную площадку для совместной работы](../../docs/reference/connector-contract.md) · [Проверьте стабильность API](../../docs/reference/api-stability.md)

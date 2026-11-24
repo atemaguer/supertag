@@ -1,5 +1,5 @@
 {
-  "version": "0.3.11",
+  "version": "0.3.12",
   "name": "supertag-cloudflare-deployment",
   "private": true,
   "type": "module",

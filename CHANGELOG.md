@@ -9,6 +9,8 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.3.12] - 2026-11-24
+
 ### Fixed
 
 - A Task whose checkout cannot be prepared or delivered now says why in its result and points to
@@ -1797,7 +1799,8 @@ within the pre-1.0 compatibility policy described in
 - Gateway control-plane support and Slack, GitHub, Linear, Microsoft Teams,
   and Lark Surfaces.
 
-[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.11...HEAD
+[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.12...HEAD
+[0.3.12]: https://github.com/atemaguer/supertag/compare/v0.3.11...v0.3.12
 [0.3.11]: https://github.com/atemaguer/supertag/compare/v0.3.10...v0.3.11
 [0.3.10]: https://github.com/atemaguer/supertag/compare/v0.3.9...v0.3.10
 [0.3.9]: https://github.com/atemaguer/supertag/compare/v0.3.8...v0.3.9
