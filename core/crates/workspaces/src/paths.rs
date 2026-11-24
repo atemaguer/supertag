@@ -118,7 +118,8 @@ fn read_file(file: File, maximum: usize) -> Result<Vec<u8>> {
     );
     ensure!(
         before.len() <= maximum as u64,
-        "file exceeds capture size limit"
+        "file of {} bytes exceeds its {maximum}-byte size limit",
+        before.len()
     );
     let mut bytes = Vec::new();
     (&file).take(maximum as u64 + 1).read_to_end(&mut bytes)?;
@@ -628,22 +629,61 @@ pub(crate) async fn sync_tree_off_runtime(path: PathBuf) -> Result<()> {
         .context("tree sync stopped")?
 }
 
-pub(crate) fn scan(root: &Path, cancel: &CancellationToken) -> Result<BTreeMap<String, String>> {
-    scan_skipping(root, &[], cancel)
+/// What a walk found at one path.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Found {
+    /// A regular file, and whether anyone may execute it.
+    File {
+        executable: bool,
+    },
+    Link,
+    /// A directory; the visitor answers whether to walk into it.
+    Directory,
+    /// A socket, device, or named pipe.
+    Special,
 }
 
-/// Like [`scan`], but never descends into `skip`: paths relative to `root`.
-pub(crate) fn scan_skipping(
+/// One entry of a walk: its path relative to the walk's root, and its open parent directory.
+pub(crate) struct Entry<'a> {
+    pub path: &'a str,
+    pub found: Found,
+    parent: &'a File,
+    name: &'a str,
+}
+
+impl Entry<'_> {
+    /// The target of a symbolic link.
+    pub(crate) fn link(&self) -> Result<Vec<u8>> {
+        link_at(self.parent, self.name)
+    }
+
+    /// Removes the file or link, never a directory.
+    pub(crate) fn remove(&self) -> Result<()> {
+        let name = CString::new(self.name)?;
+        if unsafe { libc::unlinkat(self.parent.as_raw_fd(), name.as_ptr(), 0) } != 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        Ok(())
+    }
+}
+
+/// Walks the checkout at `root` in name order without following links, calling `visit` for
+/// every entry except the root's `.git` and the paths in `skip`, and walking into a directory
+/// only when `visit` answers `true` for it. Only the names of the directories on the way to the
+/// current entry are held, so a checkout of any size can be walked.
+pub(crate) fn walk(
     root: &Path,
     skip: &[String],
     cancel: &CancellationToken,
-) -> Result<BTreeMap<String, String>> {
-    fn visit(
+    visit: &mut dyn FnMut(&Entry<'_>) -> Result<bool>,
+) -> Result<()> {
+    fn directory(
         directory: &File,
         prefix: &str,
         depth: usize,
-        (output, skip): (&mut BTreeMap<String, String>, &[String]),
+        skip: &[String],
         cancel: &CancellationToken,
+        visit: &mut dyn FnMut(&Entry<'_>) -> Result<bool>,
     ) -> Result<()> {
         ensure!(
             depth <= 128,
@@ -664,41 +704,105 @@ pub(crate) fn scan_skipping(
             }
             validate_repo_path(&path)?;
             let metadata = metadata_at(directory, &name)?;
-            match metadata.st_mode & libc::S_IFMT {
-                libc::S_IFDIR => visit(
-                    &open_dir_at(directory, &name)?,
-                    &path,
-                    depth + 1,
-                    (&mut *output, skip),
-                    cancel,
-                )?,
-                libc::S_IFREG => {
-                    output.insert(
-                        path,
-                        if metadata.st_mode & 0o111 != 0 {
-                            "100755"
-                        } else {
-                            "100644"
-                        }
-                        .into(),
-                    );
-                }
-                libc::S_IFLNK => {
-                    validate_link(&path, &link_at(directory, &name)?)?;
-                    output.insert(path, "120000".into());
-                }
-                _ => bail!("workspace contains a special file: {path}"),
+            let found = match metadata.st_mode & libc::S_IFMT {
+                libc::S_IFDIR => Found::Directory,
+                libc::S_IFREG => Found::File {
+                    executable: metadata.st_mode & 0o111 != 0,
+                },
+                libc::S_IFLNK => Found::Link,
+                _ => Found::Special,
+            };
+            let enter = visit(&Entry {
+                path: &path,
+                found,
+                parent: directory,
+                name: &name,
+            })?;
+            if found == Found::Directory && enter {
+                directory_at(directory, &name, &path, depth, skip, cancel, visit)?;
             }
-            ensure!(
-                output.len() <= 100_000,
-                "workspace file count exceeds capture limit"
-            );
         }
         Ok(())
     }
+    fn directory_at(
+        parent: &File,
+        name: &str,
+        path: &str,
+        depth: usize,
+        skip: &[String],
+        cancel: &CancellationToken,
+        visit: &mut dyn FnMut(&Entry<'_>) -> Result<bool>,
+    ) -> Result<()> {
+        directory(
+            &open_dir_at(parent, name)?,
+            path,
+            depth + 1,
+            skip,
+            cancel,
+            visit,
+        )
+    }
+    directory(&open_root(root)?, "", 0, skip, cancel, visit)
+}
+
+/// A checkout holds more files than the scan's caller can account for.
+#[derive(Debug)]
+pub(crate) struct TooManyFiles(pub usize);
+
+impl std::fmt::Display for TooManyFiles {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "the checkout holds more than {} files", self.0)
+    }
+}
+
+impl std::error::Error for TooManyFiles {}
+
+/// Every file and link of the checkout at `root`, with its Git mode, except what is under
+/// `skip` (paths relative to `root`). The caller says how many it can account for: the files a
+/// commit tracks, or those and what one delivery may add. A checkout holding more fails with
+/// [`TooManyFiles`] instead of being listed whole.
+pub(crate) fn scan(
+    root: &Path,
+    skip: &[String],
+    maximum: usize,
+    cancel: &CancellationToken,
+) -> Result<BTreeMap<String, String>> {
     let mut files = BTreeMap::new();
-    visit(&open_root(root)?, "", 0, (&mut files, skip), cancel)?;
+    walk(root, skip, cancel, &mut |entry| {
+        match entry.found {
+            Found::Directory => return Ok(true),
+            Found::File { executable } => {
+                files.insert(
+                    entry.path.to_owned(),
+                    if executable { "100755" } else { "100644" }.to_owned(),
+                );
+            }
+            Found::Link => {
+                validate_link(entry.path, &entry.link()?)?;
+                files.insert(entry.path.to_owned(), "120000".to_owned());
+            }
+            Found::Special => bail!("workspace contains a special file: {}", entry.path),
+        }
+        if files.len() > maximum {
+            return Err(TooManyFiles(maximum).into());
+        }
+        Ok(false)
+    })?;
     Ok(files)
+}
+
+/// Checks that `path` is a regular file with no other link, without following a link to it and
+/// without reading it: a checkout's index grows with the files it tracks.
+pub(crate) fn verify_private_file(path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        verify_directory(parent)?;
+    }
+    let metadata = fs::symlink_metadata(path)?;
+    ensure!(
+        metadata.is_file() && metadata.nlink() == 1,
+        "expected a regular file without external hard links"
+    );
+    Ok(())
 }
 
 /// The device, inode, and link count of a regular checkout file, without following links.
@@ -820,6 +924,61 @@ pub(crate) fn hash_checkout_file(root: &Path, path: &str, oid_length: usize) -> 
 mod artifact_tests {
     use super::*;
     use std::os::unix::fs::symlink;
+
+    #[test]
+    fn a_scan_stops_at_what_its_caller_can_account_for_and_a_walk_holds_nothing() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let root = dir.path().canonicalize()?;
+        fs::create_dir_all(root.join("src/deep"))?;
+        fs::create_dir_all(root.join(".git"))?;
+        fs::create_dir_all(root.join("node_modules/package"))?;
+        for path in [
+            "a",
+            "src/b",
+            "src/deep/c",
+            ".git/HEAD",
+            "node_modules/package/d",
+        ] {
+            fs::write(root.join(path), path)?;
+        }
+        symlink("a", root.join("link"))?;
+        let cancel = CancellationToken::new();
+        let skip = ["node_modules".to_owned()];
+        let files = scan(&root, &skip, 4, &cancel)?;
+        assert_eq!(
+            files.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["a", "link", "src/b", "src/deep/c"]
+        );
+        let error = scan(&root, &skip, 3, &cancel).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<TooManyFiles>().map(|limit| limit.0),
+            Some(3)
+        );
+        // A walk removes what its visitor chooses as it goes, and stays out of what it is told.
+        let mut seen = vec![];
+        walk(&root, &[], &cancel, &mut |entry| {
+            seen.push(entry.path.to_owned());
+            if entry.path == "src/b" || entry.path == "link" {
+                entry.remove()?;
+            }
+            Ok(entry.path != "node_modules")
+        })?;
+        assert_eq!(
+            seen,
+            [
+                "a",
+                "link",
+                "node_modules",
+                "src",
+                "src/b",
+                "src/deep",
+                "src/deep/c"
+            ]
+        );
+        assert!(!root.join("src/b").exists() && fs::symlink_metadata(root.join("link")).is_err());
+        assert!(root.join("node_modules/package/d").exists());
+        Ok(())
+    }
 
     #[test]
     fn captures_only_bounded_regular_files_under_the_owned_checkout() -> Result<()> {

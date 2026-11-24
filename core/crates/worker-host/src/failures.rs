@@ -136,6 +136,26 @@ pub(crate) fn note(what: &str, error: &dyn Display) {
     });
 }
 
+/// What a failed Task's result says after `what`, the fixed sentence for the step that failed:
+/// the cause of `error` as far as it is safe to show whoever asked (see
+/// `supertag_workspaces::failure_cause`), with this host's credentials hidden, and where the full
+/// reason is. The Worklet does not know the name `supertag logs` lists it under, so the command
+/// is the one that prints every service's log.
+pub(crate) fn shown(what: &str, error: &anyhow::Error) -> String {
+    shown_cause(what, &supertag_workspaces::failure_cause(error))
+}
+
+/// [`shown`], for a cause that is already safe to show.
+pub(crate) fn shown_cause(what: &str, cause: &str) -> String {
+    let cause = redact_text(cause, &secrets(), false);
+    let cause = cause.trim().trim_end_matches('.');
+    if cause.is_empty() {
+        format!("{what}. Run `supertag logs` on its Worker Host to see why.")
+    } else {
+        format!("{what}: {cause}. Run `supertag logs` on its Worker Host for the full detail.")
+    }
+}
+
 /// Logs like `note` without recording: for errors met while serving another host, which are not
 /// this host's Attempt.
 pub(crate) fn note_unrecorded(what: &str, error: &dyn Display) {
@@ -184,6 +204,31 @@ mod tests {
             detail
                 .iter()
                 .all(|line| !line.chars().any(char::is_control))
+        );
+    }
+
+    #[test]
+    fn a_shown_failure_names_its_cause_and_where_the_detail_is() {
+        remember_credential("stcr_shown-failure-secret");
+        let error = anyhow::anyhow!("`git ls-tree` output exceeds its 256 MiB size limit").context(
+            "list stcr_shown-failure-secret in /Users/someone/.supertag/hosts/laptop/state",
+        );
+        let shown = shown("Task workspace could not be prepared safely", &error);
+        assert!(
+            shown.starts_with("Task workspace could not be prepared safely: list "),
+            "{shown}"
+        );
+        assert!(
+            shown.ends_with(
+                "…/state: `git ls-tree` output exceeds its 256 MiB size limit. Run `supertag logs` on its Worker Host for the full detail."
+            ),
+            "{shown}"
+        );
+        assert!(!shown.contains("stcr_shown-failure-secret"), "{shown}");
+        assert!(!shown.contains("/Users/someone"), "{shown}");
+        assert_eq!(
+            shown_cause("Task workspace could not be prepared safely", " "),
+            "Task workspace could not be prepared safely. Run `supertag logs` on its Worker Host to see why."
         );
     }
 

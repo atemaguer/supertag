@@ -38,6 +38,8 @@ database_tests! {
     a_tag_following_a_branch_starts_each_session_at_its_current_commit;
     #[tokio::test]
     a_sessions_next_task_reuses_its_checkout_on_the_same_host;
+    #[tokio::test]
+    a_repository_that_cannot_be_prepared_fails_the_task_with_its_cause;
 }
 
 struct Services {
@@ -369,6 +371,64 @@ async fn workspace_setup_prepares_checkouts_and_a_failure_fails_the_task(
     ensure!(
         !result.contains("Workspace before:"),
         "the harness never ran: {result}"
+    );
+    Ok(())
+}
+
+/// A repository SuperTag cannot check out fails the Task before its harness starts, and the
+/// Task's result, which is the reply its sender reads, says what the repository is and where the
+/// full detail is.
+async fn a_repository_that_cannot_be_prepared_fails_the_task_with_its_cause(
+    database: String,
+) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let app = root.join("app");
+    std::fs::create_dir(&app)?;
+    git(&app, &["init", "--quiet"]).await?;
+    std::fs::write(app.join("workspace.txt"), "app source\n")?;
+    git(&app, &["add", "-A"]).await?;
+    git(&app, &["commit", "--quiet", "-m", "Initial source"]).await?;
+    // A submodule, as the index records one: a commit of another repository at a path.
+    let other = git(&app, &["rev-parse", "HEAD"]).await?;
+    let entry = format!("160000,{other},vendor/library");
+    git(&app, &["update-index", "--add", "--cacheinfo", &entry]).await?;
+    git(&app, &["commit", "--quiet", "-m", "Add a submodule"]).await?;
+    let base = git(&app, &["rev-parse", "HEAD"]).await?;
+    let services = Services::start(&database, root).await?;
+    let cli = |args: &[&str]| services.cli(args);
+    json(cli(&[
+        "tag",
+        "put",
+        "builder",
+        "--instructions",
+        "Edit the repository",
+        "--allow",
+        "files:write",
+        "--workspace-id",
+        "app",
+        "--workspace-base",
+        &base,
+    ]))
+    .await?;
+    let task = json(cli(&[
+        "task",
+        "submit",
+        "--tag",
+        "builder",
+        "--session",
+        "first",
+        "first",
+    ]))
+    .await?;
+    let task = field(&task, "task_id")?.to_owned();
+    let state = root.join("host-state");
+    success(services.worker(&state, Some(&services.host), &[("app", &app)])).await?;
+    let failed = json(cli(&["get", "task", &task])).await?;
+    assert_eq!(failed["state"], "TASK_STATE_FAILED", "{failed}");
+    assert_eq!(
+        failed["result"],
+        "Task workspace could not be prepared safely: the repository has a Git submodule at `vendor/library`, and SuperTag does not support repositories with submodules yet. Run `supertag logs` on its Worker Host for the full detail."
     );
     Ok(())
 }

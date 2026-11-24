@@ -483,7 +483,11 @@ pub(crate) fn git(repository: &Path, args: &[&str], limit: usize) -> Result<Vec<
         "git {} failed",
         args.first().copied().unwrap_or_default()
     );
-    ensure!(output.stdout.len() <= limit, "git output is too large");
+    ensure!(
+        output.stdout.len() <= limit,
+        "`git {}` printed more than the {limit} bytes SuperTag reads from it",
+        args.first().copied().unwrap_or_default()
+    );
     Ok(output.stdout)
 }
 

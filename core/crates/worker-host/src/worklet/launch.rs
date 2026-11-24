@@ -22,6 +22,9 @@ use crate::{
     },
 };
 
+/// What a failed Task's result begins with when its checkout could not be prepared.
+const PREPARE_FAILED: &str = "Task workspace could not be prepared safely";
+
 /// A started Attempt, ready for a Worker.
 pub(crate) struct Launched {
     /// Carries the Attempt credential its start returned, for the Worker only.
@@ -297,11 +300,11 @@ pub(crate) async fn launch(
                 .prepare(&task, &attempt, transfers, &operation_cancel)
                 .await
                 .map_err(|error| {
+                    // The whole cause goes to this host's log and the Attempt's failure detail;
+                    // the Task's result says as much of it as is safe to show.
                     error.downcast::<Status>().unwrap_or_else(|error| {
-                        failures::noted(
-                            Status::invalid_argument("Task workspace could not be prepared safely"),
-                            &format!("{error:#}"),
-                        )
+                        failures::note(PREPARE_FAILED, &format!("{error:#}"));
+                        Status::invalid_argument(failures::shown(PREPARE_FAILED, &error))
                     })
                 })
         })
@@ -331,15 +334,21 @@ pub(crate) async fn launch(
         Err(error) => {
             // A failed setup names itself and keeps its untrusted output, as TypeScript's
             // `workspace-setup` failure does.
-            let message = if error.message().starts_with("Workspace setup") {
-                error.message()
+            let message = if error.message().starts_with("Workspace setup")
+                || error.message().starts_with(PREPARE_FAILED)
+            {
+                error.message().to_owned()
             } else if error.message() == AUTHORITY_EXPIRED {
-                "Execution authority expired while the Task workspace was prepared"
+                "Execution authority expired while the Task workspace was prepared".to_owned()
             } else {
-                "Task workspace could not be prepared safely"
+                // A call the preparation made was refused, by the Control Plane or this host:
+                // the status is its own account of why, and was logged nowhere until now.
+                let cause = format!("{:?}: {}", error.code(), error.message());
+                failures::note(PREPARE_FAILED, &cause);
+                failures::shown(PREPARE_FAILED, &anyhow::anyhow!(cause))
             };
             return authority
-                .finish(attempt, adapter::failed(message))
+                .finish(attempt, adapter::failed(&message))
                 .map(|()| None);
         }
     };

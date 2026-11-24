@@ -1036,8 +1036,9 @@ fn branch_resolution(
             supertag_protocol::terminal_text::warn(&format!(
                 "Workspace branch {branch} could not be resolved: {error:#}"
             ));
-            BranchResolution::Failed(format!(
-                "Workspace branch {branch} could not be resolved on this Worker Host"
+            BranchResolution::Failed(crate::failures::shown(
+                &format!("Workspace branch {branch} could not be resolved on this Worker Host"),
+                &error,
             ))
         }
     }
@@ -1093,7 +1094,7 @@ mod tests {
                 &live
             ),
             BranchResolution::Failed(
-                "Workspace branch main could not be resolved on this Worker Host".into()
+                "Workspace branch main could not be resolved on this Worker Host: Git command exceeded its deadline. Run `supertag logs` on its Worker Host for the full detail.".into()
             )
         );
         Ok(())

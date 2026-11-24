@@ -195,6 +195,15 @@ inside bubblewrap's, which Ubuntu's `bwrap-userns-restrict` AppArmor profile and
 runners do not allow, so CI does not require it), and `linux-root`. The `linux-root` shared execution cases need root in a disposable Linux VM or
 container, util-linux `setsid`, and `SUPERTAG_RUST_TEST_SHARED_EXECUTION_BINARY` set to a built
 `supertag-shared-execution`. The `linux-root` job in `.github/workflows/core.yml` runs them.
+One Workspace test checks a repository of 120,000 tracked files and takes minutes, so it runs
+only when `SUPERTAG_RUST_TEST_LARGE_REPOSITORIES` is set. Run it after changing how checkouts are
+written, verified, or captured:
+
+```sh
+SUPERTAG_RUST_TEST_LARGE_REPOSITORIES=1 cargo test --manifest-path core/Cargo.toml --locked \
+  -p supertag-workspaces --test large_repositories -- --include-ignored
+```
+
 When you run tests in a container, start it with an init (`docker run --init`): processes a
 test leaves behind are reparented to PID 1, and a PID 1 such as `sleep infinity` never reaps
 them.

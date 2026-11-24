@@ -15,7 +15,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{GitOutputFiles, check_cancelled, paths};
+use crate::{GitOutputFiles, check_cancelled, failure::Refusal, paths};
 
 pub(crate) const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 const REMOTE_TIMEOUT: Duration = Duration::from_secs(15);
@@ -23,14 +23,42 @@ const REMOTE_TIMEOUT: Duration = Duration::from_secs(15);
 /// monorepo's multi-gigabyte history takes minutes, not the seconds of every other Git command,
 /// and the copy holds no memory of its own while it runs.
 const COPY_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+/// How long writing a checkout's files may take. A monorepo's hundreds of thousands of files take
+/// minutes on a laptop whose disk is also being indexed or scanned.
+const CHECKOUT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// The most one buffered Git read keeps. Object copies, which grow with a repository's history
 /// and tree, stream between Git children instead (see [`pipeline`]), and a remote's ref
 /// advertisement is read line by line, so what stays buffered is a listing of one tree or of a
 /// checkout's changes: 256 MiB holds the `ls-tree` of a tree of about two million files.
 const MAX_OUTPUT: usize = 268_435_456;
-/// The longest line a streamed Git listing may have: an object ID, a tab, and a ref name.
+/// How much of a line of a remote's ref listing is read: an object ID, a tab, and a ref name.
 const MAX_LINE: usize = 4096;
+/// The longest entry of a tree listing: a mode, an object ID, and a path. No file system this
+/// runs on holds a path longer than 4 KiB.
+const MAX_TREE_ENTRY: usize = 8192;
+/// Flaws in the format of old commits and trees that Git's strict checks refuse but every Git
+/// reads the same way: a malformed date, time zone, name or email, or a file mode written with a
+/// leading zero. Old histories, such as those converted from another version control system, hold
+/// them, and hosting services accept them. They are let through when copying objects this host
+/// already trusts as its operator's repository; every other strict check stays, including those
+/// on paths, `.gitmodules`, and links between objects.
+const HISTORY_FORMAT_FLAWS: &str = "badDate=ignore,badDateOverflow=ignore,badEmail=ignore,badName=ignore,badTimezone=ignore,missingEmail=ignore,missingNameBeforeEmail=ignore,missingSpaceBeforeDate=ignore,missingSpaceBeforeEmail=ignore,zeroPaddedDate=ignore,zeroPaddedFilemode=ignore";
+/// The attributes written to a checkout's `.git/info/attributes`, which override the
+/// repository's own `.gitattributes`: no line-ending, encoding, `$Id$`, or filter conversion.
+/// A checkout's files are the bytes Git stores, which is what verification and delivery compare;
+/// a repository that asks for CRLF batch files would otherwise fail its own verification.
+const CHECKOUT_ATTRIBUTES: &[u8] = b"* -text -crlf -ident -filter -working-tree-encoding\n";
+
+/// Which objects a copy between repositories lets through.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Checks {
+    /// Every strict check: for objects that came from another host.
+    Strict,
+    /// Every strict check except [`HISTORY_FORMAT_FLAWS`]: for the operator's own repository
+    /// and objects already copied from it.
+    OwnHistory,
+}
 /// The largest local source configuration read to find its remote.
 const MAX_SOURCE_CONFIG: usize = 8 * 1024 * 1024;
 
@@ -233,14 +261,24 @@ impl Repository {
         }
         check_cancelled(cancel)?;
         let source_objects = source_objects(source)?;
+        refuse_borrowed_objects(&source_objects)?;
         reject_object_links(&source_objects)?;
         let pack = self.git(
             &["pack-objects", "--stdout", "--revs"],
-            &[("GIT_OBJECT_DIRECTORY", source_objects.into_os_string())],
+            &[(
+                "GIT_OBJECT_DIRECTORY",
+                source_objects.clone().into_os_string(),
+            )],
         )?;
-        self.copy_objects(vec![pack], format!("{commit}\n").as_bytes(), cancel)
-            .await
-            .context("copy the commit's history from the source repository")?;
+        self.copy_objects(
+            vec![pack],
+            format!("{commit}\n").as_bytes(),
+            Checks::OwnHistory,
+            cancel,
+        )
+        .await
+        .map_err(|error| explain_source_copy(source, &source_objects, error))
+        .context("copy the commit's history from the source repository")?;
         self.verify_commit(commit, cancel).await
     }
 
@@ -272,9 +310,14 @@ impl Repository {
             &["pack-objects", "--stdout", "--revs"],
             &[("GIT_OBJECT_DIRECTORY", objects.into_os_string())],
         )?;
-        self.copy_objects(vec![pack], format!("{head}\n^{base}\n").as_bytes(), cancel)
-            .await
-            .context("copy the Session's commits from the Workspace that holds them")?;
+        self.copy_objects(
+            vec![pack],
+            format!("{head}\n^{base}\n").as_bytes(),
+            Checks::OwnHistory,
+            cancel,
+        )
+        .await
+        .context("copy the Session's commits from the Workspace that holds them")?;
         self.assert_ancestor(base, head, cancel).await
     }
 
@@ -349,14 +392,19 @@ impl Repository {
         extra: &[(&str, OsString)],
         cancel: &CancellationToken,
     ) -> Result<Vec<u8>> {
-        run(
-            self.git(args, extra)?,
-            input,
-            cancel,
-            MAX_OUTPUT,
-            COMMAND_TIMEOUT,
-        )
-        .await
+        self.command_within(args, input, extra, COMMAND_TIMEOUT, cancel)
+            .await
+    }
+
+    async fn command_within(
+        &self,
+        args: &[&str],
+        input: &[u8],
+        extra: &[(&str, OsString)],
+        timeout: Duration,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<u8>> {
+        run(self.git(args, extra)?, input, cancel, MAX_OUTPUT, timeout).await
     }
 
     /// Writes into this repository the objects one or more stages before it select:
@@ -367,10 +415,15 @@ impl Repository {
         &self,
         stages: Vec<Command>,
         input: &[u8],
+        checks: Checks,
         cancel: &CancellationToken,
     ) -> Result<()> {
         let mut stages = stages;
-        stages.push(self.git(&["index-pack", "--stdin", "--strict"], &[])?);
+        let strict = match checks {
+            Checks::Strict => "--strict".to_owned(),
+            Checks::OwnHistory => format!("--strict={HISTORY_FORMAT_FLAWS}"),
+        };
+        stages.push(self.git(&["index-pack", "--stdin", &strict], &[])?);
         pipeline(stages, input, cancel, 64 * 1024, COPY_TIMEOUT).await?;
         Ok(())
     }
@@ -464,44 +517,111 @@ impl Repository {
         commit: &str,
         cancel: &CancellationToken,
     ) -> Result<BTreeMap<String, TreeEntry>> {
-        let bytes = self
-            .command(&["ls-tree", "-rz", "--full-tree", commit], &[], &[], cancel)
-            .await?;
+        // Read an entry at a time: the listing of a monorepo's tree is larger than any buffer
+        // worth keeping beside the entries themselves.
         let mut entries = BTreeMap::new();
-        for entry in bytes
-            .split(|byte| *byte == 0)
-            .filter(|entry| !entry.is_empty())
-        {
-            let tab = entry
-                .iter()
-                .position(|byte| *byte == b'\t')
-                .context("invalid Git tree entry")?;
-            let header = std::str::from_utf8(&entry[..tab])?;
-            let mut fields = header.split(' ');
-            let mode = fields.next().context("missing Git mode")?.to_owned();
-            let kind = fields.next().context("missing Git object kind")?;
-            ensure!(
-                kind == "blob",
-                "submodules require an explicit workspace implementation"
-            );
-            let oid = fields.next().context("missing Git object ID")?.to_owned();
-            validate_oid(&oid)?;
-            ensure!(
-                matches!(mode.as_str(), "100644" | "100755" | "120000"),
-                "unsupported Git file mode"
-            );
-            let path = std::str::from_utf8(&entry[tab + 1..])
-                .context("repository path is not UTF-8")?
-                .to_owned();
-            paths::validate_repo_path(&path)?;
-            ensure!(
-                entries
-                    .insert(path.clone(), TreeEntry { path, mode, oid })
-                    .is_none(),
-                "duplicate Git tree path"
-            );
-        }
+        records(
+            self.git(&["ls-tree", "-rz", "--full-tree", commit], &[])?,
+            (0, MAX_TREE_ENTRY, Overlong::Fail),
+            cancel,
+            COMMAND_TIMEOUT,
+            |entry| {
+                if entry.is_empty() {
+                    return Ok(true);
+                }
+                let tab = entry
+                    .iter()
+                    .position(|byte| *byte == b'\t')
+                    .context("invalid Git tree entry")?;
+                let header = std::str::from_utf8(&entry[..tab])?;
+                let mut fields = header.split(' ');
+                let mode = fields.next().context("missing Git mode")?.to_owned();
+                let kind = fields.next().context("missing Git object kind")?;
+                let name = String::from_utf8_lossy(&entry[tab + 1..]);
+                if kind != "blob" {
+                    return Err(Refusal(format!(
+                        "the repository has a Git submodule at `{name}`, and SuperTag does not support repositories with submodules yet"
+                    ))
+                    .into());
+                }
+                let oid = fields.next().context("missing Git object ID")?.to_owned();
+                validate_oid(&oid)?;
+                if !matches!(mode.as_str(), "100644" | "100755" | "120000") {
+                    return Err(Refusal(format!(
+                        "the repository tracks `{name}` with the file mode {mode}, which SuperTag does not support"
+                    ))
+                    .into());
+                }
+                let Ok(path) = std::str::from_utf8(&entry[tab + 1..]) else {
+                    return Err(Refusal(format!(
+                        "the repository tracks a file whose name is not UTF-8 (`{name}`), which SuperTag does not support"
+                    ))
+                    .into());
+                };
+                if paths::validate_repo_path(path).is_err() {
+                    return Err(Refusal(format!(
+                        "the repository tracks `{path}`, a path SuperTag does not check out: no part of a path may be `.git`, `.` or `..`, or contain a backslash"
+                    ))
+                    .into());
+                }
+                let path = path.to_owned();
+                ensure!(
+                    entries
+                        .insert(path.clone(), TreeEntry { path, mode, oid })
+                        .is_none(),
+                    "duplicate Git tree path"
+                );
+                Ok(true)
+            },
+        )
+        .await?;
         Ok(entries)
+    }
+
+    /// Checks that every symbolic link in `entries` points inside the repository. The targets
+    /// are read with one Git command, however many links there are.
+    async fn validate_links(
+        &self,
+        entries: &BTreeMap<String, TreeEntry>,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        let links: Vec<&TreeEntry> = entries
+            .values()
+            .filter(|entry| entry.mode == "120000")
+            .collect();
+        if links.is_empty() {
+            return Ok(());
+        }
+        let wanted: String = links.iter().map(|link| format!("{}\n", link.oid)).collect();
+        let bytes = self
+            .command(&["cat-file", "--batch"], wanted.as_bytes(), &[], cancel)
+            .await?;
+        // Each answer: `<object ID> blob <size>`, a newline, the bytes, a newline.
+        let mut rest = bytes.as_slice();
+        for link in links {
+            let end = rest
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .context("Git did not answer for a symbolic link")?;
+            let header = std::str::from_utf8(&rest[..end])?;
+            let size: usize = header
+                .strip_prefix(link.oid.as_str())
+                .and_then(|header| header.strip_prefix(" blob "))
+                .context("a symbolic link is not a blob")?
+                .parse()?;
+            let target = rest
+                .get(end + 1..end + 1 + size)
+                .context("Git cut a symbolic link's target short")?;
+            if paths::validate_link(&link.path, target).is_err() {
+                return Err(Refusal(format!(
+                    "the repository tracks a symbolic link that points outside the repository (`{}`), which SuperTag does not check out",
+                    link.path
+                ))
+                .into());
+            }
+            rest = rest.get(end + size + 2..).unwrap_or_default();
+        }
+        Ok(())
     }
 
     /// Writes a checkout of `start`, or with `index_tree` of that tree on top of `start` (a merge
@@ -514,19 +634,14 @@ impl Repository {
         entries: &BTreeMap<String, TreeEntry>,
         cancel: &CancellationToken,
     ) -> Result<()> {
-        for entry in entries.values().filter(|entry| entry.mode == "120000") {
-            let target = self
-                .command(&["cat-file", "blob", &entry.oid], &[], &[], cancel)
-                .await?;
-            paths::validate_link(&entry.path, &target)?;
-        }
+        self.validate_links(entries, cancel).await?;
         let checkout = self
             .checkout_metadata_with(directory, base, start, index_tree, None, cancel)
             .await?;
         // Git writes the files on several workers.
         let workers = format!("checkout.workers={}", parallelism());
         checkout
-            .command(
+            .command_within(
                 &[
                     "-c",
                     &workers,
@@ -538,6 +653,7 @@ impl Repository {
                 ],
                 &[],
                 &[],
+                CHECKOUT_TIMEOUT,
                 cancel,
             )
             .await?;
@@ -563,12 +679,7 @@ impl Repository {
     ) -> Result<()> {
         validate_oid(prior_start)?;
         self.assert_ancestor(prior_start, start, cancel).await?;
-        for entry in entries.values().filter(|entry| entry.mode == "120000") {
-            let target = self
-                .command(&["cat-file", "blob", &entry.oid], &[], &[], cancel)
-                .await?;
-            paths::validate_link(&entry.path, &target)?;
-        }
+        self.validate_links(entries, cancel).await?;
         ensure!(
             fs::symlink_metadata(directory.join(".git"))
                 .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound),
@@ -590,12 +701,17 @@ impl Repository {
             cancel.clone(),
         );
         tokio::task::spawn_blocking(move || -> Result<()> {
-            for path in paths::scan_skipping(&root, &kept, &stop)?.into_keys() {
-                if !tracked.contains_key(&path) {
-                    crate::check_cancelled(&stop)?;
-                    fs::remove_file(root.join(&path))?;
+            // Whatever the last Attempt left that Git does not track, such as build output and
+            // dependencies, is removed as the walk meets it, so none of it is listed.
+            paths::walk(&root, &kept, &stop, &mut |entry| {
+                if entry.found == paths::Found::Directory {
+                    return Ok(true);
                 }
-            }
+                if !tracked.contains_key(entry.path) {
+                    entry.remove()?;
+                }
+                Ok(false)
+            })?;
             // Empty directories go too, as a fresh checkout has none.
             remove_empty_directories(&root, "", &kept)?;
             // A file hard-linked elsewhere would let this Attempt write outside its checkout.
@@ -629,9 +745,22 @@ impl Repository {
         );
         let oid_length = self.oid_length;
         tokio::task::spawn_blocking(move || {
-            let actual = paths::scan_skipping(&directory, &skip, &cancel)?;
+            // The checkout must hold exactly the tracked files, so the scan stops at one more.
+            let actual = match paths::scan(&directory, &skip, entries.len(), &cancel) {
+                Ok(actual) => actual.len(),
+                Err(error) if error.is::<paths::TooManyFiles>() => entries.len() + 1,
+                Err(error) => return Err(error),
+            };
+            if actual < entries.len()
+                && let Some((one, other)) = case_collision(&entries)
+            {
+                return Err(Refusal(format!(
+                    "the repository tracks paths that differ only by letter case (`{one}` and `{other}`), and the disk SuperTag keeps its checkouts on cannot hold both"
+                ))
+                .into());
+            }
             ensure!(
-                actual.len() == entries.len(),
+                actual == entries.len(),
                 "materialized checkout differs from its pinned tree"
             );
             let entries: Vec<_> = entries.iter().collect();
@@ -710,6 +839,17 @@ impl Repository {
             oid_length: self.oid_length,
             bare: false,
         };
+        let information = checkout.git_dir.join("info");
+        paths::create_private_root(&information)?;
+        let attributes = information.join("attributes");
+        if fs::symlink_metadata(&attributes).is_ok() {
+            ensure!(
+                paths::read_regular(&attributes, 65_536)? == CHECKOUT_ATTRIBUTES,
+                "private Git attributes changed"
+            );
+        } else {
+            crate::write_synced(&attributes, CHECKOUT_ATTRIBUTES)?;
+        }
         let not_base = format!("^{base}");
         let since = self
             .command(&["rev-list", start, &not_base], &[], &[], cancel)
@@ -757,6 +897,7 @@ impl Repository {
                     self.git(&["pack-objects", "--stdout"], &[])?,
                 ],
                 listed.as_bytes(),
+                Checks::OwnHistory,
                 cancel,
             )
             .await
@@ -848,8 +989,10 @@ impl Repository {
             oid_length,
             bare: false,
         };
-        paths::read_regular(&repository.git_dir.join("HEAD"), 1024)?;
-        paths::read_regular(&repository.git_dir.join("index"), 32 * 1024 * 1024)?;
+        // The harness can write these. They must be plain files of the checkout; their size is
+        // Git's to read, and a monorepo's index is hundreds of megabytes.
+        paths::verify_private_file(&repository.git_dir.join("HEAD"))?;
+        paths::verify_private_file(&repository.git_dir.join("index"))?;
         Ok(repository)
     }
 
@@ -1354,11 +1497,28 @@ impl Repository {
                 !prerequisites.is_empty(),
                 "delivery bundle pack carries objects outside the delivered history"
             );
+            // The prerequisites' history is this repository's whole history: it is read a line
+            // at a time, and only until every such object is found in it.
             let mut history = vec!["rev-list", "--objects"];
             history.extend(prerequisites.iter().map(String::as_str));
-            let history = names(&isolated.command(&history, &[], &borrowing, cancel).await?)?;
+            let mut missing: BTreeSet<&str> = extra.iter().map(|object| object.as_str()).collect();
+            records(
+                isolated.git(&history, &borrowing)?,
+                (b'\n', MAX_LINE, Overlong::Cut),
+                cancel,
+                COPY_TIMEOUT,
+                |line| {
+                    let name = line.split(|byte| *byte == b' ').next().unwrap_or_default();
+                    if let Ok(name) = std::str::from_utf8(name) {
+                        missing.remove(name);
+                    }
+                    Ok(!missing.is_empty())
+                },
+            )
+            .await
+            .context("delivery bundle history is incomplete")?;
             ensure!(
-                extra.iter().all(|object| history.contains(*object)),
+                missing.is_empty(),
                 "delivery bundle pack carries objects outside the delivered history"
             );
         }
@@ -1372,7 +1532,7 @@ impl Repository {
         )];
         objects.extend(borrowing.iter().cloned());
         let pack = self.git(&["pack-objects", "--stdout", "--revs"], &objects)?;
-        self.copy_objects(vec![pack], revisions.as_bytes(), cancel)
+        self.copy_objects(vec![pack], revisions.as_bytes(), Checks::Strict, cancel)
             .await
             .context("copy the delivery's objects from its quarantine")?;
         self.verify_commit(head, cancel).await
@@ -1611,22 +1771,42 @@ pub(crate) async fn advertised_output_remote(
         .arg(remote.as_str());
     // A GitHub monorepo advertises every branch, tag, and pull request ref, megabytes in all, so
     // the advertisement is read a line at a time and the lookup stops at the commit.
-    let advertised = any_line(lookup, cancel, REMOTE_TIMEOUT, |line| {
-        line.split(|byte| *byte == b'\t').next() == Some(commit.as_bytes())
-    })
+    let mut advertised = false;
+    records(
+        lookup,
+        (b'\n', MAX_LINE, Overlong::Cut),
+        cancel,
+        REMOTE_TIMEOUT,
+        |line| {
+            advertised = line.split(|byte| *byte == b'\t').next() == Some(commit.as_bytes());
+            Ok(!advertised)
+        },
+    )
     .await?;
     Ok(advertised.then(|| remote.into()))
 }
 
-/// Whether a line `command` prints satisfies `matches`. Its output is read a line at a time, each
-/// at most [`MAX_LINE`] bytes, and the command is stopped at the first match, so a listing of
-/// any length takes no more memory than its longest line; the deadline bounds its time.
-async fn any_line(
+/// What a streamed listing does with a record longer than its bound.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Overlong {
+    /// Fails: the record is needed whole, such as a tracked path.
+    Fail,
+    /// Passes on only its start: what matters comes first, such as the object ID before a
+    /// remote's ref name of any length.
+    Cut,
+}
+
+/// Calls `visit` with each record `command` prints, split at `delimiter`, until it answers
+/// `false` or the listing ends; the command is stopped at a `false`. Only one record is held at
+/// a time, at most `maximum` bytes of it, so a listing of any length, such as a monorepo's tree
+/// or a remote's refs, takes no more memory than what `visit` keeps. The deadline bounds its time.
+async fn records(
     mut command: Command,
+    (delimiter, maximum, overlong): (u8, usize, Overlong),
     cancel: &CancellationToken,
     timeout: Duration,
-    matches: impl Fn(&[u8]) -> bool,
-) -> Result<bool> {
+    mut visit: impl FnMut(&[u8]) -> Result<bool>,
+) -> Result<()> {
     use tokio::io::{AsyncBufReadExt, BufReader};
     check_cancelled(cancel)?;
     let operation = operation(&command);
@@ -1640,57 +1820,66 @@ async fn any_line(
         .spawn()
         .with_context(|| format!("start trusted Git executable for `{operation}`"))?;
     let pid = child.id().context("Git child has no process ID")?;
-    let mut stdout = BufReader::new(child.stdout.take().context("Git stdout unavailable")?);
+    let mut stdout = BufReader::with_capacity(
+        65_536,
+        child.stdout.take().context("Git stdout unavailable")?,
+    );
     let stderr = child.stderr.take().context("Git stderr unavailable")?;
-    let errors = {
-        let operation = operation.clone();
-        tokio::spawn(async move { limited(stderr, MAX_STDERR, &operation, "error output").await })
-    };
-    let result = tokio::select! {
+    let errors = tokio::spawn(tail(stderr, MAX_STDERR));
+    // Whether the listing was read to its end, rather than stopped by `visit`.
+    let result: Result<bool> = tokio::select! {
         biased;
         _ = cancel.cancelled() => Err(anyhow::anyhow!("workspace operation cancelled")),
         _ = tokio::time::sleep(timeout) => Err(anyhow::anyhow!("`{operation}` exceeded its deadline")),
         result = async {
-            let mut line = Vec::with_capacity(128);
+            let mut record = Vec::with_capacity(256);
+            let mut cut = false;
             loop {
-                line.clear();
-                let read = (&mut stdout)
-                    .take(MAX_LINE as u64 + 1)
-                    .read_until(b'\n', &mut line)
-                    .await?;
-                if read == 0 {
+                let buffer = stdout.fill_buf().await?;
+                if buffer.is_empty() {
+                    if (!record.is_empty() || cut) && !visit(&record)? {
+                        return Ok(false);
+                    }
                     break;
                 }
-                ensure!(
-                    line.ends_with(b"\n") || line.len() <= MAX_LINE,
-                    "`{operation}` output line exceeds its {} size limit",
-                    size(MAX_LINE)
-                );
-                if matches(line.strip_suffix(b"\n").unwrap_or(&line)) {
-                    return Ok(true);
+                let end = buffer.iter().position(|byte| *byte == delimiter);
+                let part = &buffer[..end.unwrap_or(buffer.len())];
+                let room = maximum - record.len();
+                if part.len() > room {
+                    ensure!(
+                        overlong == Overlong::Cut,
+                        "`{operation}` lists an entry longer than its {} size limit",
+                        size(maximum)
+                    );
+                    cut = true;
+                }
+                record.extend_from_slice(&part[..part.len().min(room)]);
+                let used = part.len() + usize::from(end.is_some());
+                stdout.consume(used);
+                if end.is_some() {
+                    if !visit(&record)? {
+                        return Ok(false);
+                    }
+                    record.clear();
+                    cut = false;
                 }
             }
             let stderr = errors.await.context("read Git error output")??;
             let status = child.wait().await?;
             if !status.success() {
-                return Err(GitExit {
-                    code: status.code(),
-                    operation: operation.clone(),
-                    stderr: String::from_utf8_lossy(&stderr).trim().into(),
-                }
-                .into());
+                return Err(GitExit::new(status.code(), &operation, &stderr).into());
             }
-            Ok(false)
+            Ok(true)
         } => result,
     };
-    // Stopped at a match, or failed: the rest of the listing is not wanted.
-    if !matches!(result, Ok(false)) {
+    // Stopped by `visit`, or failed: the rest of the listing is not wanted.
+    if !matches!(result, Ok(true)) {
         unsafe {
             libc::kill(-(pid as i32), libc::SIGKILL);
         }
         let _ = child.wait().await;
     }
-    result
+    result.map(|_| ())
 }
 
 fn isolated_remote_command() -> Command {
@@ -1745,6 +1934,87 @@ fn output_remote_url(source: &Path, disposable: &Path, value: &str) -> Option<ur
     url::Url::from_file_path(remote).ok()
 }
 
+/// Two tracked paths that are the same but for letter case, which a case-insensitive disk
+/// writes to one file.
+fn case_collision(entries: &BTreeMap<String, TreeEntry>) -> Option<(String, String)> {
+    let mut seen: BTreeMap<String, &str> = BTreeMap::new();
+    for path in entries.keys() {
+        if let Some(other) = seen.insert(path.to_lowercase(), path) {
+            return Some((other.to_owned(), path.clone()));
+        }
+    }
+    None
+}
+
+/// Refuses a source repository whose objects are partly in another repository.
+fn refuse_borrowed_objects(objects: &Path) -> Result<()> {
+    let alternates = objects.join("info/alternates");
+    if fs::metadata(&alternates).is_ok_and(|metadata| metadata.len() > 0) {
+        return Err(Refusal(
+            "the repository borrows objects from another repository (it has `objects/info/alternates`, as `git clone --shared` or `--reference` makes), and SuperTag reads only the repository's own objects. Run `git repack -a -d` in it and then delete `.git/objects/info/alternates`".into(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
+/// Says why copying a commit's history out of the source repository failed, when the repository
+/// is one whose history cannot be copied whole: Git's own message, kept as the cause, names an
+/// object and not the reason.
+fn explain_source_copy(source: &Path, objects: &Path, error: anyhow::Error) -> anyhow::Error {
+    let Some(exit) = error.downcast_ref::<GitExit>() else {
+        return error;
+    };
+    if exit.stderr().contains("fsck error") {
+        // `error: object <ID>: <check>: <explanation>`, one line for each object.
+        let mut checks: Vec<&str> = exit
+            .stderr()
+            .lines()
+            .filter_map(|line| line.strip_prefix("error: object "))
+            .filter_map(|line| line.split(": ").nth(1))
+            .filter(|check| {
+                check
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric())
+            })
+            .collect();
+        checks.sort_unstable();
+        checks.dedup();
+        let named = if checks.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", checks.join(", "))
+        };
+        return error.context(Refusal(format!(
+            "the repository's history holds objects that fail Git's strict checks{named}, and SuperTag does not copy them. `git fsck --strict` in the repository lists them"
+        )));
+    }
+    let directory = source_git_directory(source).ok();
+    let shallow = directory
+        .as_ref()
+        .and_then(|directory| fs::metadata(directory.join("shallow")).ok())
+        .is_some_and(|metadata| metadata.len() > 0);
+    if shallow {
+        return error.context(Refusal(
+            "the repository is a shallow clone, and SuperTag needs the whole history of the commit it starts from. Run `git fetch --unshallow` in the repository and try again".into(),
+        ));
+    }
+    let partial = fs::read_dir(objects.join("pack")).is_ok_and(|entries| {
+        entries.flatten().any(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.ends_with(".promisor"))
+        })
+    });
+    if partial {
+        return error.context(Refusal(
+            "the repository is a partial clone (made with `git clone --filter`), so some of its files and history were never downloaded, and SuperTag copies history from the local repository without contacting its remote. Use a full clone, or download everything with `git fetch --refetch --no-filter` in the repository, and try again".into(),
+        ));
+    }
+    error
+}
+
 fn reject_object_links(directory: &Path) -> Result<()> {
     paths::verify_directory(directory)?;
     for entry in fs::read_dir(directory)? {
@@ -1777,13 +2047,47 @@ pub(crate) struct GitExit {
     operation: String,
     stderr: String,
 }
+impl GitExit {
+    pub(crate) fn new(code: Option<i32>, operation: &str, stderr: &[u8]) -> Self {
+        Self {
+            code,
+            operation: operation.to_owned(),
+            stderr: String::from_utf8_lossy(stderr).trim().to_owned(),
+        }
+    }
+
+    /// The failed command by name and exit code, without anything it printed.
+    pub(crate) fn summary(&self) -> String {
+        match self.code {
+            Some(code) => format!("`{}` failed (exit {code})", self.operation),
+            None => format!("`{}` was stopped by a signal", self.operation),
+        }
+    }
+
+    /// What the command printed to its standard error, or the end of it.
+    pub(crate) fn stderr(&self) -> &str {
+        &self.stderr
+    }
+}
+/// The command, then the last line it printed, which is Git's own `fatal:` reason, then
+/// whatever came before it: a reader of a shortened message sees the reason first.
 impl std::fmt::Display for GitExit {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "`{}` failed ({:?}): {}",
-            self.operation, self.code, self.stderr
-        )
+        write!(formatter, "{}", self.summary())?;
+        let mut lines = self
+            .stderr
+            .lines()
+            .rev()
+            .filter(|line| !line.trim().is_empty());
+        let Some(last) = lines.next() else {
+            return Ok(());
+        };
+        write!(formatter, ": {}", last.trim())?;
+        if lines.next().is_some() {
+            let earlier = &self.stderr[..self.stderr.rfind(last).unwrap_or_default()];
+            write!(formatter, "\nearlier output:\n{}", earlier.trim_end())?;
+        }
+        Ok(())
     }
 }
 impl std::error::Error for GitExit {}
@@ -1841,8 +2145,28 @@ async fn limited(
     Ok(bytes)
 }
 
-/// The most one Git child may write to its standard error.
+/// The most of one Git child's standard error that is kept: its end, where Git says why it
+/// failed. A child may print any amount, such as a warning for each of a history's thousands of
+/// malformed old objects; the rest is read and dropped.
 const MAX_STDERR: usize = 65_536;
+
+/// Reads all of a child's standard error and keeps its last `maximum` bytes. Reading to the end
+/// never fails a command for being noisy and never leaves it blocked on a full pipe.
+async fn tail(mut reader: impl AsyncRead + Unpin, maximum: usize) -> Result<Vec<u8>> {
+    let mut kept: Vec<u8> = Vec::new();
+    let mut block = vec![0_u8; 16_384];
+    loop {
+        let count = reader.read(&mut block).await?;
+        if count == 0 {
+            kept.drain(..kept.len().saturating_sub(maximum));
+            return Ok(kept);
+        }
+        kept.extend_from_slice(&block[..count]);
+        if kept.len() > 2 * maximum {
+            kept.drain(..kept.len() - maximum);
+        }
+    }
+}
 
 pub(crate) async fn run(
     mut command: Command,
@@ -1879,16 +2203,11 @@ pub(crate) async fn run(
                     Ok::<_, anyhow::Error>(())
                 },
                 limited(stdout, maximum, &operation, "output"),
-                limited(stderr, MAX_STDERR, &operation, "error output"),
+                tail(stderr, MAX_STDERR),
                 async { Ok::<_, anyhow::Error>(child.wait().await?) }
             )?;
             if !status.success() {
-                return Err(GitExit {
-                    code: status.code(),
-                    operation: operation.clone(),
-                    stderr: String::from_utf8_lossy(&stderr).trim().into(),
-                }
-                .into());
+                return Err(GitExit::new(status.code(), &operation, &stderr).into());
             }
             Ok(stdout)
         } => result,
@@ -1953,10 +2272,7 @@ pub(crate) async fn pipeline(
                         .context("connect a Git pipeline stage to the next")?,
                 );
             }
-            let operation = operations[index].clone();
-            errors.push(tokio::spawn(async move {
-                limited(stderr, MAX_STDERR, &operation, "error output").await
-            }));
+            errors.push(tokio::spawn(tail(stderr, MAX_STDERR)));
             anyhow::Ok(())
         })();
         if spawned.is_err() {
@@ -2000,11 +2316,7 @@ pub(crate) async fn pipeline(
                                 == Some(libc::SIGPIPE)
                                 || status.code() == Some(128 + libc::SIGPIPE),
                         );
-                        failures.push(GitExit {
-                            code: status.code(),
-                            operation: operation.clone(),
-                            stderr: String::from_utf8_lossy(&stderr).trim().into(),
-                        });
+                        failures.push(GitExit::new(status.code(), operation, &stderr));
                     }
                 }
                 if !failures.is_empty() {
@@ -2062,7 +2374,7 @@ pub(crate) async fn run_status(
         result = async {
             let (stdout, _, status) = tokio::try_join!(
                 limited(stdout, maximum, &operation, "output"),
-                limited(stderr, MAX_STDERR, &operation, "error output"),
+                tail(stderr, MAX_STDERR),
                 async { Ok::<_, anyhow::Error>(child.wait().await?) }
             )?;
             Ok((status.code(), stdout))
@@ -2188,7 +2500,8 @@ mod tests {
         .await
         .unwrap_err();
         let exit = error.downcast_ref::<GitExit>().context("a stage exit")?;
-        assert_eq!((exit.code, exit.stderr.as_str()), (Some(3), "refused"));
+        assert_eq!((exit.code, exit.stderr()), (Some(3), "refused"));
+        assert_eq!(exit.to_string(), "`sh` failed (exit 3): refused");
         // The first stage dies writing to a stage that stopped reading; the stage that stopped
         // explains it.
         let error = pipeline(
@@ -2265,47 +2578,99 @@ mod tests {
         Ok(())
     }
 
+    async fn any_line(command: Command, matches: impl Fn(&[u8]) -> bool) -> Result<bool> {
+        let mut found = false;
+        records(
+            command,
+            (b'\n', MAX_LINE, Overlong::Cut),
+            &CancellationToken::new(),
+            COMMAND_TIMEOUT,
+            |line| {
+                found = matches(line);
+                Ok(!found)
+            },
+        )
+        .await?;
+        Ok(found)
+    }
+
     #[tokio::test]
-    async fn a_streamed_listing_stops_at_its_match_and_bounds_each_line() -> Result<()> {
-        let cancel = CancellationToken::new();
+    async fn a_streamed_listing_stops_at_its_match_and_bounds_each_record() -> Result<()> {
         // An endless listing: only the line read so far is held, and the match stops it.
+        ensure!(any_line(shell("/usr/bin/yes"), |line| line == b"y").await?);
+        ensure!(!any_line(shell("printf 'a\\nb\\n'"), |line| line == b"c").await?);
+        // A last record without its delimiter still counts.
+        ensure!(any_line(shell("printf 'a\\nb'"), |line| line == b"b").await?);
+        // A line longer than the bound is cut to its start, where a ref listing has the commit,
+        // and the listing goes on after it.
         ensure!(
-            any_line(shell("/usr/bin/yes"), &cancel, COMMAND_TIMEOUT, |line| line
-                == b"y")
-            .await?
-        );
-        ensure!(
-            !any_line(
-                shell("printf 'a\\nb\\n'"),
-                &cancel,
-                COMMAND_TIMEOUT,
-                |line| { line == b"c" }
+            any_line(
+                shell("printf 'commit\\t'; /bin/dd if=/dev/zero bs=8192 count=1 2>/dev/null | /usr/bin/tr '\\0' x; printf '\\nnext\\n'"),
+                |line| line.len() == MAX_LINE && line.starts_with(b"commit\t")
             )
             .await?
         );
-        let error = any_line(
-            shell("/bin/dd if=/dev/zero bs=8192 count=1 2>/dev/null"),
-            &cancel,
+        ensure!(
+            any_line(
+                shell("/bin/dd if=/dev/zero bs=8192 count=1 2>/dev/null | /usr/bin/tr '\\0' x; printf '\\nnext\\n'"),
+                |line| line == b"next"
+            )
+            .await?
+        );
+        // A listing whose records are needed whole refuses one that is too long, by name.
+        let error = records(
+            shell("/bin/dd if=/dev/zero bs=8192 count=3 2>/dev/null | /usr/bin/tr '\\0' x"),
+            (0, 16_384, Overlong::Fail),
+            &CancellationToken::new(),
             COMMAND_TIMEOUT,
-            |_| false,
+            |_| Ok(true),
         )
         .await
         .unwrap_err();
         assert_eq!(
             error.to_string(),
-            "`sh` output line exceeds its 4 KiB size limit"
+            "`sh` lists an entry longer than its 16 KiB size limit"
         );
-        let error = any_line(
-            shell("echo gone >&2; exit 2"),
-            &cancel,
-            COMMAND_TIMEOUT,
-            |_| false,
-        )
-        .await
-        .unwrap_err();
+        let error = any_line(shell("echo gone >&2; exit 2"), |_| false)
+            .await
+            .unwrap_err();
         assert_eq!(
             error.downcast_ref::<GitExit>().and_then(|exit| exit.code),
             Some(2)
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_noisy_command_keeps_only_the_end_of_its_error_output() -> Result<()> {
+        // 4 MiB of warnings, far past any pipe's buffer, then the output and a clean exit.
+        let noisy = "i=0; while [ $i -lt 40000 ]; do echo \"warning: object $i: zeroPaddedFilemode: contains zero-padded file modes, which is harmless\" >&2; i=$((i+1)); done";
+        let output = run(
+            shell(&format!("{noisy}; echo done")),
+            &[],
+            &CancellationToken::new(),
+            64,
+            COMMAND_TIMEOUT,
+        )
+        .await?;
+        assert_eq!(output, b"done\n");
+        // A failure after the noise still says why, in the last line.
+        let error = run(
+            shell(&format!("{noisy}; echo 'fatal: the reason' >&2; exit 128")),
+            &[],
+            &CancellationToken::new(),
+            64,
+            COMMAND_TIMEOUT,
+        )
+        .await
+        .unwrap_err();
+        let exit = error.downcast_ref::<GitExit>().context("a Git exit")?;
+        ensure!(exit.stderr().len() <= MAX_STDERR);
+        ensure!(
+            error
+                .to_string()
+                .starts_with("`sh` failed (exit 128): fatal: the reason\nearlier output:\n"),
+            "{error}"
         );
         Ok(())
     }

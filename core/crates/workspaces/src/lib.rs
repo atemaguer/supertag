@@ -7,6 +7,7 @@
 pub mod artifact_volumes;
 pub mod base_ref;
 pub mod devcontainer;
+mod failure;
 mod git;
 mod lock;
 pub mod packages;
@@ -16,6 +17,7 @@ pub mod session_branch;
 pub mod setup;
 pub mod source;
 mod transfer;
+pub use failure::{Refusal, failure_cause};
 pub use git::MissingPrerequisite;
 pub use lock::ExclusiveLock;
 pub use transfer::{
@@ -625,7 +627,26 @@ impl Workspace {
         paths::verify_directory(&checkout.path)?;
         let repository = self.repository(cancel).await?;
         let base_tree = repository.tree(&checkout.start_commit, cancel).await?;
-        let all_files = paths::scan_skipping(&checkout.path, &prior.setup_outputs, cancel)?;
+        // Everything in the checkout but setup outputs: the tracked files and what the turn
+        // added, whether or not Git ignores it. Listing it runs off the async runtime.
+        let all_files = {
+            let (root, skip, maximum, cancel) = (
+                checkout.path.clone(),
+                prior.setup_outputs.clone(),
+                base_tree.len().saturating_add(MAX_ADDED_FILES),
+                cancel.clone(),
+            );
+            tokio::task::spawn_blocking(move || paths::scan(&root, &skip, maximum, &cancel))
+                .await
+                .context("workspace capture stopped")?
+                .map_err(|error| match error.downcast::<paths::TooManyFiles>() {
+                    Ok(_) => Refusal(format!(
+                        "the Task left more than {MAX_ADDED_FILES} files in its checkout that the repository does not track, such as installed dependencies or build output, and SuperTag does not look through that many to find its changes. Have the Tag remove them before it finishes, or install dependencies with the Workspace's setup command instead"
+                    ))
+                    .into(),
+                    Err(error) => error,
+                })?
+        };
         let output_prefix = request
             .output_directory
             .as_ref()
@@ -1424,6 +1445,9 @@ const DISCARDED: &str = "discarded";
 /// The most bytes of changed and new files one delivery captures. Unchanged files, however many,
 /// are only hashed.
 const CAPTURE_LIMIT: usize = 268_435_456;
+/// The most files a checkout may hold beyond those its start commit tracks when it is delivered:
+/// new files, and whatever the turn left that Git ignores. Each is listed and asked about.
+const MAX_ADDED_FILES: usize = 1_000_000;
 /// Each Session's last delivered checkout, kept for its next Attempt.
 const PARKED: &str = "parked";
 /// The packs SuperTag wrote into each prepared checkout's `.git`, where its harness cannot write.

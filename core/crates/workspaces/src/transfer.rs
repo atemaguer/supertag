@@ -425,7 +425,7 @@ fn materialize(root: &Path, tree: &ParsedTree<'_>, cancel: &CancellationToken) -
 
 fn verify_tree(root: &Path, tree: &ParsedTree<'_>, cancel: &CancellationToken) -> Result<()> {
     ensure!(
-        paths::scan(root, cancel)?.len() == tree.entries.len(),
+        paths::scan(root, &[], tree.entries.len(), cancel)?.len() == tree.entries.len(),
         "restored tree differs from manifest"
     );
     for (entry, body) in &tree.entries {

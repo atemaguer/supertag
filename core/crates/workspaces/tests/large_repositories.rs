@@ -1,5 +1,6 @@
 //! Repositories the size of a real monorepo: a history and a tree larger than any buffer a Git
-//! read keeps, and a remote that advertises tens of thousands of refs.
+//! read keeps, more tracked files and longer paths than any fixed count allows for, and a remote
+//! that advertises tens of thousands of refs.
 use std::{
     fs,
     io::Write as _,
@@ -8,6 +9,7 @@ use std::{
 };
 use supertag_workspaces::{
     FinalizeRequest, Outcome, PrepareRequest, Workspace, WorkspaceConfig, advertised_output_remote,
+    changed_paths, git_output_files,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -250,6 +252,11 @@ async fn a_remote_advertising_tens_of_thousands_of_refs_still_verifies_an_output
     for number in 0..20_000 {
         refs.push_str(&format!("{old} refs/pull/{number:05}/head\n"));
     }
+    // One ref with a name longer than any line worth keeping: only its commit is read.
+    refs.push_str(&format!(
+        "{old} refs/heads/generated/{}/end\n",
+        vec!["a-long-path-component"; 400].join("/")
+    ));
     refs.push_str(&format!("{pushed} refs/tags/zz-release\n"));
     fs::write(remote.join("packed-refs"), refs).unwrap();
     let listing = git(&source, &["ls-remote", remote.to_str().unwrap()]);
@@ -286,4 +293,155 @@ async fn a_remote_advertising_tens_of_thousands_of_refs_still_verifies_an_output
             .unwrap(),
         None
     );
+}
+
+/// A bare source whose one commit tracks `directories * 1000` files, each under a path of about
+/// 300 bytes. Every directory holds the same thousand files, so the fixture is a few trees.
+fn wide_source(root: &Path, directories: usize) -> (PathBuf, String) {
+    let source = root.join("wide.git");
+    fs::create_dir(&source).unwrap();
+    git(&source, &["init", "--quiet", "--bare"]);
+    let blob = git_with(&source, &["hash-object", "-w", "--stdin"], b"export {};\n");
+    let long = "a-descriptive-directory-name-as-generated-code-has-them".repeat(2);
+    let files: String = (0..1000)
+        .map(|number| format!("100644 blob {blob}\tgenerated-module-{number:04}.{long}.ts\n"))
+        .collect();
+    let mut tree = git_with(&source, &["mktree"], files.as_bytes());
+    for name in ["implementation", "source"] {
+        tree = git_with(
+            &source,
+            &["mktree"],
+            format!("040000 tree {tree}\t{name}-{long}\n").as_bytes(),
+        );
+    }
+    let packages: String = (0..directories)
+        .map(|number| format!("040000 tree {tree}\tpackage-{number:04}\n"))
+        .collect();
+    let packages = git_with(&source, &["mktree"], packages.as_bytes());
+    let ignore = git_with(&source, &["hash-object", "-w", "--stdin"], b"dist/\n");
+    let top = git_with(
+        &source,
+        &["mktree"],
+        format!("100644 blob {ignore}\t.gitignore\n040000 tree {packages}\tpackages\n").as_bytes(),
+    );
+    let base = git(&source, &["commit-tree", &top, "-m", "A wide tree"]);
+    git(&source, &["update-ref", "refs/heads/main", &base]);
+    (source, base)
+}
+
+/// A monorepo tracks more files than any fixed count: 120,000 here, under long paths, so the
+/// checkout's index alone is larger than 32 MiB. A Task prepares, reports and delivers its
+/// change, and its Session's next Task reuses the checkout after the first left 30,000 files of
+/// build output and dependencies in it.
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_LARGE_REPOSITORIES=1: writes 120,000 files and hashes them several times, minutes in a debug build"]
+async fn a_workspace_tracking_more_files_than_any_fixed_count_prepares_and_delivers() {
+    // Runs of every ignored test, as CI's are, leave this one out unless it is asked for.
+    if std::env::var_os("SUPERTAG_RUST_TEST_LARGE_REPOSITORIES").is_none() {
+        eprintln!("skipped: SUPERTAG_RUST_TEST_LARGE_REPOSITORIES is not set");
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let (source, base) = wide_source(root.path(), 120);
+    let workspace = Workspace::open(WorkspaceConfig {
+        state_dir: root.path().join("state"),
+        source,
+        base_commit: base,
+    })
+    .unwrap();
+    let cancel = CancellationToken::new();
+    let started = std::time::Instant::now();
+    let checkout = workspace
+        .prepare(request("task-1", "attempt-1", None), &cancel)
+        .await
+        .unwrap();
+    eprintln!("prepared 120,001 files in {:?}", started.elapsed());
+    let index = fs::metadata(checkout.path.join(".git/index"))
+        .unwrap()
+        .len();
+    assert!(index > 32 * MIB as u64, "index of {index} bytes");
+    let long = "a-descriptive-directory-name-as-generated-code-has-them".repeat(2);
+    let changed = format!(
+        "packages/package-0119/source-{long}/implementation-{long}/generated-module-0999.{long}.ts"
+    );
+    fs::write(
+        checkout.path.join(&changed),
+        "export const changed = true;\n",
+    )
+    .unwrap();
+    // What a turn leaves behind: ignored build output, and dependencies nothing ignores by name
+    // but SuperTag's own delivery excludes.
+    for (directory, count) in [
+        ("dist", 10_000),
+        ("packages/package-0000/node_modules", 20_000),
+    ] {
+        for number in 0..count {
+            let file = checkout
+                .path
+                .join(format!("{directory}/chunk-{:03}/{number}.js", number / 500));
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, "built\n").unwrap();
+        }
+    }
+    let started = std::time::Instant::now();
+    let (paths, truncated) = changed_paths(
+        &checkout,
+        |path| !path.contains("node_modules/"),
+        10,
+        &cancel,
+    )
+    .await
+    .unwrap();
+    eprintln!("changed paths in {:?}", started.elapsed());
+    assert_eq!((paths, truncated), (vec![changed.clone()], false));
+    let outputs = git_output_files(
+        &checkout,
+        std::slice::from_ref(&changed),
+        |_| false,
+        10,
+        &cancel,
+    )
+    .await
+    .unwrap();
+    assert_eq!(outputs.tracked, std::slice::from_ref(&changed));
+    let started = std::time::Instant::now();
+    let delivery = workspace
+        .finalize(
+            &checkout,
+            FinalizeRequest {
+                output_directory: None,
+                file_scope: None,
+                summary: "Change one generated module".into(),
+                outcome: Outcome::Completed,
+            },
+            &cancel,
+        )
+        .await
+        .unwrap();
+    eprintln!("delivered in {:?}", started.elapsed());
+    assert!(delivery.committed);
+    assert_eq!(delivery.changed_files, 1);
+    // The next Task takes over the checkout: what the first left behind is gone.
+    workspace.park_checkout(&checkout).unwrap();
+    let started = std::time::Instant::now();
+    let next = workspace
+        .prepare(
+            request("task-2", "attempt-2", Some(delivery.head_commit.clone())),
+            &cancel,
+        )
+        .await
+        .unwrap();
+    eprintln!("prepared again in {:?}", started.elapsed());
+    assert_eq!(
+        fs::read_to_string(next.path.join(&changed)).unwrap(),
+        "export const changed = true;\n"
+    );
+    assert!(!next.path.join("dist").exists());
+    assert!(
+        !next
+            .path
+            .join("packages/package-0000/node_modules")
+            .exists()
+    );
+    assert_eq!(git(&next.path, &["status", "--porcelain"]), "");
 }

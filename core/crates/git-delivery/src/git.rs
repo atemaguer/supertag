@@ -169,6 +169,7 @@ pub(crate) async fn run(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     command.as_std_mut().process_group(0);
+    let name = operation(&command);
     let mut child = command.spawn().context("start git")?;
     let group = ProcessGroup(child.id().context("git has no process ID")?);
     let mut stdout = child
@@ -179,19 +180,29 @@ pub(crate) async fn run(
     let mut stderr = child
         .stderr
         .take()
-        .context("git error output unavailable")?
-        .take(16_385);
+        .context("git error output unavailable")?;
     let result = {
         let operation = async {
-            let mut out = Vec::new();
-            let mut err = Vec::new();
-            let (status, _, _) = tokio::try_join!(
-                child.wait(),
-                stdout.read_to_end(&mut out),
-                stderr.read_to_end(&mut err)
-            )?;
-            ensure!(out.len() <= limit, "git output exceeded its bound");
-            err.truncate(16_384);
+            // Output past its bound fails at once, by name, instead of leaving git blocked on a
+            // full pipe until the deadline. Error output is read to its end for the same reason,
+            // and only its start is kept.
+            let output = async {
+                let mut out = Vec::new();
+                stdout.read_to_end(&mut out).await?;
+                ensure!(
+                    out.len() <= limit,
+                    "`{name}` printed more than the {limit} bytes SuperTag reads from it"
+                );
+                Ok(out)
+            };
+            let errors = async {
+                let mut err = Vec::new();
+                (&mut stderr).take(16_384).read_to_end(&mut err).await?;
+                tokio::io::copy(&mut stderr, &mut tokio::io::sink()).await?;
+                Ok::<_, anyhow::Error>(err)
+            };
+            let (out, err) = tokio::try_join!(output, errors)?;
+            let status = child.wait().await?;
             Ok::<_, anyhow::Error>(Output {
                 success: status.success(),
                 code: status.code(),
@@ -222,6 +233,22 @@ pub(crate) async fn run(
     Ok(output)
 }
 
+/// What a child runs, such as `git ls-remote`, skipping global options and their values.
+fn operation(command: &Command) -> String {
+    let mut arguments = command.as_std().get_args();
+    while let Some(argument) = arguments.next() {
+        match argument.to_str() {
+            Some("-c" | "-C") => {
+                arguments.next();
+            }
+            Some(option) if option.starts_with('-') => {}
+            Some(subcommand) => return format!("git {subcommand}"),
+            None => break,
+        }
+    }
+    "git".into()
+}
+
 fn check_size(directory: &Path) -> Result<()> {
     let mut pending: Vec<PathBuf> = vec![directory.to_owned()];
     let mut size = 0u64;
@@ -249,7 +276,7 @@ fn check_size(directory: &Path) -> Result<()> {
                 size = size.saturating_add(metadata.len());
                 ensure!(
                     size <= MAX_STORAGE_BYTES,
-                    "the repository exceeds git delivery's 256 MiB bound"
+                    "the repository is larger than the 256 MiB a remote Workspace may be; map a checkout of it on the Worker Host as a local Workspace instead"
                 );
             } else {
                 ensure!(

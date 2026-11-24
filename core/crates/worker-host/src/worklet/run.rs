@@ -54,6 +54,10 @@ use crate::{
     },
 };
 
+/// What a failed Task's result begins with when its checkout could not be captured as a
+/// delivery.
+const CAPTURE_FAILED: &str = "Workspace output could not be captured safely";
+
 /// How many times a Worker may die before it launched the harness, or before it kept a Finalizing
 /// turn's captures, before the Worklet fails the Attempt instead of starting another.
 const PRELAUNCH_DEATHS: u32 = 3;
@@ -1212,9 +1216,15 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                                     Some(violation) => {
                                         Status::permission_denied(violation.to_string())
                                     }
-                                    None => Status::invalid_argument(
-                                        "Workspace output could not be captured safely",
-                                    ),
+                                    // The whole cause goes to this host's log and the
+                                    // Attempt's failure detail; the result says what is safe.
+                                    None => {
+                                        failures::note(CAPTURE_FAILED, &format!("{error:#}"));
+                                        Status::invalid_argument(failures::shown(
+                                            CAPTURE_FAILED,
+                                            &error,
+                                        ))
+                                    }
                                 }
                             })
                     })
@@ -1243,12 +1253,15 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                     Err(error) if error.code() == Code::PermissionDenied => {
                         save_finish(journal, attempt, adapter::failed(error.message()))?
                     }
+                    Err(error) if error.message().starts_with(CAPTURE_FAILED) => {
+                        save_finish(journal, attempt, adapter::failed(error.message()))?
+                    }
                     Err(error) => {
-                        failures::note("Workspace output could not be captured safely", &error);
+                        failures::note(CAPTURE_FAILED, &error);
                         save_finish(
                             journal,
                             attempt,
-                            adapter::failed("Workspace output could not be captured safely"),
+                            adapter::failed(&failures::shown_cause(CAPTURE_FAILED, "")),
                         )?
                     }
                 }

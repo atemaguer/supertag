@@ -153,7 +153,8 @@ the Tag wrote, `activity` for what it did, or `progress` for its plan. `get repl
 the Gateway delivered the reply. When a Task failed, `supertag logs HOST_NAME` shows why: the
 Worklet logs the failure with the last lines its harness adapter wrote to standard error,
 secrets hidden. When the Worklet itself failed the Task, for example because it could not
-capture the output, the result is a fixed message and `supertag describe task TASK_ID` shows the
+capture the output, the result is a fixed message, with a short cause when a checkout could not
+be prepared or captured, and `supertag describe task TASK_ID` shows the
 reason under the execution report's `failure_detail`: at most eight lines, secrets hidden, shown
 to operators only and never in a reply, conversation, or client's view of the Task. A reply whose delivery is uncertain waits for
 `supertag reply resolve REPLY_ID --decision ... --evidence ...` after you check the thread.
@@ -266,6 +267,33 @@ supertag get message --mailbox RECIPIENT
 - **The message stays `TAG_MESSAGE_STATE_PENDING` with no wake limit.** A note waits about 3
   seconds before it wakes its recipient. Longer means the recipient has no connected Worker Host
   to take its inbox turn. Check `supertag describe tag RECIPIENT` and `supertag ps`.
+
+## A Task's workspace could not be prepared
+
+Before a Task runs in a Workspace (a Git repository a Worker Host works in), its Worker Host
+copies the commit the Task starts from, with that commit's history, out of the repository and
+writes a checkout of it. When that fails, the Task fails with `Task workspace could not be
+prepared safely`, followed by the cause. `supertag logs` on the Worker Host shows the full
+detail, including what Git printed.
+
+SuperTag refuses some repositories, and the cause says which and what to do:
+
+| The repository | What to do |
+| --- | --- |
+| is a shallow clone | Run `git fetch --unshallow` in it. |
+| is a partial clone, made with `git clone --filter` | Use a full clone, or run `git fetch --refetch --no-filter` in it. |
+| borrows objects from another repository, as `git clone --shared` makes | Run `git repack -a -d` in it, then delete `.git/objects/info/alternates`. |
+| has a Git submodule | SuperTag does not support repositories with submodules yet. |
+| tracks a symbolic link that points outside the repository | Remove the link or point it inside the repository. |
+| tracks a file whose name is not UTF-8, has a backslash, or has `.git` as a part | Rename the file. |
+| tracks two paths that differ only by letter case, on a disk that cannot hold both | Keep SuperTag's state directory on a case-sensitive volume, or rename one path. |
+| has history with objects that fail Git's strict checks | `git fsck --strict` lists them. Malformed dates, names, emails and zero-padded file modes in old history are accepted. |
+
+A checkout holds each file exactly as Git stores it. SuperTag does not apply the repository's
+line-ending, encoding, or filter attributes, so a file kept with Git LFS is its pointer file.
+
+A failed delivery says `Workspace output could not be captured safely` and its cause the same
+way.
 
 ## A Task failed because the repository changed
 
