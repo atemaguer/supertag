@@ -9,6 +9,16 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Fixed
+
+- A Task whose checkout cannot be prepared or delivered now says why in its result and points to
+  `supertag logs`; before, it said only "Task workspace could not be prepared safely".
+  Repositories with more than 100,000 files, with `.gitattributes` that convert files on checkout
+  (such as `eol=crlf`), or with old history that has malformed dates or zero-padded file modes
+  now prepare. Shallow and partial clones, clones that borrow objects from another repository,
+  submodules, and symbolic links that leave the repository are refused with a message that says
+  what to do.
+
 ## [0.3.11] - 2026-11-24
 
 ### Changed
