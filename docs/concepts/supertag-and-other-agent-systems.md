@@ -5,6 +5,10 @@ owns outcomes and ongoing responsibilities. Your coding agents do the work; the 
 goal, acts on its responsibilities without being asked, and coordinates with your teammates' Tags.
 It runs on the coding agents and machines you choose.
 
+You can use SuperTag in two ways: out of the box, as AI teammates for engineering work, or as the
+infrastructure for building your own persistent actors for other kinds of work. This page compares
+it with systems in both roles.
+
 If these terms are new, start with [core concepts](README.md).
 
 Security and accountability are part of that design. Each **Tag** is a persistent AI actor with its
@@ -30,7 +34,7 @@ of November 2026. The links point to the projects' own documentation.
 | System | What it is built around | How it relates to SuperTag |
 | --- | --- | --- |
 | [Claude Tag](https://www.anthropic.com/news/introducing-claude-tag) | A shared AI teammate in Slack that can use channel context, tools, and proactive work | A recognizable multiplayer application pattern that can be built on organizational infrastructure |
-| [OpenAI dots](https://openai.com/index/introducing-dots/) | An always-on agent on OpenAI's models with its own cloud computer. It works toward your goals in the background and hands heavy work to Codex | Also persistent and proactive. Tags run on the coding agents you choose, on your own machines, under rules you set |
+| [OpenAI dots](https://openai.com/index/introducing-dots/) | An always-on agent on OpenAI's models with its own cloud computer. It works toward your goals in the background and hands heavy work to Codex | Also persistent and proactive. Tags run on the coding agents you choose, on your own machines, under rules you set, and you can build your own dots-like assistant on SuperTag |
 | [Grok Bot](https://x.ai/news/introducing-grok-bot) | A team of always-on Bots that share a computer in the cloud, message each other, and can manage one another | A team of agents inside one product. Tags coordinate across different coding agents and machines |
 | [Cursor Projects](https://cursor.com/docs/agent/projects) and [Claude Code Projects](https://code.claude.com/docs/en/claude-projects) | A coordinator agent that plans long-running work and delegates it to agents, mostly in the vendor's cloud. Cursor lets teammates join a Project | Each runs one vendor's agents. Teammates' Tags can run on Claude Code, Codex, Cursor, or OpenCode and still work together |
 | [OpenClaw](https://docs.openclaw.ai/) | A self-hosted personal assistant Gateway with channels, routing, and [multiple isolated agents](https://docs.openclaw.ai/concepts/multi-agent) | A general assistant. Tags are built for engineering work: they run on your coding agents, return branches for review, and check that an outcome is done |
@@ -69,6 +73,13 @@ Workstream.
 
 ## Applications built on SuperTag
 
+SuperTag's own engineering Tags are one application of its infrastructure. You can build others
+for your own use case, such as a support assistant in your team's Slack, a research Team, or an
+operations Tag that watches your systems, with the same identity, memory, permissions, events,
+and coordination. Most of that is configuration: a Tag, its Roles and permissions, its Objectives
+and Schedules, and the places people reach it. Your own application can direct it through the
+[Control Plane API](../reference/control-plane-api.md).
+
 The same infrastructure can support increasingly broad applications:
 
 ```text
@@ -76,8 +87,8 @@ shared AI teammate  ->  specialized AI Team  ->  multi-Team AI organization
 ```
 
 A Slack-native multiplayer teammate is one product experience. A larger application may give
-several Tags distinct Roles, place them in Teams, and let an Objective's owner start Sessions of
-its teammates.
+several Tags distinct Roles, place them in Teams, and let them message each other and share a
+Workstream.
 Another may provide no chat surface at all and direct the organization through an API or a custom
 control interface.
 
@@ -86,6 +97,9 @@ budgets, approval points, knowledge boundaries, and intervention paths. SuperTag
 before work reaches execution.
 SuperTag does not provide the underlying model intelligence, and describing a “Claude Tag-like”
 application pattern does not claim compatibility with or affiliation to Anthropic's product.
+
+To build the Slack support assistant from configuration, follow
+[Build your own support assistant](../guides/build-your-own.md).
 
 ## Choose by the layer you need
 
@@ -97,6 +111,8 @@ application pattern does not claim compatibility with or affiliation to Anthropi
   that own outcomes and ongoing responsibilities, act on new errors and alerts without being
   asked, coordinate with your teammates' Tags, and run on the coding agents and machines you
   choose.
+- Use SuperTag as infrastructure when you want to build your own persistent, proactive,
+  multiplayer assistant or product, on your own coding agents, machines, and rules.
 
 Continue to [How SuperTag fits together](how-it-works.md) for the runtime architecture or start with
 [Tags](tags.md), [Roles](roles.md), [Teams](../guides/teams.md), and

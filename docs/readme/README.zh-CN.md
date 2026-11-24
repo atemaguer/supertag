@@ -13,7 +13,7 @@
 
 **给它们岗位，而不是任务。**
 
-[岗位，而非任务](#give-them-jobs-not-tasks) · [持久](#persistent) · [主动](#proactive) · [多人协作](#multiplayer) · [自己运行](#run-it-yourself) · [运行你的第一个 Tag](#run-your-first-tag) · [文档](../../docs/README.md)
+[岗位，而非任务](#give-them-jobs-not-tasks) · [持久](#persistent) · [主动](#proactive) · [多人协作](#multiplayer) · [运行你的第一个 Tag](#run-your-first-tag) · [构建你自己的](#build-your-own) · [自己运行](#run-it-yourself) · [文档](../../docs/README.md)
 
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.zh-CN.webp" alt="认识一下这些 Tag：九个 SuperTag 吉祥物，体型有圆有长，穿着彩色外套，戴着帽子和眼镜" width="900" height="360">
@@ -21,11 +21,18 @@
 
 </div>
 
-**Tag** 是持久存在的 AI 行动者，有自己的身份、职责、权限和工作记录。它的岗位由这些职责和它交付的成果构成。它让工作在会话之间延续下去，不用你开口就会行动，还能与队友的 Tag 协作。代码仍然由你的编程智能体来写：Claude Code、Codex、Cursor 或 OpenCode。
+**Tag** 是持久存在的 AI 行动者，有自己的身份、职责、权限和工作记录。你给它一个岗位，你的编程智能体（Claude Code、Codex、Cursor 或 OpenCode）一次完成其中的一部分工作。在各部分之间持续存在的是 Tag：它让工作延续下去，不用你开口就会行动，还能与队友的 Tag 协作。
+
+SuperTag 为你提供两样东西：
+
+- **开箱即用的工程 AI 队友**：就像 Devin Bots、OpenAI dots 和 Grok Bot 提供的那样，这些队友随时待命，记得过去的工作，不用你开口就会行动，并与你的团队并肩工作。Tag 运行在你自己的编程智能体和机器上，只做你允许的事。
+- **构建你自己的产品的基础**：同样的能力，以由你运行、由你掌控的基础设施的形式提供，用于你自己的产品或工具。参见[构建你自己的](#build-your-own)。
 
 <a name="give-them-jobs-not-tasks"></a>
 
 ## 给它们岗位，而不是任务
+
+这就是 SuperTag 开箱即用的能力。
 
 现在，你交给编程智能体的是一个个任务：写提示词，看 diff，做评审，再写下一条提示词。它能排查 bug、写出修复、运行测试。但记住上次发生了什么的是你，发现下一次失败的是你，决定接下来做什么的还是你。一旦工作超出单个任务的范围，你就成了它的项目经理：拆分工作，为每一块启动一个编程智能体，再在它们之间来回传递上下文。
 
@@ -131,15 +138,40 @@ supertag objective review OBJECTIVE_ID request-changes --feedback "Also cover th
 
 [安装选项](../../docs/operations/install.md) · [与 Tag 对话](../../docs/guides/talk-to-a-tag.md) · [运行你的第一个 Team](../../docs/guides/first-team.md) · [从编程智能体中指挥 SuperTag](../../docs/guides/coding-agent-operator.md)
 
+<a name="build-your-own"></a>
+
+## 构建你自己的
+
+上面介绍的一切，包括持久性、主动工作和团队协作，都是 SuperTag 自身的基础设施，你可以在它之上为任何用途进行构建。假设你想在团队的 Slack 里放一个支持助手。它根据你的文档回答有关你的服务的问题，为真正的 bug 创建 issue，记得每位客户的历史，并在每天早上检查有没有无人回复的工单。你不必从零写起，只需在 SuperTag 的配置中描述它：
+
+- **它是谁**：一个有自己的名字、指令和记忆的 Tag，运行在 Claude Code、Codex、Cursor 或 OpenCode 上。
+- **它可以做什么**：每项操作的权限，以及哪些操作需要等人批准。
+- **它何时行动**：按计划、收到消息，或收到你自己的系统发来的事件时。
+- **人们在哪里找到它**：Slack、GitHub、Linear、Lark/飞书、Microsoft Teams 或终端。
+- **它与谁协作**：同一团队中的其他 Tag，它可以给它们发消息，并与它们共享一份记录。
+
+SuperTag 让它持续运行，记住它做过的事，执行它的限制，并记录每一项操作。
+
+想更进一步，可以在上面加上你自己的界面。通过 Control Plane 的 gRPC API，你的应用可以创建和指挥 Tag、给它们派发工作并查看进展，仓库中附带了自动生成的 Go、TypeScript 和 Python 绑定。[探索 API](../../docs/reference/control-plane-api.md)
+
+如果想在底层运行另一套智能体系统，可以编写一个 **harness 适配器**；内置的 Python 和 TypeScript 适配器就是可用的示例。TypeScript SDK（npm 上的 `supertag-ai`）和 Python SDK（PyPI 上的 `supertag`）用来把你的应用或适配器连接到 SuperTag：
+
+```sh
+npm install supertag-ai
+python -m pip install 'supertag==0.3.13'
+```
+
+[逐步构建支持助手](../../docs/guides/build-your-own.md) · [编写 harness 适配器](../../docs/guides/harness-adapters.md) · [接入你自己的协作界面](../../docs/reference/connector-contract.md) · [查看 API 稳定性](../../docs/reference/api-stability.md)
+
 <a name="run-it-yourself"></a>
 
 ## 自己运行
 
-SuperTag 以 Apache 2.0 许可证开源，它的每个部分都运行在你选定的地方。岗位需要访问你的代码、服务和账号，所以这些访问权限放在哪里，由你决定。
+SuperTag 以 Apache 2.0 许可证开源，无论你使用它自带的 Tag，还是构建你自己的，它的每个部分都运行在你选定的地方。岗位需要访问你的代码、服务和账号，所以这些访问权限放在哪里，由你决定。
 
 ![客户端和协作工具通过 Gateway 访问 Control Plane。Control Plane 把 Tag 和权限存储在 SQLite 或 PostgreSQL 中，并负责调度工作。在每个 Worker Host 上，Worklet 从 Control Plane 认领 Task，并为每个 Task Attempt 启动一个 Worker。笔记本运行 Codex，服务器运行 Claude Code，两者各自通过一个 harness 适配器接入。](../../assets/images/supertag-architecture.zh-CN.webp)
 
-- **你的机器**：`supertag init` 会启动一个本地 **Control Plane**，也就是存储 Tag 并调度其工作的服务，同时把你的电脑接入为 **Worker Host**，也就是实际运行工作的机器或沙箱。团队加入后，把 Control Plane 部署到所有人都能访问的地方，再把笔记本、服务器、CI 运行器或 Modal 和 E2B 沙箱接入为 Worker Host。像 `reliability` 这样承担持续性职责的 Tag，应放在始终在线的主机上。
+- **你的机器**：`supertag init` 会启动一个本地 **Control Plane**，也就是存储 Tag 并调度其工作的服务，同时把你的电脑接入为 **Worker Host**，也就是实际运行工作的机器或沙箱。团队加入后，把 Control Plane 部署到所有人都能访问的地方，再把笔记本、服务器、CI 运行器或云虚拟机接入为 Worker Host。像 `reliability` 这样承担持续性职责的 Tag，应放在始终在线的主机上。
 - **你的编程智能体和模型**：每个 Tag 都运行在你选定的编程智能体和模型上，用你自己的账号或密钥登录。
 - **你的边界**：每个 Tag 只能做权限允许的事，哪些操作需要等你批准也由你来选。Codex 在它自带的沙箱中运行命令，Claude Code、Cursor 和 OpenCode 可以在本地容器中运行命令。Tag 只能访问你允许的网络地址。在 Codex 上和容器中，凭证（例如 Sentry 令牌）由 Tag 所在的主机添加到获准的请求里，Tag 运行的命令始终看不到它们。
 
@@ -151,34 +183,19 @@ SuperTag 以 Apache 2.0 许可证开源，它的每个部分都运行在你选�
 | --- | --- |
 | **编程智能体** | Claude Code · Codex · Cursor · OpenCode · OpenAI Agents · [你自己的 harness 适配器](../../docs/guides/harness-adapters.md) |
 | **与 Tag 对话的地方** | 终端 · [Slack](../../docs/surfaces/slack.md) · [GitHub](../../docs/surfaces/github.md) · [Linear](../../docs/surfaces/linear.md) · [Lark/飞书](../../docs/surfaces/lark.md) · [Microsoft Teams](../../docs/surfaces/teams.md) |
-| **工作运行的地方** | 笔记本 · 服务器 · CI 运行器 · [Modal 和 E2B 沙箱](../../docs/guides/workers.md#run-a-harness-in-a-sandbox) |
+| **工作运行的地方** | 笔记本 · 服务器 · CI 运行器 · 云虚拟机 · [Modal 和 E2B 沙箱](../../docs/guides/workers.md#run-a-harness-in-a-sandbox)（适合短时运行） |
 
 ## 何时选择 SuperTag
 
 | 对比对象 | 擅长什么 | 缺少什么 | SuperTag 补上了什么 |
 | --- | --- | --- | --- |
+| **托管式 AI 队友** · [Devin Bots](https://devin.ai/blog/introducing-devin-bots)、[OpenAI dots](https://openai.com/index/introducing-dots/)、[Grok Bot](https://x.ai/news/introducing-grok-bot) | 随时待命的 AI 助手，记得过去的工作，还能自主行动。 | 它用的是厂商的模型和云端机器，规则也由厂商说了算。 | **自己运行，或构建你自己的。** Tag 使用你已经付费的编程智能体，运行在你自己的机器上，并且只能做你允许的事。你也可以在同一套基础设施上构建自己的版本。 |
+| **自托管智能体** · [OpenClaw](https://docs.openclaw.ai/concepts/multi-agent)、[Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban) | 运行你自己的 AI 智能体，它们有各自的工具和记忆，可以处理任何类型的任务。 | 它们是通用助手，并不是围绕你的编程智能体、代码评审或工程工作的完成验证而构建的。 | **为工程工作而构建，也开放给你在其上构建。** Tag 运行在 Claude Code、Codex、Cursor 或 OpenCode 上。代码变更以分支的形式交回给你评审，每项成果都附带验证其是否完成的方法。 |
 | **编程智能体** · [Claude Code](https://code.claude.com/docs/en/overview)、[Codex](https://learn.chatgpt.com/docs/codex/cli)、[OpenCode](https://opencode.ai/docs/) | 在你与它们一起工作时编写、修复和测试代码。 | 对话一关，工作就停了。目标得靠你自己记着，下一步也得由你自己启动。 | **工作不会中断。** Tag 会记住目标，并自行安排编程智能体去做下一步。出现新的错误和告警时，不用你开口它也会响应。代码仍然由你的编程智能体来写。 |
 | **并行智能体工具** · [Paradev（原 Superset）](https://docs.paradev.com/recipes/parallel-workstreams)、[Conductor](https://www.conductor.build/docs/concepts/parallel-agents)（[正在逐步停止运营](https://www.conductor.build/announcement)） | 同时运行多个编程智能体，并把所有变更展示给你。 | 每个智能体做什么仍然由你决定，各项结果能否拼到一起也要由你检查。 | **管理智能体的事有人代劳。** 告诉 Tag 你想完成什么、如何验收。它会分派各个部分，检查它们能否拼到一起，再把结果发给你。 |
 | **智能体项目** · [Cursor Projects](https://cursor.com/docs/agent/projects)、[Claude Code Projects](https://code.claude.com/docs/en/claude-projects)、[GitHub Copilot Projects](https://docs.github.com/en/copilot/how-tos/github-copilot-app/working-with-projects) | 多个智能体在数周或数月里朝同一个目标努力。在 Cursor 中，队友可以加入同一个项目。 | 每个项目只能运行某一家公司的智能体，而且大多运行在这家公司的云上。 | **混用不同的编程智能体和机器。** 你的 Tag 可以在你的笔记本上运行 Claude Code，队友的 Tag 在他们的笔记本上运行 Codex，两者照样能协作。 |
-| **托管式 AI 队友** · [Devin Bots](https://devin.ai/blog/introducing-devin-bots)、[OpenAI dots](https://openai.com/index/introducing-dots/)、[Grok Bot](https://x.ai/news/introducing-grok-bot) | 随时待命的 AI 助手，记得过去的工作，还能自主行动。 | 它用的是厂商的模型和云端机器，规则也由厂商说了算。 | **自己运行。** Tag 使用你已经付费的编程智能体，运行在你自己的机器上，并且只能做你允许的事。 |
-| **自托管智能体** · [OpenClaw](https://docs.openclaw.ai/concepts/multi-agent)、[Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban) | 运行你自己的 AI 智能体，它们有各自的工具和记忆，可以处理任何类型的任务。 | 它们是通用助手，并不是围绕你的编程智能体、代码评审或工程工作的完成验证而构建的。 | **为工程工作而构建。** Tag 运行在 Claude Code、Codex、Cursor 或 OpenCode 上。代码变更以分支的形式交回给你评审，每项成果都附带验证其是否完成的方法。 |
 
 [了解 SuperTag 与其他智能体系统的关系](../../docs/concepts/supertag-and-other-agent-systems.md)。
-
-## 基于 SuperTag 构建
-
-你可以用同一套基础设施，为自己的应用提供持久存在的行动者。通过 Control Plane 的 gRPC API，你的应用可以创建和指挥 Tag、给它们派发工作，并查看进展。例如，你可以把 Sentry 错误转发给 `reliability` Tag，再把它的分支和测试结果展示在你自己的评审界面中。仓库中附带了自动生成的 Go、TypeScript 和 Python 绑定。[探索 API](../../docs/reference/control-plane-api.md)
-
-如果想接入你自己的执行系统，可以编写一个 **harness 适配器**：这是一个由每个 Task Attempt 的 Worker 启动的程序，它通过 harness 协议驱动你的智能体。内置的 Python 和 TypeScript 适配器就是可供阅读的可用示例。
-
-TypeScript SDK（npm 上的 `supertag-ai`）和 Python SDK（PyPI 上的 `supertag`）用来把应用连接到 SuperTag，把 harness 适配器连接到 **Worker**，也就是为某个 Task Attempt 启动该适配器的进程：
-
-```sh
-npm install supertag-ai
-python -m pip install 'supertag==0.3.13'
-```
-
-[编写 harness 适配器](../../docs/guides/harness-adapters.md) · [接入你自己的协作界面](../../docs/reference/connector-contract.md) · [查看 API 稳定性](../../docs/reference/api-stability.md)
 
 ## 常见问题
 
@@ -187,6 +204,8 @@ python -m pip install 'supertag==0.3.13'
 **如何控制对我的仓库的变更？** 设定每个 Tag 可以做什么。仓库工作在一个固定到特定提交的独立检出中进行，并以分支的形式交回，供你评审。[使用仓库分支](../../docs/guides/workspaces.md)
 
 **我需要服务器吗？** 你可以在笔记本上启动 Control Plane 并运行工作。如果需要多人共享访问，或者希望笔记本关机后工作仍然可用，就部署 Control Plane，并连接一台保持在线的 Worker Host。[自托管 SuperTag](../../docs/guides/self-hosting.md)
+
+**SuperTag 只适用于工程工作吗？** Tag、示例以及通过 git 分支交付的方式都是为工程工作而构建的。但底层的基础设施适用于任何类型的工作：你可以在它之上构建自己的助手，就像[构建你自己的](#build-your-own)中那样。
 
 ## 贡献与许可证
 

@@ -10,6 +10,11 @@ deadline. The Tag plans the work and hands pieces to other Tags on its Team. Giv
 responsibility, and it acts on new reports and alerts without being asked. Your teammates direct
 Tags on the same Control Plane, and Tags on different machines and coding agents work together.
 
+Use SuperTag in two ways: out of the box, as AI teammates for engineering work like Devin Bots,
+OpenAI dots, or Grok Bot, on your own coding agents and machines; or as the base for a product or
+tool of your own with the same abilities. See
+[Applications built on SuperTag](concepts/supertag-and-other-agent-systems.md#applications-built-on-supertag).
+
 A **Team** is a flat list of member Tags. Together, your Teams of Tags make up an **autonomous
 organization**: Teams may pursue different Objectives but share one Control Plane, its rules, and
 its record of the work. The **Control Plane** stores the organization and schedules work.
@@ -145,6 +150,7 @@ Choose the tool your team already uses:
 
 ## Build and extend SuperTag
 
+- [Build your own support assistant](guides/build-your-own.md) — a Slack support Tag from one manifest: Role, Permission Set, Schedule, and an ongoing Objective your systems report to
 - [Write a harness adapter](guides/harness-adapters.md)
 - [Connect your own collaboration surface](reference/connector-contract.md)
 - [Call the Control Plane API](reference/control-plane-api.md)

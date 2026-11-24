@@ -13,7 +13,7 @@ Open source e auto-hospedado, sobre os agentes de código que você já usa.
 
 **Dê a eles um cargo, não tarefas.**
 
-[Cargos, não tarefas](#give-them-jobs-not-tasks) · [Persistente](#persistent) · [Proativo](#proactive) · [Multiplayer](#multiplayer) · [Execute você mesmo](#run-it-yourself) · [Execute sua primeira Tag](#run-your-first-tag) · [Documentação](../../docs/README.md)
+[Cargos, não tarefas](#give-them-jobs-not-tasks) · [Persistente](#persistent) · [Proativo](#proactive) · [Multiplayer](#multiplayer) · [Execute sua primeira Tag](#run-your-first-tag) · [Construa a sua](#build-your-own) · [Execute você mesmo](#run-it-yourself) · [Documentação](../../docs/README.md)
 
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.pt.webp" alt="Conheça as Tags — nove mascotes do SuperTag, uns redondos e outros alongados, com jaquetas coloridas, chapéus e óculos" width="900" height="360">
@@ -22,14 +22,25 @@ Open source e auto-hospedado, sobre os agentes de código que você já usa.
 </div>
 
 Uma **Tag** é um ator de IA persistente, com identidade, responsabilidades, permissões e histórico
-de trabalho próprios. O cargo dela é formado por essas responsabilidades e pelos resultados que
-entrega. Ela mantém o trabalho andando entre uma sessão e outra, age sem que ninguém peça e
-trabalha com as Tags dos seus colegas. Quem escreve o código continuam sendo os seus agentes de
-código: Claude Code, Codex, Cursor ou OpenCode.
+de trabalho próprios. Você dá um cargo a ela, e os seus agentes de código, Claude Code, Codex,
+Cursor ou OpenCode, fazem o trabalho uma parte de cada vez. A Tag é o que permanece entre uma
+parte e outra: ela mantém o trabalho andando, age sem que ninguém peça e trabalha com as Tags dos
+seus colegas.
+
+O SuperTag oferece duas coisas:
+
+- **Colegas de IA para o trabalho de engenharia, prontos para usar.** O que Devin Bots, OpenAI
+  dots e Grok Bot oferecem: colegas que estão sempre disponíveis, lembram trabalhos anteriores,
+  agem sem que ninguém peça e trabalham ao lado da sua equipe. As Tags rodam nos seus próprios
+  agentes de código e máquinas, e só fazem o que você permitir.
+- **A base para construir as suas.** As mesmas capacidades, como infraestrutura que você executa
+  e controla, para um produto ou ferramenta seu. Veja [Construa a sua](#build-your-own).
 
 <a name="give-them-jobs-not-tasks"></a>
 
 ## Dê a eles um cargo, não tarefas
+
+É isso que o SuperTag faz logo de saída.
 
 Hoje você dá uma tarefa a um agente de código: um prompt, um diff, uma revisão e, depois, o próximo
 prompt. Ele consegue investigar um bug, escrever a correção e rodar os testes. Mas é você quem
@@ -199,21 +210,60 @@ ele traz seu próprio `supertag`, configura o SuperTag na primeira abertura e co
 
 [Opções de instalação](../../docs/operations/install.md) · [Converse com uma Tag](../../docs/guides/talk-to-a-tag.md) · [Execute seu primeiro Team](../../docs/guides/first-team.md) · [Direcione o SuperTag a partir do seu agente de código](../../docs/guides/coding-agent-operator.md)
 
+<a name="build-your-own"></a>
+
+## Construa a sua
+
+Tudo o que vimos acima, a persistência, o trabalho proativo e o trabalho em equipe, é a
+infraestrutura do próprio SuperTag, e você pode construir sobre ela para qualquer caso de uso.
+Digamos que você queira um assistente de suporte no Slack da sua equipe. Ele responde perguntas
+sobre o seu serviço com base na sua documentação, abre issues para bugs reais, lembra o histórico
+de cada cliente e verifica toda manhã os chamados que ninguém respondeu. Você não escreve isso do
+zero. Você o descreve na configuração do SuperTag:
+
+- **Quem ela é.** Uma Tag com nome, instruções e memória próprios, rodando no Claude Code, no
+  Codex, no Cursor ou no OpenCode.
+- **O que ela pode fazer.** Permissões para cada ação, e quais delas esperam a aprovação de uma
+  pessoa.
+- **Quando ela age.** Por agendamento, por uma mensagem ou por um evento que seus próprios
+  sistemas enviam a ela.
+- **Onde as pessoas a encontram.** Slack, GitHub, Linear, Lark/Feishu, Microsoft Teams ou o
+  terminal.
+- **Com quem ela trabalha.** Outras Tags da equipe dela, com as quais pode trocar mensagens e
+  compartilhar um registro.
+
+O SuperTag a mantém rodando, lembra o que ela fez, aplica os limites dela e registra cada ação.
+
+Para ir além, coloque sua própria interface por cima. A API gRPC do Control Plane permite que sua
+aplicação crie e direcione Tags, envie trabalho a elas e acompanhe o progresso, com bindings
+gerados para Go, TypeScript e Python no repositório. [Explore a API](../../docs/reference/control-plane-api.md)
+Para rodar outro sistema de agentes por baixo, escreva um **adaptador de harness**; os adaptadores
+de Python e TypeScript que já vêm incluídos são exemplos funcionais. O SDK de TypeScript,
+`supertag-ai` no npm, e o SDK de Python, `supertag` no PyPI, conectam sua aplicação ou seu
+adaptador ao SuperTag:
+
+```sh
+npm install supertag-ai
+python -m pip install 'supertag==0.3.13'
+```
+
+[Construa um assistente de suporte passo a passo](../../docs/guides/build-your-own.md) · [Escreva um adaptador de harness](../../docs/guides/harness-adapters.md) · [Conecte sua própria superfície de colaboração](../../docs/reference/connector-contract.md) · [Confira a estabilidade da API](../../docs/reference/api-stability.md)
+
 <a name="run-it-yourself"></a>
 
 ## Execute você mesmo
 
-O SuperTag é open source sob a licença Apache 2.0, e cada parte dele roda onde você escolher. Um
-cargo precisa de acesso ao seu código, aos seus serviços e às suas contas; por isso, é você quem
-decide onde esse acesso fica.
+O SuperTag é open source sob a licença Apache 2.0, e cada parte dele roda onde você escolher,
+seja usando as Tags que vêm com ele, seja construindo as suas. Um cargo precisa de acesso ao seu
+código, aos seus serviços e às suas contas; por isso, é você quem decide onde esse acesso fica.
 
 ![Clientes e ferramentas de colaboração chegam ao Control Plane pelo Gateway. O Control Plane armazena Tags e permissões em SQLite ou PostgreSQL e agenda o trabalho. Em cada Worker Host, um Worklet reivindica Tasks do Control Plane e inicia um Worker para cada Task Attempt. O laptop roda o Codex e o servidor roda o Claude Code, cada um por meio de um adaptador de harness.](../../assets/images/supertag-architecture.pt.webp)
 
 - **Suas máquinas.** `supertag init` inicia um **Control Plane** local, o serviço que armazena
   suas Tags e agenda o trabalho delas, e conecta seu computador como um **Worker Host**, uma
   máquina ou sandbox que executa o trabalho. Quando sua equipe entrar, implante o Control Plane
-  onde todos consigam acessá-lo e conecte laptops, servidores, runners de CI ou sandboxes do Modal
-  e do E2B como Worker Hosts. Mantenha em um host sempre ligado as Tags com responsabilidade
+  onde todos consigam acessá-lo e conecte laptops, servidores, runners de CI ou VMs na nuvem
+  como Worker Hosts. Mantenha em um host sempre ligado as Tags com responsabilidade
   contínua, como `reliability`.
 - **Seus agentes de código e modelos.** Cada Tag roda no agente de código e no modelo que você
   escolher, autenticada com a sua própria conta ou chave.
@@ -232,42 +282,19 @@ decide onde esse acesso fica.
 | --- | --- |
 | **Agentes de código** | Claude Code · Codex · Cursor · OpenCode · OpenAI Agents · [seu próprio adaptador de harness](../../docs/guides/harness-adapters.md) |
 | **Onde você conversa com as Tags** | Terminal · [Slack](../../docs/surfaces/slack.md) · [GitHub](../../docs/surfaces/github.md) · [Linear](../../docs/surfaces/linear.md) · [Lark/Feishu](../../docs/surfaces/lark.md) · [Microsoft Teams](../../docs/surfaces/teams.md) |
-| **Onde o trabalho roda** | Laptops · servidores · runners de CI · [sandboxes do Modal e do E2B](../../docs/guides/workers.md#run-a-harness-in-a-sandbox) |
+| **Onde o trabalho roda** | Laptops · servidores · runners de CI · VMs na nuvem · [sandboxes do Modal e do E2B](../../docs/guides/workers.md#run-a-harness-in-a-sandbox) para trabalhos curtos |
 
 ## Quando escolher o SuperTag
 
 | Em comparação com | No que são bons | O que falta | O que o SuperTag acrescenta |
 | --- | --- | --- | --- |
+| **Colegas de IA hospedados** · [Devin Bots](https://devin.ai/blog/introducing-devin-bots), [OpenAI dots](https://openai.com/index/introducing-dots/), [Grok Bot](https://x.ai/news/introducing-grok-bot) | Um assistente de IA sempre disponível, que lembra trabalhos anteriores e age por conta própria. | Ele roda nos modelos e nos computadores em nuvem da empresa, segundo as regras dela. | **Execute você mesmo, ou construa o seu.** As Tags usam os agentes de código pelos quais você já paga, rodam nas suas próprias máquinas e só podem fazer o que você permitir. Ou construa sua própria versão sobre a mesma infraestrutura. |
+| **Agentes auto-hospedados** · [OpenClaw](https://docs.openclaw.ai/concepts/multi-agent), [Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban) | Rodar seus próprios agentes de IA, com ferramentas e memória próprias, para qualquer tipo de tarefa. | São assistentes de uso geral. Não foram construídos em torno dos seus agentes de código, da revisão de código nem da verificação de que o trabalho de engenharia foi concluído. | **Feito para o trabalho de engenharia, aberto para você construir em cima.** As Tags rodam no Claude Code, no Codex, no Cursor ou no OpenCode. As alterações de código voltam como branches para a sua revisão, e cada resultado vem com uma forma de verificar que está pronto. |
 | **Agentes de código** · [Claude Code](https://code.claude.com/docs/en/overview), [Codex](https://learn.chatgpt.com/docs/codex/cli), [OpenCode](https://opencode.ai/docs/) | Escrever, corrigir e testar código enquanto você trabalha com eles. | Quando você fecha o chat, o trabalho para. Cabe a você lembrar o objetivo e iniciar o próximo passo. | **O trabalho continua.** Uma Tag lembra o objetivo e coloca, ela mesma, um agente de código no próximo passo. Também reage a novos erros e alertas sem que você peça. Quem escreve o código continuam sendo os seus agentes de código. |
 | **Ferramentas de agentes em paralelo** · [Paradev (antigo Superset)](https://docs.paradev.com/recipes/parallel-workstreams), [Conductor](https://www.conductor.build/docs/concepts/parallel-agents) ([sendo descontinuado](https://www.conductor.build/announcement)) | Rodar vários agentes de código ao mesmo tempo e mostrar a você todas as alterações. | Ainda é você quem decide no que cada agente trabalha e confere se os resultados se encaixam. | **Alguém gerencia os agentes por você.** Diga a uma Tag o que você quer pronto e como verificar. Ela distribui as partes, confere se elas se encaixam e envia os resultados a você. |
 | **Projetos de agentes** · [Cursor Projects](https://cursor.com/docs/agent/projects), [Claude Code Projects](https://code.claude.com/docs/en/claude-projects), [GitHub Copilot Projects](https://docs.github.com/en/copilot/how-tos/github-copilot-app/working-with-projects) | Vários agentes trabalhando rumo a um mesmo objetivo por semanas ou meses. No Cursor, colegas podem entrar no mesmo projeto. | Cada projeto roda os agentes de uma única empresa, quase sempre na nuvem dessa empresa. | **Misture agentes de código e máquinas.** Sua Tag pode rodar no Claude Code no seu laptop enquanto a de um colega roda no Codex no dele, e mesmo assim elas trabalham juntas. |
-| **Colegas de IA hospedados** · [Devin Bots](https://devin.ai/blog/introducing-devin-bots), [OpenAI dots](https://openai.com/index/introducing-dots/), [Grok Bot](https://x.ai/news/introducing-grok-bot) | Um assistente de IA sempre disponível, que lembra trabalhos anteriores e age por conta própria. | Ele roda nos modelos e nos computadores em nuvem da empresa, segundo as regras dela. | **Execute você mesmo.** As Tags usam os agentes de código pelos quais você já paga, rodam nas suas próprias máquinas e só podem fazer o que você permitir. |
-| **Agentes auto-hospedados** · [OpenClaw](https://docs.openclaw.ai/concepts/multi-agent), [Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban) | Rodar seus próprios agentes de IA, com ferramentas e memória próprias, para qualquer tipo de tarefa. | São assistentes de uso geral. Não foram construídos em torno dos seus agentes de código, da revisão de código nem da verificação de que o trabalho de engenharia foi concluído. | **Feito para o trabalho de engenharia.** As Tags rodam no Claude Code, no Codex, no Cursor ou no OpenCode. As alterações de código voltam como branches para a sua revisão, e cada resultado vem com uma forma de verificar que está pronto. |
 
 [Veja como o SuperTag se encaixa com outros sistemas de agentes](../../docs/concepts/supertag-and-other-agent-systems.md).
-
-## Construa sobre o SuperTag
-
-Use a mesma infraestrutura para dar atores persistentes à sua própria aplicação. A API gRPC do
-Control Plane permite que sua aplicação crie e direcione Tags, envie trabalho a elas e acompanhe
-o progresso. Por exemplo, você pode encaminhar erros do Sentry para uma Tag `reliability` e exibir
-as branches e os resultados de testes dela na sua própria interface de revisão. Os bindings
-gerados para Go, TypeScript e Python acompanham o repositório. [Explore a API](../../docs/reference/control-plane-api.md)
-
-Para trazer seu próprio sistema de execução, escreva um **adaptador de harness**: um programa que
-o Worker de cada Task Attempt inicia e que conduz seu agente pelo protocolo de harness.
-Os adaptadores de Python e TypeScript que já vêm incluídos servem de exemplos funcionais para
-consulta.
-
-O SDK de TypeScript, `supertag-ai` no npm, e o SDK de Python, `supertag` no PyPI, conectam uma
-aplicação ao SuperTag e um adaptador de harness ao **Worker**, o processo que o iniciou para a sua Task Attempt:
-
-```sh
-npm install supertag-ai
-python -m pip install 'supertag==0.3.13'
-```
-
-[Escreva um adaptador de harness](../../docs/guides/harness-adapters.md) · [Conecte sua própria superfície de colaboração](../../docs/reference/connector-contract.md) · [Confira a estabilidade da API](../../docs/reference/api-stability.md)
 
 ## Perguntas frequentes
 
@@ -284,6 +311,11 @@ como uma branch que você pode revisar.
 **Preciso de um servidor?** Você pode iniciar o Control Plane e executar o trabalho no seu laptop.
 Para acesso compartilhado, ou para trabalho que deve continuar disponível com o laptop desligado,
 implante o Control Plane e conecte um Worker Host que fique online. [Hospede o SuperTag você mesmo](../../docs/guides/self-hosting.md)
+
+**O SuperTag serve só para trabalho de engenharia?** As Tags, os exemplos e a entrega por branch
+do git foram feitos para o trabalho de engenharia. A infraestrutura por baixo serve para qualquer
+tipo de trabalho: você pode construir seus próprios assistentes sobre ela, como em
+[Construa a sua](#build-your-own).
 
 ## Contribuição e licença
 
