@@ -12,6 +12,13 @@ within the pre-1.0 compatibility policy described in
 ### Changed
 
 - The Meet the Tags banner and both README diagrams now use the language of each translated README.
+- The Mac desktop app restarts faster after an update and is about 88 MB smaller (680 MB to
+  592 MB), and its update download about 42 MB smaller. The Node bridges that run Claude Code,
+  Cursor, and OpenCode now ship as a few bundled files each, so the app holds about 2,600 files
+  in place of 17,000, and macOS checks every file's signature before an updated app reopens:
+  that check took under a second in place of about 6.5 on the Mac we measured. An installed CLI
+  shrinks by the same 88 MB. Each bridge's directory has a `THIRD-PARTY-NOTICES.txt` with the
+  licenses of the open-source packages in its files.
 
 ## [0.3.10] - 2026-11-23
 

@@ -125,8 +125,8 @@ def validate_manifest(manifest):
     runtime = manifest["runtime"]
     require(isinstance(runtime, dict) and set(runtime) == {"node", "helpers"}
             and runtime["node"] == ">=22.13 <23", "invalid runtime requirements")
-    from node_bridges import PACKAGES, entry_for
-    expected = {kind: f"node-bridges/node_modules/{package}/{entry_for(kind)}" for kind, package in PACKAGES.items()}
+    from node_bridges import staged_entries
+    expected = staged_entries()
     require(runtime["helpers"] == expected, "release does not contain the complete helper set")
     entries = manifest["entries"]
     require(isinstance(entries, dict) and len(entries) <= MAX_ENTRIES, "invalid release entries")
@@ -157,10 +157,9 @@ def validate_manifest(manifest):
 
 
 def create_release(stage, output, *, version, platform, profile, source):
-    from node_bridges import PACKAGES, entry_for
+    from node_bridges import staged_entries
     manifest = {"format": FORMAT, "version": version, "platform": platform, "profile": profile,
-                "source": source, "runtime": {"node": ">=22.13 <23", "helpers": {
-                    kind: f"node-bridges/node_modules/{package}/{entry_for(kind)}" for kind, package in PACKAGES.items()}},
+                "source": source, "runtime": {"node": ">=22.13 <23", "helpers": staged_entries()},
                 "entries": inventory(stage)}
     validate_manifest(manifest)
     encoded = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode() + b"\n"

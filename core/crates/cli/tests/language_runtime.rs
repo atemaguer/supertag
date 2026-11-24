@@ -1,3 +1,5 @@
+#[path = "../../../test-support/bridges.rs"]
+mod bridges;
 #[path = "support/children.rs"]
 mod children;
 #[path = "../../../test-support/executables.rs"]
@@ -462,7 +464,7 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
     let Some(node) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = bridges::entry("claude-code")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
     let services = LanguageServices::start(directory.path(), &database).await?;
@@ -676,7 +678,7 @@ async fn claude_sdk_calls_only_the_frozen_scoped_stdio_mcp_tool(database: String
 async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
     let node =
         std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = bridges::entry("claude-code")?;
     let native = claude_fixture(directory)?;
     let services = LanguageServices::start(directory, database).await?;
     let journal = directory.join("mcp-stdio.jsonl");
@@ -989,7 +991,7 @@ async fn claude_code_sdk_resumes_from_its_tags_volume_on_any_host(database: Stri
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = bridges::entry("claude-code")?;
     let directory = tempfile::tempdir()?;
     let root = directory.path().canonicalize()?;
     let native = claude_fixture(&root)?;
@@ -1085,7 +1087,7 @@ async fn volume_journey_continues_a_session_on_another_host_after_the_first_is_g
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = bridges::entry("claude-code")?;
     let directory = tempfile::tempdir()?;
     let root = directory.path().canonicalize()?;
     let native = claude_fixture(&root)?;
@@ -1301,7 +1303,7 @@ async fn claude_keeps_native_memory_on_its_tags_volume_across_hosts(
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = bridges::entry("claude-code")?;
     let directory = tempfile::tempdir()?;
     let root = directory.path().canonicalize()?;
     let native = claude_fixture(&root)?;
@@ -1431,7 +1433,7 @@ async fn claude_code_sdk_resumes_on_its_holder_and_starts_fresh_elsewhere(
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = bridges::entry("claude-code")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
     let services = LanguageServices::start(directory.path(), &database).await?;
@@ -1497,7 +1499,7 @@ async fn claude_keeps_native_memory_on_its_host_across_tasks(database: String) -
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = bridges::entry("claude-code")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
     let services = LanguageServices::start(directory.path(), &database).await?;
@@ -1618,7 +1620,7 @@ async fn claude_holds_only_a_placeholder_key_on_an_unsandboxed_host(
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = bridges::entry("claude-code")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
     // The provider: answers whether a request carried the real key.
@@ -1748,7 +1750,7 @@ async fn real_claude_code_sends_its_requests_through_the_provider_proxy(
     if std::env::var("SUPERTAG_TEST_REAL_CLAUDE").as_deref() != Ok("1") {
         return Ok(());
     }
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = bridges::entry("claude-code")?;
     let directory = tempfile::tempdir()?;
     let provider = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let origin = format!("http://{}", provider.local_addr()?);
@@ -1850,7 +1852,7 @@ async fn a_first_run_claude_code_lead_replies_without_docker_or_the_unsandboxed_
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = bridges::entry("claude-code")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
     let services = LanguageServices::start(directory.path(), &database).await?;
@@ -1913,7 +1915,7 @@ async fn claude_runs_commands_only_with_the_hosts_unsandboxed_opt_in(
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = bridges::entry("claude-code")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
     let services = LanguageServices::start(directory.path(), &database).await?;
@@ -1979,7 +1981,7 @@ async fn claude_keeps_native_memory_in_remote_workspaces_across_hosts(
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = bridges::entry("claude-code")?;
     let transport = repo_path("harnesses/sdk/dist/rust-workspace-provider/transport.js")?;
     let directory = tempfile::tempdir()?;
     let root = directory.path().canonicalize()?;
@@ -2148,7 +2150,7 @@ async fn claude_remote(
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(None);
     };
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = bridges::entry("claude-code")?;
     let transport = repo_path("harnesses/sdk/dist/rust-workspace-provider/transport.js")?;
     let directory = tempfile::tempdir()?;
     let root = directory.path().canonicalize()?;
@@ -2380,8 +2382,8 @@ async fn claude_runs_commands_in_a_local_vm_container(database: String) -> Resul
         docker(&["info"]).is_ok_and(|output| output.status.success()),
         "SUPERTAG_TEST_LOCAL_VM=1 needs Docker"
     );
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
-    let provider = repo_path("harnesses/environments/local-vm/dist/rust-provider/main.js")?;
+    let entry = bridges::entry("claude-code")?;
+    let provider = bridges::entry("local-vm")?;
     let directory = tempfile::tempdir()?;
     let root = directory.path().canonicalize()?;
     let native = claude_fixture(&root)?;
@@ -2506,7 +2508,7 @@ async fn claude_captures_selected_workspace_files_for_the_operator(database: Str
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = bridges::entry("claude-code")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
     let source = directory.path().join("source");
@@ -2851,7 +2853,7 @@ async fn claude_sdk_approves_one_workstream_post_that_wakes_nobody(database: Str
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = bridges::entry("claude-code")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
     let services = LanguageServices::start(directory.path(), &database).await?;
@@ -3016,7 +3018,7 @@ async fn claude_sdk_applies_accepted_usd_budget_and_records_the_stop_usage(
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = bridges::entry("claude-code")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
     let services = LanguageServices::start(directory.path(), &database).await?;

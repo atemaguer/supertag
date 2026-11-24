@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from native_archive import ArchiveError
 import node_bridges
-from node_bridges import PACKAGES, prepare_workspace, relocate_self_alias, verify_deploy_lock, verify_relocatable_tree
+from node_bridges import PACKAGES, prepare_workspace, verify_relocatable_tree
 
 
 class NodeBridgeContracts(unittest.TestCase):
@@ -16,36 +16,96 @@ class NodeBridgeContracts(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
 
-    def test_exact_snapshot_pin_and_known_private_workspace_dependency(self):
-        workspace = self.root / "harnesses/sdk"
-        workspace.mkdir(parents=True)
-        (workspace / "package.json").write_text(json.dumps({"name": "@supertag/sdk", "private": True}))
-        source = {"packages": {"foo@1.0.0": {"resolution": {"integrity": "pinned"}}},
-                  "snapshots": {"foo@1.0.0": {}}, "importers": {"harnesses/sdk": {}}}
-        deployed = {"packages": {**source["packages"], "@supertag/sdk@file:harnesses/sdk": {}},
-                    "snapshots": dict(source["snapshots"])}
-        verify_deploy_lock(source, deployed, self.root)
-        deployed["snapshots"]["foo@1.0.0"] = {"dependencies": {"bar": "2.0.0"}}
-        with self.assertRaisesRegex(ArchiveError, "differs from the lockfile"):
-            verify_deploy_lock(source, deployed, self.root)
-        deployed["packages"]["foo@2.0.0"] = {"resolution": {"integrity": "unlocked"}}
-        with self.assertRaisesRegex(ArchiveError, "unlocked"):
-            verify_deploy_lock(source, deployed, self.root)
+    def store_package(self, store, key, name, version="1.0.0", **metadata):
+        """A package as pnpm lays it out: store/KEY/node_modules/NAME, its dependencies beside it."""
+        package = store / key / "node_modules" / name
+        package.mkdir(parents=True)
+        (package / "package.json").write_text(json.dumps({"name": name, "version": version, **metadata}))
+        (package / "index.js").write_text(f"// {name}@{version}")
+        return package
 
-    def test_relocates_only_the_known_pnpm_self_alias(self):
-        source = self.root / "source"
-        source.mkdir()
-        stage = self.root / "stage"
-        alias = stage / "node_modules/.pnpm/node_modules/@supertag/cursor"
-        alias.parent.mkdir(parents=True)
-        alias.symlink_to(source)
-        relocate_self_alias(stage, "@supertag/cursor", source)
-        relocated = self.root / "moved"
-        stage.rename(relocated)
-        verify_relocatable_tree(relocated)
-        moved_alias = relocated / alias.relative_to(stage)
-        self.assertEqual(moved_alias.resolve(strict=True), relocated)
-        self.assertFalse(moved_alias.readlink().is_absolute())
+    def link(self, directory, name, package):
+        link = directory / name
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(package, target_is_directory=True)
+        return link
+
+    def test_external_packages_are_copied_flat_with_what_they_depend_on(self):
+        store = self.root / "workspace/node_modules/.pnpm"
+        sdk = self.store_package(store, "sdk@1.0.0", "@vendor/sdk", dependencies={"helper": "1.0.0"},
+                                 optionalDependencies={"@vendor/sdk-here": "1.0.0", "@vendor/sdk-elsewhere": "1.0.0",
+                                                       "@anthropic-ai/claude-agent-sdk-darwin-arm64": "1.0.0"})
+        helper = self.store_package(store, "helper@1.0.0", "helper", dependencies={"@vendor/sdk": "1.0.0"})
+        here = self.store_package(store, "sdk-here@1.0.0", "@vendor/sdk-here")
+        claude = self.store_package(store, "claude@1.0.0", "@anthropic-ai/claude-agent-sdk-darwin-arm64")
+        # An npm alias: the dependency's name differs from the package's own.
+        alias = self.store_package(store, "undici@8.0.0", "undici", "8.0.0")
+        (sdk / "node_modules/.bin").mkdir(parents=True)
+        (sdk / "node_modules/.bin/tool").write_text("#!/bin/sh")
+        (sdk / "vendor/node_modules").mkdir(parents=True)
+        (sdk / "vendor/node_modules/kept.js").write_text("// part of the package")
+        for name, package in (("helper", helper), ("@vendor/sdk-here", here),
+                              ("@anthropic-ai/claude-agent-sdk-darwin-arm64", claude)):
+            self.link(sdk.parent.parent, name, package)
+        self.link(helper.parent, "@vendor/sdk", sdk)
+        self.link(helper.parent, "undici8", alias)
+        (helper / "package.json").write_text(json.dumps(
+            {"name": "helper", "version": "1.0.0", "dependencies": {"@vendor/sdk": "1.0.0", "undici8": "npm:undici@8.0.0"}}))
+        bridge = self.link(self.root / "workspace/bridge/node_modules", "@vendor/sdk", sdk)
+        modules = self.root / "stage/node_modules"
+        copied = {}
+        node_bridges.copy_external(bridge, modules, copied)
+        self.assertEqual(sorted(copied), ["@vendor/sdk", "@vendor/sdk-here", "helper", "undici8"])
+        self.assertEqual(sorted(path.relative_to(modules).as_posix() for path in modules.rglob("*") if path.is_file()),
+                         ["@vendor/sdk-here/index.js", "@vendor/sdk-here/package.json", "@vendor/sdk/index.js",
+                          "@vendor/sdk/package.json", "@vendor/sdk/vendor/node_modules/kept.js", "helper/index.js",
+                          "helper/package.json", "undici8/index.js", "undici8/package.json"])
+        verify_relocatable_tree(modules)
+        node_bridges.verify_no_claude_executable(modules)
+        # A second version of a staged package has nowhere to go in a flat node_modules.
+        other = self.store_package(store, "helper@2.0.0", "helper", "2.0.0")
+        with self.assertRaisesRegex(ArchiveError, "two versions of helper"):
+            node_bridges.copy_external(self.link(self.root / "elsewhere", "helper", other), modules, copied)
+
+    def test_a_missing_required_dependency_fails_and_a_staged_claude_is_refused(self):
+        store = self.root / "node_modules/.pnpm"
+        sdk = self.store_package(store, "sdk@1.0.0", "sdk", dependencies={"absent": "1.0.0"})
+        with self.assertRaisesRegex(ArchiveError, "sdk depends on absent"):
+            node_bridges.copy_external(self.link(self.root / "bridge/node_modules", "sdk", sdk),
+                                       self.root / "stage/node_modules", {})
+        package = self.root / "stage/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64"
+        package.mkdir(parents=True)
+        with self.assertRaisesRegex(ArchiveError, "Claude Code executable"):
+            node_bridges.verify_no_claude_executable(self.root / "stage")
+
+    def test_a_bundle_may_import_only_the_packages_staged_beside_it(self):
+        calls = []
+
+        def run(command, **_kwargs):
+            calls.append([str(word) for word in command])
+            return subprocess.CompletedProcess(command, 0, json.dumps({"packages": 1, "imports": imports}), "")
+
+        repo, target = self.root / "repo", self.root / "stage/cursor"
+        imports = ["@cursor/sdk", "@cursor/sdk/agent"]
+        with patch.object(node_bridges.subprocess, "run", side_effect=run), \
+             patch.object(node_bridges, "copy_external") as copy:
+            node_bridges.bundle("node", repo, "cursor", target)
+            imports = ["@cursor/sdk", "express"]
+            with self.assertRaisesRegex(ArchiveError, "imports express"):
+                node_bridges.bundle("node", repo, "cursor", target)
+        self.assertEqual(calls[0], ["node", str(repo / "scripts/bundle-node-bridge.mjs"),
+                                    "--package", str(repo / "harnesses/cursor"), "--output", str(target),
+                                    "--entry", "dist/rust-adapter/entry.js", "--entry", "dist/runner.js",
+                                    "--entry", "dist/stop-watchdog-main.js", "--external", "@cursor/sdk"])
+        self.assertEqual(copy.call_args_list[0].args[:2],
+                         (repo / "harnesses/cursor/node_modules/@cursor/sdk", target / "node_modules"))
+
+    def test_every_bridge_has_an_entry_directly_under_its_own_directory(self):
+        self.assertEqual(node_bridges.staged_entries(), {
+            "claude-code": "node-bridges/claude-code/entry.js", "cursor": "node-bridges/cursor/entry.js",
+            "opencode": "node-bridges/opencode/entry.js", "e2b": "node-bridges/e2b/main.js",
+            "modal": "node-bridges/modal/main.js", "local-vm": "node-bridges/local-vm/main.js"})
+        self.assertLessEqual(set(node_bridges.EXTERNAL) | set(node_bridges.SECONDARY_ENTRIES), set(PACKAGES))
 
     def test_rejects_unrelated_external_and_dangling_links(self):
         stage = self.root / "stage"

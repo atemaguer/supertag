@@ -85,7 +85,7 @@ async fn exercise_workspace_mcp(directory: &Path, database: &str) -> Result<()> 
     let node =
         std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
     let node = Path::new(&node).to_str().context("Node path")?.to_owned();
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = bridges::entry("claude-code")?;
     let native = claude_fixture(directory)?;
     let source = directory.join("source");
     std::fs::create_dir(&source)?;
@@ -237,7 +237,7 @@ fn write_login(store: &Path, login: &Value) -> Result<()> {
 async fn exercise_oauth_mcp(directory: &Path, database: &str) -> Result<()> {
     let node =
         std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
-    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = bridges::entry("claude-code")?;
     let native = claude_fixture(directory)?;
     let journal = directory.join("oauth-provider.jsonl");
     let mut provider = reaped(Command::new(&node));

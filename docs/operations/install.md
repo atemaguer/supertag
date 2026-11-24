@@ -64,6 +64,8 @@ after the new release passes its checks. The script replaces a symbolic link at
 - `supertag-tui`, the terminal UI. Plain `supertag` in a terminal opens it; see
   [Open the terminal UI](cli.md#open-the-terminal-ui).
 - `supertag-shared-execution` and `node-bridges/`, which Worker Hosts use to run harnesses.
+  Each directory in `node-bridges/` has a `THIRD-PARTY-NOTICES.txt` with the licenses of the
+  open-source packages in its files; packages in a `node_modules/` there carry their own.
 - `LICENSE`, `NOTICE`, and `licenses/opentui/`, the licenses of the OpenTUI library the terminal
   UI embeds. That library links FFmpeg under the GNU LGPL 2.1, and each release attaches the exact
   FFmpeg source it was built from, such as `ffmpeg-9.0.2.tar.xz`, listed in the same

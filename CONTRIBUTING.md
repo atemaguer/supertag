@@ -91,6 +91,29 @@ uv run scripts/node_bridges.py --output core/target/debug/node-bridges --bridge 
 
 Leave out `--bridge` to stage every bridge. Stage them again after a version change.
 
+The staged directory is what a release ships. Each bridge has its own directory,
+`node-bridges/NAME/`, that holds its entry (`entry.js` for a harness bridge, `main.js` for a
+Workspace provider) as one file bundled by esbuild (`scripts/bundle-node-bridge.mjs`) from the
+compiled `dist/`, with every dependency inside it, and `THIRD-PARTY-NOTICES.txt`, the licenses of
+the packages in the bundle. A package whose code finds other files by path or by name while it
+runs is not bundled: `EXTERNAL` in `scripts/node_bridges.py` lists those (the Claude Agent SDK,
+Cursor's SDK with its native executables, `e2b`, and `modal`) and says why, and each is copied
+unmodified, with the packages it depends on, into the bridge's own flat `node_modules/`. Keeping
+the tree to a few files matters to the desktop app: macOS checks the signature of every file in
+the app before an update restarts it. `core/crates/cli/src/node_bridges.rs` finds the entries, and
+`manifest.json` names the layout (`supertag-node-bridges-v2`); change both together.
+
+Runtime tests start the compiled entries in the checkout. To run them against the staged files
+instead, set `SUPERTAG_RUST_TEST_NODE_BRIDGES` to a staged directory; `language_runtime` (Claude
+Code) and `opencode_runtime` then start its bundled entries:
+
+```sh
+uv run scripts/node_bridges.py --output /tmp/node-bridges
+SUPERTAG_RUST_TEST_NODE_BRIDGES=/tmp/node-bridges SUPERTAG_RUST_TEST_NODE="$(command -v node)" \
+  cargo test --manifest-path core/Cargo.toml --locked -p supertag-cli --features test-fixtures \
+  --test language_runtime --test opencode_runtime -- --include-ignored
+```
+
 ### Terminal UI
 
 `supertag-tui` is compiled with Bun, at the version in `.bun-version`, from `apps/tui/src/main.tsx`
@@ -604,9 +627,9 @@ Set these GitHub Actions secrets on the release repository:
 
 The same secrets sign the desktop app. electron-builder packages an unsigned `SuperTag.app`
 (`pnpm --filter @supertag/desktop package:mac`) with its Electron fuses flipped; then
-`scripts/package-desktop-macos.sh` puts the macOS archive's contents in it with `ditto`, which
-keeps the bridges' relative symlinks, signs every executable of the CLI (only Claude Code's gets
-entitlements), then the Electron frameworks, helpers, and the app with `@electron/osx-sign`
+`scripts/package-desktop-macos.sh` puts the macOS archive's contents in it with `ditto`, signs
+every executable of the CLI (the three binaries, and in the Node bridges Cursor's `cursorsandbox`
+and `rg` and the native Node modules), then the Electron frameworks, helpers, and the app with `@electron/osx-sign`
 (`apps/desktop/build/sign-mac.mjs`; the app and its helpers get only `allow-jit`), all with the
 hardened runtime, builds and signs the disk image, and notarizes and staples only the disk image.
 The image is a drag-to-install volume: the app, a symbolic link named `Applications` to

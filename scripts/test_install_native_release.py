@@ -29,8 +29,8 @@ class NativeInstallContracts(unittest.TestCase):
         for name in ("supertag", "supertag-tui", "supertag-shared-execution"):
             (self.stage / name).write_bytes(elf() + name.encode())
             (self.stage / name).chmod(0o755)
-        for kind, package in PACKAGES.items():
-            entry = self.stage / "node-bridges/node_modules" / package / entry_for(kind)
+        for kind in PACKAGES:
+            entry = self.stage / "node-bridges" / kind / entry_for(kind)
             entry.parent.mkdir(parents=True)
             entry.write_text("compiled helper")
         (self.stage / "node-bridges/manifest.json").write_text("{}")
@@ -77,14 +77,14 @@ class NativeInstallContracts(unittest.TestCase):
                          (Path("/chosen"), Path("/commands")))
 
     def test_internal_dependency_link_keeps_portable_mode_on_install_and_replay(self):
-        alias = self.stage / "node-bridges/node_modules/opencode-alias"
-        alias.symlink_to("@supertag/worker-opencode", target_is_directory=True)
+        alias = self.stage / "node-bridges/opencode-alias"
+        alias.symlink_to("opencode", target_is_directory=True)
         archive = self.package("0.1.1")
         installed = self.install(archive)
         target = Path(installed["installation"])
         link = target / alias.relative_to(self.stage)
         self.assertEqual(link.lstat().st_mode & 0o777, 0o777)
-        self.assertEqual(link.resolve(strict=True), target / "node-bridges/node_modules/@supertag/worker-opencode")
+        self.assertEqual(link.resolve(strict=True), target / "node-bridges/opencode")
         self.assertEqual(link.stat().st_mode & 0o777, 0o755)
         self.assertTrue(self.install(archive)["reused"])
 

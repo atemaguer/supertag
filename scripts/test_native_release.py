@@ -14,7 +14,7 @@ from unittest.mock import patch
 from native_archive import ArchiveError, write_checksum
 from native_release import build_environment, mark_sources_changed, snapshot
 import native_release as assembly
-from node_bridges import PACKAGES, entry_for, source_for
+from node_bridges import PACKAGES, compiled_entry, entry_for, source_for, staged_entries
 import release_archive as release
 from test_native_archive import elf
 
@@ -29,8 +29,8 @@ class NativeReleaseContracts(unittest.TestCase):
         for name in ("supertag", "supertag-tui", "supertag-shared-execution"):
             (self.stage / name).write_bytes(elf() + name.encode())
             (self.stage / name).chmod(0o755)
-        for kind, package in PACKAGES.items():
-            entry = self.stage / "node-bridges/node_modules" / package / entry_for(kind)
+        for kind in PACKAGES:
+            entry = self.stage / "node-bridges" / kind / entry_for(kind)
             entry.parent.mkdir(parents=True)
             entry.write_text("compiled helper")
         (self.stage / "node-bridges/manifest.json").write_text("{}")
@@ -54,14 +54,14 @@ class NativeReleaseContracts(unittest.TestCase):
         return path
 
     def test_complete_relocatable_deterministic_package(self):
-        alias = self.stage / "node-bridges/node_modules/alias"
-        alias.symlink_to("@supertag/worker-cursor", target_is_directory=True)
+        alias = self.stage / "node-bridges/alias"
+        alias.symlink_to("cursor", target_is_directory=True)
         archive = self.package()
         self.assertEqual(archive.read_bytes(), self.package("again").read_bytes())
         manifest = release.validate_release(archive)
         self.assertEqual(set(manifest["runtime"]["helpers"]), set(PACKAGES))
         extracted = release.extract_release(archive, self.root / "unpack")
-        self.assertEqual((extracted / "node-bridges/node_modules/alias/dist/rust-adapter/entry.js").read_text(), "compiled helper")
+        self.assertEqual((extracted / "node-bridges/alias/entry.js").read_text(), "compiled helper")
         self.assertEqual((extracted / "supertag").stat().st_mode & 0o777, 0o755)
         self.assertEqual(manifest["source"], self.source)
 
@@ -92,12 +92,15 @@ class NativeReleaseContracts(unittest.TestCase):
 
     def test_provider_entries_come_from_private_environment_packages(self):
         for kind in ("modal", "e2b"):
-            self.assertEqual(entry_for(kind).as_posix(), "dist/rust-provider/main.js")
+            self.assertEqual(compiled_entry(kind).as_posix(), "dist/rust-provider/main.js")
+            self.assertEqual(entry_for(kind).as_posix(), "main.js")
             self.assertEqual(source_for(Path("source"), kind), Path("source/harnesses/environments") / kind)
-        self.assertEqual(entry_for("cursor").as_posix(), "dist/rust-adapter/entry.js")
+        self.assertEqual(compiled_entry("cursor").as_posix(), "dist/rust-adapter/entry.js")
+        self.assertEqual(staged_entries()["cursor"], "node-bridges/cursor/entry.js")
+        self.assertEqual(staged_entries()["local-vm"], "node-bridges/local-vm/main.js")
 
     def test_missing_provider_entry_fails_before_publication(self):
-        (self.stage / "node-bridges/node_modules" / PACKAGES["modal"] / entry_for("modal")).unlink()
+        (self.stage / "node-bridges/modal" / entry_for("modal")).unlink()
         with self.assertRaisesRegex(ArchiveError, "missing a required file"):
             self.package()
         self.assertFalse((self.root / "out").exists())

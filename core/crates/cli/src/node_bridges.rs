@@ -17,7 +17,7 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 
-const FORMAT: &str = "supertag-node-bridges-v1";
+const FORMAT: &str = "supertag-node-bridges-v2";
 const PROTOCOL: &str = "supertag.runtime.v2";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const NODE_MAJOR: u32 = 22;
@@ -52,16 +52,14 @@ impl NodeBridge {
         }
     }
 
+    /// The bridge's entry under `node-bridges/`: one bundled file in the bridge's own directory.
+    /// Packages that cannot be bundled are in a `node_modules` beside it.
     fn entry(self) -> &'static str {
         match self {
-            Self::ClaudeCode => {
-                "node_modules/@supertag/worker-claude-code/dist/rust-adapter/entry.js"
-            }
-            Self::Cursor => "node_modules/@supertag/worker-cursor/dist/rust-adapter/entry.js",
-            Self::Opencode => "node_modules/@supertag/worker-opencode/dist/rust-adapter/entry.js",
-            Self::LocalVm => {
-                "node_modules/@supertag/worker-environment-local-vm/dist/rust-provider/main.js"
-            }
+            Self::ClaudeCode => "claude-code/entry.js",
+            Self::Cursor => "cursor/entry.js",
+            Self::Opencode => "opencode/entry.js",
+            Self::LocalVm => "local-vm/main.js",
         }
     }
 }
@@ -95,8 +93,7 @@ fn platform() -> Result<&'static str> {
 fn trusted(metadata: &fs::Metadata) -> bool {
     // SAFETY: geteuid returns the effective user of this process.
     let user = unsafe { libc::geteuid() };
-    (metadata.uid() == user || metadata.uid() == 0)
-        && (metadata.is_symlink() || metadata.mode() & 0o022 == 0)
+    (metadata.uid() == user || metadata.uid() == 0) && metadata.mode() & 0o022 == 0
 }
 
 fn trusted_directory(path: &Path) -> Result<()> {
@@ -164,32 +161,18 @@ fn installed_entry(executable: &Path, bridge: NodeBridge) -> Result<PathBuf> {
             .all(|later| later.runs_on_later_node()),
         "packaged Node bridges do not match this SuperTag release"
     );
-    let mut path = root.clone();
-    let components = Path::new(bridge.entry()).components();
-    for component in components {
-        path.push(component);
-        let metadata =
-            fs::symlink_metadata(&path).context("packaged Node bridge entry is unavailable")?;
-        ensure!(trusted(&metadata), "packaged Node bridge path is unsafe");
-        if metadata.is_symlink() {
-            ensure!(
-                fs::read_link(&path)?.is_relative() && path.canonicalize()?.starts_with(&root),
-                "packaged Node bridge link leaves the installation"
-            );
-        }
-    }
-    ensure!(
-        fs::symlink_metadata(&path)?.is_file(),
-        "packaged Node bridge entry must be a regular file"
-    );
-    let entry = path.canonicalize()?;
-    ensure!(
-        entry.starts_with(&root),
-        "packaged Node bridge entry leaves the installation"
-    );
+    // `root` is already resolved and no link is followed below it: the entry is a regular file,
+    // in real directories, that only this user or root can change.
+    let entry = root.join(bridge.entry());
     for directory in entry.ancestors().skip(1).take_while(|path| *path != root) {
         trusted_directory(directory)?;
     }
+    let metadata =
+        fs::symlink_metadata(&entry).context("packaged Node bridge entry is unavailable")?;
+    ensure!(
+        metadata.is_file() && trusted(&metadata),
+        "packaged Node bridge entry is unsafe"
+    );
     Ok(entry)
 }
 
@@ -577,29 +560,41 @@ mod tests {
     }
 
     #[test]
-    fn permits_contained_package_links_and_rejects_external_and_mutable_paths() {
+    fn the_entry_is_one_file_in_the_bridge_directory_and_links_and_mutable_paths_are_refused() {
         let install = Installation::new();
         let entry = install.entry(NodeBridge::Cursor);
-        let package = entry.parent().unwrap().parent().unwrap().parent().unwrap();
-        let store = install.root.join("node_modules/.pnpm");
-        fs::create_dir(&store).unwrap();
-        let contained = store.join("cursor");
-        fs::rename(package, &contained).unwrap();
-        symlink("../.pnpm/cursor", package).unwrap();
+        let package = install.root.canonicalize().unwrap().join("cursor");
+        assert_eq!(entry, package.join("entry.js"));
         assert_eq!(
             installed_entry(&install.executable, NodeBridge::Cursor).unwrap(),
-            contained
-                .join("dist/rust-adapter/entry.js")
-                .canonicalize()
-                .unwrap()
+            entry
         );
-        fs::set_permissions(&contained, fs::Permissions::from_mode(0o777)).unwrap();
+        for (bridge, path) in [
+            (NodeBridge::ClaudeCode, "claude-code/entry.js"),
+            (NodeBridge::Opencode, "opencode/entry.js"),
+            (NodeBridge::LocalVm, "local-vm/main.js"),
+        ] {
+            assert_eq!(bridge.entry(), path);
+        }
+        // A directory or an entry that someone else can rewrite.
+        for path in [&package, &entry] {
+            let mode = fs::metadata(path).unwrap().permissions().mode();
+            fs::set_permissions(path, fs::Permissions::from_mode(mode | 0o022)).unwrap();
+            assert!(installed_entry(&install.executable, NodeBridge::Cursor).is_err());
+            fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+        }
+        installed_entry(&install.executable, NodeBridge::Cursor).unwrap();
+        // The bundled layout has no links, so one is refused wherever it points.
+        let moved = package.join("moved.js");
+        fs::rename(&entry, &moved).unwrap();
+        symlink("moved.js", &entry).unwrap();
         assert!(installed_entry(&install.executable, NodeBridge::Cursor).is_err());
-        fs::set_permissions(&contained, fs::Permissions::from_mode(0o755)).unwrap();
-        let outside = install.temporary.path().join("outside");
-        fs::rename(&contained, &outside).unwrap();
-        fs::remove_file(package).unwrap();
-        symlink("../../../../outside", package).unwrap();
+        fs::remove_file(&entry).unwrap();
+        fs::rename(&moved, &entry).unwrap();
+        installed_entry(&install.executable, NodeBridge::Cursor).unwrap();
+        let contained = package.with_file_name("contained");
+        fs::rename(&package, &contained).unwrap();
+        symlink("contained", &package).unwrap();
         assert!(installed_entry(&install.executable, NodeBridge::Cursor).is_err());
     }
 

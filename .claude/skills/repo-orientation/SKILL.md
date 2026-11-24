@@ -50,4 +50,6 @@ Worker Hosts, in the desktop app, or in the `supertag-ai` SDK.
 - `supertag-ai` is the only public npm package; never suggest installing `@supertag/*`. Its
   entry points speak only the native services' `supertag.runtime.v2` APIs.
 - A Node bridge is packaged with the native release by `scripts/node_bridges.py`; a new
-  bridge needs an entry there and in `core/crates/cli/src/node_bridges.rs`.
+  bridge needs an entry there and in `core/crates/cli/src/node_bridges.rs`. It ships as one
+  bundled file per entry. A dependency that finds files by path or by name while it runs cannot
+  be bundled: list it in `EXTERNAL` there, with the reason.

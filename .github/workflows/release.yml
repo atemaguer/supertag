@@ -233,7 +233,7 @@ jobs:
           test "$(readlink "$mount/Applications")" = /Applications
           app="$mount/SuperTag.app"
           test "$("$app/Contents/Resources/supertag/supertag" --version)" = "supertag $VERSION"
-          # ditto must have kept every relative symlink of the bridges' pnpm layout.
+          # The bundled CLI ships no symlinks today; one that appears must still resolve.
           broken=$(find "$app/Contents/Resources/supertag" -type l ! -exec test -e {} \; -print | wc -l)
           [ "$broken" -eq 0 ] || { echo "::error::$broken symlinks in the bundled CLI are broken"; exit 1; }
           # A fresh home with the bundled CLI opens on setup.

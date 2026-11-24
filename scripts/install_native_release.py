@@ -202,8 +202,8 @@ def verify_installed(package, manifest, archive_hash):
 def probe(package, manifest, node):
     check_versions(package / "supertag", package / "supertag-tui" if SHIP_TUI else None, manifest["version"])
     check_provider_version(package / "supertag-shared-execution", manifest["version"])
-    for kind, name in PACKAGES.items():
-        smoke_entry(node, kind, package / "node-bridges/node_modules" / name)
+    for kind in PACKAGES:
+        smoke_entry(node, kind, package / "node-bridges" / kind)
 
 
 def sync_path(path, *, is_directory=False):

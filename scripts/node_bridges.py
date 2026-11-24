@@ -20,7 +20,7 @@ import yaml
 from native_archive import ArchiveError, REPO, check_architecture, native_platform, require, version_from_repo
 
 
-FORMAT = "supertag-node-bridges-v1"
+FORMAT = "supertag-node-bridges-v2"
 PROTOCOL = "supertag.runtime.v2"
 NODE_MAJOR = 22
 PACKAGES = {
@@ -45,11 +45,43 @@ STARTUP_ERRORS = {
     "modal": "SuperTag Modal Workspace provider stopped after an error.",
     "local-vm": "SuperTag local-vm Workspace provider stopped after an error.",
 }
-ENTRY = Path("dist/rust-adapter/entry.js")
+BUNDLER = Path("scripts/bundle-node-bridge.mjs")
+# Processes a bridge starts beside its entry. Each is bundled into its own file next to the entry,
+# where the bridge looks for it.
+SECONDARY_ENTRIES = {"cursor": ("dist/runner.js", "dist/stop-watchdog-main.js")}
+# Packages a bridge keeps as files in its own node_modules, with everything they depend on,
+# because their code finds other files by path or by name while it runs:
+# - The Claude Agent SDK and Cursor's SDK are proprietary, so they ship as published. Cursor's
+#   also looks for its platform package (cursorsandbox, rg and native modules) by walking up
+#   from its own file.
+# - e2b imports undici, glob and tar by name when it first needs them.
+# - modal's gRPC library reads .proto files beside its code, and its CBOR decoder loads a native
+#   module from a platform package.
+# Everything else a bridge imports is inside its bundled files.
+EXTERNAL = {
+    "claude-code": ("@anthropic-ai/claude-agent-sdk",),
+    "cursor": ("@cursor/sdk",),
+    "e2b": ("e2b",),
+    "modal": ("modal",),
+}
+# The Agent SDK's platform packages each hold a whole Claude Code executable; the bridge runs the
+# user's installed claude instead, so they are never staged.
+UNSHIPPED = re.compile(r"@anthropic-ai/claude-agent-sdk-.+")
 
 
 def entry_for(kind):
-    return ENTRY if kind in HARNESS_BRIDGES else Path("dist/rust-provider/main.js")
+    """The bridge's entry file, relative to its directory in the staged tree."""
+    return Path("entry.js" if kind in HARNESS_BRIDGES else "main.js")
+
+
+def compiled_entry(kind):
+    """The compiled entry the bundle is made from, relative to the bridge's source package."""
+    return Path("dist/rust-adapter/entry.js" if kind in HARNESS_BRIDGES else "dist/rust-provider/main.js")
+
+
+def staged_entries(root="node-bridges"):
+    """Where each bridge's entry is in a release, relative to the release's root."""
+    return {kind: f"{root}/{kind}/{entry_for(kind)}" for kind in PACKAGES}
 
 
 def source_for(repo, kind):
@@ -61,27 +93,6 @@ def lockfile(path):
     document = yaml.safe_load(path.read_bytes())
     require(isinstance(document, dict) and document.get("lockfileVersion") == "9.0", "unsupported pnpm lockfile")
     return document
-
-
-def verify_deploy_lock(source, deployed, repo=REPO):
-    for section in ("packages", "snapshots"):
-        pinned = source[section]
-        for key, value in deployed[section].items():
-            if key in pinned:
-                require(value == pinned[key], f"staged dependency differs from the lockfile: {key}")
-                continue
-            # pnpm deploy rewrites linked private packages to local file dependencies.
-            match = re.fullmatch(r"(@supertag/[a-z0-9-]+)@file:(harnesses/[a-z0-9/-]+)(?:\(.+\))?", key)
-            require(match and match[2] in source["importers"], f"staged dependency is unlocked: {key}")
-            package = json.loads((repo / match[2] / "package.json").read_text())
-            require(package.get("private") is True and package.get("name") == match[1], f"unrecognized workspace dependency: {key}")
-
-
-def relocate_self_alias(stage, package, source):
-    alias = stage / "node_modules/.pnpm/node_modules" / package
-    if alias.is_symlink() and alias.resolve(strict=False) == source:
-        alias.unlink()
-        alias.symlink_to(os.path.relpath(stage, alias.parent), target_is_directory=True)
 
 
 def verify_relocatable_tree(root):
@@ -102,53 +113,106 @@ def verify_relocatable_tree(root):
                     f"unexpected staged file or mode: {entry.relative_to(root)}")
 
 
-def verify_native_asset(package, pattern, platform, label):
-    candidates = {path.resolve(strict=True) for path in package.glob(pattern)}
-    require(len(candidates) == 1, f"{label} is unavailable or ambiguous")
-    path = candidates.pop()
-    require(path.is_file() and os.access(path, os.X_OK), f"{label} is not executable")
+def package_name(link):
+    """The name a package directory has in its node_modules: NAME or @SCOPE/NAME."""
+    return f"{link.parent.name}/{link.name}" if link.parent.name.startswith("@") else link.name
+
+
+def copy_external(link, modules, copied):
+    """Copy the package `link` names, and each package it depends on, into the flat `modules`.
+
+    `link` is a package in a pnpm node_modules: a link into pnpm's store, where the package's own
+    dependencies are its siblings. `copied` maps each staged name to the store directory it came
+    from, so two versions of one package fail here; a flat node_modules cannot hold both.
+    """
+    name = package_name(link)
+    if UNSHIPPED.fullmatch(name):
+        return
+    source = link.resolve(strict=True)
+    if name in copied:
+        require(copied[name] == source, f"two versions of {name} cannot share one node_modules")
+        return
+    copied[name] = source
+    target = modules / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source, target, symlinks=True,
+                    ignore=lambda directory, _names: ["node_modules"] if Path(directory) == source else [])
+    metadata = json.loads((source / "package.json").read_text())
+    store = next(parent for parent in source.parents if parent.name == "node_modules")
+    optional = metadata.get("optionalDependencies", {})
+    for dependency in sorted({**metadata.get("dependencies", {}), **optional}):
+        sibling = store / dependency
+        if sibling.exists():
+            copy_external(sibling, modules, copied)
+        else:
+            # pnpm installs only the optional packages built for this platform.
+            require(dependency in optional, f"{name} depends on {dependency}, which is not installed")
+
+
+def bundle(node, repo, kind, target, env=None):
+    """Write the bridge's bundled entries, their license notices, and its external packages to `target`."""
+    source = source_for(repo, kind)
+    external = EXTERNAL.get(kind, ())
+    command = [node, repo / BUNDLER, "--package", source, "--output", target]
+    for entry in (compiled_entry(kind), *SECONDARY_ENTRIES.get(kind, ())):
+        command.extend(["--entry", entry])
+    for name in external:
+        command.extend(["--external", name])
+    report = json.loads(subprocess.run(command, cwd=repo, env=env, check=True, stdout=subprocess.PIPE, text=True).stdout)
+    # The bundler leaves an import alone only when told to; anything else it could not put in a
+    # bundle would be missing at run time.
+    for name in report["imports"]:
+        require(any(name == package or name.startswith(package + "/") for package in external),
+                f"the {kind} bundle imports {name}, which is neither bundled nor staged")
+    copied = {}
+    for name in external:
+        copy_external(source / "node_modules" / name, target / "node_modules", copied)
+    return sorted(copied)
+
+
+def verify_native_asset(path, platform, label):
+    require(path.is_file() and not path.is_symlink() and os.access(path, os.X_OK),
+            f"{label} is unavailable or not executable")
     with path.open("rb") as binary:
         check_architecture(binary.read(32), platform)
 
 
-def verify_cursor_assets(package, platform):
+def verify_cursor_assets(node, package, platform):
     system, arch = platform.split("-")
     vendor = f"sdk-{system}-{'x64' if arch == 'amd64' else arch}"
     for name in ("cursorsandbox", "rg"):
-        verify_native_asset(package, f"node_modules/.pnpm/*/node_modules/@cursor/{vendor}/bin/{name}", platform, f"Cursor {name}")
+        verify_native_asset(package / "node_modules/@cursor" / vendor / "bin" / name, platform, f"Cursor {name}")
     for name in ("runner.js", "stop-watchdog-main.js"):
-        require((package / "dist" / name).is_file(), f"Cursor {name} is unavailable")
+        require((package / name).is_file(), f"Cursor {name} is unavailable")
+    # The runner points Cursor's SDK at its platform package by walking up from the SDK's own
+    # file. Ask the staged runner for that file: it throws when the walk finds no platform package.
+    with tempfile.TemporaryDirectory(prefix="supertag-bridge-home-") as home:
+        result = subprocess.run(
+            [node, "--input-type=module", "--eval",
+             "const { resolveCursorSandboxEntry } = await import(process.argv[1]);"
+             "process.stdout.write(resolveCursorSandboxEntry());",
+             (package / "runner.js").resolve().as_uri()],
+            cwd=home, env={"PATH": os.defpath, "HOME": home}, capture_output=True, text=True, timeout=15)
+    sdk = (package / "node_modules/@cursor/sdk").resolve()
+    require(result.returncode == 0 and Path(result.stdout).is_relative_to(sdk),
+            "the staged Cursor runner cannot find the SDK's platform package")
 
 
-def drop_claude_executable(package):
-    """Remove the Agent SDK's own copy of Claude Code: the bridge runs the user's installed claude.
-
-    The SDK pulls in a platform package, @anthropic-ai/claude-agent-sdk-PLATFORM, that holds a full
-    Claude Code executable. SuperTag passes the user's claude to the SDK instead, so the package
-    and the links pnpm made to it go.
-    """
-    store = package / "node_modules" / ".pnpm"
-    removed = [entry for entry in store.glob("@anthropic-ai+claude-agent-sdk-*") if entry.is_dir()]
-    for entry in removed:
-        shutil.rmtree(entry)
-    for parent, directories, files in os.walk(package):
-        for name in [*directories, *files]:
-            entry = Path(parent) / name
-            if entry.is_symlink() and name.startswith("claude-agent-sdk-") and not entry.exists():
-                entry.unlink()
-    leftover = [path for path in package.rglob("claude") if path.is_file() and "claude-agent-sdk-" in str(path)]
+def verify_no_claude_executable(package):
+    """The bridge runs the user's installed claude, so no copy of it is staged; see UNSHIPPED."""
+    leftover = [path for path in package.rglob("*")
+                if UNSHIPPED.fullmatch(package_name(path)) or (path.name in ("claude", "claude.exe") and path.is_file())]
     require(not leftover, "the Agent SDK's Claude Code executable is still bundled")
-    return len(removed)
 
 
 # Files only the TypeScript compiler, editors, and debuggers read: type declarations, TypeScript
 # sources, source maps, and build info. Node 22 loads none of them from node_modules (it refuses to
-# strip types there), and they were close to half of the deployed bytes and files.
+# strip types there), and they are close to half of a package's bytes and files.
 BUILD_ONLY_SUFFIXES = (".ts", ".mts", ".cts", ".map", ".tsbuildinfo")
 
 
 def drop_build_only_files(package):
-    """Remove the files in BUILD_ONLY_SUFFIXES, and the links pnpm made to them, from a deployed bridge."""
+    """Remove the files in BUILD_ONLY_SUFFIXES, and any links to them, from a staged bridge."""
     removed = 0
     for parent, _directories, files in os.walk(package):
         for name in files:
@@ -202,8 +266,7 @@ def prepare_workspace(repo, scratch):
 
 
 def stage(output, kinds, repo=REPO):
-    # Legacy pnpm deploy changes workspace dependency state. Keep installs,
-    # generated files, and the legacy deploy lock inside a disposable source tree.
+    # Keep the install and the compiled files inside a disposable source tree.
     with tempfile.TemporaryDirectory(prefix="supertag-bridge-source-") as temporary:
         source = prepare_workspace(repo, Path(temporary))
         staged, _node = stage_workspace(output, kinds, source)
@@ -217,7 +280,8 @@ def stage_workspace(output, kinds, repo, env=None):
     root_package = json.loads((repo / "package.json").read_text())
     manager = subprocess.check_output(["pnpm", "--version"], cwd=repo, env=env, text=True).strip()
     require(root_package["packageManager"] == f"pnpm@{manager}", "workspace pnpm version differs from its pin")
-    source_lock = lockfile(repo / "pnpm-lock.yaml")
+    # The frozen install below ties every staged dependency to this lockfile.
+    lockfile(repo / "pnpm-lock.yaml")
     subprocess.run(["pnpm", "install", "--frozen-lockfile", "--prefer-offline", "--prod=false"],
                    cwd=repo, env={**(os.environ if env is None else env), "CI": "true"}, check=True)
     probe = subprocess.check_output(
@@ -241,24 +305,17 @@ def stage_workspace(output, kinds, repo, env=None):
         staging = Path(temporary) / "node-bridges"
         staging.mkdir()
         for kind in selected:
-            package = PACKAGES[kind]
-            source_package = source_for(repo, kind).resolve()
-            metadata = json.loads((source_package / "package.json").read_text())
-            require(metadata.get("private") is True and metadata.get("name") == package,
+            metadata = json.loads((source_for(repo, kind) / "package.json").read_text())
+            require(metadata.get("private") is True and metadata.get("name") == PACKAGES[kind],
                     f"runtime helper must remain a private workspace package: {kind}")
-            target = staging / "node_modules" / package
-            target.parent.mkdir(parents=True, exist_ok=True)
-            subprocess.run(["pnpm", "--filter", package, "--prod", "deploy", "--legacy",
-                            "--prefer-offline", "--ignore-scripts", target], cwd=repo, env=env, check=True)
-            verify_deploy_lock(source_lock, lockfile(target / "node_modules/.pnpm/lock.yaml"), repo)
-            relocate_self_alias(target, package, source_package)
-            verify_relocatable_tree(target)
-            if kind == "cursor":
-                verify_cursor_assets(target, platform)
-            if kind == "claude-code":
-                drop_claude_executable(target)
+            target = staging / kind
+            bundle(node, repo, kind, target, env)
             drop_build_only_files(target)
             verify_relocatable_tree(target)
+            if kind == "cursor":
+                verify_cursor_assets(node, target, platform)
+            if kind == "claude-code":
+                verify_no_claude_executable(target)
             smoke_entry(node, kind, target)
         manifest = {"format": FORMAT, "version": version_from_repo(repo), "protocol": PROTOCOL,
                     "platform": platform, "node_major": NODE_MAJOR,
@@ -267,8 +324,6 @@ def stage_workspace(output, kinds, repo, env=None):
         (staging / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         require(not output.exists(), "Node bridge output already exists")
         staging.rename(output)
-    # Legacy deploy rewrites this disposable workspace's dependency state. Keep
-    # the verified interpreter instead of probing pnpm again after deployment.
     return output, node
 
 

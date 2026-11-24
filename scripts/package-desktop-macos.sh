@@ -45,10 +45,10 @@ done
 resources="$app/Contents/Resources/supertag"
 rm -rf "$resources"
 mkdir -p "$resources"
-# ditto keeps the bridges' relative symlinks, which pnpm's layout depends on.
+# ditto keeps the modes, extended attributes and signatures of the CLI's files.
 ditto "$cli" "$resources"
 
-# Every Mach-O inside the bridges, such as Claude Code's native executable and native Node modules.
+# Every Mach-O inside the bridges: Cursor's cursorsandbox and rg, and native Node modules.
 machos=()
 while IFS= read -r -d '' path; do
   if file -b "$path" | grep -q 'Mach-O'; then

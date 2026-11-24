@@ -26,6 +26,7 @@
     "@connectrpc/connect": "2.2.0",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@types/node": "26.1.2",
+    "esbuild": "0.28.1",
     "happy-dom": "21.0.4",
     "tsx": "4.23.1",
     "typescript": "7.0.2",

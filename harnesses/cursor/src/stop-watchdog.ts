@@ -58,7 +58,7 @@ export async function armCursorStopWatchdog(
   started: string,
 ): Promise<(continued: boolean) => Promise<void>> {
   // A separate entry, so a bundler's shared chunk never hides the process entry point.
-  // The packaged CLI ships it as dist/stop-watchdog-main.js beside its chunks.
+  // A release ships it as stop-watchdog-main.js beside the bundled entry, which holds this code.
   const js = fileURLToPath(new URL("./stop-watchdog-main.js", import.meta.url));
   const ts = fileURLToPath(new URL("./stop-watchdog-main.ts", import.meta.url));
   const compiled = await access(js).then(

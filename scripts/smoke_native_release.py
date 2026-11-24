@@ -80,8 +80,8 @@ def smoke_release(archive, fixture, node, opencode_fixture=None, provider_proto=
         manifest = json.loads((package / "manifest.json").read_text())
         require(manifest["platform"] == native_platform(), "smoke requires the native release platform")
         verify_relocatable_tree(package)
-        for kind, name in PACKAGES.items():
-            smoke_entry(node, kind, package / "node-bridges/node_modules" / name)
+        for kind in PACKAGES:
+            smoke_entry(node, kind, package / "node-bridges" / kind)
         provider = smoke_provider(package / "supertag-shared-execution", scratch / "shared-provider", provider_proto)
         installed_bridge(package, node, opencode_fixture, scratch)
         round_trip = smoke(archive, fixture, validator=validate_release, extractor=extract_release)

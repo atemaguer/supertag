@@ -22,8 +22,8 @@ class SplitImagesContracts(unittest.TestCase):
             path = self.stage / name
             path.write_bytes(elf() + name.encode())
             path.chmod(0o755)
-        for kind, package in PACKAGES.items():
-            entry = self.stage / "node-bridges/node_modules" / package / entry_for(kind)
+        for kind in PACKAGES:
+            entry = self.stage / "node-bridges" / kind / entry_for(kind)
             entry.parent.mkdir(parents=True)
             entry.write_text("synthetic helper")
         (self.stage / "node-bridges/manifest.json").write_text("{}")

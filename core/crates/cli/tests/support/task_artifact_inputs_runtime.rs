@@ -154,7 +154,7 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
         r#"{"directory":"outputs","include":["evidence.txt"],"required":["evidence.txt"],"git":"capture"}"#,
     )?;
     let native = claude_fixture(root.path())?;
-    let claude = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let claude = bridges::entry("claude-code")?;
     let services = LanguageServices::start(root.path(), &database).await?;
     // A fixture Task creates and submits a file through the real declared-output lifecycle.
     services

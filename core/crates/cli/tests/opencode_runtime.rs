@@ -1,4 +1,6 @@
 //! Real Control Plane and Worklet processes with a provider-shaped OpenCode CLI.
+#[path = "../../../test-support/bridges.rs"]
+mod bridges;
 #[path = "support/children.rs"]
 mod children;
 #[path = "../../../test-support/executables.rs"]
@@ -197,14 +199,7 @@ impl Runtime {
             "Node is required for the OpenCode adapter fixture"
         );
         let node = std::fs::canonicalize(String::from_utf8(output.stdout)?.trim())?;
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../..")
-            .canonicalize()?;
-        let entry = root.join("harnesses/opencode/dist/rust-adapter/entry.js");
-        ensure!(
-            entry.is_file(),
-            "build OpenCode first: pnpm --filter @supertag/worker-opencode build"
-        );
+        let entry = bridges::entry("opencode")?;
         let fixture = directory.join("native-fixture");
         std::fs::create_dir(&fixture)?;
         let native = fixture.join("opencode.mjs");
@@ -473,14 +468,7 @@ async fn opencode_runs_commands_in_a_local_vm_container(database: String) -> Res
         docker(&["info"]).is_ok_and(|output| output.status.success()),
         "SUPERTAG_TEST_LOCAL_VM=1 needs Docker"
     );
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../..")
-        .canonicalize()?;
-    let provider = repository.join("harnesses/environments/local-vm/dist/rust-provider/main.js");
-    ensure!(
-        provider.is_file(),
-        "build the local-vm provider: pnpm --filter @supertag/worker-environment-local-vm build"
-    );
+    let provider = bridges::entry("local-vm")?;
     let directory = tempfile::tempdir()?;
     let source = directory.path().join("source");
     std::fs::create_dir(&source)?;
