@@ -144,12 +144,22 @@ async function stopMcpServers() {
   );
 }
 
+// No automatic maintenance: `git fetch` otherwise leaves a detached `git maintenance run --auto`
+// repacking the checkout after it returns, and Snapshot's copy of the checkout then fails on a
+// temporary file that vanishes under it (`.git/objects/bitmap-ref-tips_*`, `tmp_pack_*`). The
+// Worker Host retries that failed warm preparation cold, and the test sees the wrong path.
+const GIT_NO_BACKGROUND_WORK = ["-c", "gc.auto=0", "-c", "maintenance.auto=false"];
+
 async function git(cwd, ...args) {
-  const { stdout } = await promisify(execFile)("/usr/bin/git", ["-C", cwd, ...args], {
-    env: { PATH: "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" },
-    timeout: FIXTURE_STEP_TIMEOUT_MS,
-    maxBuffer: 1024 * 1024,
-  });
+  const { stdout } = await promisify(execFile)(
+    "/usr/bin/git",
+    ["-C", cwd, ...GIT_NO_BACKGROUND_WORK, ...args],
+    {
+      env: { PATH: "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" },
+      timeout: FIXTURE_STEP_TIMEOUT_MS,
+      maxBuffer: 1024 * 1024,
+    },
+  );
   return stdout.trim();
 }
 
