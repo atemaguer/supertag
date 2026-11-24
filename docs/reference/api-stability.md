@@ -76,7 +76,7 @@ UI, the desktop app, applications, Worklets, and Gateways. A pair that shares a 
 a pair that shares none is refused before any other call, with both sides' releases and protocol
 versions in the error and which one to upgrade. Before 1.0, a release that changes the protocol
 speaks only its new version: SuperTag 0.3.0 speaks protocol 2, 0.3.1 speaks protocol 5,
-0.3.2 speaks protocol 6, and 0.3.3 through 0.3.9 speak protocol 7. Protocol 6 gives each running Task Attempt a credential of its own
+0.3.2 speaks protocol 6, and 0.3.3 through 0.3.10 speak protocol 7. Protocol 6 gives each running Task Attempt a credential of its own
 for its data calls, so a Worklet from 0.3.1 cannot connect to a 0.3.2 Control Plane, and a 0.3.2
 Worklet, CLI, or app cannot connect to a 0.3.1 one: negotiation refuses the pair and says which
 side to upgrade. Protocol 7, in 0.3.3, has a Worker Host report its capacity as the one pool its

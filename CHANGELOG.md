@@ -9,6 +9,8 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-11-23
+
 ### Added
 
 - The README is available in Chinese, Japanese, Korean, Spanish, French, Portuguese, Turkish,
@@ -1772,7 +1774,8 @@ within the pre-1.0 compatibility policy described in
 - Gateway control-plane support and Slack, GitHub, Linear, Microsoft Teams,
   and Lark Surfaces.
 
-[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.9...HEAD
+[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.10...HEAD
+[0.3.10]: https://github.com/atemaguer/supertag/compare/v0.3.9...v0.3.10
 [0.3.9]: https://github.com/atemaguer/supertag/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/atemaguer/supertag/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/atemaguer/supertag/compare/v0.3.6...v0.3.7

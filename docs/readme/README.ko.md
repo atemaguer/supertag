@@ -245,7 +245,7 @@ harness 어댑터를 **Worker**, 즉 Task Attempt를 위해 그 어댑터를 시
 
 ```sh
 npm install supertag-ai
-python -m pip install 'supertag==0.3.9'
+python -m pip install 'supertag==0.3.10'
 ```
 
 [harness 어댑터 작성하기](../../docs/guides/harness-adapters.md) · [자체 협업 서피스 연결하기](../../docs/reference/connector-contract.md) · [API 안정성 확인하기](../../docs/reference/api-stability.md)

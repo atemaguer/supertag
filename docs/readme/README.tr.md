@@ -259,7 +259,7 @@ uygulamayı SuperTag'e, bir harness adaptörünü de **Worker**'a, yani onu Task
 
 ```sh
 npm install supertag-ai
-python -m pip install 'supertag==0.3.9'
+python -m pip install 'supertag==0.3.10'
 ```
 
 [Bir harness adaptörü yazın](../../docs/guides/harness-adapters.md) · [Kendi iş birliği yüzeyinizi bağlayın](../../docs/reference/connector-contract.md) · [API kararlılığını kontrol edin](../../docs/reference/api-stability.md)
