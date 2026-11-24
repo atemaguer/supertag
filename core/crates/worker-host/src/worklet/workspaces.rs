@@ -677,7 +677,8 @@ impl Workspaces {
         };
         use supertag_workspaces::session_branch::import;
         match import(repository, &session, &delivery.bundle_path, false, cancel).await {
-            // The repository lacks the delivery's start commit: import the complete history.
+            // The repository lacks a commit the delivery's bundle builds on: import the
+            // complete history.
             Err(error) if error.is::<supertag_workspaces::MissingPrerequisite>() => {
                 let state = self.state_directory(&pending.workspace_id, &delivery.base_commit)?;
                 let bytes = supertag_workspaces::complete_delivery_bundle(

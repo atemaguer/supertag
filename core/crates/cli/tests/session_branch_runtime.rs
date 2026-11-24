@@ -40,6 +40,8 @@ database_tests! {
     the_host_writes_each_session_delivery_to_its_branch_and_leaves_moved_branches;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     local_supervisor_advances_one_session_branch_for_each_task;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    a_merge_follow_up_advances_its_session_branch_and_lands;
 }
 
 struct Credentials {
@@ -251,72 +253,15 @@ async fn local_supervisor_advances_one_session_branch_for_each_task(
     git(&source, &["commit", "--quiet", "-m", "Base"]).await?;
     let base = git(&source, &["rev-parse", "HEAD"]).await?;
     fs::write(source.join("notes.txt"), "uncommitted\n")?;
-    let state = root.join("state");
-    let file = root.join("supertag.yaml");
-    let (control_plane, secrets) = if database.starts_with("postgres") {
-        let (section, secrets) = database_password::config(&database, root)?;
-        (
-            serde_json::json!({"type": "control-plane", "ports": ["127.0.0.1:0"], "database": section}),
-            secrets,
-        )
-    } else {
-        (
-            serde_json::json!({"type": "control-plane", "ports": ["127.0.0.1:0"]}),
-            serde_json::json!({}),
-        )
-    };
-    fs::write(
-        &file,
-        serde_json::to_vec(
-            &serde_json::json!({"version": 1, "secrets": secrets, "services": {
-                "control-plane": control_plane,
-                "laptop": {
-                    "type": "host",
-                    "adapter": ADAPTER,
-                    "adapter-args": ["--workspace-fixture"],
-                    "workspaces": {"project": "./source"},
-                },
-            }}),
-        )?,
+    let supervisor = Supervisor::start(
+        root,
+        &database,
+        &["--workspace-fixture"],
+        serde_json::json!("./source"),
     )?;
-    let log = root.join("supervisor.log");
-    let mut supervisor = reaped(std::process::Command::new(BINARY))
-        .args(["up", "--foreground", "--state-directory"])
-        .arg(&state)
-        .arg("--file")
-        .arg(&file)
-        .env_clear()
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(fs::File::create(&log)?)
-        .spawn()?;
-    let stdout = supervisor.stdout.take().context("stdout")?;
-    let (sender, ready) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut read = StdBufReader::new(stdout);
-        let mut line = String::new();
-        let _ = read.read_line(&mut line);
-        let _ = sender.send(line);
-        let _ = std::io::copy(&mut read, &mut std::io::sink());
-    });
-    let ready = ready.recv_timeout(WAIT)?;
     let result = async {
-        ensure!(
-            !ready.trim().is_empty(),
-            "supervisor: {}",
-            fs::read_to_string(&log)?
-        );
-        let cli = |args: &[&str]| {
-            let mut command = reaped(Command::new(BINARY));
-            command
-                .args(args)
-                .arg("--state-directory")
-                .arg(&state)
-                .env_clear()
-                .stdin(Stdio::null())
-                .kill_on_drop(true);
-            command
-        };
+        let cli = |args: &[&str]| supervisor.cli(args);
+        let logs = || supervisor.logs();
         json(cli(&[
             "tag",
             "put",
@@ -366,12 +311,7 @@ async fn local_supervisor_advances_one_session_branch_for_each_task(
                 Ok::<_, anyhow::Error>(())
             })
             .await
-            .with_context(|| {
-                format!(
-                    "supervisor did not import the delivery: {}",
-                    fs::read_to_string(&log).unwrap_or_default()
-                )
-            })??;
+            .with_context(|| format!("supervisor did not import the delivery: {}", logs()))??;
             heads.push(head);
         }
         assert_eq!(
@@ -401,19 +341,304 @@ async fn local_supervisor_advances_one_session_branch_for_each_task(
         Ok(())
     }
     .await;
-    unsafe {
-        libc::kill(supervisor.id() as i32, libc::SIGTERM);
-    }
-    let _ = timeout(WAIT, async {
-        while supervisor.try_wait()?.is_none() {
-            sleep(Duration::from_millis(50)).await;
-        }
-        Ok::<_, anyhow::Error>(())
-    })
-    .await;
-    let _ = supervisor.kill();
-    let _ = supervisor.wait();
+    supervisor.stop().await;
     result
+}
+
+/// A Session whose work conflicts with the branch it merges into gets a merge follow-up Task.
+/// Its delivery is a merge commit, which carries the target's new commits beside the Session's
+/// own: the host writes it to the Session's branch like any other delivery, and the supervisor
+/// then merges the Session into the target.
+async fn a_merge_follow_up_advances_its_session_branch_and_lands(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let source = root.join("source");
+    fs::create_dir(&source)?;
+    git(&source, &["init", "--quiet", "--initial-branch=main"]).await?;
+    fs::write(source.join("workspace.txt"), "base\n")?;
+    git(&source, &["add", "workspace.txt"]).await?;
+    git(&source, &["commit", "--quiet", "-m", "Base"]).await?;
+    let base = git(&source, &["rev-parse", "HEAD"]).await?;
+    let supervisor = Supervisor::start(
+        root,
+        &database,
+        &["--journey"],
+        serde_json::json!({"path": "./source", "land": {"merge": "agents"}}),
+    )?;
+    let result = async {
+        let cli = |args: &[&str]| supervisor.cli(args);
+        let logs = || supervisor.logs();
+        json(cli(&[
+            "tag",
+            "put",
+            "builder",
+            "--instructions",
+            "Improve the repository",
+            "--allow",
+            "file:write",
+            "--workspace-id",
+            "project",
+            "--workspace-base",
+            &base,
+        ]))
+        .await?;
+        let succeeded = async |task_id: &str| -> Result<Value> {
+            timeout(WAIT, async {
+                loop {
+                    let task = json(cli(&["get", "task", task_id])).await?;
+                    ensure!(task["state"] != "TASK_STATE_FAILED", "{task}");
+                    if task["state"] == "TASK_STATE_SUCCEEDED" {
+                        return Ok(task);
+                    }
+                    sleep(Duration::from_millis(50)).await;
+                }
+            })
+            .await
+            .with_context(|| format!("Task {task_id} did not finish: {}", logs()))?
+        };
+        // A Work Session's turn changes the file; its delivery creates the Session's branch.
+        let parent = json(cli(&[
+            "task",
+            "submit",
+            "--tag",
+            "builder",
+            "--session",
+            "conversation",
+            "start: Glossary | edit: session",
+        ]))
+        .await?;
+        succeeded(field(&parent, "task_id")?).await?;
+        let work = timeout(WAIT, async {
+            loop {
+                let listed = json(cli(&[
+                    "get",
+                    "sessions",
+                    "--parent-tag",
+                    "builder",
+                    "--parent-session",
+                    "conversation",
+                ]))
+                .await?;
+                if let Some(work) = listed["work_sessions"].get(0) {
+                    return Ok::<_, anyhow::Error>(work.clone());
+                }
+                sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .context("the Work Session did not start")??;
+        let session = field(&work, "work_session_id")?.to_owned();
+        let first_task = field(&work, "latest_task_id")?.to_owned();
+        let first = succeeded(&first_task).await?;
+        let first_head = field(&first["workspace_delivery"], "head_commit")?.to_owned();
+        let branch = supertag_protocol::session_branch("builder", &session);
+        let branch_reaches = async |head: &str, what: &str| -> Result<()> {
+            timeout(WAIT, async {
+                while branch_head(&source, &branch).await?.as_deref() != Some(head) {
+                    sleep(Duration::from_millis(50)).await;
+                }
+                Ok::<_, anyhow::Error>(())
+            })
+            .await
+            .with_context(|| format!("{what}: {}", logs()))?
+        };
+        branch_reaches(
+            &first_head,
+            "the first delivery did not reach the Session branch",
+        )
+        .await?;
+
+        // The person's own branch moves ahead with a change to the same line.
+        git(&source, &["checkout", "--quiet", "-b", "agents"]).await?;
+        fs::write(source.join("workspace.txt"), "base\nperson\n")?;
+        git(&source, &["commit", "--quiet", "-am", "Person"]).await?;
+        let person = git(&source, &["rev-parse", "HEAD"]).await?;
+        git(&source, &["checkout", "--quiet", "main"]).await?;
+
+        // The Session's work is reported done: the merge conflicts, so it gets a follow-up Task
+        // that merges the target into its work.
+        success(cli(&["session", "close", &session])).await?;
+        let follow_up = timeout(WAIT, async {
+            loop {
+                let work = json(cli(&["get", "session", &session])).await?;
+                let latest = field(&work, "latest_task_id")?;
+                if latest != first_task {
+                    return Ok::<_, anyhow::Error>(latest.to_owned());
+                }
+                sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .with_context(|| format!("the Session got no merge follow-up: {}", logs()))??;
+        let merged = succeeded(&follow_up).await?;
+        assert_eq!(merged["workspace"]["merge_commit"], person.as_str());
+        let delivery = &merged["workspace_delivery"];
+        assert_eq!(delivery["start_commit"], first_head.as_str());
+        let merged_head = field(delivery, "head_commit")?.to_owned();
+        // The delivered commit merges the person's commit into the Session's work.
+        branch_reaches(
+            &merged_head,
+            "the merge follow-up's delivery did not reach the Session branch",
+        )
+        .await?;
+        assert_eq!(
+            git(&source, &["rev-list", "--parents", "-n", "1", &merged_head]).await?,
+            format!("{merged_head} {first_head} {person}")
+        );
+
+        // With the conflict resolved, the Session merges into the person's branch.
+        timeout(WAIT, async {
+            while git(&source, &["rev-parse", "agents"]).await? == person {
+                sleep(Duration::from_millis(50)).await;
+            }
+            Ok::<_, anyhow::Error>(())
+        })
+        .await
+        .with_context(|| format!("the resolved Session was not merged: {}", logs()))??;
+        assert_eq!(
+            git(&source, &["rev-list", "--parents", "-n", "1", "agents"])
+                .await?
+                .split(' ')
+                .skip(1)
+                .collect::<Vec<_>>(),
+            [person.as_str(), merged_head.as_str()]
+        );
+        let text = git(&source, &["show", "agents:workspace.txt"]).await?;
+        ensure!(
+            text.contains("person") && text.contains("session") && !text.contains("<<<<<<<"),
+            "{text}"
+        );
+        // The person's checkout never changed.
+        assert_eq!(git(&source, &["branch", "--show-current"]).await?, "main");
+        assert_eq!(fs::read_to_string(source.join("workspace.txt"))?, "base\n");
+        Ok(())
+    }
+    .await;
+    supervisor.stop().await;
+    result
+}
+
+/// `supertag up --foreground` in `root/state`, with one Worker Host that runs the fixture adapter
+/// and maps `root/source` as the Workspace `project`.
+struct Supervisor {
+    child: std::process::Child,
+    state: std::path::PathBuf,
+    log: std::path::PathBuf,
+}
+
+impl Supervisor {
+    fn start(root: &Path, database: &str, adapter_args: &[&str], workspace: Value) -> Result<Self> {
+        let state = root.join("state");
+        let file = root.join("supertag.yaml");
+        let (control_plane, secrets) = if database.starts_with("postgres") {
+            let (section, secrets) = database_password::config(database, root)?;
+            (
+                serde_json::json!({"type": "control-plane", "ports": ["127.0.0.1:0"], "database": section}),
+                secrets,
+            )
+        } else {
+            (
+                serde_json::json!({"type": "control-plane", "ports": ["127.0.0.1:0"]}),
+                serde_json::json!({}),
+            )
+        };
+        fs::write(
+            &file,
+            serde_json::to_vec(
+                &serde_json::json!({"version": 1, "secrets": secrets, "services": {
+                    "control-plane": control_plane,
+                    "laptop": {
+                        "type": "host",
+                        "adapter": ADAPTER,
+                        "adapter-args": adapter_args,
+                        "workspaces": {"project": workspace},
+                    },
+                }}),
+            )?,
+        )?;
+        let log = root.join("supervisor.log");
+        let mut child = reaped(std::process::Command::new(BINARY))
+            .args(["up", "--foreground", "--state-directory"])
+            .arg(&state)
+            .arg("--file")
+            .arg(&file)
+            .env_clear()
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(fs::File::create(&log)?)
+            .spawn()?;
+        let stdout = child.stdout.take().context("stdout")?;
+        let (sender, ready) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut read = StdBufReader::new(stdout);
+            let mut line = String::new();
+            let _ = read.read_line(&mut line);
+            let _ = sender.send(line);
+            let _ = std::io::copy(&mut read, &mut std::io::sink());
+        });
+        let supervisor = Self { child, state, log };
+        let ready = ready.recv_timeout(WAIT);
+        if !ready.is_ok_and(|line| !line.trim().is_empty()) {
+            let logs = supervisor.logs();
+            supervisor.kill();
+            anyhow::bail!("supervisor: {logs}");
+        }
+        Ok(supervisor)
+    }
+
+    fn cli(&self, args: &[&str]) -> Command {
+        let mut command = reaped(Command::new(BINARY));
+        command
+            .args(args)
+            .arg("--state-directory")
+            .arg(&self.state)
+            .env_clear()
+            .stdin(Stdio::null())
+            .kill_on_drop(true);
+        command
+    }
+
+    /// The supervisor's own output and every log file under its state directory.
+    fn logs(&self) -> String {
+        let mut text = fs::read_to_string(&self.log).unwrap_or_default();
+        let mut directories = vec![(self.state.clone(), 0)];
+        while let Some((directory, depth)) = directories.pop() {
+            for entry in fs::read_dir(&directory).into_iter().flatten().flatten() {
+                let path = entry.path();
+                if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                    if depth < 3 {
+                        directories.push((path, depth + 1));
+                    }
+                } else if path.extension().is_some_and(|extension| extension == "log") {
+                    text.push_str(&format!(
+                        "\n--- {} ---\n{}",
+                        path.display(),
+                        fs::read_to_string(&path).unwrap_or_default()
+                    ));
+                }
+            }
+        }
+        text
+    }
+
+    async fn stop(mut self) {
+        unsafe {
+            libc::kill(self.child.id() as i32, libc::SIGTERM);
+        }
+        let _ = timeout(WAIT, async {
+            while self.child.try_wait()?.is_none() {
+                sleep(Duration::from_millis(50)).await;
+            }
+            Ok::<_, anyhow::Error>(())
+        })
+        .await;
+        self.kill();
+    }
+
+    fn kill(mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 async fn branch_head(repository: &Path, branch: &str) -> Result<Option<String>> {

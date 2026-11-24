@@ -3,7 +3,7 @@
 //! This runs on the operator's machine, never in a Worker Host. Before it touches the repository,
 //! it checks the bundle's size and digest against the Control Plane's receipt, that the bundle
 //! names exactly one ref, `refs/heads/supertag-deliveries/<delivery-id>`, at the delivered commit,
-//! and has no prerequisites. It then unbundles only that ref's objects into a private quarantine,
+//! and builds on nothing but its start commit's history. It then unbundles only that ref's objects into a private quarantine,
 //! checks them strictly, and confirms the commit descends from the Task's base and start commits.
 //! Only a delivery that passes every check reaches the repository's objects, and only
 //! `refs/heads/<branch>` moves. Hooks and
@@ -108,9 +108,14 @@ impl std::error::Error for BranchCheckedOut {}
 /// `bundle` is either the delivery's own bundle, checked against its receipt's digest, or, when
 /// `complete`, a complete bundle of the delivered commit the holding Worker Host built for a
 /// repository that lacks the delivery's start commit. A complete bundle has no recorded digest:
-/// Git's own hashing binds it to the delivered commit. A delivery's own bundle may build on its
-/// start commit (see `Workspace::import_bundle`); when this repository lacks it, the import fails
-/// with [`MissingPrerequisite`] and changes nothing.
+/// Git's own hashing binds it to the delivered commit.
+///
+/// A delivery's own bundle builds on its start commit, and borrows nothing from this repository
+/// but that commit's history. Its prerequisites are the start commit and, for a merge follow-up,
+/// the commits of that history which the merged target's new commits branch from; a delivery
+/// that changed nothing names its start commit's parents instead. When this repository lacks a
+/// prerequisite, or does not hold it in the start commit's history, the import fails with
+/// [`MissingPrerequisite`] and changes nothing.
 pub async fn import(
     repository: &Path,
     delivery: &SessionDelivery,
@@ -152,6 +157,30 @@ pub async fn import(
         .await?;
         if held.is_none() {
             return Err(MissingPrerequisite(prerequisite.clone()).into());
+        }
+    }
+    if !prerequisites.is_empty() && delivery.head_commit != delivery.start_commit {
+        // The bundle may build only on its start commit's history. A merge follow-up's bundle
+        // carries the target's new commits beside the merge, so it also names where they left
+        // that history: commits the start commit already reaches. Each is checked in the
+        // repository's own objects, before anything of the bundle is read.
+        ensure!(
+            prerequisites.contains(&delivery.start_commit),
+            "delivery bundle needs commits other than its start commit"
+        );
+        for prerequisite in &prerequisites {
+            if prerequisite != &delivery.start_commit
+                && !is_ancestor(
+                    repository,
+                    &[],
+                    prerequisite,
+                    &delivery.start_commit,
+                    cancel,
+                )
+                .await?
+            {
+                return Err(MissingPrerequisite(prerequisite.clone()).into());
+            }
         }
     }
 
@@ -207,26 +236,21 @@ pub async fn import(
         "bundle did not add exactly the delivered commit"
     );
     strict_check(repository, isolated, &quarantine, staging.path(), cancel).await?;
-    if !prerequisites.is_empty() {
-        // Only the delivery's start commit, or the head's parents when it changed nothing.
-        let allowed: std::collections::BTreeSet<String> =
-            if delivery.head_commit == delivery.start_commit {
-                output_in(
-                    repository,
-                    isolated,
-                    &["rev-list", "--parents", "-n", "1", &delivery.head_commit],
-                    cancel,
-                )
-                .await?
-                .split_whitespace()
-                .skip(1)
-                .map(str::to_owned)
-                .collect()
-            } else {
-                std::collections::BTreeSet::from([delivery.start_commit.clone()])
-            };
+    if !prerequisites.is_empty() && delivery.head_commit == delivery.start_commit {
+        // A delivery that changed nothing carries its start commit against that commit's parents.
+        let parents: std::collections::BTreeSet<String> = output_in(
+            repository,
+            isolated,
+            &["rev-list", "--parents", "-n", "1", &delivery.head_commit],
+            cancel,
+        )
+        .await?
+        .split_whitespace()
+        .skip(1)
+        .map(str::to_owned)
+        .collect();
         ensure!(
-            prerequisites == allowed,
+            prerequisites == parents,
             "delivery bundle needs commits other than its start commit"
         );
     }

@@ -1890,8 +1890,9 @@ pub(crate) fn parallelism() -> usize {
     std::thread::available_parallelism().map_or(1, |cores| cores.get().min(8))
 }
 
-/// A delivery bundle names a prerequisite commit this host does not hold, so it cannot be
-/// imported here; the caller asks for a complete bundle instead.
+/// A delivery bundle names a prerequisite commit this host does not hold, or does not hold in
+/// the history of the delivery's start commit, so it cannot be imported here; the caller asks
+/// for a complete bundle instead.
 #[derive(Debug)]
 pub struct MissingPrerequisite(pub String);
 

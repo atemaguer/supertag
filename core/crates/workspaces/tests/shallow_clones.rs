@@ -309,19 +309,10 @@ async fn a_clone_deepened_or_made_complete_between_tasks_keeps_working() {
         b"second\n"
     );
     let merged = finish(&workspace, &checkout, "Merge").await;
-    // The merge imports into the clone as a complete bundle: the Session's commits and the
-    // target's, as far back as the clone's history goes.
-    let bytes = complete_delivery_bundle(&state, &merged.head_commit, &merged.delivery_id, &cancel)
-        .await
-        .unwrap();
-    let complete = root.join("merged.bundle");
-    fs::write(&complete, bytes).unwrap();
-    assert_eq!(
-        import(&source, &session(&merged), &complete, true, &cancel)
-            .await
-            .unwrap(),
-        Imported::Advanced
-    );
+    // The merge's own bundle carries the target's new commits beside it, and builds on the
+    // Session's last commit and on the commit of its history the target moved on from, both of
+    // which the clone holds.
+    assert_eq!(land(&source, &merged).await.unwrap(), Imported::Advanced);
     assert_eq!(
         git(&source, &["rev-list", "--parents", "-n", "1", BRANCH]),
         format!("{} {} {target}", merged.head_commit, second.head_commit)

@@ -631,3 +631,155 @@ async fn an_incremental_delivery_needs_its_start_commit_or_a_complete_bundle() {
         .contains("other than its start commit")
     );
 }
+
+/// A merge follow-up's delivery merges a target the operator's repository moved ahead. Its bundle
+/// carries the target's new commits beside the merge, so it names two prerequisites: its start
+/// commit and the commit of the start's history those commits branch from. It imports like any
+/// other delivery. A bundle that names a commit outside the start commit's history, or that does
+/// not build on the start commit, is refused and leaves nothing behind.
+#[tokio::test]
+async fn a_merge_delivery_builds_on_its_start_commit_and_its_history_only() {
+    let mut fixture = Fixture::new();
+    let base = fixture.base.clone();
+    let (first, first_bundle) = incremental(&mut fixture, &base, "one.txt");
+    assert_eq!(
+        run(&fixture, &first, &first_bundle).await.unwrap(),
+        Imported::Created
+    );
+    // The operator's branch moves ahead, and the Worker Host copies it for the merge.
+    fs::write(fixture.operator.join("target.txt"), "target\n").unwrap();
+    git(&fixture.operator, &["add", "-A"]);
+    git(&fixture.operator, &["commit", "--quiet", "-m", "Target"]);
+    let target = git(&fixture.operator, &["rev-parse", "HEAD"]);
+    git(&fixture.worker, &["fetch", "--quiet", "origin", "main"]);
+    // An unrelated branch the operator's repository also holds.
+    let tree = git(
+        &fixture.operator,
+        &["rev-parse", &format!("{base}^{{tree}}")],
+    );
+    let unrelated = git(
+        &fixture.operator,
+        &["commit-tree", &tree, "-p", &base, "-m", "Unrelated"],
+    );
+    git(
+        &fixture.operator,
+        &["update-ref", "refs/heads/unrelated", &unrelated],
+    );
+    git(
+        &fixture.worker,
+        &["fetch", "--quiet", "origin", "unrelated"],
+    );
+
+    let merge = |fixture: &Fixture, parents: &[&str], id: &str, exclusions: &[&str]| {
+        let tree = git(
+            &fixture.worker,
+            &["merge-tree", "--write-tree", parents[0], parents[1]],
+        );
+        let mut args = vec!["commit-tree", tree.as_str(), "-m", "Merge"];
+        for parent in parents {
+            args.extend(["-p", parent]);
+        }
+        let head = git(&fixture.worker, &args);
+        let delivery_id = id.repeat(64);
+        let reference = format!("refs/heads/supertag-deliveries/{delivery_id}");
+        git(&fixture.worker, &["update-ref", &reference, &head]);
+        let path = fixture.root.path().join(format!("merge-{id}.bundle"));
+        let mut args = vec!["bundle", "create", path.to_str().unwrap(), &reference];
+        let excluded: Vec<String> = exclusions.iter().map(|oid| format!("^{oid}")).collect();
+        args.extend(excluded.iter().map(String::as_str));
+        git(&fixture.worker, &args);
+        let bytes = fs::read(&path).unwrap();
+        (
+            SessionDelivery {
+                branch: BRANCH.into(),
+                delivery_id,
+                base_commit: fixture.base.clone(),
+                start_commit: first.head_commit.clone(),
+                head_commit: head,
+                bundle_sha256: format!("{:x}", Sha256::digest(&bytes)),
+                bundle_byte_length: bytes.len() as u64,
+            },
+            path,
+        )
+    };
+    let prerequisites = |bundle: &Path| -> Vec<String> {
+        let bytes = fs::read(bundle).unwrap();
+        let header = bytes.split(|byte| *byte == b'\n');
+        let mut found: Vec<String> = header
+            .take_while(|line| !line.is_empty())
+            .filter_map(|line| line.strip_prefix(b"-"))
+            .map(|line| String::from_utf8_lossy(&line[..40]).into_owned())
+            .collect();
+        found.sort();
+        found
+    };
+    let sorted = |commits: &[&str]| {
+        let mut commits: Vec<String> = commits.iter().map(|commit| (*commit).to_owned()).collect();
+        commits.sort();
+        commits
+    };
+
+    // A merge of an unrelated branch, bundled against it: the bundle builds on a commit the
+    // repository holds, but not in the start commit's history.
+    let (outside, outside_bundle) = merge(
+        &fixture,
+        &[&first.head_commit, &unrelated],
+        "d",
+        &[&first.head_commit, &unrelated],
+    );
+    assert_eq!(
+        prerequisites(&outside_bundle),
+        sorted(&[&first.head_commit, &unrelated])
+    );
+    let before = objects(&fixture);
+    let error = run(&fixture, &outside, &outside_bundle).await.unwrap_err();
+    let missing = error
+        .downcast_ref::<MissingPrerequisite>()
+        .unwrap_or_else(|| panic!("{error:#}"));
+    assert_eq!(missing.0, unrelated);
+    assert_eq!(objects(&fixture), before);
+    assert!(!fixture.has(&outside.head_commit));
+    assert_eq!(fixture.branch(), Some(first.head_commit.clone()));
+
+    // The same merge bundled against the unrelated branch alone does not build on its start.
+    let (unbased, unbased_bundle) = merge(
+        &fixture,
+        &[&first.head_commit, &unrelated],
+        "e",
+        &[&unrelated],
+    );
+    assert_eq!(prerequisites(&unbased_bundle), sorted(&[&base, &unrelated]));
+    let before = objects(&fixture);
+    let error = run(&fixture, &unbased, &unbased_bundle).await.unwrap_err();
+    assert!(
+        format!("{error:#}").contains("other than its start commit"),
+        "{error:#}"
+    );
+    assert_eq!(objects(&fixture), before);
+    assert_eq!(fixture.branch(), Some(first.head_commit.clone()));
+
+    // The merge follow-up's own bundle, as a Worker Host writes it: everything but the start.
+    let (merged, merged_bundle) = merge(
+        &fixture,
+        &[&first.head_commit, &target],
+        "f",
+        &[&first.head_commit],
+    );
+    assert_eq!(
+        prerequisites(&merged_bundle),
+        sorted(&[&first.head_commit, &base])
+    );
+    assert_eq!(
+        run(&fixture, &merged, &merged_bundle).await.unwrap(),
+        Imported::Advanced
+    );
+    assert_eq!(fixture.branch(), Some(merged.head_commit.clone()));
+    assert_eq!(
+        git(
+            &fixture.operator,
+            &["rev-list", "--parents", "-n", "1", BRANCH]
+        ),
+        format!("{} {} {target}", merged.head_commit, first.head_commit)
+    );
+    git(&fixture.operator, &["fsck", "--strict", "--no-dangling"]);
+}
