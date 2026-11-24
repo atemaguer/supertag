@@ -9,6 +9,15 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Added
+
+- A local Workspace can be a shallow clone, such as `git clone --depth 1` makes, and can have
+  submodules. A shallow clone prepares, delivers, and gets its Session branches like a complete
+  one, and can be deepened between Tasks. Each submodule is an empty directory in a Task's
+  checkout, never fetched, and every delivery keeps it at the commit the repository pins; a
+  Task's result says when it left something inside one. Remote Workspaces and Tasks in remote
+  sandboxes still need the whole history, and remote sandboxes refuse submodules.
+
 ## [0.3.12] - 2026-11-24
 
 ### Fixed
