@@ -294,3 +294,33 @@ jobs:
           sh scripts/stack.sh tag engineer
           sh scripts/stack.sh tag lead
           sh scripts/tmux-e2e.sh engineer
+
+  # The Workspace journeys end to end (scripts/test_e2e_journeys.py): a Task sent to a throwaway
+  # local SuperTag whose Worker Host runs the fixture adapter, with a local repository, a file://
+  # git server, one behind HTTP basic auth, and one over SSH in a Docker container. Session
+  # branches, continuation, merges, a merge conflict and its follow-up, and Workspace Credentials
+  # that never reach the harness. No model is called and no secret is needed. The release-tooling
+  # job also discovers this file, without a CLI, so every journey is skipped there.
+  journeys:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # The same build as tui-e2e, whose cache it reads and never saves.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: tui-e2e
+          workspaces: core -> target
+          save-if: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build the CLI and the fixture adapter
+        working-directory: core
+        run: >-
+          cargo build --locked -p supertag-cli --features test-fixtures
+          --bin supertag --bin supertag-fixture-adapter
+      - name: Workspace journeys
+        env:
+          SUPERTAG_E2E_BINARY: core/target/debug/supertag
+        run: python scripts/test_e2e_journeys.py -v

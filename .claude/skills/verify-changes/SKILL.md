@@ -77,6 +77,10 @@ cargo build --manifest-path core/Cargo.toml -p supertag-cli --features test-fixt
 SUPERTAG_E2E_BINARY=core/target/debug/supertag python3 scripts/test_e2e_journeys.py
 ```
 
+CI runs the fixture journeys in the `journeys` job of `.github/workflows/ci.yml`. The script
+discovery under "After changes under `scripts/`" finds this file too but, without
+`SUPERTAG_E2E_BINARY`, skips every journey: a passing discovery says nothing about them.
+
 After changes to the Modal provider or remote Workspaces in sandboxes, add `--provider modal` to run
 one Claude Code turn in a Modal sandbox on the signed-in Modal CLI's profile instead (it costs a
 fraction of a cent of Modal time plus the turn; see `ModalJourney` for what it needs).

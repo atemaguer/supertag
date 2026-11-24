@@ -39,7 +39,9 @@ machine's own CLI sign-in; Cursor needs CURSOR_API_KEY; OpenCode runs SUPERTAG_E
 (default openai/gpt-5.5: smaller models announce a Work Session's edit and end the turn without
 making it) with its provider's API-key variable, such as OPENAI_API_KEY. A harness without its
 credential skips. Claude Code, Cursor, and OpenCode need their bridges staged beside the CLI
-(scripts/node_bridges.py). Without SUPERTAG_E2E_BINARY every journey is skipped, as in CI.
+(scripts/node_bridges.py). Without SUPERTAG_E2E_BINARY every journey is skipped. CI runs the
+fixture journeys in the `journeys` job of `.github/workflows/ci.yml`; its `release-tooling` job
+also discovers this file, without a CLI, and skips them.
 
 `--provider modal` runs only ModalJourney instead: one Claude Code turn in a Modal sandbox on the
 signed-in Modal CLI's profile (see its docstring for what it needs). `--provider codex-local-vm`
@@ -355,7 +357,7 @@ services:
             - {{ target: runtime, action: web:fetch }}
       - apiVersion: supertag/v1
         kind: Role
-        metadata: {{ name: Builder }}
+        metadata: {{ name: builder }}
         spec:
           purpose: "Make small, bounded repository changes and report what changed."
           permissionSets: [edit]
@@ -400,7 +402,7 @@ kind: Tag
 metadata: {{ name: {name} }}
 spec:
   instructions: "Make the smallest change that does what is asked. Commit nothing yourself. Be brief."
-  roles: [Builder]
+  roles: [builder]
 {execution}  workspace: {workspace}
 """)
         manifest = cls.root / "tags.yaml"
@@ -626,7 +628,7 @@ services:
             - {{ target: runtime, action: commands:execute }}
       - apiVersion: supertag/v1
         kind: Role
-        metadata: {{ name: Builder }}
+        metadata: {{ name: builder }}
         spec:
           purpose: "Run the requested command in the Workspace."
           permissionSets: [run]
@@ -640,7 +642,7 @@ kind: Tag
 metadata: { name: vm }
 spec:
   instructions: "Run the requested command."
-  roles: [Builder]
+  roles: [builder]
   execution: { harness: claude-code }
   workspace: { id: handbook-vm }
 """)
@@ -788,7 +790,7 @@ services:
             - {{ target: runtime, action: commands:execute }}
       - apiVersion: supertag/v1
         kind: Role
-        metadata: {{ name: Builder }}
+        metadata: {{ name: builder }}
         spec:
           purpose: "Edit and run commands in the Workspace."
           permissionSets: [run]
@@ -802,7 +804,7 @@ kind: Tag
 metadata: { name: codex-vm }
 spec:
   instructions: "Do exactly what the request asks, then reply DONE."
-  roles: [Builder]
+  roles: [builder]
   execution: { harness: codex, models: [gpt-6-sol], efforts: [low] }
   workspace: { id: handbook-codex }
 """)
@@ -933,7 +935,7 @@ services:
             - {{ target: runtime, action: commands:execute }}
       - apiVersion: supertag/v1
         kind: Role
-        metadata: {{ name: Builder }}
+        metadata: {{ name: builder }}
         spec:
           purpose: "Make small, bounded repository changes and report what changed."
           permissionSets: [edit]
@@ -950,7 +952,7 @@ kind: Tag
 metadata: { name: modal }
 spec:
   instructions: "Make the smallest change that does what is asked. Commit nothing yourself. Be brief."
-  roles: [Builder]
+  roles: [builder]
   execution: { harness: claude-code }
   workspace: { id: handbook-modal }
 """)
