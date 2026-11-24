@@ -9,6 +9,8 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.3.11] - 2026-11-24
+
 ### Changed
 
 - The Meet the Tags banner and both README diagrams now use the language of each translated README.
@@ -1785,7 +1787,8 @@ within the pre-1.0 compatibility policy described in
 - Gateway control-plane support and Slack, GitHub, Linear, Microsoft Teams,
   and Lark Surfaces.
 
-[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.10...HEAD
+[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.11...HEAD
+[0.3.11]: https://github.com/atemaguer/supertag/compare/v0.3.10...v0.3.11
 [0.3.10]: https://github.com/atemaguer/supertag/compare/v0.3.9...v0.3.10
 [0.3.9]: https://github.com/atemaguer/supertag/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/atemaguer/supertag/compare/v0.3.7...v0.3.8
