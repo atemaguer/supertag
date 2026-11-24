@@ -18,6 +18,14 @@ within the pre-1.0 compatibility policy described in
   Task's result says when it left something inside one. Remote Workspaces and Tasks in remote
   sandboxes still need the whole history, and remote sandboxes refuse submodules.
 
+### Fixed
+
+- A Session whose work conflicts with the branch a local Workspace merges into
+  (`land: {merge: BRANCH}`) is merged once its follow-up Task resolves the conflict. The
+  follow-up's delivery was not written to the Session's branch `supertag/session/<id>`, so the
+  Task succeeded and the merge never happened; the Worker Host log said "delivery bundle needs
+  commits other than its start commit".
+
 ## [0.3.12] - 2026-11-24
 
 ### Fixed
