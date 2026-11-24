@@ -69,6 +69,65 @@ pub(crate) struct TreeEntry {
     pub oid: String,
 }
 
+/// What a commit's tree holds: its files, and its submodules.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Tree {
+    /// Regular files and symbolic links, by path.
+    pub files: BTreeMap<String, TreeEntry>,
+    /// The commit each submodule path pins (a tree entry of mode 160000). A checkout holds an
+    /// empty directory at each, and a delivery carries every one through unchanged.
+    pub submodules: BTreeMap<String, String>,
+}
+
+/// What to do when the source repository of a copy is a shallow clone.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShallowSource {
+    /// Copy the history the source holds and record where it stops: a local Workspace.
+    Adopted,
+    /// Refuse: a remote Workspace's source is bundled whole for other hosts.
+    Refused,
+}
+
+/// The largest `shallow` file read: about 200,000 boundary commits.
+const MAX_SHALLOW: usize = 8 * 1024 * 1024;
+
+/// The commits a `shallow` file lists, the ones whose parents the repository does not hold.
+/// Its whole content must be full object IDs of this repository's format, one to a line.
+fn parse_shallow(bytes: &[u8], oid_length: usize) -> Result<BTreeSet<String>> {
+    let text = std::str::from_utf8(bytes).context("Git shallow file is not text")?;
+    text.lines()
+        .map(|line| {
+            ensure!(
+                line.len() == oid_length && validate_oid(line).is_ok(),
+                "Git shallow file holds something other than commit IDs"
+            );
+            Ok(line.to_owned())
+        })
+        .collect()
+}
+
+/// The validated `shallow` file of the Git directory `git_dir`; empty when it has none.
+fn read_shallow(git_dir: &Path, oid_length: usize) -> Result<BTreeSet<String>> {
+    match paths::read_regular(&git_dir.join("shallow"), MAX_SHALLOW) {
+        Ok(bytes) => parse_shallow(&bytes, oid_length),
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            Ok(BTreeSet::new())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn shallow_bytes(commits: &BTreeSet<String>) -> Vec<u8> {
+    commits
+        .iter()
+        .flat_map(|commit| format!("{commit}\n").into_bytes())
+        .collect()
+}
+
 pub(crate) struct Repository {
     root: PathBuf,
     git_dir: PathBuf,
@@ -232,6 +291,7 @@ impl Repository {
         root: &Path,
         source: &Path,
         base: &str,
+        shallow: ShallowSource,
         cancel: &CancellationToken,
     ) -> Result<Self> {
         let git_dir = root.join("repository.git");
@@ -243,43 +303,280 @@ impl Repository {
             bare: true,
         };
         if repository.verify_commit(base, cancel).await.is_err() {
-            repository.import_from_source(source, base, cancel).await?;
+            repository
+                .import_from_source(source, base, shallow, cancel)
+                .await?;
         }
         Ok(repository)
     }
 
     /// Copies `commit` and its history from a local source repository's object store, without
     /// reading its configuration, refs, or hooks.
+    ///
+    /// A shallow source ([`ShallowSource::Adopted`]) gives the history it holds, and this
+    /// repository records where that stops (see [`Self::copy_cut`]). When the source has since
+    /// been deepened, the history it gained behind this repository's boundary is copied too.
     pub(crate) async fn import_from_source(
         &self,
         source: &Path,
         commit: &str,
+        shallow: ShallowSource,
         cancel: &CancellationToken,
     ) -> Result<()> {
         if self.verify_commit(commit, cancel).await.is_ok() {
             return Ok(());
         }
+        self.copy_from_source(source, Some(commit), shallow, cancel)
+            .await?;
+        self.verify_commit(commit, cancel).await
+    }
+
+    /// Copies from the source `commit`, if any, and whatever history the source now holds behind
+    /// this repository's shallow boundary.
+    async fn copy_from_source(
+        &self,
+        source: &Path,
+        commit: Option<&str>,
+        shallow: ShallowSource,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
         check_cancelled(cancel)?;
         let source_objects = source_objects(source)?;
         refuse_borrowed_objects(&source_objects)?;
         reject_object_links(&source_objects)?;
-        let pack = self.git(
-            &["pack-objects", "--stdout", "--revs"],
-            &[(
-                "GIT_OBJECT_DIRECTORY",
-                source_objects.clone().into_os_string(),
-            )],
-        )?;
-        self.copy_objects(
-            vec![pack],
-            format!("{commit}\n").as_bytes(),
-            Checks::OwnHistory,
-            cancel,
-        )
-        .await
-        .map_err(|error| explain_source_copy(source, &source_objects, error))
-        .context("copy the commit's history from the source repository")?;
-        self.verify_commit(commit, cancel).await
+        let from_source = [(
+            "GIT_OBJECT_DIRECTORY",
+            source_objects.clone().into_os_string(),
+        )];
+        let mut revisions: BTreeSet<String> = commit.map(str::to_owned).into_iter().collect();
+        let boundary = match shallow {
+            // The walk meets the source's missing history and fails; the failure is explained.
+            ShallowSource::Refused => BTreeSet::new(),
+            ShallowSource::Adopted => {
+                let boundary = source_shallow(source, self.oid_length)?;
+                // A commit this repository stops at, and the source no longer does: the source
+                // was deepened, and holds the parents this repository lacks.
+                let stale: BTreeSet<String> =
+                    self.shallow()?.difference(&boundary).cloned().collect();
+                let parents = self.recorded_parents(&stale, cancel).await?;
+                let named: BTreeSet<String> = parents.values().flatten().cloned().collect();
+                let in_source = self.held(&named, &from_source, cancel).await?;
+                for parents in parents.into_values() {
+                    if parents.iter().all(|parent| in_source.contains(parent)) {
+                        revisions.extend(parents);
+                    }
+                }
+                boundary
+            }
+        };
+        if revisions.is_empty() {
+            return Ok(());
+        }
+        let revisions: String = revisions.iter().map(|oid| format!("{oid}\n")).collect();
+        self.copy_cut(&source_objects, &boundary, revisions.as_bytes(), cancel)
+            .await
+            .map_err(|error| explain_source_copy(&source_objects, shallow, error))
+            .context("copy the commit's history from the source repository")
+    }
+
+    /// Makes this repository hold the whole history of its commits, copying from the source
+    /// what the source gained since it was a shallow clone, and refuses when history is still
+    /// missing: `needs` says what cannot do without it.
+    pub(crate) async fn require_whole_history(
+        &self,
+        source: &Path,
+        needs: &str,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        if self.shallow()?.is_empty() {
+            return Ok(());
+        }
+        self.copy_from_source(source, None, ShallowSource::Adopted, cancel)
+            .await?;
+        if self.shallow()?.is_empty() {
+            return Ok(());
+        }
+        Err(Refusal(format!(
+            "the repository is a shallow clone, and {needs} needs the whole history of the commit it starts from. Run `git fetch --unshallow` in the repository and try again"
+        ))
+        .into())
+    }
+
+    /// The commits whose parents this repository does not hold: its `shallow` file, which must
+    /// be a plain file listing commit IDs and nothing else.
+    pub(crate) fn shallow(&self) -> Result<BTreeSet<String>> {
+        read_shallow(&self.git_dir, self.oid_length).context("unexpected Git metadata: shallow")
+    }
+
+    /// Replaces the `shallow` file in one step, so a reader sees the old list or the new one.
+    fn write_shallow(&self, commits: &BTreeSet<String>) -> Result<()> {
+        let path = self.git_dir.join("shallow");
+        if commits.is_empty() {
+            match fs::remove_file(&path) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(error.into());
+                }
+                _ => {}
+            }
+        } else {
+            let mut file = tempfile::NamedTempFile::new_in(&self.git_dir)?;
+            std::io::Write::write_all(&mut file, &shallow_bytes(commits))?;
+            file.as_file().sync_all()?;
+            file.persist(&path)?;
+        }
+        fs::File::open(&self.git_dir)?.sync_all()?;
+        Ok(())
+    }
+
+    /// Copies what `revisions` select from the object store `objects`, whose history stops at
+    /// `boundary` (its own `shallow` list), and keeps this repository's `shallow` file true.
+    ///
+    /// The walk over `objects` is cut where that store is cut, never where this repository is.
+    /// This repository's list first grows to cover every commit that may arrive without its
+    /// parents, so the strict check of the incoming pack accepts them and a crash leaves a list
+    /// that hides too much history rather than one that names missing commits. Once the objects
+    /// are in, the list shrinks to exactly the commits here with a parent that is not.
+    async fn copy_cut(
+        &self,
+        objects: &Path,
+        boundary: &BTreeSet<String>,
+        revisions: &[u8],
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        let mut environment = vec![("GIT_OBJECT_DIRECTORY", objects.as_os_str().to_owned())];
+        let own = self.shallow()?;
+        if boundary.is_empty() && own.is_empty() {
+            let pack = self.git(&["pack-objects", "--stdout", "--revs"], &environment)?;
+            return self
+                .copy_objects(vec![pack], revisions, Checks::OwnHistory, cancel)
+                .await;
+        }
+        let temporary = self.root.join("temporary");
+        paths::create_private_root(&temporary)?;
+        let scratch = tempfile::Builder::new()
+            .prefix("shallow-")
+            .tempdir_in(&temporary)?;
+        // Read in place of this repository's own list, even when it is empty.
+        let cut = scratch.path().join("shallow");
+        crate::write_synced(&cut, &shallow_bytes(boundary))?;
+        environment.push(("GIT_SHALLOW_FILE", cut.into_os_string()));
+        let candidates: BTreeSet<String> = own.union(boundary).cloned().collect();
+        if candidates != own {
+            self.write_shallow(&candidates)?;
+        }
+        let pack = self.git(&["pack-objects", "--stdout", "--revs"], &environment)?;
+        let copied = self
+            .copy_objects(vec![pack], revisions, Checks::OwnHistory, cancel)
+            .await;
+        // Also after a failed copy, which brought nothing the wider list was for.
+        let settled = self.settle_shallow(&candidates, cancel).await;
+        copied.and(settled)
+    }
+
+    /// Rewrites the `shallow` file as exactly those of `candidates` that are commits here with
+    /// a parent that is not.
+    async fn settle_shallow(
+        &self,
+        candidates: &BTreeSet<String>,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        let parents = self.recorded_parents(candidates, cancel).await?;
+        let named: BTreeSet<String> = parents.values().flatten().cloned().collect();
+        let here = self.held(&named, &[], cancel).await?;
+        let cut_here: BTreeSet<String> = parents
+            .into_iter()
+            .filter(|(_, parents)| parents.iter().any(|parent| !here.contains(parent)))
+            .map(|(commit, _)| commit)
+            .collect();
+        if cut_here != *candidates {
+            self.write_shallow(&cut_here)?;
+        }
+        Ok(())
+    }
+
+    /// The parents each of `commits` names, read from the commit itself and so whatever a
+    /// `shallow` file hides. A name that is not a commit in this repository has no entry.
+    async fn recorded_parents(
+        &self,
+        commits: &BTreeSet<String>,
+        cancel: &CancellationToken,
+    ) -> Result<BTreeMap<String, Vec<String>>> {
+        let mut parents = BTreeMap::new();
+        if commits.is_empty() {
+            return Ok(parents);
+        }
+        let wanted: String = commits.iter().map(|oid| format!("{oid}\n")).collect();
+        let bytes = self
+            .command(&["cat-file", "--batch"], wanted.as_bytes(), &[], cancel)
+            .await?;
+        // Each answer: `<object ID> missing`, or `<object ID> <kind> <size>`, a newline, the
+        // object, and a newline.
+        let mut rest = bytes.as_slice();
+        for commit in commits {
+            let end = rest
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .context("Git did not answer for a commit")?;
+            let header = std::str::from_utf8(&rest[..end])?
+                .strip_prefix(commit.as_str())
+                .context("Git answered for another object")?;
+            if header == " missing" {
+                rest = &rest[end + 1..];
+                continue;
+            }
+            let (kind, size) = header
+                .trim_start()
+                .split_once(' ')
+                .context("invalid Git object header")?;
+            let size: usize = size.parse()?;
+            let object = rest
+                .get(end + 1..end + 1 + size)
+                .context("Git cut an object short")?;
+            if kind == "commit" {
+                let mut named = Vec::new();
+                for line in object.split(|byte| *byte == b'\n') {
+                    if line.is_empty() {
+                        break;
+                    }
+                    if let Some(parent) = line.strip_prefix(b"parent ") {
+                        let parent = std::str::from_utf8(parent)?;
+                        validate_oid(parent)?;
+                        named.push(parent.to_owned());
+                    }
+                }
+                parents.insert(commit.clone(), named);
+            }
+            rest = rest.get(end + size + 2..).unwrap_or_default();
+        }
+        Ok(parents)
+    }
+
+    /// Which of `objects` an object store holds: this repository's, or with `environment` the
+    /// one it names.
+    async fn held(
+        &self,
+        objects: &BTreeSet<String>,
+        environment: &[(&str, OsString)],
+        cancel: &CancellationToken,
+    ) -> Result<BTreeSet<String>> {
+        if objects.is_empty() {
+            return Ok(BTreeSet::new());
+        }
+        let wanted: String = objects.iter().map(|oid| format!("{oid}\n")).collect();
+        let bytes = self
+            .command(
+                &["cat-file", "--batch-check"],
+                wanted.as_bytes(),
+                environment,
+                cancel,
+            )
+            .await?;
+        Ok(std::str::from_utf8(&bytes)?
+            .lines()
+            .filter(|line| !line.ends_with(" missing"))
+            .filter_map(|line| line.split(' ').next())
+            .map(str::to_owned)
+            .collect())
     }
 
     /// Copies `head`, a commit that contains `base`, from another Workspace state directory of
@@ -306,14 +603,12 @@ impl Repository {
         let objects = holder.git_dir.join("objects");
         reject_object_links(&objects)?;
         // `--revs` without `--thin`: every object comes whole or as a delta within the pack.
-        let pack = self.git(
-            &["pack-objects", "--stdout", "--revs"],
-            &[("GIT_OBJECT_DIRECTORY", objects.into_os_string())],
-        )?;
-        self.copy_objects(
-            vec![pack],
+        // The holder may have copied the source when it was cut elsewhere than it was for this
+        // repository, and a merged commit's history stops where the holder's does.
+        self.copy_cut(
+            &objects,
+            &holder.shallow()?,
             format!("{head}\n^{base}\n").as_bytes(),
-            Checks::OwnHistory,
             cancel,
         )
         .await
@@ -446,6 +741,10 @@ impl Repository {
                 "unexpected Git metadata: {name}"
             );
         }
+        // The one file besides the configuration that changes what Git reads as history. It
+        // may only list commits whose parents are hidden, which can hide history and never
+        // add any: a plain file of object IDs, or absent.
+        self.shallow()?;
         reject_object_links(&self.git_dir.join("objects"))?;
         let mut command = Command::new("/usr/bin/git");
         command
@@ -512,14 +811,11 @@ impl Repository {
         Ok(())
     }
 
-    pub(crate) async fn tree(
-        &self,
-        commit: &str,
-        cancel: &CancellationToken,
-    ) -> Result<BTreeMap<String, TreeEntry>> {
+    pub(crate) async fn tree(&self, commit: &str, cancel: &CancellationToken) -> Result<Tree> {
         // Read an entry at a time: the listing of a monorepo's tree is larger than any buffer
         // worth keeping beside the entries themselves.
         let mut entries = BTreeMap::new();
+        let mut submodules = BTreeMap::new();
         records(
             self.git(&["ls-tree", "-rz", "--full-tree", commit], &[])?,
             (0, MAX_TREE_ENTRY, Overlong::Fail),
@@ -538,15 +834,12 @@ impl Repository {
                 let mode = fields.next().context("missing Git mode")?.to_owned();
                 let kind = fields.next().context("missing Git object kind")?;
                 let name = String::from_utf8_lossy(&entry[tab + 1..]);
-                if kind != "blob" {
-                    return Err(Refusal(format!(
-                        "the repository has a Git submodule at `{name}`, and SuperTag does not support repositories with submodules yet"
-                    ))
-                    .into());
-                }
                 let oid = fields.next().context("missing Git object ID")?.to_owned();
                 validate_oid(&oid)?;
-                if !matches!(mode.as_str(), "100644" | "100755" | "120000") {
+                // A submodule: a commit of another repository, which this one only names.
+                let submodule = kind == "commit" && mode == "160000";
+                ensure!(submodule || kind == "blob", "unexpected Git tree entry");
+                if !submodule && !matches!(mode.as_str(), "100644" | "100755" | "120000") {
                     return Err(Refusal(format!(
                         "the repository tracks `{name}` with the file mode {mode}, which SuperTag does not support"
                     ))
@@ -566,16 +859,23 @@ impl Repository {
                 }
                 let path = path.to_owned();
                 ensure!(
-                    entries
-                        .insert(path.clone(), TreeEntry { path, mode, oid })
-                        .is_none(),
+                    if submodule {
+                        submodules.insert(path, oid).is_none()
+                    } else {
+                        entries
+                            .insert(path.clone(), TreeEntry { path, mode, oid })
+                            .is_none()
+                    },
                     "duplicate Git tree path"
                 );
                 Ok(true)
             },
         )
         .await?;
-        Ok(entries)
+        Ok(Tree {
+            files: entries,
+            submodules,
+        })
     }
 
     /// Checks that every symbolic link in `entries` points inside the repository. The targets
@@ -631,10 +931,10 @@ impl Repository {
         directory: &Path,
         (base, start): (&str, &str),
         index_tree: Option<&str>,
-        entries: &BTreeMap<String, TreeEntry>,
+        entries: &Tree,
         cancel: &CancellationToken,
     ) -> Result<()> {
-        self.validate_links(entries, cancel).await?;
+        self.validate_links(&entries.files, cancel).await?;
         let checkout = self
             .checkout_metadata_with(directory, base, start, index_tree, None, cancel)
             .await?;
@@ -657,6 +957,10 @@ impl Repository {
                 cancel,
             )
             .await?;
+        // Git makes a directory for each submodule; made here too, so none depends on that.
+        for path in entries.submodules.keys() {
+            paths::create_directories(directory, path)?;
+        }
         // Verify bytes and modes after checkout rather than trusting config, name
         // normalization, or a successful Git exit to imply the exact pinned tree.
         self.verify_files(directory, entries, &[], cancel).await
@@ -674,12 +978,12 @@ impl Repository {
         directory: &Path,
         (base, start, prior_start): (&str, &str, &str),
         (packs, keep): (&Path, &[String]),
-        entries: &BTreeMap<String, TreeEntry>,
+        entries: &Tree,
         cancel: &CancellationToken,
     ) -> Result<()> {
         validate_oid(prior_start)?;
         self.assert_ancestor(prior_start, start, cancel).await?;
-        self.validate_links(entries, cancel).await?;
+        self.validate_links(&entries.files, cancel).await?;
         ensure!(
             fs::symlink_metadata(directory.join(".git"))
                 .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound),
@@ -696,10 +1000,11 @@ impl Repository {
         .await?;
         let (root, tracked, kept, stop) = (
             directory.to_owned(),
-            entries.clone(),
+            entries.files.clone(),
             keep.to_vec(),
             cancel.clone(),
         );
+        let submodules: Vec<String> = entries.submodules.keys().cloned().collect();
         tokio::task::spawn_blocking(move || -> Result<()> {
             // Whatever the last Attempt left that Git does not track, such as build output and
             // dependencies, is removed as the walk meets it, so none of it is listed.
@@ -712,8 +1017,12 @@ impl Repository {
                 }
                 Ok(false)
             })?;
-            // Empty directories go too, as a fresh checkout has none.
+            // Empty directories go too, as a fresh checkout has none but one for each submodule,
+            // which holds nothing: whatever the last Attempt left in one went with the rest.
             remove_empty_directories(&root, "", &kept)?;
+            for path in &submodules {
+                paths::create_directories(&root, path)?;
+            }
             // A file hard-linked elsewhere would let this Attempt write outside its checkout.
             for path in tracked.keys() {
                 if let Some((_, _, links)) = paths::file_identity(&root, path)? {
@@ -727,19 +1036,20 @@ impl Repository {
         self.verify_files(directory, entries, keep, cancel).await
     }
 
-    /// Checks that the checkout's files, besides `skip`, are exactly `entries`, bytes and modes.
-    /// Reading and hashing every file runs on blocking threads, so the caller's lease renewal
-    /// goes on.
+    /// Checks that the checkout's files, besides `skip`, are exactly `entries`, bytes and modes,
+    /// and that each submodule path is an empty directory. Reading and hashing every file runs
+    /// on blocking threads, so the caller's lease renewal goes on.
     async fn verify_files(
         &self,
         directory: &Path,
-        entries: &BTreeMap<String, TreeEntry>,
+        entries: &Tree,
         skip: &[String],
         cancel: &CancellationToken,
     ) -> Result<()> {
-        let (directory, entries, skip, cancel) = (
+        let (directory, submodules, entries, skip, cancel) = (
             directory.to_owned(),
-            entries.clone(),
+            entries.submodules.clone(),
+            entries.files.clone(),
             skip.to_vec(),
             cancel.clone(),
         );
@@ -790,6 +1100,13 @@ impl Repository {
                         .map_err(|_| anyhow::anyhow!("checkout verification stopped"))?
                 })
             })?;
+            // A submodule is an empty directory here: nothing of it was fetched or checked out.
+            for path in submodules.keys() {
+                ensure!(
+                    paths::directory_content(&directory, path)? == paths::Content::Empty,
+                    "materialized submodule is not an empty directory: {path}"
+                );
+            }
             check_cancelled(&cancel)
         })
         .await
@@ -866,11 +1183,14 @@ impl Repository {
                 cancel,
             )
             .await?;
+        // This repository hides the parents of the commits its own history stops at, so they
+        // are listed with none; the checkout's history stops there too.
+        let own = self.shallow()?;
         let mut shallow = String::new();
         for line in std::str::from_utf8(&parents)?.lines() {
             let mut oids = line.split(' ');
             let Some(commit) = oids.next() else { continue };
-            if oids.any(|parent| !commits.contains(parent)) {
+            if own.contains(commit) || oids.any(|parent| !commits.contains(parent)) {
                 shallow.push_str(commit);
                 shallow.push('\n');
             }
@@ -1025,6 +1345,8 @@ impl Repository {
                     "-z",
                     "-M",
                     "--no-ext-diff",
+                    // Never run Git inside a submodule's directory, which the harness fills.
+                    "--ignore-submodules=all",
                     &checkout.start_commit,
                     "--",
                 ],
@@ -1035,7 +1357,13 @@ impl Repository {
             .await?;
         let status = repository
             .command(
-                &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+                &[
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--untracked-files=all",
+                    "--ignore-submodules=all",
+                ],
                 &[],
                 &[],
                 cancel,
@@ -1074,6 +1402,7 @@ impl Repository {
             Self::output_repository(&checkout.path, checkout.start_commit.len())?
                 .tree(&checkout.start_commit, cancel)
                 .await?
+                .files
                 .into_keys()
                 .collect(),
         )
@@ -1137,11 +1466,11 @@ impl Repository {
                 repository.selected_tracked(selected, cancel).await?,
             )
         };
-        let head = repository.tree(&head_commit, cancel).await?;
+        let head = repository.tree(&head_commit, cancel).await?.files;
         let base = if checkout.start_commit == head_commit {
             None
         } else {
-            Some(repository.tree(&checkout.start_commit, cancel).await?)
+            Some(repository.tree(&checkout.start_commit, cancel).await?.files)
         };
         let base = base.as_ref().unwrap_or(&head);
         let selected: BTreeSet<&str> = selected.iter().map(String::as_str).collect();
@@ -1187,9 +1516,12 @@ impl Repository {
         )
     }
 
+    /// Writes the tree that holds the files `entries` and the `submodules`, each a path and the
+    /// commit it pins. A submodule's commit is only named: this repository does not hold it.
     pub(crate) async fn write_tree(
         &self,
         entries: &BTreeMap<String, TreeEntry>,
+        submodules: &BTreeMap<String, String>,
         cancel: &CancellationToken,
     ) -> Result<String> {
         let temporary = tempfile::tempdir_in(self.root.join("temporary"))?;
@@ -1204,6 +1536,10 @@ impl Repository {
             input.extend_from_slice(
                 format!("{} {}\t{}\0", entry.mode, entry.oid, entry.path).as_bytes(),
             );
+        }
+        for (path, commit) in submodules {
+            validate_oid(commit)?;
+            input.extend_from_slice(format!("160000 {commit}\t{path}\0").as_bytes());
         }
         self.command(
             &["update-index", "-z", "--index-info"],
@@ -1320,6 +1656,7 @@ impl Repository {
             .await
     }
 
+    /// A bundle of `head` and its whole history, for a reader that holds none of it.
     pub(crate) async fn bundle(
         &self,
         head: &str,
@@ -1327,6 +1664,11 @@ impl Repository {
         file: &Path,
         cancel: &CancellationToken,
     ) -> Result<()> {
+        // Git would write the history this repository holds and call it complete.
+        ensure!(
+            self.shallow()?.is_empty(),
+            "a repository without its whole history cannot be bundled whole"
+        );
         self.bundle_excluding(head, id, file, &[], cancel).await
     }
 
@@ -1723,6 +2065,16 @@ fn source_git_directory(source: &Path) -> Result<PathBuf> {
     Ok(directory)
 }
 
+/// The commits a local source repository's history stops at: none unless it is a shallow clone.
+/// A linked worktree shares its repository's list.
+fn source_shallow(source: &Path, oid_length: usize) -> Result<BTreeSet<String>> {
+    read_shallow(&source_git_directory(source)?, oid_length).map_err(|error| {
+        error.context(Refusal(
+            "the repository's `.git/shallow` file, which says where a shallow clone's history stops, could not be read as a list of commit IDs".into(),
+        ))
+    })
+}
+
 fn source_objects(source: &Path) -> Result<PathBuf> {
     let objects = source_git_directory(source)?.join("objects");
     paths::verify_directory(&objects)?;
@@ -1961,7 +2313,7 @@ fn refuse_borrowed_objects(objects: &Path) -> Result<()> {
 /// Says why copying a commit's history out of the source repository failed, when the repository
 /// is one whose history cannot be copied whole: Git's own message, kept as the cause, names an
 /// object and not the reason.
-fn explain_source_copy(source: &Path, objects: &Path, error: anyhow::Error) -> anyhow::Error {
+fn explain_source_copy(objects: &Path, mode: ShallowSource, error: anyhow::Error) -> anyhow::Error {
     let Some(exit) = error.downcast_ref::<GitExit>() else {
         return error;
     };
@@ -1989,14 +2341,14 @@ fn explain_source_copy(source: &Path, objects: &Path, error: anyhow::Error) -> a
             "the repository's history holds objects that fail Git's strict checks{named}, and SuperTag does not copy them. `git fsck --strict` in the repository lists them"
         )));
     }
-    let directory = source_git_directory(source).ok();
-    let shallow = directory
-        .as_ref()
+    // A shallow source that is adopted copies whole; this one is a remote Workspace's.
+    let shallow = objects
+        .parent()
         .and_then(|directory| fs::metadata(directory.join("shallow")).ok())
         .is_some_and(|metadata| metadata.len() > 0);
-    if shallow {
+    if shallow && mode == ShallowSource::Refused {
         return error.context(Refusal(
-            "the repository is a shallow clone, and SuperTag needs the whole history of the commit it starts from. Run `git fetch --unshallow` in the repository and try again".into(),
+            "the Workspace's remote is a shallow clone, and a remote Workspace needs the whole history of the commit it starts from. Run `git fetch --unshallow` in the repository the remote names, or map a checkout of it on the Worker Host as a local Workspace instead".into(),
         ));
     }
     let partial = fs::read_dir(objects.join("pack")).is_ok_and(|entries| {

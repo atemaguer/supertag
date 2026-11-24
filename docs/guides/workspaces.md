@@ -124,6 +124,25 @@ credentials. A failed setup fails the Task Attempt with the command's output. Wh
 next turn reuses its previous checkout on the same host, the setup outputs stay as the previous
 turn left them, and setup does not run again. Only that Session's own turns share them.
 
+### Shallow clones and submodules
+
+A local Workspace may be a shallow clone, such as `git clone --depth 1` makes. The Worklet copies
+the history the clone holds and stops where the clone stops. Each Session branch lands in the
+clone on top of that history. Deepen the clone, or run `git fetch --unshallow`, whenever you like:
+Sessions already under way keep working.
+
+A repository with submodules works in a limited way:
+
+- Each submodule is an empty directory in a Task's checkout. SuperTag never fetches a submodule
+  and never contacts its URL.
+- A delivery keeps every submodule at the commit the repository pins. A Task cannot move, add, or
+  remove one.
+- What a Task writes inside a submodule's directory is left out of its delivery, and the Task's
+  result says so.
+- `.gitmodules` is a tracked file like any other, and a Task can edit it.
+
+To change a submodule's code, map the submodule's own repository as another Workspace.
+
 ## 3. See the branches appear
 
 With `land: local`, the default, the Worklet writes each delivered Task into the mapped
@@ -400,6 +419,10 @@ gets at most two replacements; after a third stop, the turn fails.
 - Workspace Volumes arrive as copies only; a Tag with copies may not run commands or fetch from
   the web.
 - Git LFS is refused with a clear error: keep large files in a Volume.
+- A submodule is an empty directory in a Task's checkout, and no delivery changes the commit it
+  pins. `setup` cannot fill one: the Task's checkout starts with it empty again.
+- A Task in an E2B or Modal sandbox needs a repository with its whole history and no submodules.
+  So does a remote Workspace's git server, for the history.
 - `merge` lands only a Work Session, when its work is reported done; a conversation's own Session
   never merges, so use `branch` for it.
 - `review` opens pull requests on GitHub only, not GitLab. Review comments and mentions on the

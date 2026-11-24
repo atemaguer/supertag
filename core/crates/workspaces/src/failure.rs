@@ -114,12 +114,12 @@ mod tests {
 
     #[test]
     fn a_refusal_is_the_whole_cause() {
-        let error = refusal("the repository has Git submodules, which SuperTag does not support")
+        let error = refusal("the repository is a partial clone, which SuperTag does not support")
             .context("list the files")
             .context("prepare");
         assert_eq!(
             failure_cause(&error),
-            "the repository has Git submodules, which SuperTag does not support"
+            "the repository is a partial clone, which SuperTag does not support"
         );
     }
 

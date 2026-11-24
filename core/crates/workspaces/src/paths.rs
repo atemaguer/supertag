@@ -260,6 +260,59 @@ pub(crate) fn create_output_directory(root: &Path, path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Makes the directory `path` of the checkout at `root` and any missing directory on the way,
+/// without following a link: a part that exists as anything but a directory is an error.
+pub(crate) fn create_directories(root: &Path, path: &str) -> Result<()> {
+    validate_repo_path(path)?;
+    let mut directory = open_root(root)?;
+    for part in path.split('/') {
+        if let Err(error) = mkdir_at(&directory, part)
+            && error.kind() != std::io::ErrorKind::AlreadyExists
+        {
+            return Err(error.into());
+        }
+        directory = open_dir_at(&directory, part)?;
+    }
+    Ok(())
+}
+
+/// What a checkout holds at a path where an empty directory belongs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Content {
+    /// Nothing: the path, or a directory on the way to it, is gone.
+    Missing,
+    Empty,
+    /// A directory with something in it, or anything that is not a directory.
+    Other,
+}
+
+/// What the checkout at `root` holds at `path`, without following a link.
+pub(crate) fn directory_content(root: &Path, path: &str) -> Result<Content> {
+    validate_repo_path(path)?;
+    let gone = |error: &anyhow::Error| {
+        error
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+    };
+    let mut directory = open_root(root)?;
+    for part in path.split('/') {
+        let metadata = match metadata_at(&directory, part) {
+            Ok(metadata) => metadata,
+            Err(error) if gone(&error) => return Ok(Content::Missing),
+            Err(error) => return Err(error),
+        };
+        if metadata.st_mode & libc::S_IFMT != libc::S_IFDIR {
+            return Ok(Content::Other);
+        }
+        directory = open_dir_at(&directory, part)?;
+    }
+    Ok(if names(&directory)?.is_empty() {
+        Content::Empty
+    } else {
+        Content::Other
+    })
+}
+
 fn mkdir_at(parent: &File, name: &str) -> std::io::Result<()> {
     let name = CString::new(name)?;
     let result = unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) };

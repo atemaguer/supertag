@@ -35,7 +35,15 @@ pub async fn capture(
         !directory.starts_with(&source) && !source.starts_with(&directory),
         "source capture must use separate private state"
     );
-    let repository = git::Repository::open(&directory, &source, commit, cancel).await?;
+    // The bundle goes to other hosts as the commit's whole history.
+    let repository = git::Repository::open(
+        &directory,
+        &source,
+        commit,
+        git::ShallowSource::Refused,
+        cancel,
+    )
+    .await?;
     let file = directory.join("source.bundle");
     let id = format!("source-{commit}");
     repository.bundle(commit, &id, &file, cancel).await?;

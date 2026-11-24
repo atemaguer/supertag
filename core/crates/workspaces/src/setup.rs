@@ -7,7 +7,7 @@
 //! link, such as one into a package store, first gets a private copy, so a Task never changes
 //! the store. Symlinks are kept as setup made them and are never followed.
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     fs::{self, DirBuilder, OpenOptions},
     os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
@@ -225,13 +225,11 @@ async fn tail(reader: &mut (impl tokio::io::AsyncRead + Unpin)) -> Result<Vec<u8
 
 /// Untracked entries setup left in `tree`, collapsed to the highest directory that holds no
 /// tracked file.
-fn untracked(
-    tree: &Path,
-    entries: &BTreeMap<String, git::TreeEntry>,
-    cancel: &CancellationToken,
-) -> Result<Vec<String>> {
+fn untracked(tree: &Path, entries: &git::Tree, cancel: &CancellationToken) -> Result<Vec<String>> {
+    // A submodule's directory is the repository's, like a tracked file: what setup puts in it
+    // is not an output, and the Task's checkout starts with it empty.
     let mut tracked_directories = BTreeSet::new();
-    for path in entries.keys() {
+    for path in entries.files.keys().chain(entries.submodules.keys()) {
         let mut parent = Path::new(path).parent();
         while let Some(directory) = parent.filter(|value| !value.as_os_str().is_empty()) {
             tracked_directories.insert(directory.to_string_lossy().into_owned());
@@ -260,7 +258,7 @@ fn untracked(
             } else {
                 format!("{prefix}/{name}")
             };
-            if entries.contains_key(&path) {
+            if entries.files.contains_key(&path) || entries.submodules.contains_key(&path) {
                 continue;
             }
             if tracked_directories.contains(&path) && entry.file_type()?.is_dir() {

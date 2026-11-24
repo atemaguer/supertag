@@ -710,6 +710,15 @@ async fn main() -> Result<()> {
             format!("{before}{}\n", task.prompt),
         )?;
         std::fs::write(workspace.join("artifact.bin"), [0_u8, 1, 2, 0, 255])?;
+        // A Task told to fill a submodule: its directory is there, empty, and takes a file.
+        if let Some(path) = task.prompt.strip_prefix("fill submodule ") {
+            let directory = workspace.join(path);
+            ensure!(
+                std::fs::read_dir(&directory)?.next().is_none(),
+                "the submodule directory {path} is not empty"
+            );
+            std::fs::write(directory.join("fetched.txt"), "fetched\n")?;
+        }
         result = format!("{}\nWorkspace before:\n{before}", task.prompt);
     }
     if std::env::args().any(|arg| arg == "--wait-for-cancel") {

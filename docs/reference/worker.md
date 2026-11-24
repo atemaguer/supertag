@@ -320,6 +320,20 @@ commit. The host's own Git commands never run repository hooks,
 filters, or configuration a Task wrote, and the host fails a Task Attempt whose repository Git
 configuration changed while it ran.
 
+A local source may be a shallow clone. The host copies the history the clone holds. Its own copy
+and each checkout record where that history stops, so none of its Git commands reads past it.
+Deliveries and Session branches build on the clone's history as on any other. After the clone is
+deepened, the host copies the added history the next time it reads a commit from the clone. A
+remote Workspace's source, and a Task Attempt in a remote sandbox, refuse a shallow clone.
+
+A submodule is an empty directory in each checkout, and the host fetches nothing for it. Every
+delivered commit pins each submodule at the commit the Task Attempt's checkout started with. The
+host does not read a submodule's directory when it captures a turn. What the harness left there is
+not delivered, and the Task's result names the path. A file where a directory that holds a
+submodule was fails the delivery. A merge follow-up whose merge conflicts in a submodule fails
+before its harness starts. A Task Attempt in a remote sandbox refuses a repository with
+submodules.
+
 `--workspace-setup ID=COMMAND`, or `setup` in a `supertag.yaml` Workspace, runs a shell command
 such as `npm ci` in each new checkout before the harness starts. It runs on the host, outside any
 harness sandbox, with a 10-minute limit, and receives no provider credentials. A reused checkout

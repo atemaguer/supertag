@@ -1,6 +1,7 @@
 //! The kinds of repository a real checkout on a developer's machine can be. Each either
 //! prepares, with files that are exactly the bytes Git stores, or is refused with a cause that
-//! says what the repository is and what to do about it.
+//! says what the repository is and what to do about it. `shallow_clones.rs` and `submodules.rs`
+//! follow those two kinds through delivery.
 use std::{
     fs,
     io::Write as _,
@@ -272,7 +273,7 @@ async fn a_history_with_harmless_format_flaws_is_copied_and_an_unsafe_one_is_ref
 }
 
 #[tokio::test]
-async fn a_repository_supertag_cannot_copy_whole_says_so_and_how_to_fix_it() {
+async fn a_clone_without_all_its_objects_prepares_or_says_how_to_fix_it() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().canonicalize().unwrap();
     let origin = repository(&root, "origin", &[("a.txt", b"one\n"), ("b.txt", b"b\n")]);
@@ -298,17 +299,35 @@ async fn a_repository_supertag_cannot_copy_whole_says_so_and_how_to_fix_it() {
     let checkout = prepare(&root, &partial, &head(&partial)).await.unwrap();
     assert_eq!(fs::read(checkout.join("a.txt")).unwrap(), b"two\n");
 
-    // A shallow clone lacks the history.
+    // A shallow clone lacks the history before its boundary, and prepares with what it has:
+    // the Task's checkout never held more than the commit it starts from.
     git(&root, &["clone", "--quiet", "--depth=1", &url, "shallow"]);
     let shallow = root.join("shallow");
-    let cause = shown_cause(prepare(&root, &shallow, &head(&shallow)).await);
-    assert!(
-        cause.starts_with("the repository is a shallow clone")
-            && cause.contains("`git fetch --unshallow`"),
-        "{cause}"
-    );
+    let checkout = prepare(&root, &shallow, &head(&shallow)).await.unwrap();
+    assert_eq!(fs::read(checkout.join("a.txt")).unwrap(), b"two\n");
+    assert_eq!(git(&checkout, &["status", "--porcelain"]), "");
     git(&shallow, &["fetch", "--quiet", "--unshallow"]);
     prepare(&root, &shallow, &head(&shallow)).await.unwrap();
+
+    // A clone that is both shallow and partial is still a partial clone.
+    git(
+        &root,
+        &[
+            "clone",
+            "--quiet",
+            "--depth=1",
+            "--filter=blob:none",
+            "--no-checkout",
+            &url,
+            "both",
+        ],
+    );
+    let both = root.join("both");
+    let cause = shown_cause(prepare(&root, &both, &head(&both)).await);
+    assert!(
+        cause.starts_with("the repository is a partial clone"),
+        "{cause}"
+    );
 
     // A clone that borrows its objects from another repository.
     git(
@@ -334,7 +353,7 @@ async fn a_repository_supertag_cannot_copy_whole_says_so_and_how_to_fix_it() {
 }
 
 #[tokio::test]
-async fn a_tree_supertag_does_not_check_out_names_the_path_and_the_reason() {
+async fn a_tree_checks_out_or_names_the_path_and_the_reason() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().canonicalize().unwrap();
 
@@ -351,10 +370,19 @@ async fn a_tree_supertag_does_not_check_out_names_the_path_and_the_reason() {
         ],
     );
     git(&with_sub, &["commit", "--quiet", "-m", "Add submodule"]);
+    // A submodule is an empty directory in the checkout: its content is another repository's,
+    // and nothing fetches it. `.gitmodules` is a file like any other.
+    let checkout = prepare(&root, &with_sub, &head(&with_sub)).await.unwrap();
     assert_eq!(
-        shown_cause(prepare(&root, &with_sub, &head(&with_sub)).await),
-        "the repository has a Git submodule at `vendor/sub`, and SuperTag does not support repositories with submodules yet"
+        fs::read_dir(checkout.join("vendor/sub")).unwrap().count(),
+        0
     );
+    assert_eq!(
+        fs::read(checkout.join(".gitmodules")).unwrap(),
+        fs::read(with_sub.join(".gitmodules")).unwrap()
+    );
+    assert_eq!(fs::read(checkout.join("README.md")).unwrap(), b"hello\n");
+    assert_eq!(git(&checkout, &["status", "--porcelain"]), "");
 
     for (name, target) in [("absolute", "/etc/hosts"), ("escaping", "../outside")] {
         let linked = repository(&root, name, &[("README.md", b"hello\n")]);

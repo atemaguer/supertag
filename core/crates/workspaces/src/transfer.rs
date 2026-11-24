@@ -52,6 +52,9 @@ struct RestoreRecord {
     byte_length: u64,
 }
 
+/// What a refusal names as unable to take a shallow clone or a submodule.
+const REMOTE_EXECUTION: &str = "a Task that runs in a remote sandbox";
+
 impl Workspace {
     /// Export exactly the prepared starting commit, including runtime-only parent
     /// history. Never consult the writable checkout's Git metadata or source HEAD.
@@ -76,6 +79,9 @@ impl Workspace {
         let staging = tempfile::tempdir_in(self.inner.root.join("temporary"))?;
         let bundle = staging.path().join("prepared.bundle");
         let repository = self.repository(cancel).await?;
+        repository
+            .require_whole_history(&self.inner.config.source, REMOTE_EXECUTION, cancel)
+            .await?;
         repository
             .bundle(
                 &checkout.start_commit,
@@ -116,8 +122,11 @@ impl Workspace {
         let path = record.join("trusted.bundle");
         let staging = tempfile::tempdir_in(self.inner.root.join("temporary"))?;
         let bundle = staging.path().join("trusted.bundle");
-        self.repository(cancel)
-            .await?
+        let repository = self.repository(cancel).await?;
+        repository
+            .require_whole_history(&self.inner.config.source, REMOTE_EXECUTION, cancel)
+            .await?;
+        repository
             .bundle(
                 &checkout.base_commit,
                 &format!(
@@ -249,6 +258,14 @@ impl Workspace {
             preparation.ready && preparation.checkout == *checkout,
             "checkout differs from accepted preparation"
         );
+        // A remote sandbox gets the commit as a bundle and returns files: it has no way to
+        // carry a submodule through.
+        if let Some(path) = preparation.submodules.keys().next() {
+            return Err(Refusal(format!(
+                "the repository has a Git submodule at `{path}`, and {REMOTE_EXECUTION} does not support repositories with submodules. Run the Tag on the Worker Host itself"
+            ))
+            .into());
+        }
         Ok(directory)
     }
 }

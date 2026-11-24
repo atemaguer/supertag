@@ -1232,7 +1232,14 @@ async fn slot_loop(worklet: &Worklet, slot: &Slot) -> Result<()> {
                 match finalization {
                     Ok((pending, _)) => journal.save(&Entry::Finish {
                         attempt,
-                        result,
+                        // What the Task left inside a submodule is not in its delivery, and
+                        // whoever reads the result should not think it is.
+                        result: match pending.delivery.submodule_note() {
+                            Some(note) if succeeded => {
+                                format!("{}\n\n{note}", result.trim_end())
+                            }
+                            _ => result,
+                        },
                         succeeded,
                         objective_signal,
                         waiting_approval_ids,

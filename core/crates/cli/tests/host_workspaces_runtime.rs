@@ -40,6 +40,10 @@ database_tests! {
     a_sessions_next_task_reuses_its_checkout_on_the_same_host;
     #[tokio::test]
     a_repository_that_cannot_be_prepared_fails_the_task_with_its_cause;
+    #[tokio::test]
+    a_shallow_clone_runs_a_session_and_lands_its_branch;
+    #[tokio::test]
+    a_repository_with_submodules_runs_a_task_and_keeps_their_pins;
 }
 
 struct Services {
@@ -389,11 +393,10 @@ async fn a_repository_that_cannot_be_prepared_fails_the_task_with_its_cause(
     std::fs::write(app.join("workspace.txt"), "app source\n")?;
     git(&app, &["add", "-A"]).await?;
     git(&app, &["commit", "--quiet", "-m", "Initial source"]).await?;
-    // A submodule, as the index records one: a commit of another repository at a path.
-    let other = git(&app, &["rev-parse", "HEAD"]).await?;
-    let entry = format!("160000,{other},vendor/library");
-    git(&app, &["update-index", "--add", "--cacheinfo", &entry]).await?;
-    git(&app, &["commit", "--quiet", "-m", "Add a submodule"]).await?;
+    // A symbolic link to somewhere outside the repository.
+    std::os::unix::fs::symlink("../outside", app.join("link"))?;
+    git(&app, &["add", "-A"]).await?;
+    git(&app, &["commit", "--quiet", "-m", "Add a link"]).await?;
     let base = git(&app, &["rev-parse", "HEAD"]).await?;
     let services = Services::start(&database, root).await?;
     let cli = |args: &[&str]| services.cli(args);
@@ -428,8 +431,203 @@ async fn a_repository_that_cannot_be_prepared_fails_the_task_with_its_cause(
     assert_eq!(failed["state"], "TASK_STATE_FAILED", "{failed}");
     assert_eq!(
         failed["result"],
-        "Task workspace could not be prepared safely: the repository has a Git submodule at `vendor/library`, and SuperTag does not support repositories with submodules yet. Run `supertag logs` on its Worker Host for the full detail."
+        "Task workspace could not be prepared safely: the repository tracks a symbolic link that points outside the repository (`link`), which SuperTag does not check out. Run `supertag logs` on its Worker Host for the full detail."
     );
+    Ok(())
+}
+
+/// The one `supertag/session/*` branch of `checkout`, and the commit it names.
+async fn session_branch(checkout: &Path) -> Result<(String, String)> {
+    let listed = git(
+        checkout,
+        &[
+            "for-each-ref",
+            "--format=%(refname:short) %(objectname)",
+            "refs/heads/supertag/session/",
+        ],
+    )
+    .await?;
+    let mut lines = listed.lines();
+    let (name, commit) = lines
+        .next()
+        .and_then(|line| line.split_once(' '))
+        .with_context(|| format!("no Session branch in {}", checkout.display()))?;
+    ensure!(lines.next().is_none(), "several Session branches: {listed}");
+    Ok((name.to_owned(), commit.to_owned()))
+}
+
+/// A Workspace mapped to a shallow clone, such as `git clone --depth 1` makes: a Session's Tasks
+/// run, and its branch lands in the clone with the history the clone has. Making the clone
+/// complete between two Tasks changes nothing for the Session.
+async fn a_shallow_clone_runs_a_session_and_lands_its_branch(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let origin = root.join("origin");
+    repository(&origin, "app source\n").await?;
+    std::fs::write(origin.join("workspace.txt"), "app source v2\n")?;
+    git(&origin, &["commit", "--quiet", "-am", "Second"]).await?;
+    let url = format!("file://{}", origin.canonicalize()?.display());
+    git(root, &["clone", "--quiet", "--depth=1", &url, "app"]).await?;
+    let app = root.join("app");
+    let base = git(&app, &["rev-parse", "HEAD"]).await?;
+    assert_eq!(
+        std::fs::read_to_string(app.join(".git/shallow"))?.trim(),
+        base
+    );
+    let services = Services::start(&database, root).await?;
+    let cli = |args: &[&str]| services.cli(args);
+    json(cli(&[
+        "tag",
+        "put",
+        "builder",
+        "--instructions",
+        "Edit the repository",
+        "--allow",
+        "files:write",
+        "--workspace-id",
+        "app",
+        "--workspace-base",
+        &base,
+    ]))
+    .await?;
+    let state = root.join("host-state");
+    let run = |prompt: &'static str| {
+        let submit = cli(&[
+            "task",
+            "submit",
+            "--tag",
+            "builder",
+            "--session",
+            "work",
+            prompt,
+        ]);
+        let worker = services.worker(&state, Some(&services.host), &[("app", &app)]);
+        async {
+            let task = field(&json(submit).await?, "task_id")?.to_owned();
+            success(worker).await?;
+            let task = json(services.cli(&["get", "task", &task])).await?;
+            assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+            Ok::<_, anyhow::Error>(task)
+        }
+    };
+
+    let first = run("first").await?;
+    assert_eq!(first["result"], "first\nWorkspace before:\napp source v2\n");
+    let delivery = &first["workspace_delivery"];
+    assert_eq!(delivery["start_commit"], base.as_str(), "{first}");
+    let first_head = field(delivery, "head_commit")?.to_owned();
+    assert_ne!(first_head, base);
+    // The branch is in the clone, on top of the one commit the clone holds, and the clone is
+    // as shallow, as sound, and as untouched as it was.
+    let (branch, landed) = session_branch(&app).await?;
+    assert_eq!(landed, first_head);
+    assert_eq!(git(&app, &["rev-list", "--count", &branch]).await?, "2");
+    assert_eq!(
+        git(&app, &["show", &format!("{branch}:workspace.txt")]).await?,
+        "app source v2\nfirst"
+    );
+    assert_eq!(
+        std::fs::read_to_string(app.join(".git/shallow"))?.trim(),
+        base
+    );
+    git(&app, &["fsck", "--strict", "--no-dangling"]).await?;
+    assert_eq!(git(&app, &["rev-parse", "HEAD"]).await?, base);
+    assert_eq!(git(&app, &["status", "--porcelain"]).await?, "");
+
+    // The clone is made complete, and the Session's next Task continues its delivery.
+    git(&app, &["fetch", "--quiet", "--unshallow"]).await?;
+    ensure!(!app.join(".git/shallow").exists());
+    let second = run("second").await?;
+    assert_eq!(
+        second["result"],
+        "second\nWorkspace before:\napp source v2\nfirst\n"
+    );
+    let delivery = &second["workspace_delivery"];
+    assert_eq!(delivery["start_commit"], first_head.as_str(), "{second}");
+    let (_, landed) = session_branch(&app).await?;
+    assert_eq!(landed, field(delivery, "head_commit")?);
+    // Both of the origin's commits and the Session's two.
+    assert_eq!(git(&app, &["rev-list", "--count", &branch]).await?, "4");
+    git(&app, &["fsck", "--strict", "--no-dangling"]).await?;
+    Ok(())
+}
+
+/// A Workspace whose repository has a submodule: the Task's checkout holds an empty directory
+/// for it, the delivery changes the repository's own file and pins the submodule where it was,
+/// and the Task's result says that what it left in the submodule was not delivered.
+async fn a_repository_with_submodules_runs_a_task_and_keeps_their_pins(
+    database: String,
+) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let app = root.join("app");
+    let pinned = repository(&app, "app source\n").await?;
+    // A submodule, as the index records one: a commit of another repository at a path, and an
+    // address in `.gitmodules` that nothing may contact.
+    std::fs::write(
+        app.join(".gitmodules"),
+        "[submodule \"vendor/library\"]\n\tpath = vendor/library\n\turl = https://supertag.invalid/library.git\n",
+    )?;
+    git(&app, &["add", ".gitmodules"]).await?;
+    let entry = format!("160000,{pinned},vendor/library");
+    git(&app, &["update-index", "--add", "--cacheinfo", &entry]).await?;
+    git(&app, &["commit", "--quiet", "-m", "Add a submodule"]).await?;
+    let base = git(&app, &["rev-parse", "HEAD"]).await?;
+    let services = Services::start(&database, root).await?;
+    let cli = |args: &[&str]| services.cli(args);
+    json(cli(&[
+        "tag",
+        "put",
+        "builder",
+        "--instructions",
+        "Edit the repository",
+        "--allow",
+        "files:write",
+        "--workspace-id",
+        "app",
+        "--workspace-base",
+        &base,
+    ]))
+    .await?;
+    let prompt = "fill submodule vendor/library";
+    let task = json(cli(&[
+        "task",
+        "submit",
+        "--tag",
+        "builder",
+        "--session",
+        "first",
+        prompt,
+    ]))
+    .await?;
+    let task = field(&task, "task_id")?.to_owned();
+    let state = root.join("host-state");
+    success(services.worker(&state, Some(&services.host), &[("app", &app)])).await?;
+    let task = json(cli(&["get", "task", &task])).await?;
+    assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+    assert_eq!(
+        task["result"],
+        format!(
+            "{prompt}\nWorkspace before:\napp source\n\nSuperTag did not deliver what this Task left inside Git submodules (`vendor/library`). A delivery holds the repository's own files and keeps each submodule at the commit the repository pins."
+        )
+    );
+    let head = field(&task["workspace_delivery"], "head_commit")?.to_owned();
+    let (branch, landed) = session_branch(&app).await?;
+    assert_eq!(landed, head);
+    // The delivery holds the Task's edits to the repository's own files and nothing else.
+    assert_eq!(
+        git(&app, &["diff", "--name-only", &base, &branch]).await?,
+        "artifact.bin\nworkspace.txt"
+    );
+    assert_eq!(
+        git(&app, &["ls-tree", &branch, "vendor/library"]).await?,
+        format!("160000 commit {pinned}\tvendor/library")
+    );
+    assert_eq!(
+        git(&app, &["ls-tree", &branch, "vendor/library"]).await?,
+        git(&app, &["ls-tree", &base, "vendor/library"]).await?
+    );
+    assert_eq!(git(&app, &["rev-parse", "HEAD"]).await?, base);
     Ok(())
 }
 

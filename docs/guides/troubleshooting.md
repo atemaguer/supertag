@@ -280,10 +280,8 @@ SuperTag refuses some repositories, and the cause says which and what to do:
 
 | The repository | What to do |
 | --- | --- |
-| is a shallow clone | Run `git fetch --unshallow` in it. |
 | is a partial clone, made with `git clone --filter` | Use a full clone, or run `git fetch --refetch --no-filter` in it. |
 | borrows objects from another repository, as `git clone --shared` makes | Run `git repack -a -d` in it, then delete `.git/objects/info/alternates`. |
-| has a Git submodule | SuperTag does not support repositories with submodules yet. |
 | tracks a symbolic link that points outside the repository | Remove the link or point it inside the repository. |
 | tracks a file whose name is not UTF-8, has a backslash, or has `.git` as a part | Rename the file. |
 | tracks two paths that differ only by letter case, on a disk that cannot hold both | Keep SuperTag's state directory on a case-sensitive volume, or rename one path. |
@@ -291,6 +289,12 @@ SuperTag refuses some repositories, and the cause says which and what to do:
 
 A checkout holds each file exactly as Git stores it. SuperTag does not apply the repository's
 line-ending, encoding, or filter attributes, so a file kept with Git LFS is its pointer file.
+
+A shallow clone and a repository with submodules both prepare. A submodule is an empty directory
+in the checkout; see
+[Shallow clones and submodules](workspaces.md#shallow-clones-and-submodules). A remote Workspace
+whose git server is itself a shallow clone is still refused: run `git fetch --unshallow` in the
+repository the server serves.
 
 A failed delivery says `Workspace output could not be captured safely` and its cause the same
 way.

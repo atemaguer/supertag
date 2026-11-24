@@ -281,6 +281,34 @@ pub struct Delivery {
     pub patch_sha256: String,
     pub bundle_path: PathBuf,
     pub bundle_sha256: String,
+    /// Submodule paths where the Task left something other than the empty directory it was
+    /// given. None of it is delivered: the commit pins each submodule where the start commit does.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignored_submodules: Vec<String>,
+}
+
+impl Delivery {
+    /// What to tell whoever reads the Task's result about [`Self::ignored_submodules`]; `None`
+    /// when the Task left every submodule directory empty.
+    pub fn submodule_note(&self) -> Option<String> {
+        const SHOWN: usize = 10;
+        if self.ignored_submodules.is_empty() {
+            return None;
+        }
+        let mut named: Vec<String> = self
+            .ignored_submodules
+            .iter()
+            .take(SHOWN)
+            .map(|path| format!("`{path}`"))
+            .collect();
+        if self.ignored_submodules.len() > SHOWN {
+            named.push(format!("{} more", self.ignored_submodules.len() - SHOWN));
+        }
+        Some(format!(
+            "SuperTag did not deliver what this Task left inside Git submodules ({}). A delivery holds the repository's own files and keeps each submodule at the commit the repository pins.",
+            named.join(", ")
+        ))
+    }
 }
 
 #[derive(Clone)]
@@ -312,6 +340,10 @@ struct Preparation {
     setup_outputs: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     merge: Option<PreparedMerge>,
+    /// The commit each submodule path pins in the tree the checkout started with. The checkout
+    /// holds an empty directory at each, and the delivery pins the same commits.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    submodules: BTreeMap<String, String>,
 }
 
 /// A Session's last delivered checkout, kept for its next Attempt on this host.
@@ -480,6 +512,7 @@ impl Workspace {
                 ready: false,
                 setup_outputs: Vec::new(),
                 merge: None,
+                submodules: BTreeMap::new(),
             },
         };
         atomic_json(&record_path, &preparation)?;
@@ -509,12 +542,23 @@ impl Workspace {
         let entries = repository
             .tree(merged_tree.as_deref().unwrap_or(&start), cancel)
             .await?;
-        for entry in entries.values() {
-            paths::validate_repo_path(&entry.path)?;
-            ensure!(
-                entry.mode != "160000",
-                "submodules require an explicit workspace implementation"
-            );
+        for path in entries.files.keys().chain(entries.submodules.keys()) {
+            paths::validate_repo_path(path)?;
+        }
+        if let Some(merge) = merge.as_ref().filter(|merge| !merge.conflicts.is_empty()) {
+            // A submodule's two sides are commits of a repository SuperTag does not hold, and a
+            // Task cannot change which one is pinned.
+            let pinned = repository.tree(&start, cancel).await?.submodules;
+            if let Some(path) = merge
+                .conflicts
+                .iter()
+                .find(|path| entries.submodules.contains_key(*path) || pinned.contains_key(*path))
+            {
+                return Err(Refusal(format!(
+                    "merging the target into the Session conflicts in the Git submodule at `{path}`, and a Task cannot change which commit a submodule pins. Merge the Session's branch by hand"
+                ))
+                .into());
+            }
         }
         // The Session's previous checkout on this host, if it holds exactly where this Attempt
         // starts, is moved here instead of written again.
@@ -563,6 +607,7 @@ impl Workspace {
             git::copy_packs(&checkout.path.join(".git/objects/pack"), &trusted)?;
         }
         preparation.merge = merge;
+        preparation.submodules = entries.submodules.clone();
         preparation.setup_outputs = match held {
             None => reused.unwrap_or_default(),
             Some(held) => {
@@ -626,16 +671,19 @@ impl Workspace {
         transfer::require_restored(&record_dir)?;
         paths::verify_directory(&checkout.path)?;
         let repository = self.repository(cancel).await?;
-        let base_tree = repository.tree(&checkout.start_commit, cancel).await?;
-        // Everything in the checkout but setup outputs: the tracked files and what the turn
-        // added, whether or not Git ignores it. Listing it runs off the async runtime.
+        let base_tree = repository.tree(&checkout.start_commit, cancel).await?.files;
+        // Everything in the checkout but setup outputs and submodule directories: the tracked
+        // files and what the turn added, whether or not Git ignores it. Listing it runs off the
+        // async runtime. Nothing under a submodule's path is listed, read, or delivered,
+        // whatever the turn put there, such as the submodule's own checkout.
         let all_files = {
-            let (root, skip, maximum, cancel) = (
+            let (root, mut skip, maximum, cancel) = (
                 checkout.path.clone(),
                 prior.setup_outputs.clone(),
                 base_tree.len().saturating_add(MAX_ADDED_FILES),
                 cancel.clone(),
             );
+            skip.extend(prior.submodules.keys().cloned());
             tokio::task::spawn_blocking(move || paths::scan(&root, &skip, maximum, &cancel))
                 .await
                 .context("workspace capture stopped")?
@@ -647,6 +695,7 @@ impl Workspace {
                     Err(error) => error,
                 })?
         };
+        let ignored_submodules = left_in_submodules(&checkout.path, &prior.submodules, &all_files)?;
         let output_prefix = request
             .output_directory
             .as_ref()
@@ -802,7 +851,16 @@ impl Workspace {
                 unresolved.join(", ")
             );
         }
-        let tree = repository.write_tree(&entries, cancel).await?;
+        let tree = repository
+            .write_tree(&entries, &prior.submodules, cancel)
+            .await?;
+        if !prior.submodules.is_empty() {
+            // Whatever the checkout held, the delivered tree pins exactly what it started with.
+            ensure!(
+                repository.tree(&tree, cancel).await?.submodules == prior.submodules,
+                "the captured tree changed a submodule"
+            );
+        }
         let original_tree = repository.tree_oid(&checkout.start_commit, cancel).await?;
         let committed = tree != original_tree || prior.merge.is_some();
         let mut parents = vec![checkout.start_commit.as_str()];
@@ -875,6 +933,7 @@ impl Workspace {
             patch_sha256: sha256(&patch),
             bundle_path: artifacts.join("changes.bundle"),
             bundle_sha256,
+            ignored_submodules,
         };
         atomic_json(
             &record_dir.join("finalize.json"),
@@ -1083,7 +1142,12 @@ impl Workspace {
         git::validate_oid(commit)?;
         let repository = self.repository(cancel).await?;
         repository
-            .import_from_source(&self.inner.config.source, commit, cancel)
+            .import_from_source(
+                &self.inner.config.source,
+                commit,
+                git::ShallowSource::Adopted,
+                cancel,
+            )
             .await?;
         repository.sync()?;
         Ok(())
@@ -1329,7 +1393,7 @@ impl Workspace {
         repository: &git::Repository,
         request: &PrepareRequest,
         (checkout, start, trusted): (&Checkout, &str, &Path),
-        entries: &BTreeMap<String, git::TreeEntry>,
+        entries: &git::Tree,
         cancel: &CancellationToken,
     ) -> Option<Vec<String>> {
         let slot = self
@@ -1392,6 +1456,7 @@ impl Workspace {
             &self.inner.root,
             &self.inner.config.source,
             &self.inner.config.base_commit,
+            git::ShallowSource::Adopted,
             cancel,
         )
         .await
@@ -1714,6 +1779,36 @@ fn verify_bundle_head(bytes: &[u8], head: &str, reference: &str) -> Result<()> {
         "bundle does not bind the delivered commit to its receipt"
     );
     Ok(())
+}
+
+/// The submodule paths where the checkout holds something other than the empty directory it
+/// started with: files, the submodule's own checkout, or a file or link in the directory's place.
+/// None of it is delivered. A removed directory is not listed, as nothing was left in it.
+///
+/// A file or link where a directory on the way to a submodule was cannot be delivered beside
+/// the submodule, and dropping either silently is not safe, so it is refused by name.
+fn left_in_submodules(
+    checkout: &Path,
+    submodules: &BTreeMap<String, String>,
+    all_files: &BTreeMap<String, String>,
+) -> Result<Vec<String>> {
+    let mut left = Vec::new();
+    for path in submodules.keys() {
+        let mut above = path.as_str();
+        while let Some((parent, _)) = above.rsplit_once('/') {
+            if all_files.contains_key(parent) {
+                return Err(Refusal(format!(
+                    "the Task replaced `{parent}`, the directory that holds the Git submodule `{path}`, with a file, and a delivery cannot remove a submodule. Have the Tag restore the directory"
+                ))
+                .into());
+            }
+            above = parent;
+        }
+        if paths::directory_content(checkout, path)? == paths::Content::Other {
+            left.push(path.clone());
+        }
+    }
+    Ok(left)
 }
 
 /// Every added, modified, or deleted path a completed Attempt delivers must be writable in its
