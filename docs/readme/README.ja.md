@@ -174,7 +174,7 @@ TypeScript SDK（npm の `supertag-ai`）と Python SDK（PyPI の `supertag`）
 
 ```sh
 npm install supertag-ai
-python -m pip install 'supertag==0.3.12'
+python -m pip install 'supertag==0.3.13'
 ```
 
 [harness アダプターを書く](../../docs/guides/harness-adapters.md) · [独自のコラボレーションサーフェスを接続する](../../docs/reference/connector-contract.md) · [API の安定性を確認する](../../docs/reference/api-stability.md)

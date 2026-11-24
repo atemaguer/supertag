@@ -9,6 +9,8 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.3.13] - 2026-11-24
+
 ### Added
 
 - A local Workspace can be a shallow clone, such as `git clone --depth 1` makes, and can have
@@ -1816,7 +1818,8 @@ within the pre-1.0 compatibility policy described in
 - Gateway control-plane support and Slack, GitHub, Linear, Microsoft Teams,
   and Lark Surfaces.
 
-[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.12...HEAD
+[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.13...HEAD
+[0.3.13]: https://github.com/atemaguer/supertag/compare/v0.3.12...v0.3.13
 [0.3.12]: https://github.com/atemaguer/supertag/compare/v0.3.11...v0.3.12
 [0.3.11]: https://github.com/atemaguer/supertag/compare/v0.3.10...v0.3.11
 [0.3.10]: https://github.com/atemaguer/supertag/compare/v0.3.9...v0.3.10
