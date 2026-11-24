@@ -178,7 +178,7 @@ supertag message lead "/goal Add a test for an uncovered edge case. Done when th
 
 Un lead con Codex ejecuta las pruebas. Un lead con Claude Code configurado sin Docker y sin la
 opción explícita de ejecución sin sandbox lee y edita archivos, pero no ejecuta comandos, así que
-informa de esa condición como no comprobada; consulta
+no puede ejecutar las pruebas e informa de la condición «Done when» como no comprobada; consulta
 [Permite que el lead ejecute comandos](../../docs/operations/cli.md#let-the-lead-run-commands).
 
 `supertag get inbox-item` enumera las preguntas que te hace el Tag; responde a una con

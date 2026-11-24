@@ -176,7 +176,8 @@ supertag message lead "/goal Add a test for an uncovered edge case. Done when th
 
 Codex kullanan bir lead testleri çalıştırır. Docker olmadan ve sandbox'sız çalışma açıkça
 etkinleştirilmeden kurulmuş, Claude Code kullanan bir lead ise dosyaları okur ve düzenler ama komut
-çalıştırmaz; bu yüzden o koşulu doğrulanmamış olarak bildirir. Bkz.
+çalıştırmaz; bu yüzden testleri çalıştıramaz ve
+"Done when" koşulunu doğrulanmamış olarak bildirir. Bkz.
 [lead'in komut çalıştırmasına izin verin](../../docs/operations/cli.md#let-the-lead-run-commands).
 
 `supertag get inbox-item`, Tag'in size sorduğu soruları listeler; birini

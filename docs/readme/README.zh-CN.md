@@ -117,7 +117,7 @@ supertag message lead "Read this repository and tell me what you would improve f
 supertag message lead "/goal Add a test for an uncovered edge case. Done when the new test and its suite pass. Ask me before changing application code."
 ```
 
-运行在 Codex 上的 lead 会运行这些测试。运行在 Claude Code 上的 lead 如果在设置时既没有启用 Docker，也没有选择启用无沙箱模式，就只能读取和编辑文件，不能运行命令，因此它会把这项条件报告为未检查；参见[让 lead 运行命令](../../docs/operations/cli.md#let-the-lead-run-commands)。
+运行在 Codex 上的 lead 会运行这些测试。运行在 Claude Code 上的 lead 如果在设置时既没有启用 Docker，也没有选择启用无沙箱模式，就只能读取和编辑文件，不能运行命令，因此它无法运行这些测试，会把“Done when”这项条件报告为未检查；参见[让 lead 运行命令](../../docs/operations/cli.md#let-the-lead-run-commands)。
 
 `supertag get inbox-item` 会列出 Tag 向你提出的问题，用 `supertag question answer TASK_ID "..."` 回答其中一个。Objective 准备就绪后，`supertag status` 会把它显示为 `review`。每一项交付的变更都会以 `supertag/session/...` 分支的形式出现在你的仓库中。评审之后，批准这个 Objective 或要求修改：
 

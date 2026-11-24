@@ -165,7 +165,8 @@ supertag message lead "/goal Add a test for an uncovered edge case. Done when th
 ```
 
 Codex 기반 lead는 테스트를 실행합니다. Docker나 샌드박스 없는 실행에 대한 옵트인 없이 설정한 Claude Code
-기반 lead는 파일을 읽고 편집하지만 명령은 실행하지 않으므로, 해당 완료 조건을 미확인으로 보고합니다.
+기반 lead는 파일을 읽고 편집하지만 명령은 실행하지 않으므로, 테스트를 실행하지 못하고
+"Done when" 조건을 미확인으로 보고합니다.
 [lead가 명령을 실행하게 하기](../../docs/operations/cli.md#let-the-lead-run-commands)를 참고하세요.
 
 `supertag get inbox-item`은 Tag가 여러분에게 한 질문을 나열합니다. 질문에는

@@ -116,7 +116,7 @@ supertag message lead "Read this repository and tell me what you would improve f
 supertag message lead "/goal Add a test for an uncovered edge case. Done when the new test and its suite pass. Ask me before changing application code."
 ```
 
-Codex の lead はテストを実行します。Docker も、サンドボックスなしでの実行のオプトインも設定していない Claude Code の lead は、ファイルの読み取りと編集はできてもコマンドを実行しないため、この完了条件を未確認として報告します。詳しくは[lead にコマンドを実行させる](../../docs/operations/cli.md#let-the-lead-run-commands)を参照してください。
+Codex の lead はテストを実行します。Docker も、サンドボックスなしでの実行のオプトインも設定していない Claude Code の lead は、ファイルの読み取りと編集はできてもコマンドを実行しないため、テストを実行できず、「Done when」の条件を未確認として報告します。詳しくは[lead にコマンドを実行させる](../../docs/operations/cli.md#let-the-lead-run-commands)を参照してください。
 
 `supertag get inbox-item` は、Tag からあなたへの質問を一覧表示します。回答するには`supertag question answer TASK_ID "..."` を使います。Objective の準備が整うと、`supertag status` に`review` と表示されます。届けられた変更はそれぞれ、`supertag/session/...` ブランチとしてあなたのリポジトリに入ります。内容をレビューしたら、Objective を承認するか、修正を依頼します。
 

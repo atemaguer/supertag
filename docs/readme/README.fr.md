@@ -181,7 +181,7 @@ supertag message lead "/goal Add a test for an uncovered edge case. Done when th
 
 Un lead sous Codex lance les tests. Un lead sous Claude Code configuré sans Docker ni l'option
 explicite d'exécution hors sandbox lit et modifie les fichiers mais n'exécute aucune commande ; il
-signale donc cette condition comme non vérifiée. Voir
+ne peut donc pas lancer les tests et signale la condition « Done when » comme non vérifiée. Voir
 [Autoriser le lead à exécuter des commandes](../../docs/operations/cli.md#let-the-lead-run-commands).
 
 `supertag get inbox-item` liste les questions que le Tag vous pose ; répondez à l'une d'elles avec
