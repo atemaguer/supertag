@@ -13,7 +13,7 @@
 
 **작업이 아니라 직무를 맡기세요.**
 
-[작업이 아닌 직무](#give-them-jobs-not-tasks) · [지속성](#persistent) · [능동성](#proactive) · [멀티플레이어](#multiplayer) · [첫 Tag 실행하기](#run-your-first-tag) · [직접 만들기](#build-your-own) · [직접 운영하기](#run-it-yourself) · [문서](../../docs/README.md)
+[작업이 아닌 직무](#give-them-jobs-not-tasks) · [지속성](#persistent) · [능동성](#proactive) · [멀티플레이어](#multiplayer) · [배포 하나로 운영할 수 있는 것](#what-a-deployment-can-run) · [첫 Tag 실행하기](#run-your-first-tag) · [직접 만들기](#build-your-own) · [직접 운영하기](#run-it-yourself) · [문서](../../docs/README.md)
 
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.ko.webp" alt="Tag들을 소개합니다 — 둥글거나 길쭉한 체형에 알록달록한 재킷, 모자, 안경을 걸친 아홉 SuperTag 마스코트" width="900" height="360">
@@ -32,7 +32,7 @@ SuperTag는 두 가지를 제공합니다.
   항상 대기하고, 지난 작업을 기억하고, 시키지 않아도 움직이며, 팀과 함께 일하는 팀원입니다. Tag는
   여러분의 코딩 에이전트와 머신에서 실행되며, 여러분이 허용한 일만 합니다.
 - **직접 만들기 위한 기반.** 같은 능력을 여러분이 운영하고 통제하는 인프라로 제공하므로, 여러분만의
-  제품이나 도구에 쓸 수 있습니다. [직접 만들기](#build-your-own)를 참고하세요.
+  제품에, 또는 마케팅이나 영업 같은 다른 부서에 쓸 수 있습니다. [직접 만들기](#build-your-own)를 참고하세요.
 
 <a name="give-them-jobs-not-tasks"></a>
 
@@ -139,6 +139,42 @@ API로 알림과 보고를 Objective에 전달하거나, Slack, GitHub, Linear�
 
 [멀티플레이어의 동작 방식](../../docs/concepts/multiplayer.md) · [SuperTag 셀프 호스팅하기](../../docs/guides/self-hosting.md)
 
+<a name="what-a-deployment-can-run"></a>
+
+## 배포 하나로 운영할 수 있는 것
+
+지속성, 능동적인 작업, 팀워크를 한데 모으면, 셀프 호스팅한 SuperTag 하나로 자율적인 엔지니어링 조직을
+운영할 수 있습니다. 이 조직은 자체 부서, 팀, 책임을 갖추고 있으며, 여러분은 그 수장으로서 조직을
+지휘합니다.
+
+조직도를 그리듯이 설정에 조직을 기술합니다.
+
+```text
+you
+ └─ lead                     takes your outcomes, splits them across teams, reports with evidence
+     ├─ platform team        platform-lead, infra-builder              on Codex, on a server
+     ├─ product team         product-lead, web-builder, api-builder     on Claude Code, on laptops
+     ├─ reliability          reliability, support                      always on
+     ├─ release              release-manager                            ships when you approve
+     └─ shared specialists   reviewer, security-reviewer, verifier
+```
+
+- **부서마다 Role.** 각 Role에는 지침, 기준, 모델, 권한이 담깁니다. 빌더는 코드를 편집하고 명령을
+  실행하며, 리뷰어는 읽기만 하고, 릴리스 매니저는 여러분의 승인 없이는 릴리스할 수 없습니다.
+- **하위 부서마다 Team.** 각 Team에는 자체 Workstream이 있습니다. Team 리드들은 서로 메시지를 주고받으며
+  여러분 없이 세부 사항을 정리합니다.
+- **위에서 아래로 흐르는 성과.** 예산과 기한을 붙여 lead에게 성과를 맡기세요. lead는 일을 여러 Team에
+  나누고, 각 Team은 리뷰와 전체 테스트 실행을 거쳐 자기 몫을 전달하며, lead가 그 증거를 여러분에게
+  가져옵니다.
+- **끝나지 않는 책임.** reliability는 새 오류와 실패한 빌드마다 스스로 대응하고, 보안 담당은 자격 증명을
+  건드리는 모든 변경을 리뷰하며, 릴리스 매니저는 매주 릴리스를 준비합니다.
+- **사람이 개입할 지점은 여러분이 정합니다.** 병합, 릴리스, 예산, 그리고 여러분이 고른 모든 동작에
+  승인을 둡니다. 나머지는 조직이 알아서 처리합니다.
+
+SuperTag는 모든 Tag를 계속 실행하고, 각 Role의 한계를 지키게 하며, 누가 무엇을 왜 했는지 기록하고,
+여러분이 내려야 할 결정을 하나의 받은편지함에 모아 줍니다.
+[자율 엔지니어링 조직 구성하기](../../docs/guides/engineering-organization.md)
+
 <a name="get-started"></a>
 
 <a name="run-your-first-tag"></a>
@@ -199,21 +235,32 @@ supertag objective review OBJECTIVE_ID request-changes --feedback "Also cover th
 
 ## 직접 만들기
 
-지금까지 설명한 지속성, 능동적인 작업, 팀워크는 모두 SuperTag 자체의 인프라이며, 그 위에 어떤
-용도로든 무언가를 만들 수 있습니다. 팀의 Slack에 지원 어시스턴트를 두고 싶다고 해 봅시다. 이
-어시스턴트는 문서를 바탕으로 서비스에 관한 질문에 답하고, 실제 버그에는 이슈를 열고, 고객마다 이력을
-기억하며, 매일 아침 아무도 답하지 않은 티켓이 있는지 확인합니다. 이것을 처음부터 작성할 필요는
-없습니다. SuperTag 설정에 설명하면 됩니다.
+이 중 어느 것도 엔지니어링에만 해당하지 않습니다. Tag, Role, Team, Objective, 권한, 메모리, 일정, 승인은
+조직의 어떤 부서에도 쓸 수 있습니다. 그 부서에 맞는 Role, 도구, 이벤트를 고르면 같은 인프라가 그 부서를
+운영합니다.
 
-- **누구인가.** 고유한 이름, 지침, 메모리를 갖고 Claude Code, Codex, Cursor, OpenCode에서 실행되는
-  Tag.
-- **무엇을 할 수 있는가.** 동작마다의 권한, 그리고 어떤 동작이 사람의 승인을 기다리는지.
-- **언제 움직이는가.** 일정, 메시지, 또는 여러분의 시스템이 보내는 이벤트.
-- **사람들이 어디서 찾는가.** Slack, GitHub, Linear, Lark/Feishu, Microsoft Teams, 또는 터미널.
-- **누구와 일하는가.** 같은 팀의 다른 Tag. 메시지를 주고받고 기록을 공유할 수 있습니다.
+마케팅을 이런 방식으로 운영하고 싶다고 해 봅시다.
 
-SuperTag는 어시스턴트를 계속 실행하고, 무엇을 했는지 기억하고, 한계를 지키게 하며, 모든 동작을
-기록합니다.
+```text
+you (head of marketing)
+ └─ marketing-lead         owns campaign outcomes, reports weekly with the numbers
+     ├─ content             drafts posts, docs pages, and release notes in your voice
+     ├─ product-marketing   turns each release from engineering into launch copy
+     ├─ growth              reads traffic and signup numbers, proposes and tracks experiments
+     ├─ social              drafts launch posts, publishes only when you approve
+     └─ research            watches competitors and customer conversations, briefs the team
+```
+
+- **부서마다 Role.** 각 Role에는 그 부서의 어조, 브랜드 규칙, 내세워도 되는 주장이 담깁니다. 여러분의
+  승인 없이는 아무것도 게시되지 않고, 돈도 쓰이지 않습니다.
+- **리뷰를 위해 돌아오는 작업.** 콘텐츠는 코드와 마찬가지로 웹사이트나 문서 저장소의 브랜치로 도착합니다.
+- **끝나지 않는 책임.** 수치를 담은 주간 보고서, 경쟁사에 대한 꾸준한 관찰, 릴리스마다 준비하는 출시 문구.
+- **여러분의 시스템에서 오는 이벤트.** 릴리스, 분석 데이터, 고객 대화가 일어나는 즉시 알맞은 Tag에
+  전달됩니다.
+- **부서를 아우르는 하나의 조직.** 엔지니어링의 릴리스 매니저가 릴리스를 내보내면, 같은 Control Plane
+  위에서 프로덕트 마케팅에 직접 알립니다.
+
+같은 구성 요소로 영업, 고객 지원, 재무 운영, 채용, 리서치도 운영할 수 있습니다.
 
 더 나아가려면 그 위에 여러분만의 인터페이스를 얹으세요. Control Plane의 gRPC API를 쓰면
 애플리케이션에서 Tag를 만들고 지시하고, 일을 보내고, 진행 상황을 살펴볼 수 있으며, 생성된 Go,
@@ -227,7 +274,7 @@ npm install supertag-ai
 python -m pip install 'supertag==0.3.13'
 ```
 
-[지원 어시스턴트 단계별로 만들기](../../docs/guides/build-your-own.md) · [harness 어댑터 작성하기](../../docs/guides/harness-adapters.md) · [자체 협업 서피스 연결하기](../../docs/reference/connector-contract.md) · [API 안정성 확인하기](../../docs/reference/api-stability.md)
+[직접 조직 만들기: 마케팅](../../docs/guides/build-your-own.md) · [harness 어댑터 작성하기](../../docs/guides/harness-adapters.md) · [자체 협업 서피스 연결하기](../../docs/reference/connector-contract.md) · [API 안정성 확인하기](../../docs/reference/api-stability.md)
 
 <a name="run-it-yourself"></a>
 
@@ -289,9 +336,9 @@ SuperTag는 Apache 2.0 라이선스의 오픈 소스이며, 기본 제공되는 
 노트북이 꺼져 있어도 일이 계속되어야 한다면, Control Plane을 배포하고 항상 온라인 상태인 Worker Host를
 연결하세요. [SuperTag 셀프 호스팅하기](../../docs/guides/self-hosting.md)
 
-**SuperTag는 엔지니어링 업무 전용인가요?** Tag, 예제, git 브랜치를 통한 전달은 엔지니어링 업무를
-위해 만들어졌습니다. 그 아래의 인프라는 어떤 종류의 일에도 쓸 수 있습니다.
-[직접 만들기](#build-your-own)에서처럼 그 위에 여러분만의 어시스턴트를 만들 수 있습니다.
+**SuperTag는 엔지니어링 업무 전용인가요?** 아닙니다. 기본 제공 Tag, 예제, git 브랜치를 통한 전달은
+엔지니어링 업무에서 출발하지만, 인프라는 어떤 부서에도 쓸 수 있습니다. [직접 만들기](#build-your-own)에서처럼
+그 위에서 마케팅, 영업, 지원을 운영할 수 있습니다.
 
 ## 기여와 라이선스
 

@@ -13,7 +13,7 @@ Açık kaynak, kendi altyapınızda, zaten kullandığınız kodlama ajanların�
 
 **Onlara görev değil, iş verin.**
 
-[Görev değil, iş](#give-them-jobs-not-tasks) · [Kalıcı](#persistent) · [Proaktif](#proactive) · [Çok kullanıcılı](#multiplayer) · [İlk Tag'inizi çalıştırın](#run-your-first-tag) · [Kendinizinkini oluşturun](#build-your-own) · [Kendiniz çalıştırın](#run-it-yourself) · [Dokümantasyon](../../docs/README.md)
+[Görev değil, iş](#give-them-jobs-not-tasks) · [Kalıcı](#persistent) · [Proaktif](#proactive) · [Çok kullanıcılı](#multiplayer) · [Bir kurulum neleri çalıştırabilir](#what-a-deployment-can-run) · [İlk Tag'inizi çalıştırın](#run-your-first-tag) · [Kendinizinkini oluşturun](#build-your-own) · [Kendiniz çalıştırın](#run-it-yourself) · [Dokümantasyon](../../docs/README.md)
 
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.tr.webp" alt="Tag'lerle tanışın: yuvarlak ve uzun gövdeli, renkli ceketli, şapkalı ve gözlüklü dokuz SuperTag maskotu" width="900" height="360">
@@ -32,8 +32,8 @@ SuperTag size iki şey sunar:
   dots ve Grok Bot'un sunduğu şey: her zaman ulaşılabilen, geçmiş işleri hatırlayan, kimse
   istemeden harekete geçen ve ekibinizle birlikte çalışan ekip arkadaşları. Tag'ler kendi kodlama
   ajanlarınızda ve makinelerinizde çalışır, yalnızca izin verdiğinizi yapar.
-- **Kendinizinkini oluşturmak için bir temel.** Aynı yetenekler, kendi ürününüz veya aracınız
-  için sizin çalıştırıp denetlediğiniz bir altyapı olarak. Bkz.
+- **Kendinizinkini oluşturmak için bir temel.** Aynı yetenekler, kendi ürününüz ya da pazarlama veya
+  satış gibi başka bir işlev için sizin çalıştırıp denetlediğiniz bir altyapı olarak. Bkz.
   [Kendinizinkini oluşturun](#build-your-own).
 
 <a name="give-them-jobs-not-tasks"></a>
@@ -150,6 +150,44 @@ makinesinde Codex ile çalışan bir Tag'le aynı Objective için birlikte çal�
 
 [Çok kullanıcılı çalışma nasıl işler](../../docs/concepts/multiplayer.md) · [SuperTag'i kendi altyapınızda barındırın](../../docs/guides/self-hosting.md)
 
+<a name="what-a-deployment-can-run"></a>
+
+## Bir kurulum neleri çalıştırabilir
+
+Kalıcılığı, proaktif çalışmayı ve ekip çalışmasını bir araya getirin; kendi altyapınızda
+barındırdığınız tek bir SuperTag, kendi işlevleri, ekipleri ve sorumlulukları olan özerk bir
+mühendislik organizasyonunu çalıştırabilir. Siz de onu başındaki kişi gibi yönetirsiniz.
+
+Organizasyonu, bir organizasyon şeması çizer gibi yapılandırmada tarif edersiniz:
+
+```text
+you
+ └─ lead                     takes your outcomes, splits them across teams, reports with evidence
+     ├─ platform team        platform-lead, infra-builder              on Codex, on a server
+     ├─ product team         product-lead, web-builder, api-builder     on Claude Code, on laptops
+     ├─ reliability          reliability, support                      always on
+     ├─ release              release-manager                            ships when you approve
+     └─ shared specialists   reviewer, security-reviewer, verifier
+```
+
+- **Her işlev için bir Role.** Her Role kendi talimatlarını, standartlarını, modellerini ve
+  izinlerini taşır. Geliştiriciler kodu düzenler ve komut çalıştırır, inceleyiciler yalnızca okur,
+  sürüm yöneticisi de onayınız olmadan hiçbir şey yayımlayamaz.
+- **Her alt işlev için bir ekip.** Her ekibin kendi Workstream'i vardır. Ekip liderleri
+  birbirleriyle mesajlaşır ve ayrıntıları size danışmadan çözer.
+- **Yukarıdan aşağı akan sonuçlar.** Lidere bütçesi ve son tarihi olan bir sonuç verin. Lider işi
+  ekiplere böler, her ekip kendi payını inceleme ve eksiksiz bir test çalıştırmasıyla teslim eder,
+  lider de kanıtları size getirir.
+- **Hiç bitmeyen sorumluluklar.** Güvenilirlik her yeni hataya ve kırmızıya dönen her derlemeye
+  kendiliğinden müdahale eder, güvenlik kimlik bilgilerine dokunan her değişikliği inceler, sürüm
+  yöneticisi de her hafta bir sürüm hazırlar.
+- **İnsanların nerede devrede kalacağına siz karar verirsiniz.** Birleştirmeler, sürümler,
+  bütçeler ve seçtiğiniz her eylem için onaylar. Geri kalan her şeyi organizasyon halleder.
+
+SuperTag her Tag'i çalışır durumda tutar, her Role'ün sınırlarını uygular, kimin neyi neden
+yaptığını kaydeder ve size ait kararlar için tek bir gelen kutusu sunar.
+[Özerk bir mühendislik organizasyonu kurun](../../docs/guides/engineering-organization.md)
+
 <a name="get-started"></a>
 
 <a name="run-your-first-tag"></a>
@@ -212,26 +250,35 @@ kendi `supertag` kopyasıyla gelir, ilk açılışta SuperTag'i kurar ve aynı T
 
 ## Kendinizinkini oluşturun
 
-Yukarıdaki her şey, yani kalıcılık, proaktif çalışma ve ekip çalışması, SuperTag'in kendi
-altyapısıdır ve bunun üzerine her kullanım senaryosu için bir şey kurabilirsiniz. Diyelim ki
-ekibinizin Slack'inde bir destek asistanı istiyorsunuz. Servisinizle ilgili soruları
-dokümantasyonunuza dayanarak yanıtlıyor, gerçek hatalar için issue açıyor, her müşterinin
-geçmişini hatırlıyor ve her sabah kimsenin yanıtlamadığı talepleri kontrol ediyor. Bunu sıfırdan
-yazmazsınız. SuperTag'in yapılandırmasında tarif edersiniz:
+Bunların hiçbiri mühendisliğe özgü değildir. Tag'ler, Role'ler, Team'ler, Objective'ler, izinler,
+bellek, zamanlamalar ve onaylar organizasyonunuzdaki her işlev için çalışır. İşlev için Role'leri,
+araçları ve olayları seçin; aynı altyapı onu çalıştırır.
 
-- **Kim olduğu.** Kendi adı, talimatları ve belleği olan, Claude Code, Codex, Cursor veya
-  OpenCode üzerinde çalışan bir Tag.
-- **Neler yapabileceği.** Her eylem için izinler ve bunlardan hangilerinin bir kişinin onayını
-  beklediği.
-- **Ne zaman harekete geçtiği.** Bir zamanlama, bir mesaj veya kendi sistemlerinizin ona
-  gönderdiği bir olay.
-- **İnsanların ona nereden ulaştığı.** Slack, GitHub, Linear, Lark/Feishu, Microsoft Teams veya
-  terminal.
-- **Kimlerle çalıştığı.** Ekibindeki, mesajlaşabildiği ve ortak bir kaydı paylaştığı diğer
-  Tag'ler.
+Diyelim ki pazarlamayı bu şekilde yürütmek istiyorsunuz:
 
-SuperTag onu çalışır durumda tutar, ne yaptığını hatırlar, sınırlarını uygular ve her eylemini
-kaydeder.
+```text
+you (head of marketing)
+ └─ marketing-lead         owns campaign outcomes, reports weekly with the numbers
+     ├─ content             drafts posts, docs pages, and release notes in your voice
+     ├─ product-marketing   turns each release from engineering into launch copy
+     ├─ growth              reads traffic and signup numbers, proposes and tracks experiments
+     ├─ social              drafts launch posts, publishes only when you approve
+     └─ research            watches competitors and customer conversations, briefs the team
+```
+
+- **Her işlev için bir Role.** Her biri işlevin üslubunu, marka kurallarını ve neyi iddia
+  edebileceğini taşır. Onayınız olmadan hiçbir şey yayımlanmaz ve hiç para harcanmaz.
+- **İncelemeniz için geri getirilen işler.** İçerik, tıpkı kod gibi, web sitenizin veya
+  dokümantasyonunuzun deposuna dal olarak gelir.
+- **Hiç bitmeyen sorumluluklar.** Rakamlarla haftalık bir rapor, rakiplerin sürekli takibi ve her
+  sürüm için lansman metinleri.
+- **Kendi sistemlerinizden gelen olaylar.** Sürümler, analitik verileri ve müşteri görüşmeleri
+  gerçekleştikleri anda doğru Tag'e ulaşır.
+- **İşlevler arasında tek bir organizasyon.** Mühendisliğin sürüm yöneticisi bir sürüm
+  yayımladığında bunu aynı Control Plane üzerinden doğrudan ürün pazarlamasına bildirir.
+
+Aynı yapı taşları satışı, müşteri desteğini, finans operasyonlarını, işe alımı veya araştırmayı
+da çalıştırır.
 
 Daha ileri gitmek için üzerine kendi arayüzünüzü koyun. Control Plane'in gRPC API'si sayesinde
 uygulamanız Tag'ler oluşturup yönlendirebilir, onlara iş gönderebilir ve ilerlemelerini
@@ -245,7 +292,7 @@ npm install supertag-ai
 python -m pip install 'supertag==0.3.13'
 ```
 
-[Adım adım bir destek asistanı oluşturun](../../docs/guides/build-your-own.md) · [Bir harness adaptörü yazın](../../docs/guides/harness-adapters.md) · [Kendi iş birliği yüzeyinizi bağlayın](../../docs/reference/connector-contract.md) · [API kararlılığını kontrol edin](../../docs/reference/api-stability.md)
+[Kendi organizasyonunuzu oluşturun: pazarlama](../../docs/guides/build-your-own.md) · [Bir harness adaptörü yazın](../../docs/guides/harness-adapters.md) · [Kendi iş birliği yüzeyinizi bağlayın](../../docs/reference/connector-contract.md) · [API kararlılığını kontrol edin](../../docs/reference/api-stability.md)
 
 <a name="run-it-yourself"></a>
 
@@ -311,9 +358,10 @@ olarak geri gelir.
 işler için Control Plane'i bir sunucuya kurun ve çevrimiçi kalan bir Worker Host bağlayın.
 [SuperTag'i kendi altyapınızda barındırın](../../docs/guides/self-hosting.md)
 
-**SuperTag yalnızca mühendislik işi için mi?** Tag'ler, örnekler ve git dalı üzerinden teslim
-mühendislik işi için tasarlandı. Alttaki altyapı ise her türlü iş için çalışır: [Kendinizinkini oluşturun](#build-your-own)
-bölümündeki gibi üzerine kendi asistanlarınızı kurabilirsiniz.
+**SuperTag yalnızca mühendislik işi için mi?** Hayır. Birlikte gelen Tag'ler, örnekler ve git dalı
+üzerinden teslim mühendislik işiyle başlar, ancak altyapı her işlev için çalışır. Üzerinde
+pazarlama, satış veya destek yürütebilirsiniz; [Kendinizinkini oluşturun](#build-your-own)
+bölümündeki gibi.
 
 ## Katkı ve lisans
 

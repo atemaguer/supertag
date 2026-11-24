@@ -13,7 +13,7 @@ Open source et auto-hébergé, sur les agents de code que vous utilisez déjà.
 
 **Confiez-leur des missions, pas des tâches.**
 
-[Des missions, pas des tâches](#give-them-jobs-not-tasks) · [Persistant](#persistent) · [Proactif](#proactive) · [Multijoueur](#multiplayer) · [Lancer votre premier Tag](#run-your-first-tag) · [Construire le vôtre](#build-your-own) · [Chez vous](#run-it-yourself) · [Documentation](../../docs/README.md)
+[Des missions, pas des tâches](#give-them-jobs-not-tasks) · [Persistant](#persistent) · [Proactif](#proactive) · [Multijoueur](#multiplayer) · [Ce qu'un déploiement peut faire tourner](#what-a-deployment-can-run) · [Lancer votre premier Tag](#run-your-first-tag) · [Construire le vôtre](#build-your-own) · [Chez vous](#run-it-yourself) · [Documentation](../../docs/README.md)
 
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.fr.webp" alt="Voici les Tags : neuf mascottes SuperTag, rondes ou élancées, avec vestes colorées, chapeaux et lunettes" width="900" height="360">
@@ -35,8 +35,8 @@ SuperTag vous apporte deux choses :
   Tags tournent sur vos propres agents de code et vos propres machines, et ne font que ce que vous
   autorisez.
 - **La base pour construire les vôtres.** Les mêmes capacités, sous forme d'infrastructure que
-  vous exécutez et contrôlez, pour un produit ou un outil bien à vous. Voir
-  [Construire le vôtre](#build-your-own).
+  vous exécutez et contrôlez, pour votre propre produit ou pour une autre fonction, comme le
+  marketing ou les ventes. Voir [Construire le vôtre](#build-your-own).
 
 <a name="give-them-jobs-not-tasks"></a>
 
@@ -156,6 +156,45 @@ Code, peut ainsi travailler au même Objective qu'un Tag sur la machine d'un col
 
 [Comment fonctionne le multijoueur](../../docs/concepts/multiplayer.md) · [Auto-héberger SuperTag](../../docs/guides/self-hosting.md)
 
+<a name="what-a-deployment-can-run"></a>
+
+## Ce qu'un déploiement peut faire tourner
+
+Réunissez la persistance, le travail proactif et le travail en équipe, et un seul SuperTag
+auto-hébergé peut faire tourner une organisation d'ingénierie autonome, avec ses propres
+fonctions, équipes et responsabilités, que vous dirigez comme si vous en étiez le responsable.
+
+Vous décrivez l'organisation dans la configuration, comme vous dessineriez un organigramme :
+
+```text
+you
+ └─ lead                     takes your outcomes, splits them across teams, reports with evidence
+     ├─ platform team        platform-lead, infra-builder              on Codex, on a server
+     ├─ product team         product-lead, web-builder, api-builder     on Claude Code, on laptops
+     ├─ reliability          reliability, support                      always on
+     ├─ release              release-manager                            ships when you approve
+     └─ shared specialists   reviewer, security-reviewer, verifier
+```
+
+- **Un Role pour chaque fonction.** Chaque Role porte ses instructions, ses standards, ses modèles
+  et ses permissions. Les développeurs modifient le code et exécutent des commandes, les relecteurs
+  ne font que lire, et le responsable des releases ne peut rien livrer sans votre approbation.
+- **Une équipe pour chaque sous-fonction.** Chaque équipe a son propre Workstream. Les chefs
+  d'équipe s'écrivent entre eux et règlent les détails sans vous.
+- **Des résultats qui descendent l'organisation.** Confiez au lead un résultat, avec un budget et
+  une échéance. Il répartit le travail entre les équipes, chaque équipe livre sa part avec une
+  relecture et une exécution complète des tests, et le lead vous rapporte les preuves.
+- **Des responsabilités qui ne s'arrêtent jamais.** La fiabilité réagit d'elle-même à chaque
+  nouvelle erreur et à chaque build en échec, la sécurité relit chaque modification qui touche
+  aux identifiants, et le responsable des releases prépare une release chaque semaine.
+- **Vous décidez où les humains restent dans la boucle.** Des approbations pour les fusions, les
+  releases, les budgets et toute action de votre choix. Tout le reste, l'organisation s'en charge.
+
+SuperTag maintient chaque Tag en marche, fait respecter les limites de chaque Role, consigne qui a
+fait quoi et pourquoi, et vous donne une seule boîte de réception pour les décisions qui vous
+reviennent.
+[Mettre en place une organisation d'ingénierie autonome](../../docs/guides/engineering-organization.md)
+
 <a name="get-started"></a>
 
 <a name="run-your-first-tag"></a>
@@ -217,25 +256,37 @@ elle embarque son propre `supertag`, configure SuperTag au premier lancement et 
 
 ## Construire le vôtre
 
-Tout ce qui précède, la persistance, le travail proactif et le travail en équipe, repose sur
-l'infrastructure propre à SuperTag, et vous pouvez bâtir dessus pour n'importe quel usage. Mettons
-que vous vouliez un assistant de support dans le Slack de votre équipe. Il répond aux questions
-sur votre service à partir de votre documentation, ouvre des tickets pour les vrais bugs, se
-souvient de l'historique de chaque client et vérifie chaque matin les demandes restées sans
-réponse. Inutile de l'écrire de zéro : vous le décrivez dans la configuration de SuperTag.
+Rien de tout cela n'est propre à l'ingénierie. Tags, Roles, Teams, Objectives, permissions,
+mémoire, plannings et approbations fonctionnent pour n'importe quelle fonction de votre
+organisation. Choisissez les Roles, les outils et les événements de la fonction, et la même
+infrastructure la fait tourner.
 
-- **Qui il est.** Un Tag avec son propre nom, ses instructions et sa mémoire, qui tourne sous
-  Claude Code, Codex, Cursor ou OpenCode.
-- **Ce qu'il a le droit de faire.** Des permissions pour chaque action, et celles qui attendent
-  l'approbation d'une personne.
-- **Quand il agit.** Selon un planning, sur un message ou sur un événement que vos propres
-  systèmes lui envoient.
-- **Où on le joint.** Slack, GitHub, Linear, Lark/Feishu, Microsoft Teams ou le terminal.
-- **Avec qui il travaille.** Les autres Tags de son équipe, à qui il peut écrire et avec qui il
-  partage un historique commun.
+Mettons que vous vouliez faire tourner le marketing de cette façon :
 
-SuperTag le maintient en marche, se souvient de ce qu'il a fait, applique ses limites et consigne
-chacune de ses actions.
+```text
+you (head of marketing)
+ └─ marketing-lead         owns campaign outcomes, reports weekly with the numbers
+     ├─ content             drafts posts, docs pages, and release notes in your voice
+     ├─ product-marketing   turns each release from engineering into launch copy
+     ├─ growth              reads traffic and signup numbers, proposes and tracks experiments
+     ├─ social              drafts launch posts, publishes only when you approve
+     └─ research            watches competitors and customer conversations, briefs the team
+```
+
+- **Un Role pour chaque fonction.** Chacun porte le ton de la fonction, les règles de la marque et
+  ce qu'elle a le droit d'affirmer. Rien n'est publié, et aucune dépense n'est engagée, sans votre
+  approbation.
+- **Un travail rapporté pour relecture.** Les contenus arrivent sous forme de branches dans le
+  dépôt de votre site ou de votre documentation, comme le code.
+- **Des responsabilités qui ne s'arrêtent jamais.** Un rapport hebdomadaire sur les chiffres, une
+  veille permanente sur la concurrence et des textes de lancement pour chaque release.
+- **Des événements venus de vos propres systèmes.** Releases, données d'audience et conversations
+  avec les clients parviennent au bon Tag au moment où ils se produisent.
+- **Une seule organisation pour toutes les fonctions.** Quand le responsable des releases de
+  l'ingénierie livre, il prévient directement le marketing produit, sur le même Control Plane.
+
+Les mêmes briques font tourner les ventes, le support client, les opérations financières, le
+recrutement ou la recherche.
 
 Pour aller plus loin, ajoutez votre propre interface par-dessus. L'API gRPC du Control Plane
 permet à votre application de créer et de diriger des Tags, de leur envoyer du travail et de
@@ -251,7 +302,7 @@ npm install supertag-ai
 python -m pip install 'supertag==0.3.13'
 ```
 
-[Construire un assistant de support pas à pas](../../docs/guides/build-your-own.md) · [Écrire un adaptateur de harness](../../docs/guides/harness-adapters.md) · [Connecter votre propre surface de collaboration](../../docs/reference/connector-contract.md) · [Vérifier la stabilité de l'API](../../docs/reference/api-stability.md)
+[Construire votre propre organisation : le marketing](../../docs/guides/build-your-own.md) · [Écrire un adaptateur de harness](../../docs/guides/harness-adapters.md) · [Connecter votre propre surface de collaboration](../../docs/reference/connector-contract.md) · [Vérifier la stabilité de l'API](../../docs/reference/api-stability.md)
 
 <a name="run-it-yourself"></a>
 
@@ -318,10 +369,10 @@ votre ordinateur portable. Pour un accès partagé, ou pour un travail qui doit 
 quand votre ordinateur portable est éteint, déployez le Control Plane et connectez un Worker Host
 qui reste en ligne. [Auto-héberger SuperTag](../../docs/guides/self-hosting.md)
 
-**SuperTag ne sert-il qu'au travail d'ingénierie ?** Les Tags, les exemples et la livraison par
-branche Git sont conçus pour le travail d'ingénierie. L'infrastructure sous-jacente convient à
-tout type de travail : vous pouvez y construire vos propres assistants, comme dans
-[Construire le vôtre](#build-your-own).
+**SuperTag ne sert-il qu'au travail d'ingénierie ?** Non. Les Tags fournis, les exemples et la
+livraison par branche Git commencent par le travail d'ingénierie, mais l'infrastructure convient
+à n'importe quelle fonction. Vous pouvez y faire tourner le marketing, les ventes ou le support,
+comme dans [Construire le vôtre](#build-your-own).
 
 ## Contribuer et licence
 

@@ -13,7 +13,7 @@ Open source and self-hosted, on the coding agents you already use.
 
 **Give them jobs, not tasks.**
 
-[Jobs, not tasks](#give-them-jobs-not-tasks) · [Persistent](#persistent) · [Proactive](#proactive) · [Multiplayer](#multiplayer) · [Run your first Tag](#run-your-first-tag) · [Build your own](#build-your-own) · [Run it yourself](#run-it-yourself) · [Documentation](docs/README.md)
+[Jobs, not tasks](#give-them-jobs-not-tasks) · [Persistent](#persistent) · [Proactive](#proactive) · [Multiplayer](#multiplayer) · [What a deployment can run](#what-a-deployment-can-run) · [Run your first Tag](#run-your-first-tag) · [Build your own](#build-your-own) · [Run it yourself](#run-it-yourself) · [Documentation](docs/README.md)
 
 <p>
   <img src="assets/images/supertag-meet-the-tags.png" alt="Meet the Tags — nine SuperTag mascots with round and elongated builds, colorful jackets, hats, and glasses" width="900" height="360">
@@ -33,7 +33,7 @@ SuperTag gives you two things:
   work alongside your team. Tags run on your own coding agents and machines, and do only what you
   allow.
 - **The base to build your own.** The same abilities, as infrastructure you run and control, for
-  a product or tool of your own. See [Build your own](#build-your-own).
+  your own product, or for another function such as marketing or sales. See [Build your own](#build-your-own).
 
 ## Give them jobs, not tasks
 
@@ -137,6 +137,42 @@ toward the same Objective.
 
 [How multiplayer works](docs/concepts/multiplayer.md) · [Self-host SuperTag](docs/guides/self-hosting.md)
 
+## What a deployment can run
+
+Put persistence, proactive work, and teamwork together, and one self-hosted SuperTag can run an
+autonomous engineering organization, with its own functions, teams, and responsibilities, that
+you direct like its head.
+
+You describe the organization in configuration, the way you'd draw an org chart:
+
+```text
+you
+ └─ lead                     takes your outcomes, splits them across teams, reports with evidence
+     ├─ platform team        platform-lead, infra-builder              on Codex, on a server
+     ├─ product team         product-lead, web-builder, api-builder     on Claude Code, on laptops
+     ├─ reliability          reliability, support                      always on
+     ├─ release              release-manager                            ships when you approve
+     └─ shared specialists   reviewer, security-reviewer, verifier
+```
+
+- **A Role for each function.** Each Role carries its instructions, standards, models, and
+  permissions. Builders edit code and run commands, reviewers only read, and the release manager
+  can't ship without your approval.
+- **Teams for each sub-function.** Each team has its own Workstream. Team leads message each
+  other and settle the details without you.
+- **Outcomes that flow down.** Give the lead an outcome with a budget and a deadline. It splits
+  the work across the teams, each team delivers its part with review and a full test run, and
+  the lead brings you the evidence.
+- **Responsibilities that never end.** Reliability acts on every new error and red build on its
+  own, security reviews every change that touches credentials, and the release manager prepares
+  a release every week.
+- **You decide where people stay in the loop.** Approvals for merges, releases, budgets, and any
+  action you choose. Everything else, the organization handles.
+
+SuperTag keeps every Tag running, enforces each Role's limits, records who did what and why, and
+gives you one inbox for the decisions that are yours.
+[Set up an autonomous engineering organization](docs/guides/engineering-organization.md)
+
 <a name="get-started"></a>
 
 ## Run your first Tag
@@ -194,21 +230,35 @@ it carries its own `supertag`, sets SuperTag up on first launch, and talks to th
 
 ## Build your own
 
-Everything above, the persistence, the proactive work, and the teamwork, is SuperTag's own
-infrastructure, and you can build on it for any use case. Say you want a support assistant in your team's Slack.
-It answers questions about your service from your documentation, opens issues for real bugs,
-remembers each customer's history, and checks every morning for tickets nobody answered. You
-don't write that from scratch. You describe it in SuperTag's configuration:
+None of that is specific to engineering. Tags, Roles, Teams, Objectives, permissions, memory,
+schedules, and approvals work for any function in your organization. Choose the Roles, the
+tools, and the events for the function, and the same infrastructure runs it.
 
-- **Who it is.** A Tag with its own name, instructions, and memory, running on Claude Code,
-  Codex, Cursor, or OpenCode.
-- **What it may do.** Permissions for each action, and which ones wait for a person's approval.
-- **When it acts.** A schedule, a message, or an event your own systems send it.
-- **Where people reach it.** Slack, GitHub, Linear, Lark/Feishu, Microsoft Teams, or the
-  terminal.
-- **Who it works with.** Other Tags on its team, which it can message and share a record with.
+Say you want to run marketing this way:
 
-SuperTag keeps it running, remembers what it did, enforces its limits, and records every action.
+```text
+you (head of marketing)
+ └─ marketing-lead         owns campaign outcomes, reports weekly with the numbers
+     ├─ content             drafts posts, docs pages, and release notes in your voice
+     ├─ product-marketing   turns each release from engineering into launch copy
+     ├─ growth              reads traffic and signup numbers, proposes and tracks experiments
+     ├─ social              drafts launch posts, publishes only when you approve
+     └─ research            watches competitors and customer conversations, briefs the team
+```
+
+- **A Role for each function.** Each carries the function's voice, brand rules, and what it may
+  claim. Nothing is published, and no money is spent, without your approval.
+- **Work it brings back for review.** Content arrives as branches in your website or docs
+  repository, like code does.
+- **Responsibilities that never end.** A weekly report on the numbers, a running watch on
+  competitors, and launch copy for every release.
+- **Events from your own systems.** Releases, analytics, and customer conversations reach the
+  right Tag as they happen.
+- **One organization across functions.** When engineering's release manager ships, it tells
+  product marketing directly, on the same Control Plane.
+
+The same building blocks run sales, customer support, finance operations, recruiting, or
+research.
 
 To go further, put your own interface on top. The Control Plane's gRPC API lets your application
 create and direct Tags, send them work, and inspect their progress, with generated Go,
@@ -222,7 +272,7 @@ npm install supertag-ai
 python -m pip install 'supertag==0.3.13'
 ```
 
-[Build a support assistant step by step](docs/guides/build-your-own.md) · [Write a harness adapter](docs/guides/harness-adapters.md) · [Connect your own collaboration surface](docs/reference/connector-contract.md) · [Check API stability](docs/reference/api-stability.md)
+[Build your own organization: marketing](docs/guides/build-your-own.md) · [Write a harness adapter](docs/guides/harness-adapters.md) · [Connect your own collaboration surface](docs/reference/connector-contract.md) · [Check API stability](docs/reference/api-stability.md)
 
 ## Run it yourself
 
@@ -282,9 +332,9 @@ work happens in a separate pinned checkout and comes back as a branch you can re
 access or work that should stay available when your laptop is off, deploy the Control Plane and
 connect a Worker Host that stays online. [Self-host SuperTag](docs/guides/self-hosting.md)
 
-**Is SuperTag only for engineering work?** The Tags, examples, and delivery by git branch are
-built for engineering work. The infrastructure underneath works for any kind of work: you can
-build your own assistants on it, as in [Build your own](#build-your-own).
+**Is SuperTag only for engineering work?** No. The Tags it comes with, its examples, and delivery
+by git branch start with engineering work, but the infrastructure works for any function. You
+can run marketing, sales, or support on it, as in [Build your own](#build-your-own).
 
 ## Contributing and license
 

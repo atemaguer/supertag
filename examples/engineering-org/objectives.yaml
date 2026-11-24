@@ -1,0 +1,74 @@
+# What the organization owns: one outcome for the lead, two ongoing responsibilities for
+# reliability, and a weekly release. Applying this file starts the work: the lead plans the
+# outcome, and each ongoing Objective takes a first turn and then rests until a report arrives.
+# Apply organization.yaml first.
+#
+# Reports reach an ongoing Objective as messages. Forward them from Sentry and your CI with a
+# small webhook relay that calls the Control Plane API's Conversations.SendMessage: `tag_id`
+# reliability, `conversation` the Objective's `session_id` (from `supertag get objective NAME`),
+# and the alert's own ID as `operation_id`, so a retried delivery never arrives twice. See
+# docs/guides/ongoing-responsibilities.md.
+#
+# Each budget is the most an Objective may spend in total; raise it as you learn its cost.
+
+# An outcome that crosses both teams. The lead gives platform the export job and its storage,
+# and product the endpoint and the page, and agrees the contract between them first.
+apiVersion: supertag/v1
+kind: Objective
+metadata: { name: account-data-export }
+spec:
+  ownerTagId: lead
+  outcome: >-
+    Signed-in customers can export all of their account data as one downloadable archive. Done
+    when a customer can request an export from the settings page, receives a download link once
+    it is ready, and the link expires after 7 days; the export job runs in the background with
+    retries and a test for each failure path; the API's tests cover the new endpoints; `npm test`
+    and `npm run lint` pass on the integrated commit; and the reviewer and security reviewer have
+    no open high or medium findings. An export never includes another customer's data. Existing
+    API responses are unchanged. A person approves the result before it merges.
+  budgetLimitMinor: 60000
+  budgetCurrency: USD
+  deadline: "2027-03-31T00:00:00Z"
+---
+apiVersion: supertag/v1
+kind: Objective
+metadata: { name: triage-production-errors }
+spec:
+  ownerTagId: reliability
+  outcome: >-
+    Every new or regressed Sentry issue is triaged within the hour. For each one that affects
+    users, a branch holds a fix with a test that fails before it and passes after, and the report
+    names the change that caused it. Duplicates and known noise get a one-line note. Nothing is
+    merged or deployed without a person.
+  ongoing: true
+  budgetLimitMinor: 30000
+  budgetCurrency: USD
+---
+apiVersion: supertag/v1
+kind: Objective
+metadata: { name: keep-main-green }
+spec:
+  ownerTagId: reliability
+  outcome: >-
+    When CI fails on main, find the commit that broke it and say whether the failure is a flaky
+    test or a real one, with the reruns as evidence. Prepare a fix or a revert on a branch for a
+    real failure, and name the test to quarantine for a flaky one. Merging and quarantining stay
+    with people.
+  ongoing: true
+  budgetLimitMinor: 20000
+  budgetCurrency: USD
+---
+# Thursday morning, the release manager prepares a release in your conversation with it, and
+# waits for you to ship it.
+apiVersion: supertag/v1
+kind: Schedule
+metadata: { name: weekly-release }
+spec:
+  tag: release-manager
+  every: "0 9 * * THU"
+  timeZone: UTC
+  note: >-
+    Prepare this week's release. Start a release branch from main, bump the version, write the
+    changelog from what merged since the last release tag, and run the full checks. Report the
+    branch, the version, the notes, the check results, and anything risky. If nothing merged
+    since the last release, say so in one line. Don't ship it: wait for the operator.

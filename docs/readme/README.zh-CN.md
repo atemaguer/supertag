@@ -13,7 +13,7 @@
 
 **给它们岗位，而不是任务。**
 
-[岗位，而非任务](#give-them-jobs-not-tasks) · [持久](#persistent) · [主动](#proactive) · [多人协作](#multiplayer) · [运行你的第一个 Tag](#run-your-first-tag) · [构建你自己的](#build-your-own) · [自己运行](#run-it-yourself) · [文档](../../docs/README.md)
+[岗位，而非任务](#give-them-jobs-not-tasks) · [持久](#persistent) · [主动](#proactive) · [多人协作](#multiplayer) · [一个部署能运行什么](#what-a-deployment-can-run) · [运行你的第一个 Tag](#run-your-first-tag) · [构建你自己的](#build-your-own) · [自己运行](#run-it-yourself) · [文档](../../docs/README.md)
 
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.zh-CN.webp" alt="认识一下这些 Tag：九个 SuperTag 吉祥物，体型有圆有长，穿着彩色外套，戴着帽子和眼镜" width="900" height="360">
@@ -26,7 +26,7 @@
 SuperTag 为你提供两样东西：
 
 - **开箱即用的工程 AI 队友**：就像 Devin Bots、OpenAI dots 和 Grok Bot 提供的那样，这些队友随时待命，记得过去的工作，不用你开口就会行动，并与你的团队并肩工作。Tag 运行在你自己的编程智能体和机器上，只做你允许的事。
-- **构建你自己的产品的基础**：同样的能力，以由你运行、由你掌控的基础设施的形式提供，用于你自己的产品或工具。参见[构建你自己的](#build-your-own)。
+- **构建你自己的产品的基础**：同样的能力，以由你运行、由你掌控的基础设施的形式提供，用于你自己的产品，或市场营销、销售等其他职能。参见[构建你自己的](#build-your-own)。
 
 <a name="give-them-jobs-not-tasks"></a>
 
@@ -99,6 +99,33 @@ Tag 拥有的则是一个岗位。岗位由两部分构成：Tag 持续承担的
 
 [多人协作的工作原理](../../docs/concepts/multiplayer.md) · [自托管 SuperTag](../../docs/guides/self-hosting.md)
 
+<a name="what-a-deployment-can-run"></a>
+
+## 一个部署能运行什么
+
+把持久性、主动工作和团队协作结合起来，一个自托管的 SuperTag 就能运行一个自主的工程组织：它有自己的职能、团队和职责，而你像它的负责人一样指挥它。
+
+你在配置中描述这个组织，就像画一张组织架构图：
+
+```text
+you
+ └─ lead                     takes your outcomes, splits them across teams, reports with evidence
+     ├─ platform team        platform-lead, infra-builder              on Codex, on a server
+     ├─ product team         product-lead, web-builder, api-builder     on Claude Code, on laptops
+     ├─ reliability          reliability, support                      always on
+     ├─ release              release-manager                            ships when you approve
+     └─ shared specialists   reviewer, security-reviewer, verifier
+```
+
+- **每个职能一个 Role**：每个 Role 都带有自己的指令、标准、模型和权限。负责构建的 Tag 编辑代码、运行命令，评审者只能读取，发布经理没有你的批准就无法发布。
+- **每个子职能一个 Team**：每个 Team 都有自己的 Workstream。各 Team 的负责人彼此发消息，自行商定细节，不需要你参与。
+- **层层下达的成果**：给 lead 一个带预算和截止日期的成果。它把工作分派给各个 Team，每个 Team 交付自己的那部分，并经过评审和完整的测试运行，最后由 lead 把证据带给你。
+- **永不结束的职责**：可靠性团队会主动处理每一个新错误和每一次构建失败，安全评审会审查每一项涉及凭证的变更，发布经理每周准备一次发布。
+- **由你决定哪些环节需要人参与**：合并、发布、预算，以及你选定的任何操作，都需要经过批准。其余的一切，由这个组织自行处理。
+
+SuperTag 让每个 Tag 持续运行，执行每个 Role 的限制，记录谁做了什么、为什么做，并给你一个收件箱，集中处理该由你做的决定。
+[搭建一个自主的工程组织](../../docs/guides/engineering-organization.md)
+
 <a name="get-started"></a>
 
 <a name="run-your-first-tag"></a>
@@ -142,15 +169,27 @@ supertag objective review OBJECTIVE_ID request-changes --feedback "Also cover th
 
 ## 构建你自己的
 
-上面介绍的一切，包括持久性、主动工作和团队协作，都是 SuperTag 自身的基础设施，你可以在它之上为任何用途进行构建。假设你想在团队的 Slack 里放一个支持助手。它根据你的文档回答有关你的服务的问题，为真正的 bug 创建 issue，记得每位客户的历史，并在每天早上检查有没有无人回复的工单。你不必从零写起，只需在 SuperTag 的配置中描述它：
+这一切都不局限于工程。Tag、Role、Team、Objective、权限、记忆、计划任务和审批，适用于你组织中的任何职能。为这个职能选好 Role、工具和事件，同一套基础设施就能运行它。
 
-- **它是谁**：一个有自己的名字、指令和记忆的 Tag，运行在 Claude Code、Codex、Cursor 或 OpenCode 上。
-- **它可以做什么**：每项操作的权限，以及哪些操作需要等人批准。
-- **它何时行动**：按计划、收到消息，或收到你自己的系统发来的事件时。
-- **人们在哪里找到它**：Slack、GitHub、Linear、Lark/飞书、Microsoft Teams 或终端。
-- **它与谁协作**：同一团队中的其他 Tag，它可以给它们发消息，并与它们共享一份记录。
+假设你想用这种方式运营市场营销：
 
-SuperTag 让它持续运行，记住它做过的事，执行它的限制，并记录每一项操作。
+```text
+you (head of marketing)
+ └─ marketing-lead         owns campaign outcomes, reports weekly with the numbers
+     ├─ content             drafts posts, docs pages, and release notes in your voice
+     ├─ product-marketing   turns each release from engineering into launch copy
+     ├─ growth              reads traffic and signup numbers, proposes and tracks experiments
+     ├─ social              drafts launch posts, publishes only when you approve
+     └─ research            watches competitors and customer conversations, briefs the team
+```
+
+- **每个职能一个 Role**：每个 Role 都带有该职能的语气、品牌规范，以及它可以对外宣称的内容。没有你的批准，什么都不会发布，也不会花一分钱。
+- **把工作带回来供你评审**：内容会以分支的形式出现在你的网站或文档仓库中，就像代码一样。
+- **永不结束的职责**：每周一份数据报告，持续关注竞争对手，并为每次发布准备上线文案。
+- **来自你自己系统的事件**：发布、分析数据和客户对话一发生，就会送达对应的 Tag。
+- **跨职能的同一个组织**：工程团队的发布经理完成发布时，会直接通知产品营销，两者在同一个 Control Plane 上。
+
+同样的构建模块也能运行销售、客户支持、财务运营、招聘或研究。
 
 想更进一步，可以在上面加上你自己的界面。通过 Control Plane 的 gRPC API，你的应用可以创建和指挥 Tag、给它们派发工作并查看进展，仓库中附带了自动生成的 Go、TypeScript 和 Python 绑定。[探索 API](../../docs/reference/control-plane-api.md)
 
@@ -161,7 +200,7 @@ npm install supertag-ai
 python -m pip install 'supertag==0.3.13'
 ```
 
-[逐步构建支持助手](../../docs/guides/build-your-own.md) · [编写 harness 适配器](../../docs/guides/harness-adapters.md) · [接入你自己的协作界面](../../docs/reference/connector-contract.md) · [查看 API 稳定性](../../docs/reference/api-stability.md)
+[构建你自己的组织：市场营销](../../docs/guides/build-your-own.md) · [编写 harness 适配器](../../docs/guides/harness-adapters.md) · [接入你自己的协作界面](../../docs/reference/connector-contract.md) · [查看 API 稳定性](../../docs/reference/api-stability.md)
 
 <a name="run-it-yourself"></a>
 
@@ -205,7 +244,7 @@ SuperTag 以 Apache 2.0 许可证开源，无论你使用它自带的 Tag，还�
 
 **我需要服务器吗？** 你可以在笔记本上启动 Control Plane 并运行工作。如果需要多人共享访问，或者希望笔记本关机后工作仍然可用，就部署 Control Plane，并连接一台保持在线的 Worker Host。[自托管 SuperTag](../../docs/guides/self-hosting.md)
 
-**SuperTag 只适用于工程工作吗？** Tag、示例以及通过 git 分支交付的方式都是为工程工作而构建的。但底层的基础设施适用于任何类型的工作：你可以在它之上构建自己的助手，就像[构建你自己的](#build-your-own)中那样。
+**SuperTag 只适用于工程工作吗？** 不是。它自带的 Tag、示例以及通过 git 分支交付的方式都从工程工作入手，但底层的基础设施适用于任何职能。你可以在它之上运行市场营销、销售或支持，就像[构建你自己的](#build-your-own)中那样。
 
 ## 贡献与许可证
 

@@ -140,6 +140,7 @@ Choose the tool your team already uses:
 
 - [Define and complete an Objective](guides/objectives.md)
 - [Organize Tags into Teams](guides/teams.md)
+- [Set up an autonomous engineering organization](guides/engineering-organization.md) — twelve Tags in a lead, platform and product teams, shared reviewers, reliability, and release, from one example
 - [Share a Team's Workstream](guides/workstreams.md)
 - [Talk to a Tag from your terminal](guides/talk-to-a-tag.md)
 - [Send messages between Tags](guides/tag-messaging.md)
@@ -150,7 +151,7 @@ Choose the tool your team already uses:
 
 ## Build and extend SuperTag
 
-- [Build your own support assistant](guides/build-your-own.md) — a Slack support Tag from one manifest: Role, Permission Set, Schedule, and an ongoing Objective your systems report to
+- [Build your own organization: marketing](guides/build-your-own.md) — the same machinery for another function: six marketing Tags, brand-voice Roles, content as branches, releases and analytics as events, and approvals before anything is published
 - [Write a harness adapter](guides/harness-adapters.md)
 - [Connect your own collaboration surface](reference/connector-contract.md)
 - [Call the Control Plane API](reference/control-plane-api.md)

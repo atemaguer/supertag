@@ -1,0 +1,483 @@
+# An autonomous engineering organization: twelve Tags in four functions, on two coding agents.
+#
+#   lead                 Engineering lead. Takes outcomes from you, splits them across the teams,
+#                        integrates their branches, and reports with evidence.
+#   platform             platform-lead, infra-builder. Infrastructure, CI, and deploys. Codex.
+#   product              product-lead, web-builder, api-builder. The web app and the API.
+#                        Claude Code.
+#   shared specialists   reviewer, security-reviewer, verifier. Members of both teams they serve.
+#   reliability          reliability owns production errors and a green main; support triages
+#                        bug reports with read-only access.
+#   release              release-manager prepares a release every week, in your conversation
+#                        with it. You ship it.
+#
+# A Tag may be in several Teams, but then it has no Workstream: it can't post or read one. So
+# the leads, who record plans in their team's Workstream, stay in one Team each and reach one
+# another through `acceptsMessagesFrom` grants. Only the shared specialists, which answer by
+# message, join two Teams. The lead and the release manager work with the teams by grant too.
+#
+# Five host services in supertag.yaml serve the repository as the Workspace `app`. They can run
+# on one machine, or each on its own; labels place each Tag:
+#   product-host:                      lead, product team, release-manager
+#     type: host
+#     harnesses: [claude-code]
+#     models: { claude-code: [claude-opus-5-5, claude-sonnet-5-5] }
+#     allow-unsandboxed-commands: [claude-code]
+#     labels: [product]
+#     workspaces: { app: ~/code/app }
+#   platform-host:                     platform team
+#     type: host
+#     harnesses: [codex]
+#     models: { codex: [gpt-6-sol] }
+#     labels: [platform]
+#     workspaces: { app: ~/code/app }
+#   review-host:                       reviewer, security-reviewer, support
+#     type: host
+#     harnesses: [claude-code]
+#     models: { claude-code: [claude-opus-5-5, claude-sonnet-5-5] }
+#     sandbox-commands: [claude-code]
+#     labels: [review]
+#     workspaces: { app: ~/code/app }
+#   verify-host:                       verifier, so long test runs take no one else's slot
+#     type: host
+#     harnesses: [claude-code]
+#     models: { claude-code: [claude-sonnet-5-5] }
+#     allow-unsandboxed-commands: [claude-code]
+#     labels: [verify]
+#     workspaces: { app: ~/code/app }
+#   reliability-host:                  reliability, somewhere always on
+#     type: host
+#     harnesses: [codex]
+#     models: { codex: [gpt-6-sol] }
+#     network-credentials:
+#       sentry: { secret: sentry-token, environment: SENTRY_AUTH_TOKEN }
+#       github: { secret: github-token, environment: GITHUB_TOKEN }
+#     labels: [reliability]
+#     workspaces: { app: ~/code/app }
+# with `sentry-token` and `github-token` under `secrets:`. `allow-unsandboxed-commands` lets
+# Claude Code run commands as your user, with your files and network. `sandbox-commands` runs
+# them in Claude Code's own sandbox, where a Task without files:write can write only a temporary
+# folder: that keeps the reviewers read-only. Hosts on one machine that map the same clone see
+# each other's branches. Across machines, serve a remote Workspace instead, so branches travel
+# through your git server; see docs/guides/workspaces.md.
+#
+# Before applying, replace `app` with your Workspace name, `main` with the branch new Sessions
+# start from, and `acme/app` with your repository. If `supertag init` already created a Tag named
+# `lead`, rename this example's `lead` in both files, including every `acceptsMessagesFrom`.
+# Then run:
+#   supertag apply -f organization.yaml
+# and, when you're ready for the work to start, objectives.yaml.
+
+# ---- Permission Sets: what each function may do ----
+
+# Builders, leads, and the verifier edit files and run commands.
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: { name: build-tools }
+spec:
+  displayName: Build Tools
+  permissions:
+    - { target: runtime, action: files:write }
+    - { target: runtime, action: commands:execute }
+---
+# Codex runs commands on code-mode-only models such as gpt-6-sol only with web:fetch. Narrow it to
+# the registries your build installs from.
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: { name: registries }
+spec:
+  displayName: Package Registries
+  permissions:
+    - target: runtime
+      action: web:fetch
+      hosts: ["https://registry.npmjs.org"]
+      methods: [GET, HEAD]
+---
+# Reviewers read the code and run git and the tests, but get no edit tools. On review-host their
+# commands run in Claude Code's sandbox, which lets them write nothing in the Workspace.
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: { name: review-tools }
+spec:
+  displayName: Review Tools
+  permissions:
+    - { target: runtime, action: files:read }
+    - { target: runtime, action: commands:execute }
+---
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: { name: read-only }
+spec:
+  displayName: Read Only
+  permissions:
+    - { target: runtime, action: files:read }
+---
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: { name: reliability-tools }
+spec:
+  displayName: Reliability Tools
+  permissions:
+    - { target: runtime, action: files:write }
+    - { target: runtime, action: commands:execute }
+    # Read Sentry issues and events with the host's Sentry token.
+    - target: runtime
+      action: web:fetch
+      hosts: ["https://sentry.io"]
+      methods: [GET]
+      credential: sentry
+    # Read CI runs and commits for the repository with the host's GitHub token.
+    - target: runtime
+      action: web:fetch
+      hosts: ["https://api.github.com"]
+      methods: [GET]
+      paths: [/repos/acme/app]
+      credential: github
+---
+# Shipping a release waits for a person: each merge of a release pull request needs an operator's
+# approval. Add `release-gate` to the release-manager Role only once its host serves a `github`
+# MCP server (`supertag worklet --mcp-catalog`; see docs/surfaces/worker-tools.md). Until then a
+# Task granted it waits for that server, so the Role leaves it out and you ship by hand.
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: { name: release-gate }
+spec:
+  displayName: Release Gate
+  permissions:
+    - { target: mcp, action: github/create_pull_request, resource: "repository:acme/app" }
+    - target: mcp
+      action: github/merge_pull_request
+      resource: "repository:acme/app"
+      approvalRequired: true
+---
+# ---- Roles: how each function works ----
+#
+# A function Role holds the instructions, permissions, and efforts. The two team Roles add the
+# team's area and its coding agent. They set different fields, so no Tag's Roles conflict.
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: engineering-lead }
+spec:
+  displayName: Engineering Lead
+  purpose: Own the outcomes the operator gives you. Split each across the platform and product teams, integrate their work, and report with evidence.
+  instructions: >-
+    Read the repository's contributing guide (AGENTS.md or CONTRIBUTING.md) before planning.
+    Split each outcome into one brief per team: what must be true, how it will be checked, and
+    what must not change. Agree the contract between the teams, such as an endpoint or a queue
+    message, before either builds on it. Your Objective's turns reach other Tags only through
+    your own inbox: ask it with ask_tag, and your inbox turn sends each brief to platform-lead
+    or product-lead with send_message and answers the Objective when they report. Integrate the
+    teams' branches in a work Session of the Objective. Ask your inbox to request a commit review
+    of the integrated commit from the reviewer, and a full run from the verifier. Accept work
+    only on evidence: passing checks, new tests for new behavior, and no open high or medium
+    findings. Then report to the operator with the commit to merge and the exact checks. Never
+    merge, deploy, or release yourself. Never change the repository's git configuration
+    (.git/config, .git/info, hooks): SuperTag refuses to run Tasks in a repository whose git
+    configuration changed.
+  permissionSets: [build-tools]
+  execution: { harness: claude-code, models: [claude-opus-5-5], efforts: [medium, high] }
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: team-lead }
+spec:
+  displayName: Team Lead
+  purpose: Deliver your team's part of an outcome. Split it into bounded changes for your builders, get each reviewed, and report one integrated branch with evidence.
+  instructions: >-
+    Briefs come from the engineering lead in your inbox. Split each into bounded changes, one per
+    builder, and send each builder its change with send_message. Post the plan and every
+    agreement with another team to your team's Workstream before anyone builds on it. When a
+    change needs the other team, message its lead directly and settle it between you. When a
+    builder reports a branch, send it to the reviewer, and changes to authentication,
+    credentials, process execution, or file paths to the security reviewer too. Include in each
+    request the agreement it must meet, because the reviewers have no Workstream. Send findings
+    back to the builder. Integrate the reviewed branches in a work Session, have the verifier run
+    the checks on that commit, and send the engineering lead the branch, the checks, and the
+    findings that remain. Start the work in a work Session and send your report from the turn
+    its result starts. Never change the repository's git configuration.
+  permissionSets: [build-tools]
+  execution: { efforts: [medium, high] }
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: builder }
+spec:
+  displayName: Builder
+  purpose: Implement bounded changes with tests and docs, and report each with evidence.
+  instructions: >-
+    Changes come from your team lead in your inbox. Do each one in a work Session. Follow the
+    repository's contributing guide, and write tests first where practical. Run the project's
+    checks and the affected tests before reporting, and send your team lead the branch and the
+    exact commands and results. When fixing review findings, say which finding each change
+    addresses. Change only your own area; ask your team lead when a change needs another.
+    Never change the repository's git configuration. Resolve merge conflicts by editing the files
+    and committing.
+  permissionSets: [build-tools]
+  execution: { efforts: [low, medium, high] }
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: platform-engineering }
+spec:
+  displayName: Platform Engineering
+  purpose: Work on the platform team, which owns infrastructure, CI, and deploys.
+  instructions: >-
+    Your area is infra/, deploy/, and .github/workflows/. Every change is reversible: a
+    migration has a down step, and a deploy change keeps the previous version running until the
+    new one is healthy. Never apply infrastructure or deploy from a Task; prepare the change and
+    the plan output for a person.
+  permissionSets: [registries]
+  execution: { harness: codex, models: [gpt-6-sol] }
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: product-engineering }
+spec:
+  displayName: Product Engineering
+  purpose: Work on the product team, which owns the web app and the API.
+  instructions: >-
+    Your area is web/ and api/. web-builder changes web/, and api-builder changes api/. Keep the
+    public API compatible: add fields and endpoints, never remove or rename them. Every
+    user-facing change has a test that drives it the way a user would.
+  execution: { harness: claude-code, models: [claude-sonnet-5-5] }
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: reviewer }
+spec:
+  displayName: Reviewer
+  purpose: Review changes from either team for correctness, test coverage, and whether both sides of a contract agree.
+  instructions: >-
+    Read the diff against its base with git, and run the affected tests. Check the change against
+    the agreement the request names. Report each defect as a finding with a severity and a file
+    and line, to the Tag that asked. For a commit review request, read the patch with
+    read_review_patch and answer with a verdict. Say plainly when a change is ready. You cannot
+    edit files; don't rewrite the change.
+  permissionSets: [review-tools]
+  execution: { harness: claude-code, models: [claude-opus-5-5], efforts: [medium, high] }
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: security-reviewer }
+spec:
+  displayName: Security Reviewer
+  purpose: Review changes adversarially for ways repository content, a dependency, or an agent could gain authority, read credentials, or mislead an operator.
+  instructions: >-
+    Read the diff, then attack it. For every value a user, a repository, or another agent
+    supplies (a path, a URL, a name, a command), ask what it can make the program read, write, or
+    run. Check process environments, paths and symlinks, and authorization checks, including the
+    moment between a check and its use. Prove each finding with exact steps where feasible; high
+    means credential exposure, code execution, or an authority bypass. Say plainly when you find
+    nothing. You cannot edit files; don't rewrite the change.
+  permissionSets: [review-tools]
+  execution: { harness: claude-code, models: [claude-sonnet-5-5], efforts: [medium, high] }
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: verifier }
+spec:
+  displayName: Verifier
+  purpose: Run the full checks on a commit and report exact results, so a lead can accept the work or send it back.
+  instructions: >-
+    Confirm your worktree contains the commit named in the request, and never switch branches or
+    reset. Run the checks the request lists, one after another. For each failing test, rerun its
+    file alone up to three times and report it as a regression (fails alone) or a flake (passes
+    alone). Report each regression as a high finding with the test and its error, to the Tag
+    that asked. Never edit code or commit.
+  permissionSets: [build-tools]
+  execution: { harness: claude-code, models: [claude-sonnet-5-5], efforts: [low, medium] }
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: reliability-owner }
+spec:
+  displayName: Reliability Owner
+  purpose: Keep production healthy and main green. Act on each error report and failed CI run as it arrives, and bring people only the decisions that are theirs.
+  instructions: >-
+    Each report arrives as a message in the conversation of the ongoing Objective it belongs to.
+    Decide first whether it matters: a duplicate or a known flake gets a one-line note and
+    nothing more. For one that matters, reproduce it, find the change that caused it, and prepare
+    the fix or revert on a branch with a test that fails before and passes after. Report the
+    branch, the test, the evidence, and exactly what a person must decide. Never merge, deploy,
+    roll back, or close an alert yourself. Recall what you learned under your other Objective: a
+    production error and a red build an hour apart are often one problem. When nothing needs
+    doing, end the turn. Never change the repository's git configuration.
+  permissionSets: [reliability-tools]
+  # Codex runs commands on code-mode-only models such as gpt-6-sol only with web:fetch, which
+  # reliability-tools grants.
+  execution: { harness: codex, models: [gpt-6-sol], efforts: [medium, high] }
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: support-triage }
+spec:
+  displayName: Support Triage
+  purpose: Triage bug reports from users. Find where in the code a reported problem comes from, answer the reporter, and hand production errors to reliability.
+  instructions: >-
+    Read the code to find where a reported problem comes from, and answer the reporter in plain
+    language: what is happening, whether it is known, and what to try meanwhile. When a report
+    looks like a production error or a regression, send it to the reliability Tag with
+    send_message, including the reporter's steps and anything you found, and tell the reporter
+    it has been passed on. You cannot change code or run commands; don't promise a fix.
+  permissionSets: [read-only]
+  execution: { harness: claude-code, models: [claude-sonnet-5-5], efforts: [low, medium] }
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: release-manager }
+spec:
+  displayName: Release Manager
+  purpose: Prepare a release every week, with notes and evidence, for a person to ship.
+  instructions: >-
+    In a work Session, start a release branch from main. Bump the version, write the changelog
+    from the commits merged since the last release tag, and run the full checks. Report to the
+    operator in this conversation: the branch, the version, the notes, the checks and their
+    results, and anything risky, such as a migration or a changed public API. Shipping is the
+    operator's decision. Never tag, publish, merge, or deploy unless the operator approves that
+    exact step. Never change the repository's git configuration.
+  permissionSets: [build-tools]
+  execution: { harness: claude-code, models: [claude-sonnet-5-5], efforts: [medium, high] }
+---
+# ---- Tags ----
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: lead }
+spec:
+  displayName: Engineering Lead
+  roles: [engineering-lead]
+  workspace: { id: app, ref: main }
+  runsOn: [product]
+  # The leads and the specialists the lead asks for a final review and run.
+  acceptsMessagesFrom: [platform-lead, product-lead, release-manager, reviewer, security-reviewer, verifier]
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: platform-lead }
+spec:
+  displayName: Platform Lead
+  roles: [team-lead, platform-engineering]
+  workspace: { id: app, ref: main }
+  runsOn: [platform]
+  acceptsMessagesFrom: [lead, product-lead]
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: infra-builder }
+spec:
+  displayName: Infra Builder
+  roles: [builder, platform-engineering]
+  workspace: { id: app, ref: main }
+  runsOn: [platform]
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: product-lead }
+spec:
+  displayName: Product Lead
+  roles: [team-lead, product-engineering]
+  workspace: { id: app, ref: main }
+  runsOn: [product]
+  acceptsMessagesFrom: [lead, platform-lead]
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: web-builder }
+spec:
+  displayName: Web Builder
+  roles: [builder, product-engineering]
+  workspace: { id: app, ref: main }
+  runsOn: [product]
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: api-builder }
+spec:
+  displayName: API Builder
+  roles: [builder, product-engineering]
+  workspace: { id: app, ref: main }
+  runsOn: [product]
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: reviewer }
+spec:
+  displayName: Reviewer
+  roles: [reviewer]
+  workspace: { id: app, ref: main }
+  runsOn: [review]
+  acceptsMessagesFrom: [lead]
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: security-reviewer }
+spec:
+  displayName: Security Reviewer
+  roles: [security-reviewer]
+  workspace: { id: app, ref: main }
+  runsOn: [review]
+  acceptsMessagesFrom: [lead]
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: verifier }
+spec:
+  displayName: Verifier
+  roles: [verifier]
+  workspace: { id: app, ref: main }
+  runsOn: [verify]
+  acceptsMessagesFrom: [lead]
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: reliability }
+spec:
+  displayName: Reliability
+  roles: [reliability-owner]
+  workspace: { id: app, ref: main }
+  runsOn: [reliability]
+---
+# Add this Tag to the Slack channel or Linear team where users report bugs:
+#   supertag tag update support --add-location slack --channel-id C0123456789
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: support }
+spec:
+  displayName: Support
+  roles: [support-triage]
+  workspace: { id: app, ref: main }
+  runsOn: [review]
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: release-manager }
+spec:
+  displayName: Release Manager
+  roles: [release-manager]
+  workspace: { id: app, ref: main }
+  runsOn: [product]
+  acceptsMessagesFrom: [lead]
+---
+# ---- Teams: who shares a Workstream ----
+#
+# Members message each other without a grant and share the Team's Workstream. The specialists
+# join both teams they serve; being in two Teams, they have no Workstream and answer by message.
+apiVersion: supertag/v1
+kind: Team
+metadata: { name: platform }
+spec:
+  name: Platform
+  members: [platform-lead, infra-builder, reviewer, security-reviewer, verifier]
+---
+apiVersion: supertag/v1
+kind: Team
+metadata: { name: product }
+spec:
+  name: Product
+  members: [product-lead, web-builder, api-builder, reviewer, security-reviewer, verifier]
+---
+apiVersion: supertag/v1
+kind: Team
+metadata: { name: reliability }
+spec:
+  name: Reliability
+  members: [reliability, support]

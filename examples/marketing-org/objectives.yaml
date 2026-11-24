@@ -1,0 +1,88 @@
+# The marketing organization's work: one campaign outcome, three ongoing responsibilities, and a
+# weekly report. Applying this file starts the Tags: each Objective takes a first turn in its own
+# conversation. Apply organization.yaml first.
+#
+# Releases and analytics numbers reach an Objective as messages, through the Control Plane API.
+# A small relay of your own forwards them: from your release pipeline or GitHub releases to
+# launch-copy, and from your analytics tool to track-experiments. Each delivery calls
+# Conversations.SendMessage with `tag_id` the owner, `conversation` the Objective's `session_id`
+# (from `supertag get objective NAME`), and an `operation_id` built from the event's own ID, such
+# as `release-42` or `analytics-2026-w47`, so a retried delivery never arrives twice. See
+# docs/guides/build-your-own.md.
+#
+# Each budget is the most an Objective may spend in total; raise it as you learn its cost.
+apiVersion: supertag/v1
+kind: Objective
+metadata: { name: launch-copy }
+spec:
+  ownerTagId: product-marketing
+  outcome: >-
+    For each release reported in this conversation, have the changelog entry and the release
+    notes page on a branch within one working day, and a launch post when the release changes
+    what a customer can do. Every claim names the merged change or release note behind it. A
+    person merges the branch; nothing is published without them.
+  ongoing: true
+  budgetLimitMinor: 20000
+  budgetCurrency: USD
+---
+apiVersion: supertag/v1
+kind: Objective
+metadata: { name: track-experiments }
+spec:
+  ownerTagId: growth
+  outcome: >-
+    For each analytics report that arrives in this conversation, say what changed in traffic,
+    signups, and activation since the last one, and whether it is more than normal noise. Track
+    each running experiment against the number it should move, and recommend keeping, changing,
+    or stopping it with the evidence. Propose new experiments as drafts; a person approves each
+    one, and none spends money or changes prices.
+  ongoing: true
+  budgetLimitMinor: 15000
+  budgetCurrency: USD
+---
+apiVersion: supertag/v1
+kind: Objective
+metadata: { name: competitor-watch }
+spec:
+  ownerTagId: research
+  outcome: >-
+    Every Monday, check the competitors listed in the repository's COMPETITORS.md: their pricing
+    pages, changelogs, and announcements. Set yourself a weekly Schedule for it on the first turn.
+    Brief the team on each change that affects our positioning, with its source link and date,
+    and say nothing in a week when nothing changed. Read only public pages, and never contact
+    a competitor or a customer.
+  ongoing: true
+  budgetLimitMinor: 10000
+  budgetCurrency: USD
+---
+# A campaign is an outcome with an end: what must be true, how it will be checked, what must not
+# change, and the limits. The lead plans it and delivers it with the team. Rewrite it for yours.
+apiVersion: supertag/v1
+kind: Objective
+metadata: { name: spring-launch }
+spec:
+  ownerTagId: marketing-lead
+  outcome: >-
+    Prepare the spring launch of the usage-based plans. Done when the pricing page, a launch
+    post, an email to existing customers, and posts for each social network are on branches, each
+    reviewed against the brand guide, with every claim sourced from the release notes or the
+    pricing decision in PRICING.md. Keep current prices and plan names unchanged until the launch
+    date. A person approves the copy, the launch date, and anything that is published.
+  budgetLimitMinor: 30000
+  budgetCurrency: USD
+  deadline: "2027-03-15T00:00:00Z"
+---
+# Monday morning, marketing-lead reports the week in your conversation with it.
+apiVersion: supertag/v1
+kind: Schedule
+metadata: { name: marketing-weekly }
+spec:
+  tag: marketing-lead
+  every: "0 9 * * MON"
+  timeZone: UTC
+  note: >-
+    Report last week to the head of marketing. Read the Team's Workstream for growth's numbers
+    and research's briefs, and your Objectives for the campaign's progress. Give traffic, signups,
+    and activation against the week before, each experiment's status, what shipped, what waits on
+    a person, and the one thing you would change next week. Use only numbers from the Workstream,
+    and say when they are missing.

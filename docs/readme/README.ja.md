@@ -12,7 +12,7 @@
 
 **タスクではなく、仕事を任せよう。**
 
-[タスクではなく仕事を](#give-them-jobs-not-tasks) · [永続的](#persistent) · [能動的](#proactive) · [マルチプレイヤー](#multiplayer) · [最初の Tag を動かす](#run-your-first-tag) · [独自に構築する](#build-your-own) · [自分で運用する](#run-it-yourself) · [ドキュメント](../../docs/README.md)
+[タスクではなく仕事を](#give-them-jobs-not-tasks) · [永続的](#persistent) · [能動的](#proactive) · [マルチプレイヤー](#multiplayer) · [1 つのデプロイで動かせるもの](#what-a-deployment-can-run) · [最初の Tag を動かす](#run-your-first-tag) · [独自に構築する](#build-your-own) · [自分で運用する](#run-it-yourself) · [ドキュメント](../../docs/README.md)
 
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.ja.webp" alt="Tag たちの紹介 — 丸い体型や縦長の体型で、色とりどりのジャケットや帽子、メガネを身につけた 9 体の SuperTag マスコット" width="900" height="360">
@@ -25,7 +25,7 @@
 SuperTag が提供するものは 2 つあります。
 
 - **すぐに使える、エンジニアリングの仕事のための AI チームメイト。** Devin Bots、OpenAI dots、Grok Bot が提供しているもの、つまりいつでも使えて、過去の作業を覚えており、頼まれなくても動き、チームと一緒に働くチームメイトです。Tag はあなた自身のコーディングエージェントとマシンで動き、あなたが許可したことしか行いません。
-- **独自のものを構築するための基盤。** 同じ機能を、あなたが運用し管理するインフラとして、あなた自身の製品やツールのために使えます。[独自に構築する](#build-your-own)を参照してください。
+- **独自のものを構築するための基盤。** 同じ機能を、あなたが運用し管理するインフラとして、あなた自身の製品のために、あるいはマーケティングや営業といったほかの部門のために使えます。[独自に構築する](#build-your-own)を参照してください。
 
 <a name="give-them-jobs-not-tasks"></a>
 
@@ -98,6 +98,33 @@ Sentry が新しいエラーを報告すると、`reliability` は 1 つ目の O
 
 [マルチプレイヤーの仕組み](../../docs/concepts/multiplayer.md) · [SuperTag をセルフホストする](../../docs/guides/self-hosting.md)
 
+<a name="what-a-deployment-can-run"></a>
+
+## 1 つのデプロイで動かせるもの
+
+永続性、能動的な作業、チームワークを組み合わせれば、セルフホストした 1 つの SuperTag で自律的なエンジニアリング組織を運営できます。その組織には独自の部門、チーム、責務があり、あなたはそのトップとして指揮をとります。
+
+組織図を描くように、組織を設定に記述します。
+
+```text
+you
+ └─ lead                     takes your outcomes, splits them across teams, reports with evidence
+     ├─ platform team        platform-lead, infra-builder              on Codex, on a server
+     ├─ product team         product-lead, web-builder, api-builder     on Claude Code, on laptops
+     ├─ reliability          reliability, support                      always on
+     ├─ release              release-manager                            ships when you approve
+     └─ shared specialists   reviewer, security-reviewer, verifier
+```
+
+- **部門ごとの Role。** 各 Role は、指示、基準、モデル、権限を持ちます。ビルダーはコードを編集してコマンドを実行し、レビュアーは読み取りだけを行い、リリースマネージャーはあなたの承認なしにはリリースできません。
+- **サブ部門ごとの Team。** 各 Team は自分の Workstream を持ちます。Team のリード同士がメッセージをやり取りし、あなたを介さずに細部を詰めます。
+- **上から下へ流れる成果。** 予算と期限をつけた成果を lead に渡します。lead は作業を各 Team に割り振り、各 Team はレビューとテストの全件実行を経て担当分を納品し、lead が証拠をあなたに届けます。
+- **終わりのない責務。** 新しいエラーや失敗したビルドには reliability が自ら対応し、認証情報に関わる変更はすべてセキュリティがレビューし、リリースマネージャーは毎週リリースを準備します。
+- **人が関わる場面はあなたが決める。** マージ、リリース、予算、そしてあなたが選んだあらゆるアクションに承認を求められます。それ以外は組織が処理します。
+
+SuperTag はすべての Tag を動かし続け、各 Role の制限を守らせ、だれが何をなぜ行ったかを記録し、あなたが下すべき判断を 1 つの受信箱にまとめます。
+[自律的なエンジニアリング組織を立ち上げる](../../docs/guides/engineering-organization.md)
+
 <a name="get-started"></a>
 
 <a name="run-your-first-tag"></a>
@@ -141,15 +168,27 @@ supertag objective review OBJECTIVE_ID request-changes --feedback "Also cover th
 
 ## 独自に構築する
 
-ここまで紹介した永続性、能動的な作業、チームワークはすべて SuperTag 自身のインフラであり、その上にあらゆる用途のものを構築できます。たとえば、チームの Slack にサポートアシスタントを置きたいとします。そのアシスタントは、ドキュメントをもとにサービスに関する質問に答え、本物のバグには issue を作成し、顧客ごとの履歴を覚えていて、毎朝だれも返信していないチケットがないか確認します。これをゼロから書く必要はありません。SuperTag の設定に記述するだけです。
+これらはどれも、エンジニアリング専用ではありません。Tag、Role、Team、Objective、権限、メモリ、スケジュール、承認は、組織のどの部門にも使えます。その部門に合った Role、ツール、イベントを選べば、同じインフラがその部門を動かします。
 
-- **何者か。** 固有の名前、指示、メモリを持ち、Claude Code、Codex、Cursor、OpenCode の上で動く Tag。
-- **何をしてよいか。** アクションごとの権限と、どのアクションが人の承認を待つか。
-- **いつ動くか。** スケジュール、メッセージ、またはあなた自身のシステムから送られるイベント。
-- **どこで声をかけられるか。** Slack、GitHub、Linear、Lark/Feishu、Microsoft Teams、またはターミナル。
-- **だれと働くか。** 同じチームのほかの Tag。メッセージを送り合い、記録を共有できます。
+たとえば、マーケティングをこの方法で運営したいとします。
 
-SuperTag はそれを動かし続け、何をしたかを覚え、制限を守らせ、すべてのアクションを記録します。
+```text
+you (head of marketing)
+ └─ marketing-lead         owns campaign outcomes, reports weekly with the numbers
+     ├─ content             drafts posts, docs pages, and release notes in your voice
+     ├─ product-marketing   turns each release from engineering into launch copy
+     ├─ growth              reads traffic and signup numbers, proposes and tracks experiments
+     ├─ social              drafts launch posts, publishes only when you approve
+     └─ research            watches competitors and customer conversations, briefs the team
+```
+
+- **部門ごとの Role。** 各 Role は、その部門のトーン、ブランドのルール、主張してよい内容を持ちます。あなたの承認なしには、何も公開されず、お金も使われません。
+- **レビューのために持ち帰られる作業。** コンテンツは、コードと同じように、Web サイトやドキュメントのリポジトリのブランチとして届きます。
+- **終わりのない責務。** 数字をまとめた週次レポート、競合の継続的なウォッチ、リリースごとのローンチ文案。
+- **あなた自身のシステムからのイベント。** リリース、アナリティクス、顧客との会話が、発生したその場で適切な Tag に届きます。
+- **部門をまたぐ 1 つの組織。** エンジニアリングのリリースマネージャーがリリースすると、同じ Control Plane 上で、プロダクトマーケティングに直接知らせます。
+
+同じ構成要素で、営業、カスタマーサポート、財務オペレーション、採用、リサーチも運営できます。
 
 さらに進むなら、その上に独自のインターフェースを載せましょう。Control Plane の gRPC API を使えば、アプリケーションから Tag を作成して指示を出し、作業を送り、進捗を確認できます。生成済みの Go、TypeScript、Python バインディングはリポジトリに含まれています。[API を見る](../../docs/reference/control-plane-api.md)
 
@@ -160,7 +199,7 @@ npm install supertag-ai
 python -m pip install 'supertag==0.3.13'
 ```
 
-[サポートアシスタントを順に構築する](../../docs/guides/build-your-own.md) · [harness アダプターを書く](../../docs/guides/harness-adapters.md) · [独自のコラボレーションサーフェスを接続する](../../docs/reference/connector-contract.md) · [API の安定性を確認する](../../docs/reference/api-stability.md)
+[独自の組織を構築する：マーケティング](../../docs/guides/build-your-own.md) · [harness アダプターを書く](../../docs/guides/harness-adapters.md) · [独自のコラボレーションサーフェスを接続する](../../docs/reference/connector-contract.md) · [API の安定性を確認する](../../docs/reference/api-stability.md)
 
 <a name="run-it-yourself"></a>
 
@@ -204,7 +243,7 @@ SuperTag は Apache 2.0 ライセンスのオープンソースで、付属の T
 
 **サーバーは必要ですか？** Control Plane の起動も作業の実行も、ノート PC だけで行えます。共有して使う場合や、ノート PC の電源が切れていても作業を続けたい場合は、Control Plane をデプロイし、常時オンラインの Worker Host を接続してください。[SuperTag をセルフホストする](../../docs/guides/self-hosting.md)
 
-**SuperTag はエンジニアリングの仕事専用ですか？** Tag、例、git ブランチによる納品は、エンジニアリングの仕事向けに作られています。その下にあるインフラは、どんな種類の仕事にも使えます。[独自に構築する](#build-your-own)のように、その上に独自のアシスタントを構築できます。
+**SuperTag はエンジニアリングの仕事専用ですか？** いいえ。同梱の Tag、例、git ブランチによる納品はエンジニアリングの仕事から始まりますが、インフラはどの部門にも使えます。[独自に構築する](#build-your-own)のように、マーケティング、営業、サポートをその上で運営できます。
 
 ## コントリビューションとライセンス
 

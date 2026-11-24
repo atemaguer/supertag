@@ -98,8 +98,8 @@ before work reaches execution.
 SuperTag does not provide the underlying model intelligence, and describing a “Claude Tag-like”
 application pattern does not claim compatibility with or affiliation to Anthropic's product.
 
-To build the Slack support assistant from configuration, follow
-[Build your own support assistant](../guides/build-your-own.md).
+To build an organization for another function from configuration, follow
+[Build your own organization: marketing](../guides/build-your-own.md).
 
 ## Choose by the layer you need
 

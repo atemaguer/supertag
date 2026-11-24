@@ -19,7 +19,13 @@ use anyhow::{Context, Result, ensure};
 use operator_services::OperatorServices;
 use serde_json::Value;
 
-const EXAMPLES: [&str; 3] = ["multiplayer", "reliability", "review-team"];
+const EXAMPLES: [&str; 5] = [
+    "engineering-org",
+    "marketing-org",
+    "multiplayer",
+    "reliability",
+    "review-team",
+];
 
 fn example(name: &str, file: &str) -> String {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -52,11 +58,23 @@ fn every_example_is_tested() -> Result<()> {
 
 database_tests! {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    engineering_org;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    marketing_org;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     multiplayer;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     reliability;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     review_team;
+}
+
+async fn engineering_org(database: String) -> Result<()> {
+    applies_and_round_trips(&database, "engineering-org").await
+}
+
+async fn marketing_org(database: String) -> Result<()> {
+    applies_and_round_trips(&database, "marketing-org").await
 }
 
 async fn multiplayer(database: String) -> Result<()> {
@@ -106,10 +124,16 @@ async fn applies_and_round_trips(database: &str, name: &str) -> Result<()> {
             "{name}: Tag {} does not follow app at main: {tag}",
             tag["tag_id"]
         );
-        // Only review-team places Tags by label, keeping the verifier on its own host.
+        // review-team keeps the verifier on its own host; engineering-org places each function
+        // on the host with its coding agent and sandbox.
         let expected: &[&str] = match (name, tag["tag_id"].as_str()) {
             ("review-team", Some("verifier")) => &["verify"],
             ("review-team", _) => &["team"],
+            ("engineering-org", Some("platform-lead" | "infra-builder")) => &["platform"],
+            ("engineering-org", Some("reviewer" | "security-reviewer" | "support")) => &["review"],
+            ("engineering-org", Some("verifier")) => &["verify"],
+            ("engineering-org", Some("reliability")) => &["reliability"],
+            ("engineering-org", _) => &["product"],
             _ => &[],
         };
         ensure!(

@@ -9,6 +9,11 @@ part of what makes Tags different, in manifests you can copy, rename, and apply.
 | [`reliability`](reliability/) | **Proactive.** One Tag owns four ongoing Objectives and acts on each error report, alert, failed CI run, and advisory as it arrives | `reliability` on Codex, `support` on Claude Code with read-only access | You want production errors, alerts, and red builds handled before anyone asks |
 | [`multiplayer`](multiplayer/) | **Multiplayer.** Two teammates each direct their own Tag on their own machine and coding agent; the Tags settle details between themselves | `web` on Claude Code, `api` on Codex, a shared `reviewer` on Claude Code | Your team works on one product and you want your Tags to coordinate without you |
 | [`review-team`](review-team/) | **Outcomes, with evidence.** A lead owns an outcome and delivers it with builders and independent review | A lead, two builders, a reviewer, a security reviewer, and a verifier on its own host | You want every change reviewed and the full checks run before you see it |
+| [`engineering-org`](engineering-org/) | **An organization.** A lead splits outcomes across a platform team and a product team, shared specialists review and verify, reliability owns production, and a release manager prepares a weekly release | 12 Tags in four functions, on Codex and Claude Code, across five host services | You want a whole engineering organization: teams, shared review, standing responsibilities, and a release cadence |
+| [`marketing-org`](marketing-org/) | **Another function.** The same machinery runs marketing: a lead owns campaigns, content arrives as branches, releases and analytics arrive as events, and nothing is published without a person | 6 Tags in one Team on Claude Code, with a shared brand-voice Role | You want Tags for work other than engineering; see [Build your own organization: marketing](../docs/guides/build-your-own.md) |
+
+[Set up an autonomous engineering organization](../docs/guides/engineering-organization.md)
+walks through `engineering-org` step by step.
 
 Each example has two files:
 
@@ -16,8 +21,8 @@ Each example has two files:
   may do), **Roles** (responsibilities with instructions, models, and efforts), and, where Tags
   work together, a **Team**. Applying it starts nothing.
 - **`objectives.yaml`** declares the outcomes and responsibilities the Tags own: **Objectives**
-  and, in `reliability`, a **Schedule**. Applying it starts the work, so apply it when you're
-  ready.
+  and, in `reliability`, `engineering-org`, and `marketing-org`, a **Schedule**. Applying it starts the work, so
+  apply it when you're ready.
 
 Each Tag works in one **Workspace**, the repository a Worker Host serves, declared in its
 `supertag.yaml`. Each file's header comment shows the host settings it expects. See the
