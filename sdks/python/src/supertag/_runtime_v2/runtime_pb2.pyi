@@ -1080,7 +1080,7 @@ class CloseAttemptWorkSessionRequest(_message.Message):
     def __init__(self, work_session_id: _Optional[str] = ...) -> None: ...
 
 class WorkSession(_message.Message):
-    __slots__ = ("work_session_id", "title", "parent_tag_id", "parent_session_id", "starter_task_id", "tag_id", "latest_task_id", "latest_task_state", "report_task_id", "report_task_state", "objective_id", "workspace_delivery", "created_order", "question", "closed_at_ms", "close_reason")
+    __slots__ = ("work_session_id", "title", "parent_tag_id", "parent_session_id", "starter_task_id", "tag_id", "latest_task_id", "latest_task_state", "report_task_id", "report_task_state", "objective_id", "workspace_delivery", "created_order", "question", "closed_at_ms", "close_reason", "steering_offered", "running_task_id")
     WORK_SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     TITLE_FIELD_NUMBER: _ClassVar[int]
     PARENT_TAG_ID_FIELD_NUMBER: _ClassVar[int]
@@ -1097,6 +1097,8 @@ class WorkSession(_message.Message):
     QUESTION_FIELD_NUMBER: _ClassVar[int]
     CLOSED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     CLOSE_REASON_FIELD_NUMBER: _ClassVar[int]
+    STEERING_OFFERED_FIELD_NUMBER: _ClassVar[int]
+    RUNNING_TASK_ID_FIELD_NUMBER: _ClassVar[int]
     work_session_id: str
     title: str
     parent_tag_id: str
@@ -1113,7 +1115,9 @@ class WorkSession(_message.Message):
     question: WorkSessionQuestion
     closed_at_ms: int
     close_reason: WorkSessionCloseReason
-    def __init__(self, work_session_id: _Optional[str] = ..., title: _Optional[str] = ..., parent_tag_id: _Optional[str] = ..., parent_session_id: _Optional[str] = ..., starter_task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., latest_task_id: _Optional[str] = ..., latest_task_state: _Optional[_Union[TaskState, str]] = ..., report_task_id: _Optional[str] = ..., report_task_state: _Optional[_Union[TaskState, str]] = ..., objective_id: _Optional[str] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., created_order: _Optional[int] = ..., question: _Optional[_Union[WorkSessionQuestion, _Mapping]] = ..., closed_at_ms: _Optional[int] = ..., close_reason: _Optional[_Union[WorkSessionCloseReason, str]] = ...) -> None: ...
+    steering_offered: bool
+    running_task_id: str
+    def __init__(self, work_session_id: _Optional[str] = ..., title: _Optional[str] = ..., parent_tag_id: _Optional[str] = ..., parent_session_id: _Optional[str] = ..., starter_task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., latest_task_id: _Optional[str] = ..., latest_task_state: _Optional[_Union[TaskState, str]] = ..., report_task_id: _Optional[str] = ..., report_task_state: _Optional[_Union[TaskState, str]] = ..., objective_id: _Optional[str] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., created_order: _Optional[int] = ..., question: _Optional[_Union[WorkSessionQuestion, _Mapping]] = ..., closed_at_ms: _Optional[int] = ..., close_reason: _Optional[_Union[WorkSessionCloseReason, str]] = ..., steering_offered: _Optional[bool] = ..., running_task_id: _Optional[str] = ...) -> None: ...
 
 class WorkSessionQuestion(_message.Message):
     __slots__ = ("work_session_id", "task_id", "attempt_id", "text", "asked_at_ms", "published_at_ms", "answer_task_id")

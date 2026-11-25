@@ -79,6 +79,18 @@ pub(crate) async fn settle_in(
     ) {
         return Ok(());
     }
+    // An accepted steering input was handled by the preceding running Task.
+    // Its fallback Task has no separate result to report.
+    let steered: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM supertag_v2_session_inputs WHERE admitted_task_id=$1 AND offer_state=$2",
+    )
+    .bind(&task.task_id)
+    .bind(supertag_protocol::v2::LiveInputState::Accepted as i64)
+    .fetch_one(&mut **tx)
+    .await?;
+    if steered != 0 {
+        return Ok(());
+    }
     let row = sqlx::query(
         "SELECT w.*,t.cleanup_pending,
                 COALESCE(k.starter_task_id,w.starter_task_id) AS reporting_starter_task_id,
@@ -215,7 +227,8 @@ pub(crate) async fn parent_has_pending_in(
          JOIN supertag_v2_tasks t ON t.task_id=k.task_id
          WHERE w.parent_tag_id=$1 AND w.parent_session_id=$2
            AND (t.cleanup_pending=1 OR t.state NOT IN ($3,$4,$5)
-             OR NOT EXISTS (SELECT 1 FROM supertag_v2_work_session_reports r WHERE r.child_task_id=t.task_id)
+             OR (NOT EXISTS (SELECT 1 FROM supertag_v2_work_session_reports r WHERE r.child_task_id=t.task_id)
+                 AND NOT EXISTS (SELECT 1 FROM supertag_v2_session_inputs i WHERE i.admitted_task_id=t.task_id AND i.offer_state=3))
              OR (w.latest_task_id=t.task_id AND EXISTS (
                  SELECT 1 FROM supertag_v2_work_session_questions q
                  WHERE q.task_id=t.task_id AND q.attempt_id=t.attempt_id

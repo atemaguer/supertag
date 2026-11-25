@@ -11,6 +11,13 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- A Tag's inbox can steer its own running work. When another Tag's message changes the plan, the
+  inbox turn calls `continue_session` on the running Work Session, and the message reaches the
+  running Task Attempt as live input: `steered` on Codex and Claude Code, or `queued` as a
+  follow-up turn on harnesses that take no live input. The relayed text names the inbox and the
+  Tags whose messages it relays, and grants nothing. Each inbox turn lists the Tag's running Work
+  Sessions with their Objective, branch, and changed paths. Only the inbox reaches work another of
+  the Tag's Sessions started, and operators can steer a running Work Session too.
 - Users: a person admitted to the Control Plane. `supertag user invite alice --display-name
   "Alice Ng"` prints one invite key that joins all of Alice's devices with `supertag connect` and,
   with `supertag host enroll`, Worker Hosts that belong to her. Each device enrolls as its own

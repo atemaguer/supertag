@@ -18,7 +18,7 @@ import { useWatchRefresh, type WatchFeed } from "@supertag/client/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TuiGateway } from "./connection";
 import { clip, safe } from "./text";
-import { color, type KeyEvent, type ScrollBoxRenderable, useKeyboard } from "./ui";
+import { color, type KeyEvent, pasteOnOneLine, type ScrollBoxRenderable, useKeyboard } from "./ui";
 
 interface Detail {
   activity?: string[];
@@ -50,6 +50,9 @@ export function WorkSessions({
   const [expanded, setExpanded] = useState<string | undefined>();
   const [details, setDetails] = useState<Record<string, Detail>>({});
   const [diff, setDiff] = useState<{ work: WorkSession; branch: WorkBranch; result?: WorkDiff }>();
+  const [steering, setSteering] = useState<WorkSession | undefined>();
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
   const key = sessionIds.join("\n");
   const read = useCallback(
     async (signal: AbortSignal) => {
@@ -141,6 +144,10 @@ export function WorkSessions({
 
   const scroll = useRef<ScrollBoxRenderable>(null);
   useKeyboard((event: KeyEvent) => {
+    if (steering) {
+      if (event.name === "escape" && !sending) setSteering(undefined);
+      return;
+    }
     if (diff) {
       const box = scroll.current;
       const page = Math.max(1, (box?.viewport.height ?? 10) - 2);
@@ -162,7 +169,33 @@ export function WorkSessions({
       );
     else if (event.name === "d" && selected) void showDiff(selected);
     else if (event.name === "o" && selected) openPullRequest(selected);
+    else if (event.name === "s" && selected && selected.runningTaskId) {
+      setSteering(selected);
+      setDraft("");
+    }
   });
+
+  const sendSteering = async (text: string) => {
+    if (!steering || !text.trim() || sending) return;
+    setSending(true);
+    try {
+      const receipt = await gateway.steerTask(
+        steering.runningTaskId ?? steering.latestTaskId,
+        text.trim(),
+      );
+      setProblem(
+        receipt.state === "pending"
+          ? "Message offered to the running Task."
+          : `Message ${receipt.state}; follow-up Task ${receipt.followerTaskId}.`,
+      );
+      setSteering(undefined);
+      setDraft("");
+    } catch (error) {
+      setProblem(describe(error));
+    } finally {
+      setSending(false);
+    }
+  };
 
   const inner = Math.max(20, width - 4);
   if (diff) {
@@ -297,8 +330,25 @@ export function WorkSessions({
         );
       })}
       {problem ? <text fg={color.warning}>{safe(problem)}</text> : null}
+      {steering ? (
+        <box
+          border
+          borderColor={color.focus}
+          height={3}
+          title={`Steer ${clip(steering.title, 30)}`}
+        >
+          <input
+            focused
+            onPaste={pasteOnOneLine}
+            value={draft}
+            onInput={setDraft}
+            onSubmit={(value: string) => void sendSteering(String(value))}
+            placeholder="Message for this running work Session"
+          />
+        </box>
+      ) : null}
       <text fg={color.faint}>
-        ↑ ↓ move · Enter expand · d diff · o open the pull request · Esc back
+        ↑ ↓ move · Enter expand · s steer running · d diff · o open the pull request · Esc back
       </text>
     </box>
   );

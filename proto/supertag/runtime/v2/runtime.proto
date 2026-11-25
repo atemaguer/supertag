@@ -611,6 +611,11 @@ message WorkSession {
   // `max_work_sessions`. Only an idle close is undone: continuing it reopens it.
   optional int64 closed_at_ms = 15;
   WorkSessionCloseReason close_reason = 16;
+  // True when this continuation was offered to the running Task Attempt.
+  // The queued child remains the fallback until the harness accepts the input.
+  bool steering_offered = 17;
+  // The newest running child, even when a steering fallback is already queued.
+  optional string running_task_id = 18;
 }
 
 message WorkSessionQuestion {

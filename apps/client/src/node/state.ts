@@ -632,6 +632,12 @@ export class GatewayState {
     return this.call(connectionId, (session) => coordination.taskResult(session.client, taskId));
   }
 
+  steerTask(connectionId: string, taskId: string, text: string) {
+    return this.call(connectionId, (session) =>
+      coordination.steerTask(session.client, taskId, text),
+    );
+  }
+
   /** The inbox items an operator decides. */
   inbox(connectionId: string): Promise<InboxItem[]> {
     return this.call(connectionId, (session) => coordination.listInbox(session.client));

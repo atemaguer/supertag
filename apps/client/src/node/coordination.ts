@@ -10,6 +10,7 @@ import {
   AttemptCleanup,
   AttemptDecision,
   InboxItemKind,
+  LiveInputState,
   ObjectiveStatus,
   type Approval as ProtoApproval,
   type InboxItem as ProtoInboxItem,
@@ -199,6 +200,7 @@ export function workSession(value: ProtoWorkSession): WorkSession {
     starterTaskId: value.starterTaskId,
     latestTaskId: value.latestTaskId,
     latestTaskState: enumName(TaskState, value.latestTaskState),
+    runningTaskId: value.runningTaskId,
     reportTaskId: value.reportTaskId,
     reportTaskState:
       value.reportTaskId === undefined ? undefined : enumName(TaskState, value.reportTaskState),
@@ -328,6 +330,14 @@ export async function reviewObjective(
 export async function taskResult(client: GatewayClient, taskId: string) {
   const task = await rpc(() => client.operator.getTask({ taskId }, CALL));
   return { state: enumName(TaskState, task.state), result: task.result ?? "" };
+}
+
+/** Offer an operator's message to a running Task; its queued Task remains the fallback. */
+export async function steerTask(client: GatewayClient, taskId: string, text: string) {
+  const input = await rpc(() =>
+    client.liveInputs.queueInput({ taskId, text, operationId: operationId() }, CALL),
+  );
+  return { state: enumName(LiveInputState, input.state), followerTaskId: input.followerTaskId };
 }
 
 /** The inbox items an operator decides, oldest first, as the Gateway orders them. */

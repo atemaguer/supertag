@@ -76,18 +76,90 @@ impl Store {
                 "send messages through the conversation".into(),
             ));
         }
-        if crate::work_sessions::reserved_session(&session_id)
-            || crate::work_sessions::task_kind_in(&mut tx, &request.task_id)
-                .await?
-                .is_some()
+        if crate::work_sessions::task_kind_in(&mut tx, &request.task_id).await?
+            == Some(crate::work_sessions::REPORT)
         {
             return Err(StoreError::FailedPrecondition(
-                "Work Session Tasks and reports do not accept live input".into(),
+                "Work Session reports do not accept live input".into(),
             ));
         }
-        objective_admission_in(&mut tx, &tag_id, &session_id, now).await?;
-        let follower = insert_task(&mut tx, order, &tag_id, &session_id, &request.text).await?;
+        if crate::work_sessions::reserved_session(&session_id)
+            && crate::work_sessions::task_kind_in(&mut tx, &request.task_id).await?
+                != Some(crate::work_sessions::CHILD)
+        {
+            return Err(StoreError::FailedPrecondition(
+                "only a Work Session Task accepts live input".into(),
+            ));
+        }
+        let child_scope = crate::work_sessions::task_scope_in(&mut tx, &request.task_id).await?;
+        let work_child = child_scope
+            .as_ref()
+            .is_some_and(|scope| scope.kind == crate::work_sessions::CHILD);
+        if child_scope
+            .as_ref()
+            .is_none_or(|scope| scope.kind != crate::work_sessions::CHILD)
+        {
+            objective_admission_in(&mut tx, &tag_id, &session_id, now).await?;
+        }
+        let mut follower = if child_scope
+            .as_ref()
+            .is_some_and(|scope| scope.kind == crate::work_sessions::CHILD)
+        {
+            let active = task_in(&mut tx, &request.task_id).await?;
+            crate::store::insert_task_from_snapshot(
+                &mut tx,
+                order,
+                &active,
+                &session_id,
+                &request.text,
+            )
+            .await?
+        } else {
+            insert_task(&mut tx, order, &tag_id, &session_id, &request.text).await?
+        };
         objective_link_task_in(&mut tx, &follower).await?;
+        if let Some(scope) = child_scope
+            && scope.kind == crate::work_sessions::CHILD
+        {
+            let starter: String = sqlx::query_scalar(
+                    "SELECT COALESCE(k.starter_task_id,w.starter_task_id) FROM supertag_v2_work_session_tasks k JOIN supertag_v2_work_sessions w ON w.work_session_id=k.work_session_id WHERE k.task_id=$1",
+                )
+                .bind(&scope.task_id)
+                .fetch_one(&mut *tx)
+                .await?;
+            sqlx::query("INSERT INTO supertag_v2_work_session_tasks (task_id,work_session_id,kind,starter_task_id) VALUES ($1,$2,$3,$4)")
+                    .bind(&follower.task_id).bind(&scope.work_session_id)
+                    .bind(crate::work_sessions::CHILD).bind(starter).execute(&mut *tx).await?;
+            sqlx::query(
+                "UPDATE supertag_v2_work_sessions SET latest_task_id=$1 WHERE work_session_id=$2",
+            )
+            .bind(&follower.task_id)
+            .bind(&scope.work_session_id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query("INSERT INTO supertag_v2_objective_tasks (task_id,objective_id,kind) SELECT $1,objective_id,'work' FROM supertag_v2_work_sessions WHERE work_session_id=$2 AND objective_id IS NOT NULL ON CONFLICT(task_id) DO NOTHING")
+                .bind(&follower.task_id).bind(&scope.work_session_id).execute(&mut *tx).await?;
+            let objective: Option<String> = sqlx::query_scalar(
+                "SELECT objective_id FROM supertag_v2_work_sessions WHERE work_session_id=$1",
+            )
+            .bind(&scope.work_session_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            if objective.is_some() {
+                let owner_session: String = sqlx::query_scalar("SELECT parent_session_id FROM supertag_v2_work_sessions WHERE work_session_id=$1")
+                    .bind(&scope.work_session_id).fetch_one(&mut *tx).await?;
+                objective_admission_in(&mut tx, &tag_id, &owner_session, now).await?;
+            }
+            let active = task_in(&mut tx, &request.task_id).await?;
+            let allocation = crate::budget_pool::child_in(
+                &mut tx,
+                &active,
+                objective.as_deref(),
+                active.execution_limits.as_ref(),
+            )
+            .await?;
+            crate::budget_pool::set_in(&mut tx, &mut follower, allocation).await?;
+        }
         let (_, audience) = session_inputs::requester_of_in(&mut tx, &follower.task_id).await?;
         let own = session_inputs::admit_in(
             &mut tx,
@@ -101,13 +173,22 @@ impl Store {
             now,
         )
         .await?;
-        let input = offer_in(&mut tx, &request.task_id, &attempt_id, &own, true)
+        let mut input = offer_in(&mut tx, &request.task_id, &attempt_id, &own, true)
             .await?
             .ok_or_else(|| {
                 StoreError::FailedPrecondition(
                     "Task policy changed; submit a new Task to continue this Session".into(),
                 )
             })?;
+        if work_child
+            && !matches!(
+                task_in(&mut tx, &request.task_id).await?.harness_kind(),
+                supertag_protocol::v2::HarnessKind::Codex
+                    | supertag_protocol::v2::HarnessKind::ClaudeCode
+            )
+        {
+            set_state(&mut tx, &mut input, LiveInputState::Rejected).await?;
+        }
         tx.commit().await?;
         Ok(input)
     }
@@ -229,6 +310,9 @@ impl Store {
                 crate::reply_progress::follow_up_in(&mut tx, &input.task_id).await?;
                 session_inputs::bind_in(&mut tx, &input.input_id, &input.task_id, false, now)
                     .await?;
+                sqlx::query("UPDATE supertag_v2_work_sessions SET latest_task_id=$1 WHERE latest_task_id=$2 AND EXISTS (SELECT 1 FROM supertag_v2_work_session_tasks k WHERE k.task_id=$2 AND k.kind=$3)")
+                    .bind(&input.task_id).bind(&input.follower_task_id)
+                    .bind(crate::work_sessions::CHILD).execute(&mut *tx).await?;
             }
             LiveInputState::Withdrawn if current == LiveInputState::Accepted => {
                 session_inputs::unbind_in(&mut tx, &input.input_id).await?;
@@ -240,6 +324,9 @@ impl Store {
                     None,
                 )
                 .await?;
+                sqlx::query("UPDATE supertag_v2_work_sessions SET latest_task_id=$1 WHERE latest_task_id=$2 AND EXISTS (SELECT 1 FROM supertag_v2_work_session_tasks k WHERE k.task_id=$1 AND k.kind=$3)")
+                    .bind(&input.follower_task_id).bind(&input.task_id)
+                    .bind(crate::work_sessions::CHILD).execute(&mut *tx).await?;
             }
             _ => {}
         }
@@ -544,7 +631,8 @@ async fn compatible_policy_in(
            AND active.allowed_actions=follower.allowed_actions
            AND active.approval_rules=follower.approval_rules
            AND active.policy_effective_digest=follower.policy_effective_digest
-           AND active.execution_limits=follower.execution_limits
+           AND (active.execution_limits=follower.execution_limits OR EXISTS
+               (SELECT 1 FROM supertag_v2_work_session_tasks k WHERE k.task_id=follower.task_id AND k.kind=1))
            AND active.harness_kind=follower.harness_kind
            AND active.workspace_id IS NOT DISTINCT FROM follower.workspace_id
            AND active.workspace_base_commit IS NOT DISTINCT FROM follower.workspace_base_commit

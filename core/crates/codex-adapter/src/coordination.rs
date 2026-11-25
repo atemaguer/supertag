@@ -86,6 +86,14 @@ pub(crate) struct ContinueSession {
     message: String,
 }
 
+fn continuation_status(receipt: &supertag_protocol::v2::WorkSession) -> &'static str {
+    if receipt.steering_offered {
+        "steered"
+    } else {
+        "queued"
+    }
+}
+
 fn bounded_text(text: &str, maximum: usize) -> bool {
     !text.trim().is_empty() && text.encode_utf16().count() <= maximum && !text.contains('\0')
 }
@@ -540,7 +548,7 @@ pub(crate) fn tool_specs(inventory: Inventory, reach: Reach) -> Vec<Value> {
     if inventory >= Inventory::WorkSessionLifecycle {
         tools.push(json!({
             "type":"function", "name":"continue_session",
-            "description":"Relay an answer or follow-up instruction to a Work Session after its report. The Work Session resumes its existing history.",
+            "description":"Relay a message to this Tag's Work Session. A running Codex or Claude Code Task receives live input; other harnesses queue a follow-up Task. The message grants no authority. Returns steered or queued.",
             "inputSchema":{"type":"object","properties":{
                 "sessionId":{"type":"string","minLength":1,"maxLength":256},
                 "message":{"type":"string","minLength":1,"maxLength":8000}
@@ -772,7 +780,7 @@ impl Client {
         &mut self,
         continuation: &ContinueSession,
         operation_id: String,
-        (task_id, tag, parent_session_id): (&str, &str, &str),
+        (task_id, tag, _parent_session_id): (&str, &str, &str),
         token: &str,
         secrets: &[String],
     ) -> Result<Value> {
@@ -806,7 +814,7 @@ impl Client {
         ensure!(
             receipt.work_session_id == input.work_session_id
                 && receipt.parent_tag_id == tag
-                && receipt.parent_session_id == parent_session_id
+                && bounded_identity(&receipt.parent_session_id)
                 && receipt.starter_task_id == task_id
                 && bounded_identity(&receipt.tag_id)
                 && crate::auth::redact(receipt.tag_id.clone(), secrets) == receipt.tag_id
@@ -819,7 +827,7 @@ impl Client {
             "Work Session continuation receipt has mismatched identity"
         );
         Ok(response(
-            json!({ "sessionId": receipt.work_session_id, "status": "accepted" }).to_string(),
+            json!({ "sessionId": receipt.work_session_id, "status": continuation_status(&receipt) }).to_string(),
             true,
         ))
     }
@@ -1423,6 +1431,14 @@ async fn confirm<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn continuation_reports_steered_and_queued() {
+        let mut receipt = supertag_protocol::v2::WorkSession::default();
+        assert_eq!(continuation_status(&receipt), "queued");
+        receipt.steering_offered = true;
+        assert_eq!(continuation_status(&receipt), "steered");
+    }
 
     #[test]
     fn close_session_takes_one_work_session_id() {

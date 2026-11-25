@@ -5511,8 +5511,13 @@ type WorkSession struct {
 	Question          *WorkSessionQuestion        `protobuf:"bytes,14,opt,name=question,proto3" json:"question,omitempty"`
 	// Set while it is closed. An open Work Session counts toward its parent Tag's
 	// `max_work_sessions`. Only an idle close is undone: continuing it reopens it.
-	ClosedAtMs    *int64                 `protobuf:"varint,15,opt,name=closed_at_ms,json=closedAtMs,proto3,oneof" json:"closed_at_ms,omitempty"`
-	CloseReason   WorkSessionCloseReason `protobuf:"varint,16,opt,name=close_reason,json=closeReason,proto3,enum=supertag.runtime.v2.WorkSessionCloseReason" json:"close_reason,omitempty"`
+	ClosedAtMs  *int64                 `protobuf:"varint,15,opt,name=closed_at_ms,json=closedAtMs,proto3,oneof" json:"closed_at_ms,omitempty"`
+	CloseReason WorkSessionCloseReason `protobuf:"varint,16,opt,name=close_reason,json=closeReason,proto3,enum=supertag.runtime.v2.WorkSessionCloseReason" json:"close_reason,omitempty"`
+	// True when this continuation was offered to the running Task Attempt.
+	// The queued child remains the fallback until the harness accepts the input.
+	SteeringOffered bool `protobuf:"varint,17,opt,name=steering_offered,json=steeringOffered,proto3" json:"steering_offered,omitempty"`
+	// The newest running child, even when a steering fallback is already queued.
+	RunningTaskId *string `protobuf:"bytes,18,opt,name=running_task_id,json=runningTaskId,proto3,oneof" json:"running_task_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5657,6 +5662,20 @@ func (x *WorkSession) GetCloseReason() WorkSessionCloseReason {
 		return x.CloseReason
 	}
 	return WorkSessionCloseReason_WORK_SESSION_CLOSE_REASON_UNSPECIFIED
+}
+
+func (x *WorkSession) GetSteeringOffered() bool {
+	if x != nil {
+		return x.SteeringOffered
+	}
+	return false
+}
+
+func (x *WorkSession) GetRunningTaskId() string {
+	if x != nil && x.RunningTaskId != nil {
+		return *x.RunningTaskId
+	}
+	return ""
 }
 
 type WorkSessionQuestion struct {
@@ -27423,7 +27442,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x0fwork_session_id\x18\x01 \x01(\tR\rworkSessionId\x12'\n" +
 	"\x0fdelivery_pulled\x18\x02 \x01(\bR\x0edeliveryPulled\"W\n" +
 	"\x1eCloseAttemptWorkSessionRequest\x12&\n" +
-	"\x0fwork_session_id\x18\x02 \x01(\tR\rworkSessionIdJ\x04\b\x01\x10\x02R\aattempt\"\xe2\x06\n" +
+	"\x0fwork_session_id\x18\x02 \x01(\tR\rworkSessionIdJ\x04\b\x01\x10\x02R\aattempt\"\xce\a\n" +
 	"\vWorkSession\x12&\n" +
 	"\x0fwork_session_id\x18\x01 \x01(\tR\rworkSessionId\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\"\n" +
@@ -27442,10 +27461,13 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\bquestion\x18\x0e \x01(\v2(.supertag.runtime.v2.WorkSessionQuestionR\bquestion\x12%\n" +
 	"\fclosed_at_ms\x18\x0f \x01(\x03H\x02R\n" +
 	"closedAtMs\x88\x01\x01\x12N\n" +
-	"\fclose_reason\x18\x10 \x01(\x0e2+.supertag.runtime.v2.WorkSessionCloseReasonR\vcloseReasonB\x11\n" +
+	"\fclose_reason\x18\x10 \x01(\x0e2+.supertag.runtime.v2.WorkSessionCloseReasonR\vcloseReason\x12)\n" +
+	"\x10steering_offered\x18\x11 \x01(\bR\x0fsteeringOffered\x12+\n" +
+	"\x0frunning_task_id\x18\x12 \x01(\tH\x03R\rrunningTaskId\x88\x01\x01B\x11\n" +
 	"\x0f_report_task_idB\x0f\n" +
 	"\r_objective_idB\x0f\n" +
-	"\r_closed_at_ms\"\xa8\x02\n" +
+	"\r_closed_at_msB\x12\n" +
+	"\x10_running_task_id\"\xa8\x02\n" +
 	"\x13WorkSessionQuestion\x12&\n" +
 	"\x0fwork_session_id\x18\x01 \x01(\tR\rworkSessionId\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x1d\n" +

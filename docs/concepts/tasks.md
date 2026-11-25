@@ -130,7 +130,11 @@ Session holds at most eight unfinished work Sessions.
 A work Session runs the Tag's harness unless `start_session` names another, such as
 `claude-code` for a Tag that runs on Codex. It keeps that harness for its whole life, and it and
 the Session that started it exchange only messages: the instruction, its report, its questions,
-and `continue_session`. SuperTag runs it only on a Worker Host bound to the Tag that runs that
+and `continue_session`. A Tag can relay a change while the work Session is running. For example,
+Alice's inbox can pass Bob's API change to Alice's running work Session. Codex reads
+the relay during the turn; Claude Code reads it at its next tool call. If the harness cannot
+receive it, SuperTag queues the message as the work Session's next turn. A relay identifies its
+source and grants no new permissions. SuperTag runs it only on a Worker Host bound to the Tag that runs that
 harness, and checks its permissions against what that harness can enforce, as for any Task: a
 harness no bound host runs, or one that can't enforce the work Session's permissions, refuses the
 start. The work Session uses the host's default model for that harness, because the Tag's models
@@ -197,8 +201,8 @@ work Session's next Task, which resumes the work Session's own native session. T
 Tag's relay of what the person said, so it grants nothing. The next Task runs under the continuing
 conversation Task's permissions and counts against its limits. If the conversation's permissions
 changed since the work Session last ran, the Tag starts a new work Session instead. Only the
-conversation that started a work Session can continue it, and only once it has stopped running
-and its report turn has run.
+the Tag that owns a work Session can relay to it. A stopped work Session starts its next Task
+after its report turn has run.
 
 When a work Session's Task calls an action that needs approval, the call doesn't run. The Task
 ends, completed and **waiting on approval** of that request. The approval notice posts to the

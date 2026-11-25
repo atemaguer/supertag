@@ -5,6 +5,10 @@ use super::*;
 const VIEW: &str = "SELECT ws.work_session_id, ws.title, ws.parent_tag_id, ws.parent_session_id,
     ws.tag_id, ws.objective_id, COALESCE(k.starter_task_id, ws.starter_task_id) AS starter_task_id,
     child.task_id AS latest_task_id, child.state AS latest_task_state,
+    (SELECT running.task_id FROM supertag_v2_work_session_tasks running_key
+       JOIN supertag_v2_tasks running ON running.task_id=running_key.task_id
+       WHERE running_key.work_session_id=ws.work_session_id AND running_key.kind=1 AND running.state=2
+       ORDER BY running.accepted_order DESC LIMIT 1) AS running_task_id,
     child.workspace_delivery, child.accepted_order AS created_order,
     report.report_task_id, delivered.state AS report_task_state,
     q.attempt_id AS question_attempt_id, q.text AS question_text,
@@ -52,6 +56,8 @@ fn projection(row: &AnyRow) -> Result<WorkSession> {
         question,
         closed_at_ms: row.try_get("closed_at_ms")?,
         close_reason: row.try_get::<i64, _>("close_reason")? as i32,
+        steering_offered: false,
+        running_task_id: row.try_get("running_task_id")?,
     })
 }
 

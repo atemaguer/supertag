@@ -350,6 +350,8 @@ export interface WorkSession {
   starterTaskId: string;
   latestTaskId: string;
   latestTaskState: string;
+  /** A running Task, even when a follow-up is already queued. */
+  runningTaskId?: string;
   reportTaskId?: string;
   reportTaskState?: string;
   objectiveId?: string;

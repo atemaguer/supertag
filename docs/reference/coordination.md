@@ -219,6 +219,12 @@ An Objective's turn starts work with `start_session {title, instruction, harness
 
 A work Session's result returns to the Objective's conversation as a turn. The owner reads it,
 then either accepts it in its reply or sends fixes with `continue_session {sessionId, message}`.
+The Tag's inbox also lists its running work Sessions with each title, Objective, branch, and
+reported changed paths. An inbox turn can relay relevant messages with `continue_session`.
+The relay identifies its source and grants no authority. A withdrawn offer runs as the queued
+follow-up Task. Cursor and OpenCode queue the follow-up because they do not accept live input.
+An operator can offer input to a running Task with `supertag task input TASK_ID TEXT` or press
+`s` on a running work Session in the terminal UI. The input receipt shows its delivery state.
 
 A work Session that another Tag started for an Objective before the upgrade that removed
 cross-Tag work Sessions keeps running and still reports to the Objective's conversation. Nothing
@@ -516,7 +522,7 @@ when the Tag makes the call; see [Approval requests](#approval-requests). The [a
 | Tool | Input | Effect |
 | --- | --- | --- |
 | `start_session` | `title` (up to 120 characters), `instruction` (up to 8,000), optional `harness` | Starts a work Session of the Tag; see [Work Sessions](#work-sessions) |
-| `continue_session` | `sessionId`, `message` (up to 8,000 characters) | Starts that work Session's next Task |
+| `continue_session` | `sessionId`, `message` (up to 8,000 characters) | Offers the message to a running Codex or Claude Code Task (`steered`); otherwise queues the next Task (`queued`) |
 | `close_session` | `sessionId` | Closes one of the Tag's work Sessions, so it stops counting toward the [limit](#open-work-sessions) |
 | `ask` | `text` (up to 16,000 characters; 2,000 in a work Session) | Ends the Task waiting on a person's answer |
 | `report_objective` | `status` (`ready_for_review`, `completed`, or `blocked`; not `completed` for an ongoing Objective), `summary` (up to 16,000 characters) | When the turn ends, sets the Objective's status; the summary becomes the turn's result, and the Objective records it with the Session's delivered commit and branch |

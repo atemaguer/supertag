@@ -178,15 +178,8 @@ async fn contract(url: String) {
 
     let outsider = submit(&store, "different-parent").await;
     let outsider = run(&store, &host, &outsider.task_id).await;
-    assert!(matches!(
-        store
-            .continue_work_session(
-                &supertag_control_plane::AttemptAccess::new(&host, &outsider),
-                &next(&started.work_session_id, "wrong-parent")
-            )
-            .await,
-        Err(StoreError::NotFound(_))
-    ));
+    // A root turn in another Session of the same Tag may now relay a change.
+    // The steering contract exercises that route without queuing another child here.
     finish(&store, &host, &outsider, None).await;
     store
         .put_tag(

@@ -205,6 +205,60 @@ async fn addressed_in(
     .await?)
 }
 
+async fn running_work_in(tx: &mut Transaction<'_, Any>, recipient: &str) -> Result<String> {
+    let running = sqlx::query(
+        "SELECT w.work_session_id,w.title,w.objective_id,t.tag_id,t.session_id,c.paths,c.truncated
+         FROM supertag_v2_work_sessions w
+         JOIN supertag_v2_work_session_tasks k ON k.work_session_id=w.work_session_id AND k.kind=1
+         JOIN supertag_v2_tasks t ON t.task_id=k.task_id AND t.state=$2
+         LEFT JOIN supertag_v2_attempt_changed_paths c ON c.task_id=t.task_id AND c.attempt_id=t.attempt_id
+         WHERE w.parent_tag_id=$1 ORDER BY w.created_order LIMIT 8",
+    )
+    .bind(recipient)
+    .bind(TaskState::Running as i64)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut work = String::new();
+    for row in running {
+        let title: String = row.try_get("title")?;
+        let objective: Option<String> = row.try_get("objective_id")?;
+        let tag: String = row.try_get("tag_id")?;
+        let session: String = row.try_get("session_id")?;
+        let paths: Option<String> = row.try_get("paths")?;
+        let paths: Vec<String> = paths
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()?
+            .unwrap_or_default();
+        let shown = paths.iter().take(12).cloned().collect::<Vec<_>>();
+        let line = format!(
+            "- {}: {} | Objective: {} | branch: {} | changed paths: {}{}\n",
+            row.try_get::<String, _>("work_session_id")?,
+            serde_json::to_string(&title)?,
+            objective.as_deref().unwrap_or("none"),
+            supertag_protocol::session_branch(&tag, &session),
+            if shown.is_empty() {
+                "none reported".to_owned()
+            } else {
+                serde_json::to_string(&shown)?
+            },
+            if paths.len() > shown.len() || row.try_get::<Option<i64>, _>("truncated")? == Some(1) {
+                " (more paths)"
+            } else {
+                ""
+            }
+        );
+        work.extend(line.chars().take(600));
+        work.push('\n');
+    }
+    let work = if work.is_empty() {
+        String::new()
+    } else {
+        format!("Running Work Sessions on this Tag:\n{work}\n")
+    };
+    Ok(work)
+}
+
 /// The inbox prompt as it is built, within its limits.
 struct Prompt {
     text: String,
@@ -357,7 +411,7 @@ pub(crate) async fn started_in(
         ));
     }
     let mut prompt = Prompt {
-        text: String::new(),
+        text: running_work_in(tx, &recipient).await?,
         entries: 0,
         unread: 0,
         mentions: 0,

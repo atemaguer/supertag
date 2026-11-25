@@ -606,6 +606,9 @@ export class TuiGateway implements Gateway {
   async taskResult(taskId: string) {
     return this.state.taskResult(await this.ready(), taskId);
   }
+  async steerTask(taskId: string, text: string) {
+    return this.state.steerTask(await this.ready(), taskId, text);
+  }
   async inbox(): Promise<InboxItem[]> {
     return this.state.inbox(await this.ready());
   }

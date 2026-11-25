@@ -305,18 +305,15 @@ async fn private_work_sessions(
             .code(),
         tonic::Code::NotFound
     );
-    assert_eq!(
-        plane
-            .queue_input(authenticated_request(queue, secret, Some(ALICE))?)
-            .await
-            .unwrap_err()
-            .code(),
-        tonic::Code::FailedPrecondition
-    );
+    let steering = plane
+        .queue_input(authenticated_request(queue, secret, Some(ALICE))?)
+        .await?
+        .into_inner();
+    assert_eq!(steering.state(), LiveInputState::Rejected);
 
     let get = GetWorkSessionRequest {
         work_session_id: work_session_id.into(),
-        report_task_id: None,
+        report_task_id: Some(report.task_id.clone()),
     };
     assert_eq!(
         WorkSessions::get(
@@ -351,13 +348,13 @@ async fn private_work_sessions(
         .work_sessions
         .is_empty()
     );
-    assert_eq!(
-        WorkSessions::list(plane, authenticated_request(list, secret, Some(ALICE))?)
-            .await?
-            .into_inner()
-            .work_sessions,
-        vec![work]
-    );
+    let listed = WorkSessions::list(plane, authenticated_request(list, secret, Some(ALICE))?)
+        .await?
+        .into_inner()
+        .work_sessions;
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].work_session_id, work.work_session_id);
+    assert_ne!(listed[0].latest_task_id, child.task_id);
 
     let message = GetMessageRequest {
         tag_id: parent.tag_id.clone(),
@@ -465,6 +462,18 @@ async fn private_work_sessions(
                 WatchKind::ConversationMessage,
                 report.task_id.as_str(),
                 parent.tag_id.as_str()
+            ),
+            (
+                ALICE,
+                WatchKind::Task,
+                steering.follower_task_id.as_str(),
+                child.tag_id.as_str()
+            ),
+            (
+                ALICE,
+                WatchKind::ConversationMessage,
+                steering.follower_task_id.as_str(),
+                child.tag_id.as_str()
             ),
         ]
     );
