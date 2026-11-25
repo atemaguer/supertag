@@ -12,8 +12,9 @@ collaboration surface on the first run.
 Use Codex or Claude Code for the first run. Check [Requirements](../../docs/operations/requirements.md)
 for system tools, then sign in before `supertag init`: run
 `codex -c 'cli_auth_credentials_store="file"' login` for Codex, or run `claude` and follow its
-prompt for Claude Code. Cursor and OpenCode also work; their setup is under
-[Other harnesses](#other-harnesses) below.
+prompt for Claude Code. Cursor and OpenCode also work; OpenCode is the way to run open-weight
+models such as GLM, Kimi, and DeepSeek. Their setup is under [Other harnesses](#other-harnesses)
+below.
 
 ## 1. Install
 
@@ -35,10 +36,12 @@ supertag init
 `init` finds `claude` and `codex` on `PATH` (and `opencode`, or Cursor through `CURSOR_API_KEY`),
 and stops without changing anything when none is available. It checks each harness's sign-in with
 the credentials the Worker Host will have and labels it `signed in` or not, with sign-in
-instructions. Asked in a terminal, OpenCode prints `sign-in not checked (choose a model)` until you choose a model.
+instructions. Asked in a terminal, OpenCode prints `sign-in not checked (choose a model)` until
+you choose a model; `init` then checks it with that model.
 Claude Code also needs Node.js 22.13.0 or later on `PATH`; without it, `init` says
 so and doesn't offer Claude Code.
-It then asks for the Control Plane port, the harness (and a `provider/model` for OpenCode), the
+It then asks for the Control Plane port, the harness (and a model for OpenCode, offering what
+`opencode models` lists), the
 Workspace name, and the Tag's name, with defaults in brackets. Codex sandboxes its own commands.
 For Claude Code, `init` asks how the lead may run commands and defaults to not at all: the lead
 then reads and edits files and replies, but runs no commands. Keep that default for the first
@@ -204,7 +207,13 @@ team deployment, continue to [deploy-supertag](../deploy-supertag/SKILL.md).
 For Cursor, the user generates an API key at https://cursor.com/dashboard/api and adds
 `CURSOR_API_KEY=...` to `~/.supertag/.env` themselves; `init` detects Cursor only when
 `CURSOR_API_KEY` is also set in the environment it runs in. Never ask for a key in chat or write
-it for them. For OpenCode, set the provider's API-key variable in `~/.supertag/.env`; `init` then
-asks for a `provider/model`. For a provider without a key variable, such as `opencode-go`, the
-user runs `opencode auth login` and the host gets `opencode-auth-file:
-~/.local/share/opencode/auth.json` in `supertag.yaml`; never read that file. See [Requirements](../../docs/operations/requirements.md#choose-and-sign-in-to-a-harness).
+it for them.
+
+For OpenCode, run `supertag init --yes --harness opencode --model PROVIDER/MODEL`, such as
+`opencode-go/glm-5.3`; without `--model`, `init` chooses from `opencode models`. The key comes
+from the provider's API-key entry in OpenCode's sign-in file, which the user makes with
+`opencode auth login`, and `init` then writes `opencode-auth-file` for the host. Otherwise it
+comes from the provider's variable, such as `OPENAI_API_KEY`, in `~/.supertag/.env`. OpenCode
+Zen's free `opencode/...` models need neither. Without any, `init` stops and says to run
+`opencode auth login`. Never read the sign-in file or ask for a key in chat. See
+[Start on open-weight models with OpenCode](../../docs/operations/cli.md#start-on-open-weight-models-with-opencode).

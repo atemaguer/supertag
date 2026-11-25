@@ -245,6 +245,11 @@ impl AdapterOptions {
         }
     }
 
+    /// The OpenCode lane's `opencode-auth-file`, when it has one.
+    pub fn opencode_auth_file(&self) -> Option<&std::path::Path> {
+        self.opencode_auth_file.as_deref()
+    }
+
     pub fn execution_profile(&self) -> Result<supertag_protocol::v2::HarnessExecutionProfile> {
         let default_model = self
             .codex_model

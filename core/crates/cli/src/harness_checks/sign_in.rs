@@ -302,8 +302,15 @@ pub fn codex_has_credential(variables: &Variables) -> bool {
 }
 
 /// OpenCode: one tool-free `opencode run` turn with only the selected provider's key, in an
-/// isolated home that never reads the usual OpenCode auth.json. Every permission is denied.
-pub async fn opencode(variables: &Variables, model: &str, stop: impl Future<Output = ()>) -> bool {
+/// isolated home that never reads the usual OpenCode auth.json. Every permission is denied. As a
+/// Task Attempt, the provider's API-key entry in `auth_file` (a host's `opencode-auth-file`)
+/// comes first, then its key variable.
+pub async fn opencode(
+    variables: &Variables,
+    model: &str,
+    auth_file: Option<&Path>,
+    stop: impl Future<Output = ()>,
+) -> bool {
     let Ok(names) = supertag_worker_host::provider_environment_for(
         supertag_protocol::v2::HarnessKind::Opencode,
         Some(model),
@@ -317,26 +324,31 @@ pub async fn opencode(variables: &Variables, model: &str, stop: impl Future<Outp
         return false;
     };
     let provider = model.split('/').next().unwrap_or_default();
-    let credential = names
-        .iter()
-        .find_map(|name| probe::text(variables, name).map(|value| (*name, value)));
+    let file_entry = auth_file.and_then(|path| super::opencode_auth::api_entry(path, provider));
+    let credential = file_entry
+        .is_none()
+        .then(|| {
+            names
+                .iter()
+                .find_map(|name| probe::text(variables, name).map(|value| (*name, value)))
+        })
+        .flatten();
     let home = directory.path().join("home");
     if std::fs::create_dir_all(home.join("opencode")).is_err() {
         return false;
     }
-    if let Some((_, key)) = &credential {
+    let entry = file_entry.or_else(|| {
+        credential
+            .as_ref()
+            .map(|(_, key)| json!({ "type": "api", "key": key }))
+    });
+    if let Some(entry) = entry {
         let written = OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
             .open(home.join("opencode").join("auth.json"))
-            .and_then(|mut file| {
-                file.write_all(
-                    json!({ provider: { "type": "api", "key": key } })
-                        .to_string()
-                        .as_bytes(),
-                )
-            });
+            .and_then(|mut file| file.write_all(json!({ provider: entry }).to_string().as_bytes()));
         if written.is_err() {
             return false;
         }
@@ -695,7 +707,7 @@ done"#,
                 ("UNRELATED_SECRET", "never-pass"),
             ],
         );
-        assert!(opencode(&variables, "openai/model", std::future::pending()).await);
+        assert!(opencode(&variables, "openai/model", None, std::future::pending()).await);
         let auth: Value = serde_json::from_str(&read(temporary.path(), "auth.json")).unwrap();
         assert_eq!(
             auth,
@@ -717,20 +729,58 @@ done"#,
             "opencode",
             "echo 'credential test-secret' >&2",
         );
-        assert!(!opencode(&variables, "openai/model", std::future::pending()).await);
+        assert!(!opencode(&variables, "openai/model", None, std::future::pending()).await);
         recording(
             temporary.path(),
             "opencode",
             r#"echo '{"type":"text","part":{"text":"OK"}}'; echo '{"type":"error"}'; echo '{"type":"step_finish","part":{"reason":"stop"}}'"#,
         );
-        assert!(!opencode(&variables, "openai/model", std::future::pending()).await);
+        assert!(!opencode(&variables, "openai/model", None, std::future::pending()).await);
         // A complete answer from a failed run is not sign-in either.
         recording(
             temporary.path(),
             "opencode",
             r#"echo '{"type":"text","part":{"text":"OK"}}'; echo '{"type":"step_finish","part":{"reason":"stop"}}'; exit 1"#,
         );
-        assert!(!opencode(&variables, "openai/model", std::future::pending()).await);
+        assert!(!opencode(&variables, "openai/model", None, std::future::pending()).await);
+    }
+
+    #[tokio::test]
+    async fn opencode_copies_only_the_providers_entry_from_the_hosts_auth_file() {
+        let temporary = tempfile::tempdir().unwrap();
+        recording(
+            temporary.path(),
+            "opencode",
+            &format!(
+                "cp \"$HOME/opencode/auth.json\" '{}/copied.json'\n\
+                 echo '{{\"type\":\"text\",\"part\":{{\"text\":\"OK\"}}}}'\n\
+                 echo '{{\"type\":\"step_finish\",\"part\":{{\"reason\":\"stop\"}}}}'",
+                temporary.path().display()
+            ),
+        );
+        let auth = temporary.path().join("opencode-auth.json");
+        std::fs::write(
+            &auth,
+            r#"{"opencode-go":{"type":"api","key":"fake-go-key"},"openai":{"type":"api","key":"fake-openai-key"}}"#,
+        )
+        .unwrap();
+        let variables = variables(temporary.path(), &[]);
+        assert!(
+            opencode(
+                &variables,
+                "opencode-go/glm-5.3",
+                Some(&auth),
+                std::future::pending()
+            )
+            .await
+        );
+        let copied: Value = serde_json::from_str(&read(temporary.path(), "copied.json")).unwrap();
+        assert_eq!(
+            copied,
+            json!({"opencode-go": {"type": "api", "key": "fake-go-key"}})
+        );
+        let environment = read(temporary.path(), "opencode.env");
+        assert!(!environment.contains("fake-"), "no key in the environment");
     }
 
     #[tokio::test]
@@ -746,7 +796,7 @@ done"#,
             ),
         );
         let variables = variables(temporary.path(), &[("OPENAI_API_KEY", "test-secret")]);
-        assert!(!opencode(&variables, "openai/model", exists(started.clone())).await);
+        assert!(!opencode(&variables, "openai/model", None, exists(started.clone())).await);
         assert!(gone(&started));
     }
 }

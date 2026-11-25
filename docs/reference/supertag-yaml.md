@@ -230,7 +230,8 @@ get a provider's API key in one of two ways:
   `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`, `AZURE_OPENAI_API_KEY`, `MISTRAL_API_KEY`, and
   `XAI_API_KEY`.
 - From OpenCode's sign-in file, for any other provider, such as `opencode-go`. Sign in with
-  `opencode auth login`, then name the file:
+  `opencode auth login`, then name the file. `supertag init --harness opencode` names it for you
+  when the file has the provider's API key:
 
 ```yaml
   spike:

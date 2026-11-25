@@ -15,6 +15,14 @@ within the pre-1.0 compatibility policy described in
   `~/.local/share/opencode/auth.json`, so OpenCode Tags can use providers without a key variable,
   such as `opencode-go`. SuperTag stores only the path. It replaces the undocumented
   `SUPERTAG_OPENCODE_AUTH_FILE` variable, which `supertag up` no longer reads.
+- `supertag init --harness opencode --model PROVIDER/MODEL` sets up an OpenCode lead, so a script
+  can start SuperTag on open-weight models such as `opencode-go/glm-5.3`. Without `--model`,
+  `init` chooses from `opencode models`, and asked in a terminal it lists the models you can use.
+  When OpenCode's sign-in file holds the provider's API key, `init` writes the host's
+  `opencode-auth-file`, reading only which providers the file holds. With no key there, in the
+  provider's variable, or for a free `opencode/...` model, it stops and says to run
+  `opencode auth login`. `supertag sign-in opencode` also uses a configured host's
+  `opencode-auth-file`.
 
 ### Fixed
 

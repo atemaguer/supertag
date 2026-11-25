@@ -41,8 +41,10 @@ Check this page before [installing SuperTag](install.md).
 
 Prepare at least one harness on the Worker Host. Start with Claude Code or Codex: `supertag init`
 finds them by their `claude` and `codex` CLIs on `PATH`. Cursor and OpenCode also work (OpenCode
-needs its CLI on `PATH`; Cursor uses its bundled SDK and does not need `cursor-agent`). Sign in as
-the same OS user that runs the Worklet.
+needs its CLI on `PATH`; Cursor uses its bundled SDK and does not need `cursor-agent`). For
+open-weight models, start with OpenCode:
+[Start on open-weight models with OpenCode](cli.md#start-on-open-weight-models-with-opencode). Sign
+in as the same OS user that runs the Worklet.
 
 SuperTag runs the Codex CLI you install, so keep it current: `supertag init` and `supertag up`
 check its version and stop with the upgrade command when it is older than the minimum. A newer
@@ -59,7 +61,7 @@ isn't; the desktop app's setup screen shows the same checks.
 | [Claude Code](https://code.claude.com/docs/en/setup) | `claude` | 2.1.280; 2.1.323 for [`sandbox-commands`](#claude-code-commands-and-sandbox). Install with `curl -fsSL https://claude.ai/install.sh \| bash`; upgrade with `claude update`. | Run `claude` and follow its sign-in prompt. |
 | [Codex](https://developers.openai.com/codex/cli/) | `codex` | 0.163.0. Install or upgrade with `npm install -g @openai/codex`. | Run `codex -c 'cli_auth_credentials_store="file"' login` so Tasks can use the sign-in file. On macOS, a Keychain-only login is not copied to Tasks. |
 | [Cursor](https://cursor.com/docs/sdk/typescript.md) | None | None | Generate an API key and set `CURSOR_API_KEY` for the host service; see [Cursor setup](#cursor-setup-and-limits). Signing in to the Cursor app or `cursor-agent` is not enough. |
-| [OpenCode](https://opencode.ai/docs/) | `opencode` | None | Set your selected provider's API-key environment variable for the Worker Host, such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. For any other provider, such as `opencode-go`, run `opencode auth login` and name the file in the host's [`opencode-auth-file`](../reference/supertag-yaml.md#opencode-sign-in). |
+| [OpenCode](https://opencode.ai/docs/) | `opencode` | None | Set your selected provider's API-key environment variable for the Worker Host, such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. For any other provider, such as `opencode-go`, run `opencode auth login` with an API key; `supertag init --harness opencode` names the file in the host's [`opencode-auth-file`](../reference/supertag-yaml.md#opencode-sign-in). OpenCode Zen's free `opencode/...` models need neither. |
 
 For provider API credentials, use provider environment variables or SuperTag's masked prompts;
 never put lasting credentials in command flags. Sign-in detection is local and best effort; a

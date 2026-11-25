@@ -933,6 +933,155 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
     Ok(())
 }
 
+#[test]
+fn init_sets_up_an_opencode_lead_only_with_a_sign_in_the_host_can_use() -> Result<()> {
+    let machine = Machine::new()?;
+    let repository = machine.home.join("app");
+    fs::create_dir_all(&repository)?;
+    fs::write(repository.join("README.md"), "fixture\n")?;
+    for args in [
+        &["init", "-q", "-b", "main"][..],
+        &["add", "README.md"][..],
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-qm",
+            "first",
+        ][..],
+    ] {
+        ensure!(
+            Command::new("git")
+                .args(args)
+                .current_dir(&repository)
+                .env("HOME", &machine.home)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .stdout(Stdio::null())
+                .status()?
+                .success()
+        );
+    }
+    // A fake OpenCode: it lists models, and its check turn copies the sign-in it was given,
+    // then fails, so init stops before writing anything.
+    let record = machine.home.join("record");
+    fs::create_dir_all(&record)?;
+    executables::write_executable(
+        &machine.bin.join("opencode"),
+        format!(
+            "#!/bin/sh\n\
+             if [ \"$1\" = models ]; then printf 'opencode/deepseek-v4.1-flash-free\\nopencode-go/glm-5.3\\nopencode-go/kimi-k3\\n'; exit 0; fi\n\
+             printf '%s\\n' \"$@\" > '{0}/args'\n\
+             cp \"$HOME/opencode/auth.json\" '{0}/auth.json' 2>/dev/null\n\
+             exit 1\n",
+            record.display()
+        ),
+        0o755,
+    )?;
+    let init = |args: &[&str]| -> Result<(Output, Value)> {
+        let mut command = machine.command(&[&["init", "--yes", "--json"][..], args].concat());
+        command
+            .current_dir(&repository)
+            .env("SUPERTAG_TEST_INIT_OPENCODE_RUNS", "1");
+        let output = command.output()?;
+        ensure!(!output.status.success(), "{output:?}");
+        let value = serde_json::from_slice(&output.stdout).unwrap_or(Value::Null);
+        Ok((output, value))
+    };
+    let shown = |output: &Output| {
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    };
+
+    // --model needs --harness opencode, and a provider/model.
+    let (output, _) = init(&["--model", "opencode-go/glm-5.3"])?;
+    assert!(shown(&output).contains("--harness"), "{}", shown(&output));
+    let (_, failed) = init(&["--harness", "codex", "--model", "opencode-go/glm-5.3"])?;
+    assert_eq!(
+        failed["error"], "--model chooses an OpenCode lead's model.",
+        "{failed}"
+    );
+    let (_, failed) = init(&["--harness", "opencode", "--model", "glm-5.3"])?;
+    assert_eq!(
+        failed["error"], "glm-5.3 is not an OpenCode model.",
+        "{failed}"
+    );
+
+    // No sign-in for the provider: stop, saying how to sign in.
+    let auth = machine.home.join(".local/share/opencode/auth.json");
+    fs::create_dir_all(auth.parent().unwrap())?;
+    fs::write(
+        &auth,
+        r#"{"anthropic":{"type":"api","key":"fake-anthropic-key"},"opencode-go":{"type":"oauth","refresh":"fake-refresh"}}"#,
+    )?;
+    fs::set_permissions(&auth, fs::Permissions::from_mode(0o600))?;
+    let (output, failed) = init(&["--harness", "opencode", "--model", "moonshot/kimi-k3"])?;
+    assert_eq!(
+        failed["error"], "OpenCode has no moonshot sign-in.",
+        "{failed}"
+    );
+    assert_eq!(failed["fix_command"], "opencode auth login", "{failed}");
+    // An OAuth sign-in is refused.
+    let (_, refused) = init(&["--harness", "opencode", "--model", "opencode-go/glm-5.3"])?;
+    assert!(
+        refused["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("not an API key")),
+        "{refused}"
+    );
+    assert!(!shown(&output).contains("fake-"), "{}", shown(&output));
+    assert!(!machine.state.join("supertag.yaml").exists());
+
+    // A shared sign-in file would be refused by the host.
+    fs::write(
+        &auth,
+        r#"{"opencode-go":{"type":"api","key":"fake-go-key"},"anthropic":{"type":"api","key":"fake-anthropic-key"}}"#,
+    )?;
+    fs::set_permissions(&auth, fs::Permissions::from_mode(0o644))?;
+    let (_, failed) = init(&["--harness", "opencode", "--model", "opencode-go/glm-5.3"])?;
+    assert_eq!(
+        failed["fix"],
+        format!(
+            "Run chmod 600 {}, then run supertag init again.",
+            auth.display()
+        ),
+        "{failed}"
+    );
+
+    // With the provider's API key in the file, and no --model, init chooses a tested model and
+    // checks it with only that provider's entry; the check turn's failure stops it.
+    fs::set_permissions(&auth, fs::Permissions::from_mode(0o600))?;
+    let (output, failed) = init(&["--harness", "opencode"])?;
+    assert_eq!(
+        failed["error"], "OpenCode's check turn with opencode-go/kimi-k3 didn't succeed.",
+        "{failed}"
+    );
+    assert!(
+        failed["fix"]
+            .as_str()
+            .is_some_and(|fix| fix.contains("opencode run -m opencode-go/kimi-k3")),
+        "{failed}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("opencode-go's API key comes from OpenCode's sign-in file"),
+        "{stderr}"
+    );
+    assert!(!shown(&output).contains("fake-"), "{}", shown(&output));
+    let copied: Value = serde_json::from_str(&fs::read_to_string(record.join("auth.json"))?)?;
+    assert_eq!(
+        copied,
+        json!({ "opencode-go": { "type": "api", "key": "fake-go-key" } })
+    );
+    assert!(fs::read_to_string(record.join("args"))?.contains("opencode-go/kimi-k3"));
+    assert!(!machine.state.join("supertag.yaml").exists());
+    Ok(())
+}
+
 /// Starts a separate Control Plane on `database` and a fixture Worker Host.
 struct SplitServices {
     children: Vec<Child>,

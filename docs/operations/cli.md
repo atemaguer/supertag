@@ -43,7 +43,8 @@ supertag init
 
 `init` finds the harnesses on your `PATH`, checks each one's sign-in with the credentials a
 Worker Host will have, and asks for a Control Plane port, a harness, a Workspace name, and the
-Tag's name; for OpenCode it also asks for a `provider/model`. Claude Code runs through Node.js
+Tag's name; for OpenCode it also asks for a model (see [Start on open-weight models with
+OpenCode](#start-on-open-weight-models-with-opencode)). Claude Code runs through Node.js
 22.13.0 or later; without it on `PATH`, `init` says so and doesn't offer Claude Code. It writes
 `~/.supertag/supertag.yaml` with two services and starts them in the background:
 
@@ -128,14 +129,54 @@ A script or app can run `init` without a terminal:
   seconds is reported as unknown. `ready` is true when the folder and at least one checked harness
   are usable. Add `--harness codex` to check only that harness. Without `--json`,
   `supertag init --check` prints the same findings as readable text.
-- `supertag init --yes --harness codex --directory PATH` (or `--harness claude-code`) sets up that
-  folder with that harness for the lead and starts SuperTag, as `init` does; the host also runs
+- `supertag init --yes --harness codex --directory PATH` (or `--harness claude-code`, or
+  `--harness opencode` with `--model PROVIDER/MODEL`) sets up that folder with that harness for
+  the lead and starts SuperTag, as `init` does; the host also runs
   the other installed harnesses that are signed in. It stops before writing anything when the
   named harness is not installed or not signed in. On a machine that is already set up, it adds
   the folder as described in [Add another repository](#add-another-repository), and the Tag uses
   the lead's harness. With `--json`, it prints one object: the Tag, Workspace, harness, and
   Control Plane address on success, or `error`, `fix`, and `fix_command` with a non-zero exit
   status on failure. Its progress goes to standard error.
+
+### Start on open-weight models with OpenCode
+
+OpenCode runs open-weight models such as GLM, Kimi, and DeepSeek. To make an OpenCode lead from
+the first command, name the harness and the model as OpenCode writes it, `provider/model`:
+
+```sh
+supertag init --yes --harness opencode --model opencode-go/glm-5.3
+```
+
+Without `--model`, `init` runs `opencode models` and chooses for you. Asked in a terminal, it lists
+the models you can use now and offers that choice as the default. It prefers a model SuperTag has
+run real work on (`opencode-go/kimi-k3`, `opencode-go/glm-5.3`, then OpenCode Zen's free
+`opencode/deepseek-v4.1-flash-free`), then any model of a provider you are signed in to, then a
+free `opencode/...` model.
+
+`init` then finds the provider's key the way the Worker Host will:
+
+1. An API key for the provider in OpenCode's sign-in file, `~/.local/share/opencode/auth.json`
+   (`$XDG_DATA_HOME/opencode/auth.json` when that is set). `init` reads only which providers the
+   file holds, never a key, and writes the path as the host's
+   [`opencode-auth-file`](../reference/supertag-yaml.md#opencode-sign-in). The file must be
+   readable only by you; `init` stops with `chmod 600` otherwise.
+2. The provider's key variable, such as `OPENAI_API_KEY`, in your environment or
+   `~/.supertag/.env`. No file is written.
+3. No key, for OpenCode Zen's `opencode/...` models.
+
+With none of these, or with an OAuth sign-in, which SuperTag refuses, `init` stops before writing
+anything and says to run `opencode auth login` with an API key. It then runs one tool-free
+OpenCode turn with that key to check the sign-in. When that turn fails, `init` stops and says to
+try the model with `opencode run -m PROVIDER/MODEL` to see the provider's error.
+
+OpenCode has no sandbox of its own, so `init` asks how the lead may run commands, as for Claude
+Code without its sandbox. Prefer local-vm containers. Without a sandbox, the lead's commands can
+read your files as you can, including the provider's key unless it is an `anthropic` or `openai`
+key, which SuperTag keeps in the Worker; `init` says so. With `--yes`, the lead runs no commands.
+
+An OpenCode host serves one provider. To add models from another, add a second host service; see
+[Host models](../reference/supertag-yaml.md#host-models).
 
 ### Run and stop SuperTag
 

@@ -42,6 +42,15 @@ pub struct InitArgs {
     /// this harness.
     #[arg(long, value_enum)]
     harness: Option<InitHarness>,
+    /// The lead's model with --harness opencode, as OpenCode writes it: provider/model, such as
+    /// opencode-go/glm-5.3. Without it, init offers the models opencode models lists.
+    #[arg(
+        long,
+        value_name = "PROVIDER/MODEL",
+        requires = "harness",
+        conflicts_with = "check"
+    )]
+    model: Option<String>,
     /// Check this machine and folder without changing anything: whether the folder is a git
     /// repository, which harnesses are installed and signed in, and whether SuperTag is set up.
     /// Prints a readable report, or one JSON object with --json.
@@ -58,6 +67,7 @@ pub struct InitArgs {
 pub enum InitHarness {
     Codex,
     ClaudeCode,
+    Opencode,
 }
 
 impl InitHarness {
@@ -65,6 +75,7 @@ impl InitHarness {
         match self {
             Self::Codex => Found::Codex,
             Self::ClaudeCode => Found::ClaudeCode,
+            Self::Opencode => Found::Opencode,
         }
     }
 }
@@ -225,7 +236,12 @@ struct SignIns {
 }
 
 impl SignIns {
-    async fn check(&mut self, harness: Found, model: Option<&str>) -> Result<bool> {
+    async fn check(
+        &mut self,
+        harness: Found,
+        model: Option<&str>,
+        opencode_auth_file: Option<&Path>,
+    ) -> Result<bool> {
         if let Some((_, _, signed_in)) = self
             .results
             .iter()
@@ -245,7 +261,9 @@ impl SignIns {
             &self.environment,
             self.supervisor,
         )?;
-        let result = harness_checks::probe_sign_in(harness.check(), model, &variables).await;
+        let result =
+            harness_checks::probe_sign_in(harness.check(), model, opencode_auth_file, &variables)
+                .await;
         if let Some(detail) = result.detail.as_ref().filter(|_| !self.quiet) {
             outln!("  {detail}");
         }
@@ -256,6 +274,27 @@ impl SignIns {
         self.results
             .push((harness, model.map(str::to_owned), signed_in));
         Ok(signed_in)
+    }
+
+    /// The key variable for an OpenCode model's provider that the Worker Host would pass, when
+    /// it is set: in the environment or the env_file.
+    fn opencode_key_variable(&self, model: &str) -> Option<&'static str> {
+        let names =
+            supertag_worker_host::provider_environment_for(HarnessKind::Opencode, Some(model))
+                .ok()?;
+        let variables = harness_checks::worker_variables(
+            harness_checks::Harness::Opencode,
+            Some(model),
+            &self.environment,
+            self.supervisor,
+        )
+        .ok()?;
+        names.iter().copied().find(|name| {
+            variables
+                .get(std::ffi::OsStr::new(name))
+                .and_then(|value| value.to_str())
+                .is_some_and(|value| !value.trim().is_empty())
+        })
     }
 }
 
@@ -581,6 +620,8 @@ struct Answers {
     /// The other signed-in harnesses the host also runs, for Tags created later.
     also: Vec<Found>,
     model: Option<String>,
+    /// The host's `opencode-auth-file`, for an OpenCode lead whose provider's key is in it.
+    opencode_auth_file: Option<PathBuf>,
     commands: Commands,
     workspace: String,
     tag: String,
@@ -633,6 +674,23 @@ async fn apply(args: InitArgs) -> Result<(PathBuf, PathBuf)> {
     // First, before any question or side effect: a harness must be installed.
     let installed = installed_harnesses();
     let named = args.harness.map(InitHarness::found);
+    if let Some(model) = &args.model {
+        ensure!(
+            named == Some(Found::Opencode),
+            Fixable {
+                error: "--model chooses an OpenCode lead's model.".into(),
+                fix: "Add --harness opencode, or leave --model out.".into(),
+                command: None,
+            }
+        );
+        if supertag_worker_host::validate_opencode_model(model).is_err() {
+            bail!(Fixable {
+                error: format!("{model} is not an OpenCode model."),
+                fix: "Give it as OpenCode writes it, provider/model, such as opencode-go/glm-5.3; opencode models lists them.".into(),
+                command: Some("opencode models"),
+            });
+        }
+    }
     if let Some(harness) = named
         && !installed.contains(&harness)
     {
@@ -653,10 +711,12 @@ async fn apply(args: InitArgs) -> Result<(PathBuf, PathBuf)> {
 Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, and Cursor, with CURSOR_API_KEY set, also work.)",
         harness_checks::CLAUDE_CODE_INSTALL
     );
-    if args.yes && installed == [Found::Opencode] {
-        bail!(
-            "OpenCode is the only harness on this machine, and it needs a model. Run supertag init in a terminal, without --yes, to enter one as provider/model, or install Claude Code or Codex."
-        );
+    if args.yes && named.is_none() && installed == [Found::Opencode] {
+        bail!(Fixable {
+            error: "OpenCode is the only harness on this machine, and --yes chooses OpenCode only when it is named.".into(),
+            fix: "Run supertag init --yes --harness opencode, and add --model provider/model to choose its model.".into(),
+            command: Some("supertag init --yes --harness opencode"),
+        });
     }
     let ask = !args.yes;
     if ask && !interactive() {
@@ -729,7 +789,9 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
                     _ => continue,
                 };
                 let model = adapter.execution_profile()?.default_model;
-                let signed_in = sign_ins.check(found, model.as_deref()).await?;
+                let signed_in = sign_ins
+                    .check(found, model.as_deref(), adapter.opencode_auth_file())
+                    .await?;
                 report(found, signed_in);
                 runnable |= signed_in;
                 checked.push(found);
@@ -764,11 +826,28 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
     let mut signed_in = Vec::new();
     // Why Claude Code can't run here, as the fix to name if it is the only harness.
     let mut claude_cannot_run: Option<&str> = None;
+    // Why OpenCode can't run here, when it can't.
+    let mut opencode_cannot_run: Option<String> = None;
     // Every installed harness is checked, a named one too: the host runs each signed-in one, so
     // Tags created later may use any of them. Only the lead's harness must be signed in.
     for harness in &installed {
         if *harness == Found::Opencode {
-            // `--yes` never selects OpenCode, which needs a model answer first.
+            // SuperTag runs OpenCode through its Node bridge too.
+            if let Some((cause, fix)) = opencode_problem() {
+                outln!("  opencode: can't run: {cause}. {fix}");
+                if named == Some(Found::Opencode) {
+                    bail!(Fixable {
+                        error: format!("OpenCode can't run: {cause}."),
+                        fix,
+                        command: None,
+                    });
+                }
+                opencode_cannot_run = Some(format!(
+                    "OpenCode is the only harness on this machine, and it can't run: {cause}. {fix}"
+                ));
+                continue;
+            }
+            // Its sign-in check needs a model, chosen below.
             if prompter.is_some() {
                 outln!("  opencode: sign-in not checked (choose a model)");
             }
@@ -837,7 +916,7 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
             }
             continue;
         }
-        let result = sign_ins.check(*harness, None).await?;
+        let result = sign_ins.check(*harness, None, None).await?;
         report(*harness, result);
         if result {
             signed_in.push(*harness);
@@ -849,13 +928,16 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
     let installed: Vec<Found> = installed
         .into_iter()
         .filter(|harness| !(claude_cannot_run.is_some() && *harness == Found::ClaudeCode))
+        .filter(|harness| !(opencode_cannot_run.is_some() && *harness == Found::Opencode))
         .collect();
     if installed.is_empty()
-        && let Some(problem) = claude_cannot_run
+        && let Some(problem) = claude_cannot_run.map(str::to_owned).or(opencode_cannot_run)
     {
         bail!(problem);
     }
+    // OpenCode's sign-in is checked once its model is chosen.
     if let Some(harness) = named
+        && harness != Found::Opencode
         && !signed_in.contains(&harness)
     {
         bail!(sign_in_problem(
@@ -863,35 +945,76 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
             sign_ins.timed_out.contains(&harness)
         ));
     }
-    if prompter.is_none() && signed_in.is_empty() {
+    if prompter.is_none() && signed_in.is_empty() && named != Some(Found::Opencode) {
         return Err(no_sign_in(&installed));
     }
     if prompter.is_some() {
         outln!("Press Enter to accept the default in [brackets].");
     }
-    let answers = answers(
+    // OpenCode's own sign-in file, read only for which providers it holds.
+    let opencode_auth = installed
+        .contains(&Found::Opencode)
+        .then(OpencodeAuth::at_usual_path)
+        .flatten();
+    // OpenCode Zen's models without a key are only its free ones.
+    let usable = |model: &str| match opencode_key(
+        model,
+        opencode_auth.as_ref(),
+        sign_ins.opencode_key_variable(model),
+        &state,
+    ) {
+        Ok(OpencodeKey::None) => model.ends_with("-free"),
+        Ok(_) => true,
+        Err(_) => false,
+    };
+    let mut answers = answers(
         prompter.as_mut(),
         &installed,
         &signed_in,
         &repository,
         named,
+        Opencode {
+            model: args.model.as_deref(),
+            usable: &usable,
+        },
         &state,
     )?;
+    if let (Found::Opencode, Some(model)) = (answers.harness, answers.model.as_deref()) {
+        let key = opencode_key(
+            model,
+            opencode_auth.as_ref(),
+            sign_ins.opencode_key_variable(model),
+            &state,
+        )?;
+        outln!("  {}", key.describe(model));
+        if let OpencodeKey::File(path) = key {
+            answers.opencode_auth_file = Some(path);
+        }
+    }
     // A harness checked above already said whether it is signed in.
     let checked = sign_ins
         .results
         .iter()
         .any(|(harness, model, _)| *harness == answers.harness && *model == answers.model);
     let result = sign_ins
-        .check(answers.harness, answers.model.as_deref())
+        .check(
+            answers.harness,
+            answers.model.as_deref(),
+            answers.opencode_auth_file.as_deref(),
+        )
         .await?;
     if !checked {
         report(answers.harness, result);
     }
     if !result {
+        if let (Found::Opencode, Some(model)) = (answers.harness, answers.model.as_deref()) {
+            bail!(opencode_turn_failed(
+                model,
+                sign_ins.timed_out.contains(&Found::Opencode)
+            ));
+        }
         return Err(no_sign_in(&[answers.harness]));
     }
-    let mut answers = answers;
     answers.also = signed_in
         .iter()
         .copied()
@@ -934,7 +1057,10 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
     outln!(
         "\nTag {} runs {} on this machine, in Workspace {} ({}), {}.",
         answers.tag,
-        answers.harness.harness(),
+        match &answers.model {
+            Some(model) => format!("{} with {model}", answers.harness.harness()),
+            None => answers.harness.harness().to_owned(),
+        },
         answers.workspace,
         repository.root.display(),
         repository.start.describe()
@@ -1083,7 +1209,7 @@ async fn add_harnesses(
         {
             continue;
         }
-        if sign_ins.check(*harness, None).await? {
+        if sign_ins.check(*harness, None, None).await? {
             missing.push(*harness);
         }
     }
@@ -1410,7 +1536,7 @@ async fn check(
         let is_installed = installed.contains(&harness);
         // OpenCode's check needs a model, which only an interactive init asks for.
         let signed_in = if is_installed && harness != Found::Opencode {
-            Some(sign_ins.check(harness, None).await?)
+            Some(sign_ins.check(harness, None, None).await?)
         } else {
             None
         };
@@ -1623,6 +1749,7 @@ fn answers(
     signed_in: &[Found],
     repository: &Repository,
     chosen: Option<Found>,
+    opencode: Opencode<'_>,
     state: &Path,
 ) -> Result<Answers> {
     let free = (DEFAULT_PORT..=u16::MAX)
@@ -1664,18 +1791,9 @@ fn answers(
         }
         _ => default,
     };
-    let model = match (harness, ask.as_deref_mut()) {
-        (Found::Opencode, Some(prompter)) => Some(loop {
-            let answer = prompter.ask("OpenCode model, as provider/model", "")?;
-            if answer
-                .split_once('/')
-                .is_some_and(|(provider, model)| !provider.is_empty() && !model.is_empty())
-            {
-                break answer;
-            }
-            outln!("Enter the model as provider/model.");
-        }),
-        (Found::Opencode, None) => unreachable!("--yes never selects OpenCode"),
+    let model = match (harness, opencode.model) {
+        (Found::Opencode, Some(model)) => Some(model.to_owned()),
+        (Found::Opencode, None) => Some(opencode_model(ask.as_deref_mut(), opencode.usable)?),
         _ => None,
     };
     // Claude Code's own sandbox, where it can start, runs the lead's commands without asking.
@@ -1707,10 +1825,10 @@ fn answers(
             )? {
                 Commands::LocalVm
             } else {
-                unsandboxed(harness, Some(prompter), state)?
+                unsandboxed(harness, model.as_deref(), Some(prompter), state)?
             }
         }
-        (_, prompter) => unsandboxed(harness, prompter, state)?,
+        (_, prompter) => unsandboxed(harness, model.as_deref(), prompter, state)?,
     };
     let workspace = match ask.as_deref_mut() {
         None => repository.name.clone(),
@@ -1739,9 +1857,304 @@ fn answers(
         // Set once the lead's harness is known to be signed in.
         also: Vec::new(),
         model,
+        // Set once the model's sign-in is found.
+        opencode_auth_file: None,
         commands,
         workspace,
         tag,
+    })
+}
+
+/// Why OpenCode can't run on this machine, and what to do, or `None` when it can: SuperTag runs it
+/// through Node.js and the OpenCode Node bridge installed beside this supertag.
+fn opencode_problem() -> Option<(String, String)> {
+    use crate::node_bridges::{NodeBridge, bridge_problem, node_problem};
+    #[cfg(feature = "test-fixtures")]
+    if std::env::var_os("SUPERTAG_TEST_INIT_OPENCODE_RUNS").is_some() {
+        return None;
+    }
+    if let Some(problem) = node_problem(NodeBridge::Opencode) {
+        return Some((
+            format!("{problem}; SuperTag runs OpenCode through Node.js 22.13 or later"),
+            "Install it from https://nodejs.org/en/download, then run supertag init again.".into(),
+        ));
+    }
+    bridge_problem(NodeBridge::Opencode).map(|problem| {
+        (
+            problem.cause,
+            format!("{}, then run supertag init again.", problem.fix),
+        )
+    })
+}
+
+/// What `answers` needs to choose an OpenCode lead's model.
+struct Opencode<'a> {
+    /// `--model`.
+    model: Option<&'a str>,
+    /// Whether the Worker Host would have a sign-in for a model, or it is a free one.
+    usable: &'a dyn Fn(&str) -> bool,
+}
+
+/// OpenCode models SuperTag has run real work on, in the order init prefers them as the default.
+const OPENCODE_MODELS: [&str; 3] = [
+    "opencode-go/kimi-k3",
+    "opencode-go/glm-5.3",
+    "opencode/deepseek-v4.1-flash-free",
+];
+
+/// How long `opencode models` may take.
+const OPENCODE_MODELS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The models `opencode models` lists, one `provider/model` a line, or `None` when it fails.
+/// It runs outside the repository, so no project configuration of OpenCode's loads.
+fn opencode_models() -> Option<Vec<String>> {
+    let mut child = Command::new("opencode")
+        .arg("models")
+        .current_dir(std::env::temp_dir())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut stdout = child.stdout.take()?;
+    let reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        io::Read::read_to_string(&mut stdout, &mut text).map(|_| text)
+    });
+    let deadline = std::time::Instant::now() + OPENCODE_MODELS_TIMEOUT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    };
+    let text = reader.join().ok()?.ok()?;
+    status.success().then(|| opencode_model_lines(&text))
+}
+
+/// The `provider/model` lines of `opencode models`' output.
+fn opencode_model_lines(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| supertag_worker_host::validate_opencode_model(line).is_ok())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The default OpenCode model among those listed: a tested one the host has a sign-in for, then
+/// any model of a signed-in provider, then any of OpenCode Zen's free models.
+fn default_opencode_model(listed: &[String], usable: &dyn Fn(&str) -> bool) -> Option<String> {
+    let listed_and_usable =
+        |model: &str| listed.iter().any(|known| known == model) && usable(model);
+    OPENCODE_MODELS
+        .iter()
+        .find(|model| listed_and_usable(model))
+        .map(|model| (*model).to_owned())
+        .or_else(|| {
+            listed
+                .iter()
+                .find(|model| !model.starts_with("opencode/") && usable(model))
+                .cloned()
+        })
+        .or_else(|| {
+            listed
+                .iter()
+                .find(|model| model.starts_with("opencode/") && model.ends_with("-free"))
+                .cloned()
+        })
+}
+
+/// The OpenCode lead's model: asked, offering the signed-in models `opencode models` lists, or
+/// with `--yes` the default.
+fn opencode_model(ask: Option<&mut Prompter>, usable: &dyn Fn(&str) -> bool) -> Result<String> {
+    outln!("Listing OpenCode's models (opencode models)...");
+    let listed = opencode_models().unwrap_or_default();
+    let default = default_opencode_model(&listed, usable);
+    let Some(prompter) = ask else {
+        return default.ok_or_else(|| {
+            Fixable {
+                error: "supertag init found no OpenCode model to choose.".into(),
+                fix: "Add --model provider/model, such as opencode-go/glm-5.3; opencode models lists them.".into(),
+                command: Some("opencode models"),
+            }
+            .into()
+        });
+    };
+    let ready: Vec<&str> = listed
+        .iter()
+        .map(String::as_str)
+        .filter(|model| usable(model))
+        .collect();
+    if !ready.is_empty() {
+        const SHOWN: usize = 8;
+        let more = match ready.len().saturating_sub(SHOWN) {
+            0 => String::new(),
+            more => format!(", and {more} more"),
+        };
+        outln!(
+            "OpenCode models you can use now: {}{more}. opencode models lists every model.",
+            ready[..ready.len().min(SHOWN)].join(", ")
+        );
+    }
+    loop {
+        let answer = prompter.ask(
+            "OpenCode model, as provider/model",
+            default.as_deref().unwrap_or_default(),
+        )?;
+        if supertag_worker_host::validate_opencode_model(&answer).is_ok() {
+            return Ok(answer);
+        }
+        outln!("Enter the model as provider/model, such as opencode-go/glm-5.3.");
+    }
+}
+
+/// OpenCode's sign-in file at its usual path, and which providers it holds, when it exists.
+struct OpencodeAuth {
+    path: PathBuf,
+    /// Why it can't be read, in words, when it can't.
+    providers: std::result::Result<
+        std::collections::BTreeMap<String, harness_checks::opencode_auth::Entry>,
+        String,
+    >,
+}
+
+impl OpencodeAuth {
+    fn at_usual_path() -> Option<Self> {
+        let path = harness_checks::opencode_auth::usual_path()?;
+        std::fs::symlink_metadata(&path).ok()?;
+        let providers =
+            harness_checks::opencode_auth::providers(&path).map_err(|error| error.to_string());
+        Some(Self { path, providers })
+    }
+}
+
+/// Where an OpenCode lead's Worker Host gets the provider's key.
+#[derive(Debug, PartialEq, Eq)]
+enum OpencodeKey {
+    /// The provider's API key in OpenCode's sign-in file, which the host names.
+    File(PathBuf),
+    /// The provider's key variable, in the environment or the env_file.
+    Variable(&'static str),
+    /// No key: OpenCode Zen's free models.
+    None,
+}
+
+impl OpencodeKey {
+    fn describe(&self, model: &str) -> String {
+        let provider = model
+            .split_once('/')
+            .map_or(model, |(provider, _)| provider);
+        match self {
+            Self::File(path) => format!(
+                "opencode: {provider}'s API key comes from OpenCode's sign-in file, {}, as opencode-auth-file.",
+                path.display()
+            ),
+            Self::Variable(variable) => {
+                format!("opencode: {provider}'s API key comes from {variable}.")
+            }
+            Self::None => format!("opencode: {model} needs no sign-in."),
+        }
+    }
+}
+
+/// Where the Worker Host gets the key for an OpenCode `model`: the provider's API-key entry in
+/// OpenCode's sign-in file `auth`, then its key `variable` when set, then none for OpenCode Zen.
+/// Otherwise, how to sign in. Reads only which providers the file holds, never a key.
+fn opencode_key(
+    model: &str,
+    auth: Option<&OpencodeAuth>,
+    variable: Option<&'static str>,
+    state: &Path,
+) -> std::result::Result<OpencodeKey, Fixable> {
+    use harness_checks::opencode_auth::{Entry, private_problem};
+    let provider = model
+        .split_once('/')
+        .map_or(model, |(provider, _)| provider);
+    let entry = auth.and_then(|auth| auth.providers.as_ref().ok()?.get(provider).copied());
+    if let (Some(Entry::ApiKey), Some(auth)) = (entry, auth) {
+        if let Some(problem) = private_problem(&auth.path) {
+            return Err(Fixable {
+                error: format!("OpenCode's sign-in file can't be used: {problem}."),
+                fix: format!(
+                    "Run chmod 600 {}, then run supertag init again.",
+                    auth.path.display()
+                ),
+                command: None,
+            });
+        }
+        return Ok(OpencodeKey::File(auth.path.clone()));
+    }
+    if let Some(variable) = variable {
+        return Ok(OpencodeKey::Variable(variable));
+    }
+    if provider == "opencode" {
+        return Ok(OpencodeKey::None);
+    }
+    let why = match (auth, entry) {
+        (
+            Some(OpencodeAuth {
+                path,
+                providers: Err(problem),
+            }),
+            _,
+        ) => format!(
+            "OpenCode's sign-in file {} can't be read: {problem}",
+            path.display()
+        ),
+        (_, Some(_)) => format!(
+            "OpenCode's {provider} sign-in is not an API key, and SuperTag uses only API keys, not OAuth"
+        ),
+        _ => format!("OpenCode has no {provider} sign-in"),
+    };
+    let variable =
+        supertag_worker_host::provider_environment_for(HarnessKind::Opencode, Some(model))
+            .ok()
+            .and_then(|names| names.first().copied());
+    let or_variable = variable
+        .map(|variable| format!(", or set {variable} in {}", state.join(".env").display()))
+        .unwrap_or_default();
+    Err(Fixable {
+        error: format!("{why}."),
+        fix: format!(
+            "Sign in with opencode auth login, choosing {provider} and an API key{or_variable}, then run supertag init again."
+        ),
+        command: Some("opencode auth login"),
+    })
+}
+
+/// Why init stops when OpenCode's check turn with `model` fails.
+fn opencode_turn_failed(model: &str, timed_out: bool) -> Fixable {
+    if timed_out {
+        return Fixable {
+            error: "Couldn't check the opencode sign-in.".into(),
+            fix: timed_out_line(),
+            command: None,
+        };
+    }
+    Fixable {
+        error: format!("OpenCode's check turn with {model} didn't succeed."),
+        fix: format!(
+            "Check the model and its sign-in outside SuperTag with opencode run -m {model} \"Reply with OK only.\", then run supertag init again."
+        ),
+        command: None,
+    }
+}
+
+/// What an unsandboxed OpenCode lead's commands can read: the provider proxy keeps only an
+/// anthropic or openai key in the Worker.
+fn opencode_key_caveat(model: &str) -> Option<String> {
+    let provider = model.split_once('/')?.0;
+    (!matches!(provider, "anthropic" | "openai")).then(|| {
+        format!(
+            "Those commands can read {provider}'s key: SuperTag keeps only an anthropic or openai key in the Worker. With environment: local-vm, the key stays out of their reach."
+        )
     })
 }
 
@@ -1751,7 +2164,12 @@ fn answers(
 /// How to let a harness without a sandbox run commands after setup.
 const ENABLE_COMMANDS: &str = "To let it run commands later, see https://github.com/atemaguer/supertag/blob/main/docs/operations/cli.md#let-the-lead-run-commands";
 
-fn unsandboxed(harness: Found, ask: Option<&mut Prompter>, state: &Path) -> Result<Commands> {
+fn unsandboxed(
+    harness: Found,
+    model: Option<&str>,
+    ask: Option<&mut Prompter>,
+    state: &Path,
+) -> Result<Commands> {
     Ok(match (harness, ask) {
         (Found::ClaudeCode | Found::Opencode | Found::Cursor, Some(prompter)) => {
             let name = harness.harness();
@@ -1768,6 +2186,9 @@ fn unsandboxed(harness: Found, ask: Option<&mut Prompter>, state: &Path) -> Resu
                         "  Those commands can read a Claude Code sign-in made with /login. With ANTHROPIC_API_KEY in {} instead, the key stays in the Worker and Claude Code gets a stand-in.",
                         state.join(".env").display()
                     );
+                }
+                if let Some(line) = model.and_then(opencode_key_caveat) {
+                    outln!("  {line}");
                 }
                 Commands::Unsandboxed
             } else {
@@ -1941,6 +2362,9 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
     });
     if let Some(model) = &answers.model {
         host["models"] = json!({ harness: model });
+    }
+    if let Some(path) = &answers.opencode_auth_file {
+        host["opencode-auth-file"] = json!(path);
     }
     match answers.commands {
         Commands::Sandboxed => host["sandbox-commands"] = json!([harness]),
@@ -2247,6 +2671,7 @@ mod tests {
             harness: Found::Codex,
             also: vec![Found::ClaudeCode],
             model: None,
+            opencode_auth_file: None,
             commands: Commands::Unset,
             workspace: "app".into(),
             tag: "lead".into(),
@@ -2326,6 +2751,7 @@ mod tests {
             harness: Found::Codex,
             also: Vec::new(),
             model: None,
+            opencode_auth_file: None,
             commands: Commands::Unset,
             workspace: "app".into(),
             tag: "lead".into(),
@@ -2390,6 +2816,7 @@ mod tests {
             harness: Found::ClaudeCode,
             also: Vec::new(),
             model: None,
+            opencode_auth_file: None,
             commands: Commands::Unsandboxed,
             workspace: "app".into(),
             tag: "lead".into(),
@@ -2445,6 +2872,7 @@ mod tests {
                 harness,
                 also: Vec::new(),
                 model: None,
+                opencode_auth_file: None,
                 commands,
                 workspace: "app".into(),
                 tag: "lead".into(),
@@ -2482,6 +2910,7 @@ mod tests {
             harness: Found::ClaudeCode,
             also: Vec::new(),
             model: None,
+            opencode_auth_file: None,
             commands: Commands::LocalVm,
             workspace: "app".into(),
             tag: "lead".into(),
@@ -2511,6 +2940,7 @@ mod tests {
             harness: Found::ClaudeCode,
             also: Vec::new(),
             model: None,
+            opencode_auth_file: None,
             commands: Commands::Sandboxed,
             workspace: "app".into(),
             tag: "lead".into(),
@@ -2566,5 +2996,268 @@ mod tests {
         );
         assert_eq!(name_for_machine(None, "gateway.local"), "this-machine");
         assert_eq!(name_for_machine(None, ""), "this-machine");
+    }
+
+    #[derive(clap::Parser)]
+    struct Init {
+        #[command(flatten)]
+        args: InitArgs,
+    }
+
+    fn parse(args: &[&str]) -> Result<InitArgs, clap::Error> {
+        use clap::Parser as _;
+        Init::try_parse_from([&["init"][..], args].concat()).map(|init| init.args)
+    }
+
+    #[test]
+    fn harness_opencode_takes_a_model_and_model_needs_a_harness() {
+        let args = parse(&[
+            "--yes",
+            "--harness",
+            "opencode",
+            "--model",
+            "opencode-go/glm-5.3",
+        ])
+        .unwrap();
+        assert_eq!(args.harness, Some(InitHarness::Opencode));
+        assert_eq!(args.harness.map(InitHarness::found), Some(Found::Opencode));
+        assert_eq!(args.model.as_deref(), Some("opencode-go/glm-5.3"));
+        assert_eq!(parse(&["--harness", "opencode"]).unwrap().model, None);
+        assert!(parse(&["--model", "opencode-go/glm-5.3"]).is_err());
+        assert!(
+            parse(&[
+                "--check",
+                "--harness",
+                "opencode",
+                "--model",
+                "opencode-go/glm-5.3"
+            ])
+            .is_err()
+        );
+        assert!(parse(&["--harness", "cursor"]).is_err());
+    }
+
+    #[test]
+    fn reads_the_models_opencode_lists() {
+        assert_eq!(
+            opencode_model_lines(
+                "opencode/big-pickle\nopencode-go/glm-5.3\n\nnot a model\n  openai/gpt-5 \n"
+            ),
+            ["opencode/big-pickle", "opencode-go/glm-5.3", "openai/gpt-5"]
+        );
+    }
+
+    #[test]
+    fn the_default_opencode_model_is_a_tested_signed_in_one_then_a_signed_in_then_a_free_one() {
+        let listed: Vec<String> = [
+            "amazon-bedrock/some-model",
+            "opencode/big-pickle",
+            "opencode/deepseek-v4.1-flash-free",
+            "opencode-go/glm-5.3",
+            "opencode-go/kimi-k3",
+            "openai/gpt-5",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        let signed_in = |providers: &'static [&'static str]| {
+            move |model: &str| {
+                let provider = model.split_once('/').unwrap().0;
+                providers.contains(&provider)
+                    || (provider == "opencode" && model.ends_with("-free"))
+            }
+        };
+        assert_eq!(
+            default_opencode_model(&listed, &signed_in(&["opencode-go"])).as_deref(),
+            Some("opencode-go/kimi-k3")
+        );
+        assert_eq!(
+            default_opencode_model(&listed, &signed_in(&["openai"])).as_deref(),
+            Some("opencode/deepseek-v4.1-flash-free"),
+            "a tested free model before an untested signed-in one"
+        );
+        let untested: Vec<String> = ["opencode/beam-free", "openai/gpt-5"]
+            .map(str::to_owned)
+            .to_vec();
+        assert_eq!(
+            default_opencode_model(&untested, &signed_in(&["openai"])).as_deref(),
+            Some("openai/gpt-5")
+        );
+        assert_eq!(
+            default_opencode_model(&untested, &signed_in(&[])).as_deref(),
+            Some("opencode/beam-free")
+        );
+        assert_eq!(default_opencode_model(&[], &signed_in(&["openai"])), None);
+    }
+
+    fn auth_file(directory: &Path, text: &str, mode: u32) -> OpencodeAuth {
+        use std::os::unix::fs::PermissionsExt as _;
+        let path = directory.join("auth.json");
+        std::fs::write(&path, text).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+        OpencodeAuth {
+            providers: harness_checks::opencode_auth::providers(&path)
+                .map_err(|error| error.to_string()),
+            path,
+        }
+    }
+
+    #[test]
+    fn an_opencode_lead_takes_its_key_from_the_sign_in_file_then_a_variable_then_none() {
+        let temporary = tempfile::tempdir().unwrap();
+        let state = Path::new("/home/me/.supertag");
+        let auth = auth_file(
+            temporary.path(),
+            r#"{"opencode-go":{"type":"api","key":"fake-go-key"},"anthropic":{"type":"oauth","refresh":"fake-refresh"}}"#,
+            0o600,
+        );
+        // The provider's API key in the file: the host names the file.
+        assert_eq!(
+            opencode_key("opencode-go/glm-5.3", Some(&auth), None, state).unwrap(),
+            OpencodeKey::File(auth.path.clone())
+        );
+        assert_eq!(
+            opencode_key(
+                "opencode-go/glm-5.3",
+                Some(&auth),
+                Some("OPENAI_API_KEY"),
+                state
+            )
+            .unwrap(),
+            OpencodeKey::File(auth.path.clone()),
+            "the file's entry comes first, as a Task Attempt reads it"
+        );
+        // A key variable, with no API key in the file: no file.
+        assert_eq!(
+            opencode_key(
+                "anthropic/claude-sonnet-5",
+                Some(&auth),
+                Some("ANTHROPIC_API_KEY"),
+                state
+            )
+            .unwrap(),
+            OpencodeKey::Variable("ANTHROPIC_API_KEY")
+        );
+        // OpenCode Zen's free models need no key, and no file.
+        assert_eq!(
+            opencode_key(
+                "opencode/deepseek-v4.1-flash-free",
+                Some(&auth),
+                None,
+                state
+            )
+            .unwrap(),
+            OpencodeKey::None
+        );
+        assert_eq!(
+            opencode_key("opencode/deepseek-v4.1-flash-free", None, None, state).unwrap(),
+            OpencodeKey::None
+        );
+        // An OAuth sign-in is refused, with how to sign in, and never the file's contents.
+        let refused =
+            opencode_key("anthropic/claude-sonnet-5", Some(&auth), None, state).unwrap_err();
+        assert!(refused.error.contains("not an API key"), "{refused}");
+        assert!(refused.fix.contains("opencode auth login"), "{refused}");
+        assert!(
+            refused
+                .fix
+                .contains("ANTHROPIC_API_KEY in /home/me/.supertag/.env"),
+            "{refused}"
+        );
+        assert!(!refused.to_string().contains("fake"), "{refused}");
+        // No sign-in at all: stop, saying how to sign in.
+        let refused = opencode_key("moonshot/kimi-k3", Some(&auth), None, state).unwrap_err();
+        assert_eq!(refused.error, "OpenCode has no moonshot sign-in.");
+        assert_eq!(refused.command, Some("opencode auth login"));
+        assert!(!refused.fix.contains(".env"), "no variable for {refused}");
+        let refused = opencode_key("opencode-go/glm-5.3", None, None, state).unwrap_err();
+        assert_eq!(refused.error, "OpenCode has no opencode-go sign-in.");
+        // A file the host would refuse: shared with others.
+        let shared = auth_file(
+            temporary.path(),
+            r#"{"opencode-go":{"type":"api","key":"fake-go-key"}}"#,
+            0o644,
+        );
+        let refused = opencode_key("opencode-go/glm-5.3", Some(&shared), None, state).unwrap_err();
+        assert!(refused.fix.starts_with("Run chmod 600 "), "{refused}");
+        // One it can't read says why, without its contents.
+        let broken = auth_file(temporary.path(), "not json fake-go-key", 0o600);
+        let refused = opencode_key("opencode-go/glm-5.3", Some(&broken), None, state).unwrap_err();
+        assert!(refused.error.contains("is not valid JSON"), "{refused}");
+        assert!(!refused.to_string().contains("fake-go-key"), "{refused}");
+    }
+
+    #[test]
+    fn an_opencode_lead_names_its_model_and_sign_in_file_in_supertag_yaml() {
+        let repository = Repository {
+            root: PathBuf::from("/work/app"),
+            name: "app".into(),
+            start: Start::Branch("main".into()),
+        };
+        let auth = PathBuf::from("/home/me/.local/share/opencode/auth.json");
+        let answers = Answers {
+            port: DEFAULT_PORT,
+            harness: Found::Opencode,
+            also: vec![Found::Codex],
+            model: Some("opencode-go/glm-5.3".into()),
+            opencode_auth_file: Some(auth.clone()),
+            commands: Commands::LocalVm,
+            workspace: "app".into(),
+            tag: "lead".into(),
+        };
+        let document = document(&answers, &repository);
+        let host = &document["services"][machine_name()];
+        assert_eq!(host["harnesses"], json!(["opencode", "codex"]));
+        assert_eq!(host["models"], json!({ "opencode": "opencode-go/glm-5.3" }));
+        assert_eq!(host["opencode-auth-file"], json!(auth));
+        assert_eq!(host["environment"], "local-vm");
+        let tag = &document["services"]["control-plane"]["provision"][3];
+        assert_eq!(
+            tag["spec"]["execution"],
+            json!({ "harness": "opencode", "models": ["opencode-go/glm-5.3"] })
+        );
+        let config = local_config::parse(
+            local_config::to_yaml(&document).as_bytes(),
+            Path::new("/work"),
+            |_| None,
+        )
+        .unwrap();
+        let lanes = &config.hosts[0].harnesses;
+        assert_eq!(lanes[0].harness_kind(), HarnessKind::Opencode);
+        assert_eq!(lanes[0].opencode_auth_file(), Some(auth.as_path()));
+        assert_eq!(
+            lanes[0].provider_model().as_deref(),
+            Some("opencode-go/glm-5.3")
+        );
+        assert_eq!(
+            lanes[1].opencode_auth_file(),
+            None,
+            "only the OpenCode lane"
+        );
+        // A free model, or a key from a variable, names no file.
+        let answers = Answers {
+            model: Some("opencode/deepseek-v4.1-flash-free".into()),
+            opencode_auth_file: None,
+            commands: Commands::Unset,
+            ..answers
+        };
+        let document = super::document(&answers, &repository);
+        let host = &document["services"][machine_name()];
+        assert!(host.get("opencode-auth-file").is_none(), "{host}");
+        // An OpenCode lead without a sandbox runs no commands.
+        let permissions =
+            document["services"]["control-plane"]["provision"][0]["spec"]["permissions"]
+                .to_string();
+        assert!(!permissions.contains("commands:execute"), "{permissions}");
+    }
+
+    #[test]
+    fn an_unsandboxed_opencode_lead_is_told_which_keys_its_commands_can_read() {
+        let line = opencode_key_caveat("opencode-go/glm-5.3").unwrap();
+        assert!(
+            line.contains("opencode-go's key") && line.contains("local-vm"),
+            "{line}"
+        );
+        assert_eq!(opencode_key_caveat("anthropic/claude-sonnet-5"), None);
+        assert_eq!(opencode_key_caveat("openai/gpt-5"), None);
     }
 }

@@ -180,7 +180,7 @@ cargo build --release --locked --manifest-path core/Cargo.toml -p supertag-cli -
 
 Put `core/target/release/supertag` on your `PATH`. Without the release archive's Node bridges, a
 Worklet runs Claude Code, Cursor, or OpenCode only when you name a built adapter entrypoint
-with `--harness-entrypoint`, and `supertag init` doesn't offer Claude Code; it names the
+with `--harness-entrypoint`, and `supertag init` doesn't offer Claude Code or OpenCode; it names the
 directory the bridges belong in. Container images for hosted platforms are described in
 [Self-host SuperTag](../guides/self-hosting.md).
 

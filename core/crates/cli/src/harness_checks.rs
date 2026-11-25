@@ -3,6 +3,7 @@
 //! models against its provider's model listing.
 mod cursor;
 mod models;
+pub mod opencode_auth;
 mod probe;
 mod sign_in;
 
@@ -150,13 +151,15 @@ async fn cursor_listing(
     }
 }
 
-/// Run a harness's sign-in probe with the Worker Host's credentials. OpenCode needs a model.
+/// Run a harness's sign-in probe with the Worker Host's credentials. OpenCode needs a model, and
+/// takes its provider's key from the host's `opencode-auth-file` first, when it has one.
 pub async fn probe_sign_in(
     harness: Harness,
     model: Option<&str>,
+    opencode_auth_file: Option<&std::path::Path>,
     variables: &Variables,
 ) -> SignInResult {
-    let result = sign_in_once(harness, model, variables).await;
+    let result = sign_in_once(harness, model, opencode_auth_file, variables).await;
     // Ctrl-C stopped the probe; its process group and temporary directory are gone now.
     probe::exit_if_interrupted();
     result
@@ -165,6 +168,7 @@ pub async fn probe_sign_in(
 async fn sign_in_once(
     harness: Harness,
     model: Option<&str>,
+    opencode_auth_file: Option<&std::path::Path>,
     variables: &Variables,
 ) -> SignInResult {
     // The deadline future finishes only when the probe ran out of time.
@@ -205,7 +209,9 @@ async fn sign_in_once(
             };
         }
         Harness::Opencode => match model {
-            Some(model) => sign_in::opencode(variables, model, deadline()).await,
+            Some(model) => {
+                sign_in::opencode(variables, model, opencode_auth_file, deadline()).await
+            }
             None => {
                 return SignInResult {
                     signed_in: false,
@@ -279,11 +285,16 @@ pub struct SignInArgs {
 /// work, and say how to sign in when they do not.
 pub async fn sign_in(args: SignInArgs) -> Result<()> {
     let state = crate::local_config::state_directory(args.state_directory)?;
-    let (environment, supervisor) = match crate::local_config::load(args.file, &state)? {
-        Some(config) => (config.environment.clone(), Supervisor::of(&config)),
+    let (environment, supervisor, auth_file) = match crate::local_config::load(args.file, &state)? {
+        Some(config) => (
+            config.environment.clone(),
+            Supervisor::of(&config),
+            opencode_auth_file(&config, args.model.as_deref()),
+        ),
         None => (
             crate::local_config::default_environment(&state)?,
             Supervisor::ThisProcess,
+            None,
         ),
     };
     if args.harness == Harness::Opencode && args.model.is_none() {
@@ -301,7 +312,15 @@ pub async fn sign_in(args: SignInArgs) -> Result<()> {
         "Checking {} sign-in with the Worker Host credentials...",
         args.harness.name()
     );
-    let result = probe_sign_in(args.harness, args.model.as_deref(), &variables).await;
+    let result = probe_sign_in(
+        args.harness,
+        args.model.as_deref(),
+        auth_file
+            .as_deref()
+            .filter(|_| args.harness == Harness::Opencode),
+        &variables,
+    )
+    .await;
     if let Some(detail) = &result.detail {
         outln!("  {detail}");
     }
@@ -314,6 +333,24 @@ pub async fn sign_in(args: SignInArgs) -> Result<()> {
         args.harness.name(),
         instructions(args.harness)
     )
+}
+
+/// The `opencode-auth-file` of a configured OpenCode lane that serves `model`'s provider.
+fn opencode_auth_file(
+    config: &crate::local_config::Config,
+    model: Option<&str>,
+) -> Option<PathBuf> {
+    let provider = model?.split_once('/')?.0;
+    config
+        .hosts
+        .iter()
+        .flat_map(|host| &host.harnesses)
+        .filter(|lane| lane.harness_kind() == HarnessKind::Opencode)
+        .find(|lane| {
+            lane.provider_model()
+                .is_some_and(|default| default.split_once('/').is_some_and(|(p, _)| p == provider))
+        })
+        .and_then(|lane| lane.opencode_auth_file().map(std::path::Path::to_path_buf))
 }
 
 /// What a host service runs: its name and, for each configured harness, its models.
