@@ -492,9 +492,6 @@ async fn build(args: WorkerHostArgs, worker: bool) -> Result<Built> {
     if shared_execution.is_some() {
         environment.push("SUPERTAG_EXECUTION_ADMIN_TOKEN".into());
     }
-    if harness == HarnessKind::Opencode {
-        environment.push("SUPERTAG_OPENCODE_AUTH_FILE".into());
-    }
     // A GitHub-hosted Skill catalog is fetched with the host's GitHub token, or else the
     // operator's own Git configuration.
     if skill_catalog.is_some() {

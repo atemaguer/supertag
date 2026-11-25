@@ -123,6 +123,12 @@ supertag logs HOST_NAME
 
 `task events` shows the run's progress and result. `logs HOST_NAME` shows why a Task failed: the
 host logs the failure with the last lines the harness adapter wrote to standard error, redacted.
+An OpenCode Task a provider refused fails with the provider's reason, such as an expired API key,
+a model the account's region setting blocks, or `Model not found: PROVIDER/MODEL.`; the user fixes
+the key (`opencode auth login`, or the key variable in `~/.supertag/.env`), the account setting, or
+the model ID. Keys for providers outside the nine SuperTag knows come from the host's
+`opencode-auth-file`. An OpenCode host serves one provider: `supertag up` names a model whose
+provider differs from the default model's; move it to another host service.
 `get reply` shows whether the reply reached the surface. After checking the provider, resolve an `uncertain` reply with `supertag reply
 resolve REPLY_ID --decision failed --evidence TEXT`, or `--decision delivered` with
 `--provider-receipt` too; it never resends the reply.

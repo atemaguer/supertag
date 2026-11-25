@@ -75,7 +75,7 @@ pub fn instructions(harness: Harness) -> &'static str {
             "Cursor: generate an API key at https://cursor.com/dashboard/api and set CURSOR_API_KEY in ~/.supertag/.env.\n    The Cursor app and cursor-agent logins do not authenticate the Cursor SDK runner."
         }
         Harness::Opencode => {
-            "OpenCode: set the API key for the selected provider/model in ~/.supertag/.env (for example OPENAI_API_KEY for openai, or ANTHROPIC_API_KEY for anthropic).\n    Tasks use an isolated OpenCode home and do not read your usual OpenCode auth.json."
+            "OpenCode: set the API key for the selected provider/model in ~/.supertag/.env (for example OPENAI_API_KEY for openai, or ANTHROPIC_API_KEY for anthropic).\n    For another provider, such as opencode-go, sign in with opencode auth login and name the file in the host service's opencode-auth-file in supertag.yaml (usually ~/.local/share/opencode/auth.json). Tasks use an isolated OpenCode home and read no other OpenCode sign-in."
         }
     }
 }

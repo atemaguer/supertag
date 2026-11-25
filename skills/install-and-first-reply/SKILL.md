@@ -205,4 +205,6 @@ For Cursor, the user generates an API key at https://cursor.com/dashboard/api an
 `CURSOR_API_KEY=...` to `~/.supertag/.env` themselves; `init` detects Cursor only when
 `CURSOR_API_KEY` is also set in the environment it runs in. Never ask for a key in chat or write
 it for them. For OpenCode, set the provider's API-key variable in `~/.supertag/.env`; `init` then
-asks for a `provider/model`. See [Requirements](../../docs/operations/requirements.md#choose-and-sign-in-to-a-harness).
+asks for a `provider/model`. For a provider without a key variable, such as `opencode-go`, the
+user runs `opencode auth login` and the host gets `opencode-auth-file:
+~/.local/share/opencode/auth.json` in `supertag.yaml`; never read that file. See [Requirements](../../docs/operations/requirements.md#choose-and-sign-in-to-a-harness).

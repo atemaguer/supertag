@@ -9,6 +9,28 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Added
+
+- A host service's `opencode-auth-file` in `supertag.yaml` names OpenCode's sign-in file, such as
+  `~/.local/share/opencode/auth.json`, so OpenCode Tags can use providers without a key variable,
+  such as `opencode-go`. SuperTag stores only the path. It replaces the undocumented
+  `SUPERTAG_OPENCODE_AUTH_FILE` variable, which `supertag up` no longer reads.
+
+### Fixed
+
+- An OpenCode Task a provider refuses fails with the provider's reason, such as an expired API
+  key, a model the account's region setting blocks, or `Model not found: PROVIDER/MODEL.`, in
+  `supertag get task`, `describe task`, and `logs`, with anything shaped like a key or token
+  hidden. It said only `OpenCode execution failed.`
+- An OpenCode host with an auth file serves the providers the file has no entry for, such as
+  OpenCode Zen's free `opencode/...` models and providers whose key comes from the environment.
+  Every such model failed.
+- An OpenCode host whose models mix providers is refused with the model and provider that
+  differ, and [Host models](docs/reference/supertag-yaml.md#host-models) documents the
+  one-provider rule.
+- An OpenCode reply no longer repeats a line when OpenCode reports the same text, or the same
+  tool call, twice.
+
 ## [0.3.14] - 2026-11-25
 
 ### Security

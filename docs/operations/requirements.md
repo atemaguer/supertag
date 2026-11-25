@@ -59,13 +59,18 @@ isn't; the desktop app's setup screen shows the same checks.
 | [Claude Code](https://code.claude.com/docs/en/setup) | `claude` | 2.1.280; 2.1.323 for [`sandbox-commands`](#claude-code-commands-and-sandbox). Install with `curl -fsSL https://claude.ai/install.sh \| bash`; upgrade with `claude update`. | Run `claude` and follow its sign-in prompt. |
 | [Codex](https://developers.openai.com/codex/cli/) | `codex` | 0.163.0. Install or upgrade with `npm install -g @openai/codex`. | Run `codex -c 'cli_auth_credentials_store="file"' login` so Tasks can use the sign-in file. On macOS, a Keychain-only login is not copied to Tasks. |
 | [Cursor](https://cursor.com/docs/sdk/typescript.md) | None | None | Generate an API key and set `CURSOR_API_KEY` for the host service; see [Cursor setup](#cursor-setup-and-limits). Signing in to the Cursor app or `cursor-agent` is not enough. |
-| [OpenCode](https://opencode.ai/docs/) | `opencode` | None | Set your selected provider's API-key environment variable for the Worker Host, such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. |
+| [OpenCode](https://opencode.ai/docs/) | `opencode` | None | Set your selected provider's API-key environment variable for the Worker Host, such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. For any other provider, such as `opencode-go`, run `opencode auth login` and name the file in the host's [`opencode-auth-file`](../reference/supertag-yaml.md#opencode-sign-in). |
 
 For provider API credentials, use provider environment variables or SuperTag's masked prompts;
 never put lasting credentials in command flags. Sign-in detection is local and best effort; a
 missing credential file does not prove you are signed out. `supertag sign-in HARNESS` checks a
 harness the way a Worker uses it. OpenCode receives only provider environment credentials, or
-the file `--opencode-auth-file` names, and needs an explicit `provider/model`. See
+its provider's API-key entry in the file the host's `opencode-auth-file` names, and needs an
+explicit `provider/model`. A provider the file has no entry for, such as OpenCode Zen's free
+`opencode/...` models, uses its environment key or none. An OpenCode host serves one provider; see
+[Host models](../reference/supertag-yaml.md#host-models). When the provider refuses a turn, for an
+expired key, a model the account may not use, or an unknown model, the Task fails with the
+provider's reason. See
 [Run Worker Hosts](../guides/workers.md) for
 remote hosts and [credential storage](../reference/credential-storage.md) for secret handling.
 

@@ -83,7 +83,8 @@ pub struct AdapterOptions {
     /// Absolute OpenCode executable path. Otherwise resolve opencode on PATH.
     #[arg(long, requires = "harness")]
     opencode_path: Option<PathBuf>,
-    /// Owner-only API credential file. Also accepts SUPERTAG_OPENCODE_AUTH_FILE.
+    /// OpenCode's auth file (its auth.json): owner-only, absolute, API-key sign-ins only. Each
+    /// Task reads only its own provider's entry; a provider without one uses its environment key.
     #[arg(long, requires = "harness")]
     opencode_auth_file: Option<PathBuf>,
     /// Allow Claude Code, OpenCode, or Cursor commands without an operating-system sandbox.
@@ -268,10 +269,14 @@ impl AdapterOptions {
                     .as_deref()
                     .context("OpenCode requires --harness-model")?,
             )?;
+            // The Worker Host passes one provider's key variable and keeps one provider's key
+            // behind its provider proxy, both chosen by the default model.
             for model in &model_ids {
+                let other = supertag_worker_host::validate_opencode_model(model)?;
                 ensure!(
-                    supertag_worker_host::validate_opencode_model(model)? == provider,
-                    "OpenCode model IDs must use the Worker Host's selected provider"
+                    other == provider,
+                    "OpenCode model {model} uses provider {other}, but this host's default model {} uses {provider}; an OpenCode host serves one provider. Add another host service for {other}",
+                    default_model.as_deref().unwrap_or_default()
                 );
             }
         }
@@ -321,15 +326,6 @@ impl AdapterOptions {
             self.harness_kind(),
             self.harness_model.as_deref(),
         )
-    }
-    fn auth_file(&self) -> Option<PathBuf> {
-        self.opencode_auth_file.clone().or_else(|| {
-            if matches!(self.harness, Some(Harness::Opencode)) {
-                std::env::var_os("SUPERTAG_OPENCODE_AUTH_FILE").map(PathBuf::from)
-            } else {
-                None
-            }
-        })
     }
     pub fn worker_args(&self) -> Vec<OsString> {
         if let Some(path) = &self.adapter {
@@ -382,7 +378,7 @@ impl AdapterOptions {
             ("--opencode-node", self.opencode_node.as_ref()),
             ("--opencode-adapter", self.opencode_adapter.as_ref()),
             ("--opencode-path", self.opencode_path.as_ref()),
-            ("--opencode-auth-file", self.auth_file().as_ref()),
+            ("--opencode-auth-file", self.opencode_auth_file.as_ref()),
         ] {
             if let Some(value) = value {
                 args.extend([flag.into(), value.as_os_str().to_owned()]);
@@ -449,7 +445,7 @@ impl AdapterOptions {
         installed_executable: impl FnOnce() -> Result<PathBuf>,
     ) -> Result<(PathBuf, Vec<OsString>)> {
         self.provider_environment()?;
-        let auth_file = self.auth_file();
+        let auth_file = self.opencode_auth_file.clone();
         ensure!(
             matches!(self.harness, Some(Harness::Opencode))
                 || (self.opencode_node.is_none()

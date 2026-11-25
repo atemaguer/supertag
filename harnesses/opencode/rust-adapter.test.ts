@@ -18,7 +18,13 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { digestContextPackage } from "@supertag/worker-sdk";
 import * as rustHarness from "@supertag/worker-sdk/internal/rust-harness";
 import { afterEach, expect, it, vi } from "vitest";
-import { openCodePatterns, openCodePermissions, runOpenCode } from "./src/index.js";
+import {
+  OpenCodeReportedError,
+  openCodePatterns,
+  openCodePermissions,
+  redactCredentialShapes,
+  runOpenCode,
+} from "./src/index.js";
 import {
   failureResult,
   nativeRequest,
@@ -979,4 +985,212 @@ it("fails a Task whose named Skill OpenCode cannot load, and loads none in a rem
   named.remoteWorkspace = true;
   if (named.task) named.task.allowedActions = ["files:read"];
   expect(taskModel(named, configuration).skills).toEqual([]);
+});
+
+/** Runs OpenCode on a scripted stream: `stdout` lines as JSON, and `stderr` text. */
+async function runScripted(lines: unknown[], stderr = "", exitCode = 0) {
+  const events = [];
+  for await (const event of runOpenCode(
+    {
+      prompt: "Do work",
+      executable: "opencode",
+      model: "opencode-go/deepseek-v4-pro",
+      workspace: "/private/workspace",
+      timeoutMs: 1000,
+      environment: {},
+    },
+    {
+      async spawn() {
+        return {
+          output: (async function* () {
+            // A failing provider's error event can arrive before its log line.
+            yield {
+              stream: "stdout" as const,
+              text: lines.map((line) => JSON.stringify(line)).join("\n"),
+            };
+            if (stderr) yield { stream: "stderr" as const, text: stderr };
+          })(),
+          async wait() {
+            return { exitCode, stdout: "", stderr: "" };
+          },
+          kill() {},
+        };
+      },
+    },
+    undefined,
+    async () => [completePart],
+  ))
+    events.push(event);
+  return events;
+}
+
+async function reportedReason(lines: unknown[], stderr = "", exitCode = 1) {
+  const failure = await runScripted(lines, stderr, exitCode).then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  expect(failure).toBeInstanceOf(OpenCodeReportedError);
+  return (failure as OpenCodeReportedError).reason;
+}
+
+const providerError = (name: string, message: string, extra: Record<string, unknown> = {}) => ({
+  type: "error",
+  timestamp: 1,
+  sessionID: nativeSessionId,
+  error: { name, data: { message, ...extra } },
+});
+
+it("reports the provider's reason for a failed turn, never its response", async () => {
+  const expired = "This API key has expired. Create a new API key in OpenCode Console.";
+  expect(
+    await reportedReason([
+      { type: "step_start", sessionID: nativeSessionId },
+      providerError("APIError", expired, {
+        statusCode: 401,
+        responseHeaders: { "set-cookie": "provider-session-cookie" },
+        responseBody: '{"error":{"message":"response-body-detail"}}',
+        metadata: { url: "https://opencode.ai/zen/go/v1/chat/completions" },
+      }),
+      // Nothing after the error is parsed, even an invalid line.
+      "not an event",
+    ]),
+  ).toBe(expired);
+  const region =
+    "This OpenCode Go model is hosted outside Europe and the United States. Select Global in the OpenCode Console's privacy settings.";
+  expect(await reportedReason([providerError("APIError", region, { statusCode: 403 })])).toBe(
+    region,
+  );
+  // Control characters, which could split a secret, become spaces.
+  expect(await reportedReason([providerError("APIError", "Bad\u001b[31m key\n\tgiven")])).toBe(
+    "Bad [31m key given",
+  );
+  expect(await reportedReason([{ type: "error", error: { name: "ProviderAuthError" } }])).toBe(
+    "ProviderAuthError",
+  );
+});
+
+it("names an unknown model from OpenCode's error log, which its event leaves out", async () => {
+  const unknown = providerError(
+    "UnknownError",
+    "Unexpected server error. Check server logs for details.",
+    { ref: "err_0d5d57a8" },
+  );
+  const log = [
+    'timestamp=2026-11-25T06:20:04.700Z level=ERROR run=b0b87325 message=retrying error="first"',
+    'timestamp=2026-11-25T06:20:04.753Z level=ERROR run=b0b87325 message=failed ref=err_0d5d57a8 error="ProviderModelNotFoundError: Model not found: opencode-go/nosuch." cause="ProviderModelNotFoundError: Model not found: opencode-go/nosuch.\\n    at SessionPrompt.getModel (/$bunfs/root/chunk.js:50:11031)"',
+    "",
+  ].join("\n");
+  expect(await reportedReason([unknown], log)).toBe("Model not found: opencode-go/nosuch.");
+  // Without the log line, the generic reason is all there is.
+  expect(await reportedReason([unknown])).toBe(
+    "Unexpected server error. Check server logs for details.",
+  );
+  // A failed process without an error event still names the logged reason.
+  expect(await reportedReason([{ type: "step_start", sessionID: nativeSessionId }], log, 1)).toBe(
+    "Model not found: opencode-go/nosuch.",
+  );
+  await expect(runScripted([], "", 1)).rejects.toThrow("OpenCode process failed");
+});
+
+it("passes a reported reason through to the Task's result, redacted", () => {
+  const key = "opencode-go-attempt-key-fixture";
+  const reported = (reason: string) =>
+    failureResult(new OpenCodeReportedError(reason), false, true, [key]);
+  expect(reported("This API key has expired. Create a new API key in OpenCode Console.")).toBe(
+    "OpenCode execution failed: This API key has expired. Create a new API key in OpenCode Console.",
+  );
+  expect(reported("Model not found: opencode/deepseek-v4.1-flash-free.")).toBe(
+    "OpenCode execution failed: Model not found: opencode/deepseek-v4.1-flash-free.",
+  );
+  // The Attempt's own values, and anything shaped like a key or token, never cross.
+  const leaked = reported(
+    `Invalid key ${key}; Authorization: Bearer eyJhbGciOi.fixture; api_key=plain-fixture-secret; sk-proj-AbCdEf0123456789 ghp_0123456789abcdefghij https://user:hunter2@proxy.example/v1 AbCdEfGhIjKlMnOpQrStUvWxYz0123456789 0123456789abcdef0123456789abcdef`,
+  );
+  for (const secret of [
+    key,
+    "eyJhbGciOi",
+    "plain-fixture-secret",
+    "sk-proj-",
+    "ghp_",
+    "hunter2",
+    "AbCdEfGhIjKlMnOpQrStUvWxYz",
+    "0123456789abcdef0123456789abcdef",
+  ])
+    expect(leaked).not.toContain(secret);
+  expect(leaked).toMatch(/^OpenCode execution failed: Invalid key \[REDACTED\];/u);
+});
+
+it("keeps model IDs and prose when redacting credential shapes", () => {
+  for (const text of [
+    "Model not found: anthropic/claude-sonnet-4-5-20250929.",
+    "opencode-go/deepseek-v4.1-flash and opencode/deepseek-v4.1-flash-free",
+    "This API key has expired. Create a new API key in OpenCode Console.",
+    "Rate limit reached: retry in 20s (ses_deea3b302ffeT46TuibGlHG1qA).",
+  ])
+    expect(redactCredentialShapes(text)).toBe(text);
+});
+
+it("publishes a text part or a tool call that OpenCode repeats only once", async () => {
+  const progress = { id: "prt_fixtureProgress", text: "Got the diff. Re-asking the reviewer Tag." };
+  const call = {
+    tool: "bash",
+    callID: "call_fixture",
+    state: { status: "completed", input: { command: "git diff" } },
+  };
+  const events = await runScripted([
+    { type: "step_start", sessionID: nativeSessionId },
+    { type: "text", sessionID: nativeSessionId, part: progress },
+    { type: "text", sessionID: nativeSessionId, part: progress },
+    { type: "tool_use", sessionID: nativeSessionId, part: call },
+    { type: "tool_use", sessionID: nativeSessionId, part: call },
+    { type: "step_start", sessionID: nativeSessionId },
+    { type: "text", sessionID: nativeSessionId, part: completePart },
+    { type: "text", sessionID: nativeSessionId, part: completePart },
+    { type: "step_finish", sessionID: nativeSessionId, part: { reason: "stop" } },
+  ]);
+  expect(events).toEqual([
+    { type: "output.message", text: progress.text },
+    { type: "progress.updated", progress: { summary: "Running git diff" } },
+    { type: "output.message", text: completePart.text },
+  ]);
+});
+
+it("serves providers the auth file has no entry for from the environment, or with no key", async () => {
+  const { root } = await sandbox();
+  const authFile = join(root, "host-auth.json");
+  await writeFile(
+    authFile,
+    JSON.stringify({ "opencode-go": { type: "api", key: "file-go-secret" } }),
+    { mode: 0o600 },
+  );
+  const request = async (model: string, extra: Record<string, string> = {}) => {
+    const { environment: fresh } = await sandbox();
+    const run = ownedRun();
+    run.task!.policySnapshot!.execution!.models = [model];
+    const selected = taskModel(run, { ...configuration, model });
+    const native = await nativeRequest(selected.task, selected.model, {
+      ...configuration,
+      model,
+      authFile,
+      environment: { ...fresh, ...extra },
+    });
+    const staged = join(fresh.SUPERTAG_ADAPTER_STATE_DIRECTORY, "opencode-home", "opencode");
+    return { native, staged };
+  };
+  // OpenCode Zen's free models need no key: no sign-in is staged, and the turn proceeds.
+  const free = await request("opencode/deepseek-v4.1-flash-free");
+  expect(free.native.secrets).toEqual([]);
+  await expect(lstat(free.staged)).rejects.toMatchObject({ code: "ENOENT" });
+  // A provider whose key comes from the environment keeps it.
+  const keyed = await request("deepseek/deepseek-chat", { DEEPSEEK_API_KEY: "env-deepseek-key" });
+  expect(keyed.native.secrets).toEqual(["env-deepseek-key"]);
+  expect(keyed.native.forTools([]).environment).toMatchObject({
+    DEEPSEEK_API_KEY: "env-deepseek-key",
+  });
+  // The provider the file signs in to still gets only its own entry.
+  const signed = await request("opencode-go/glm-5.3");
+  expect(signed.native.secrets).toEqual(["file-go-secret"]);
+  expect(JSON.parse(await readFile(join(signed.staged, "auth.json"), "utf8"))).toEqual({
+    "opencode-go": { type: "api", key: "file-go-secret" },
+  });
 });

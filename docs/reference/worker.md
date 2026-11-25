@@ -230,7 +230,7 @@ A Worker starts from an allowlist of its Worklet's environment, never the whole 
 | Transport | `HTTPS_PROXY`, `NO_PROXY` (either case), `SUPERTAG_SERVER_CA_FILE`, `SUPERTAG_CLIENT_CERT_FILE`, `SUPERTAG_CLIENT_KEY_FILE` |
 | SuperTag state | `SUPERTAG_STATE_DIR` |
 | Its own harness | The non-secret provider variables of its harness, such as `CODEX_HOME` for Codex |
-| Its own harness's configuration | Its sandbox provider's variables, `SUPERTAG_EXECUTION_ADMIN_TOKEN` for shared execution, the variables its MCP catalog and Workspace mount mappings name, `SUPERTAG_MCP_*` for Claude Code and Cursor, `SUPERTAG_OPENCODE_AUTH_FILE` for OpenCode, and `GITHUB_TOKEN` and `GIT_CONFIG_GLOBAL` with a Skill catalog |
+| Its own harness's configuration | Its sandbox provider's variables, `SUPERTAG_EXECUTION_ADMIN_TOKEN` for shared execution, the variables its MCP catalog and Workspace mount mappings name, `SUPERTAG_MCP_*` for Claude Code and Cursor, and `GITHUB_TOKEN` and `GIT_CONFIG_GLOBAL` with a Skill catalog |
 
 Another harness's variables never reach it. Its harness's provider keys and tokens, and the
 network credentials its Task may use, arrive in its assignment instead, never in its environment.
@@ -297,7 +297,7 @@ turns. Reported tokens are not a billing cap. See [Budgets and allocation](coord
 | `codex` | Built into `supertag`; drives Codex's app-server | `CODEX_API_KEY`, `OPENAI_API_KEY`, and a copy of a file-backed sign-in | In Codex's sandbox, writable only in the checkout and read-write Workspace Volume copies; or, on a host with an E2B, Modal, or own-provider Workspace, in the Task's sandbox through Codex's exec-server. A code-mode-only model, such as gpt-6-sol, runs commands only when the Task also has `web:fetch`; see [Codex commands and models](../operations/requirements.md#codex-commands-and-models) |
 | `claude-code` | Node bridge on the Claude Agent SDK | `ANTHROPIC_API_KEY` or the host user's sign-in | In Claude Code's own operating-system sandbox with `--sandbox-commands`; in a container with `--local-vm`, or in the Task's sandbox on a host with an E2B or Modal Workspace, with no built-in tool. Without a sandbox, only with `--allow-unsandboxed-commands`; a permission hook keeps file tools in the Task's roots |
 | `cursor` | Node bridge on the Cursor SDK | `CURSOR_API_KEY` | In a container with `--local-vm`; in the Task's sandbox on a host with an E2B or Modal Workspace; in a shared execution environment; or without a sandbox, only with `--allow-unsandboxed-commands` |
-| `opencode` | Node bridge | The selected provider's API key, or `--opencode-auth-file` | In a container with `--local-vm`, or in the Task's sandbox on a host with an E2B or Modal Workspace, with every built-in tool off. Without a sandbox, only with `--allow-unsandboxed-commands` |
+| `opencode` | Node bridge | The selected provider's API key, or its entry in the file `--opencode-auth-file` names | In a container with `--local-vm`, or in the Task's sandbox on a host with an E2B or Modal Workspace, with every built-in tool off. Without a sandbox, only with `--allow-unsandboxed-commands` |
 | `openai-agents` | The `supertag` Python package | `OPENAI_API_KEY` | The tools the Task's permissions allow |
 
 `supertag sign-in HARNESS` checks a harness's credentials the way a host uses them, and

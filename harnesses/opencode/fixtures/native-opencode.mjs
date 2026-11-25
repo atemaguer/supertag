@@ -64,6 +64,9 @@ assert.deepEqual(args, [
   "--agent",
   "build",
   "--pure",
+  "--print-logs",
+  "--log-level",
+  "ERROR",
 ]);
 // On an unsandboxed host the Worker Host keeps the key in a loopback proxy: the provider's
 // baseURL names it, and the key variable is a placeholder.
@@ -195,8 +198,39 @@ if (mode === "bad-json") {
   process.exit(0);
 }
 if (mode === "native-error") {
-  emit({ type: "error", error: { message: "synthetic failure" } });
-  process.exit(0);
+  // As OpenCode reports a provider's refusal: the reason, and the provider's whole response.
+  const message =
+    "This API key has expired. Create a new API key in OpenCode Console. (key synthetic-opencode-provider-key)";
+  emit({
+    type: "error",
+    error: {
+      name: "APIError",
+      data: {
+        message,
+        statusCode: 401,
+        responseHeaders: { "set-cookie": "fixture-provider-cookie" },
+        responseBody: JSON.stringify({ error: { message } }),
+      },
+    },
+  });
+  process.exit(1);
+}
+if (mode === "unknown-model") {
+  // OpenCode's event says only "unexpected server error"; its error log names the model.
+  process.stderr.write(
+    'timestamp=2026-11-25T06:20:04.753Z level=ERROR run=b0b87325 message=failed ref=err_0d5d57a8 error="ProviderModelNotFoundError: Model not found: openai/fixture-model." cause="ProviderModelNotFoundError: Model not found: openai/fixture-model.\\n    at <anonymous>"\n',
+  );
+  emit({
+    type: "error",
+    error: {
+      name: "UnknownError",
+      data: {
+        message: "Unexpected server error. Check server logs for details.",
+        ref: "err_0d5d57a8",
+      },
+    },
+  });
+  process.exit(1);
 }
 /** A minimal HTTP MCP client for `server`, as OpenCode's own. */
 function mcpClient(server) {

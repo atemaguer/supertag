@@ -990,11 +990,21 @@ async fn opencode_bad_streams_fail_closed(database: String) -> Result<()> {
     runtime
         .tag("native", HarnessKind::Opencode, &["files:read"])
         .await?;
-    for mode in [
-        "bad-json",
-        "missing-terminal",
-        "native-error",
-        "process-failure",
+    for (mode, reason) in [
+        ("bad-json", "OpenCode execution failed."),
+        ("missing-terminal", "OpenCode execution failed."),
+        // The provider's reason reaches the Task, without its key or its response.
+        (
+            "native-error",
+            "OpenCode execution failed: This API key has expired. Create a new API key in \
+             OpenCode Console. (key [REDACTED])",
+        ),
+        // An unknown model: OpenCode's error log names it.
+        (
+            "unknown-model",
+            "OpenCode execution failed: Model not found: openai/fixture-model.",
+        ),
+        ("process-failure", "OpenCode execution failed."),
     ] {
         let prior_calls = runtime.calls()?.len();
         let task = runtime.submit("native", mode, mode, None).await?;
@@ -1006,6 +1016,11 @@ async fn opencode_bad_streams_fail_closed(database: String) -> Result<()> {
         ensure!(
             result.state() == TaskState::Failed,
             "bad native stream succeeded: {mode}"
+        );
+        ensure!(
+            result.result.as_deref() == Some(reason),
+            "native {mode} failed with {:?}",
+            result.result
         );
         let calls = runtime.calls()?;
         let call = calls.last().context("native call missing")?;

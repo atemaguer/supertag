@@ -46,6 +46,8 @@ fn version() -> u32 {
 fn instance() -> String {
     "supertag".into()
 }
+// Parsed once from the file and taken apart at once, so the larger host variant costs nothing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 enum Service {
@@ -95,6 +97,10 @@ enum Service {
         unsandboxed: Vec<String>,
         #[serde(default, rename = "sandbox-commands")]
         sandboxed: Vec<String>,
+        /// OpenCode's auth file, by path: the host's OpenCode Tasks read their provider's API key
+        /// from it. Only the path is configured; the file stays where it is.
+        #[serde(default, rename = "opencode-auth-file")]
+        opencode_auth_file: Option<PathBuf>,
         #[serde(default)]
         restart: Restart,
         #[serde(default)]
@@ -652,6 +658,7 @@ pub(crate) fn parse(
             skills,
             unsandboxed,
             sandboxed,
+            opencode_auth_file,
             restart,
             depends_on,
             concurrency,
@@ -859,8 +866,11 @@ pub(crate) fn parse(
         let mut selections = Vec::new();
         if let Some(adapter) = adapter {
             ensure!(
-                models.is_empty() && unsandboxed.is_empty() && sandboxed.is_empty(),
-                "protocol adapters cannot configure native models or unsandboxed commands"
+                models.is_empty()
+                    && unsandboxed.is_empty()
+                    && sandboxed.is_empty()
+                    && opencode_auth_file.is_none(),
+                "protocol adapters cannot configure native models, unsandboxed commands, or an OpenCode auth file"
             );
             let mut args = vec![
                 OsString::from("host"),
@@ -888,6 +898,13 @@ pub(crate) fn parse(
                 sandboxed.iter().all(|h| harnesses.contains(h)),
                 "sandbox-commands must name a selected harness"
             );
+            ensure!(
+                opencode_auth_file.is_none() || harnesses.iter().any(|h| h == "opencode"),
+                "host {name}: opencode-auth-file requires the opencode harness"
+            );
+            let opencode_auth_file = opencode_auth_file
+                .map(|path| resolve_path(base, &path))
+                .transpose()?;
             for harness in &harnesses {
                 let mut args = vec![OsString::from("host"), "--harness".into(), harness.into()];
                 if let Some(models) = models.get(harness) {
@@ -918,6 +935,12 @@ pub(crate) fn parse(
                         "host {name}: name {harness} in sandbox-commands or allow-unsandboxed-commands, not both"
                     );
                     args.push("--sandbox-commands".into());
+                }
+                if let Some(path) = opencode_auth_file
+                    .as_ref()
+                    .filter(|_| harness == "opencode")
+                {
+                    args.extend(["--opencode-auth-file".into(), path.clone().into_os_string()]);
                 }
                 selections.push(args);
             }
@@ -955,7 +978,9 @@ pub(crate) fn parse(
             let adapter = AdapterArguments::try_parse_from(args)
                 .map_err(|_| anyhow::anyhow!("invalid configured harness or adapter options"))?
                 .adapter;
-            adapter.execution_profile()?;
+            adapter
+                .execution_profile()
+                .with_context(|| format!("host {name}"))?;
             adapter.provider_environment()?;
             selected.push(adapter);
         }
@@ -2153,6 +2178,65 @@ services: {vm: {type: host, control-plane: https://example.com, environment: loc
             let refused = profile(consent).unwrap_err();
             assert!(format!("{refused:#}").contains(reason), "{refused:#}");
         }
+    }
+    #[test]
+    fn opencode_auth_file_reaches_only_the_opencode_lane() {
+        let host = |fields: &str| {
+            let input = format!(
+                "services: {{host: {{type: host, control-plane: https://example.com, harnesses: [codex, opencode], models: {{opencode: [opencode-go/glm-5.3, opencode-go/kimi-k3]}}{fields}}}}}"
+            );
+            parse(input.as_bytes(), Path::new("/trusted"), |_| None)
+        };
+        let flag = |args: &[OsString]| {
+            args.windows(2)
+                .find(|pair| pair[0] == "--opencode-auth-file")
+                .map(|pair| PathBuf::from(&pair[1]))
+        };
+        let config = host(", opencode-auth-file: keys/opencode-auth.json").unwrap();
+        let lanes = &config.hosts[0].harnesses;
+        assert_eq!(flag(&lanes[0].worker_args()), None);
+        assert_eq!(
+            flag(&lanes[1].worker_args()),
+            Some(PathBuf::from("/trusted/keys/opencode-auth.json"))
+        );
+        // Without the setting, no lane names an auth file.
+        let config = host("").unwrap();
+        assert!(
+            config.hosts[0]
+                .harnesses
+                .iter()
+                .all(|lane| flag(&lane.worker_args()).is_none())
+        );
+        let refused = parse(
+            b"services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], opencode-auth-file: /keys/auth.json}}",
+            Path::new("/trusted"),
+            |_| None,
+        )
+        .err()
+        .expect("must reject");
+        assert!(
+            format!("{refused:#}").contains("opencode-auth-file requires the opencode harness"),
+            "{refused:#}"
+        );
+    }
+    #[test]
+    fn opencode_host_names_the_model_and_provider_it_cannot_serve() {
+        let refused = parse(
+            b"services: {spike: {type: host, control-plane: https://example.com, harnesses: [opencode], models: {opencode: [opencode-go/glm-5.3, opencode/deepseek-v4.1-flash-free]}}}",
+            Path::new("/trusted"),
+            |_| None,
+        )
+        .err()
+        .expect("must reject");
+        let message = format!("{refused:#}");
+        assert!(
+            message.contains("host spike")
+                && message.contains(
+                    "OpenCode model opencode/deepseek-v4.1-flash-free uses provider opencode"
+                )
+                && message.contains("default model opencode-go/glm-5.3 uses opencode-go"),
+            "{message}"
+        );
     }
     #[test]
     fn provisioning_configuration_requires_owner_control() {

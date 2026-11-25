@@ -30,14 +30,17 @@ import {
   workerHostFailure,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import {
+  OpenCodeAuthFileError,
   type OpenCodeCopy,
   type OpenCodeMcpTool,
+  OpenCodeReportedError,
   type OpenCodeRunRequest,
   type OpenCodeScope,
   type OpenCodeSkills,
   openCodeConfigurationEnvironment,
   openCodeRemoteConfigurationEnvironment,
   readProviderApiKey,
+  redactCredentialShapes,
   runOpenCode,
   shortenActivity,
 } from "../index.js";
@@ -345,10 +348,17 @@ export async function nativeRequest(
   // On a host that runs commands unsandboxed, the Worker Host holds the real key in a loopback
   // proxy: the key variable is a placeholder, and OpenCode sends its requests to the proxy.
   const proxyUrl = providerProxyUrl(environment);
-  const fileKey =
-    configuration.authFile === undefined || proxyUrl !== undefined
-      ? undefined
-      : await readProviderApiKey(configuration.authFile, provider, true);
+  // A provider without an entry in the auth file takes its key from the environment, or needs
+  // none, as OpenCode Zen's free `opencode/...` models.
+  let fileKey: string | undefined;
+  if (configuration.authFile !== undefined && proxyUrl === undefined) {
+    try {
+      fileKey = await readProviderApiKey(configuration.authFile, provider, true);
+    } catch (error) {
+      if (!(error instanceof OpenCodeAuthFileError)) throw error;
+      throw new SafeOpenCodeFailure(`${error.message}. Native execution did not start.`);
+    }
+  }
   let skills: OpenCodeSkills | undefined;
   try {
     skills = await stageOpenCodeSkills(selectedSkills, join(scratch, "opencode-skills"), signal);
@@ -491,11 +501,12 @@ function coordinationSecrets(tools: readonly OpenCodeMcpTool[]): string[] {
   );
 }
 
-/** The Rust Worker Host owns the Attempt lease and the enclosing native process group. */
 /**
  * The result of a failed Attempt. Native and transport errors may contain credentials or output
- * from a provider, so only fixed text crosses the Harness, or a failed Worker Host call's status,
- * redacted with this Attempt's values.
+ * from a provider, so only fixed text crosses the Harness, a failed Worker Host call's status, or
+ * the reason OpenCode reported (`OpenCodeReportedError`: an expired key, a model the account may
+ * not use, an unknown model). Each is redacted with this Attempt's values and anything shaped
+ * like a credential.
  */
 export function failureResult(
   error: unknown,
@@ -505,15 +516,16 @@ export function failureResult(
 ): string {
   if (error instanceof SafeOpenCodeFailure) return error.message;
   if (stopped) return "OpenCode execution stopped.";
-  const hostFailure = workerHostFailure(error);
-  const detail = hostFailure
-    ? `: ${redact(hostFailure, secrets).replaceAll("\0", "").slice(0, 600)}`
+  const reason = error instanceof OpenCodeReportedError ? error.reason : workerHostFailure(error);
+  const detail = reason
+    ? `: ${redactCredentialShapes(redact(reason.replaceAll("\0", ""), secrets)).slice(0, 600)}`
     : "";
   return started
     ? `OpenCode execution failed${detail}${detail ? "" : "."}`
     : `OpenCode adapter configuration failed${detail}. Native execution did not start.`;
 }
 
+/** The Rust Worker Host owns the Attempt lease and the enclosing native process group. */
 export async function runAdapter(
   bootstrap: AdapterBootstrap,
   signal: AbortSignal,

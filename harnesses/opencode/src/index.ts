@@ -11,6 +11,99 @@ import {
 
 const MAX_LINE_BYTES = 1024 * 1024;
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+/** The most of OpenCode's standard error kept to explain a failure: its last error log lines. */
+const MAX_DIAGNOSTIC_BYTES = 16 * 1024;
+/** The most of a reported failure's reason that crosses the Harness. */
+const MAX_REASON_CHARS = 500;
+/** How long OpenCode may take to exit, and log its error, after it reports a failure. */
+const REPORTED_EXIT_GRACE_MS = 2000;
+
+/**
+ * A failure OpenCode reported for its run: the provider's reason, such as an expired API key or
+ * a model the account may not use, or OpenCode's own, such as an unknown model. The reason is
+ * stripped of controls and bounded, but may still hold a credential: redact it with
+ * [`redactCredentialShapes`] and the Attempt's own values before it leaves the adapter.
+ */
+export class OpenCodeReportedError extends Error {
+  constructor(readonly reason: string) {
+    super("OpenCode reported a failure");
+  }
+}
+
+/** One line of at most [`MAX_REASON_CHARS`], without controls, which can split a secret. */
+function reasonLine(text: string): string {
+  return [...text.replace(/[\p{Cc}\p{Cf}\s]+/gu, " ").trim()].slice(0, MAX_REASON_CHARS).join("");
+}
+
+/**
+ * The `error` field of OpenCode's last `level=ERROR` log line on standard error (it runs with
+ * `--print-logs --log-level ERROR`), without its error class: for an unknown model, "Model not
+ * found: PROVIDER/MODEL.", which OpenCode's JSON event reports only as an unexpected error.
+ */
+export function openCodeLoggedError(diagnostics: string): string | undefined {
+  let found: string | undefined;
+  for (const line of diagnostics.split(/\r?\n/u)) {
+    if (!/\blevel=ERROR\b/u.test(line)) continue;
+    const quoted = /(?:^|\s)error="((?:[^"\\]|\\.)*)"/u.exec(line)?.[1];
+    if (quoted === undefined) continue;
+    let text: string;
+    try {
+      text = JSON.parse(`"${quoted}"`) as string;
+    } catch {
+      text = quoted;
+    }
+    text = reasonLine(text.replace(/^[A-Za-z]*Error:\s*/u, ""));
+    if (text) found = text;
+  }
+  return found;
+}
+
+/**
+ * The reason in an OpenCode `error` event (`{ name, data: { message } }`), or in its log when
+ * the event carries only OpenCode's generic "unexpected server error". Never the provider's
+ * response headers or body, which the event also carries.
+ */
+export function openCodeErrorReason(error: unknown, diagnostics = ""): string {
+  const record = error && typeof error === "object" ? (error as Record<string, unknown>) : {};
+  const data =
+    record["data"] && typeof record["data"] === "object"
+      ? (record["data"] as Record<string, unknown>)
+      : {};
+  const name = typeof record["name"] === "string" ? reasonLine(record["name"]) : "";
+  const message =
+    typeof data["message"] === "string"
+      ? reasonLine(data["message"])
+      : typeof record["message"] === "string"
+        ? reasonLine(record["message"])
+        : "";
+  const logged = openCodeLoggedError(diagnostics);
+  if (logged && (!message || name === "UnknownError")) return logged;
+  return message || name || "OpenCode reported an error without a reason.";
+}
+
+/**
+ * Redacts what looks like a credential in text from OpenCode or a provider: well-known API key
+ * and token prefixes, `Bearer` values, `key=value` style secrets, URL user information, and long
+ * runs of mixed-case letters and digits or of hexadecimal digits. Model IDs and prose stay.
+ */
+export function redactCredentialShapes(text: string): string {
+  return text
+    .replace(/\bBearer\s+[^\s"',;]+/giu, "Bearer [REDACTED]")
+    .replace(
+      /\b((?:api[_-]?key|access[_-]?key|access[_-]?token|auth[_-]?token|token|secret|password|passwd|authorization|key)\s*[:=]\s*)["']?[^\s"',;&]+["']?/giu,
+      "$1[REDACTED]",
+    )
+    .replace(
+      /\b(?:(?:sk|rk|pk)[-_]|gh[pousr]_|github_pat_|glpat-|xox[abprs]-|AKIA|ASIA|AIza|hf_|gsk_|csk-|nvapi-)[A-Za-z0-9_-]{8,}/gu,
+      "[REDACTED]",
+    )
+    .replace(/\/\/[^\s/@]+@/gu, "//[REDACTED]@")
+    .replace(
+      /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*[A-Z])[A-Za-z0-9_-]{32,}(?![A-Za-z0-9_-])/gu,
+      "[REDACTED]",
+    )
+    .replace(/(?<![A-Za-z0-9])[a-f0-9]{32,}(?![A-Za-z0-9])/giu, "[REDACTED]");
+}
 
 export interface OpenCodeRunRequest {
   readonly prompt: string;
@@ -447,7 +540,20 @@ export async function* runOpenCode(
     handle = await environment.spawn(
       {
         command: request.executable,
-        args: ["run", "--format", "json", "--model", request.model, "--agent", "build", "--pure"],
+        // Error logs go to standard error: the only place OpenCode names an unknown model.
+        args: [
+          "run",
+          "--format",
+          "json",
+          "--model",
+          request.model,
+          "--agent",
+          "build",
+          "--pure",
+          "--print-logs",
+          "--log-level",
+          "ERROR",
+        ],
         cwd: request.workspace,
         environment: request.environment,
         stdin: request.prompt,
@@ -458,9 +564,15 @@ export async function* runOpenCode(
     );
     if (!handle.output) throw new Error("OpenCode requires environment process output streaming");
     let pending = "",
+      diagnostics = "",
       responseBytes = 0,
       textSeen = false,
       finished = false;
+    // OpenCode's `error` event; the rest of its output is drained, but not parsed, for the log.
+    let reported: { readonly error: unknown } | undefined;
+    // OpenCode emits a text part each time it is updated after it ends, and may repeat a tool
+    // call's update: each is published once.
+    const reportedCalls = new Set<string>();
     const parse = (line: string): HarnessEvent | undefined => {
       if (!line.trim()) return;
       let raw: unknown;
@@ -471,7 +583,12 @@ export async function* runOpenCode(
       }
       if (!raw || typeof raw !== "object") throw new Error("Invalid OpenCode event");
       const record = raw as Record<string, unknown>;
-      if (record["type"] === "error") throw new Error("OpenCode session failed");
+      if (record["type"] === "error") {
+        reported = { error: record["error"] };
+        // OpenCode exits after its error; one that doesn't is stopped, and the error stands.
+        setTimeout(() => handle?.kill(), REPORTED_EXIT_GRACE_MS).unref();
+        return;
+      }
       const part = record["part"] as Record<string, unknown> | undefined;
       if (recoverCompletion) {
         if (
@@ -531,6 +648,11 @@ export async function* runOpenCode(
       if (record["type"] === "tool_use" && typeof part?.["tool"] === "string") {
         // What the Tag did, as one activity line from the call's input, never its output.
         const state = part["state"] as Record<string, unknown> | undefined;
+        if (typeof part["callID"] === "string") {
+          const report = `${part["callID"]}\0${String(state?.["status"])}`;
+          if (reportedCalls.has(report)) return;
+          reportedCalls.add(report);
+        }
         return {
           type: "progress.updated",
           progress: { summary: openCodeToolActivity(part["tool"], state?.["input"]) },
@@ -541,15 +663,19 @@ export async function* runOpenCode(
         responseBytes += Buffer.byteLength(text);
         if (responseBytes > MAX_RESPONSE_BYTES) throw new Error("OpenCode response exceeds limit");
         textSeen ||= Boolean(text.trim());
+        const id = part["id"];
+        const identified = typeof id === "string" && /^prt_[A-Za-z0-9]{1,120}$/u.test(id);
+        if (identified && text) {
+          const previous = streamedParts.get(id);
+          if (previous !== undefined && previous !== text)
+            throw new Error("OpenCode stream changed a completed text part");
+          // The same ended part again: already published.
+          if (previous === text) return;
+          streamedParts.set(id, text);
+        }
         if (recoverCompletion && text) {
           completion.latestStepHasText ||= Boolean(text.trim());
-          const id = part["id"];
-          if (typeof id === "string" && /^prt_[A-Za-z0-9]{1,120}$/u.test(id)) {
-            const previous = streamedParts.get(id);
-            if (previous !== undefined && previous !== text)
-              throw new Error("OpenCode stream changed a completed text part");
-            streamedParts.set(id, text);
-          } else anonymousText.add(text);
+          if (!identified) anonymousText.add(text);
           if (streamedParts.size + anonymousText.size > 4096)
             throw new Error("OpenCode response has too many text parts");
         }
@@ -558,10 +684,14 @@ export async function* runOpenCode(
     };
     for await (const chunk of handle.output) {
       cancellation.throwIfAborted();
-      if (chunk.stream !== "stdout") continue;
+      if (chunk.stream === "stderr") {
+        diagnostics = (diagnostics + chunk.text).slice(-MAX_DIAGNOSTIC_BYTES);
+        continue;
+      }
+      if (chunk.stream !== "stdout" || reported) continue;
       pending += chunk.text;
       let newline = pending.indexOf("\n");
-      while (newline >= 0) {
+      while (newline >= 0 && !reported) {
         const line = pending.slice(0, newline);
         pending = pending.slice(newline + 1);
         if (Buffer.byteLength(line) > MAX_LINE_BYTES)
@@ -573,13 +703,17 @@ export async function* runOpenCode(
       if (Buffer.byteLength(pending) > MAX_LINE_BYTES)
         throw new Error("OpenCode event exceeds limit");
     }
-    if (pending.trim()) {
+    if (pending.trim() && !reported) {
       const event = parse(pending);
       if (event) yield event;
     }
     const result = await handle.wait();
     cancellation.throwIfAborted();
-    if (result.exitCode !== 0 || result.signal) throw new Error("OpenCode process failed");
+    if (reported) throw new OpenCodeReportedError(openCodeErrorReason(reported.error, diagnostics));
+    if (result.exitCode !== 0 || result.signal) {
+      const logged = openCodeLoggedError(diagnostics);
+      throw logged ? new OpenCodeReportedError(logged) : new Error("OpenCode process failed");
+    }
     if (finished && (recoverCompletion ? completion.latestStepHasText : textSeen)) return;
   } finally {
     if (handle) {
@@ -601,40 +735,62 @@ export async function* runOpenCode(
   }
 }
 
+/** Why OpenCode's auth file cannot be used, in fixed text that names no credential. */
+export class OpenCodeAuthFileError extends Error {}
+
+/**
+ * The API key for `provider` in OpenCode's auth file (`{ PROVIDER: { "type": "api", "key": KEY } }`),
+ * or `undefined` when the file has no entry for it: that provider then takes its key from the
+ * environment, or needs none, as OpenCode Zen's free `opencode/...` models.
+ */
 export async function readProviderApiKey(
   path: string,
   provider: string,
   privateFile = false,
-): Promise<string> {
-  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+): Promise<string | undefined> {
+  let file: Awaited<ReturnType<typeof open>>;
+  try {
+    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    throw new OpenCodeAuthFileError(
+      code === "ENOENT"
+        ? "OpenCode auth file does not exist"
+        : code === "ELOOP"
+          ? "OpenCode auth file must be a regular file without a symlink"
+          : "OpenCode auth file cannot be opened",
+    );
+  }
   try {
     const info = await file.stat();
     if (!info.isFile() || info.size > 1024 * 1024)
-      throw new Error("OpenCode auth source must be a regular file no larger than 1 MiB");
+      throw new OpenCodeAuthFileError(
+        "OpenCode auth file must be a regular file no larger than 1 MiB",
+      );
     if (
       privateFile &&
       ((info.mode & 0o077) !== 0 || (process.getuid && info.uid !== process.getuid()))
     )
-      throw new Error("OpenCode auth source must be privately owned");
+      throw new OpenCodeAuthFileError("OpenCode auth file must be privately owned (chmod 600)");
     const buffer = Buffer.alloc(1024 * 1024 + 1);
     const { bytesRead } = await file.read(buffer);
-    if (bytesRead > 1024 * 1024) throw new Error("OpenCode auth source exceeds 1 MiB");
+    if (bytesRead > 1024 * 1024)
+      throw new OpenCodeAuthFileError("OpenCode auth file exceeds 1 MiB");
     let parsed: unknown;
     try {
       parsed = JSON.parse(buffer.toString("utf8", 0, bytesRead));
     } catch {
-      throw new Error("Invalid OpenCode auth JSON");
+      throw new OpenCodeAuthFileError("OpenCode auth file is not valid JSON");
     }
-    const credential =
-      parsed && typeof parsed === "object"
-        ? (parsed as Record<string, unknown>)[provider]
-        : undefined;
-    if (!credential || typeof credential !== "object")
-      throw new Error("OpenCode auth source has no credential for the selected provider");
-    const record = credential as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      throw new OpenCodeAuthFileError("OpenCode auth file is not a JSON object");
+    if (!Object.hasOwn(parsed, provider)) return undefined;
+    const credential = (parsed as Record<string, unknown>)[provider];
+    const record =
+      credential && typeof credential === "object" ? (credential as Record<string, unknown>) : {};
     if (record["type"] !== "api" || typeof record["key"] !== "string" || !record["key"].trim())
-      throw new Error(
-        "OpenCode authFile supports only nonempty API credentials; OAuth is not supported",
+      throw new OpenCodeAuthFileError(
+        `OpenCode auth file's ${provider} sign-in is not an API key; only API-key sign-ins are supported, not OAuth`,
       );
     return record["key"];
   } finally {

@@ -168,7 +168,7 @@ Options:
           Absolute OpenCode executable path. Otherwise resolve opencode on PATH
 
       --opencode-auth-file <OPENCODE_AUTH_FILE>
-          Owner-only API credential file. Also accepts SUPERTAG_OPENCODE_AUTH_FILE
+          OpenCode's auth file (its auth.json): owner-only, absolute, API-key sign-ins only. Each Task reads only its own provider's entry; a provider without one uses its environment key
 
       --allow-unsandboxed-commands
           Allow Claude Code, OpenCode, or Cursor commands without an operating-system sandbox
@@ -2564,7 +2564,7 @@ Options:
           Absolute OpenCode executable path. Otherwise resolve opencode on PATH
 
       --opencode-auth-file <OPENCODE_AUTH_FILE>
-          Owner-only API credential file. Also accepts SUPERTAG_OPENCODE_AUTH_FILE
+          OpenCode's auth file (its auth.json): owner-only, absolute, API-key sign-ins only. Each Task reads only its own provider's entry; a provider without one uses its environment key
 
       --allow-unsandboxed-commands
           Allow Claude Code, OpenCode, or Cursor commands without an operating-system sandbox

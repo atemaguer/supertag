@@ -156,7 +156,12 @@ secrets hidden. When the Worklet itself failed the Task, for example because it 
 capture the output, the result is a fixed message, with a short cause when a checkout could not
 be prepared or captured, and `supertag describe task TASK_ID` shows the
 reason under the execution report's `failure_detail`: at most eight lines, secrets hidden, shown
-to operators only and never in a reply, conversation, or client's view of the Task. A reply whose delivery is uncertain waits for
+to operators only and never in a reply, conversation, or client's view of the Task. An OpenCode
+Task that a provider refused fails with the provider's reason, keys and tokens hidden: `This API
+key has expired...` needs a new key (`opencode auth login`, or the key variable in
+`~/.supertag/.env`); `...hosted outside Europe and the United States. Select Global...` needs that
+setting in the provider's console; `Model not found: PROVIDER/MODEL.` needs a model ID as OpenCode
+writes it. See [OpenCode sign-in](../reference/supertag-yaml.md#opencode-sign-in). A reply whose delivery is uncertain waits for
 `supertag reply resolve REPLY_ID --decision ... --evidence ...` after you check the thread.
 
 ## A Task was interrupted and not run again

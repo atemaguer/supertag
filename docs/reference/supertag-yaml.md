@@ -174,6 +174,7 @@ echoing secret values.
 | `environment` | none | `local-vm` runs Claude Code, Cursor, OpenCode, and Codex Tasks' commands and file tools in containers on this machine. See [local-vm containers](#local-vm-containers) |
 | `allow-unsandboxed-commands` | none | `claude-code`, `cursor`, or `opencode` from `harnesses`. See [Unsandboxed harnesses](#unsandboxed-harnesses) |
 | `sandbox-commands` | none | `claude-code` from `harnesses`. See [Sandboxed Claude Code commands](#sandboxed-claude-code-commands) |
+| `opencode-auth-file` | none | OpenCode's sign-in file, usually `~/.local/share/opencode/auth.json`, for providers without a key variable. Needs `opencode` in `harnesses`. See [OpenCode sign-in](#opencode-sign-in) |
 | `network-credentials` | none | Credential name to `{ secret, environment }`, added to a Task's requests by the egress proxy. Codex, or every harness on a local-vm host. See [Network credentials](#network-credentials) |
 | `volumes` | none | Volume ID to an absolute, owner-only directory: a file Volume this host maps and writes directly, such as the copies of a Tag's captures. Tags on that Volume run only on hosts that map it. See [Keep every capture on a Volume](artifacts.md#keep-every-capture-on-a-volume) |
 | `concurrency` | `1` | Task Attempts the host runs at once across all its harnesses, from 1 through 16. See [Host concurrency](#host-concurrency) |
@@ -199,7 +200,57 @@ terminal. After joining, the host uses its stored credential.
 ```
 
 The first model is the default for Tasks that name none. A Task that names a model runs only on a
-host that lists it. OpenCode requires a `provider/model`.
+host that lists it. OpenCode requires a `provider/model`, written as OpenCode writes it, such as
+`opencode-go/glm-5.3`.
+
+An OpenCode host serves one provider: every model in its `opencode` list uses the default
+model's provider. The host passes that provider's key, and keeps it behind its provider proxy, for
+every Task. `supertag up` refuses a list that mixes providers and names the model and provider
+that differ. To serve a second provider from the same machine, add another host service:
+
+```yaml
+  go:
+    type: host
+    harnesses: [opencode]
+    models: { opencode: [opencode-go/glm-5.3, opencode-go/kimi-k3] }
+    opencode-auth-file: ~/.local/share/opencode/auth.json
+  zen:
+    type: host
+    harnesses: [opencode]
+    models: { opencode: [opencode/deepseek-v4.1-flash-free] }
+```
+
+### OpenCode sign-in
+
+OpenCode Tasks run in a private OpenCode home, so they never read your own OpenCode sign-in. They
+get a provider's API key in one of two ways:
+
+- From the provider's key variable in the `env_file`, for the providers SuperTag knows:
+  `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `GROQ_API_KEY`,
+  `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`, `AZURE_OPENAI_API_KEY`, `MISTRAL_API_KEY`, and
+  `XAI_API_KEY`.
+- From OpenCode's sign-in file, for any other provider, such as `opencode-go`. Sign in with
+  `opencode auth login`, then name the file:
+
+```yaml
+  spike:
+    type: host
+    harnesses: [opencode]
+    models: { opencode: [opencode-go/glm-5.3] }
+    opencode-auth-file: ~/.local/share/opencode/auth.json
+```
+
+SuperTag stores only the path. The file must be a regular file, not a symlink, owned by the host's
+user and readable only by it. Each Task Attempt reads its own provider's entry and copies only
+that entry into its private OpenCode home. OpenCode's OAuth sign-ins are refused; use an API key.
+A provider without an entry in the file uses its key variable, or runs with no key, as OpenCode
+Zen's free `opencode/...` models do. Each Task Attempt reads the file afresh, so a new
+`opencode auth login` needs no restart.
+
+When a provider refuses a turn, the Task fails with the provider's reason, such as `OpenCode
+execution failed: This API key has expired...` or `Model not found: PROVIDER/MODEL.`, in
+`supertag get task`, `supertag describe task`, and `supertag logs`. Anything shaped like a key or
+token is redacted.
 
 ### Host labels
 

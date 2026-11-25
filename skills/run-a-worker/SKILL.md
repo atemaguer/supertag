@@ -93,7 +93,7 @@ supertag worklet --control-plane https://supertag.example.com \
 | `codex` | `codex` on `PATH` | `CODEX_API_KEY`, `OPENAI_API_KEY`, or a sign-in file from `codex -c 'cli_auth_credentials_store="file"' login` |
 | `claude-code` | Node.js; `claude` on `PATH` for `init` and `sign-in` (Tasks use the bundled Claude Code) | `ANTHROPIC_API_KEY` or the user's `claude` sign-in |
 | `cursor` | Node.js | `CURSOR_API_KEY` |
-| `opencode` | `opencode` on `PATH`, Node.js, a `provider/model` model | The provider's API key |
+| `opencode` | `opencode` on `PATH`, Node.js, a `provider/model` model | The provider's API key, or `opencode-auth-file: ~/.local/share/opencode/auth.json` on the host after `opencode auth login`; one provider per host |
 | `openai-agents` | Python with the `supertag` package | `OPENAI_API_KEY` |
 
 ```sh
