@@ -337,6 +337,12 @@ async fn execute(
     {
         policy.consolidate = Some(authentication.home().to_path_buf());
     }
+    if !policy.remote {
+        // The Task's own CODEX_HOME holds a copy of the sign-in; Codex reads it, its commands never.
+        let sign_in = authentication.home().join("auth.json");
+        policy.denied =
+            config::denied_paths(&config::user_home()?, &[sign_in.as_path()], &workspace);
+    }
     let arguments = config::arguments(&workspace, model, effort, &policy)?;
     let thread_parameters = config::thread_parameters(&workspace, &policy, &arguments)?;
     let skills = skills::prepare(task, resolved_skills, authentication.home())?;

@@ -279,6 +279,11 @@ const HOME_SECRETS = [
   ".config/gh",
   ".config/opencode",
   ".supertag",
+  // The CLI's saved Gateways (operator tokens), deployments, and the desktop app's Gateways.
+  ".config/supertag",
+  ".config/ai.supertag.desktop",
+  "Library/Application Support/supertag",
+  "Library/Application Support/ai.supertag.desktop",
   "Library/Keychains",
 ] as const;
 

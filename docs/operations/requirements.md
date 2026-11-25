@@ -85,7 +85,10 @@ starts, naming the model. To let it run commands, do one of these:
 SuperTag cannot tell a model's mode before the Task Attempt starts: Codex does not report it, so
 `supertag placement explain` cannot name it, and `supertag describe task` shows the failure as the
 Task's result. `allow-unsandboxed-commands` does not apply to Codex, which always runs commands in
-its own sandbox. `files:write` or `commands:execute` gives a Codex Task read access too; a Task
+its own sandbox. Its commands write only the Workspace and cannot read the credential folders in
+your home or the CLI's saved Gateways; see
+[Sandboxed Claude Code commands](../reference/supertag-yaml.md#sandboxed-claude-code-commands)
+for the list. `files:write` or `commands:execute` gives a Codex Task read access too; a Task
 with none of `files:read`, `files:write`, and `commands:execute` is refused, because Codex reads
 the Workspace in every sandbox mode.
 

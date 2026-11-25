@@ -2263,15 +2263,23 @@ async fn disposable_write_and_commands_select_legacy_loopback_profile_and_protec
         common.canonicalize()?.to_str().unwrap(),
     )?);
     let protected = format!(
-        "permissions.supertag.filesystem={{ {} }}",
+        "permissions.supertag.filesystem={{ {}",
         entries
             .iter()
             .map(|path| format!("{path} = \"read\""))
             .collect::<Vec<_>>()
             .join(", ")
     );
+    // Then only deny entries: the home's credential folders and the Task's sign-in copy.
     assert!(
-        args.iter().any(|value| value == &protected),
+        args.iter().any(
+            |value| value
+                .strip_prefix(&protected)
+                .is_some_and(|rest| rest.ends_with(" }")
+                    && !rest.contains("\"read\"")
+                    && !rest.contains("\"write\"")
+                    && rest.contains("auth.json\" = \"deny\""))
+        ),
         "{protected} {args:?}"
     );
     assert!(

@@ -332,8 +332,11 @@ Under it, a Task's commands:
   changes after Claude Code finishes, so a command cannot commit itself.
 - cannot read hidden paths, or these credential locations in your home: `~/.ssh`, `~/.aws`,
   `~/.gnupg`, `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.docker`, `~/.kube`, `~/.codex`,
-  `~/.claude`, `~/.claude.json`, `~/.config/gh`, `~/.config/opencode`, `~/.supertag`, and
-  `~/Library/Keychains`. They can read your other files.
+  `~/.claude`, `~/.claude.json`, `~/.config/gh`, `~/.config/opencode`, `~/.supertag`, the
+  saved Gateways and deployments of the CLI and desktop app (`~/.config/supertag` and
+  `~/.config/ai.supertag.desktop` on Linux, the same names under `~/Library/Application Support`
+  on macOS), and `~/Library/Keychains`. They can read your other files. Codex's commands cannot
+  read these locations either, nor the Task's copy of the Codex sign-in.
 - have no network unless the Task has `web:fetch`, which the lead `init` creates has by default.
   A [network scope](iam.md#network-scopes) limits
   them to its hosts, through the Attempt's egress proxy. They may listen on loopback, so a test

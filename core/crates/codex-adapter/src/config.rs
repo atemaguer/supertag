@@ -22,6 +22,48 @@ pub(crate) struct Policy {
     /// The Workspace is a remote sandbox: every command and file operation runs there, through
     /// Codex's exec-server, and the sandbox is the boundary.
     pub(crate) remote: bool,
+    /// Paths on the Worker Host the Task's commands may not read: the user's credential folders,
+    /// SuperTag's saved Gateways, deployments and state in the home, and the Task's sign-in copy. Codex's `:workspace`
+    /// profile reads the whole disk, so without these a command could read an operator token.
+    pub(crate) denied: Vec<PathBuf>,
+}
+
+/// Credential locations in the Worker Host user's home that a Task's commands never read, the
+/// same list Claude Code's sandbox denies.
+pub(crate) const HOME_SECRETS: [&str; 19] = [
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+    ".docker",
+    ".kube",
+    ".codex",
+    ".claude",
+    ".claude.json",
+    ".config/gh",
+    ".config/opencode",
+    ".supertag",
+    // The CLI's saved Gateways (operator tokens), deployments, and the desktop app's Gateways.
+    ".config/supertag",
+    ".config/ai.supertag.desktop",
+    "Library/Application Support/supertag",
+    "Library/Application Support/ai.supertag.desktop",
+    "Library/Keychains",
+];
+
+/// The paths of [`HOME_SECRETS`] under `home` and the `extra` paths that exist, other than one
+/// holding the Workspace or inside it: a deny entry for a missing path could stop Codex's
+/// Linux sandbox from starting.
+pub(crate) fn denied_paths(home: &Path, extra: &[&Path], workspace: &Path) -> Vec<PathBuf> {
+    HOME_SECRETS
+        .iter()
+        .map(|entry| home.join(entry))
+        .chain(extra.iter().map(|path| path.to_path_buf()))
+        .filter(|path| path.is_absolute() && path.exists())
+        .filter(|path| !workspace.starts_with(path) && !path.starts_with(workspace))
+        .collect()
 }
 
 /// The Attempt's egress proxy, from the Worker Host.
@@ -149,6 +191,7 @@ impl Policy {
             memory: false,
             consolidate: None,
             remote: false,
+            denied: vec![],
         };
         ensure!(
             !policy.write || disposable,
@@ -561,6 +604,9 @@ fn filesystem(workspace: &Path, policy: &Policy) -> Result<Vec<(String, &'static
     if let Some(scope) = &policy.scope {
         entries.extend(scoped_entries(workspace, policy, scope)?);
     }
+    for path in &policy.denied {
+        entries.push((utf8(path, "Denied path")?, "deny"));
+    }
     // One grant per path, the strongest: a path scope never weakens a protected entry.
     let strength = |access: &str| match access {
         "deny" => 2,
@@ -727,6 +773,45 @@ mod tests {
 
     fn actions(names: &[&str]) -> Vec<String> {
         names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    /// Codex's `:workspace` profile reads the whole disk, so the profile denies the home's
+    /// credential folders and SuperTag's saved Gateways, but never the Workspace or a missing path.
+    #[test]
+    fn commands_cannot_read_the_hosts_credentials_or_saved_gateways() -> Result<()> {
+        let home = tempfile::tempdir()?;
+        for entry in [".ssh", ".config/supertag", ".supertag"] {
+            std::fs::create_dir_all(home.path().join(entry))?;
+        }
+        let sign_in = home.path().join("codex-home/auth.json");
+        std::fs::create_dir_all(sign_in.parent().unwrap())?;
+        std::fs::write(&sign_in, "{}")?;
+        let workspace = tempfile::tempdir()?;
+        let denied = denied_paths(home.path(), &[sign_in.as_path()], workspace.path());
+        assert_eq!(
+            denied,
+            vec![
+                home.path().join(".ssh"),
+                home.path().join(".supertag"),
+                home.path().join(".config/supertag"),
+                sign_in.clone(),
+            ]
+        );
+        // A Workspace inside a denied folder keeps it readable rather than deny itself.
+        let inside = home.path().join(".supertag/checkout");
+        assert!(!denied_paths(home.path(), &[], &inside).contains(&home.path().join(".supertag")));
+
+        let mut policy = Policy::from_actions(&actions(&["files:read", "commands:execute"]), true)?;
+        policy.denied = denied;
+        let entries = filesystem(workspace.path(), &policy)?;
+        for path in [home.path().join(".config/supertag"), sign_in] {
+            assert!(
+                entries.contains(&(path.to_str().unwrap().to_owned(), "deny")),
+                "{}",
+                path.display()
+            );
+        }
+        Ok(())
     }
 
     /// On a remote Workspace the sandbox is the boundary: no Codex sandbox, no managed proxy, no

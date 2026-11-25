@@ -9,7 +9,23 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Security
+
+- A Codex Task's commands can no longer read the credential folders in your home (`~/.ssh`,
+  `~/.aws`, `~/.supertag`, and the rest of the list Claude Code's sandbox denies), the Task's
+  copy of the Codex sign-in, or the saved Gateways and deployments of the CLI and desktop app,
+  which hold Operator Tokens. Codex's sandbox let them read the whole disk. Sandboxed Claude Code
+  commands can no longer read the saved Gateways and deployments either.
+
 ### Fixed
+
+- A Worker Host with `restart: unless-stopped` reaches a Control Plane whose certificate comes
+  from your own CA. The service unit `supertag up` installs left out `SUPERTAG_SERVER_CA_FILE`,
+  `SUPERTAG_CLIENT_CERT_FILE`, and `SUPERTAG_CLIENT_KEY_FILE`, so the host failed on an unknown
+  issuer and restarted forever. `supertag connect` reads the same variables when no flag names
+  the files.
+- A local-vm container lives as long as the host's `attempt-timeout-seconds` allows, up to
+  86400 seconds. It was capped at 3600, the longest E2B and Modal grant.
 
 - `supertag deploy` to Modal replaces the running container. Upgrading a deployment that a
   Worker Host or a Gateway was connected to left the old container running and the new one
