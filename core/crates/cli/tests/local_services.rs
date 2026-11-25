@@ -1128,6 +1128,8 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     }
     expected.extend([
         "SUPERTAG_ADAPTER_STATE_DIRECTORY",
+        // A path, no secret: the adapter denies the Task's commands the host's state.
+        "SUPERTAG_HOST_STATE_DIRECTORY",
         "SUPERTAG_WORKSPACE_DIRECTORY",
         "TMPDIR",
     ]);
