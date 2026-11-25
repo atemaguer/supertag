@@ -742,6 +742,18 @@ async fn deploys_from_one_file_and_changes_no_secret_again(database: String) -> 
         1
     );
     assert_eq!(count(&log, "deploy"), 2);
+    // The first rollout's container would hold the app's one place, so the second stops it.
+    assert_eq!(
+        log.iter()
+            .filter(|line| line.starts_with("container stop "))
+            .collect::<Vec<_>>(),
+        ["container stop ta-1 --yes"],
+        "{log:?}"
+    );
+    assert!(
+        progress.contains("Stopping the previous rollout's container ta-1"),
+        "{progress}"
+    );
     for secret in [
         "tags-operator-token",
         "tags-gateway-credential",

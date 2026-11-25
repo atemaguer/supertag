@@ -32,6 +32,33 @@ app)
     printf '[]\n'
   fi
   ;;
+container)
+  # `modal container list [--env NAME] --json` and `modal container stop ID --yes`. Each
+  # rollout starts a container, and one stays until it is stopped, as a real one does while a
+  # Worker Host or a Gateway holds a tunnel open.
+  case "${2:-}" in
+  list)
+    printf '[\n'
+    first=1
+    for path in "$root"/containers/*; do
+      [ -e "$path" ] || continue
+      [ "$first" = 1 ] || printf ',\n'
+      first=0
+      printf '  {"container_id": "%s", "app_id": "ap-1", "app_name": "%s", "start_time": "2026-11-22 10:00:00+00:00"}' "${path##*/}" "$(cat "$path")"
+    done
+    printf '\n]\n'
+    ;;
+  stop)
+    [ "${4:-}" = --yes ] || { echo "Aborted: no interactive terminal detected." >&2; exit 1; }
+    [ -e "$root/containers/$3" ] || { echo "Container '$3' not found" >&2; exit 1; }
+    rm "$root/containers/$3"
+    ;;
+  *)
+    echo "unexpected: modal $*" >&2
+    exit 2
+    ;;
+  esac
+  ;;
 secret)
   action=$2
   shift 2
@@ -134,6 +161,8 @@ deploy)
     }
   done
   printf '%s' "$SUPERTAG_MODAL_APP" >"$root/deployed"
+  mkdir -p "$root/containers"
+  printf '%s' "$SUPERTAG_MODAL_APP" >"$root/containers/ta-$number"
   echo "✓ Created objects."
   echo "├── 🔨 Created mount app.py"
   echo "└── 🔨 Created web function serve => $(cat "$root/ready-$number")"

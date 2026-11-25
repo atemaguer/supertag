@@ -169,7 +169,7 @@ compared with the answer, never used in place of it:
 | Field | Says | Asked of |
 | --- | --- | --- |
 | `deployed`, `state` | Whether the app is deployed | Modal |
-| `endpoint`, `healthy` | The `wss://` URL, and whether its `/healthz` answers | The endpoint |
+| `endpoint`, `healthy` | The `wss://` URL, and whether its `/healthz` answers. `status` asks the host the CA file says the certificate names, then the host Modal's naming predicts | The endpoint |
 | `version` | The SuperTag release that answers | The Control Plane |
 | `secrets` | The names of the secrets, never a value | Modal |
 | `certificate.matches_deployment` | Whether `supertag-deploy-ca.pem` belongs to the deployed certificate: SuperTag's TLS connects with it | The Control Plane |
@@ -408,6 +408,10 @@ Plane migrates its database schema when it starts. See
 - The container is always running. A deploy or a host failure replaces it; the replacement pulls
   the image and starts within the two-minute startup timeout. Requests during that time get `503`,
   opening a tunnel waits up to 30 seconds, and each host's Worklet and the Gateway retry.
+- `supertag deploy` stops the container of the previous rollout once Modal accepts the new one.
+  Modal would let it finish the calls it serves, and a tunnel a Worker Host or a Gateway holds
+  open is one call. The app runs one container at most, so the new one could not start and the
+  endpoint would answer nothing until those tunnels closed.
 - Each open tunnel is one function call, closed after the 24-hour function timeout; clients
   reconnect at once.
 - Both ends of a tunnel ping every 20 seconds, which keeps idle tunnels open.

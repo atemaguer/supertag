@@ -9,6 +9,16 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Fixed
+
+- `supertag deploy` to Modal replaces the running container. Upgrading a deployment that a
+  Worker Host or a Gateway was connected to left the old container running and the new one
+  unscheduled, so the endpoint answered nothing, after deploy had reported it healthy. Deploy
+  now stops the previous rollout's container before it waits for health.
+- `supertag deploy status` finds a deployment whose Modal endpoint has a regional host, such as
+  `WORKSPACE--supertag.us-east.modal.run`. It asked only the host without the region, so it
+  reported a certificate mismatch and no version.
+
 ## [0.3.13] - 2026-11-24
 
 ### Added

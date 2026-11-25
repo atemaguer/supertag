@@ -5,7 +5,7 @@
 //! SuperTag release answers. This machine's files are never the answer. The committed CA file
 //! is only compared with the deployment: it belongs to the deployed certificate when SuperTag's
 //! TLS handshake through the endpoint succeeds with it.
-use std::{path::Path, time::Duration};
+use std::{net::IpAddr, path::Path, time::Duration};
 
 use anyhow::Result;
 use serde_json::json;
@@ -18,7 +18,11 @@ use supertag_protocol::{
 };
 
 use super::{
-    config::Config, health_client, healthy, operator_token, store, target::Target, tls, variable_of,
+    certificate_names,
+    config::Config,
+    health_client, healthy, operator_token, store,
+    target::{Endpoint, Target},
+    tls, variable_of,
 };
 use crate::{deployment, network};
 
@@ -39,10 +43,34 @@ fn refused_certificate(error: &str) -> bool {
     error.to_ascii_lowercase().contains("certificate")
 }
 
+/// Where to ask for the deployment: first the hosts the CA file says the deployed certificate
+/// names, then the hosts the target predicts.
+///
+/// A platform may give the endpoint a host this machine cannot predict, such as the regional
+/// `WORKSPACE--LABEL.us-east.modal.run`. The rollout reported it and the certificate was issued
+/// for it, so the CA file names it. The file only says where to ask; the deployment answers.
+fn candidates(target: &dyn Target, ca: Option<&str>, predicted: Vec<Endpoint>) -> Vec<Endpoint> {
+    // The name the Gateway dials inside the deployment is not the endpoint.
+    let inside = certificate_names(target, Vec::new());
+    let mut candidates: Vec<Endpoint> = ca
+        .and_then(tls::names)
+        .unwrap_or_default()
+        .iter()
+        .filter(|name| name.parse::<IpAddr>().is_err() && !inside.contains(name))
+        .map(|name| target.endpoint_at(name))
+        .collect();
+    for endpoint in predicted {
+        if !candidates.contains(&endpoint) {
+            candidates.push(endpoint);
+        }
+    }
+    candidates
+}
+
 pub(super) async fn run(config: &Config, directory: &Path, target: &dyn Target) -> Result<()> {
     target.prepare()?;
     let store = store(target)?;
-    let deployment = target.deployment()?;
+    let mut deployment = target.deployment()?;
     let mut secrets: Vec<String> = store
         .list()?
         .iter()
@@ -55,6 +83,7 @@ pub(super) async fn run(config: &Config, directory: &Path, target: &dyn Target) 
     let ca = ca_file
         .as_ref()
         .and_then(|file| std::fs::read_to_string(file).ok());
+    deployment.endpoints = candidates(target, ca.as_deref(), deployment.endpoints);
     // The endpoint is the candidate that answers its health check.
     let client = health_client(ca.as_deref())?;
     let mut endpoint = None;
@@ -169,4 +198,47 @@ pub(super) async fn run(config: &Config, directory: &Path, target: &dyn Target) 
     }
     crate::terminal::print_json_pretty(&report)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::deploy::modal::Modal;
+
+    #[test]
+    fn the_host_the_certificate_names_is_asked_before_the_predicted_one() -> Result<()> {
+        let target = Modal::new(None)?;
+        let predicted = || vec![target.endpoint_at("acme--supertag.modal.run")];
+        let urls = |ca: Option<&str>| -> Vec<String> {
+            candidates(&target, ca, predicted())
+                .into_iter()
+                .map(|endpoint| endpoint.url)
+                .collect()
+        };
+        // A regional host the rollout reported, and the address the Gateway dials inside.
+        let regional = tls::issue(&[
+            "acme--supertag.us-east.modal.run".to_owned(),
+            "127.0.0.1".to_owned(),
+        ])?;
+        assert_eq!(
+            urls(Some(&regional.ca)),
+            [
+                "wss://acme--supertag.us-east.modal.run",
+                "wss://acme--supertag.modal.run"
+            ]
+        );
+        // The predicted host, once.
+        let predicted_host = tls::issue(&["acme--supertag.modal.run".to_owned()])?;
+        assert_eq!(
+            urls(Some(&predicted_host.ca)),
+            ["wss://acme--supertag.modal.run"]
+        );
+        // No CA file, or one deploy did not write: only what the target predicts.
+        assert_eq!(urls(None), ["wss://acme--supertag.modal.run"]);
+        assert_eq!(
+            urls(Some("-----BEGIN CERTIFICATE-----\n")),
+            ["wss://acme--supertag.modal.run"]
+        );
+        Ok(())
+    }
 }

@@ -121,6 +121,9 @@ pub(crate) trait Target {
     fn roll_out(&self, rollout: &Rollout<'_>) -> Result<Endpoint>;
     /// What the target runs now, asked of the target itself.
     fn deployment(&self) -> Result<Deployment>;
+    /// The endpoint the deployment would have at `host`, for asking a host the target did not
+    /// predict whether the deployment answers there.
+    fn endpoint_at(&self, host: &str) -> Endpoint;
     /// One sentence on where to look when the deployment does not become healthy.
     fn troubleshooting(&self) -> String;
 }

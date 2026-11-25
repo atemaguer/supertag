@@ -21,6 +21,7 @@ use std::{
     cell::OnceCell,
     io::{BufRead as _, BufReader, Write as _},
     process::{Command, Stdio},
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, bail, ensure};
@@ -36,6 +37,8 @@ const APP: &str = include_str!("../../../../../deploy/modal/app.py");
 /// The Modal client release `app.py` is written for.
 const REQUIREMENTS: &str = include_str!("../../../../../deploy/modal/requirements.txt");
 const PROGRAM: &str = "modal";
+/// How long a stopped container of the previous rollout may take to leave Modal's list.
+const RETIRE: Duration = Duration::from_secs(90);
 
 pub(crate) struct Modal {
     app: String,
@@ -92,7 +95,10 @@ impl Modal {
         let mut command = Command::new(PROGRAM);
         command.args(subcommand);
         if let Some(environment) = &self.environment
-            && matches!(subcommand, ["secret", _] | ["app", _] | ["deploy"])
+            && matches!(
+                subcommand,
+                ["secret", _] | ["app", _] | ["deploy"] | ["container", "list"]
+            )
         {
             command.args(["--env", environment]);
         }
@@ -116,6 +122,60 @@ impl Modal {
             String::from_utf8_lossy(&output.stderr).trim()
         );
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
+    /// The app's running containers.
+    fn running(&self) -> Result<Vec<String>> {
+        let output = self.output(
+            self.modal(&["container", "list"], &["--json"]),
+            "list the app's containers",
+        )?;
+        containers(&output, &self.app)
+    }
+
+    /// Stops the containers that ran before a rollout and waits until Modal lists none of them.
+    ///
+    /// Modal lets a replaced container finish the calls it is serving, and each open tunnel is
+    /// one call that lasts up to the function's 24-hour timeout. The app runs one container at
+    /// most, so while a Worker Host or a Gateway holds a tunnel open the old container stays,
+    /// the new one is never scheduled, and the endpoint answers nothing.
+    fn retire(&self, previous: &[String]) -> Result<()> {
+        if previous.is_empty() {
+            return Ok(());
+        }
+        let deadline = Instant::now() + RETIRE;
+        let mut asked = false;
+        loop {
+            let left: Vec<String> = self
+                .running()?
+                .into_iter()
+                .filter(|container| previous.contains(container))
+                .collect();
+            if left.is_empty() {
+                return Ok(());
+            }
+            if !asked {
+                asked = true;
+                for container in &left {
+                    errln!(
+                        "Stopping the previous rollout's container {container} so the new one can start."
+                    );
+                    // One that exited since it was listed cannot be stopped; the next listing
+                    // says whether it is gone.
+                    let _ = self.output(
+                        self.modal(&["container", "stop"], &[container, "--yes"]),
+                        "stop the previous rollout's container",
+                    );
+                }
+            }
+            ensure!(
+                Instant::now() < deadline,
+                "the previous rollout's container {} is still running, so the new one cannot start. Stop it with `modal container stop {} --yes` and run `supertag deploy` again",
+                left.join(", "),
+                left[0]
+            );
+            std::thread::sleep(Duration::from_secs(2));
+        }
     }
 
     /// The secret's name in Modal: the app's name, then the deployment's own name for it.
@@ -259,6 +319,27 @@ fn app_state(output: &str, app: &str) -> Result<Option<String>> {
         other => states.find(|state| *state == "deployed").or(other),
     }
     .map(str::to_owned))
+}
+
+/// The IDs of the containers of the app named `app` in `modal container list --json`.
+fn containers(output: &str, app: &str) -> Result<Vec<String>> {
+    let unreadable = "Modal's container list could not be read";
+    let (start, end) = match (output.find('['), output.rfind(']')) {
+        (Some(start), Some(end)) if start < end => (start, end),
+        _ => bail!(unreadable),
+    };
+    let containers: Vec<serde_json::Value> =
+        serde_json::from_str(&output[start..=end]).context(unreadable)?;
+    containers
+        .iter()
+        .filter(|container| container["app_name"] == app)
+        .map(|container| {
+            container["container_id"]
+                .as_str()
+                .map(str::to_owned)
+                .context(unreadable)
+        })
+        .collect()
 }
 
 /// The endpoint at `authority`, a host with an optional port: clients use the tunnel, and the
@@ -418,6 +499,8 @@ impl Target for Modal {
     }
 
     fn roll_out(&self, rollout: &Rollout<'_>) -> Result<Endpoint> {
+        // Asked before the rollout: whatever runs now is what the rollout replaces.
+        let previous = self.running()?;
         let directory = tempfile::tempdir().context("create a temporary directory")?;
         let definition = directory.path().join("app.py");
         std::fs::write(&definition, APP).context("write the Modal app definition")?;
@@ -472,6 +555,7 @@ impl Target for Modal {
             child.wait()?.success(),
             "`modal deploy` failed; its output is above"
         );
+        self.retire(&previous)?;
         let url = match endpoint_url(&output) {
             Some(url) => url,
             None => {
@@ -503,6 +587,10 @@ impl Target for Modal {
         })
     }
 
+    fn endpoint_at(&self, host: &str) -> Endpoint {
+        endpoint(host)
+    }
+
     fn troubleshooting(&self) -> String {
         let environment = self
             .environment
@@ -522,6 +610,20 @@ mod tests {
 
     fn modal(settings: config::Modal) -> Modal {
         Modal::new(Some(&settings)).expect("valid settings")
+    }
+
+    #[test]
+    fn the_containers_of_a_rollout_are_the_ones_of_its_app() -> Result<()> {
+        let list = r#"[
+  {"container_id": "ta-1", "app_id": "ap-1", "app_name": "supertag", "start_time": "2026-11-23 19:59:04-08:00"},
+  {"container_id": "ta-2", "app_id": "ap-2", "app_name": "supertag-staging", "start_time": "2026-11-24 10:00:00-08:00"},
+  {"container_id": "ta-3", "app_id": "ap-1", "app_name": "supertag", "start_time": "2026-11-24 16:53:30-08:00"}
+]"#;
+        assert_eq!(containers(list, "supertag")?, ["ta-1", "ta-3"]);
+        assert!(containers("[]", "supertag")?.is_empty());
+        assert!(containers("No containers", "supertag").is_err());
+        assert!(containers(r#"[{"app_name": "supertag"}]"#, "supertag").is_err());
+        Ok(())
     }
 
     #[test]
