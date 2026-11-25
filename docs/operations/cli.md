@@ -166,8 +166,8 @@ free `opencode/...` model.
 3. No key, for OpenCode Zen's `opencode/...` models.
 
 With none of these, or with an OAuth sign-in, which SuperTag refuses, `init` stops before writing
-anything and says to run `opencode auth login` with an API key. It then runs one tool-free
-OpenCode turn with that key to check the sign-in. When that turn fails, `init` stops and says to
+anything and says to run `opencode auth login` with an API key. It then runs one OpenCode turn
+with that key, which can use no tool, to check the sign-in. When that turn fails, `init` stops and says to
 try the model with `opencode run -m PROVIDER/MODEL` to see the provider's error.
 
 OpenCode has no sandbox of its own, so `init` asks how the lead may run commands, as for Claude

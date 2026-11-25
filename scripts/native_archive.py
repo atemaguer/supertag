@@ -64,11 +64,25 @@ def require(condition, message):
 
 
 def native_platform():
+    """This machine's platform, whatever the interpreter's: on Apple silicon an Intel Python runs
+    under Rosetta and reports x86_64, but the CLI and its helpers run as arm64 there."""
     system = host_platform.system().lower()
     machine = {"aarch64": "arm64", "arm64": "arm64", "x86_64": "amd64", "amd64": "amd64"}.get(host_platform.machine())
+    if system == "darwin" and machine == "amd64" and apple_silicon():
+        machine = "arm64"
     name = f"{system}-{machine}"
     require(name in PLATFORMS, "native packaging supports Linux and macOS on arm64 or amd64")
     return name
+
+
+def apple_silicon():
+    """Whether this Mac has arm64 processors. An Intel Mac has no hw.optional.arm64, so sysctl fails."""
+    try:
+        answer = subprocess.run(["/usr/sbin/sysctl", "-n", "hw.optional.arm64"], capture_output=True,
+                                text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return answer.returncode == 0 and answer.stdout.strip() == "1"
 
 
 def version_from_repo(repo=REPO):

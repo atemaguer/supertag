@@ -30,6 +30,14 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- `supertag init` and `supertag sign-in opencode` check OpenCode Zen's free models, such as
+  `opencode/deepseek-v4.1-flash-free`, in a few seconds. The check turn denied every OpenCode
+  tool, Zen's free tier refused a request without them, and OpenCode retried until the check gave
+  up after 30 seconds. The turn now offers only OpenCode's read, glob and grep tools, and refuses
+  every call to them, so it still runs no command and reads or changes no file.
+- `uv run scripts/node_bridges.py` and the other release scripts in a source checkout name an
+  Apple-silicon Mac's own platform, `darwin-arm64`, when the Python running them is an Intel build
+  under Rosetta. The bridges were staged as `darwin-amd64`, which the CLI refused.
 - A Work Session starts from the current commit of the branch its Tag's Workspace follows. It
   copied the commit its parent's Session recorded, so work a long-running conversation started
   ran on the code from that conversation's first turn, weeks old in some cases.

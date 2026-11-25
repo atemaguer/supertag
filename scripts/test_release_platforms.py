@@ -68,12 +68,45 @@ class ReleasePlatformContracts(unittest.TestCase):
         self.assertEqual(native_archive.PLATFORMS, {'linux-arm64', 'linux-amd64', 'darwin-arm64', 'darwin-amd64'})
         self.assertEqual(native_archive.OPENTUI_PACKAGES['darwin-amd64'], ('core-darwin-x64', 'libopentui.dylib'))
         with patch.object(native_archive.host_platform, 'system', return_value='Darwin'), \
-             patch.object(native_archive.host_platform, 'machine', return_value='x86_64'):
+             patch.object(native_archive.host_platform, 'machine', return_value='x86_64'), \
+             patch.object(native_archive, 'apple_silicon', return_value=False):
             self.assertEqual(native_archive.native_platform(), 'darwin-amd64')
         with patch.object(native_archive.host_platform, 'system', return_value='Windows'), \
              patch.object(native_archive.host_platform, 'machine', return_value='AMD64'):
             with self.assertRaisesRegex(ArchiveError, 'Linux and macOS'):
                 native_archive.native_platform()
+
+    def test_an_intel_python_under_rosetta_reports_the_macs_own_platform(self):
+        # uv may run an x86_64 Python on Apple silicon, where it reports x86_64.
+        with patch.object(native_archive.host_platform, 'system', return_value='Darwin'), \
+             patch.object(native_archive.host_platform, 'machine', return_value='x86_64'), \
+             patch.object(native_archive, 'apple_silicon', return_value=True):
+            self.assertEqual(native_archive.native_platform(), 'darwin-arm64')
+        # Linux is never asked: hw.optional.arm64 is a macOS sysctl.
+        with patch.object(native_archive.host_platform, 'system', return_value='Linux'), \
+             patch.object(native_archive.host_platform, 'machine', return_value='x86_64'), \
+             patch.object(native_archive, 'apple_silicon', side_effect=AssertionError):
+            self.assertEqual(native_archive.native_platform(), 'linux-amd64')
+
+    def test_apple_silicon_reads_the_machines_arm64_sysctl(self):
+        def answer(code, stdout=''):
+            return native_archive.subprocess.CompletedProcess([], code, stdout, '')
+        cases = ((answer(0, '1\n'), True), (answer(0, '0\n'), False),
+                 # An Intel Mac has no hw.optional.arm64, so sysctl fails.
+                 (answer(1), False), (OSError('no sysctl'), False))
+        for result, expected in cases:
+            with self.subTest(result=result), patch.object(native_archive.subprocess, 'run',
+                                                           side_effect=[result]) as run:
+                self.assertIs(native_archive.apple_silicon(), expected)
+                self.assertEqual(run.call_args.args[0], ['/usr/sbin/sysctl', '-n', 'hw.optional.arm64'])
+
+    def test_an_intel_release_builder_is_still_an_intel_platform(self):
+        # The darwin-amd64 archive is built on an Intel runner, and --expect-platform still holds.
+        with patch.object(native_archive.host_platform, 'system', return_value='Darwin'), \
+             patch.object(native_archive.host_platform, 'machine', return_value='x86_64'), \
+             patch.object(native_archive.subprocess, 'run',
+                          return_value=native_archive.subprocess.CompletedProcess([], 1, '', '')):
+            self.assertEqual(release.native_platform(), 'darwin-amd64')
 
     def test_mach_o_architecture_matches_the_mac_platform(self):
         arm64 = b'\xcf\xfa\xed\xfe' + (0x100000C).to_bytes(4, 'little') + bytes(24)

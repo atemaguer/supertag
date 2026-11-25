@@ -1,7 +1,7 @@
 //! Sign-in probes for Codex, Claude Code and OpenCode, with the credentials a Worker Host passes
-//! to that harness. Where only a model turn proves a credential, the probe runs one tool-free turn
-//! in a private temporary directory that is removed afterwards. Only a boolean leaves: native
-//! output and errors can contain credentials.
+//! to that harness. Where only a model turn proves a credential, the probe runs one turn that can
+//! use no tool, in a private temporary directory that is removed afterwards. Only a boolean
+//! leaves: native output and errors can contain credentials.
 use std::{
     ffi::{OsStr, OsString},
     fs::OpenOptions,
@@ -301,8 +301,9 @@ pub fn codex_has_credential(variables: &Variables) -> bool {
         || probe::text(variables, "OPENAI_API_KEY").is_some()
 }
 
-/// OpenCode: one tool-free `opencode run` turn with only the selected provider's key, in an
-/// isolated home that never reads the usual OpenCode auth.json. Every permission is denied. As a
+/// OpenCode: one `opencode run` turn with only the selected provider's key, in an
+/// isolated home that never reads the usual OpenCode auth.json. No tool can run: every permission
+/// but three read-only ones is denied, and those ask, which `opencode run` rejects. As a
 /// Task Attempt, the provider's API-key entry in `auth_file` (a host's `opencode-auth-file`)
 /// comes first, then its key variable.
 pub async fn opencode(
@@ -353,7 +354,11 @@ pub async fn opencode(
             return false;
         }
     }
-    let permission = json!({"*": "deny"});
+    // The last matching rule wins. A denied tool is left out of the request, and OpenCode Zen's
+    // free models refuse a request without OpenCode's tools ("Free usage limit reached"), which
+    // OpenCode 1.19 retries without end. So read, glob and grep stay in the request but ask, and
+    // `opencode run` without --auto rejects every ask; any tool call then fails the check.
+    let permission = json!({"*": "deny", "read": "ask", "glob": "ask", "grep": "ask"});
     let mut environment = process_variables(variables);
     if let Some((name, key)) = credential {
         environment.insert(name.into(), key.into());
@@ -717,7 +722,21 @@ done"#,
         assert!(!environment.contains("UNRELATED_SECRET"));
         assert!(!environment.contains("other-provider"));
         assert!(environment.contains("OPENCODE_DISABLE_PROJECT_CONFIG=true"));
-        assert!(environment.contains(r#"OPENCODE_PERMISSION={"*":"deny"}"#));
+        let permission = environment
+            .lines()
+            .find_map(|line| line.strip_prefix("OPENCODE_PERMISSION="))
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(permission).unwrap(),
+            json!({"*": "deny", "read": "ask", "glob": "ask", "grep": "ask"})
+        );
+        // Nothing approves an ask: `opencode run` rejects each one.
+        let args = read(temporary.path(), "opencode.args");
+        assert!(
+            !args
+                .lines()
+                .any(|arg| arg.starts_with("--auto") || arg.contains("skip-permissions"))
+        );
         let home = environment
             .lines()
             .find_map(|line| line.strip_prefix("HOME="))
@@ -734,6 +753,13 @@ done"#,
             temporary.path(),
             "opencode",
             r#"echo '{"type":"text","part":{"text":"OK"}}'; echo '{"type":"error"}'; echo '{"type":"step_finish","part":{"reason":"stop"}}'"#,
+        );
+        assert!(!opencode(&variables, "openai/model", None, std::future::pending()).await);
+        // A turn that tried a tool, which `opencode run` rejected, is not sign-in.
+        recording(
+            temporary.path(),
+            "opencode",
+            r#"echo '{"type":"text","part":{"text":"OK"}}'; echo '{"type":"tool_use","part":{"tool":"read","state":{"status":"error"}}}'; echo '{"type":"step_finish","part":{"reason":"tool-calls"}}'"#,
         );
         assert!(!opencode(&variables, "openai/model", None, std::future::pending()).await);
         // A complete answer from a failed run is not sign-in either.

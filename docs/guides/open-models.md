@@ -233,7 +233,6 @@ are hidden. The reply shows it, and so do `supertag describe task TASK_ID` and
 | `This API key has expired. Create a new API key in OpenCode Console...` | Create a key in the OpenCode Console and run `opencode auth login` again, under the right provider entry |
 | `This OpenCode Go model is hosted outside Europe and the United States. Select Global...` | Turn on Global hosting; see [DeepSeek on OpenCode Go](#deepseek-on-opencode-go-needs-global-hosting) |
 | `Model not found: PROVIDER/MODEL.` | Use the ID exactly as `opencode models` prints it, on the host's list and the Tag |
-| `Couldn't check the opencode sign-in... did not finish within 30 seconds` from `init` with an `opencode/...` free model | `init`'s check turn can stall on Zen's free models. Run `init` with your provider's model, then add the free model on a second host; see [One provider per host](#one-provider-per-host) |
 | The Task stays queued | `supertag placement explain TASK_ID` names the cause, such as no host listing the Tag's model |
 
 For anything else, try the model outside SuperTag with `opencode run -m PROVIDER/MODEL "Reply with
