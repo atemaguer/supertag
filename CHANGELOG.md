@@ -26,6 +26,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- A Work Session starts from the current commit of the branch its Tag's Workspace follows. It
+  copied the commit its parent's Session recorded, so work a long-running conversation started
+  ran on the code from that conversation's first turn, weeks old in some cases.
 - A Tag no longer loses track of work it delivered. Delivery replaces the commits a Tag makes in
   its checkout with one new commit, so a Tag quoted commit IDs that never existed, and a later
   conversation, which starts from the Workspace's ref, concluded the work was missing. Each turn

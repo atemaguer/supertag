@@ -182,6 +182,25 @@ async fn exercise(url: &str) {
     let fresh = submit(&store, "beta").await.unwrap();
     assert_eq!(fresh.workspace, Some(following("main")));
 
+    // So does a Work Session the first Attempt starts: it follows the branch, not the commit its
+    // parent's Session resolved before the branch moved.
+    let work = store
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&host, &attempt),
+            &StartWorkSessionRequest {
+                operation_id: Uuid::new_v4().to_string(),
+                title: "Build the part".into(),
+                instruction: "Change the repository".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let child = store.get_task(&work.latest_task_id).await.unwrap();
+    assert_eq!(base(&child), "");
+    assert_eq!(child.workspace.as_ref().unwrap().base_ref, "main");
+    store.cancel_task(&child.task_id).await.unwrap();
+
     // A pinned Task has nothing to resolve.
     store.cancel_task(&first.task_id).await.unwrap();
     store.cancel_task(&queued.task_id).await.unwrap();

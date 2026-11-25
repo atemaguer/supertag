@@ -108,7 +108,9 @@ tag, or a remote-tracking branch.
 
 The Worklet that starts a Session's first Task looks the branch up in its host's checkout of the
 Workspace and records the commit it names. Every later Task of that Session works from the same
-commit, even after the branch moves; the next new Session looks the branch up again.
+commit, even after the branch moves; the next new Session looks the branch up again. A Work
+Session a turn starts is a new Session too: it starts from the branch's current commit, not from
+the commit its parent's Session recorded.
 `supertag get task ID` shows the branch as `ref` and the recorded commit as `base_commit`, which
 stays empty until the Worklet has looked it up. When the host's checkout has no such branch, the
 Task fails before the harness starts, with `Workspace branch BRANCH does not name a commit on

@@ -123,7 +123,22 @@ async fn insert_child_in(
     session_id: &str,
     prompt: &str,
 ) -> Result<Task> {
-    insert_task_from_snapshot(tx, order, parent, session_id, prompt).await
+    // A new Session resolves the branch it follows anew, like any other new Session. The parent's
+    // commit is only what its own Session resolved, perhaps weeks ago for a conversation, and a
+    // Work Session's checkout starts from the commit alone, never from the parent's changes.
+    let child = insert_task_from_snapshot(tx, order, parent, session_id, prompt).await?;
+    if child
+        .workspace
+        .as_ref()
+        .is_none_or(|spec| spec.base_ref.is_empty() || spec.base_commit.is_empty())
+    {
+        return Ok(child);
+    }
+    sqlx::query("UPDATE supertag_v2_tasks SET workspace_base_commit='' WHERE task_id=$1")
+        .bind(&child.task_id)
+        .execute(&mut **tx)
+        .await?;
+    crate::store::task_in(tx, &child.task_id).await
 }
 
 /// The harness a new Work Session names, when it differs from the parent Task's: `None` runs
