@@ -102,13 +102,16 @@ its Roles. The result follows three rules, in order:
 3. Otherwise the grant allows the action.
 
 The approvers of a request are the union of the approvers of the sets that require it.
+The owner of a personal Tag may also decide that Tag’s requests, including publication and MCP
+actions, from any of their devices. Other Users cannot see or decide those requests. Operators
+retain their approval access.
 
 ### Approvers
 
 | Entry | Who may decide |
 | --- | --- |
 | `operator:<operatorId>` | That operator, authenticated to the Control Plane's operator RPCs |
-| `user:<name>` | That [User](resource-model.md#users), from any of their devices. Only for `workstream:post` and `mailbox:send` |
+| `user:<name>` | That [User](resource-model.md#users), from any of their devices. For actions their Permission Sets allow, including MCP and publication |
 
 A Permission Set that names a Tag (`tag:<id>`) as an approver is refused: approval is a person's
 check on a Tag's work, so no Tag decides one.

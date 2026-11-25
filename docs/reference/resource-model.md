@@ -339,7 +339,7 @@ a User's name must not be taken by a Tag already.
 
 | Who | May |
 | --- | --- |
-| The owner, from any device | Talk to it; set its instructions, harness, model settings, Workspace, and display name with `supertag tag put` |
+| The owner, from any device | Talk to it; decide its approval requests from any device; set its instructions, harness, model settings, Workspace, and display name with `supertag tag put` |
 | Another User | Nothing: their devices don't see it |
 | An operator | Everything, including its Roles, Permission Sets, placement, and retiring it |
 

@@ -39,7 +39,7 @@ Commands:
   host                  Enroll, drain, resume, and revoke Worker Hosts, and rotate their credentials
   placement             Choose which labelled Worker Hosts run a Tag, and explain waiting Tasks
   question              Answer questions Objective Tasks ask the operator
-  approval              Approve or deny actions waiting on an operator
+  approval              Approve or deny actions waiting on an operator, or on you for your own personal Tag
   mcp                   List this host's catalog MCP servers and log in to OAuth servers
   mailbox-grant         Manage permission to send direct messages between Tags
   operator-token        Issue, rotate, and revoke named Operator Tokens. Admin operator token only
@@ -1863,7 +1863,7 @@ Options:
 ## `supertag approval`
 
 ```text
-Approve or deny actions waiting on an operator
+Approve or deny actions waiting on an operator, or on you for your own personal Tag
 
 Usage: supertag approval [OPTIONS] <COMMAND>
 

@@ -51,7 +51,10 @@ fn summary(value: &str, limit: usize) -> Result<String> {
 /// Whether `principal` may decide. With no approvers named, any operator may and no client may:
 /// a client decides only an approval that names it (`client:NAME`). Operators are named by their
 /// operator ID, such as `local` or `token:laptop`.
-fn eligible(approval: &Approval, principal: &str) -> bool {
+fn eligible(approval: &Approval, principal: &str, owner: &str) -> bool {
+    if principal == owner && principal.starts_with("user:") {
+        return true;
+    }
     if approval.operator_ids.is_empty() {
         return principal.starts_with("operator:");
     }
@@ -69,8 +72,24 @@ fn approver_is(approver: &str, principal: &str) -> bool {
         principal.strip_prefix("operator:") == Some(approver)
     }
 }
-async fn access_in(tx: &mut Transaction<'_, Any>, principal: &str, task_id: &str) -> Result<bool> {
-    crate::conversations::task_access_in(tx, principal, task_id).await
+async fn tag_owner_in(tx: &mut Transaction<'_, Any>, tag_id: &str) -> Result<String> {
+    Ok(
+        sqlx::query_scalar("SELECT COALESCE(owner_user,'') FROM supertag_v2_tags WHERE tag_id=$1")
+            .bind(tag_id)
+            .fetch_one(&mut **tx)
+            .await?,
+    )
+}
+async fn access_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    approval: &Approval,
+) -> Result<bool> {
+    let owner = tag_owner_in(tx, &approval.tag_id).await?;
+    if !owner.is_empty() {
+        return Ok(principal.starts_with("operator:") || principal == format!("user:{owner}"));
+    }
+    crate::conversations::task_access_in(tx, principal, &approval.task_id).await
 }
 
 fn effect_request_digest(input: &RequestApprovalRequest) -> Result<String> {
@@ -171,7 +190,12 @@ pub(crate) async fn gate_effect_in(
         .ok_or(StoreError::PermissionDenied)?;
     if !conversation_owner.is_empty() {
         let owner = operator(&conversation_owner)?;
-        if !operators.is_empty() && !operators.iter().any(|id| approver_is(id, owner)) {
+        if !operators.is_empty()
+            && !operators.iter().any(|id| approver_is(id, owner))
+            && tag_owner_in(tx, &task.try_get::<String, _>("tag_id")?)
+                .await?
+                .is_empty()
+        {
             return Err(StoreError::PermissionDenied);
         }
     }
@@ -259,7 +283,7 @@ impl Store {
         name("approval ID", id)?;
         let mut tx = self.pool.begin().await?;
         let mut value = load_in(&mut tx, id).await?;
-        if !access_in(&mut tx, principal, &value.task_id).await? {
+        if !access_in(&mut tx, principal, &value).await? {
             return Err(StoreError::NotFound("approval was not found".into()));
         }
         value.state = effective_state(&mut tx, &value, self.execution_now_ms()).await? as i32;
@@ -297,7 +321,7 @@ impl Store {
         };
         let mut tx = self.pool.begin().await?;
         let owner = crate::store::sees_owner_sql("audience.owner", "$4");
-        let rows = sqlx::query(&format!("{VIEW} WHERE a.requested_order>$1 AND ($2='' OR a.objective_id=$2) AND ($3='' OR a.task_id=$3) AND EXISTS (SELECT 1 FROM supertag_v2_task_audience audience WHERE audience.task_id=a.task_id AND {owner}) ORDER BY a.requested_order LIMIT 1001"))
+        let rows = sqlx::query(&format!("{VIEW} WHERE a.requested_order>$1 AND ($2='' OR a.objective_id=$2) AND ($3='' OR a.task_id=$3) AND ((EXISTS (SELECT 1 FROM supertag_v2_tags tag WHERE tag.tag_id=a.tag_id AND tag.owner_user IS NOT NULL AND (substr(CAST($4 AS TEXT),1,9)='operator:' OR $4='user:'||tag.owner_user))) OR (EXISTS (SELECT 1 FROM supertag_v2_tags tag WHERE tag.tag_id=a.tag_id AND tag.owner_user IS NULL) AND EXISTS (SELECT 1 FROM supertag_v2_task_audience audience WHERE audience.task_id=a.task_id AND {owner}))) ORDER BY a.requested_order LIMIT 1001"))
             .bind(after).bind(&input.objective_id).bind(&input.task_id).bind(principal).fetch_all(&mut *tx).await?;
         let limit = if input.limit == 0 {
             50
@@ -373,10 +397,11 @@ impl Store {
         ))?;
         let (mut tx, _) = self.write().await?;
         let mut value = load_in(&mut tx, &input.approval_id).await?;
-        if !access_in(&mut tx, principal, &value.task_id).await? {
+        if !access_in(&mut tx, principal, &value).await? {
             return Err(StoreError::NotFound("approval was not found".into()));
         }
-        if !eligible(&value, id) {
+        let owner = tag_owner_in(&mut tx, &value.tag_id).await?;
+        if !eligible(&value, id, &format!("user:{owner}")) {
             return Err(StoreError::PermissionDenied);
         }
         let receipt=sqlx::query("SELECT request_digest,approval_id FROM supertag_v2_approval_decisions WHERE principal=$1 AND operation_id=$2")
@@ -888,7 +913,7 @@ pub(crate) async fn pending_in(
 ) -> Result<Vec<InboxItem>> {
     operator(principal)?;
     let owner = crate::store::sees_owner_sql("audience.owner", "$4");
-    let mut rows=sqlx::query(&format!("{VIEW} WHERE a.state=1 AND c.approval_id IS NULL AND a.requested_at_ms<=$1 AND a.requested_order<=$2 AND ($3='' OR a.objective_id=$3) AND EXISTS (SELECT 1 FROM supertag_v2_task_audience audience WHERE audience.task_id=a.task_id AND {owner}) AND NOT EXISTS (SELECT 1 FROM supertag_v2_objectives o WHERE o.objective_id=a.objective_id AND o.status IN (5,6)) AND EXISTS (SELECT 1 FROM supertag_v2_tasks t WHERE t.task_id=a.task_id AND t.attempt_id=a.attempt_id AND ((t.state=2 AND t.lease_expires_at_ms>$1) OR (t.state=3 AND EXISTS (SELECT 1 FROM supertag_v2_approval_waits w JOIN supertag_v2_approval_wait_requests r ON r.task_id=w.task_id WHERE r.approval_id=a.approval_id AND w.continuation_task_id IS NULL) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice'))))) ORDER BY a.requested_order LIMIT $5"))
+    let mut rows=sqlx::query(&format!("{VIEW} WHERE a.state=1 AND c.approval_id IS NULL AND a.requested_at_ms<=$1 AND a.requested_order<=$2 AND ($3='' OR a.objective_id=$3) AND ((EXISTS (SELECT 1 FROM supertag_v2_tags tag WHERE tag.tag_id=a.tag_id AND tag.owner_user IS NOT NULL AND (substr(CAST($4 AS TEXT),1,9)='operator:' OR $4='user:'||tag.owner_user))) OR (EXISTS (SELECT 1 FROM supertag_v2_tags tag WHERE tag.tag_id=a.tag_id AND tag.owner_user IS NULL) AND EXISTS (SELECT 1 FROM supertag_v2_task_audience audience WHERE audience.task_id=a.task_id AND {owner}))) AND NOT EXISTS (SELECT 1 FROM supertag_v2_objectives o WHERE o.objective_id=a.objective_id AND o.status IN (5,6)) AND EXISTS (SELECT 1 FROM supertag_v2_tasks t WHERE t.task_id=a.task_id AND t.attempt_id=a.attempt_id AND ((t.state=2 AND t.lease_expires_at_ms>$1) OR (t.state=3 AND EXISTS (SELECT 1 FROM supertag_v2_approval_waits w JOIN supertag_v2_approval_wait_requests r ON r.task_id=w.task_id WHERE r.approval_id=a.approval_id AND w.continuation_task_id IS NULL) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice'))))) ORDER BY a.requested_order LIMIT $5"))
         .bind(as_of_ms).bind(upper_order).bind(objective_id).bind(principal).bind(limit.min(1001) as i64).fetch_all(&mut **tx).await?;
     rows.sort_by_key(|row| row.get::<i64, _>("requested_order"));
     rows.dedup_by(|a, b| a.get::<String, _>("approval_id") == b.get::<String, _>("approval_id"));
@@ -906,7 +931,11 @@ pub(crate) async fn pending_in(
             objective_id: value.objective_id.clone().unwrap_or_default(),
             task_id: value.task_id.clone(),
             attempt_id: Some(value.attempt_id.clone()),
-            operator_eligible: eligible(&value, principal),
+            operator_eligible: eligible(
+                &value,
+                principal,
+                &format!("user:{}", tag_owner_in(tx, &value.tag_id).await?),
+            ),
             actionable_since_ms: value.requested_at_ms,
             reason: value.summary.clone(),
             question: None,
@@ -1160,16 +1189,23 @@ mod eligibility_tests {
     #[test]
     fn clients_decide_only_when_named() {
         let open = approval(&[]);
-        assert!(eligible(&open, "operator:local"));
-        assert!(eligible(&open, "operator:token:laptop"));
-        assert!(!eligible(&open, "user:alice"));
+        assert!(eligible(&open, "operator:local", "user:"));
+        assert!(eligible(&open, "operator:token:laptop", "user:"));
+        assert!(!eligible(&open, "user:alice", "user:"));
+        assert!(eligible(&open, "user:alice", "user:alice"));
+        assert!(!eligible(&open, "user:bob", "user:alice"));
         let named = approval(&["local", "user:alice"]);
-        assert!(eligible(&named, "operator:local"));
-        assert!(eligible(&named, "user:alice"));
-        assert!(!eligible(&named, "user:bob"));
-        assert!(!eligible(&named, "operator:token:laptop"));
+        assert!(eligible(&named, "operator:local", "user:"));
+        assert!(eligible(&named, "user:alice", "user:"));
+        assert!(!eligible(&named, "user:bob", "user:"));
+        assert!(eligible(&named, "user:bob", "user:bob"));
+        assert!(!eligible(&named, "operator:token:laptop", "user:"));
         // A client name never matches an operator, nor an operator ID a client.
-        assert!(!eligible(&approval(&["alice"]), "user:alice"));
-        assert!(!eligible(&approval(&["user:alice"]), "operator:user:alice"));
+        assert!(!eligible(&approval(&["alice"]), "user:alice", "user:"));
+        assert!(!eligible(
+            &approval(&["user:alice"]),
+            "operator:user:alice",
+            "user:"
+        ));
     }
 }

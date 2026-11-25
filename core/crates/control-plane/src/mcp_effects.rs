@@ -92,11 +92,8 @@ impl Store {
             .collect();
         let operators: Vec<_> = approvers
             .iter()
-            .filter_map(|id| id.strip_prefix("operator:").map(str::to_owned))
+            .map(|id| id.strip_prefix("operator:").unwrap_or(id).to_string())
             .collect();
-        if !approvers.is_empty() && operators.is_empty() {
-            return Err(StoreError::PermissionDenied);
-        }
         let action = format!("mcp:{}/{}", input.server, input.tool);
         let resource = authority.resource.unwrap_or_default();
         let binding = identity(&(

@@ -330,7 +330,7 @@ enum Command {
         #[command(subcommand)]
         command: inbox::QuestionCommand,
     },
-    /// Approve or deny actions waiting on an operator.
+    /// Approve or deny actions waiting on an operator, or on you for your own personal Tag.
     Approval {
         #[command(flatten)]
         connection: Connection,

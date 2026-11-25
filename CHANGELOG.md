@@ -11,6 +11,11 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- A personal Tag's owner decides its approval requests from any of their devices, beside the
+  operators, even when a Permission Set names only operators: Workstream and Mailbox posts,
+  external publication, and MCP-gated actions. Another User neither sees nor decides them, and
+  `supertag get approvals` from a User's device lists their own Tag's. A Permission Set may name
+  `user:NAME` approvers for MCP-gated actions too.
 - `supertag user remove bob --transfer-to casey` removes a User: every device, Worker Host, and
   invite key of theirs is revoked at once, and their personal Tags and unfinished Objectives move
   to Casey, whose Worker Hosts then run those Tags. Without `--transfer-to`, it is refused while
