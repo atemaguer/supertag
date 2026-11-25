@@ -161,7 +161,8 @@ rm ~/build-1.key
 
 The first `supertag up` enrolls the host and keeps its own credential in its state directory, so
 later runs ignore the key. To run a host without `supertag.yaml`, use `supertag host enroll` and
-`supertag worklet`; see [Run Worker Hosts](workers.md).
+`supertag worklet`; see [Run Worker Hosts](workers.md). To keep a host on a Linux server, see
+[Run a Worker Host on a persistent machine](persistent-worker-host.md).
 
 ## Add teammates
 

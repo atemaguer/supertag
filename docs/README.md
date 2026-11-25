@@ -67,6 +67,7 @@ Follow this order on your first visit:
 | Add another agent system | [Write a harness adapter](guides/harness-adapters.md) |
 | Look up a command or flag | [CLI reference](reference/cli.md) |
 | Run an always-on deployment | [Self-host SuperTag](guides/self-hosting.md) |
+| Keep a Worker Host on a Linux server | [Run a Worker Host on a persistent machine](guides/persistent-worker-host.md) |
 | Host the Control Plane on Modal | [Deploy on Modal](guides/deploy-modal.md) |
 | Compare SuperTag with other agent systems | [SuperTag and other agent systems](concepts/supertag-and-other-agent-systems.md) |
 | Look up a term | [Glossary](reference/glossary.md) |
@@ -124,6 +125,7 @@ Choose the tool your team already uses:
 ## Operate SuperTag
 
 - [Self-host SuperTag](guides/self-hosting.md) — choose Docker Compose, Fly.io, Railway, Render, Cloudflare, or Modal
+- [Run a Worker Host on a persistent machine](guides/persistent-worker-host.md) — a Linux server that stays on, with sandboxes on the same machine
 - [Configure a deployment](guides/deployment-setup.md) — `setup`, `check`, and `verify deployment` for every platform
 - [Fly.io](guides/deploy-fly.md) — Control Plane and optional Gateway as Machines, with PostgreSQL
 - [Railway](guides/deploy-railway.md) — Control Plane behind a TCP Proxy, with PostgreSQL
