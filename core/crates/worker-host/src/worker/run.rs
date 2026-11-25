@@ -390,8 +390,6 @@ impl Worker<'_> {
                 egress::start_for_attempt(
                     scope,
                     options.network_credentials,
-                    options.state_directory,
-                    &attempt.attempt_id,
                     options.harness,
                     options.remote_provider.is_some(),
                 )

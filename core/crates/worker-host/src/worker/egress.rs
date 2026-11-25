@@ -1030,8 +1030,6 @@ pub(crate) struct AttemptEgress {
 pub(crate) async fn start_for_attempt(
     scope: &NetworkScope,
     credentials: &[HostCredential],
-    state_directory: &std::path::Path,
-    attempt_id: &str,
     harness: supertag_protocol::v2::HarnessKind,
     remote: bool,
 ) -> Result<AttemptEgress> {
@@ -1053,10 +1051,14 @@ pub(crate) async fn start_for_attempt(
         "Claude Code's sandbox cannot authenticate to the egress proxy, so it carries no network credentials"
     );
     let proxy = EgressProxy::start(config).await?;
-    use sha2::Digest as _;
-    let directory = state_directory
-        .join("egress")
-        .join(format!("{:x}", sha2::Sha256::digest(attempt_id.as_bytes())));
+    // Outside the host's state directory: the Task's commands read the CA from here, and the
+    // harness sandboxes deny them the state directory, which holds the host's credentials. The
+    // files hold only public certificates.
+    let directory = tempfile::Builder::new()
+        .prefix("supertag-egress-")
+        .tempdir()
+        .context("create the Attempt's egress certificate directory")?
+        .keep();
     let files = write_sandbox_files(&proxy, &directory)?;
     let environment = adapter_environment(&proxy, &files)?;
     Ok(AttemptEgress {
