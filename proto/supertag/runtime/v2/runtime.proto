@@ -1714,8 +1714,9 @@ message CreateAuthKeyRequest {
   // The operator's name for the key: 1 to 63 lowercase letters, digits,
   // hyphens or underscores, starting with a letter or digit. Never reused.
   string name = 3300;
-  // Required: the one role every enrollee of the key takes. HOST, GATEWAY or
-  // CLIENT; it never changes after creation.
+  // Required: the one role every enrollee of the key takes, HOST or GATEWAY; it
+  // never changes after creation. Client devices join with a User's invite key
+  // (Users.InviteUser) instead.
   PrincipalRole role = 4100;
 }
 
@@ -1734,7 +1735,10 @@ message AuthKey {
   int64 created_at_ms = 3301;
   // A one-time key enrolled its principal, or a reusable key enrolled at least one.
   bool used = 3302;
+  // CLIENT for a User's invite key, which also enrolls that User's Worker Hosts.
   PrincipalRole role = 4100;
+  // A User's invite key: the User every device and Worker Host it enrolls belongs to.
+  string user = 4101;
 }
 
 // Who a caller of the Control Plane is. Operators present the admin operator

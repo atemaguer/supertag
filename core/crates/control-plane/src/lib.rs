@@ -277,17 +277,28 @@ impl ControlPlane {
         Ok(principal.to_owned())
     }
 
-    /// An operator or a client: the principals that converse and own work.
+    /// An operator, or the User a client device belongs to: the principals that converse and
+    /// own work. A device acts for its User, as `user:NAME`, so the User's conversations and work
+    /// follow them across devices.
     fn actor<T>(&self, request: &Request<T>) -> Result<String, Status> {
         let principal = internal_principal(request, &self.internal_token)?;
-        if !(principal.starts_with("operator:") || principal.starts_with("client:"))
-            || principal.len() > 256
-        {
-            return Err(Status::permission_denied(
-                "caller is not allowed to use this service",
-            ));
+        if principal.len() > 256 {
+            return Err(Status::permission_denied("invalid caller identity"));
         }
-        Ok(principal.to_owned())
+        if principal.starts_with("operator:") {
+            return Ok(principal.to_owned());
+        }
+        if principal.starts_with("client:") {
+            return match supertag_protocol::internal_user(request) {
+                Some(user) if store::valid_user_name(user) => Ok(format!("user:{user}")),
+                _ => Err(Status::permission_denied(
+                    "this device belongs to no User; join again with a User's invite key from `supertag user invite`",
+                )),
+            };
+        }
+        Err(Status::permission_denied(
+            "caller is not allowed to use this service",
+        ))
     }
 
     /// A Gateway call for one connector account: the internal `connector:ACCOUNT` principal, once

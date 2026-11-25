@@ -85,6 +85,7 @@ where
     let mut outgoing = api
         .credentials
         .upstream(request.into_inner(), caller.identity()?, startup);
+    caller.mark_user(outgoing.metadata_mut())?;
     outgoing.metadata_mut().remove(TIMEOUT);
     if let Some(timeout) = timeout {
         outgoing.set_timeout(timeout);

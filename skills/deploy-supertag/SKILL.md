@@ -118,7 +118,7 @@ host service with `control-plane: https://supertag.example.com` and `auth-key: S
 `supertag worklet --control-plane URL --state-directory DIR --harness codex`. See
 [Run Worker Hosts](../../docs/guides/workers.md).
 
-Teammates get a client Auth Key (`--role client`) or an Operator Token
+Teammates get an invite key (`supertag user invite NAME`) or an Operator Token
 (`supertag operator-token create NAME`), and connect with `supertag connect`. Keep the admin token
 with the deployment's owner.
 

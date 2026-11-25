@@ -317,6 +317,173 @@ class AuthKeys:
             _registered_method=True)
 
 
+class UsersStub:
+    """People admitted to the Control Plane. A User is a person, never a machine: every client device
+    belongs to one, and a Worker Host enrolled with a User's invite key belongs to them.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.InviteUser = channel.unary_unary(
+                '/supertag.runtime.v2.Users/InviteUser',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.InviteUserRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.InviteUserResponse.FromString,
+                _registered_method=True)
+        self.GetUser = channel.unary_unary(
+                '/supertag.runtime.v2.Users/GetUser',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.GetUserRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.User.FromString,
+                _registered_method=True)
+        self.ListUsers = channel.unary_unary(
+                '/supertag.runtime.v2.Users/ListUsers',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ListUsersRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ListUsersResponse.FromString,
+                _registered_method=True)
+
+
+class UsersServicer:
+    """People admitted to the Control Plane. A User is a person, never a machine: every client device
+    belongs to one, and a Worker Host enrolled with a User's invite key belongs to them.
+    """
+
+    def InviteUser(self, request, context):
+        """Creates the User, or finds an existing one, and issues a new invite key: a reusable Auth Key
+        that enrolls the User's client devices and Worker Hosts.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetUser(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListUsers(self, request, context):
+        """By name.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_UsersServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'InviteUser': grpc.unary_unary_rpc_method_handler(
+                    servicer.InviteUser,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.InviteUserRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.InviteUserResponse.SerializeToString,
+            ),
+            'GetUser': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetUser,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.GetUserRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.User.SerializeToString,
+            ),
+            'ListUsers': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListUsers,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ListUsersRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ListUsersResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.Users', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.Users', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class Users:
+    """People admitted to the Control Plane. A User is a person, never a machine: every client device
+    belongs to one, and a Worker Host enrolled with a User's invite key belongs to them.
+    """
+
+    @staticmethod
+    def InviteUser(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Users/InviteUser',
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.InviteUserRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.InviteUserResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetUser(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Users/GetUser',
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.GetUserRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.User.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListUsers(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Users/ListUsers',
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.ListUsersRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.ListUsersResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
 class EnrollmentsStub:
     """Joining a deployment, and the credentials joining issues. A host, Gateway or
     client enrolls once with an Auth Key of its role and from then on presents

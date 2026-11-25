@@ -65,10 +65,13 @@ impl<S> Service<http::Request<Body>> for Passthrough<S> {
     }
 
     fn call(&mut self, mut request: http::Request<Body>) -> Self::Future {
-        let Some(principal) = request
-            .extensions()
-            .get::<Caller>()
+        let caller = request.extensions().get::<Caller>();
+        let user = caller
+            .and_then(|caller| caller.user.as_deref())
+            .map(str::parse::<http::HeaderValue>);
+        let Some((principal, user)) = caller
             .and_then(|caller| caller.principal.parse::<http::HeaderValue>().ok())
+            .zip(user.transpose().ok())
         else {
             return Box::pin(async {
                 Ok(tonic::Status::unauthenticated("valid bearer credential required").into_http())
@@ -82,6 +85,10 @@ impl<S> Service<http::Request<Body>> for Passthrough<S> {
                 .expect("a valid internal credential"),
         );
         headers.insert(PRINCIPAL, principal);
+        headers.remove(supertag_protocol::INTERNAL_USER_HEADER);
+        if let Some(user) = user {
+            headers.insert(supertag_protocol::INTERNAL_USER_HEADER, user);
+        }
         let mut channel = self.channel.clone();
         Box::pin(async move {
             let response = async {

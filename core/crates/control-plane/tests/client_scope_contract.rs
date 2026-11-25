@@ -10,17 +10,18 @@ use supertag_protocol::v2::*;
 use uuid::Uuid;
 
 const OPERATOR: &str = "operator:alice";
-const MALLORY: &str = "client:mallory";
+const MALLORY: &str = "user:mallory";
 
-/// Enrolls `client:NAME` with a client Auth Key limited to `tags`.
+/// Invites the User NAME, who may talk to `tags`, and enrolls one of their devices. The device
+/// acts as `user:NAME`.
 async fn enroll_client(store: &Store, name: &str, tags: &[&str]) {
     let key = Sha256::digest(format!("client key {name}")).to_vec();
     store
-        .create_auth_key(
+        .invite_user(
             OPERATOR,
-            &CreateAuthKeyRequest {
-                name: format!("{name}-key"),
-                role: PrincipalRole::Client.into(),
+            &InviteUserRequest {
+                name: name.into(),
+                display_name: name.into(),
                 operation_id: format!("{name}-key"),
                 key_digest: key.clone(),
                 allowed_tag_ids: tags.iter().map(|tag| (*tag).into()).collect(),

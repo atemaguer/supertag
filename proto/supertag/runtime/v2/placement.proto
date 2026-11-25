@@ -21,6 +21,63 @@ service AuthKeys {
   rpc GetAuthKey(GetAuthKeyRequest) returns (AuthKey);
 }
 
+// People admitted to the Control Plane. A User is a person, never a machine: every client device
+// belongs to one, and a Worker Host enrolled with a User's invite key belongs to them.
+service Users {
+  // Creates the User, or finds an existing one, and issues a new invite key: a reusable Auth Key
+  // that enrolls the User's client devices and Worker Hosts.
+  rpc InviteUser(InviteUserRequest) returns (InviteUserResponse);
+  rpc GetUser(GetUserRequest) returns (User);
+  // By name.
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+}
+
+message User {
+  // 1 to 40 lowercase letters, digits, hyphens or underscores, starting with a letter or digit.
+  string name = 1;
+  string display_name = 2;
+  int64 created_at_ms = 3;
+  // The Role the User's personal Tag takes; empty means the Control Plane's `personal` Role.
+  string role = 4;
+  // Shared Tags the User's devices may talk to, besides the User's own.
+  repeated string allowed_tag_ids = 5;
+}
+
+message InviteUserRequest {
+  string operation_id = 1;
+  string name = 2;
+  // Required for a new User; for an existing one, empty keeps it and a value must match.
+  string display_name = 3;
+  // SHA-256 of the invite key the caller generated.
+  bytes key_digest = 4;
+  // Zero means 7 days. At most 90 days.
+  uint64 expires_in_ms = 5;
+  // A new User only: the Role for their personal Tag.
+  string role = 6;
+  // A new User only: shared Tags their devices may talk to.
+  repeated string allowed_tag_ids = 7;
+}
+
+message InviteUserResponse {
+  User user = 1;
+  // The invite key's record, without its secret. Its `user` names the User.
+  AuthKey auth_key = 2;
+}
+
+message GetUserRequest { string name = 1; }
+
+message ListUsersRequest {
+  // At most this many Users; 0 means 100. At most 500.
+  uint32 limit = 1;
+  // The name of the last User on the previous page.
+  string cursor = 2;
+}
+
+message ListUsersResponse {
+  repeated User users = 1;
+  string next_cursor = 2;
+}
+
 message RevokeAuthKeyRequest { string name = 1; }
 
 message GetAuthKeyRequest { string name = 1; }
@@ -98,6 +155,9 @@ message Enrollment {
   // Every Tag. A Gateway with it serves connector accounts no Surface Account
   // names and delivers the admin operator's notifications.
   bool all_tags = 10;
+  // The User a client device or Worker Host belongs to: every client has one;
+  // a Worker Host enrolled with a host Auth Key has none.
+  string user = 11;
 }
 
 message WhoAmIRequest {}
@@ -164,6 +224,8 @@ message ResolvedCredential {
   string name = 2;
   // Hosts: the current registration generation.
   uint64 generation = 3;
+  // Clients and Worker Hosts: the User the enrollment belongs to, if any.
+  string user = 4;
 }
 
 message SetTagRunsOnRequest {

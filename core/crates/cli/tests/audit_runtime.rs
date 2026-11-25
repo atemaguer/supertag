@@ -637,20 +637,46 @@ async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Re
     assert_eq!(profiles["gateways"][1]["name"], "typed");
     assert_eq!(profiles["gateways"][1]["token"], token.as_str());
 
-    // A client Auth Key joins this device as client:NAME; only the enrolled credential is saved,
-    // and the device reaches only the Tags its key allows.
+    // A User's invite key joins this device as client:NAME; only the enrolled credential is
+    // saved, and the device reaches only the Tags the invitation allows.
     for tag in ["allowed", "hidden"] {
         services
             .json(&["tag", "put", tag, "--instructions", "Help"])
             .await?;
     }
+    // Client Auth Keys are gone: people join with an invitation.
+    let refused = timeout(
+        WAIT,
+        services
+            .operator(&[
+                "auth-key",
+                "create",
+                "laptops",
+                "--role",
+                "client",
+                "--all-tags",
+            ])
+            .output(),
+    )
+    .await??;
+    ensure!(!refused.status.success(), "a client Auth Key was created");
     let issued = services
         .json(&[
-            "auth-key", "create", "laptops", "--role", "client", "--tag", "allowed",
+            "user",
+            "invite",
+            "alice",
+            "--display-name",
+            "Alice Ng",
+            "--tag",
+            "allowed",
         ])
         .await?;
-    assert_eq!(issued["role"], "client");
-    let key = issued["auth_key"].as_str().context("auth_key")?.to_owned();
+    assert_eq!(issued["user"]["name"], "alice");
+    assert_eq!(issued["invite_key_name"], "alice-invite-1");
+    let key = issued["invite_key"]
+        .as_str()
+        .context("invite_key")?
+        .to_owned();
     let mut join = binary(&[
         "connect",
         &services.public,
@@ -710,23 +736,66 @@ async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Re
         let refused = timeout(WAIT, as_client(args).output()).await??;
         ensure!(!refused.status.success(), "a client ran {args:?}");
     }
-    // The one-time key admits no second device.
-    let mut again = binary(&["connect", &services.public, "--name", "again"]);
+    // The same key joins Alice's second device, and her conversation follows her there: a
+    // message sent from the laptop is her work on the desktop too.
+    let desktop_home = tempfile::tempdir()?;
+    let mut again = binary(&[
+        "connect",
+        &services.public,
+        "--name",
+        "work",
+        "--client-name",
+        "alice-desktop",
+    ]);
     again
-        .env("HOME", home.path())
+        .env("HOME", desktop_home.path())
         .env("SUPERTAG_OPERATOR_TOKEN", &key);
     let again = timeout(WAIT, again.output()).await??;
     ensure!(
-        !again.status.success()
-            && String::from_utf8_lossy(&again.stderr).contains("refused the Auth Key"),
+        again.status.success(),
         "{}",
         String::from_utf8_lossy(&again.stderr)
     );
+    let sent = timeout(
+        WAIT,
+        as_client(&["message", "allowed", "--no-wait", "Hello from the laptop"]).output(),
+    )
+    .await??;
+    ensure!(
+        sent.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sent.stderr)
+    );
+    let mut from_desktop = binary(&["get", "tasks", "--tag", "allowed", "--gateway", "work"]);
+    from_desktop.env("HOME", desktop_home.path());
+    let seen = timeout(WAIT, from_desktop.output()).await??;
+    ensure!(
+        seen.status.success(),
+        "{}",
+        String::from_utf8_lossy(&seen.stderr)
+    );
+    let turns = |output: &[u8]| -> Result<Vec<String>> {
+        let page: Value = serde_json::from_slice(output)?;
+        Ok(page["tasks"]
+            .as_array()
+            .context("tasks")?
+            .iter()
+            .filter_map(|task| task["task_id"].as_str().map(str::to_owned))
+            .collect())
+    };
+    let on_laptop = timeout(
+        WAIT,
+        as_client(&["get", "tasks", "--tag", "allowed"]).output(),
+    )
+    .await??;
+    let on_laptop = turns(&on_laptop.stdout)?;
+    assert_eq!(on_laptop.len(), 1, "the laptop's turn");
+    assert_eq!(turns(&seen.stdout)?, on_laptop);
     // Enrollment and the client's own calls are recorded under their full principals.
     let audit = services.audit().await?;
     assert!(
         audit.contains(&entry(
-            "auth-key:laptops",
+            "auth-key:alice-invite-1",
             "enrollment.join",
             "Client/alice-laptop",
             "succeeded",

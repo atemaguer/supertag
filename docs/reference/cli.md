@@ -53,8 +53,9 @@ Commands:
   gateway               Run a Gateway: the endpoint clients and operators connect to, which forwards their calls to the Control Plane, and collaboration surface webhooks and connections, reply delivery, and operator notifications as gateway:NAME. Or enroll, revoke, and rotate the credentials of Gateways
   worklet               Run this Worker Host's Worklet, which connects the host and runs accepted Tasks
   client                Revoke client devices and rotate their credentials
-  auth-key              Create and revoke Auth Keys that enroll Worker Hosts, Gateways, and clients
-  connect               Save a Gateway under a name for `--gateway NAME`. Reads one secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a masked prompt in a terminal: an operator token is checked and saved; a client Auth Key (stak_...) enrolls this device as client:NAME and saves only the resulting credential
+  auth-key              Create and revoke Auth Keys that enroll Worker Hosts and Gateways
+  user                  Admit people as Users: one invite key joins all of a User's devices and Worker Hosts
+  connect               Save a Gateway under a name for `--gateway NAME`. Reads one secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a masked prompt in a terminal: an operator token is checked and saved; a User's invite key (stak_...) enrolls this device as client:NAME and saves only the resulting credential
   disconnect            Forget a Gateway saved with `supertag connect`: remove it and its credential from this device. Its enrolled client stays until an operator revokes it. A Gateway saved in the desktop app is removed there
   tag                   Set up and retire Tags
   task                  Submit, cancel, and steer Tasks, and read their events, usage, and published results
@@ -2777,7 +2778,7 @@ Options:
 ## `supertag auth-key`
 
 ```text
-Create and revoke Auth Keys that enroll Worker Hosts, Gateways, and clients
+Create and revoke Auth Keys that enroll Worker Hosts and Gateways
 
 Usage: supertag auth-key [OPTIONS] <COMMAND>
 
@@ -2816,7 +2817,6 @@ Options:
           Possible values:
           - host:    Worker Hosts, with `supertag host enroll`
           - gateway: Gateways, with `supertag gateway enroll`
-          - client:  Clients (a device running the CLI or desktop app), with `supertag connect`
 
       --reusable
           Enroll any number of principals instead of one. A host name already taken enrolls as NAME-2, NAME-3, and so on
@@ -2834,7 +2834,7 @@ Options:
           Shorter lifetime. Defaults to the maximum: one hour, or 90 days with --reusable
 
       --tag <TAG>
-          Host and client keys: a Tag the enrollee may run (host) or talk to (client). Repeat for more Tags
+          Host keys: a Tag the host may run. Repeat for more Tags
 
       --all-tags
           Every Tag. On a gateway key, it lets the Gateway serve connector accounts that no Surface Account names, which admit work on any Tag, and deliver the admin operator's notifications
@@ -2862,10 +2862,57 @@ Options:
           Print help
 ```
 
+## `supertag user`
+
+```text
+Admit people as Users: one invite key joins all of a User's devices and Worker Hosts
+
+Usage: supertag user [OPTIONS] <COMMAND>
+
+Commands:
+  invite  Admit a person as a User and print an invite key that joins all their devices and Worker Hosts. Invite an existing User again, with only their name, for another key
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+  -h, --help
+          Print help
+```
+
+## `supertag user invite`
+
+```text
+Admit a person as a User and print an invite key that joins all their devices and Worker Hosts. Invite an existing User again, with only their name, for another key
+
+Usage: supertag user invite [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  The User's name, such as alice: 1-50 lowercase letters, digits, and hyphens
+
+Options:
+      --display-name <DISPLAY_NAME>
+          The person's name as people read it, such as "Alice Ng". Required for a new User
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --role <ROLE>
+          The Role the User's personal Tag takes. Default: the Control Plane's `personal` Role
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+      --tag <TAG>
+          A shared Tag the User's devices may talk to. Repeat for more Tags
+      --expires-in-seconds <EXPIRES_IN_SECONDS>
+          Shorter or longer key lifetime. Default: 7 days; at most 90 days
+  -h, --help
+          Print help
+```
+
 ## `supertag connect`
 
 ```text
-Save a Gateway under a name for `--gateway NAME`. Reads one secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a masked prompt in a terminal: an operator token is checked and saved; a client Auth Key (stak_...) enrolls this device as client:NAME and saves only the resulting credential
+Save a Gateway under a name for `--gateway NAME`. Reads one secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a masked prompt in a terminal: an operator token is checked and saved; a User's invite key (stak_...) enrolls this device as client:NAME and saves only the resulting credential
 
 Usage: supertag connect [OPTIONS] --name <NAME> <URL>
 
@@ -3840,6 +3887,7 @@ Commands:
   workspace-volume      Read one Workspace data Volume [alias: workspace-volumes]
   workspace             Read one remote Workspace, or list them [alias: workspaces]
   auth-key              Read one Auth Key without its secret, or list Auth Keys, revoked, expired and used ones included [alias: auth-keys]
+  user                  Read one User, or list Users: the people admitted to the Control Plane [alias: users]
   operator-token        Read one Operator Token without its secret, or list them. Admin operator token only [alias: operator-tokens]
   artifact              Read an artifact's provenance and exact file manifest, or list the artifacts a Task captured [alias: artifacts]
   artifact-publication  Read one artifact publication, or list those approved from an Objective [alias: artifact-publications]
@@ -4237,6 +4285,29 @@ Usage: supertag get auth-key [OPTIONS] [ID]
 
 Arguments:
   [ID]  Auth Key name. Omit to list
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --limit <LIMIT>
+          Most entries to return on one page [default: 100]
+      --cursor <CURSOR>
+          The next_cursor of the previous page [default: ""]
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+  -h, --help
+          Print help
+```
+
+## `supertag get user`
+
+```text
+Read one User, or list Users: the people admitted to the Control Plane
+
+Usage: supertag get user [OPTIONS] [ID]
+
+Arguments:
+  [ID]  User name. Omit to list
 
 Options:
       --gateway <URL|NAME>
@@ -4688,7 +4759,7 @@ Describe one resource in readable text
 Usage: supertag describe [OPTIONS] <KIND> <ID>
 
 Arguments:
-  <KIND>  The kind of resource. Only kinds read by ID can be described [possible values: tag, task, objective, team, host, gateway, client, session, role, permission-set, context-set, volume, volume-copy, workspace-volume, workspace, auth-key, operator-token, artifact, artifact-publication, artifact-consumption, landing, reply, input, surface-account, surface-location, approval, question, schedule, memory]
+  <KIND>  The kind of resource. Only kinds read by ID can be described [possible values: tag, task, objective, team, host, gateway, client, session, role, permission-set, context-set, volume, volume-copy, workspace-volume, workspace, auth-key, user, operator-token, artifact, artifact-publication, artifact-consumption, landing, reply, input, surface-account, surface-location, approval, question, schedule, memory]
   <ID>    The resource's ID or name
 
 Options:

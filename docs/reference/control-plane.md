@@ -124,11 +124,13 @@ missing from the table is refused.
 | `operator:local` (admin), `operator:token:NAME` | The admin operator token, or an Operator Token (`stop_…`) | Deployment configuration; `supertag operator-token create` |
 | `host:NAME` | Enrolled credential (`stcr_…`) | `supertag host enroll NAME` with a host Auth Key |
 | `gateway:NAME` | Enrolled credential (`stcr_…`) | `supertag gateway enroll NAME` with a gateway Auth Key |
-| `client:NAME` | Enrolled credential (`stcr_…`) | `supertag connect URL` with a client Auth Key, or the desktop app |
+| `client:NAME` | Enrolled credential (`stcr_…`) | `supertag connect URL` with a User's invite key, or the desktop app. The device acts for its User, `user:NAME` |
 | One running Task Attempt | Task Attempt credential (`stat_…`) | Returned by `StartTask` to the Worklet that holds the Task Attempt's lease |
 
 An Auth Key (`stak_…`) admits one role, chosen when an operator creates it with
-`supertag auth-key create NAME --role host|gateway|client`. It is accepted only to enroll. The
+`supertag auth-key create NAME --role host|gateway`. A User's invite key, from
+`supertag user invite NAME`, enrolls that User's client devices and Worker Hosts. Either is
+accepted only to enroll. The
 enrollee generates its credential, and the Control Plane stores only its digest. An enrollee
 rotates its own credential, an operator rotates or revokes anyone's, and a revoked or replaced
 credential is refused on the next call and ends open streams within about a second.

@@ -11,6 +11,14 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- Users: a person admitted to the Control Plane. `supertag user invite alice --display-name
+  "Alice Ng"` prints one invite key that joins all of Alice's devices with `supertag connect` and,
+  with `supertag host enroll`, Worker Hosts that belong to her. Each device enrolls as its own
+  `client:NAME` but acts for Alice as `user:alice`, so her conversations, Objectives and their
+  work follow her from her laptop to the desktop app. `--tag` names the shared Tags she may talk
+  to. `supertag get users` and `describe user` read them, and an approver entry is now
+  `user:NAME`. Client Auth Keys are gone: `auth-key create --role client` is refused, and a device
+  enrolled with one before must join again with an invite key.
 - A host service's `opencode-auth-file` in `supertag.yaml` names OpenCode's sign-in file, such as
   `~/.local/share/opencode/auth.json`, so OpenCode Tags can use providers without a key variable,
   such as `opencode-go`. SuperTag stores only the path. It replaces the undocumented

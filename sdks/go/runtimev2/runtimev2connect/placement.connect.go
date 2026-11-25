@@ -25,6 +25,8 @@ const (
 	PlacementName = "supertag.runtime.v2.Placement"
 	// AuthKeysName is the fully-qualified name of the AuthKeys service.
 	AuthKeysName = "supertag.runtime.v2.AuthKeys"
+	// UsersName is the fully-qualified name of the Users service.
+	UsersName = "supertag.runtime.v2.Users"
 	// EnrollmentsName is the fully-qualified name of the Enrollments service.
 	EnrollmentsName = "supertag.runtime.v2.Enrollments"
 	// CredentialDirectoryName is the fully-qualified name of the CredentialDirectory service.
@@ -49,6 +51,12 @@ const (
 	AuthKeysListAuthKeysProcedure = "/supertag.runtime.v2.AuthKeys/ListAuthKeys"
 	// AuthKeysGetAuthKeyProcedure is the fully-qualified name of the AuthKeys's GetAuthKey RPC.
 	AuthKeysGetAuthKeyProcedure = "/supertag.runtime.v2.AuthKeys/GetAuthKey"
+	// UsersInviteUserProcedure is the fully-qualified name of the Users's InviteUser RPC.
+	UsersInviteUserProcedure = "/supertag.runtime.v2.Users/InviteUser"
+	// UsersGetUserProcedure is the fully-qualified name of the Users's GetUser RPC.
+	UsersGetUserProcedure = "/supertag.runtime.v2.Users/GetUser"
+	// UsersListUsersProcedure is the fully-qualified name of the Users's ListUsers RPC.
+	UsersListUsersProcedure = "/supertag.runtime.v2.Users/ListUsers"
 	// EnrollmentsEnrollProcedure is the fully-qualified name of the Enrollments's Enroll RPC.
 	EnrollmentsEnrollProcedure = "/supertag.runtime.v2.Enrollments/Enroll"
 	// EnrollmentsWhoAmIProcedure is the fully-qualified name of the Enrollments's WhoAmI RPC.
@@ -292,6 +300,134 @@ func (UnimplementedAuthKeysHandler) ListAuthKeys(context.Context, *connect.Reque
 
 func (UnimplementedAuthKeysHandler) GetAuthKey(context.Context, *connect.Request[runtimev2.GetAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AuthKeys.GetAuthKey is not implemented"))
+}
+
+// UsersClient is a client for the supertag.runtime.v2.Users service.
+type UsersClient interface {
+	// Creates the User, or finds an existing one, and issues a new invite key: a reusable Auth Key
+	// that enrolls the User's client devices and Worker Hosts.
+	InviteUser(context.Context, *connect.Request[runtimev2.InviteUserRequest]) (*connect.Response[runtimev2.InviteUserResponse], error)
+	GetUser(context.Context, *connect.Request[runtimev2.GetUserRequest]) (*connect.Response[runtimev2.User], error)
+	// By name.
+	ListUsers(context.Context, *connect.Request[runtimev2.ListUsersRequest]) (*connect.Response[runtimev2.ListUsersResponse], error)
+}
+
+// NewUsersClient constructs a client for the supertag.runtime.v2.Users service. By default, it uses
+// the Connect protocol with the binary Protobuf Codec, asks for gzipped responses, and sends
+// uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or
+// connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewUsersClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) UsersClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	usersMethods := runtimev2.File_supertag_runtime_v2_placement_proto.Services().ByName("Users").Methods()
+	return &usersClient{
+		inviteUser: connect.NewClient[runtimev2.InviteUserRequest, runtimev2.InviteUserResponse](
+			httpClient,
+			baseURL+UsersInviteUserProcedure,
+			connect.WithSchema(usersMethods.ByName("InviteUser")),
+			connect.WithClientOptions(opts...),
+		),
+		getUser: connect.NewClient[runtimev2.GetUserRequest, runtimev2.User](
+			httpClient,
+			baseURL+UsersGetUserProcedure,
+			connect.WithSchema(usersMethods.ByName("GetUser")),
+			connect.WithClientOptions(opts...),
+		),
+		listUsers: connect.NewClient[runtimev2.ListUsersRequest, runtimev2.ListUsersResponse](
+			httpClient,
+			baseURL+UsersListUsersProcedure,
+			connect.WithSchema(usersMethods.ByName("ListUsers")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// usersClient implements UsersClient.
+type usersClient struct {
+	inviteUser *connect.Client[runtimev2.InviteUserRequest, runtimev2.InviteUserResponse]
+	getUser    *connect.Client[runtimev2.GetUserRequest, runtimev2.User]
+	listUsers  *connect.Client[runtimev2.ListUsersRequest, runtimev2.ListUsersResponse]
+}
+
+// InviteUser calls supertag.runtime.v2.Users.InviteUser.
+func (c *usersClient) InviteUser(ctx context.Context, req *connect.Request[runtimev2.InviteUserRequest]) (*connect.Response[runtimev2.InviteUserResponse], error) {
+	return c.inviteUser.CallUnary(ctx, req)
+}
+
+// GetUser calls supertag.runtime.v2.Users.GetUser.
+func (c *usersClient) GetUser(ctx context.Context, req *connect.Request[runtimev2.GetUserRequest]) (*connect.Response[runtimev2.User], error) {
+	return c.getUser.CallUnary(ctx, req)
+}
+
+// ListUsers calls supertag.runtime.v2.Users.ListUsers.
+func (c *usersClient) ListUsers(ctx context.Context, req *connect.Request[runtimev2.ListUsersRequest]) (*connect.Response[runtimev2.ListUsersResponse], error) {
+	return c.listUsers.CallUnary(ctx, req)
+}
+
+// UsersHandler is an implementation of the supertag.runtime.v2.Users service.
+type UsersHandler interface {
+	// Creates the User, or finds an existing one, and issues a new invite key: a reusable Auth Key
+	// that enrolls the User's client devices and Worker Hosts.
+	InviteUser(context.Context, *connect.Request[runtimev2.InviteUserRequest]) (*connect.Response[runtimev2.InviteUserResponse], error)
+	GetUser(context.Context, *connect.Request[runtimev2.GetUserRequest]) (*connect.Response[runtimev2.User], error)
+	// By name.
+	ListUsers(context.Context, *connect.Request[runtimev2.ListUsersRequest]) (*connect.Response[runtimev2.ListUsersResponse], error)
+}
+
+// NewUsersHandler builds an HTTP handler from the service implementation. It returns the path on
+// which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewUsersHandler(svc UsersHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	usersMethods := runtimev2.File_supertag_runtime_v2_placement_proto.Services().ByName("Users").Methods()
+	usersInviteUserHandler := connect.NewUnaryHandler(
+		UsersInviteUserProcedure,
+		svc.InviteUser,
+		connect.WithSchema(usersMethods.ByName("InviteUser")),
+		connect.WithHandlerOptions(opts...),
+	)
+	usersGetUserHandler := connect.NewUnaryHandler(
+		UsersGetUserProcedure,
+		svc.GetUser,
+		connect.WithSchema(usersMethods.ByName("GetUser")),
+		connect.WithHandlerOptions(opts...),
+	)
+	usersListUsersHandler := connect.NewUnaryHandler(
+		UsersListUsersProcedure,
+		svc.ListUsers,
+		connect.WithSchema(usersMethods.ByName("ListUsers")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.Users/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case UsersInviteUserProcedure:
+			usersInviteUserHandler.ServeHTTP(w, r)
+		case UsersGetUserProcedure:
+			usersGetUserHandler.ServeHTTP(w, r)
+		case UsersListUsersProcedure:
+			usersListUsersHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedUsersHandler returns CodeUnimplemented from all methods.
+type UnimplementedUsersHandler struct{}
+
+func (UnimplementedUsersHandler) InviteUser(context.Context, *connect.Request[runtimev2.InviteUserRequest]) (*connect.Response[runtimev2.InviteUserResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Users.InviteUser is not implemented"))
+}
+
+func (UnimplementedUsersHandler) GetUser(context.Context, *connect.Request[runtimev2.GetUserRequest]) (*connect.Response[runtimev2.User], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Users.GetUser is not implemented"))
+}
+
+func (UnimplementedUsersHandler) ListUsers(context.Context, *connect.Request[runtimev2.ListUsersRequest]) (*connect.Response[runtimev2.ListUsersResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Users.ListUsers is not implemented"))
 }
 
 // EnrollmentsClient is a client for the supertag.runtime.v2.Enrollments service.

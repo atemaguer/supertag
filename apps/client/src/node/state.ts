@@ -65,7 +65,7 @@ export interface GatewayStateOptions extends SessionOptions {
   readonly cache: string;
   /** Finds the local Gateway with the app's CLI. */
   readonly discoverLocal: DiscoverLocal;
-  /** The name this device enrolls under with a client Auth Key; the host name by default. */
+  /** The name this device enrolls under with a User's invite key; the host name by default. */
   readonly deviceName?: () => string;
 }
 
@@ -232,7 +232,7 @@ export class GatewayState {
       if ([...trimmed].length > 80 || /\p{Cc}/u.test(trimmed)) {
         throw "Enter a Gateway name of up to 80 characters.";
       }
-      // A client Auth Key joins this device once; only the enrolled credential is saved.
+      // A User's invite key joins this device once; only the enrolled credential is saved.
       let credential = token;
       if (isAuthKey(token)) {
         const joining = await Session.connect(target, token, this.options);

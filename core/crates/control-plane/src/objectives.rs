@@ -185,10 +185,10 @@ fn operator(principal: &str) -> Result<()> {
     Ok(())
 }
 
-/// An operator or a client: the principals that create and direct Objectives.
+/// An operator or a person: the principals that create and direct Objectives.
 fn actor(principal: &str) -> Result<()> {
     name("principal", principal)?;
-    if !["operator:", "client:"].iter().any(|prefix| {
+    if !["operator:", "client:", "user:"].iter().any(|prefix| {
         principal
             .strip_prefix(prefix)
             .is_some_and(|id| !id.is_empty())

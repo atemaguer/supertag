@@ -48,7 +48,7 @@ Configuration resources: **Tag, Role, Permission Set, Context Set, Workspace, Vo
 Account**.
 
 Operational resources: **Objective, Team, Workstream, Mailbox, Session, Schedule, Memory, Task,
-Task Attempt, Worker Host, Auth Key, Operator Token**.
+Task Attempt, Worker Host, Auth Key, Operator Token, User**.
 
 Extension contracts (as named in `api-stability.md`): **Connector**. Write *harness* and *harness
 adapter* in lowercase, like other industry terms, and keep code identifiers such as `Harness` as

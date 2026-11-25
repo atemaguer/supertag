@@ -61,9 +61,9 @@ fn eligible(approval: &Approval, principal: &str) -> bool {
         .any(|approver| approver_is(approver, principal))
 }
 
-/// Whether an approver entry names `principal`: `client:NAME` in full, an operator by its ID.
+/// Whether an approver entry names `principal`: `user:NAME` in full, an operator by its ID.
 fn approver_is(approver: &str, principal: &str) -> bool {
-    if approver.starts_with("client:") {
+    if approver.starts_with("user:") {
         approver == principal
     } else {
         principal.strip_prefix("operator:") == Some(approver)
@@ -1162,17 +1162,14 @@ mod eligibility_tests {
         let open = approval(&[]);
         assert!(eligible(&open, "operator:local"));
         assert!(eligible(&open, "operator:token:laptop"));
-        assert!(!eligible(&open, "client:alice"));
-        let named = approval(&["local", "client:alice"]);
+        assert!(!eligible(&open, "user:alice"));
+        let named = approval(&["local", "user:alice"]);
         assert!(eligible(&named, "operator:local"));
-        assert!(eligible(&named, "client:alice"));
-        assert!(!eligible(&named, "client:bob"));
+        assert!(eligible(&named, "user:alice"));
+        assert!(!eligible(&named, "user:bob"));
         assert!(!eligible(&named, "operator:token:laptop"));
         // A client name never matches an operator, nor an operator ID a client.
-        assert!(!eligible(&approval(&["alice"]), "client:alice"));
-        assert!(!eligible(
-            &approval(&["client:alice"]),
-            "operator:client:alice"
-        ));
+        assert!(!eligible(&approval(&["alice"]), "user:alice"));
+        assert!(!eligible(&approval(&["user:alice"]), "operator:user:alice"));
     }
 }

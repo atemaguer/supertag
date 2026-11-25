@@ -3,7 +3,7 @@
  * connect and never saved), and the Gateways saved with `supertag connect` or in the desktop
  * app. Enter switches, which ends every call and stream of the current one; `a` adds one; `d`
  * forgets a saved one (`supertag disconnect`, or the desktop app's store) and its cache. Adding
- * takes a name, the URL, an Operator Token or a client Auth Key (which enrolls this device), and
+ * takes a name, the URL, an Operator Token or an invite key (which enrolls this device), and
  * optional TLS files, and saves with `supertag connect`, the CLI's own store.
  */
 import { describe } from "@supertag/client/model";
@@ -22,7 +22,7 @@ import {
 const FIELDS = [
   { key: "name", label: "Name", placeholder: "work" },
   { key: "url", label: "URL", placeholder: "https://supertag.example.com" },
-  { key: "token", label: "Token", placeholder: "Operator Token or client Auth Key (stak_…)" },
+  { key: "token", label: "Token", placeholder: "Operator Token or invite key (stak_…)" },
   { key: "serverCaFile", label: "CA file", placeholder: "optional: PEM of a private CA" },
   { key: "clientCertFile", label: "Client cert", placeholder: "optional: for mutual TLS" },
   { key: "clientKeyFile", label: "Client key", placeholder: "optional: its private key" },

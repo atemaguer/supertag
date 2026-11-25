@@ -175,7 +175,7 @@ export async function tlsOf(saved: {
 export interface NewCliGateway {
   name: string;
   url: string;
-  /** An Operator Token, enrolled credential, or a client Auth Key the CLI enrolls with. */
+  /** An Operator Token, enrolled credential, or a User's invite key the CLI enrolls with. */
   token: string;
   replace?: boolean;
   serverCaFile?: string;

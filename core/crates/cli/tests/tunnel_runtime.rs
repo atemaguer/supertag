@@ -671,15 +671,16 @@ mod roles {
             AcceptEventRequest, ClaimConnectorRequest, ClaimOperatorNotificationRequest,
             ClaimTaskRequest, CreateAuthKeyRequest, CreateObjectiveRequest,
             CreateOperatorTokenRequest, EnrollRequest, GetObjectiveRequest, GetTagRequest,
-            GetTaskRequest, ListAuditEntriesRequest, ListAuthKeysRequest, ListConversationsRequest,
-            ListHostsRequest, ListInboxItemsRequest, ListObjectivesRequest,
-            ListOperatorTokensRequest, PrincipalRole, PutTagRequest, RegisterHostRequest,
-            RevokeAuthKeyRequest, RevokeEnrollmentRequest, RotateCredentialRequest,
-            SendMessageRequest, SubmitTaskRequest, WhoAmIRequest, auth_keys_client::AuthKeysClient,
-            connector_client::ConnectorClient, conversations_client::ConversationsClient,
-            enrollments_client::EnrollmentsClient, inbox_client::InboxClient,
-            objectives_client::ObjectivesClient, operator_access_client::OperatorAccessClient,
-            operator_notifications_client::OperatorNotificationsClient,
+            GetTaskRequest, InviteUserRequest, ListAuditEntriesRequest, ListAuthKeysRequest,
+            ListConversationsRequest, ListHostsRequest, ListInboxItemsRequest,
+            ListObjectivesRequest, ListOperatorTokensRequest, PrincipalRole, PutTagRequest,
+            RegisterHostRequest, RevokeAuthKeyRequest, RevokeEnrollmentRequest,
+            RotateCredentialRequest, SendMessageRequest, SubmitTaskRequest, WhoAmIRequest,
+            auth_keys_client::AuthKeysClient, connector_client::ConnectorClient,
+            conversations_client::ConversationsClient, enrollments_client::EnrollmentsClient,
+            inbox_client::InboxClient, objectives_client::ObjectivesClient,
+            operator_access_client::OperatorAccessClient,
+            operator_notifications_client::OperatorNotificationsClient, users_client::UsersClient,
             worker_host_client::WorkerHostClient,
         },
     };
@@ -824,6 +825,26 @@ mod roles {
         reusable: bool,
     ) -> Result<String> {
         let key = new_secret(AUTH_KEY_SECRET_PREFIX);
+        // People's devices join with a User's invite key, always reusable: `alice-key` invites
+        // the User alice.
+        if role == PrincipalRole::Client {
+            let user = name.trim_end_matches("-key");
+            UsersClient::new(channel.clone())
+                .invite_user(call(
+                    InviteUserRequest {
+                        name: user.into(),
+                        display_name: user.into(),
+                        operation_id: Uuid::new_v4().to_string(),
+                        key_digest: Sha256::digest(key.as_bytes()).to_vec(),
+                        allowed_tag_ids: tags.iter().map(|tag| (*tag).into()).collect(),
+                        ..Default::default()
+                    },
+                    admin,
+                )?)
+                .await?;
+            let _ = reusable;
+            return Ok(key);
+        }
         OperatorClient::new(channel.clone())
             .create_auth_key(call(
                 CreateAuthKeyRequest {
@@ -1287,7 +1308,8 @@ mod roles {
             )?)
             .await?
             .into_inner();
-        ensure!(created.created_by == "client:alice", "{created:?}");
+        // A device acts for its User.
+        ensure!(created.created_by == "user:alice", "{created:?}");
         objectives
             .clone()
             .create_objective(call(
@@ -1422,7 +1444,7 @@ mod roles {
                 .await,
         )?;
         ensure!(
-            enroll(&native, &alice_key, PrincipalRole::Client, "mallory")
+            enroll(&native, &host_key, PrincipalRole::Host, "mallory")
                 .await
                 .unwrap_err()
                 .code()
@@ -1430,18 +1452,18 @@ mod roles {
             "a one-time key enrolled twice"
         );
         ensure!(
-            enroll(&native, &bob_key, PrincipalRole::Host, "mallory")
+            enroll(&native, &bob_key, PrincipalRole::Gateway, "mallory")
                 .await
                 .unwrap_err()
                 .code()
                 == Code::FailedPrecondition,
-            "a client key enrolled a host"
+            "a User's invite key enrolled a Gateway"
         );
         enroll(&tunnel, &bob_key, PrincipalRole::Client, "carol").await?;
         AuthKeysClient::new(native.clone())
             .revoke_auth_key(call(
                 RevokeAuthKeyRequest {
-                    name: "bob-key".into(),
+                    name: "bob-invite-1".into(),
                 },
                 &admin,
             )?)
@@ -1463,17 +1485,19 @@ mod roles {
             "an enrolled credential enrolled"
         );
         let brief = run_json(deployment.operator(&[
-            "auth-key",
-            "create",
+            "user",
+            "invite",
             "brief",
-            "--role",
-            "client",
-            "--all-tags",
+            "--display-name",
+            "Brief",
             "--expires-in-seconds",
             "1",
         ]))
         .await?;
-        let brief = brief["auth_key"].as_str().context("auth_key")?.to_owned();
+        let brief = brief["invite_key"]
+            .as_str()
+            .context("invite_key")?
+            .to_owned();
         sleep(Duration::from_millis(1_200)).await;
         ensure!(
             enroll(&tunnel, &brief, PrincipalRole::Client, "frank")
@@ -1507,7 +1531,7 @@ mod roles {
         };
         for (actor, action, target, succeeded) in [
             (
-                "auth-key:alice-key",
+                "auth-key:alice-invite-1",
                 "enrollment.join",
                 "Client/alice",
                 true,

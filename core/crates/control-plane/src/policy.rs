@@ -193,13 +193,13 @@ impl Resource for PermissionSet {
         }
         let mut approvers = BTreeSet::new();
         for value in &self.approvers {
-            const FORMAT: &str = "approvers must be operator:<id> or client:<name>";
+            const FORMAT: &str = "approvers must be operator:<id> or user:<name>";
             let (kind, id) = value
                 .trim()
                 .split_once(':')
                 .ok_or_else(|| invalid(FORMAT))?;
             match kind {
-                "operator" | "client" => {}
+                "operator" | "user" => {}
                 // Approval is a person's check on a Tag's work, so no Tag decides one.
                 "tag" => {
                     return Err(invalid(&format!(
@@ -1734,7 +1734,7 @@ fn base_runtime_requirement(rule: &ApprovalRule) -> RuntimeApprovalRequirement {
             .operator_ids
             .iter()
             .map(|id| {
-                if id.starts_with("client:") {
+                if id.starts_with("user:") {
                     id.clone()
                 } else {
                     format!("operator:{id}")
@@ -1813,7 +1813,7 @@ fn project_runtime(
                 .filter_map(|id| {
                     id.strip_prefix("operator:")
                         .map(str::to_owned)
-                        .or_else(|| id.starts_with("client:").then(|| id.clone()))
+                        .or_else(|| id.starts_with("user:").then(|| id.clone()))
                 })
                 .collect(),
         })

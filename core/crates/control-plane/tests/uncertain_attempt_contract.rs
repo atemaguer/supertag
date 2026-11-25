@@ -18,8 +18,8 @@ use uuid::Uuid;
 
 const BASE: i64 = 1_790_000_000_000;
 const OPERATOR: &str = "operator:alice";
-const ADA: &str = "client:ada";
-const MALLORY: &str = "client:mallory";
+const ADA: &str = "user:ada";
+const MALLORY: &str = "user:mallory";
 /// The lease of an Attempt that never renews it.
 const LEASE: i64 = 30_000;
 const GRACE: i64 = 60_000;
@@ -31,15 +31,16 @@ struct Fixture {
     pool: AnyPool,
 }
 
-/// Enrolls `client:NAME` with a client Auth Key limited to `tags`.
+/// Invites the User NAME, who may talk to `tags`, and enrolls one of their devices. The device
+/// acts as `user:NAME`.
 async fn enroll_client(store: &Store, name: &str, tags: &[&str]) {
     let key = Sha256::digest(format!("client key {name}")).to_vec();
     store
-        .create_auth_key(
+        .invite_user(
             OPERATOR,
-            &CreateAuthKeyRequest {
-                name: format!("{name}-key"),
-                role: PrincipalRole::Client.into(),
+            &InviteUserRequest {
+                name: name.into(),
+                display_name: name.into(),
                 operation_id: format!("{name}-key"),
                 key_digest: key.clone(),
                 allowed_tag_ids: tags.iter().map(|tag| (*tag).into()).collect(),

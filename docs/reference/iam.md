@@ -108,7 +108,7 @@ The approvers of a request are the union of the approvers of the sets that requi
 | Entry | Who may decide |
 | --- | --- |
 | `operator:<operatorId>` | That operator, authenticated to the Control Plane's operator RPCs |
-| `client:<name>` | That client device, enrolled with a client Auth Key. Only for `workstream:post` and `mailbox:send` |
+| `user:<name>` | That [User](resource-model.md#users), from any of their devices. Only for `workstream:post` and `mailbox:send` |
 
 A Permission Set that names a Tag (`tag:<id>`) as an approver is refused: approval is a person's
 check on a Tag's work, so no Tag decides one.

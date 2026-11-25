@@ -255,7 +255,7 @@ machine:
 ```sh
 supertag auth-key create laptop-hosts --role host --reusable --label verify
 supertag auth-key create gateway --role gateway --all-tags
-supertag auth-key create phone --role client --tag lead
+supertag user invite ada --display-name "Ada" --tag lead
 ```
 
 On each remote Worker Host, start from an empty state directory. Then run

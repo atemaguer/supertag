@@ -55,6 +55,7 @@ mod tasks;
 mod teams;
 mod tui;
 mod update;
+mod users;
 mod volumes;
 mod work_sessions;
 mod worker_host;
@@ -503,17 +504,24 @@ enum Command {
         #[command(subcommand)]
         command: enrollments::ClientCommand,
     },
-    /// Create and revoke Auth Keys that enroll Worker Hosts, Gateways, and clients.
+    /// Create and revoke Auth Keys that enroll Worker Hosts and Gateways.
     AuthKey {
         #[command(flatten)]
         connection: Connection,
         #[command(subcommand)]
         command: auth_keys::AuthKeyCommand,
     },
+    /// Admit people as Users: one invite key joins all of a User's devices and Worker Hosts.
+    User {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: users::UserCommand,
+    },
     /// Save a Gateway under a name for `--gateway NAME`. Reads one secret from
     /// SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a masked prompt
-    /// in a terminal: an operator token is checked and saved; a client Auth Key (stak_...) enrolls
-    /// this device as client:NAME and saves only the resulting credential.
+    /// in a terminal: an operator token is checked and saved; a User's invite key (stak_...)
+    /// enrolls this device as client:NAME and saves only the resulting credential.
     Connect {
         /// The Gateway origin, such as https://supertag.example.com, or its wss:// tunnel URL.
         url: String,
@@ -1081,6 +1089,10 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => auth_keys::run(connection, command).await?,
+        Command::User {
+            connection,
+            command,
+        } => users::run(connection, command).await?,
         Command::Connect {
             url,
             name,
@@ -1569,6 +1581,7 @@ async fn state_owner(
         .add_service(supertag_protocol::v2::workspace_volumes_server::WorkspaceVolumesServer::new(plane.clone()))
         .add_service(supertag_protocol::v2::placement_server::PlacementServer::new(plane.clone()))
         .add_service(supertag_protocol::v2::auth_keys_server::AuthKeysServer::new(plane.clone()))
+        .add_service(supertag_protocol::v2::users_server::UsersServer::new(plane.clone()))
         .add_service(supertag_protocol::v2::attempt_workspace_mounts_server::AttemptWorkspaceMountsServer::new(plane.clone()))
         .add_service(
             ArtifactDirectoryServer::new(plane.clone())
@@ -2595,8 +2608,8 @@ fn local_state_of(connection: &Connection) -> Result<Option<PathBuf>> {
 }
 
 /// Reads one secret and saves the Control Plane by name. An operator token is proven against the
-/// Control Plane and saved; a client Auth Key enrolls this device and only the enrolled credential
-/// is saved.
+/// Control Plane and saved; a User's invite key enrolls this device and only the enrolled
+/// credential is saved.
 async fn connect_control_plane(
     mut saved: profiles::NewGateway,
     client_name: Option<String>,
@@ -2616,7 +2629,7 @@ async fn connect_control_plane(
         supertag_protocol::is_secret(supertag_protocol::AUTH_KEY_SECRET_PREFIX, &saved.token);
     ensure!(
         auth_key || client_name.is_none(),
-        "--client-name applies only when connecting with a client Auth Key"
+        "--client-name applies only when connecting with an invite key"
     );
     // The token goes only to the origin that would be saved.
     saved.url = profiles::checked_origin(&saved)?;
@@ -2655,7 +2668,7 @@ async fn connect_control_plane(
             caller.principal.split_once(':'),
             Some(("operator" | "client", _))
         ),
-        "connect with an operator token or a client Auth Key, not a {} credential",
+        "connect with an operator token or an invite key, not a {} credential",
         caller
             .principal
             .split_once(':')

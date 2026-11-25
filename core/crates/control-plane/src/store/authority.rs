@@ -131,7 +131,9 @@ impl Store {
         name("principal", principal)?;
         // An operator decides for any Task it sees. A client decides only for a Task it owns, its
         // own conversation's turn, once the host confirmed execution stopped (checked below).
-        let client = principal.strip_prefix("client:");
+        let client = principal
+            .strip_prefix("user:")
+            .or_else(|| principal.strip_prefix("client:"));
         let operator_id = principal.strip_prefix("operator:");
         let caller_id = operator_id.or(client).ok_or(StoreError::PermissionDenied)?;
         name("caller ID", caller_id)?;
@@ -1217,6 +1219,9 @@ fn resolution_row(row: &AnyRow) -> Result<AttemptResolution> {
         resolution.operator_id = operator.into();
     } else if let Some(host) = principal.strip_prefix("host:") {
         resolution.worker_host_id = host.into();
+    } else if principal.starts_with("user:") {
+        // A User decided, from one of their devices.
+        resolution.client_id = principal;
     } else if let Some(client) = principal.strip_prefix("client:") {
         resolution.client_id = client.into();
     } else if principal == AUTOMATIC_PRINCIPAL {

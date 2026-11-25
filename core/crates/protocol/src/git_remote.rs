@@ -133,7 +133,7 @@ pub fn tag_author_email(tag_id: &str) -> String {
 }
 
 /// The `Co-authored-by` value for the person who asked for the work, from their principal, such
-/// as `operator:ada` or `user:slack/T1/U2`. Empty when no person asked.
+/// as `operator:ada` or `user:alice`. Empty when no person asked.
 pub fn requester_co_author(principal: &str) -> String {
     let name = principal
         .strip_prefix("operator:")

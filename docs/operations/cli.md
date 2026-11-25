@@ -483,8 +483,8 @@ Save a shared Control Plane under a name. `connect` reads one secret, from
 `SUPERTAG_OPERATOR_TOKEN` or a masked prompt:
 
 - an **Operator Token** an administrator issued you with `supertag operator-token create`; or
-- a client **Auth Key** (`stak_...`) from `supertag auth-key create NAME --role client`, which
-  enrolls this device as `client:NAME` and saves only the device's own credential.
+- your **invite key** (`stak_...`) from `supertag user invite NAME`, which enrolls this device as
+  `client:NAME` and saves only the device's own credential. The device acts for you, the User.
 
 ```sh
 supertag connect https://supertag.example.com --name team

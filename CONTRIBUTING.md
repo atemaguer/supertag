@@ -338,8 +338,8 @@ harness (Claude Code, Codex, OpenCode, Cursor) a Tag named `memeval-HARNESS`, an
 scenario on each: a Session teaches a preference and a fact, later Sessions recall them, one
 corrects the preference, a Work Session proposes a fix for the stale fact and an unverified note,
 the operator's conversation shares their Sessions' memory, an Objective (whose Sessions are
-shared) teaches what the operator's own Sessions must not see, and a second person, a client
-device it enrolls with a client Auth Key, teaches what neither the operator's Sessions nor the
+shared) teaches what the operator's own Sessions must not see, and a second person, a User whose
+device it enrolls with their invite key, teaches what neither the operator's Sessions nor the
 shared ones may see. Each of the three stores then gets its daily review, which merges and drops
 its proposals, lists only its own audience's Sessions, and on Codex consolidates that store's
 notes into the summary its later turns load. It moves the Control Plane's clock a day ahead so

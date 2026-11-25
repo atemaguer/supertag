@@ -106,7 +106,7 @@ that required. It registers no Worker Host and runs no Task.
 
 Worker Hosts are not part of setup. Create an Auth Key with `supertag auth-key create NAME --role
 host`, then run `supertag host enroll` and `supertag worklet` on each host against the Control
-Plane's URL. Teammates' devices join with a client Auth Key (`--role client`) and
+Plane's URL. Teammates' devices join with an invite key from `supertag user invite NAME` and
 `supertag connect`.
 
 To check a deployed Gateway's notification destinations, run `supertag test notification

@@ -2177,7 +2177,7 @@ class CreateAuthKeyRequest(_message.Message):
     def __init__(self, operation_id: _Optional[str] = ..., key_digest: _Optional[bytes] = ..., expires_in_ms: _Optional[int] = ..., allowed_tag_ids: _Optional[_Iterable[str]] = ..., all_tags: _Optional[bool] = ..., reusable: _Optional[bool] = ..., ephemeral: _Optional[bool] = ..., labels: _Optional[_Iterable[str]] = ..., name: _Optional[str] = ..., role: _Optional[_Union[PrincipalRole, str]] = ...) -> None: ...
 
 class AuthKey(_message.Message):
-    __slots__ = ("expires_at_ms", "allowed_tag_ids", "all_tags", "reusable", "ephemeral", "labels", "revoked", "name", "created_at_ms", "used", "role")
+    __slots__ = ("expires_at_ms", "allowed_tag_ids", "all_tags", "reusable", "ephemeral", "labels", "revoked", "name", "created_at_ms", "used", "role", "user")
     EXPIRES_AT_MS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
     ALL_TAGS_FIELD_NUMBER: _ClassVar[int]
@@ -2189,6 +2189,7 @@ class AuthKey(_message.Message):
     CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     USED_FIELD_NUMBER: _ClassVar[int]
     ROLE_FIELD_NUMBER: _ClassVar[int]
+    USER_FIELD_NUMBER: _ClassVar[int]
     expires_at_ms: int
     allowed_tag_ids: _containers.RepeatedScalarFieldContainer[str]
     all_tags: bool
@@ -2200,7 +2201,8 @@ class AuthKey(_message.Message):
     created_at_ms: int
     used: bool
     role: PrincipalRole
-    def __init__(self, expires_at_ms: _Optional[int] = ..., allowed_tag_ids: _Optional[_Iterable[str]] = ..., all_tags: _Optional[bool] = ..., reusable: _Optional[bool] = ..., ephemeral: _Optional[bool] = ..., labels: _Optional[_Iterable[str]] = ..., revoked: _Optional[bool] = ..., name: _Optional[str] = ..., created_at_ms: _Optional[int] = ..., used: _Optional[bool] = ..., role: _Optional[_Union[PrincipalRole, str]] = ...) -> None: ...
+    user: str
+    def __init__(self, expires_at_ms: _Optional[int] = ..., allowed_tag_ids: _Optional[_Iterable[str]] = ..., all_tags: _Optional[bool] = ..., reusable: _Optional[bool] = ..., ephemeral: _Optional[bool] = ..., labels: _Optional[_Iterable[str]] = ..., revoked: _Optional[bool] = ..., name: _Optional[str] = ..., created_at_ms: _Optional[int] = ..., used: _Optional[bool] = ..., role: _Optional[_Union[PrincipalRole, str]] = ..., user: _Optional[str] = ...) -> None: ...
 
 class RegisterHostRequest(_message.Message):
     __slots__ = ("incarnation_id",)

@@ -117,7 +117,7 @@ export class Session {
   }
 
   /**
-   * Joins this device as `client:NAME` with a client Auth Key, this session's bearer, and
+   * Joins this device as `client:NAME` with a User's invite key, this session's bearer, and
    * returns its new enrolled credential. The key is presented once and never kept.
    */
   async enroll(name: string): Promise<string> {
@@ -138,7 +138,7 @@ export class Session {
         return code === Code.PermissionDenied ||
           code === Code.FailedPrecondition ||
           code === Code.Unauthenticated
-          ? "The Gateway refused this Auth Key. Ask an operator for a new client Auth Key."
+          ? "The Gateway refused this Auth Key. Ask an operator for a new invite key."
           : rpcError(error);
       },
     );

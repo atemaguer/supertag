@@ -146,6 +146,10 @@ fn rule(path: &str) -> Option<Rule> {
             CreateAuthKeyRequest,
             |value| named("AuthKey", &value.name)
         ),
+        ("Users", "InviteUser") => rule!("user.invite", "User", InviteUserRequest, |value| named(
+            "User",
+            &value.name
+        )),
         ("AuthKeys", "RevokeAuthKey") => rule!(
             "auth-key.revoke",
             "AuthKey",

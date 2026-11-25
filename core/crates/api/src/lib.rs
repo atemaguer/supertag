@@ -208,6 +208,7 @@ impl Api {
             self.workspace_volumes_service(),
             self.placement_service(),
             self.auth_keys_service(),
+            self.users_service(),
             self.attempt_workspace_mounts_service(),
             transfers.attempt_artifacts_service(),
             transfers.artifact_sources_service(),
@@ -295,6 +296,7 @@ impl Api {
             let mut upstream =
                 self.credentials
                     .upstream(request.into_inner(), caller.identity()?, remaining);
+            caller.mark_user(upstream.metadata_mut())?;
             if caller.role == Role::Host {
                 upstream
                     .metadata_mut()

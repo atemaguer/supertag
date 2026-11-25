@@ -134,11 +134,14 @@ whole system rather than another first-class resource.
 - <a id="host-service"></a>**host service** — a `host` entry in `supertag.yaml` that connects its machine as a
   Worker Host. See [host service](supertag-yaml.md#host-service).
 - <a id="auth-key"></a>**Auth Key** — an operator-issued secret that enrolls principals of one role: a
-  Worker Host (`host`), a Gateway (`gateway`), or a client device (`client`). A one-time key
-  lasts at most an hour, and a reusable key at most 90 days. See
+  Worker Host (`host`) or a Gateway (`gateway`). A User's invite key is an Auth Key too. A
+  one-time key lasts at most an hour, and a reusable key at most 90 days. See
   [Identities and access](../operations/control-plane.md#identities-and-access).
-- <a id="client"></a>**client** — a device running the CLI or the desktop app, enrolled with a client
-  Auth Key as `client:NAME`.
+- <a id="user"></a>**User** — a person admitted to the Control Plane, never a machine. One invite key
+  joins all their devices and the Worker Hosts that belong to them, and every device acts for them
+  as `user:NAME`. See [Users](resource-model.md#users).
+- <a id="client"></a>**client** — a device running the CLI or the desktop app, enrolled with its
+  User's invite key as `client:NAME`.
 - <a id="admin-token"></a>**admin token** — the admin Operator Token: the Control Plane's full operator credential, which
   alone manages Operator Tokens. `supertag setup deployment` generates it; a local Control Plane
   also accepts this machine's local operator credential.

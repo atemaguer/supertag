@@ -12191,8 +12191,9 @@ type CreateAuthKeyRequest struct {
 	// The operator's name for the key: 1 to 63 lowercase letters, digits,
 	// hyphens or underscores, starting with a letter or digit. Never reused.
 	Name string `protobuf:"bytes,3300,opt,name=name,proto3" json:"name,omitempty"`
-	// Required: the one role every enrollee of the key takes. HOST, GATEWAY or
-	// CLIENT; it never changes after creation.
+	// Required: the one role every enrollee of the key takes, HOST or GATEWAY; it
+	// never changes after creation. Client devices join with a User's invite key
+	// (Users.InviteUser) instead.
 	Role          PrincipalRole `protobuf:"varint,4100,opt,name=role,proto3,enum=supertag.runtime.v2.PrincipalRole" json:"role,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -12311,8 +12312,11 @@ type AuthKey struct {
 	Name        string `protobuf:"bytes,3300,opt,name=name,proto3" json:"name,omitempty"`
 	CreatedAtMs int64  `protobuf:"varint,3301,opt,name=created_at_ms,json=createdAtMs,proto3" json:"created_at_ms,omitempty"`
 	// A one-time key enrolled its principal, or a reusable key enrolled at least one.
-	Used          bool          `protobuf:"varint,3302,opt,name=used,proto3" json:"used,omitempty"`
-	Role          PrincipalRole `protobuf:"varint,4100,opt,name=role,proto3,enum=supertag.runtime.v2.PrincipalRole" json:"role,omitempty"`
+	Used bool `protobuf:"varint,3302,opt,name=used,proto3" json:"used,omitempty"`
+	// CLIENT for a User's invite key, which also enrolls that User's Worker Hosts.
+	Role PrincipalRole `protobuf:"varint,4100,opt,name=role,proto3,enum=supertag.runtime.v2.PrincipalRole" json:"role,omitempty"`
+	// A User's invite key: the User every device and Worker Host it enrolls belongs to.
+	User          string `protobuf:"bytes,4101,opt,name=user,proto3" json:"user,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -12422,6 +12426,13 @@ func (x *AuthKey) GetRole() PrincipalRole {
 		return x.Role
 	}
 	return PrincipalRole_PRINCIPAL_ROLE_UNSPECIFIED
+}
+
+func (x *AuthKey) GetUser() string {
+	if x != nil {
+		return x.User
+	}
+	return ""
 }
 
 type RegisterHostRequest struct {
@@ -27957,7 +27968,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x06labels\x18\xfa\n" +
 	" \x03(\tR\x06labels\x12\x13\n" +
 	"\x04name\x18\xe4\x19 \x01(\tR\x04name\x127\n" +
-	"\x04role\x18\x84  \x01(\x0e2\".supertag.runtime.v2.PrincipalRoleR\x04roleJ\x04\b\x01\x10\x02\"\xf6\x02\n" +
+	"\x04role\x18\x84  \x01(\x0e2\".supertag.runtime.v2.PrincipalRoleR\x04roleJ\x04\b\x01\x10\x02\"\x8b\x03\n" +
 	"\aAuthKey\x12\"\n" +
 	"\rexpires_at_ms\x18\x02 \x01(\x03R\vexpiresAtMs\x12&\n" +
 	"\x0fallowed_tag_ids\x18\x03 \x03(\tR\rallowedTagIds\x12\x19\n" +
@@ -27973,7 +27984,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x04name\x18\xe4\x19 \x01(\tR\x04name\x12#\n" +
 	"\rcreated_at_ms\x18\xe5\x19 \x01(\x03R\vcreatedAtMs\x12\x13\n" +
 	"\x04used\x18\xe6\x19 \x01(\bR\x04used\x127\n" +
-	"\x04role\x18\x84  \x01(\x0e2\".supertag.runtime.v2.PrincipalRoleR\x04roleJ\x04\b\x01\x10\x02J\x06\b\xfb\n" +
+	"\x04role\x18\x84  \x01(\x0e2\".supertag.runtime.v2.PrincipalRoleR\x04role\x12\x13\n" +
+	"\x04user\x18\x85  \x01(\tR\x04userJ\x04\b\x01\x10\x02J\x06\b\xfb\n" +
 	"\x10\xfc\n" +
 	"\"<\n" +
 	"\x13RegisterHostRequest\x12%\n" +

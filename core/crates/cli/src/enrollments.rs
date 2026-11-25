@@ -364,7 +364,7 @@ async fn rotate_saved_client(connection: Connection) -> Result<Value> {
     }))
 }
 
-/// Enrolls this device as `client:NAME` with a client Auth Key and returns its new credential.
+/// Enrolls this device as `client:NAME` with a User's invite key and returns its new credential.
 /// The Auth Key is used once and never saved.
 pub(crate) async fn enroll_client(
     channel: ProtocolChannel,

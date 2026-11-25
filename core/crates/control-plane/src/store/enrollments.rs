@@ -93,6 +93,11 @@ impl Store {
         operator(principal)?;
         super::resource_id("Auth Key name", &input.name)?;
         let role = required_role(input.role)?;
+        if role == Role::Client {
+            return Err(invalid(
+                "client devices join with a User's invite key; run `supertag user invite NAME`",
+            ));
+        }
         if role != Role::Host && (input.ephemeral || !input.labels.is_empty()) {
             return Err(invalid("only host Auth Keys are ephemeral or grant labels"));
         }
@@ -323,7 +328,9 @@ impl Store {
             return Err(StoreError::PermissionDenied);
         }
         let key_role = Role::parse(&row.try_get::<String, _>("role")?)?;
-        if key_role != role {
+        // A User's invite key enrolls their client devices and their Worker Hosts.
+        let user: Option<String> = row.try_get("user_name")?;
+        if key_role != role && !(user.is_some() && role == Role::Host) {
             return Err(StoreError::FailedPrecondition(format!(
                 "this Auth Key enrolls {}, not {}",
                 key_role.plural(),
@@ -397,6 +404,7 @@ impl Store {
             Some(&key_label),
             if role == Role::Client { &tags } else { &[] },
             role != Role::Host && all_tags,
+            user.as_deref(),
             now,
         )
         .await?;
@@ -464,6 +472,7 @@ impl Store {
             None,
             &[],
             role == Role::Gateway,
+            None,
             now,
         )
         .await?;
@@ -488,7 +497,7 @@ impl Store {
         let Ok(token) = credential_digest(token_digest) else {
             return Ok(None);
         };
-        let Some(row) = sqlx::query("SELECT e.role,e.name,e.last_used_at_ms,h.generation FROM supertag_v2_enrollments e LEFT JOIN supertag_v2_hosts h ON e.role='host' AND h.host_id=e.name WHERE e.token_digest=$1 AND e.revoked_at_ms IS NULL AND (e.role<>'host' OR h.revoked_at_ms IS NULL)")
+        let Some(row) = sqlx::query("SELECT e.role,e.name,e.user_name,e.last_used_at_ms,h.generation FROM supertag_v2_enrollments e LEFT JOIN supertag_v2_hosts h ON e.role='host' AND h.host_id=e.name WHERE e.token_digest=$1 AND e.revoked_at_ms IS NULL AND (e.role<>'host' OR h.revoked_at_ms IS NULL)")
             .bind(&token).fetch_optional(&self.pool).await?
         else {
             return Ok(None);
@@ -510,6 +519,9 @@ impl Store {
             generation: row
                 .try_get::<Option<i64>, _>("generation")?
                 .map_or(0, |generation| generation as u64),
+            user: row
+                .try_get::<Option<String>, _>("user_name")?
+                .unwrap_or_default(),
         }))
     }
 
@@ -700,11 +712,21 @@ impl Store {
     }
 }
 
-/// The Tags a client may talk to: `None` for every Tag, and for every principal but a client.
+/// The Tags a person may talk to: `None` for every Tag, and for every principal but a User or a
+/// client. A User reaches the shared Tags their invitation lists.
 pub(crate) async fn client_tags_in(
     transaction: &mut Transaction<'_, Any>,
     principal: &str,
 ) -> Result<Option<Vec<String>>> {
+    if let Some(user) = principal.strip_prefix("user:") {
+        let tags: String =
+            sqlx::query_scalar("SELECT allowed_tag_ids FROM supertag_v2_users WHERE name=$1")
+                .bind(user)
+                .fetch_optional(&mut **transaction)
+                .await?
+                .ok_or(StoreError::PermissionDenied)?;
+        return Ok(Some(serde_json::from_str(&tags)?));
+    }
     let Some(id) = principal.strip_prefix("client:") else {
         return Ok(None);
     };
@@ -740,11 +762,12 @@ async fn insert_enrollment_in(
     auth_key_name: Option<&str>,
     tags: &[String],
     all_tags: bool,
+    user: Option<&str>,
     now: i64,
 ) -> Result<()> {
-    sqlx::query("INSERT INTO supertag_v2_enrollments (role,name,token_digest,auth_key_name,allowed_tag_ids,all_tags,enrolled_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7)")
+    sqlx::query("INSERT INTO supertag_v2_enrollments (role,name,token_digest,auth_key_name,allowed_tag_ids,all_tags,enrolled_at_ms,user_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)")
         .bind(role.as_str()).bind(id).bind(token).bind(auth_key_name)
-        .bind(serde_json::to_string(tags)?).bind(i64::from(all_tags)).bind(now)
+        .bind(serde_json::to_string(tags)?).bind(i64::from(all_tags)).bind(now).bind(user)
         .execute(&mut **transaction).await?;
     sqlx::query("INSERT INTO supertag_v2_enrollment_secrets (token_digest,role,name,credential_revision) VALUES ($1,$2,$3,1)")
         .bind(token).bind(role.as_str()).bind(id)
@@ -783,10 +806,13 @@ fn enrollment_row(row: &AnyRow) -> Result<Enrollment> {
         credential_revision: row.try_get::<i64, _>("credential_revision")? as u64,
         allowed_tag_ids: serde_json::from_str(&row.try_get::<String, _>("allowed_tag_ids")?)?,
         all_tags: row.try_get::<i64, _>("all_tags")? == 1,
+        user: row
+            .try_get::<Option<String>, _>("user_name")?
+            .unwrap_or_default(),
     })
 }
 
-fn auth_key_row(row: &AnyRow) -> Result<AuthKey> {
+pub(super) fn auth_key_row(row: &AnyRow) -> Result<AuthKey> {
     Ok(AuthKey {
         expires_at_ms: row.try_get("expires_at_ms")?,
         allowed_tag_ids: serde_json::from_str(&row.try_get::<String, _>("allowed_tag_ids")?)?,
@@ -801,12 +827,18 @@ fn auth_key_row(row: &AnyRow) -> Result<AuthKey> {
         role: Role::parse(&row.try_get::<String, _>("role")?)?
             .proto()
             .into(),
+        user: row
+            .try_get::<Option<String>, _>("user_name")?
+            .unwrap_or_default(),
     })
 }
 
 /// A new credential is no enrollee's current or earlier credential, no Auth Key, and no
 /// Operator Token.
-async fn credential_unused_in(transaction: &mut Transaction<'_, Any>, token: &str) -> Result<()> {
+pub(super) async fn credential_unused_in(
+    transaction: &mut Transaction<'_, Any>,
+    token: &str,
+) -> Result<()> {
     let used: Option<String> = sqlx::query_scalar("SELECT key_digest FROM supertag_v2_auth_keys WHERE key_digest=$1 UNION SELECT token_digest FROM supertag_v2_enrollment_secrets WHERE token_digest=$1 UNION SELECT secret_digest FROM supertag_v2_operator_token_secrets WHERE secret_digest=$1")
         .bind(token)
         .fetch_optional(&mut **transaction)
@@ -877,7 +909,7 @@ pub(crate) fn enrollee_name(id: &str) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn credential_digest(bytes: &[u8]) -> Result<String> {
+pub(crate) fn credential_digest(bytes: &[u8]) -> Result<String> {
     if bytes.len() != 32 {
         return Err(invalid("credential digest must be 32 bytes"));
     }
@@ -893,6 +925,6 @@ pub(super) fn credential_digest(bytes: &[u8]) -> Result<String> {
         .collect())
 }
 
-fn fingerprint(value: &impl serde::Serialize) -> Result<String> {
+pub(super) fn fingerprint(value: &impl serde::Serialize) -> Result<String> {
     Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(value)?)))
 }

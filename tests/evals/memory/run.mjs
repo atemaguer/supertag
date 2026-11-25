@@ -38,7 +38,7 @@ export const LIVE_TURN_TOKENS = 400_000;
 /** Each store's daily review waits for this many of its turns, and a day after its first. */
 const REVIEW_AFTER_TURNS = 10;
 const DAY_AND_AN_HOUR_MS = 25 * 60 * 60 * 1000;
-/** The second person, a client device enrolled with an Auth Key. */
+/** The second person, a User whose device joined with their invite key. */
 const SECOND_PERSON = "bob-eval";
 
 /** The scope the Worker Host names a person's store by. */
@@ -376,8 +376,9 @@ class Deployment {
   }
 
   /**
-   * Enrolls the second person: a client device joined with a client Auth Key that may talk to
-   * every eval Tag, saved as the Gateway `second` in this deployment's home.
+   * Enrolls the second person: the User bob-eval, who may talk to every eval Tag, with one device
+   * joined by their invite key and saved as the Gateway `second` in this deployment's home. The
+   * device acts for the User, so the person's store is the User's.
    */
   async enrollSecondPerson(tags) {
     const ps = await this.json(["ps", "--output", "json"]);
@@ -389,21 +390,23 @@ class Deployment {
       ? service.address
       : `http://${service.address}`;
     const issued = await this.json([
-      "auth-key",
-      "create",
-      "second-person",
-      "--role",
-      "client",
+      "user",
+      "invite",
+      SECOND_PERSON,
+      "--display-name",
+      "Bob",
       ...tags.flatMap((tag) => ["--tag", tag]),
     ]);
     const joined = JSON.parse(
       await run(
         this.options.cli,
         ["connect", url, "--name", "second", "--client-name", SECOND_PERSON],
-        { ...this.environment, SUPERTAG_OPERATOR_TOKEN: issued.auth_key },
+        { ...this.environment, SUPERTAG_OPERATOR_TOKEN: issued.invite_key },
       ),
     );
-    this.secondPrincipal = joined.connected_as;
+    if (joined.connected_as !== `client:${SECOND_PERSON}`)
+      throw new Error(`the second person's device joined as ${joined.connected_as}`);
+    this.secondPrincipal = `user:${SECOND_PERSON}`;
     this.secondScope = personScope(this.secondPrincipal);
   }
 

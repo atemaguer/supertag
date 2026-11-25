@@ -202,8 +202,8 @@ operator:local: cleanup confirmed, complete true per execution report.` It never
 execution stopped: the decision is accepted only once the Worker Host confirmed it, and otherwise
 the app says that an operator who checked the host must use `supertag task resolve-attempt`.
 
-An operator may decide for any Task it sees. A client, a person enrolled with a client Auth Key,
-may decide only for its own Task, such as its own conversation's turn, and only after the Worker
+An operator may decide for any Task it sees. A [User](resource-model.md#users), from any of their
+devices, may decide only for their own Task, such as their own conversation's turn, and only after the Worker
 Host confirmed the Task Attempt stopped, so two executions of the Session cannot overlap. A client
 may mark such a turn failed, and run it again only when SuperTag recorded no effect for it (see
 below); otherwise only an operator may run it again.

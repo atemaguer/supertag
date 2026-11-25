@@ -29,7 +29,7 @@ use supertag_protocol::authorization::{
 };
 use supertag_protocol::{
     ATTEMPT_CREDENTIAL_SECRET_PREFIX, ATTEMPT_PRINCIPAL_PREFIX, AUTH_KEY_SECRET_PREFIX,
-    CREDENTIAL_SECRET_PREFIX, INTERNAL_PRINCIPAL_HEADER, MAX_MESSAGE_BYTES,
+    CREDENTIAL_SECRET_PREFIX, INTERNAL_PRINCIPAL_HEADER, INTERNAL_USER_HEADER, MAX_MESSAGE_BYTES,
     is_operator_token_secret, is_secret,
     v2::{
         PrincipalRole, ResolveCredentialRequest,
@@ -92,6 +92,8 @@ pub struct Caller {
     pub admin: bool,
     /// Hosts: the generation the Control Plane has registered.
     pub generation: u64,
+    /// Clients: the User the device belongs to. The state owner acts for it as `user:NAME`.
+    pub user: Option<String>,
     pub(crate) credential: Credential,
 }
 
@@ -109,6 +111,18 @@ impl Caller {
         self.principal
             .parse()
             .map_err(|_| Status::internal("invalid caller identity"))
+    }
+
+    /// Names the caller's User on a call to the state owner, beside its principal.
+    pub(crate) fn mark_user(&self, metadata: &mut MetadataMap) -> Result<(), Status> {
+        if let Some(user) = &self.user {
+            metadata.insert(
+                INTERNAL_USER_HEADER,
+                user.parse()
+                    .map_err(|_| Status::internal("invalid caller User"))?,
+            );
+        }
+        Ok(())
     }
 }
 
@@ -158,6 +172,7 @@ impl Api {
                 principal: self.credentials.admin_principal.clone(),
                 admin: true,
                 generation: 0,
+                user: None,
                 credential: Credential::Admin,
             });
         }
@@ -174,6 +189,7 @@ impl Api {
                 principal: format!("{ATTEMPT_PRINCIPAL_PREFIX}{}", hex(&digest)),
                 admin: false,
                 generation: 0,
+                user: None,
                 credential: Credential::Attempt,
             })
         } else if is_secret(AUTH_KEY_SECRET_PREFIX, secret) {
@@ -236,6 +252,8 @@ impl Api {
             principal: format!("{prefix}:{}", resolved.name),
             admin: false,
             generation: resolved.generation,
+            user: (role == Role::Client && !resolved.user.is_empty())
+                .then(|| resolved.user.clone()),
             credential,
         })
     }
@@ -370,6 +388,7 @@ where
         Box::pin(async move {
             // The internal principal is the state owner's alone; no caller may name one.
             request.headers_mut().remove(INTERNAL_PRINCIPAL_HEADER);
+            request.headers_mut().remove(INTERNAL_USER_HEADER);
             let path = request.uri().path().to_owned();
             let metadata = MetadataMap::from_headers(request.headers().clone());
             match admit(&api, &path, &metadata).await {

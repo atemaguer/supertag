@@ -170,13 +170,14 @@ Keep the admin token to yourself. Each teammate gets the secrets for what they d
 
 | Secret | Lets them | Create it with |
 | --- | --- | --- |
-| A client Auth Key | Connect their CLI or desktop app as their own device | `supertag auth-key create NAME --role client --tag TAG` |
+| An invite key | Join their CLI and desktop app as their own devices, as a [User](../operations/control-plane.md#users) | `supertag user invite NAME --display-name "NAME" --tag TAG` |
 | An Operator Token | Run operator commands, recorded under the token's name | `supertag operator-token create NAME` |
 | A host Auth Key | Join their computer as a Worker Host | `supertag auth-key create NAME --role host --tag TAG` |
 
 Each command prints its secret once. Send it over a private channel. A teammate connects with
-`supertag connect https://supertag.example.com --name team` and pastes the secret. A client Auth
-Key enrolls their device as `client:NAME` and saves only the device's own credential.
+`supertag connect https://supertag.example.com --name team` and pastes the secret. An invite key
+enrolls each of their devices as `client:NAME` and saves only the device's own credential; every
+device acts for them, so their conversations follow them across devices.
 
 To end access, revoke what you issued:
 

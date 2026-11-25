@@ -146,6 +146,9 @@ pub const HOST_GENERATION_HEADER: &str = "x-supertag-host-generation";
 /// The principal a call acts as, from the Control Plane's API tier to its state owner only. The
 /// state owner has no network listener, and the API tier never forwards this header from a caller.
 pub const INTERNAL_PRINCIPAL_HEADER: &str = "x-supertag-internal-principal";
+/// The User a client device belongs to, beside its principal on the same internal hop. The device
+/// converses and owns work as `user:NAME`. Like the principal, never forwarded from a caller.
+pub const INTERNAL_USER_HEADER: &str = "x-supertag-internal-user";
 /// The connector account a Gateway call acts for. It selects, and never grants: the Control Plane
 /// refuses an account that is not bound to the calling Gateway.
 pub const CONNECTOR_ACCOUNT_HEADER: &str = "x-supertag-connector-account";
@@ -291,6 +294,16 @@ pub fn internal_principal<'a, T>(
         .and_then(|value| value.to_str().ok())
         .filter(|value| !value.is_empty())
         .ok_or_else(|| Status::permission_denied("authenticated caller identity required"))
+}
+
+/// The User named on the internal hop beside the principal. Read it only after
+/// [`internal_principal`] has checked the hop's credential.
+pub fn internal_user<T>(request: &Request<T>) -> Option<&str> {
+    request
+        .metadata()
+        .get(INTERNAL_USER_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty())
 }
 
 pub fn validate_checkpoint_reference(reference: &v2::CheckpointReference) -> Result<(), Status> {

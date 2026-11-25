@@ -273,7 +273,7 @@ describe.skipIf(CLI === undefined)(
       }
     });
 
-    it("enrolls this device with a client Auth Key and saves only its credential", async () => {
+    it("enrolls this device with a User's invite key and saves only its credential", async () => {
       const home = await directory("auth-key");
       const stack = await Stack.start({ root: home, name: "state", token: "join-operator" });
       try {
@@ -281,19 +281,19 @@ describe.skipIf(CLI === undefined)(
         await stack.putTag("hidden-tag", undefined, false);
         const created = await runCli(
           [
-            "auth-key",
-            "create",
-            "--role",
-            "client",
+            "user",
+            "invite",
+            "alice",
+            "--display-name",
+            "Alice",
             "--tag",
             "allowed-tag",
             "--gateway",
             stack.url,
-            "laptops",
           ],
           { ...baseEnv(home), SUPERTAG_OPERATOR_TOKEN: "join-operator" },
         );
-        const key = (JSON.parse(created) as { auth_key: string }).auth_key;
+        const key = (JSON.parse(created) as { invite_key: string }).invite_key;
         expect(key).toMatch(/^stak_/u);
 
         const state = app(home);
@@ -310,16 +310,14 @@ describe.skipIf(CLI === undefined)(
         const saved = await readFile(path.join(home, "config", "gateways.json"), "utf8");
         expect(saved).not.toContain(key);
         expect(saved).toContain("stcr_");
-        // The one-time key admits no second device.
+        // A key the Gateway does not know is refused with what to do next.
         await expect(
           app(home, { store: path.join(home, "other", "gateways.json") }).saveGateway(
             stack.url,
             "Again",
-            key,
+            `stak_${"0".repeat(64)}`,
           ),
-        ).rejects.toBe(
-          "The Gateway refused this Auth Key. Ask an operator for a new client Auth Key.",
-        );
+        ).rejects.toBe("The Gateway refused this Auth Key. Ask an operator for a new invite key.");
       } finally {
         await stack.stop();
       }

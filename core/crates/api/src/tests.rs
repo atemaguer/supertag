@@ -69,6 +69,12 @@ impl CredentialDirectory for Directory {
             role: role.into(),
             name: name.into(),
             generation,
+            // A client device belongs to a User.
+            user: if role == PrincipalRole::Client {
+                "alice".into()
+            } else {
+                String::new()
+            },
         };
         let found = if input.kind == PrincipalRole::Operator as i32 {
             (input.token_digest == digest(TOKEN))

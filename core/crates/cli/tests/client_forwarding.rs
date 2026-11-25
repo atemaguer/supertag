@@ -32,13 +32,14 @@ use supertag_protocol::{
     negotiation::ProtocolChannel,
     new_secret,
     v2::{
-        CreateAuthKeyRequest, CreateOperatorTokenRequest, EnrollRequest, FollowConversationRequest,
+        CreateOperatorTokenRequest, EnrollRequest, FollowConversationRequest, InviteUserRequest,
         ListAuditEntriesRequest, ListAuthKeysRequest, ListConversationsRequest, ListHostsRequest,
         PrincipalRole, PutTagRequest, ReconcileTagRelationshipsRequest, RevokeEnrollmentRequest,
         WhoAmIRequest, auth_keys_client::AuthKeysClient, conversations_client::ConversationsClient,
         enrollments_client::EnrollmentsClient,
         manifest_relationships_client::ManifestRelationshipsClient,
         operator_access_client::OperatorAccessClient, operator_client::OperatorClient,
+        users_client::UsersClient,
     },
 };
 use tokio::{
@@ -201,17 +202,18 @@ async fn raw_code(channel: &ProtocolChannel, path: &str, headers: &[(&str, &str)
     status(trailers.get("grpc-status").context("no gRPC status")?)
 }
 
-/// Creates a client Auth Key and enrolls `name` with it through the Gateway.
+/// Invites the User alice, who may talk to the reviewer, and enrolls her device `name` with the
+/// invite key through the Gateway.
 async fn enroll_client(channel: &ProtocolChannel, admin: &str, name: &str) -> Result<String> {
     let key = new_secret(AUTH_KEY_SECRET_PREFIX);
-    OperatorClient::new(channel.clone())
-        .create_auth_key(call(
-            CreateAuthKeyRequest {
+    UsersClient::new(channel.clone())
+        .invite_user(call(
+            InviteUserRequest {
                 operation_id: Uuid::new_v4().to_string(),
                 key_digest: Sha256::digest(key.as_bytes()).to_vec(),
-                all_tags: true,
-                name: format!("{name}-key"),
-                role: PrincipalRole::Client as i32,
+                name: "alice".into(),
+                display_name: "Alice".into(),
+                allowed_tag_ids: vec!["reviewer".into()],
                 ..Default::default()
             },
             admin,

@@ -59,7 +59,7 @@ table of roles:
 | --- | --- | --- |
 | The admin operator | The admin Operator Token | Every operator service, including `OperatorAccess` |
 | A named operator, `token:NAME` | An Operator Token | Every operator service except Operator Token management in `OperatorAccess` |
-| A client device, `client:NAME` | The credential `supertag connect` saved from a client Auth Key | Operator services, limited to the Tags its key named |
+| A User's device, `client:NAME` | The credential `supertag connect` saved from the User's invite key | Operator services, limited to the Tags the User's invitation named, acting for the User as `user:NAME` |
 | A Worker Host's Worklet, `host:NAME` | Its host credential | `WorkerHost` registration, claims, leases, finishing, and checkpoints, and `HostLandings`, `VolumeObjects`, `Transfers`, `WorkspaceGitAccess`, and `ArtifactSources` |
 | A running Task Attempt's Worker | The Task Attempt credential `WorkerHost.StartTask` returned (`stat_…`) | That Task Attempt's data calls on `WorkerHost`, such as its events, text, questions, usage, network log, history, and Context Item pins, and the `Attempt…` services |
 | A Gateway, `gateway:NAME` | Its Gateway credential | `Connector`, `ReplyProgress`, and `OperatorNotifications` |

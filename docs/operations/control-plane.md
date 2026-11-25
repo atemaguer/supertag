@@ -56,14 +56,13 @@ authentication. See [Identity and access](../reference/iam.md).
 | --- | --- | --- |
 | The admin operator | The admin Operator Token from setup, or this machine's local operator credential | `supertag setup deployment`, or `supertag up` |
 | Another operator | A named Operator Token, `token:NAME` | `supertag operator-token create NAME` (admin only) |
-| A client device | A device credential, `client:NAME`, enrolled with a client Auth Key | `supertag auth-key create NAME --role client`, then `supertag connect` |
-| A Worker Host | A host credential, `host:NAME`, enrolled with a host Auth Key | `supertag auth-key create NAME --role host`, then `supertag host enroll` or `supertag up` |
+| A User's device | A device credential, `client:NAME`, enrolled with the User's invite key. It acts for the User, as `user:NAME` | `supertag user invite NAME`, then `supertag connect` |
+| A Worker Host | A host credential, `host:NAME`, enrolled with a host Auth Key, or with a User's invite key for a host that belongs to them | `supertag auth-key create NAME --role host`, then `supertag host enroll` or `supertag up` |
 | A Gateway | A Gateway credential, `gateway:NAME` | `supertag setup deployment` for `gateway:local`; otherwise a gateway Auth Key and `supertag gateway enroll` |
 
-An **Auth Key** enrolls principals of exactly one role and never changes role. A one-time key
-enrolls one principal and lasts at most an hour; `--reusable` keys last up to 90 days. `--tag`
-limits a host to the Tags it may run and a client to the Tags it may talk to; `--all-tags`
-removes the limit. On a host key, `--label` gives every host that joins a placement label that a
+An **Auth Key** enrolls Worker Hosts or Gateways, exactly one role, and never changes role. A
+one-time key enrolls one principal and lasts at most an hour; `--reusable` keys last up to 90
+days. `--tag` limits a host to the Tags it may run; `--all-tags` removes the limit. On a host key, `--label` gives every host that joins a placement label that a
 Tag's `runsOn` can select. Revoking an Auth Key stops further enrollment; principals that already
 joined stay enrolled.
 
@@ -77,6 +76,23 @@ Rotate or revoke an enrolled principal with `host rotate-credential`, `client
 rotate-credential`, `gateway rotate-credential`, and the matching `revoke` commands. A revoked
 credential is refused at once, and its name is never reused.
 
+### Users
+
+A **User** is a person admitted to the Control Plane, never a machine. Invite one, and send them
+the key it prints over a private channel:
+
+```sh
+supertag user invite alice --display-name "Alice Ng" --tag release-bot --gateway team
+supertag get users --gateway team
+```
+
+The invite key is a reusable Auth Key that lasts 7 days (`--expires-in-seconds` changes that, up
+to 90 days). It joins every device Alice uses with `supertag connect`, and a computer she runs
+Tags on with `supertag host enroll`. Each device enrolls as its own `client:NAME`, so you can
+revoke one alone, but acts for Alice: her conversations and work follow her from her laptop to
+the desktop app. `--tag` names the shared Tags she may talk to. Inviting an existing User with
+only their name issues another key.
+
 ## Manage a remote Control Plane
 
 ### Connect the CLI
@@ -86,7 +102,7 @@ supertag connect https://supertag.example.com --name team
 ```
 
 `connect` reads one secret from `SUPERTAG_OPERATOR_TOKEN` or a masked prompt. It saves an
-Operator Token after checking it. It uses a client Auth Key (`stak_...`) to enroll this device and
+Operator Token after checking it. It uses a User's invite key (`stak_...`) to enroll this device and
 saves only the device credential. It saves the Control Plane in the CLI's store; commands also read the
 names the desktop app saves. For a certificate from your own CA, add
 `--server-ca-file`; for a Control Plane that requires client certificates, add

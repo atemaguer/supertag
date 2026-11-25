@@ -663,6 +663,7 @@ impl credential_directory_server::CredentialDirectory for ControlPlane {
                             .unwrap_or(&principal)
                             .to_owned(),
                         generation: 0,
+                        user: String::new(),
                     }))
                 }
                 OperatorAuthentication::Revoked => {

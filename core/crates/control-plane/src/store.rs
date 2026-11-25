@@ -23,6 +23,7 @@ mod replica_tests;
 #[path = "slack_threads.rs"]
 mod slack_threads;
 mod sqlite_files;
+mod users;
 pub use attempt_credentials::{AttemptAccess, AttemptCall};
 pub(crate) use authority::ClaimScope;
 pub(crate) use authority::lease_is_live;
@@ -35,6 +36,7 @@ pub(crate) use execution::lane_requirement;
 pub use hosts::HostAuthority;
 pub(crate) use hosts::current_scope_in;
 pub(crate) use readiness::status_in as host_status_in;
+pub(crate) use users::valid_user_name;
 
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
@@ -110,7 +112,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 124;
+        const SCHEMA_VERSION: i64 = 125;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -359,6 +361,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0122_session_input_queue.sql"),
                 include_str!("../migrations/sqlite/0123_memory_reviews.sql"),
                 include_str!("../migrations/sqlite/0124_tag_session_boundaries.sql"),
+                include_str!("../migrations/sqlite/0125_users.sql"),
             ]
         } else {
             [
@@ -488,6 +491,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0122_session_input_queue.sql"),
                 include_str!("../migrations/postgresql/0123_memory_reviews.sql"),
                 include_str!("../migrations/postgresql/0124_tag_session_boundaries.sql"),
+                include_str!("../migrations/postgresql/0125_users.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -2865,10 +2869,16 @@ pub(crate) fn text(kind: &str, value: &str, maximum: usize) -> Result<()> {
     Ok(())
 }
 
-/// An operator or a client: the principals that converse and own work.
+/// Whether `principal` is a person who owns their own work: a User (`user:NAME`), as every
+/// client device acts, or a client device itself.
+pub(crate) fn person(principal: &str) -> bool {
+    principal.starts_with("user:") || principal.starts_with("client:")
+}
+
+/// An operator or a person: the principals that converse and own work.
 pub(crate) fn actor(principal: &str) -> Result<()> {
     name("principal", principal)?;
-    if ["operator:", "client:"].iter().any(|prefix| {
+    if ["operator:", "client:", "user:"].iter().any(|prefix| {
         principal
             .strip_prefix(prefix)
             .is_some_and(|id| !id.is_empty())
@@ -2880,18 +2890,17 @@ pub(crate) fn actor(principal: &str) -> Result<()> {
 }
 
 /// Whether `principal` sees work owned by `owner`. Everyone sees their own work. Work with no
-/// owner (surface threads, submitted Tasks, operators' Objectives) and every client's work are
-/// visible to operators only; a client sees nothing but its own.
+/// owner (surface threads, submitted Tasks, operators' Objectives) and every person's work are
+/// visible to operators only; a person sees nothing but their own.
 pub(crate) fn sees_owner(principal: &str, owner: &str) -> bool {
     owner == principal
-        || (principal.starts_with("operator:")
-            && (owner.is_empty() || owner.starts_with("client:")))
+        || (principal.starts_with("operator:") && (owner.is_empty() || person(owner)))
 }
 
 /// The SQL form of [`sees_owner`] for an owner column and the parameter holding the principal.
 pub(crate) fn sees_owner_sql(owner: &str, principal: &str) -> String {
     format!(
-        "({owner}={principal} OR (substr(CAST({principal} AS TEXT),1,9)='operator:' AND ({owner}='' OR substr({owner},1,7)='client:')))"
+        "({owner}={principal} OR (substr(CAST({principal} AS TEXT),1,9)='operator:' AND ({owner}='' OR substr({owner},1,7)='client:' OR substr({owner},1,5)='user:')))"
     )
 }
 

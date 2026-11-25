@@ -855,6 +855,41 @@ impl auth_keys_server::AuthKeys for ControlPlane {
     }
 }
 
+#[tonic::async_trait]
+impl users_server::Users for ControlPlane {
+    async fn invite_user(
+        &self,
+        request: Request<InviteUserRequest>,
+    ) -> std::result::Result<Response<InviteUserResponse>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .invite_user(&principal, request.get_ref())
+                .await?,
+        ))
+    }
+
+    async fn get_user(
+        &self,
+        request: Request<GetUserRequest>,
+    ) -> std::result::Result<Response<User>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store.get_user(&principal, request.get_ref()).await?,
+        ))
+    }
+
+    async fn list_users(
+        &self,
+        request: Request<ListUsersRequest>,
+    ) -> std::result::Result<Response<ListUsersResponse>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store.list_users(&principal, request.get_ref()).await?,
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

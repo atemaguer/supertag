@@ -222,7 +222,7 @@ async fn audience_at(
                 _ => Ok(Audience::Private(None)),
             };
         }
-        if created_by.starts_with("client:") {
+        if crate::store::person(&created_by) {
             return Ok(Audience::Private(Some(created_by)));
         }
         // A surface thread (Slack channels only) or an operator started it.

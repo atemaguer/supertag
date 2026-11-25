@@ -582,11 +582,11 @@ async fn client_team_notices(url: &str) -> anyhow::Result<()> {
     }
     let key = Sha256::digest(b"watching client key").to_vec();
     store
-        .create_auth_key(
+        .invite_user(
             "operator:local",
-            &CreateAuthKeyRequest {
+            &InviteUserRequest {
                 name: "watcher".into(),
-                role: PrincipalRole::Client.into(),
+                display_name: "Watcher".into(),
                 operation_id: "watcher-key".into(),
                 key_digest: key.clone(),
                 allowed_tag_ids: vec!["other".into()],
@@ -625,14 +625,22 @@ async fn client_team_notices(url: &str) -> anyhow::Result<()> {
         shutdown: CancellationToken::new(),
     };
     let teams = |principal: &str| {
-        authenticated_request(
+        let mut request = authenticated_request(
             WatchRequest {
                 kinds: vec![WatchKind::Team as i32],
                 resume_token: format!("v1.{}.{}", start.feed_id, start.head),
             },
             SECRET,
             Some(principal),
-        )
+        )?;
+        // A client device acts for the User it belongs to.
+        if principal.starts_with("client:") {
+            request.metadata_mut().insert(
+                supertag_protocol::INTERNAL_USER_HEADER,
+                tonic::metadata::MetadataValue::from_static("watcher"),
+            );
+        }
+        Ok::<_, tonic::Status>(request)
     };
     let first_team = |mut stream: <OperatorWatch as OperatorEvents>::WatchStream| async move {
         let event = tokio::time::timeout(Duration::from_secs(5), stream.next())

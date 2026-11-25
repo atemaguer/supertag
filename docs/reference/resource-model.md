@@ -72,6 +72,10 @@ scheduler then chooses a compatible harness and model on one of those hosts. Non
 
 ## Operational resources
 
+- **User** — a person admitted to the Control Plane, never a machine. Each of their client devices
+  enrolls as its own `client:NAME` but acts for them as `user:NAME`, so their conversations and
+  work follow them across devices. A Worker Host enrolled with their invite key belongs to them.
+  See [Users](#users).
 - **Objective** — an outcome a Tag owns, with a budget, a deadline, a status and an explicit
   completion assessment. It is a conversation with a goal: it talks in the thread it was created
   in, and the work happens in Sessions started beneath it. Set `ongoing: true` for a continuing
@@ -232,7 +236,6 @@ creates it for one role, and the enrollee redeems it from its own side, choosing
 | --- | --- | --- |
 | `host` | A Worker Host | `supertag host enroll HOST_ID`, or a host service's `auth-key` in `supertag.yaml` |
 | `gateway` | A Gateway | `supertag gateway enroll` |
-| `client` | A device running the CLI or desktop app | `supertag connect URL --name NAME` |
 
 ```sh
 supertag auth-key create ci --role host --tag builder --label linux-ci --reusable --ephemeral
@@ -243,8 +246,9 @@ without it:
 
 | Field | Meaning |
 | --- | --- |
-| `role` | `host`, `gateway`, or `client`. It never changes. |
-| `allowed_tag_ids`, `all_tags` | Host keys: the Tags every joining host may run. Client keys: the Tags the device may talk to. `--all-tags` names every Tag. |
+| `role` | `host` or `gateway`, or `client` for a User's invite key. It never changes. |
+| `allowed_tag_ids`, `all_tags` | Host keys: the Tags every joining host may run. An invite key: the shared Tags its User may talk to. `--all-tags` names every Tag. |
+| `user` | An invite key: the User whose devices and Worker Hosts it enrolls. |
 | `labels` | Host keys: labels granted to every host that joins. See [Worker Host labels](#worker-host-labels). |
 | `reusable` | `false` (default): the key enrolls one principal. `true`: it enrolls any number. |
 | `ephemeral` | Host keys: hosts that join are removed after they disconnect. See [Ephemeral Worker Hosts](#ephemeral-worker-hosts). |
@@ -287,6 +291,31 @@ it.
 
 The Control Plane stores no artifact bytes, so an ephemeral host's artifacts are lost with it
 unless they were copied to a Volume. See [Artifacts](artifacts.md#where-artifact-bytes-live).
+
+## Users
+
+A User is a person admitted to the Control Plane. `supertag user invite` creates one and prints an
+invite key, which joins all their devices:
+
+```sh
+supertag user invite alice --display-name "Alice Ng" --tag release-bot
+supertag get user alice
+```
+
+| Field | Meaning |
+| --- | --- |
+| `name` | The User's ID, such as `alice`: 1-50 lowercase letters, digits, and hyphens. Never reused. |
+| `display_name` | The person's name as people read it. |
+| `role` | The Role their personal Tag takes; empty means the Control Plane's `personal` Role. |
+| `allowed_tag_ids` | Shared Tags their devices may talk to. |
+
+The invite key is a reusable Auth Key, valid for 7 days unless `--expires-in-seconds` says
+otherwise (at most 90 days). `supertag connect` with it enrolls each of the User's devices as
+`client:NAME`; `supertag host enroll` with it enrolls a Worker Host that belongs to them. Every
+device acts for the User as `user:NAME`: an approver entry, a conversation, an Objective a device
+created, and its Tasks belong to the User, while the audit log records the device that acted.
+Inviting an existing User with only their name issues another key; revoke a key with
+`supertag auth-key revoke NAME-invite-N`, and one device with `supertag client revoke NAME`.
 
 ## Operator Tokens
 

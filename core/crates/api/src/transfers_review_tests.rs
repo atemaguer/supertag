@@ -44,6 +44,7 @@ impl CredentialDirectory for Directory {
             role: PrincipalRole::Host.into(),
             name: "reviewer-host".into(),
             generation: 7,
+            ..Default::default()
         }))
     }
 }

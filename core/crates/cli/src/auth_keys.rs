@@ -1,7 +1,8 @@
 //! `supertag auth-key create|revoke`, and the Auth Key reads behind `supertag get auth-key`.
 //!
-//! An Auth Key admits one role: Worker Hosts (`host enroll`), Gateways (`gateway enroll`), or
-//! clients (`supertag connect`). Each enrollee chooses its own name.
+//! An Auth Key admits one role: Worker Hosts (`host enroll`) or Gateways (`gateway enroll`). Each
+//! enrollee chooses its own name. People's devices join with a User's invite key instead, from
+//! `supertag user invite`.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -23,8 +24,6 @@ pub enum KeyRole {
     Host,
     /// Gateways, with `supertag gateway enroll`.
     Gateway,
-    /// Clients (a device running the CLI or desktop app), with `supertag connect`.
-    Client,
 }
 
 impl KeyRole {
@@ -32,7 +31,6 @@ impl KeyRole {
         match self {
             Self::Host => PrincipalRole::Host,
             Self::Gateway => PrincipalRole::Gateway,
-            Self::Client => PrincipalRole::Client,
         }
     }
 }
@@ -74,8 +72,7 @@ pub enum AuthKeyCommand {
         /// Shorter lifetime. Defaults to the maximum: one hour, or 90 days with --reusable.
         #[arg(long)]
         expires_in_seconds: Option<u64>,
-        /// Host and client keys: a Tag the enrollee may run (host) or talk to (client). Repeat
-        /// for more Tags.
+        /// Host keys: a Tag the host may run. Repeat for more Tags.
         #[arg(long, conflicts_with = "all_tags")]
         tag: Vec<String>,
         /// Every Tag. On a gateway key, it lets the Gateway serve connector accounts that no
@@ -198,6 +195,7 @@ pub fn view(key: &AuthKey) -> Value {
         "revoked": key.revoked,
         "created_at_ms": key.created_at_ms,
         "expires_at_ms": key.expires_at_ms,
+        "user": key.user,
     })
 }
 

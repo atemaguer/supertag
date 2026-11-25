@@ -23,8 +23,8 @@ use crate::observe::{Output, describe_text};
 use crate::{
     Connection, artifact_publications, artifacts, auth_keys, connect_operator, enrollments,
     host_status, inbox, inputs, mailbox, memories, objectives, operator_access, policy,
-    remote_workspaces, replies, request, schedules, surface_policy, tags, tasks, teams, volumes,
-    work_sessions, workspace_landings, workspace_mounts,
+    remote_workspaces, replies, request, schedules, surface_policy, tags, tasks, teams, users,
+    volumes, work_sessions, workspace_landings, workspace_mounts,
 };
 
 /// A resource kind. The singular is the canonical name; the plural is accepted too.
@@ -62,6 +62,8 @@ pub enum Kind {
     Workspace,
     #[value(alias = "auth-keys")]
     AuthKey,
+    #[value(alias = "users")]
+    User,
     #[value(alias = "operator-tokens")]
     OperatorToken,
     #[value(alias = "artifacts")]
@@ -214,6 +216,7 @@ pub(crate) const KINDS: &[KindSpec] = &[
         LIST_DELETE,
     ),
     kind(Kind::AuthKey, "auth-key", "auth-keys", "Auth Key", LIST),
+    kind(Kind::User, "user", "users", "User", LIST),
     kind(
         Kind::OperatorToken,
         "operator-token",
@@ -447,6 +450,14 @@ pub enum GetCommand {
         id: Option<String>,
         #[command(flatten)]
         list: auth_keys::ListArgs,
+    },
+    /// Read one User, or list Users: the people admitted to the Control Plane.
+    #[command(visible_alias = "users")]
+    User {
+        /// User name. Omit to list.
+        id: Option<String>,
+        #[command(flatten)]
+        list: users::ListArgs,
     },
     /// Read one Operator Token without its secret, or list them. Admin operator token only.
     #[command(visible_alias = "operator-tokens")]
@@ -750,6 +761,10 @@ pub async fn get(connection: Connection, command: GetCommand) -> Result<()> {
         GetCommand::AuthKey { id: None, list } => {
             return print(auth_keys::list(connection, list)).await;
         }
+        GetCommand::User { id: Some(id), .. } => (Kind::User, id),
+        GetCommand::User { id: None, list } => {
+            return print(users::list(connection, list)).await;
+        }
         GetCommand::OperatorToken { id: Some(id), .. } => (Kind::OperatorToken, id),
         GetCommand::OperatorToken { id: None, list } => {
             return print(operator_access::list(connection, list)).await;
@@ -840,6 +855,7 @@ async fn fetch(channel: ProtocolChannel, token: &str, kind: Kind, id: String) ->
         Kind::WorkspaceVolume => workspace_mounts::fetch(channel, token, id).await,
         Kind::Workspace => remote_workspaces::fetch(channel, token, id).await,
         Kind::AuthKey => auth_keys::fetch(channel, token, id).await,
+        Kind::User => users::fetch(channel, token, id).await,
         Kind::OperatorToken => operator_access::fetch(channel, token, id).await,
         Kind::Artifact => artifacts::fetch(channel, token, id).await,
         Kind::ArtifactPublication => {

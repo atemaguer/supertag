@@ -333,9 +333,9 @@ pub(crate) async fn inbox_page_in(
     }
     let kind = InboxItemKind::try_from(input.kind).map_err(|_| invalid("unknown Inbox kind"))?;
     let scope = format!("{:x}", Sha256::digest(principal.as_bytes()));
-    // A client sees the items of the Objectives it created. Execution recovery and MCP
+    // A User sees the items of the Objectives they created. Execution recovery and MCP
     // logins are Worker Host work, which only operators see and act on.
-    let creator = if principal.starts_with("client:") {
+    let creator = if crate::store::person(principal) {
         principal
     } else {
         ""

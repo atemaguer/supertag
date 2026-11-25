@@ -45,6 +45,7 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     ("Enrollments", "WhoAmI", ANY),
     ("Enrollments", "RotateCredential", ANY),
     ("Enrollments", "*", O),
+    ("Users", "*", O),
     ("AuthKeys", "*", O),
     ("CredentialDirectory", "*", INTERNAL),
     // Fleet, configuration, recovery.
