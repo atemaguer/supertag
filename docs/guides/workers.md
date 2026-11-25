@@ -260,7 +260,7 @@ stops every process the Task left running there. Files your ignore rules match, 
 `node_modules/`, and any `.git` directory a command creates stay in the sandbox and are not
 returned; the Task output directory is always returned. A Task whose Permission Sets hide paths
 can't run commands there, because the sandbox holds the whole checkout. A sandbox caps a
-Task Attempt at 3600 seconds, the longest E2B and Modal grant. A Tag
+Task Attempt at 3600 seconds, the longest E2B and Modal grant; a local-vm container lives as long as the host's `attempt-timeout-seconds` allows. A Tag
 requires a shared environment with `tag put --shared-execution-environment ID`. A repository's
 `.devcontainer` settings choose the sandbox's image, user, and setup commands; see
 [Devcontainer settings](../reference/devcontainer-subset.md).

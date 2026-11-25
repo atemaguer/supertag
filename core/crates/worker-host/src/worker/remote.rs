@@ -15,7 +15,7 @@ use crate::worker::{Settings, WorkerOptions};
 use crate::{
     AttemptClients,
     worker::adapter::artifact_acquisition::AcquisitionClient,
-    worker::remote_provider::{RemoteProvider, Start},
+    worker::remote_provider::{ProviderAuthority, ProviderConfig, RemoteProvider, Start},
     worker::task_artifact_inputs::RemoteInputs,
     worker::task_outputs::PendingOutputs,
     worklet::HostStorage,
@@ -33,6 +33,17 @@ const EGRESS_CLIENT_PORT: u16 = 3128;
 
 /// The longest sandbox lifetime the E2B and Modal provider sessions grant.
 pub(crate) const MAX_SANDBOX_LIFETIME: Duration = Duration::from_secs(3600);
+/// The longest a `local-vm` container lives: the longest attempt timeout a Worker Host accepts.
+/// The container runs on the Worker Host's own machine, so no provider session limits it.
+pub(crate) const LOCAL_VM_MAX_LIFETIME: Duration = Duration::from_secs(86_400);
+
+/// The longest a sandbox of this provider lives.
+pub(crate) fn sandbox_lifetime(provider: Option<&ProviderConfig>) -> Duration {
+    match provider.map(|config| &config.authority) {
+        Some(ProviderAuthority::LocalVm { .. }) => LOCAL_VM_MAX_LIFETIME,
+        _ => MAX_SANDBOX_LIFETIME,
+    }
+}
 /// Sandbox life kept after the harness stops, for capture and cleanup.
 const SANDBOX_CLEANUP_MARGIN: Duration = Duration::from_secs(180);
 /// The rate, in bytes per second, at which sandbox life is kept for capturing
@@ -50,12 +61,16 @@ fn copy_capture_margin(read_write: impl Iterator<Item = (u64, u64)>) -> Duration
 }
 
 /// The Attempt time limit must be positive, and a remote sandbox must outlive it.
-pub(crate) fn validate_time_limit(limit: Duration, remote: bool) -> Result<()> {
+pub(crate) fn validate_time_limit(
+    limit: Duration,
+    provider: Option<&ProviderConfig>,
+) -> Result<()> {
     ensure!(!limit.is_zero(), "attempt timeout must be positive");
+    let lifetime = sandbox_lifetime(provider);
     ensure!(
-        !remote || limit <= MAX_SANDBOX_LIFETIME,
+        provider.is_none() || limit <= lifetime,
         "a remote Workspace sandbox lives at most {} seconds, so the attempt timeout cannot exceed it",
-        MAX_SANDBOX_LIFETIME.as_secs()
+        lifetime.as_secs()
     );
     Ok(())
 }
@@ -73,7 +88,7 @@ pub(crate) fn execution_ends(options: &WorkerOptions, mounted: Option<&Mounted>)
     let timeout = options
         .attempt_timeout
         .saturating_add(margin)
-        .min(MAX_SANDBOX_LIFETIME);
+        .min(sandbox_lifetime(options.remote_provider.as_ref()));
     Instant::now() + timeout.saturating_sub(margin)
 }
 
@@ -217,7 +232,7 @@ pub(crate) async fn prepare(
     let timeout = options
         .attempt_timeout
         .saturating_add(margin)
-        .min(MAX_SANDBOX_LIFETIME);
+        .min(sandbox_lifetime(options.remote_provider.as_ref()));
     ensure!(
         timeout > margin,
         "Workspace copies leave a remote sandbox no time for the Harness; lower their byte limits"
@@ -416,7 +431,7 @@ pub(crate) async fn replace(
     let export = workspaces.export_remote(workspace, cancel).await?;
     let timeout = left
         .saturating_add(restart.margin)
-        .min(MAX_SANDBOX_LIFETIME);
+        .min(sandbox_lifetime(options.remote_provider.as_ref()));
     start_sandbox(
         options,
         journal,
@@ -578,10 +593,36 @@ mod tests {
 
     #[test]
     fn a_remote_sandbox_must_outlive_the_attempt_time_limit() {
-        assert!(validate_time_limit(Duration::ZERO, false).is_err());
-        assert!(validate_time_limit(Duration::from_secs(86_400), false).is_ok());
-        assert!(validate_time_limit(MAX_SANDBOX_LIFETIME, true).is_ok());
-        assert!(validate_time_limit(MAX_SANDBOX_LIFETIME + Duration::from_secs(1), true).is_err());
+        let provider = |authority| ProviderConfig {
+            executable: "provider".into(),
+            arguments: Vec::new(),
+            authority,
+            codex_version: None,
+        };
+        let e2b = provider(ProviderAuthority::E2b {
+            api_key: None,
+            domain: None,
+            template: None,
+        });
+        let local_vm = provider(ProviderAuthority::LocalVm {
+            settings: Vec::new(),
+            runtime_variables: Vec::new(),
+        });
+        assert!(validate_time_limit(Duration::ZERO, None).is_err());
+        assert!(validate_time_limit(Duration::from_secs(86_400), None).is_ok());
+        assert!(validate_time_limit(MAX_SANDBOX_LIFETIME, Some(&e2b)).is_ok());
+        assert!(
+            validate_time_limit(MAX_SANDBOX_LIFETIME + Duration::from_secs(1), Some(&e2b)).is_err()
+        );
+        // A local-vm container runs on the Worker Host itself: no provider session caps it.
+        assert!(validate_time_limit(LOCAL_VM_MAX_LIFETIME, Some(&local_vm)).is_ok());
+        assert!(
+            validate_time_limit(
+                LOCAL_VM_MAX_LIFETIME + Duration::from_secs(1),
+                Some(&local_vm)
+            )
+            .is_err()
+        );
     }
 
     #[test]

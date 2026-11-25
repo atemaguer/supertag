@@ -59,7 +59,9 @@ import {
   type SandboxWorkspaceSession,
 } from "./session.js";
 
-const MAX_LIFETIME_MS = 3_600_000;
+// The longest attempt timeout a Worker Host accepts. A container runs on the Worker Host's own
+// machine, so unlike an E2B or Modal sandbox no provider session limits its life.
+const MAX_LIFETIME_MS = 86_400_000;
 
 export interface ContainerProviderOptions {
   /**

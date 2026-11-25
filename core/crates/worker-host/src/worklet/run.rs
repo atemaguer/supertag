@@ -194,7 +194,7 @@ fn validate(options: &WorkletOptions) -> Result<()> {
             harness.limit.is_none_or(|limit| limit > 0),
             "a harness's limit is at least one Task Attempt"
         );
-        remote::validate_time_limit(worker.attempt_timeout, worker.remote_provider.is_some())?;
+        remote::validate_time_limit(worker.attempt_timeout, worker.remote_provider.as_ref())?;
         ensure!(
             worker.execution_profile.mcp_servers == options.mcp_catalog.capabilities()
                 && (worker.execution_profile.mcp_servers.is_empty()
