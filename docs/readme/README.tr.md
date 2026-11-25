@@ -12,11 +12,11 @@
 Kendi Devin Bots, OpenAI dots veya Grok Bot'unuzu mühendislik, pazarlama, satış ya da herhangi bir
 ekip için çalıştırın. Kendi altyapınızda, zaten kullandığınız kodlama ajanlarının üzerinde.
 
-**Onlara görev değil, iş verin.**
-
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.tr.webp" alt="Tag'lerle tanışın: yuvarlak ve uzun gövdeli, renkli ceketli, şapkalı ve gözlüklü dokuz SuperTag maskotu" width="900" height="360">
 </p>
+
+**Onlara görev değil, iş verin.**
 
 [Görev değil, iş](#give-them-jobs-not-tasks) · [Kalıcı](#persistent) · [Proaktif](#proactive) · [Çok kullanıcılı](#multiplayer) · [Bir mühendislik organizasyonu](#an-engineering-organization) · [İlk Tag'inizi çalıştırın](#run-your-first-tag) · [Kendiniz çalıştırın](#run-it-yourself) · [Kendinizinkini oluşturun](#build-your-own) · [Dokümantasyon](../../docs/README.md)
 

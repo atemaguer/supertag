@@ -11,11 +11,11 @@
 
 运行你自己的 Devin Bots、OpenAI dots 或 Grok Bot，服务于工程、市场营销、销售或任何团队。可自托管，直接运行在你已经在用的编程智能体之上。
 
-**给它们岗位，而不是任务。**
-
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.zh-CN.webp" alt="认识一下这些 Tag：九个 SuperTag 吉祥物，体型有圆有长，穿着彩色外套，戴着帽子和眼镜" width="900" height="360">
 </p>
+
+**给它们岗位，而不是任务。**
 
 [岗位，而非任务](#give-them-jobs-not-tasks) · [持久](#persistent) · [主动](#proactive) · [多人协作](#multiplayer) · [一个工程组织](#an-engineering-organization) · [运行你的第一个 Tag](#run-your-first-tag) · [自己运行](#run-it-yourself) · [构建你自己的](#build-your-own) · [文档](../../docs/README.md)
 

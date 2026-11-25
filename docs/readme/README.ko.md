@@ -12,11 +12,11 @@
 엔지니어링, 마케팅, 영업, 어떤 팀을 위해서든 여러분만의 Devin Bots, OpenAI dots, Grok Bot을 운영하세요. 셀프
 호스팅 방식으로, 이미 쓰고 있는 코딩 에이전트 위에서 동작합니다.
 
-**작업이 아니라 직무를 맡기세요.**
-
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.ko.webp" alt="Tag들을 소개합니다 — 둥글거나 길쭉한 체형에 알록달록한 재킷, 모자, 안경을 걸친 아홉 SuperTag 마스코트" width="900" height="360">
 </p>
+
+**작업이 아니라 직무를 맡기세요.**
 
 [작업이 아닌 직무](#give-them-jobs-not-tasks) · [지속성](#persistent) · [능동성](#proactive) · [멀티플레이어](#multiplayer) · [엔지니어링 조직](#an-engineering-organization) · [첫 Tag 실행하기](#run-your-first-tag) · [직접 운영하기](#run-it-yourself) · [직접 만들기](#build-your-own) · [문서](../../docs/README.md)
 

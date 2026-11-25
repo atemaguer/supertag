@@ -12,11 +12,11 @@
 Faites tourner vos propres Devin Bots, OpenAI dots ou Grok Bot, pour l'ingénierie, le marketing,
 les ventes ou n'importe quelle équipe. Auto-hébergé, sur les agents de code que vous utilisez déjà.
 
-**Confiez-leur des missions, pas des tâches.**
-
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.fr.webp" alt="Voici les Tags : neuf mascottes SuperTag, rondes ou élancées, avec vestes colorées, chapeaux et lunettes" width="900" height="360">
 </p>
+
+**Confiez-leur des missions, pas des tâches.**
 
 [Des missions, pas des tâches](#give-them-jobs-not-tasks) · [Persistant](#persistent) · [Proactif](#proactive) · [Multijoueur](#multiplayer) · [Une organisation d'ingénierie](#an-engineering-organization) · [Lancer votre premier Tag](#run-your-first-tag) · [Chez vous](#run-it-yourself) · [Construire le vôtre](#build-your-own) · [Documentation](../../docs/README.md)
 
