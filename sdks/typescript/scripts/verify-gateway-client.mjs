@@ -426,26 +426,26 @@ async function verifyTunnels(
     mismatched.close();
   }
 
-  // A client Auth Key enrolls this device through the tunnel; the credential it chose works.
+  // A User's invite key enrolls this device through the tunnel; the credential it chose works.
   const { stdout } = await execute(
     binary,
     [
-      "auth-key",
-      "create",
-      "--role",
-      "client",
+      "user",
+      "invite",
+      "sdk-user",
+      "--display-name",
+      "SDK User",
       "--tag",
       "node-sdk",
       "--gateway",
       nativeUrl,
-      "sdk-device",
     ],
     {
       env: { SUPERTAG_OPERATOR_TOKEN: token, HOME: root, PATH: "/usr/bin:/bin" },
       timeout: 30_000,
     },
   );
-  const key = JSON.parse(stdout).auth_key;
+  const key = JSON.parse(stdout).invite_key;
   assert.match(key, /^stak_/u);
   const credential = `stcr_${randomBytes(32).toString("hex")}`;
   const enrolling = createGatewayClient({ url: tunnelUrl, token: key });
