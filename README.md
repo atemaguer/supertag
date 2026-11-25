@@ -284,7 +284,7 @@ Python SDK, `supertag` on PyPI, connect your application or adapter to SuperTag:
 
 ```sh
 npm install supertag-ai
-python -m pip install 'supertag==0.3.13'
+python -m pip install 'supertag==0.3.14'
 ```
 
 [Write a harness adapter](docs/guides/harness-adapters.md) · [Connect your own collaboration surface](docs/reference/connector-contract.md) · [Check API stability](docs/reference/api-stability.md)

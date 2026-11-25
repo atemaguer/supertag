@@ -307,7 +307,7 @@ PyPI'deki `supertag` adlı Python SDK'sı, uygulamanızı veya adaptörünüzü 
 
 ```sh
 npm install supertag-ai
-python -m pip install 'supertag==0.3.13'
+python -m pip install 'supertag==0.3.14'
 ```
 
 [Bir harness adaptörü yazın](../../docs/guides/harness-adapters.md) · [Kendi iş birliği yüzeyinizi bağlayın](../../docs/reference/connector-contract.md) · [API kararlılığını kontrol edin](../../docs/reference/api-stability.md)

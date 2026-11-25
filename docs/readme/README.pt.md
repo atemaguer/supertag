@@ -312,7 +312,7 @@ adaptador ao SuperTag:
 
 ```sh
 npm install supertag-ai
-python -m pip install 'supertag==0.3.13'
+python -m pip install 'supertag==0.3.14'
 ```
 
 [Escreva um adaptador de harness](../../docs/guides/harness-adapters.md) · [Conecte sua própria superfície de colaboração](../../docs/reference/connector-contract.md) · [Confira a estabilidade da API](../../docs/reference/api-stability.md)
