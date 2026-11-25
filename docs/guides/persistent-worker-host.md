@@ -109,10 +109,22 @@ without you logging in.
 
 ## Several Tags on one machine
 
-One machine can run many Tags' Tasks. The sandbox keeps a Task's commands away from the harness's
-keys, the host's credential, and the CLI's saved Gateways. It doesn't keep one Tag's Tasks from
-reading another Tag's files under this user's home. Give Tags that must not see each other's work
-separate machines or separate users, each with its own state directory.
+One machine can run many Tags' Tasks. Codex's and Claude Code's sandboxes keep a Task's commands
+away from the harness's keys, the host's credential, the CLI's saved Gateways, and the other files
+in the host's state directory, such as other Tasks' checkouts. That is a deny list, not a wall:
+
+- Cursor and OpenCode Tasks get it only with `environment: local-vm`.
+- The harness itself, as opposed to the commands it runs, reads anything this user can.
+
+So share a machine only between Tags you trust alike, such as one team's Tags. Give each trust
+group its own machine, enrolled with an Auth Key that names only that group's Tags:
+
+```sh
+supertag auth-key create reviewers --role host --reusable --tag reviewer --tag security-reviewer --gateway team
+```
+
+A host enrolled with that key runs only those Tags' Tasks. Separate Unix users on one machine work
+too: each runs its own host service from its own state directory, under its own key.
 
 ## If something goes wrong
 
