@@ -382,17 +382,8 @@ async fn a_gateway_forwards_calls_as_their_caller_and_never_widens_them(
                 .await,
         ),
     ];
-    // Writing a Tag reaches the Control Plane, which hides a Tag that is not the User's own.
-    assert_eq!(
-        denied,
-        [
-            Code::NotFound,
-            Code::PermissionDenied,
-            Code::PermissionDenied,
-            Code::PermissionDenied,
-            Code::PermissionDenied
-        ]
-    );
+    // Writing a Tag reaches the Control Plane, which refuses any Tag but the User's own.
+    assert_eq!(denied, [Code::PermissionDenied; 5]);
     // A Tag's network log names other people's Tasks' origins and paths: operators only.
     let network_logs = "/supertag.runtime.v2.NetworkLogs/List";
     assert_eq!(

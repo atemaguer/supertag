@@ -343,7 +343,7 @@ async fn exercise(url: &str) {
                         },
                     )
                     .await,
-                Err(StoreError::NotFound(_))
+                Err(StoreError::PermissionDenied)
             ),
             "{who} wrote {tag}"
         );

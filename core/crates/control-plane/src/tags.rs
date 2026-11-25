@@ -172,8 +172,9 @@ impl Store {
             .map(tag_from_row)
             .transpose()?
             .filter(|tag| tag.owner == user)
-            // Someone else's Tag, personal or shared, is not theirs to see.
-            .ok_or_else(|| missing(&input.tag_id))?;
+            // Creating a Tag, or writing anyone else's, is an operator's. The refusal is the same
+            // whether or not the Tag exists, so it reveals no Tag.
+            .ok_or(StoreError::PermissionDenied)?;
         let changes = |set: bool, differs: bool| set && differs;
         if changes(
             !input.allowed_actions.is_empty(),

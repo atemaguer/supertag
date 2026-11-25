@@ -299,7 +299,9 @@ describe.skipIf(CLI === undefined)(
         const state = app(home);
         const joined = await state.saveGateway(stack.url, "Work", key);
         expect(joined.principal).toBe("client:test-device");
+        // Alice's own personal Tag, and the shared Tag her invitation lists.
         expect((await state.tags(joined.connectionId)).map((tag) => tag.tagId)).toEqual([
+          "alice",
           "allowed-tag",
         ]);
         // A client device converses with its Tags but cannot create one or list hosts.
