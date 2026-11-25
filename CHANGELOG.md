@@ -23,6 +23,10 @@ within the pre-1.0 compatibility policy described in
   provider's variable, or for a free `opencode/...` model, it stops and says to run
   `opencode auth login`. `supertag sign-in opencode` also uses a configured host's
   `opencode-auth-file`.
+- [Run SuperTag on open-weight models](docs/guides/open-models.md) sets up Tags on GLM 5.3, Kimi
+  K3, and DeepSeek V4.1 Flash through OpenCode: the provider sign-in, `init`, an existing
+  `supertag.yaml`, containers, one provider per host, OpenCode Go's Global hosting, and the errors
+  a provider returns. The README now says Tags run on the models you already use.
 
 ### Fixed
 

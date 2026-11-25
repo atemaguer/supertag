@@ -10,7 +10,7 @@
 **지속적이고 능동적인 멀티플레이어 AI 액터를 위한 오픈 인프라.**
 
 엔지니어링, 마케팅, 영업, 어떤 팀을 위해서든 여러분만의 Devin Bots, OpenAI dots, Grok Bot을 운영하세요. 셀프
-호스팅 방식으로, 이미 쓰고 있는 코딩 에이전트 위에서 동작합니다.
+호스팅 방식으로, 이미 쓰고 있는 코딩 에이전트와 모델 위에서 동작합니다.
 
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.ko.webp" alt="Tag들을 소개합니다 — 둥글거나 길쭉한 체형에 알록달록한 재킷, 모자, 안경을 걸친 아홉 SuperTag 마스코트" width="900" height="360">
@@ -261,7 +261,8 @@ supertag objective review OBJECTIVE_ID request-changes --feedback "Also cover th
   Worker Host로 연결하세요. `reliability`처럼 상시 책임을 맡은 Tag는 상시 가동되는 호스트에
   두세요.
 - **여러분의 코딩 에이전트와 모델.** 각 Tag는 여러분이 고른 코딩 에이전트와 모델에서 실행되며, 여러분의
-  계정이나 키로 로그인합니다.
+  계정이나 키로 로그인합니다. GLM, Kimi, DeepSeek 같은 오픈 웨이트 모델은
+  [OpenCode를 통해 실행됩니다](../../docs/guides/open-models.md).
 - **여러분이 정한 한계.** 각 Tag는 권한이 허용하는 일만 할 수 있고, 어떤 동작이 승인을 기다려야 하는지는
   여러분이 정합니다. Codex는 자체 샌드박스에서 명령을 실행하고, Claude Code, Cursor, OpenCode는 로컬
   컨테이너에서 명령을 실행할 수 있습니다. Tag는 여러분이 허용한 네트워크 주소에만 접근합니다. Codex와

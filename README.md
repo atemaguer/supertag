@@ -10,7 +10,7 @@ English · [中文](docs/readme/README.zh-CN.md) · [日本語](docs/readme/READ
 **Open infrastructure for persistent, proactive, multiplayer AI actors.**
 
 Run your own Devin Bots, OpenAI dots, or Grok Bot, for engineering, marketing, sales, or any
-team. Self-hosted, on the coding agents you already use.
+team. Self-hosted, on the coding agents and models you already use.
 
 <p>
   <img src="assets/images/supertag-meet-the-tags.png" alt="Meet the Tags — nine SuperTag mascots with round and elongated builds, colorful jackets, hats, and glasses" width="900" height="360">
@@ -255,7 +255,8 @@ then share one Control Plane with your team; the parts are the same.
   reach it, and connect laptops, servers, CI runners, or cloud VMs as Worker Hosts.
   Keep a Tag with an ongoing responsibility, such as `reliability`, on an always-on host.
 - **Your coding agents and models.** Each Tag runs on the coding agent and model you choose,
-  signed in with your own account or key.
+  signed in with your own account or key. Open-weight models such as GLM, Kimi, and DeepSeek
+  [run through OpenCode](docs/guides/open-models.md).
 - **Your limits.** Each Tag can do only what its permissions allow, and you choose which actions
   wait for your approval. Codex runs commands in its own sandbox, and Claude Code, Cursor, and
   OpenCode can run theirs in local containers. A Tag reaches only the network addresses you

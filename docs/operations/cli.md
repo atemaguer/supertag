@@ -178,6 +178,9 @@ key, which SuperTag keeps in the Worker; `init` says so. With `--yes`, the lead 
 An OpenCode host serves one provider. To add models from another, add a second host service; see
 [Host models](../reference/supertag-yaml.md#host-models).
 
+The tested models, the provider sign-in, containers, and the errors a provider returns are in
+[Run SuperTag on open-weight models](../guides/open-models.md).
+
 ### Run and stop SuperTag
 
 | Command | Does |

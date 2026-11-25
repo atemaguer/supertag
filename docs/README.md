@@ -63,6 +63,7 @@ Follow this order on your first visit:
 | Start from a ready-made proactive Tag, teammates' Tags, or review team | [Example organizations](../examples/README.md) |
 | Connect Slack, GitHub, Lark/Feishu, Linear, or Teams | [Connection guides](surfaces/README.md) |
 | Run Codex, Claude Code, Cursor, OpenCode, or OpenAI Agents | [Run Worker Hosts](guides/workers.md) |
+| Run Tags on open-weight models such as GLM, Kimi, and DeepSeek | [Run SuperTag on open-weight models](guides/open-models.md) |
 | Let Tags change a repository on their own branches | [Work in a repository with Workspaces](guides/workspaces.md) |
 | Add another agent system | [Write a harness adapter](guides/harness-adapters.md) |
 | Look up a command or flag | [CLI reference](reference/cli.md) |
@@ -160,6 +161,7 @@ Choose the tool your team already uses:
 
 - [Build your own organization: marketing](guides/build-your-own.md) — the same machinery for another function: six marketing Tags, brand-voice Roles, content as branches, releases and analytics as events, and approvals before anything is published
 - [Write a harness adapter](guides/harness-adapters.md)
+- [Run SuperTag on open-weight models](guides/open-models.md) — GLM, Kimi, and DeepSeek through OpenCode
 - [Connect your own collaboration surface](reference/connector-contract.md)
 - [Call the Control Plane API](reference/control-plane-api.md)
 

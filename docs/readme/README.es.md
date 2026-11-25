@@ -10,7 +10,7 @@
 **Infraestructura abierta para actores de IA persistentes, proactivos y multijugador.**
 
 Ejecuta tus propios Devin Bots, OpenAI dots o Grok Bot, para ingeniería, marketing, ventas o
-cualquier equipo. Autoalojado, sobre los agentes de programación que ya usas.
+cualquier equipo. Autoalojado, sobre los agentes de programación y los modelos que ya usas.
 
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.es.webp" alt="Conoce a los Tags: nueve mascotas de SuperTag, unas redondas y otras alargadas, con chaquetas de colores, sombreros y gafas" width="900" height="360">
@@ -278,7 +278,8 @@ son las mismas.
   como Worker Hosts. Mantén en un host siempre encendido los Tags con una responsabilidad
   continua, como `reliability`.
 - **Tus agentes de programación y tus modelos.** Cada Tag se ejecuta en el agente de programación
-  y el modelo que elijas, con la sesión iniciada con tu propia cuenta o clave.
+  y el modelo que elijas, con la sesión iniciada con tu propia cuenta o clave. Los modelos de pesos
+  abiertos como GLM, Kimi y DeepSeek [se ejecutan a través de OpenCode](../../docs/guides/open-models.md).
 - **Tus límites.** Cada Tag solo puede hacer lo que sus permisos le permiten, y tú eliges qué
   acciones esperan tu aprobación. Codex ejecuta los comandos en su propio sandbox, y Claude Code,
   Cursor y OpenCode pueden ejecutar los suyos en contenedores locales. Un Tag solo llega a las

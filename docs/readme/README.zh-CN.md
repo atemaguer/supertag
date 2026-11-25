@@ -9,7 +9,7 @@
 
 **开放的基础设施，用于运行持久在岗、主动做事、多人协作的 AI 行动者。**
 
-运行你自己的 Devin Bots、OpenAI dots 或 Grok Bot，服务于工程、市场营销、销售或任何团队。可自托管，直接运行在你已经在用的编程智能体之上。
+运行你自己的 Devin Bots、OpenAI dots 或 Grok Bot，服务于工程、市场营销、销售或任何团队。可自托管，直接运行在你已经在用的编程智能体和模型之上。
 
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.zh-CN.webp" alt="认识一下这些 Tag：九个 SuperTag 吉祥物，体型有圆有长，穿着彩色外套，戴着帽子和眼镜" width="900" height="360">
@@ -179,7 +179,7 @@ supertag objective review OBJECTIVE_ID request-changes --feedback "Also cover th
 ![客户端和协作工具通过 Gateway 访问 Control Plane。Control Plane 把 Tag 和权限存储在 SQLite 或 PostgreSQL 中，并负责调度工作。在每个 Worker Host 上，Worklet 从 Control Plane 认领 Task，并为每个 Task Attempt 启动一个 Worker。笔记本运行 Codex，服务器运行 Claude Code，两者各自通过一个 harness 适配器接入。](../../assets/images/supertag-architecture.zh-CN.webp)
 
 - **你的机器**：`supertag init` 会启动一个本地 **Control Plane**，也就是存储 Tag 并调度其工作的服务，同时把你的电脑接入为 **Worker Host**，也就是实际运行工作的机器或沙箱。团队加入后，把 Control Plane 部署到所有人都能访问的地方，再把笔记本、服务器、CI 运行器或云虚拟机接入为 Worker Host。像 `reliability` 这样承担持续性职责的 Tag，应放在始终在线的主机上。
-- **你的编程智能体和模型**：每个 Tag 都运行在你选定的编程智能体和模型上，用你自己的账号或密钥登录。
+- **你的编程智能体和模型**：每个 Tag 都运行在你选定的编程智能体和模型上，用你自己的账号或密钥登录。GLM、Kimi、DeepSeek 等开放权重模型[通过 OpenCode 运行](../../docs/guides/open-models.md)。
 - **你的边界**：每个 Tag 只能做权限允许的事，哪些操作需要等你批准也由你来选。Codex 在它自带的沙箱中运行命令，Claude Code、Cursor 和 OpenCode 可以在本地容器中运行命令。Tag 只能访问你允许的网络地址。在 Codex 上和容器中，凭证（例如 Sentry 令牌）由 Tag 所在的主机添加到获准的请求里，Tag 运行的命令始终看不到它们。
 
 [自托管 SuperTag](../../docs/guides/self-hosting.md) · [连接 Worker Host](../../docs/guides/workers.md) · [设置权限与审批](../../docs/concepts/context-and-permissions.md) · [了解各部分如何协同工作](../../docs/concepts/how-it-works.md)

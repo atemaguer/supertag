@@ -43,8 +43,9 @@ Prepare at least one harness on the Worker Host. Start with Claude Code or Codex
 finds them by their `claude` and `codex` CLIs on `PATH`. Cursor and OpenCode also work (OpenCode
 needs its CLI on `PATH`; Cursor uses its bundled SDK and does not need `cursor-agent`). For
 open-weight models, start with OpenCode:
-[Start on open-weight models with OpenCode](cli.md#start-on-open-weight-models-with-opencode). Sign
-in as the same OS user that runs the Worklet.
+[Start on open-weight models with OpenCode](cli.md#start-on-open-weight-models-with-opencode), and
+see [Run SuperTag on open-weight models](../guides/open-models.md) for tested models, containers,
+and errors. Sign in as the same OS user that runs the Worklet.
 
 SuperTag runs the Codex CLI you install, so keep it current: `supertag init` and `supertag up`
 check its version and stop with the upgrade command when it is older than the minimum. A newer

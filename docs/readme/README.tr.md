@@ -10,7 +10,7 @@
 **Kalıcı, proaktif, çok kullanıcılı yapay zekâ aktörleri için açık altyapı.**
 
 Kendi Devin Bots, OpenAI dots veya Grok Bot'unuzu mühendislik, pazarlama, satış ya da herhangi bir
-ekip için çalıştırın. Kendi altyapınızda, zaten kullandığınız kodlama ajanlarının üzerinde.
+ekip için çalıştırın. Kendi altyapınızda, zaten kullandığınız kodlama ajanlarının ve modellerin üzerinde.
 
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.tr.webp" alt="Tag'lerle tanışın: yuvarlak ve uzun gövdeli, renkli ceketli, şapkalı ve gözlüklü dokuz SuperTag maskotu" width="900" height="360">
@@ -276,7 +276,8 @@ kalır.
   sanal makinelerini Worker Host olarak bağlayın. `reliability` gibi süregelen bir sorumluluğu olan
   Tag'leri sürekli açık bir host üzerinde tutun.
 - **Sizin kodlama ajanlarınız ve modelleriniz.** Her Tag, seçtiğiniz kodlama ajanında ve modelde,
-  kendi hesabınızla veya anahtarınızla oturum açmış olarak çalışır.
+  kendi hesabınızla veya anahtarınızla oturum açmış olarak çalışır. GLM, Kimi ve DeepSeek gibi açık
+  ağırlıklı modeller [OpenCode üzerinden çalışır](../../docs/guides/open-models.md).
 - **Sizin sınırlarınız.** Her Tag yalnızca izinlerinin elverdiğini yapabilir; hangi eylemlerin
   onayınızı bekleyeceğini de siz seçersiniz. Codex komutları kendi sandbox'ında çalıştırır; Claude
   Code, Cursor ve OpenCode ise kendi komutlarını yerel konteynerlerde çalıştırabilir. Bir Tag

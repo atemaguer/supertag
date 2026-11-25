@@ -8,7 +8,7 @@
 
 **永続的・能動的・マルチプレイヤーの AI アクターのための、オープンなインフラ。**
 
-あなた専用の Devin Bots、OpenAI dots、Grok Bot を、エンジニアリング、マーケティング、営業、どんなチームのためにも動かせます。セルフホストで、いつものコーディングエージェントの上で動きます。
+あなた専用の Devin Bots、OpenAI dots、Grok Bot を、エンジニアリング、マーケティング、営業、どんなチームのためにも動かせます。セルフホストで、いつものコーディングエージェントとモデルの上で動きます。
 
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.ja.webp" alt="Tag たちの紹介 — 丸い体型や縦長の体型で、色とりどりのジャケットや帽子、メガネを身につけた 9 体の SuperTag マスコット" width="900" height="360">
@@ -178,7 +178,7 @@ supertag objective review OBJECTIVE_ID request-changes --feedback "Also cover th
 ![クライアントとコラボレーションツールは Gateway を経由して Control Plane に接続する。Control Plane は Tag と権限を SQLite または PostgreSQL に保存し、作業をスケジュールする。各 Worker Host では、Worklet が Control Plane から Task を取得し、Task Attempt ごとに Worker を起動する。ノート PC では Codex、サーバーでは Claude Code が、それぞれ harness アダプターを介して動く。](../../assets/images/supertag-architecture.ja.webp)
 
 - **あなたのマシン。** `supertag init` はローカルの **Control Plane**（Tag を保存し、その作業をスケジュールするサービス）を起動し、あなたのコンピューターを **Worker Host**（作業を実行するマシンまたはサンドボックス）として接続します。チームが加わったら、全員がアクセスできる場所にControl Plane をデプロイし、ノート PC、サーバー、CI ランナー、クラウド VMを Worker Host として接続します。`reliability` のように継続的な責務を持つ Tag は、常時稼働のホストに置いてください。
-- **あなたのコーディングエージェントとモデル。** 各 Tag は、あなたが選んだコーディングエージェントとモデルで動き、あなた自身のアカウントまたはキーでサインインします。
+- **あなたのコーディングエージェントとモデル。** 各 Tag は、あなたが選んだコーディングエージェントとモデルで動き、あなた自身のアカウントまたはキーでサインインします。GLM、Kimi、DeepSeek などのオープンウェイトモデルは [OpenCode を通じて動きます](../../docs/guides/open-models.md)。
 - **あなたが決める制限。** 各 Tag にできるのは権限で許可されたことだけで、どのアクションにあなたの承認を必要とするかも選べます。Codex は自前のサンドボックスでコマンドを実行し、Claude Code、Cursor、OpenCode はローカルのコンテナ内で実行できます。Tag がアクセスできるのは、あなたが許可したネットワークアドレスだけです。Codex 上とコンテナ内では、Sentry のトークンなどの認証情報をホストが許可済みのリクエストに付加するため、Tag のコマンドが認証情報を目にすることはありません。
 
 [SuperTag をセルフホストする](../../docs/guides/self-hosting.md) · [Worker Host を接続する](../../docs/guides/workers.md) · [権限と承認を設定する](../../docs/concepts/context-and-permissions.md) · [全体の仕組みを見る](../../docs/concepts/how-it-works.md)
