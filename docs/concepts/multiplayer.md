@@ -90,7 +90,8 @@ Slack thread does not appear in Bob's GitHub issue on its own. Work crosses Sess
 explicit ways:
 
 - **Recall.** Each turn of a conversation, an Objective's conversation, or the Tag's inbox starts
-  with the Tag's open Objectives, most recently updated first. When a request refers to earlier
+  with the Tag's open Objectives, most recently updated first, and the work it delivered: each
+  Session's branch and delivered commit and what became of them. When a request refers to earlier
   work, the Tag searches and reads its other Sessions with `list_sessions`, `search_sessions`, and
   `read_session`, rereads what happened during a turn with `read_turn`, and reads an Objective
   with `read_objective`. It reads only the Sessions this

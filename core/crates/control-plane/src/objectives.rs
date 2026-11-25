@@ -1569,7 +1569,7 @@ pub(crate) async fn objective_finish_in(
     if record.value.status == ObjectiveStatus::Limited as i32 {
         return Err(invalid("only an operator can resume a limited Objective"));
     }
-    record.set_summary(result);
+    record.set_summary(&reported_summary(task, result));
     record.change_status(status, now_ms);
     save_in(tx, &record).await?;
     if record.closed() {
@@ -1581,6 +1581,25 @@ pub(crate) async fn objective_finish_in(
         report_completion_in(tx, &record, now_ms).await?;
     }
     Ok(())
+}
+
+/// The report as recorded: the turn's summary and, when its Session has delivered work, the
+/// commit and branch that hold it. Delivery replaces the commits a turn makes in its checkout, so
+/// a commit ID the summary quotes may not exist; the recorded commit does.
+fn reported_summary(task: &Task, result: &str) -> String {
+    match task
+        .workspace_delivery
+        .as_ref()
+        .filter(|delivery| delivery.head_commit != delivery.base_commit)
+    {
+        Some(delivery) => format!(
+            "{}\n\nDelivered by SuperTag as commit {} on branch {}.",
+            result.trim_end(),
+            delivery.head_commit,
+            supertag_protocol::session_branch(&task.tag_id, &task.session_id)
+        ),
+        None => result.to_owned(),
+    }
 }
 
 /// A recorded review schedules at most one owner turn. Pause and limits defer

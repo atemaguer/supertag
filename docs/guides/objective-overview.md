@@ -33,7 +33,7 @@ Deadline: 2027-03-31T23:00:00.000Z (about 138 days left)
 
 Delivered:
   Meter API calls per customer (lead, Task 2f1c…)
-    Commit 0123456789ab in Workspace app, 4 changed files since fedcba987654
+    Commit 0123456789ab on branch supertag/session/5e1d… in Workspace app, 4 changed files since fedcba987654
 
 Needs you:
   1 approval request waits for a decision.
@@ -55,8 +55,9 @@ Details:
 - **Budget** is unlimited, or how much of the pool is spent. One pool covers the Objective's own
   conversation and every Session beneath it. Task Attempts with unknown cost are called out,
   because the budget cannot count them.
-- **Delivered** lists each Session's latest delivery: its commit and changed files in the
-  Workspace. A branch delivery is imported into your repository as the Session's branch under `supertag/session/`; see
+- **Delivered** lists each Session's latest delivery: its commit, its branch, and changed files
+  in the Workspace. This commit replaces any commit the Tag made in its checkout, so a commit ID
+  in the Tag's own summary may not exist. A branch delivery is imported into your repository as the Session's branch under `supertag/session/`; see
   [Workspaces](workspaces.md#3-see-the-branches-appear).
 - **Needs you** lists approval requests, questions, results submitted for review, pauses, and
   budget or deadline limits, each with the command that acts on it. A question appears in full.

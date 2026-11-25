@@ -519,7 +519,7 @@ when the Tag makes the call; see [Approval requests](#approval-requests). The [a
 | `continue_session` | `sessionId`, `message` (up to 8,000 characters) | Starts that work Session's next Task |
 | `close_session` | `sessionId` | Closes one of the Tag's work Sessions, so it stops counting toward the [limit](#open-work-sessions) |
 | `ask` | `text` (up to 16,000 characters; 2,000 in a work Session) | Ends the Task waiting on a person's answer |
-| `report_objective` | `status` (`ready_for_review`, `completed`, or `blocked`; not `completed` for an ongoing Objective), `summary` (up to 16,000 characters) | When the turn ends, sets the Objective's status; the summary becomes the turn's result |
+| `report_objective` | `status` (`ready_for_review`, `completed`, or `blocked`; not `completed` for an ongoing Objective), `summary` (up to 16,000 characters) | When the turn ends, sets the Objective's status; the summary becomes the turn's result, and the Objective records it with the Session's delivered commit and branch |
 | `ask_tag` | `text` (up to 8,000 characters) | Asks the Objective's own Tag; the inbox answer is the Objective's next turn. See [Asking the Tag](#asking-the-tag) |
 | `send_message` | `to`, `text` (up to 8,000 characters), optional `type` and commit review; or, in an inbox turn, `objective` and `text` | Delivers a message to another Tag's Mailbox, or answers one of the Tag's Objectives |
 | `read_mailbox` | optional `limit` (1–16), `cursor` | Reads the Tag's Mailbox |
@@ -531,7 +531,7 @@ when the Tag makes the call; see [Approval requests](#approval-requests). The [a
 | `read_session` | `sessionId`, `limit` (1–20), `before` | Reads one page of a visible Session's finished turns, oldest first |
 | `read_turn` | `taskId`, `limit` (1–100, default 50), `after` | Reads one page of what happened during a visible finished turn: the Tag's messages, its activity, and its progress, in order |
 | `list_objectives` | `limit` (1–20), `offset` | Lists the Tag's open Objectives it may see |
-| `read_objective` | optional `objectiveId` | Reads an Objective's status, limits, budget pool, and Sessions |
+| `read_objective` | optional `objectiveId` | Reads an Objective's status, limits, budget pool, and Sessions, with each Session's delivered commit and branch |
 | `schedule` | `note` (up to 4,000 characters), and `at` or `every`, optional `timeZone` | When the turn succeeds, creates a [Schedule](#schedules) that wakes the Tag later in this Session |
 | `cancel_schedule` | `scheduleId` | Cancels one of the Tag's Schedules in this Session |
 | `stay_quiet` | `note` (up to 500 characters) | Ends the turn without posting anything; see [Quiet results](#quiet-results) |
@@ -551,7 +551,8 @@ the turn goes on. No tool creates an Objective. A person's `/goal` creates one; 
 A Tag is one actor across many conversations. Each turn of a conversation, an Objective's
 conversation, or the Tag's inbox starts with the Tag's portfolio: its open Objectives that the turn
 may see, most recently updated first, and a reminder that it can recall its other Sessions. The
-portfolio is state, not instructions, and is bounded to about 3,800 characters.
+portfolio is state, not instructions. Its Objectives are bounded to about 3,800 characters; the
+[delivered work](#delivered-work) that follows them has its own bound.
 
 - A turn sees a Session of its own Tag that is shared, or private to the same person. See
   [Shared and private Sessions](../concepts/multiplayer.md#shared-and-private-sessions).
@@ -574,9 +575,33 @@ portfolio is state, not instructions, and is bounded to about 3,800 characters.
   Session's recap.
 - `read_objective` without `objectiveId` reads the Objective this turn works for. An Objective's
   own turn reads only its own Objective; another turn reads an Objective the Tag owns whose
-  Session it may see. It returns no turn prompts, results, or failure text.
+  Session it may see. It returns no turn prompts, results, or failure text. Each Session carries
+  its latest delivery: the Workspace, the delivered commit, its branch, and how many files it
+  changed.
 - Each read looks past Sessions it may not see until it has a full page, so older visible
   Sessions and turns are never left out, and `list_objectives` counts every open Objective.
+
+### Delivered work
+
+When a Task with a Workspace ends, the Worklet delivers what changed in its checkout as one new
+commit on the Session's branch, `supertag/session/HASH`. Commits the harness made in its checkout
+are not delivered, so their IDs never exist in the repository. The Tag is told so, and reads its
+delivered work from what SuperTag recorded:
+
+- Each turn with a Workspace learns its Session's branch in its portfolio, with the instruction to
+  name the branch, not a commit ID from its checkout.
+- The portfolio of every conversation, Objective, and inbox turn lists the Tag's latest delivered
+  work in Sessions the turn may see, newest first and up to five: the Objective or Session, its
+  branch, the delivered commit, when it was delivered, and what became of it (the Objective's
+  status, a [landing](../guides/workspaces.md#use-a-repository-on-a-git-server) such as a pull request
+  or a merge, and the latest [commit review](#commit-reviews)).
+- `read_objective` names each Session's delivered commit and branch. When the reporting Session
+  has delivered work, an Objective's report records the summary followed by
+  `Delivered by SuperTag as commit COMMIT on branch BRANCH.`
+
+Only a Session's own later turns start from its delivered commit. A new Session, such as a later
+conversation, starts from the Workspace's ref, so it sees earlier work through these records, not
+in its checkout.
 
 ### Schedules
 

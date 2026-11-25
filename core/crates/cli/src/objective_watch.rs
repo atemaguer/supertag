@@ -771,6 +771,7 @@ mod tests {
             committed: true,
             changed_files: 3,
             patch: true,
+            branch: String::new(),
         });
         let mut closed = view(
             ObjectiveStatus::Completed,

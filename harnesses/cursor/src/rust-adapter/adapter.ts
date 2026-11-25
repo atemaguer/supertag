@@ -254,7 +254,9 @@ export async function runAdapter(
               ? "Use paths relative to the Task workspace in the admitted file and command tools."
               : `The Task workspace is ${workspace}. Use the admitted workspace tools for files and commands.`,
           ...(task.workspace
-            ? ["SuperTag records changes after the Attempt. Do not push or change other branches."]
+            ? [
+                "SuperTag delivers changes after the Attempt as one new commit that replaces any commits made here, so do not quote their IDs. Do not push or change other branches.",
+              ]
             : []),
           restored
             ? ""

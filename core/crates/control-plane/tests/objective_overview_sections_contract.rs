@@ -131,6 +131,7 @@ async fn contract(url: String) {
             committed: true,
             changed_files: 3,
             patch: true,
+            branch: supertag_protocol::session_branch(&task.tag_id, &task.session_id),
         })
     );
     assert!(owner.started_at_ms.is_some(), "the first turn's acceptance");

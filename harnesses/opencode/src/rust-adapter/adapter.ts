@@ -396,7 +396,7 @@ export async function nativeRequest(
     redact(task.prompt, secrets),
     ...(task.workspace
       ? [
-          "Work in this Task's assigned Git worktree. SuperTag records Workspace changes after the Attempt. Do not push, rewrite history, or change other branches.",
+          "Work in this Task's assigned Git worktree. SuperTag delivers Workspace changes after the Attempt as one new commit that replaces any commits made here, so do not quote their IDs. Do not push, rewrite history, or change other branches.",
         ]
       : []),
     ...(remote

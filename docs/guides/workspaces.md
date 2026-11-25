@@ -168,6 +168,11 @@ Session continues only on the host that holds its commits. Submit
 independent work in a new Session with `supertag task submit --session NAME`; it gets its own
 branch.
 
+A new Session starts from the Workspace's ref, not from another Session's branch. Delivery
+replaces the commits a Tag makes in its checkout with one new commit, so the Tag finds its earlier
+work from what SuperTag recorded: each turn lists the branches and commits it delivered and what
+became of them; see [Delivered work](../reference/coordination.md#delivered-work).
+
 ### Push or merge from your machine
 
 `land` can also push Session branches to one of the repository's own remotes, or merge finished

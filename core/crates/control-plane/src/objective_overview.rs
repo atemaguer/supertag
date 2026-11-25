@@ -286,6 +286,7 @@ async fn session_status(
                 head_commit: delivery.head_commit,
                 committed: delivery.committed,
                 changed_files: delivery.changed_files,
+                branch: supertag_protocol::session_branch(tag_id, session_id),
             })
         }),
         None => None,

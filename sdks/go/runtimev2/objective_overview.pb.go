@@ -918,7 +918,10 @@ type ObjectiveSessionDelivery struct {
 	Committed    bool                   `protobuf:"varint,5,opt,name=committed,proto3" json:"committed,omitempty"`
 	ChangedFiles uint64                 `protobuf:"varint,6,opt,name=changed_files,json=changedFiles,proto3" json:"changed_files,omitempty"`
 	// Whether the delivery published a patch.
-	Patch         bool `protobuf:"varint,7,opt,name=patch,proto3" json:"patch,omitempty"`
+	Patch bool `protobuf:"varint,7,opt,name=patch,proto3" json:"patch,omitempty"`
+	// The Session's branch, `supertag/session/ID`, which holds `head_commit`. Commits made in a
+	// checkout are not delivered: delivery replaces them with `head_commit`.
+	Branch        string `protobuf:"bytes,8,opt,name=branch,proto3" json:"branch,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1000,6 +1003,13 @@ func (x *ObjectiveSessionDelivery) GetPatch() bool {
 		return x.Patch
 	}
 	return false
+}
+
+func (x *ObjectiveSessionDelivery) GetBranch() string {
+	if x != nil {
+		return x.Branch
+	}
+	return ""
 }
 
 type ObjectiveSessionFailure struct {
@@ -1270,7 +1280,7 @@ const file_supertag_runtime_v2_objective_overview_proto_rawDesc = "" +
 	"\x16latest_completed_at_ms\x18\x9a* \x01(\x03H\x00R\x13latestCompletedAtMs\x88\x01\x01\x12(\n" +
 	"\rstarted_at_ms\x18\x9b* \x01(\x03H\x01R\vstartedAtMs\x88\x01\x01B\x19\n" +
 	"\x17_latest_completed_at_msB\x10\n" +
-	"\x0e_started_at_ms\"\xf1\x01\n" +
+	"\x0e_started_at_ms\"\x89\x02\n" +
 	"\x18ObjectiveSessionDelivery\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1f\n" +
@@ -1280,7 +1290,8 @@ const file_supertag_runtime_v2_objective_overview_proto_rawDesc = "" +
 	"headCommit\x12\x1c\n" +
 	"\tcommitted\x18\x05 \x01(\bR\tcommitted\x12#\n" +
 	"\rchanged_files\x18\x06 \x01(\x04R\fchangedFiles\x12\x14\n" +
-	"\x05patch\x18\a \x01(\bR\x05patch\"\xea\x01\n" +
+	"\x05patch\x18\a \x01(\bR\x05patch\x12\x16\n" +
+	"\x06branch\x18\b \x01(\tR\x06branch\"\xea\x01\n" +
 	"\x17ObjectiveSessionFailure\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x124\n" +
 	"\x05state\x18\x02 \x01(\x0e2\x1e.supertag.runtime.v2.TaskStateR\x05state\x12C\n" +

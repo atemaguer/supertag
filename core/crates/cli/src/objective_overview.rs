@@ -345,8 +345,13 @@ fn short_commit(commit: &str) -> &str {
 pub(crate) fn delivery_summary(delivery: &ObjectiveSessionDelivery) -> String {
     let files = plural(delivery.changed_files, "changed file");
     if delivery.committed {
+        let branch = if delivery.branch.is_empty() {
+            String::new()
+        } else {
+            format!(" on branch {}", delivery.branch)
+        };
         format!(
-            "Commit {} in Workspace {}, {files} since {}",
+            "Commit {}{branch} in Workspace {}, {files} since {}",
             short_commit(&delivery.head_commit),
             delivery.workspace_id,
             short_commit(&delivery.base_commit)
@@ -452,6 +457,7 @@ pub(crate) fn json(view: &ObjectiveOverview) -> Value {
                 "workspace_id": delivery.workspace_id,
                 "base_commit": delivery.base_commit,
                 "head_commit": delivery.head_commit,
+                "branch": delivery.branch,
                 "committed": delivery.committed,
                 "changed_files": delivery.changed_files,
                 "patch": delivery.patch,
@@ -604,6 +610,7 @@ mod tests {
                 committed: true,
                 changed_files: 3,
                 patch: true,
+                branch: "supertag/session/5e55".into(),
             }),
             ..Default::default()
         });
@@ -619,7 +626,7 @@ mod tests {
         let text = text(&working);
         assert!(
             text.contains(
-                "Delivered:\n  Build the exporter (builder, Task t2)\n    Commit 0123456789ab in Workspace product, 3 changed files since fedcba987654\n"
+                "Delivered:\n  Build the exporter (builder, Task t2)\n    Commit 0123456789ab on branch supertag/session/5e55 in Workspace product, 3 changed files since fedcba987654\n"
             ),
             "{text}"
         );

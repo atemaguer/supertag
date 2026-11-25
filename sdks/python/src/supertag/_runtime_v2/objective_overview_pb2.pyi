@@ -194,7 +194,7 @@ class ObjectiveSessionView(_message.Message):
     def __init__(self, session_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., owner: _Optional[bool] = ..., title: _Optional[str] = ..., parent_session_id: _Optional[str] = ..., status: _Optional[_Union[ObjectiveSessionStatus, str]] = ..., question: _Optional[str] = ..., task_count: _Optional[int] = ..., latest_task_id: _Optional[str] = ..., delivery: _Optional[_Union[ObjectiveSessionDelivery, _Mapping]] = ..., failure: _Optional[_Union[ObjectiveSessionFailure, _Mapping]] = ..., latest_completed_at_ms: _Optional[int] = ..., started_at_ms: _Optional[int] = ...) -> None: ...
 
 class ObjectiveSessionDelivery(_message.Message):
-    __slots__ = ("task_id", "workspace_id", "base_commit", "head_commit", "committed", "changed_files", "patch")
+    __slots__ = ("task_id", "workspace_id", "base_commit", "head_commit", "committed", "changed_files", "patch", "branch")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
     BASE_COMMIT_FIELD_NUMBER: _ClassVar[int]
@@ -202,6 +202,7 @@ class ObjectiveSessionDelivery(_message.Message):
     COMMITTED_FIELD_NUMBER: _ClassVar[int]
     CHANGED_FILES_FIELD_NUMBER: _ClassVar[int]
     PATCH_FIELD_NUMBER: _ClassVar[int]
+    BRANCH_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     workspace_id: str
     base_commit: str
@@ -209,7 +210,8 @@ class ObjectiveSessionDelivery(_message.Message):
     committed: bool
     changed_files: int
     patch: bool
-    def __init__(self, task_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., base_commit: _Optional[str] = ..., head_commit: _Optional[str] = ..., committed: _Optional[bool] = ..., changed_files: _Optional[int] = ..., patch: _Optional[bool] = ...) -> None: ...
+    branch: str
+    def __init__(self, task_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., base_commit: _Optional[str] = ..., head_commit: _Optional[str] = ..., committed: _Optional[bool] = ..., changed_files: _Optional[int] = ..., patch: _Optional[bool] = ..., branch: _Optional[str] = ...) -> None: ...
 
 class ObjectiveSessionFailure(_message.Message):
     __slots__ = ("task_id", "state", "harness_kind", "message", "next_actions")

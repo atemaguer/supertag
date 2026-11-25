@@ -159,6 +159,9 @@ message ObjectiveSessionDelivery {
   uint64 changed_files = 6;
   // Whether the delivery published a patch.
   bool patch = 7;
+  // The Session's branch, `supertag/session/ID`, which holds `head_commit`. Commits made in a
+  // checkout are not delivered: delivery replaces them with `head_commit`.
+  string branch = 8;
 }
 
 message ObjectiveSessionFailure {

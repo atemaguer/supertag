@@ -18,6 +18,14 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- A Tag no longer loses track of work it delivered. Delivery replaces the commits a Tag makes in
+  its checkout with one new commit, so a Tag quoted commit IDs that never existed, and a later
+  conversation, which starts from the Workspace's ref, concluded the work was missing. Each turn
+  is now told its Session's branch and to name it instead of a commit ID; every conversation,
+  Objective, and inbox turn lists the Tag's latest delivered branches and commits with their
+  Objective status, landing, and commit review; `read_objective` and `describe objective` name
+  each delivery's branch; and an Objective's report records the delivered commit and branch
+  after the Tag's summary.
 - An OpenCode Task a provider refuses fails with the provider's reason, such as an expired API
   key, a model the account's region setting blocks, or `Model not found: PROVIDER/MODEL.`, in
   `supertag get task`, `describe task`, and `logs`, with anything shaped like a key or token
