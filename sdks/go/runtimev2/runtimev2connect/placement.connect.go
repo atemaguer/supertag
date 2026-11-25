@@ -57,6 +57,8 @@ const (
 	UsersGetUserProcedure = "/supertag.runtime.v2.Users/GetUser"
 	// UsersListUsersProcedure is the fully-qualified name of the Users's ListUsers RPC.
 	UsersListUsersProcedure = "/supertag.runtime.v2.Users/ListUsers"
+	// UsersRemoveUserProcedure is the fully-qualified name of the Users's RemoveUser RPC.
+	UsersRemoveUserProcedure = "/supertag.runtime.v2.Users/RemoveUser"
 	// EnrollmentsEnrollProcedure is the fully-qualified name of the Enrollments's Enroll RPC.
 	EnrollmentsEnrollProcedure = "/supertag.runtime.v2.Enrollments/Enroll"
 	// EnrollmentsWhoAmIProcedure is the fully-qualified name of the Enrollments's WhoAmI RPC.
@@ -308,8 +310,12 @@ type UsersClient interface {
 	// that enrolls the User's client devices and Worker Hosts.
 	InviteUser(context.Context, *connect.Request[runtimev2.InviteUserRequest]) (*connect.Response[runtimev2.InviteUserResponse], error)
 	GetUser(context.Context, *connect.Request[runtimev2.GetUserRequest]) (*connect.Response[runtimev2.User], error)
-	// By name.
+	// By name, removed Users included.
 	ListUsers(context.Context, *connect.Request[runtimev2.ListUsersRequest]) (*connect.Response[runtimev2.ListUsersResponse], error)
+	// Revokes every device, Worker Host, and invite key of the User at once, and moves their
+	// personal Tags and unfinished Objectives to `transfer_to`. Refused while the User owns
+	// anything and names no one to take it. Removing a removed User changes nothing.
+	RemoveUser(context.Context, *connect.Request[runtimev2.RemoveUserRequest]) (*connect.Response[runtimev2.RemoveUserResponse], error)
 }
 
 // NewUsersClient constructs a client for the supertag.runtime.v2.Users service. By default, it uses
@@ -341,6 +347,12 @@ func NewUsersClient(httpClient connect.HTTPClient, baseURL string, opts ...conne
 			connect.WithSchema(usersMethods.ByName("ListUsers")),
 			connect.WithClientOptions(opts...),
 		),
+		removeUser: connect.NewClient[runtimev2.RemoveUserRequest, runtimev2.RemoveUserResponse](
+			httpClient,
+			baseURL+UsersRemoveUserProcedure,
+			connect.WithSchema(usersMethods.ByName("RemoveUser")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -349,6 +361,7 @@ type usersClient struct {
 	inviteUser *connect.Client[runtimev2.InviteUserRequest, runtimev2.InviteUserResponse]
 	getUser    *connect.Client[runtimev2.GetUserRequest, runtimev2.User]
 	listUsers  *connect.Client[runtimev2.ListUsersRequest, runtimev2.ListUsersResponse]
+	removeUser *connect.Client[runtimev2.RemoveUserRequest, runtimev2.RemoveUserResponse]
 }
 
 // InviteUser calls supertag.runtime.v2.Users.InviteUser.
@@ -366,14 +379,23 @@ func (c *usersClient) ListUsers(ctx context.Context, req *connect.Request[runtim
 	return c.listUsers.CallUnary(ctx, req)
 }
 
+// RemoveUser calls supertag.runtime.v2.Users.RemoveUser.
+func (c *usersClient) RemoveUser(ctx context.Context, req *connect.Request[runtimev2.RemoveUserRequest]) (*connect.Response[runtimev2.RemoveUserResponse], error) {
+	return c.removeUser.CallUnary(ctx, req)
+}
+
 // UsersHandler is an implementation of the supertag.runtime.v2.Users service.
 type UsersHandler interface {
 	// Creates the User, or finds an existing one, and issues a new invite key: a reusable Auth Key
 	// that enrolls the User's client devices and Worker Hosts.
 	InviteUser(context.Context, *connect.Request[runtimev2.InviteUserRequest]) (*connect.Response[runtimev2.InviteUserResponse], error)
 	GetUser(context.Context, *connect.Request[runtimev2.GetUserRequest]) (*connect.Response[runtimev2.User], error)
-	// By name.
+	// By name, removed Users included.
 	ListUsers(context.Context, *connect.Request[runtimev2.ListUsersRequest]) (*connect.Response[runtimev2.ListUsersResponse], error)
+	// Revokes every device, Worker Host, and invite key of the User at once, and moves their
+	// personal Tags and unfinished Objectives to `transfer_to`. Refused while the User owns
+	// anything and names no one to take it. Removing a removed User changes nothing.
+	RemoveUser(context.Context, *connect.Request[runtimev2.RemoveUserRequest]) (*connect.Response[runtimev2.RemoveUserResponse], error)
 }
 
 // NewUsersHandler builds an HTTP handler from the service implementation. It returns the path on
@@ -401,6 +423,12 @@ func NewUsersHandler(svc UsersHandler, opts ...connect.HandlerOption) (string, h
 		connect.WithSchema(usersMethods.ByName("ListUsers")),
 		connect.WithHandlerOptions(opts...),
 	)
+	usersRemoveUserHandler := connect.NewUnaryHandler(
+		UsersRemoveUserProcedure,
+		svc.RemoveUser,
+		connect.WithSchema(usersMethods.ByName("RemoveUser")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.Users/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case UsersInviteUserProcedure:
@@ -409,6 +437,8 @@ func NewUsersHandler(svc UsersHandler, opts ...connect.HandlerOption) (string, h
 			usersGetUserHandler.ServeHTTP(w, r)
 		case UsersListUsersProcedure:
 			usersListUsersHandler.ServeHTTP(w, r)
+		case UsersRemoveUserProcedure:
+			usersRemoveUserHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -428,6 +458,10 @@ func (UnimplementedUsersHandler) GetUser(context.Context, *connect.Request[runti
 
 func (UnimplementedUsersHandler) ListUsers(context.Context, *connect.Request[runtimev2.ListUsersRequest]) (*connect.Response[runtimev2.ListUsersResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Users.ListUsers is not implemented"))
+}
+
+func (UnimplementedUsersHandler) RemoveUser(context.Context, *connect.Request[runtimev2.RemoveUserRequest]) (*connect.Response[runtimev2.RemoveUserResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Users.RemoveUser is not implemented"))
 }
 
 // EnrollmentsClient is a client for the supertag.runtime.v2.Enrollments service.

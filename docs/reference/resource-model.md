@@ -317,6 +317,18 @@ created, and its Tasks belong to the User, while the audit log records the devic
 Inviting an existing User with only their name issues another key; revoke a key with
 `supertag auth-key revoke NAME-invite-N`, and one device with `supertag client revoke NAME`.
 
+When someone leaves, remove them:
+
+```sh
+supertag user remove bob --transfer-to casey
+```
+
+It revokes every device, Worker Host, and invite key of Bob's at once, and moves his personal
+Tags and unfinished Objectives to Casey, whose Worker Hosts then run those Tags. Running work
+settles under the new owner. Without `--transfer-to`, it is refused while Bob owns anything, and
+says what; retire his Tag first if no one should take it over. Bob stays in `supertag get users`
+with `removed_at_ms`, and his name is never reused.
+
 ### Personal Tags
 
 Inviting a new User also creates their **personal Tag**: a Tag with the User's name, owned by them

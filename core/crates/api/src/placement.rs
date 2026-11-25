@@ -50,6 +50,16 @@ impl Users for Api {
         })
         .await
     }
+
+    async fn remove_user(
+        &self,
+        request: Request<RemoveUserRequest>,
+    ) -> Result<Response<RemoveUserResponse>, Status> {
+        self.forward(request, |channel, request| async move {
+            UsersClient::new(channel).remove_user(request).await
+        })
+        .await
+    }
 }
 
 #[tonic::async_trait]

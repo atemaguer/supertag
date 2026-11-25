@@ -36,6 +36,16 @@ pub enum UserCommand {
         #[arg(long)]
         expires_in_seconds: Option<u64>,
     },
+    /// Remove a User: revoke every device, Worker Host, and invite key of theirs at once, and
+    /// move their personal Tags and unfinished Objectives to another User. Refused while they
+    /// own anything and --transfer-to names no one. Their name is never reused.
+    Remove {
+        /// The User to remove.
+        name: String,
+        /// The User who takes over their personal Tags and unfinished Objectives.
+        #[arg(long)]
+        transfer_to: Option<String>,
+    },
 }
 
 // Options for `supertag get users`.
@@ -106,6 +116,24 @@ pub async fn run(connection: Connection, command: UserCommand) -> Result<()> {
                 ],
             })
         }
+        UserCommand::Remove { name, transfer_to } => {
+            let removed = client(channel)
+                .remove_user(request(
+                    RemoveUserRequest {
+                        name,
+                        transfer_to: transfer_to.unwrap_or_default(),
+                    },
+                    &token,
+                )?)
+                .await?
+                .into_inner();
+            json!({
+                "user": removed.user.as_ref().map(view),
+                "transferred_tag_ids": removed.transferred_tag_ids,
+                "transferred_objective_ids": removed.transferred_objective_ids,
+                "revoked_principals": removed.revoked_principals,
+            })
+        }
     };
     crate::terminal::print_json(&output)?;
     Ok(())
@@ -118,6 +146,8 @@ pub fn view(user: &User) -> Value {
         "role": user.role,
         "allowed_tag_ids": user.allowed_tag_ids,
         "created_at_ms": user.created_at_ms,
+        "removed_at_ms": user.removed_at_ms,
+        "transferred_to": user.transferred_to,
     })
 }
 

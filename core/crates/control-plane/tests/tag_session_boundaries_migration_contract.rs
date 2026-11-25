@@ -76,7 +76,7 @@ async fn seed_prior_version(url: &str) {
 async fn contract(url: String) {
     seed_prior_version(&url).await;
     let store = Store::open(&url).await.unwrap();
-    assert_eq!(store.migrated(), Some((i64::from(PRIOR), 126)));
+    assert_eq!(store.migrated(), Some((i64::from(PRIOR), 127)));
     let pool = AnyPool::connect(&url).await.unwrap();
     // The Objective names no Team, and a Team has no concurrency limit.
     assert!(

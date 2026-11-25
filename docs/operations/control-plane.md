@@ -97,6 +97,10 @@ The invitation also creates Alice's [personal Tag](../reference/resource-model.m
 `alice`. She chooses its harness and Workspace; what it may do comes from the `personal` Role you
 define, or the invitation's `--role`.
 
+When someone leaves, `supertag user remove bob --transfer-to casey --gateway team` revokes all of
+Bob's devices, Worker Hosts, and invite keys at once, and gives his personal Tag and unfinished
+Objectives to Casey. See [Users](../reference/resource-model.md#users).
+
 ## Manage a remote Control Plane
 
 ### Connect the CLI

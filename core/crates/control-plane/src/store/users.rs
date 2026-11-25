@@ -5,7 +5,7 @@
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::v2::{
     GetUserRequest, InviteUserRequest, InviteUserResponse, ListUsersRequest, ListUsersResponse,
-    PutTagRequest, User,
+    ObjectiveStatus, PutTagRequest, RemoveUserRequest, RemoveUserResponse, User,
 };
 
 use super::enrollments::{credential_digest, credential_unused_in, fingerprint, operator};
@@ -112,6 +112,12 @@ impl Store {
         }
         let now = self.execution_now_ms();
         let user = match user_in(&mut tx, &input.name).await? {
+            Some(user) if user.removed_at_ms.is_some() => {
+                return Err(StoreError::FailedPrecondition(format!(
+                    "User {} was removed, and a User's name is never reused",
+                    user.name
+                )));
+            }
             Some(user) => {
                 // An existing User keeps their details; an invitation only issues a new key.
                 if (!display.is_empty() && display != user.display_name)
@@ -199,6 +205,143 @@ impl Store {
         Ok(InviteUserResponse {
             user: Some(user),
             auth_key: Some(auth_key),
+        })
+    }
+
+    /// Removes a User: revokes every device, Worker Host, and invite key of theirs, and moves
+    /// their personal Tags and unfinished Objectives to `transfer_to`, whose Worker Hosts then run
+    /// those Tags. Refused while they own anything and name no one to take it over. Removing a
+    /// removed User changes nothing.
+    pub async fn remove_user(
+        &self,
+        principal: &str,
+        input: &RemoveUserRequest,
+    ) -> Result<RemoveUserResponse> {
+        operator(principal)?;
+        user_name(&input.name)?;
+        if !input.transfer_to.is_empty() {
+            user_name(&input.transfer_to)?;
+            if input.transfer_to == input.name {
+                return Err(invalid("a User cannot take over their own Tags"));
+            }
+        }
+        let person = format!("user:{}", input.name);
+        // Check first, so a refusal changes nothing.
+        {
+            let mut tx = self.pool.begin().await?;
+            let user = user_in(&mut tx, &input.name).await?.ok_or_else(|| {
+                StoreError::NotFound(format!("User {} was not found", input.name))
+            })?;
+            if user.removed_at_ms.is_some() {
+                tx.commit().await?;
+                return Ok(RemoveUserResponse {
+                    user: Some(user),
+                    ..Default::default()
+                });
+            }
+            let (tags, objectives) = owned_in(&mut tx, &input.name, &person).await?;
+            if input.transfer_to.is_empty() && !(tags.is_empty() && objectives.is_empty()) {
+                let mut owned = Vec::new();
+                if !tags.is_empty() {
+                    owned.push(format!("personal Tags {}", tags.join(", ")));
+                }
+                if !objectives.is_empty() {
+                    owned.push(format!("unfinished Objectives {}", objectives.join(", ")));
+                }
+                return Err(StoreError::FailedPrecondition(format!(
+                    "User {} owns {}; name who takes them over with --transfer-to USER, or retire them first",
+                    input.name,
+                    owned.join(" and ")
+                )));
+            }
+            if !input.transfer_to.is_empty() {
+                let target = user_in(&mut tx, &input.transfer_to).await?.ok_or_else(|| {
+                    StoreError::NotFound(format!("User {} was not found", input.transfer_to))
+                })?;
+                if target.removed_at_ms.is_some() {
+                    return Err(StoreError::FailedPrecondition(format!(
+                        "User {} was removed and cannot take anything over",
+                        target.name
+                    )));
+                }
+            }
+            tx.commit().await?;
+        }
+        // No new device or host joins once the keys are revoked; then each host is fenced, so
+        // its running Task Attempts stop, in its own transaction.
+        let now = self.execution_now_ms();
+        {
+            let (mut tx, _) = self.write().await?;
+            sqlx::query("UPDATE supertag_v2_auth_keys SET revoked_at_ms=$1 WHERE user_name=$2 AND revoked_at_ms IS NULL")
+                .bind(now).bind(&input.name).execute(&mut *tx).await?;
+            tx.commit().await?;
+        }
+        let hosts: Vec<String> = sqlx::query_scalar("SELECT name FROM supertag_v2_enrollments WHERE role='host' AND user_name=$1 AND revoked_at_ms IS NULL ORDER BY name")
+            .bind(&input.name).fetch_all(&self.pool).await?;
+        for host in &hosts {
+            self.revoke_host(host).await?;
+        }
+        let (mut tx, _) = self.write().await?;
+        let clients: Vec<String> = sqlx::query_scalar("SELECT name FROM supertag_v2_enrollments WHERE role='client' AND user_name=$1 AND revoked_at_ms IS NULL ORDER BY name")
+            .bind(&input.name).fetch_all(&mut *tx).await?;
+        sqlx::query("UPDATE supertag_v2_enrollments SET revoked_at_ms=$1 WHERE user_name=$2 AND revoked_at_ms IS NULL")
+            .bind(now).bind(&input.name).execute(&mut *tx).await?;
+        let (tags, objectives) = owned_in(&mut tx, &input.name, &person).await?;
+        if !input.transfer_to.is_empty() {
+            sqlx::query("UPDATE supertag_v2_tags SET owner_user=$1 WHERE owner_user=$2")
+                .bind(&input.transfer_to)
+                .bind(&input.name)
+                .execute(&mut *tx)
+                .await?;
+            for objective in &objectives {
+                sqlx::query(
+                    "UPDATE supertag_v2_objectives SET created_by=$1 WHERE objective_id=$2",
+                )
+                .bind(format!("user:{}", input.transfer_to))
+                .bind(objective)
+                .execute(&mut *tx)
+                .await?;
+            }
+            // The new owner's Worker Hosts run the Tags they took over.
+            for tag in &tags {
+                sqlx::query("INSERT INTO supertag_v2_host_tags (host_id,tag_id) SELECT h.host_id,$1 FROM supertag_v2_hosts h WHERE h.owner_user=$2 AND h.revoked_at_ms IS NULL AND NOT EXISTS (SELECT 1 FROM supertag_v2_host_tags b WHERE b.host_id=h.host_id AND b.tag_id=$1)")
+                    .bind(tag)
+                    .bind(&input.transfer_to)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+        sqlx::query(
+            "UPDATE supertag_v2_users SET removed_at_ms=$1,transferred_to=$2 WHERE name=$3",
+        )
+        .bind(now)
+        .bind((!input.transfer_to.is_empty()).then_some(&input.transfer_to))
+        .bind(&input.name)
+        .execute(&mut *tx)
+        .await?;
+        let user = user_in(&mut tx, &input.name)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(format!("User {} was not found", input.name)))?;
+        tx.commit().await?;
+        let mut revoked_principals: Vec<String> = clients
+            .iter()
+            .map(|name| format!("client:{name}"))
+            .chain(hosts.iter().map(|name| format!("host:{name}")))
+            .collect();
+        revoked_principals.sort();
+        Ok(RemoveUserResponse {
+            user: Some(user),
+            transferred_tag_ids: if input.transfer_to.is_empty() {
+                vec![]
+            } else {
+                tags
+            },
+            transferred_objective_ids: if input.transfer_to.is_empty() {
+                vec![]
+            } else {
+                objectives
+            },
+            revoked_principals,
         })
     }
 
@@ -296,8 +439,33 @@ pub(crate) async fn user_in(tx: &mut Transaction<'_, Any>, name: &str) -> Result
         .transpose()
 }
 
+/// The personal Tags a User owns and their unfinished Objectives, by ID.
+async fn owned_in(
+    tx: &mut Transaction<'_, Any>,
+    user: &str,
+    person: &str,
+) -> Result<(Vec<String>, Vec<String>)> {
+    let tags = sqlx::query_scalar(
+        "SELECT tag_id FROM supertag_v2_tags WHERE owner_user=$1 AND retired_at_ms IS NULL ORDER BY tag_id",
+    )
+    .bind(user)
+    .fetch_all(&mut **tx)
+    .await?;
+    let objectives = sqlx::query_scalar("SELECT objective_id FROM supertag_v2_objectives WHERE created_by=$1 AND status NOT IN ($2,$3) ORDER BY objective_id")
+        .bind(person)
+        .bind(ObjectiveStatus::Completed as i64)
+        .bind(ObjectiveStatus::Cancelled as i64)
+        .fetch_all(&mut **tx)
+        .await?;
+    Ok((tags, objectives))
+}
+
 fn user_row(row: &AnyRow) -> Result<User> {
     Ok(User {
+        removed_at_ms: row.try_get("removed_at_ms")?,
+        transferred_to: row
+            .try_get::<Option<String>, _>("transferred_to")?
+            .unwrap_or_default(),
         name: row.try_get("name")?,
         display_name: row.try_get("display_name")?,
         created_at_ms: row.try_get("created_at_ms")?,

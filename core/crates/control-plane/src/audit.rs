@@ -150,6 +150,10 @@ fn rule(path: &str) -> Option<Rule> {
             "User",
             &value.name
         )),
+        ("Users", "RemoveUser") => rule!("user.remove", "User", RemoveUserRequest, |value| named(
+            "User",
+            &value.name
+        )),
         ("AuthKeys", "RevokeAuthKey") => rule!(
             "auth-key.revoke",
             "AuthKey",

@@ -11,6 +11,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- `supertag user remove bob --transfer-to casey` removes a User: every device, Worker Host, and
+  invite key of theirs is revoked at once, and their personal Tags and unfinished Objectives move
+  to Casey, whose Worker Hosts then run those Tags. Without `--transfer-to`, it is refused while
+  they own anything. A removed User's name is never reused; audited as `user.remove`.
 - Personal Tags. Inviting a new User creates a Tag with their name that they own: `owner` in
   `supertag get tag`. It takes the invitation's `--role`, or the Control Plane's `personal` Role.
   Its owner, from any device, sets its instructions, harness, model settings, Workspace, and

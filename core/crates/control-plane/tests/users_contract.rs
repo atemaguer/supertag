@@ -491,6 +491,131 @@ async fn exercise(url: &str) {
         ["bob"]
     );
     assert!(rest.next_cursor.is_empty());
+
+    // Removing Bob: refused while he owns anything and names no one to take it over.
+    store
+        .enroll(
+            &digest("k4"),
+            &enroll(PrincipalRole::Client, "bob-phone", "bob phone credential"),
+        )
+        .await
+        .unwrap();
+    store
+        .enroll(
+            &digest("k4"),
+            &enroll(PrincipalRole::Host, "bob-box", "bob host credential"),
+        )
+        .await
+        .unwrap();
+    store
+        .create_objective(
+            "user:bob",
+            &CreateObjectiveRequest {
+                objective_id: "bob-goal".into(),
+                operation_id: "bob-goal".into(),
+                owner_tag_id: "bob".into(),
+                outcome: "Ship the exporter".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let remove = |name: &str, to: &str| RemoveUserRequest {
+        name: name.into(),
+        transfer_to: to.into(),
+    };
+    assert!(matches!(
+        store.remove_user(OPERATOR, &remove("bob", "")).await,
+        Err(StoreError::FailedPrecondition(message))
+            if message.contains("personal Tags bob") && message.contains("bob-goal")
+    ));
+    assert!(matches!(
+        store
+            .remove_user("user:alice", &remove("bob", "alice"))
+            .await,
+        Err(StoreError::PermissionDenied)
+    ));
+    assert!(matches!(
+        store.remove_user(OPERATOR, &remove("bob", "carol")).await,
+        Err(StoreError::NotFound(_))
+    ));
+    // Nothing changed: Bob's phone still works.
+    assert!(
+        store
+            .resolve_credential(&digest("bob phone credential"))
+            .await
+            .unwrap()
+            .is_some()
+    );
+
+    // Casey takes over: Bob's devices, host, and keys stop at once, and his Tag and Objective
+    // become Casey's, run on Casey's host.
+    store
+        .invite_user(OPERATOR, &invite("casey", "Casey", "k8"))
+        .await
+        .unwrap();
+    store
+        .enroll(
+            &digest("k8"),
+            &enroll(PrincipalRole::Host, "casey-box", "casey host credential"),
+        )
+        .await
+        .unwrap();
+    let removed = store
+        .remove_user(OPERATOR, &remove("bob", "casey"))
+        .await
+        .unwrap();
+    assert!(removed.user.as_ref().unwrap().removed_at_ms.is_some());
+    assert_eq!(removed.user.as_ref().unwrap().transferred_to, "casey");
+    assert_eq!(removed.transferred_tag_ids, ["bob"]);
+    assert_eq!(removed.transferred_objective_ids, ["bob-goal"]);
+    assert_eq!(
+        removed.revoked_principals,
+        ["client:bob-phone", "host:bob-box"]
+    );
+    for credential in ["bob phone credential", "bob host credential"] {
+        assert!(
+            store
+                .resolve_credential(&digest(credential))
+                .await
+                .unwrap()
+                .is_none(),
+            "{credential}"
+        );
+    }
+    assert!(matches!(
+        store
+            .enroll(
+                &digest("k4"),
+                &enroll(PrincipalRole::Client, "bob-laptop", "bob laptop credential"),
+            )
+            .await,
+        Err(StoreError::PermissionDenied)
+    ));
+    assert_eq!(store.get_tag("bob").await.unwrap().owner, "casey");
+    assert_eq!(
+        store
+            .get_objective(OPERATOR, "bob-goal")
+            .await
+            .unwrap()
+            .created_by,
+        "user:casey"
+    );
+    submit("bob", "after-removal").await;
+    assert_eq!(
+        claimed(host_authority("casey-box").await).await.as_deref(),
+        Some("bob")
+    );
+    // Removing him again changes nothing, and his name is never reused.
+    let again = store
+        .remove_user(OPERATOR, &remove("bob", "casey"))
+        .await
+        .unwrap();
+    assert!(again.transferred_tag_ids.is_empty());
+    assert!(matches!(
+        store.invite_user(OPERATOR, &invite("bob", "Bob", "k9")).await,
+        Err(StoreError::FailedPrecondition(message)) if message.contains("never reused")
+    ));
     store.close().await;
 }
 

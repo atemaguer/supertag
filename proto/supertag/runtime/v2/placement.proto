@@ -28,8 +28,26 @@ service Users {
   // that enrolls the User's client devices and Worker Hosts.
   rpc InviteUser(InviteUserRequest) returns (InviteUserResponse);
   rpc GetUser(GetUserRequest) returns (User);
-  // By name.
+  // By name, removed Users included.
   rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  // Revokes every device, Worker Host, and invite key of the User at once, and moves their
+  // personal Tags and unfinished Objectives to `transfer_to`. Refused while the User owns
+  // anything and names no one to take it. Removing a removed User changes nothing.
+  rpc RemoveUser(RemoveUserRequest) returns (RemoveUserResponse);
+}
+
+message RemoveUserRequest {
+  string name = 1;
+  // The User who takes over the removed User's personal Tags and unfinished Objectives.
+  string transfer_to = 2;
+}
+
+message RemoveUserResponse {
+  User user = 1;
+  repeated string transferred_tag_ids = 2;
+  repeated string transferred_objective_ids = 3;
+  // The enrolled devices and Worker Hosts revoked, as `client:NAME` and `host:NAME`.
+  repeated string revoked_principals = 4;
 }
 
 message User {
@@ -41,6 +59,10 @@ message User {
   string role = 4;
   // Shared Tags the User's devices may talk to, besides the User's own.
   repeated string allowed_tag_ids = 5;
+  // When the User was removed; their name is never reused.
+  optional int64 removed_at_ms = 6;
+  // The User who took over what a removed User owned.
+  string transferred_to = 7;
 }
 
 message InviteUserRequest {

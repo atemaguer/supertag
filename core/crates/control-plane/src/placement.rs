@@ -888,6 +888,18 @@ impl users_server::Users for ControlPlane {
             self.store.list_users(&principal, request.get_ref()).await?,
         ))
     }
+
+    async fn remove_user(
+        &self,
+        request: Request<RemoveUserRequest>,
+    ) -> std::result::Result<Response<RemoveUserResponse>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .remove_user(&principal, request.get_ref())
+                .await?,
+        ))
+    }
 }
 
 #[cfg(test)]

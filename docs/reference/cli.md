@@ -2871,6 +2871,7 @@ Usage: supertag user [OPTIONS] <COMMAND>
 
 Commands:
   invite  Admit a person as a User and print an invite key that joins all their devices and Worker Hosts. Invite an existing User again, with only their name, for another key
+  remove  Remove a User: revoke every device, Worker Host, and invite key of theirs at once, and move their personal Tags and unfinished Objectives to another User. Refused while they own anything and --transfer-to names no one. Their name is never reused
   help    Print this message or the help of the given subcommand(s)
 
 Options:
@@ -2905,6 +2906,27 @@ Options:
           A shared Tag the User's devices may talk to. Repeat for more Tags
       --expires-in-seconds <EXPIRES_IN_SECONDS>
           Shorter or longer key lifetime. Default: 7 days; at most 90 days
+  -h, --help
+          Print help
+```
+
+## `supertag user remove`
+
+```text
+Remove a User: revoke every device, Worker Host, and invite key of theirs at once, and move their personal Tags and unfinished Objectives to another User. Refused while they own anything and --transfer-to names no one. Their name is never reused
+
+Usage: supertag user remove [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  The User to remove
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved with `supertag connect` or in the desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --transfer-to <TRANSFER_TO>
+          The User who takes over their personal Tags and unfinished Objectives
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
           Print help
 ```

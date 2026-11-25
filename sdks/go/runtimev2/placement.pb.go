@@ -21,6 +21,128 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type RemoveUserRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// The User who takes over the removed User's personal Tags and unfinished Objectives.
+	TransferTo    string `protobuf:"bytes,2,opt,name=transfer_to,json=transferTo,proto3" json:"transfer_to,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveUserRequest) Reset() {
+	*x = RemoveUserRequest{}
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveUserRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveUserRequest) ProtoMessage() {}
+
+func (x *RemoveUserRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveUserRequest.ProtoReflect.Descriptor instead.
+func (*RemoveUserRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *RemoveUserRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *RemoveUserRequest) GetTransferTo() string {
+	if x != nil {
+		return x.TransferTo
+	}
+	return ""
+}
+
+type RemoveUserResponse struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	User                    *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	TransferredTagIds       []string               `protobuf:"bytes,2,rep,name=transferred_tag_ids,json=transferredTagIds,proto3" json:"transferred_tag_ids,omitempty"`
+	TransferredObjectiveIds []string               `protobuf:"bytes,3,rep,name=transferred_objective_ids,json=transferredObjectiveIds,proto3" json:"transferred_objective_ids,omitempty"`
+	// The enrolled devices and Worker Hosts revoked, as `client:NAME` and `host:NAME`.
+	RevokedPrincipals []string `protobuf:"bytes,4,rep,name=revoked_principals,json=revokedPrincipals,proto3" json:"revoked_principals,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *RemoveUserResponse) Reset() {
+	*x = RemoveUserResponse{}
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveUserResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveUserResponse) ProtoMessage() {}
+
+func (x *RemoveUserResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveUserResponse.ProtoReflect.Descriptor instead.
+func (*RemoveUserResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *RemoveUserResponse) GetUser() *User {
+	if x != nil {
+		return x.User
+	}
+	return nil
+}
+
+func (x *RemoveUserResponse) GetTransferredTagIds() []string {
+	if x != nil {
+		return x.TransferredTagIds
+	}
+	return nil
+}
+
+func (x *RemoveUserResponse) GetTransferredObjectiveIds() []string {
+	if x != nil {
+		return x.TransferredObjectiveIds
+	}
+	return nil
+}
+
+func (x *RemoveUserResponse) GetRevokedPrincipals() []string {
+	if x != nil {
+		return x.RevokedPrincipals
+	}
+	return nil
+}
+
 type User struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// 1 to 40 lowercase letters, digits, hyphens or underscores, starting with a letter or digit.
@@ -31,13 +153,17 @@ type User struct {
 	Role string `protobuf:"bytes,4,opt,name=role,proto3" json:"role,omitempty"`
 	// Shared Tags the User's devices may talk to, besides the User's own.
 	AllowedTagIds []string `protobuf:"bytes,5,rep,name=allowed_tag_ids,json=allowedTagIds,proto3" json:"allowed_tag_ids,omitempty"`
+	// When the User was removed; their name is never reused.
+	RemovedAtMs *int64 `protobuf:"varint,6,opt,name=removed_at_ms,json=removedAtMs,proto3,oneof" json:"removed_at_ms,omitempty"`
+	// The User who took over what a removed User owned.
+	TransferredTo string `protobuf:"bytes,7,opt,name=transferred_to,json=transferredTo,proto3" json:"transferred_to,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *User) Reset() {
 	*x = User{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[0]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -49,7 +175,7 @@ func (x *User) String() string {
 func (*User) ProtoMessage() {}
 
 func (x *User) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[0]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -62,7 +188,7 @@ func (x *User) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use User.ProtoReflect.Descriptor instead.
 func (*User) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{0}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *User) GetName() string {
@@ -100,6 +226,20 @@ func (x *User) GetAllowedTagIds() []string {
 	return nil
 }
 
+func (x *User) GetRemovedAtMs() int64 {
+	if x != nil && x.RemovedAtMs != nil {
+		return *x.RemovedAtMs
+	}
+	return 0
+}
+
+func (x *User) GetTransferredTo() string {
+	if x != nil {
+		return x.TransferredTo
+	}
+	return ""
+}
+
 type InviteUserRequest struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	OperationId string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
@@ -120,7 +260,7 @@ type InviteUserRequest struct {
 
 func (x *InviteUserRequest) Reset() {
 	*x = InviteUserRequest{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[1]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -132,7 +272,7 @@ func (x *InviteUserRequest) String() string {
 func (*InviteUserRequest) ProtoMessage() {}
 
 func (x *InviteUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[1]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -145,7 +285,7 @@ func (x *InviteUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InviteUserRequest.ProtoReflect.Descriptor instead.
 func (*InviteUserRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{1}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *InviteUserRequest) GetOperationId() string {
@@ -208,7 +348,7 @@ type InviteUserResponse struct {
 
 func (x *InviteUserResponse) Reset() {
 	*x = InviteUserResponse{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[2]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -220,7 +360,7 @@ func (x *InviteUserResponse) String() string {
 func (*InviteUserResponse) ProtoMessage() {}
 
 func (x *InviteUserResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[2]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -233,7 +373,7 @@ func (x *InviteUserResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InviteUserResponse.ProtoReflect.Descriptor instead.
 func (*InviteUserResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{2}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *InviteUserResponse) GetUser() *User {
@@ -259,7 +399,7 @@ type GetUserRequest struct {
 
 func (x *GetUserRequest) Reset() {
 	*x = GetUserRequest{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[3]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -271,7 +411,7 @@ func (x *GetUserRequest) String() string {
 func (*GetUserRequest) ProtoMessage() {}
 
 func (x *GetUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[3]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -284,7 +424,7 @@ func (x *GetUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUserRequest.ProtoReflect.Descriptor instead.
 func (*GetUserRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{3}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *GetUserRequest) GetName() string {
@@ -306,7 +446,7 @@ type ListUsersRequest struct {
 
 func (x *ListUsersRequest) Reset() {
 	*x = ListUsersRequest{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[4]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -318,7 +458,7 @@ func (x *ListUsersRequest) String() string {
 func (*ListUsersRequest) ProtoMessage() {}
 
 func (x *ListUsersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[4]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -331,7 +471,7 @@ func (x *ListUsersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListUsersRequest.ProtoReflect.Descriptor instead.
 func (*ListUsersRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{4}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ListUsersRequest) GetLimit() uint32 {
@@ -358,7 +498,7 @@ type ListUsersResponse struct {
 
 func (x *ListUsersResponse) Reset() {
 	*x = ListUsersResponse{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[5]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -370,7 +510,7 @@ func (x *ListUsersResponse) String() string {
 func (*ListUsersResponse) ProtoMessage() {}
 
 func (x *ListUsersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[5]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -383,7 +523,7 @@ func (x *ListUsersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListUsersResponse.ProtoReflect.Descriptor instead.
 func (*ListUsersResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{5}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListUsersResponse) GetUsers() []*User {
@@ -409,7 +549,7 @@ type RevokeAuthKeyRequest struct {
 
 func (x *RevokeAuthKeyRequest) Reset() {
 	*x = RevokeAuthKeyRequest{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[6]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -421,7 +561,7 @@ func (x *RevokeAuthKeyRequest) String() string {
 func (*RevokeAuthKeyRequest) ProtoMessage() {}
 
 func (x *RevokeAuthKeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[6]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -434,7 +574,7 @@ func (x *RevokeAuthKeyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeAuthKeyRequest.ProtoReflect.Descriptor instead.
 func (*RevokeAuthKeyRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{6}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RevokeAuthKeyRequest) GetName() string {
@@ -453,7 +593,7 @@ type GetAuthKeyRequest struct {
 
 func (x *GetAuthKeyRequest) Reset() {
 	*x = GetAuthKeyRequest{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[7]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -465,7 +605,7 @@ func (x *GetAuthKeyRequest) String() string {
 func (*GetAuthKeyRequest) ProtoMessage() {}
 
 func (x *GetAuthKeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[7]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -478,7 +618,7 @@ func (x *GetAuthKeyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAuthKeyRequest.ProtoReflect.Descriptor instead.
 func (*GetAuthKeyRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{7}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GetAuthKeyRequest) GetName() string {
@@ -500,7 +640,7 @@ type ListAuthKeysRequest struct {
 
 func (x *ListAuthKeysRequest) Reset() {
 	*x = ListAuthKeysRequest{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[8]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -512,7 +652,7 @@ func (x *ListAuthKeysRequest) String() string {
 func (*ListAuthKeysRequest) ProtoMessage() {}
 
 func (x *ListAuthKeysRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[8]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -525,7 +665,7 @@ func (x *ListAuthKeysRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAuthKeysRequest.ProtoReflect.Descriptor instead.
 func (*ListAuthKeysRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{8}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ListAuthKeysRequest) GetLimit() uint32 {
@@ -552,7 +692,7 @@ type ListAuthKeysResponse struct {
 
 func (x *ListAuthKeysResponse) Reset() {
 	*x = ListAuthKeysResponse{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[9]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -564,7 +704,7 @@ func (x *ListAuthKeysResponse) String() string {
 func (*ListAuthKeysResponse) ProtoMessage() {}
 
 func (x *ListAuthKeysResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[9]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -577,7 +717,7 @@ func (x *ListAuthKeysResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAuthKeysResponse.ProtoReflect.Descriptor instead.
 func (*ListAuthKeysResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{9}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ListAuthKeysResponse) GetAuthKeys() []*AuthKey {
@@ -609,7 +749,7 @@ type EnrollRequest struct {
 
 func (x *EnrollRequest) Reset() {
 	*x = EnrollRequest{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[10]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -621,7 +761,7 @@ func (x *EnrollRequest) String() string {
 func (*EnrollRequest) ProtoMessage() {}
 
 func (x *EnrollRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[10]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -634,7 +774,7 @@ func (x *EnrollRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnrollRequest.ProtoReflect.Descriptor instead.
 func (*EnrollRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{10}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *EnrollRequest) GetRole() PrincipalRole {
@@ -694,7 +834,7 @@ type Enrollment struct {
 
 func (x *Enrollment) Reset() {
 	*x = Enrollment{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[11]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -706,7 +846,7 @@ func (x *Enrollment) String() string {
 func (*Enrollment) ProtoMessage() {}
 
 func (x *Enrollment) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[11]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -719,7 +859,7 @@ func (x *Enrollment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Enrollment.ProtoReflect.Descriptor instead.
 func (*Enrollment) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{11}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *Enrollment) GetRole() PrincipalRole {
@@ -807,7 +947,7 @@ type WhoAmIRequest struct {
 
 func (x *WhoAmIRequest) Reset() {
 	*x = WhoAmIRequest{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[12]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -819,7 +959,7 @@ func (x *WhoAmIRequest) String() string {
 func (*WhoAmIRequest) ProtoMessage() {}
 
 func (x *WhoAmIRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[12]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -832,7 +972,7 @@ func (x *WhoAmIRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WhoAmIRequest.ProtoReflect.Descriptor instead.
 func (*WhoAmIRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{12}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{14}
 }
 
 type WhoAmIResponse struct {
@@ -848,7 +988,7 @@ type WhoAmIResponse struct {
 
 func (x *WhoAmIResponse) Reset() {
 	*x = WhoAmIResponse{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[13]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -860,7 +1000,7 @@ func (x *WhoAmIResponse) String() string {
 func (*WhoAmIResponse) ProtoMessage() {}
 
 func (x *WhoAmIResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[13]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -873,7 +1013,7 @@ func (x *WhoAmIResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WhoAmIResponse.ProtoReflect.Descriptor instead.
 func (*WhoAmIResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{13}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *WhoAmIResponse) GetRole() PrincipalRole {
@@ -913,7 +1053,7 @@ type RotateCredentialRequest struct {
 
 func (x *RotateCredentialRequest) Reset() {
 	*x = RotateCredentialRequest{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[14]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -925,7 +1065,7 @@ func (x *RotateCredentialRequest) String() string {
 func (*RotateCredentialRequest) ProtoMessage() {}
 
 func (x *RotateCredentialRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[14]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -938,7 +1078,7 @@ func (x *RotateCredentialRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RotateCredentialRequest.ProtoReflect.Descriptor instead.
 func (*RotateCredentialRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{14}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *RotateCredentialRequest) GetRole() PrincipalRole {
@@ -979,7 +1119,7 @@ type CredentialRotation struct {
 
 func (x *CredentialRotation) Reset() {
 	*x = CredentialRotation{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[15]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -991,7 +1131,7 @@ func (x *CredentialRotation) String() string {
 func (*CredentialRotation) ProtoMessage() {}
 
 func (x *CredentialRotation) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[15]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1004,7 +1144,7 @@ func (x *CredentialRotation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CredentialRotation.ProtoReflect.Descriptor instead.
 func (*CredentialRotation) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{15}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *CredentialRotation) GetPrincipal() string {
@@ -1031,7 +1171,7 @@ type GetEnrollmentRequest struct {
 
 func (x *GetEnrollmentRequest) Reset() {
 	*x = GetEnrollmentRequest{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[16]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1043,7 +1183,7 @@ func (x *GetEnrollmentRequest) String() string {
 func (*GetEnrollmentRequest) ProtoMessage() {}
 
 func (x *GetEnrollmentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[16]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1056,7 +1196,7 @@ func (x *GetEnrollmentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetEnrollmentRequest.ProtoReflect.Descriptor instead.
 func (*GetEnrollmentRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{16}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *GetEnrollmentRequest) GetRole() PrincipalRole {
@@ -1087,7 +1227,7 @@ type ListEnrollmentsRequest struct {
 
 func (x *ListEnrollmentsRequest) Reset() {
 	*x = ListEnrollmentsRequest{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[17]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1099,7 +1239,7 @@ func (x *ListEnrollmentsRequest) String() string {
 func (*ListEnrollmentsRequest) ProtoMessage() {}
 
 func (x *ListEnrollmentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[17]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1112,7 +1252,7 @@ func (x *ListEnrollmentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListEnrollmentsRequest.ProtoReflect.Descriptor instead.
 func (*ListEnrollmentsRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{17}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ListEnrollmentsRequest) GetRole() PrincipalRole {
@@ -1146,7 +1286,7 @@ type ListEnrollmentsResponse struct {
 
 func (x *ListEnrollmentsResponse) Reset() {
 	*x = ListEnrollmentsResponse{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[18]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1158,7 +1298,7 @@ func (x *ListEnrollmentsResponse) String() string {
 func (*ListEnrollmentsResponse) ProtoMessage() {}
 
 func (x *ListEnrollmentsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[18]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1171,7 +1311,7 @@ func (x *ListEnrollmentsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListEnrollmentsResponse.ProtoReflect.Descriptor instead.
 func (*ListEnrollmentsResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{18}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ListEnrollmentsResponse) GetEnrollments() []*Enrollment {
@@ -1198,7 +1338,7 @@ type RevokeEnrollmentRequest struct {
 
 func (x *RevokeEnrollmentRequest) Reset() {
 	*x = RevokeEnrollmentRequest{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[19]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1210,7 +1350,7 @@ func (x *RevokeEnrollmentRequest) String() string {
 func (*RevokeEnrollmentRequest) ProtoMessage() {}
 
 func (x *RevokeEnrollmentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[19]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1223,7 +1363,7 @@ func (x *RevokeEnrollmentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeEnrollmentRequest.ProtoReflect.Descriptor instead.
 func (*RevokeEnrollmentRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{19}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *RevokeEnrollmentRequest) GetRole() PrincipalRole {
@@ -1253,7 +1393,7 @@ type ResolveCredentialRequest struct {
 
 func (x *ResolveCredentialRequest) Reset() {
 	*x = ResolveCredentialRequest{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[20]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1265,7 +1405,7 @@ func (x *ResolveCredentialRequest) String() string {
 func (*ResolveCredentialRequest) ProtoMessage() {}
 
 func (x *ResolveCredentialRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[20]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1278,7 +1418,7 @@ func (x *ResolveCredentialRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveCredentialRequest.ProtoReflect.Descriptor instead.
 func (*ResolveCredentialRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{20}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ResolveCredentialRequest) GetTokenDigest() []byte {
@@ -1310,7 +1450,7 @@ type ResolvedCredential struct {
 
 func (x *ResolvedCredential) Reset() {
 	*x = ResolvedCredential{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[21]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1322,7 +1462,7 @@ func (x *ResolvedCredential) String() string {
 func (*ResolvedCredential) ProtoMessage() {}
 
 func (x *ResolvedCredential) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[21]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1335,7 +1475,7 @@ func (x *ResolvedCredential) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolvedCredential.ProtoReflect.Descriptor instead.
 func (*ResolvedCredential) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{21}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ResolvedCredential) GetRole() PrincipalRole {
@@ -1376,7 +1516,7 @@ type SetTagRunsOnRequest struct {
 
 func (x *SetTagRunsOnRequest) Reset() {
 	*x = SetTagRunsOnRequest{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[22]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1388,7 +1528,7 @@ func (x *SetTagRunsOnRequest) String() string {
 func (*SetTagRunsOnRequest) ProtoMessage() {}
 
 func (x *SetTagRunsOnRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[22]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1401,7 +1541,7 @@ func (x *SetTagRunsOnRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetTagRunsOnRequest.ProtoReflect.Descriptor instead.
 func (*SetTagRunsOnRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{22}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *SetTagRunsOnRequest) GetTagId() string {
@@ -1427,7 +1567,7 @@ type DiagnoseTaskPlacementRequest struct {
 
 func (x *DiagnoseTaskPlacementRequest) Reset() {
 	*x = DiagnoseTaskPlacementRequest{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[23]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1439,7 +1579,7 @@ func (x *DiagnoseTaskPlacementRequest) String() string {
 func (*DiagnoseTaskPlacementRequest) ProtoMessage() {}
 
 func (x *DiagnoseTaskPlacementRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[23]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1452,7 +1592,7 @@ func (x *DiagnoseTaskPlacementRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiagnoseTaskPlacementRequest.ProtoReflect.Descriptor instead.
 func (*DiagnoseTaskPlacementRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{23}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *DiagnoseTaskPlacementRequest) GetTaskId() string {
@@ -1482,7 +1622,7 @@ type HostPlacement struct {
 
 func (x *HostPlacement) Reset() {
 	*x = HostPlacement{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[24]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1494,7 +1634,7 @@ func (x *HostPlacement) String() string {
 func (*HostPlacement) ProtoMessage() {}
 
 func (x *HostPlacement) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[24]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1507,7 +1647,7 @@ func (x *HostPlacement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostPlacement.ProtoReflect.Descriptor instead.
 func (*HostPlacement) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{24}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *HostPlacement) GetHostId() string {
@@ -1584,7 +1724,7 @@ type TaskPlacementDiagnosis struct {
 
 func (x *TaskPlacementDiagnosis) Reset() {
 	*x = TaskPlacementDiagnosis{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[25]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1596,7 +1736,7 @@ func (x *TaskPlacementDiagnosis) String() string {
 func (*TaskPlacementDiagnosis) ProtoMessage() {}
 
 func (x *TaskPlacementDiagnosis) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[25]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1609,7 +1749,7 @@ func (x *TaskPlacementDiagnosis) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskPlacementDiagnosis.ProtoReflect.Descriptor instead.
 func (*TaskPlacementDiagnosis) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{25}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *TaskPlacementDiagnosis) GetTaskId() string {
@@ -1672,13 +1812,25 @@ var File_supertag_runtime_v2_placement_proto protoreflect.FileDescriptor
 
 const file_supertag_runtime_v2_placement_proto_rawDesc = "" +
 	"\n" +
-	"#supertag/runtime/v2/placement.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"\x9d\x01\n" +
+	"#supertag/runtime/v2/placement.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"H\n" +
+	"\x11RemoveUserRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
+	"\vtransfer_to\x18\x02 \x01(\tR\n" +
+	"transferTo\"\xde\x01\n" +
+	"\x12RemoveUserResponse\x12-\n" +
+	"\x04user\x18\x01 \x01(\v2\x19.supertag.runtime.v2.UserR\x04user\x12.\n" +
+	"\x13transferred_tag_ids\x18\x02 \x03(\tR\x11transferredTagIds\x12:\n" +
+	"\x19transferred_objective_ids\x18\x03 \x03(\tR\x17transferredObjectiveIds\x12-\n" +
+	"\x12revoked_principals\x18\x04 \x03(\tR\x11revokedPrincipals\"\xff\x01\n" +
 	"\x04User\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12\"\n" +
 	"\rcreated_at_ms\x18\x03 \x01(\x03R\vcreatedAtMs\x12\x12\n" +
 	"\x04role\x18\x04 \x01(\tR\x04role\x12&\n" +
-	"\x0fallowed_tag_ids\x18\x05 \x03(\tR\rallowedTagIds\"\xec\x01\n" +
+	"\x0fallowed_tag_ids\x18\x05 \x03(\tR\rallowedTagIds\x12'\n" +
+	"\rremoved_at_ms\x18\x06 \x01(\x03H\x00R\vremovedAtMs\x88\x01\x01\x12%\n" +
+	"\x0etransferred_to\x18\a \x01(\tR\rtransferredToB\x10\n" +
+	"\x0e_removed_at_ms\"\xec\x01\n" +
 	"\x11InviteUserRequest\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
@@ -1798,12 +1950,14 @@ const file_supertag_runtime_v2_placement_proto_rawDesc = "" +
 	"\rRevokeAuthKey\x12).supertag.runtime.v2.RevokeAuthKeyRequest\x1a\x1c.supertag.runtime.v2.AuthKey\x12c\n" +
 	"\fListAuthKeys\x12(.supertag.runtime.v2.ListAuthKeysRequest\x1a).supertag.runtime.v2.ListAuthKeysResponse\x12R\n" +
 	"\n" +
-	"GetAuthKey\x12&.supertag.runtime.v2.GetAuthKeyRequest\x1a\x1c.supertag.runtime.v2.AuthKey2\x8d\x02\n" +
+	"GetAuthKey\x12&.supertag.runtime.v2.GetAuthKeyRequest\x1a\x1c.supertag.runtime.v2.AuthKey2\xec\x02\n" +
 	"\x05Users\x12]\n" +
 	"\n" +
 	"InviteUser\x12&.supertag.runtime.v2.InviteUserRequest\x1a'.supertag.runtime.v2.InviteUserResponse\x12I\n" +
 	"\aGetUser\x12#.supertag.runtime.v2.GetUserRequest\x1a\x19.supertag.runtime.v2.User\x12Z\n" +
-	"\tListUsers\x12%.supertag.runtime.v2.ListUsersRequest\x1a&.supertag.runtime.v2.ListUsersResponse2\xc8\x04\n" +
+	"\tListUsers\x12%.supertag.runtime.v2.ListUsersRequest\x1a&.supertag.runtime.v2.ListUsersResponse\x12]\n" +
+	"\n" +
+	"RemoveUser\x12&.supertag.runtime.v2.RemoveUserRequest\x1a'.supertag.runtime.v2.RemoveUserResponse2\xc8\x04\n" +
 	"\vEnrollments\x12M\n" +
 	"\x06Enroll\x12\".supertag.runtime.v2.EnrollRequest\x1a\x1f.supertag.runtime.v2.Enrollment\x12Q\n" +
 	"\x06WhoAmI\x12\".supertag.runtime.v2.WhoAmIRequest\x1a#.supertag.runtime.v2.WhoAmIResponse\x12i\n" +
@@ -1826,93 +1980,98 @@ func file_supertag_runtime_v2_placement_proto_rawDescGZIP() []byte {
 	return file_supertag_runtime_v2_placement_proto_rawDescData
 }
 
-var file_supertag_runtime_v2_placement_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
+var file_supertag_runtime_v2_placement_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_supertag_runtime_v2_placement_proto_goTypes = []any{
-	(*User)(nil),                         // 0: supertag.runtime.v2.User
-	(*InviteUserRequest)(nil),            // 1: supertag.runtime.v2.InviteUserRequest
-	(*InviteUserResponse)(nil),           // 2: supertag.runtime.v2.InviteUserResponse
-	(*GetUserRequest)(nil),               // 3: supertag.runtime.v2.GetUserRequest
-	(*ListUsersRequest)(nil),             // 4: supertag.runtime.v2.ListUsersRequest
-	(*ListUsersResponse)(nil),            // 5: supertag.runtime.v2.ListUsersResponse
-	(*RevokeAuthKeyRequest)(nil),         // 6: supertag.runtime.v2.RevokeAuthKeyRequest
-	(*GetAuthKeyRequest)(nil),            // 7: supertag.runtime.v2.GetAuthKeyRequest
-	(*ListAuthKeysRequest)(nil),          // 8: supertag.runtime.v2.ListAuthKeysRequest
-	(*ListAuthKeysResponse)(nil),         // 9: supertag.runtime.v2.ListAuthKeysResponse
-	(*EnrollRequest)(nil),                // 10: supertag.runtime.v2.EnrollRequest
-	(*Enrollment)(nil),                   // 11: supertag.runtime.v2.Enrollment
-	(*WhoAmIRequest)(nil),                // 12: supertag.runtime.v2.WhoAmIRequest
-	(*WhoAmIResponse)(nil),               // 13: supertag.runtime.v2.WhoAmIResponse
-	(*RotateCredentialRequest)(nil),      // 14: supertag.runtime.v2.RotateCredentialRequest
-	(*CredentialRotation)(nil),           // 15: supertag.runtime.v2.CredentialRotation
-	(*GetEnrollmentRequest)(nil),         // 16: supertag.runtime.v2.GetEnrollmentRequest
-	(*ListEnrollmentsRequest)(nil),       // 17: supertag.runtime.v2.ListEnrollmentsRequest
-	(*ListEnrollmentsResponse)(nil),      // 18: supertag.runtime.v2.ListEnrollmentsResponse
-	(*RevokeEnrollmentRequest)(nil),      // 19: supertag.runtime.v2.RevokeEnrollmentRequest
-	(*ResolveCredentialRequest)(nil),     // 20: supertag.runtime.v2.ResolveCredentialRequest
-	(*ResolvedCredential)(nil),           // 21: supertag.runtime.v2.ResolvedCredential
-	(*SetTagRunsOnRequest)(nil),          // 22: supertag.runtime.v2.SetTagRunsOnRequest
-	(*DiagnoseTaskPlacementRequest)(nil), // 23: supertag.runtime.v2.DiagnoseTaskPlacementRequest
-	(*HostPlacement)(nil),                // 24: supertag.runtime.v2.HostPlacement
-	(*TaskPlacementDiagnosis)(nil),       // 25: supertag.runtime.v2.TaskPlacementDiagnosis
-	(*AuthKey)(nil),                      // 26: supertag.runtime.v2.AuthKey
-	(PrincipalRole)(0),                   // 27: supertag.runtime.v2.PrincipalRole
-	(HostPhase)(0),                       // 28: supertag.runtime.v2.HostPhase
-	(TaskState)(0),                       // 29: supertag.runtime.v2.TaskState
-	(*Tag)(nil),                          // 30: supertag.runtime.v2.Tag
+	(*RemoveUserRequest)(nil),            // 0: supertag.runtime.v2.RemoveUserRequest
+	(*RemoveUserResponse)(nil),           // 1: supertag.runtime.v2.RemoveUserResponse
+	(*User)(nil),                         // 2: supertag.runtime.v2.User
+	(*InviteUserRequest)(nil),            // 3: supertag.runtime.v2.InviteUserRequest
+	(*InviteUserResponse)(nil),           // 4: supertag.runtime.v2.InviteUserResponse
+	(*GetUserRequest)(nil),               // 5: supertag.runtime.v2.GetUserRequest
+	(*ListUsersRequest)(nil),             // 6: supertag.runtime.v2.ListUsersRequest
+	(*ListUsersResponse)(nil),            // 7: supertag.runtime.v2.ListUsersResponse
+	(*RevokeAuthKeyRequest)(nil),         // 8: supertag.runtime.v2.RevokeAuthKeyRequest
+	(*GetAuthKeyRequest)(nil),            // 9: supertag.runtime.v2.GetAuthKeyRequest
+	(*ListAuthKeysRequest)(nil),          // 10: supertag.runtime.v2.ListAuthKeysRequest
+	(*ListAuthKeysResponse)(nil),         // 11: supertag.runtime.v2.ListAuthKeysResponse
+	(*EnrollRequest)(nil),                // 12: supertag.runtime.v2.EnrollRequest
+	(*Enrollment)(nil),                   // 13: supertag.runtime.v2.Enrollment
+	(*WhoAmIRequest)(nil),                // 14: supertag.runtime.v2.WhoAmIRequest
+	(*WhoAmIResponse)(nil),               // 15: supertag.runtime.v2.WhoAmIResponse
+	(*RotateCredentialRequest)(nil),      // 16: supertag.runtime.v2.RotateCredentialRequest
+	(*CredentialRotation)(nil),           // 17: supertag.runtime.v2.CredentialRotation
+	(*GetEnrollmentRequest)(nil),         // 18: supertag.runtime.v2.GetEnrollmentRequest
+	(*ListEnrollmentsRequest)(nil),       // 19: supertag.runtime.v2.ListEnrollmentsRequest
+	(*ListEnrollmentsResponse)(nil),      // 20: supertag.runtime.v2.ListEnrollmentsResponse
+	(*RevokeEnrollmentRequest)(nil),      // 21: supertag.runtime.v2.RevokeEnrollmentRequest
+	(*ResolveCredentialRequest)(nil),     // 22: supertag.runtime.v2.ResolveCredentialRequest
+	(*ResolvedCredential)(nil),           // 23: supertag.runtime.v2.ResolvedCredential
+	(*SetTagRunsOnRequest)(nil),          // 24: supertag.runtime.v2.SetTagRunsOnRequest
+	(*DiagnoseTaskPlacementRequest)(nil), // 25: supertag.runtime.v2.DiagnoseTaskPlacementRequest
+	(*HostPlacement)(nil),                // 26: supertag.runtime.v2.HostPlacement
+	(*TaskPlacementDiagnosis)(nil),       // 27: supertag.runtime.v2.TaskPlacementDiagnosis
+	(*AuthKey)(nil),                      // 28: supertag.runtime.v2.AuthKey
+	(PrincipalRole)(0),                   // 29: supertag.runtime.v2.PrincipalRole
+	(HostPhase)(0),                       // 30: supertag.runtime.v2.HostPhase
+	(TaskState)(0),                       // 31: supertag.runtime.v2.TaskState
+	(*Tag)(nil),                          // 32: supertag.runtime.v2.Tag
 }
 var file_supertag_runtime_v2_placement_proto_depIdxs = []int32{
-	0,  // 0: supertag.runtime.v2.InviteUserResponse.user:type_name -> supertag.runtime.v2.User
-	26, // 1: supertag.runtime.v2.InviteUserResponse.auth_key:type_name -> supertag.runtime.v2.AuthKey
-	0,  // 2: supertag.runtime.v2.ListUsersResponse.users:type_name -> supertag.runtime.v2.User
-	26, // 3: supertag.runtime.v2.ListAuthKeysResponse.auth_keys:type_name -> supertag.runtime.v2.AuthKey
-	27, // 4: supertag.runtime.v2.EnrollRequest.role:type_name -> supertag.runtime.v2.PrincipalRole
-	27, // 5: supertag.runtime.v2.Enrollment.role:type_name -> supertag.runtime.v2.PrincipalRole
-	27, // 6: supertag.runtime.v2.WhoAmIResponse.role:type_name -> supertag.runtime.v2.PrincipalRole
-	27, // 7: supertag.runtime.v2.RotateCredentialRequest.role:type_name -> supertag.runtime.v2.PrincipalRole
-	27, // 8: supertag.runtime.v2.GetEnrollmentRequest.role:type_name -> supertag.runtime.v2.PrincipalRole
-	27, // 9: supertag.runtime.v2.ListEnrollmentsRequest.role:type_name -> supertag.runtime.v2.PrincipalRole
-	11, // 10: supertag.runtime.v2.ListEnrollmentsResponse.enrollments:type_name -> supertag.runtime.v2.Enrollment
-	27, // 11: supertag.runtime.v2.RevokeEnrollmentRequest.role:type_name -> supertag.runtime.v2.PrincipalRole
-	27, // 12: supertag.runtime.v2.ResolveCredentialRequest.kind:type_name -> supertag.runtime.v2.PrincipalRole
-	27, // 13: supertag.runtime.v2.ResolvedCredential.role:type_name -> supertag.runtime.v2.PrincipalRole
-	28, // 14: supertag.runtime.v2.HostPlacement.phase:type_name -> supertag.runtime.v2.HostPhase
-	29, // 15: supertag.runtime.v2.TaskPlacementDiagnosis.state:type_name -> supertag.runtime.v2.TaskState
-	24, // 16: supertag.runtime.v2.TaskPlacementDiagnosis.hosts:type_name -> supertag.runtime.v2.HostPlacement
-	22, // 17: supertag.runtime.v2.Placement.SetTagRunsOn:input_type -> supertag.runtime.v2.SetTagRunsOnRequest
-	23, // 18: supertag.runtime.v2.Placement.DiagnoseTask:input_type -> supertag.runtime.v2.DiagnoseTaskPlacementRequest
-	6,  // 19: supertag.runtime.v2.AuthKeys.RevokeAuthKey:input_type -> supertag.runtime.v2.RevokeAuthKeyRequest
-	8,  // 20: supertag.runtime.v2.AuthKeys.ListAuthKeys:input_type -> supertag.runtime.v2.ListAuthKeysRequest
-	7,  // 21: supertag.runtime.v2.AuthKeys.GetAuthKey:input_type -> supertag.runtime.v2.GetAuthKeyRequest
-	1,  // 22: supertag.runtime.v2.Users.InviteUser:input_type -> supertag.runtime.v2.InviteUserRequest
-	3,  // 23: supertag.runtime.v2.Users.GetUser:input_type -> supertag.runtime.v2.GetUserRequest
-	4,  // 24: supertag.runtime.v2.Users.ListUsers:input_type -> supertag.runtime.v2.ListUsersRequest
-	10, // 25: supertag.runtime.v2.Enrollments.Enroll:input_type -> supertag.runtime.v2.EnrollRequest
-	12, // 26: supertag.runtime.v2.Enrollments.WhoAmI:input_type -> supertag.runtime.v2.WhoAmIRequest
-	14, // 27: supertag.runtime.v2.Enrollments.RotateCredential:input_type -> supertag.runtime.v2.RotateCredentialRequest
-	16, // 28: supertag.runtime.v2.Enrollments.GetEnrollment:input_type -> supertag.runtime.v2.GetEnrollmentRequest
-	17, // 29: supertag.runtime.v2.Enrollments.ListEnrollments:input_type -> supertag.runtime.v2.ListEnrollmentsRequest
-	19, // 30: supertag.runtime.v2.Enrollments.RevokeEnrollment:input_type -> supertag.runtime.v2.RevokeEnrollmentRequest
-	20, // 31: supertag.runtime.v2.CredentialDirectory.Resolve:input_type -> supertag.runtime.v2.ResolveCredentialRequest
-	30, // 32: supertag.runtime.v2.Placement.SetTagRunsOn:output_type -> supertag.runtime.v2.Tag
-	25, // 33: supertag.runtime.v2.Placement.DiagnoseTask:output_type -> supertag.runtime.v2.TaskPlacementDiagnosis
-	26, // 34: supertag.runtime.v2.AuthKeys.RevokeAuthKey:output_type -> supertag.runtime.v2.AuthKey
-	9,  // 35: supertag.runtime.v2.AuthKeys.ListAuthKeys:output_type -> supertag.runtime.v2.ListAuthKeysResponse
-	26, // 36: supertag.runtime.v2.AuthKeys.GetAuthKey:output_type -> supertag.runtime.v2.AuthKey
-	2,  // 37: supertag.runtime.v2.Users.InviteUser:output_type -> supertag.runtime.v2.InviteUserResponse
-	0,  // 38: supertag.runtime.v2.Users.GetUser:output_type -> supertag.runtime.v2.User
-	5,  // 39: supertag.runtime.v2.Users.ListUsers:output_type -> supertag.runtime.v2.ListUsersResponse
-	11, // 40: supertag.runtime.v2.Enrollments.Enroll:output_type -> supertag.runtime.v2.Enrollment
-	13, // 41: supertag.runtime.v2.Enrollments.WhoAmI:output_type -> supertag.runtime.v2.WhoAmIResponse
-	15, // 42: supertag.runtime.v2.Enrollments.RotateCredential:output_type -> supertag.runtime.v2.CredentialRotation
-	11, // 43: supertag.runtime.v2.Enrollments.GetEnrollment:output_type -> supertag.runtime.v2.Enrollment
-	18, // 44: supertag.runtime.v2.Enrollments.ListEnrollments:output_type -> supertag.runtime.v2.ListEnrollmentsResponse
-	11, // 45: supertag.runtime.v2.Enrollments.RevokeEnrollment:output_type -> supertag.runtime.v2.Enrollment
-	21, // 46: supertag.runtime.v2.CredentialDirectory.Resolve:output_type -> supertag.runtime.v2.ResolvedCredential
-	32, // [32:47] is the sub-list for method output_type
-	17, // [17:32] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	2,  // 0: supertag.runtime.v2.RemoveUserResponse.user:type_name -> supertag.runtime.v2.User
+	2,  // 1: supertag.runtime.v2.InviteUserResponse.user:type_name -> supertag.runtime.v2.User
+	28, // 2: supertag.runtime.v2.InviteUserResponse.auth_key:type_name -> supertag.runtime.v2.AuthKey
+	2,  // 3: supertag.runtime.v2.ListUsersResponse.users:type_name -> supertag.runtime.v2.User
+	28, // 4: supertag.runtime.v2.ListAuthKeysResponse.auth_keys:type_name -> supertag.runtime.v2.AuthKey
+	29, // 5: supertag.runtime.v2.EnrollRequest.role:type_name -> supertag.runtime.v2.PrincipalRole
+	29, // 6: supertag.runtime.v2.Enrollment.role:type_name -> supertag.runtime.v2.PrincipalRole
+	29, // 7: supertag.runtime.v2.WhoAmIResponse.role:type_name -> supertag.runtime.v2.PrincipalRole
+	29, // 8: supertag.runtime.v2.RotateCredentialRequest.role:type_name -> supertag.runtime.v2.PrincipalRole
+	29, // 9: supertag.runtime.v2.GetEnrollmentRequest.role:type_name -> supertag.runtime.v2.PrincipalRole
+	29, // 10: supertag.runtime.v2.ListEnrollmentsRequest.role:type_name -> supertag.runtime.v2.PrincipalRole
+	13, // 11: supertag.runtime.v2.ListEnrollmentsResponse.enrollments:type_name -> supertag.runtime.v2.Enrollment
+	29, // 12: supertag.runtime.v2.RevokeEnrollmentRequest.role:type_name -> supertag.runtime.v2.PrincipalRole
+	29, // 13: supertag.runtime.v2.ResolveCredentialRequest.kind:type_name -> supertag.runtime.v2.PrincipalRole
+	29, // 14: supertag.runtime.v2.ResolvedCredential.role:type_name -> supertag.runtime.v2.PrincipalRole
+	30, // 15: supertag.runtime.v2.HostPlacement.phase:type_name -> supertag.runtime.v2.HostPhase
+	31, // 16: supertag.runtime.v2.TaskPlacementDiagnosis.state:type_name -> supertag.runtime.v2.TaskState
+	26, // 17: supertag.runtime.v2.TaskPlacementDiagnosis.hosts:type_name -> supertag.runtime.v2.HostPlacement
+	24, // 18: supertag.runtime.v2.Placement.SetTagRunsOn:input_type -> supertag.runtime.v2.SetTagRunsOnRequest
+	25, // 19: supertag.runtime.v2.Placement.DiagnoseTask:input_type -> supertag.runtime.v2.DiagnoseTaskPlacementRequest
+	8,  // 20: supertag.runtime.v2.AuthKeys.RevokeAuthKey:input_type -> supertag.runtime.v2.RevokeAuthKeyRequest
+	10, // 21: supertag.runtime.v2.AuthKeys.ListAuthKeys:input_type -> supertag.runtime.v2.ListAuthKeysRequest
+	9,  // 22: supertag.runtime.v2.AuthKeys.GetAuthKey:input_type -> supertag.runtime.v2.GetAuthKeyRequest
+	3,  // 23: supertag.runtime.v2.Users.InviteUser:input_type -> supertag.runtime.v2.InviteUserRequest
+	5,  // 24: supertag.runtime.v2.Users.GetUser:input_type -> supertag.runtime.v2.GetUserRequest
+	6,  // 25: supertag.runtime.v2.Users.ListUsers:input_type -> supertag.runtime.v2.ListUsersRequest
+	0,  // 26: supertag.runtime.v2.Users.RemoveUser:input_type -> supertag.runtime.v2.RemoveUserRequest
+	12, // 27: supertag.runtime.v2.Enrollments.Enroll:input_type -> supertag.runtime.v2.EnrollRequest
+	14, // 28: supertag.runtime.v2.Enrollments.WhoAmI:input_type -> supertag.runtime.v2.WhoAmIRequest
+	16, // 29: supertag.runtime.v2.Enrollments.RotateCredential:input_type -> supertag.runtime.v2.RotateCredentialRequest
+	18, // 30: supertag.runtime.v2.Enrollments.GetEnrollment:input_type -> supertag.runtime.v2.GetEnrollmentRequest
+	19, // 31: supertag.runtime.v2.Enrollments.ListEnrollments:input_type -> supertag.runtime.v2.ListEnrollmentsRequest
+	21, // 32: supertag.runtime.v2.Enrollments.RevokeEnrollment:input_type -> supertag.runtime.v2.RevokeEnrollmentRequest
+	22, // 33: supertag.runtime.v2.CredentialDirectory.Resolve:input_type -> supertag.runtime.v2.ResolveCredentialRequest
+	32, // 34: supertag.runtime.v2.Placement.SetTagRunsOn:output_type -> supertag.runtime.v2.Tag
+	27, // 35: supertag.runtime.v2.Placement.DiagnoseTask:output_type -> supertag.runtime.v2.TaskPlacementDiagnosis
+	28, // 36: supertag.runtime.v2.AuthKeys.RevokeAuthKey:output_type -> supertag.runtime.v2.AuthKey
+	11, // 37: supertag.runtime.v2.AuthKeys.ListAuthKeys:output_type -> supertag.runtime.v2.ListAuthKeysResponse
+	28, // 38: supertag.runtime.v2.AuthKeys.GetAuthKey:output_type -> supertag.runtime.v2.AuthKey
+	4,  // 39: supertag.runtime.v2.Users.InviteUser:output_type -> supertag.runtime.v2.InviteUserResponse
+	2,  // 40: supertag.runtime.v2.Users.GetUser:output_type -> supertag.runtime.v2.User
+	7,  // 41: supertag.runtime.v2.Users.ListUsers:output_type -> supertag.runtime.v2.ListUsersResponse
+	1,  // 42: supertag.runtime.v2.Users.RemoveUser:output_type -> supertag.runtime.v2.RemoveUserResponse
+	13, // 43: supertag.runtime.v2.Enrollments.Enroll:output_type -> supertag.runtime.v2.Enrollment
+	15, // 44: supertag.runtime.v2.Enrollments.WhoAmI:output_type -> supertag.runtime.v2.WhoAmIResponse
+	17, // 45: supertag.runtime.v2.Enrollments.RotateCredential:output_type -> supertag.runtime.v2.CredentialRotation
+	13, // 46: supertag.runtime.v2.Enrollments.GetEnrollment:output_type -> supertag.runtime.v2.Enrollment
+	20, // 47: supertag.runtime.v2.Enrollments.ListEnrollments:output_type -> supertag.runtime.v2.ListEnrollmentsResponse
+	13, // 48: supertag.runtime.v2.Enrollments.RevokeEnrollment:output_type -> supertag.runtime.v2.Enrollment
+	23, // 49: supertag.runtime.v2.CredentialDirectory.Resolve:output_type -> supertag.runtime.v2.ResolvedCredential
+	34, // [34:50] is the sub-list for method output_type
+	18, // [18:34] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_placement_proto_init() }
@@ -1921,14 +2080,15 @@ func file_supertag_runtime_v2_placement_proto_init() {
 		return
 	}
 	file_supertag_runtime_v2_runtime_proto_init()
-	file_supertag_runtime_v2_placement_proto_msgTypes[11].OneofWrappers = []any{}
+	file_supertag_runtime_v2_placement_proto_msgTypes[2].OneofWrappers = []any{}
+	file_supertag_runtime_v2_placement_proto_msgTypes[13].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_placement_proto_rawDesc), len(file_supertag_runtime_v2_placement_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   26,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   5,
 		},

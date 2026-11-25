@@ -12,7 +12,65 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/placement.proto.
  */
 export const file_supertag_runtime_v2_placement: GenFile = /*@__PURE__*/
-  fileDesc("CiNzdXBlcnRhZy9ydW50aW1lL3YyL3BsYWNlbWVudC5wcm90bxITc3VwZXJ0YWcucnVudGltZS52MiJoCgRVc2VyEgwKBG5hbWUYASABKAkSFAoMZGlzcGxheV9uYW1lGAIgASgJEhUKDWNyZWF0ZWRfYXRfbXMYAyABKAMSDAoEcm9sZRgEIAEoCRIXCg9hbGxvd2VkX3RhZ19pZHMYBSADKAkinwEKEUludml0ZVVzZXJSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRISCgprZXlfZGlnZXN0GAQgASgMEhUKDWV4cGlyZXNfaW5fbXMYBSABKAQSDAoEcm9sZRgGIAEoCRIXCg9hbGxvd2VkX3RhZ19pZHMYByADKAkibQoSSW52aXRlVXNlclJlc3BvbnNlEicKBHVzZXIYASABKAsyGS5zdXBlcnRhZy5ydW50aW1lLnYyLlVzZXISLgoIYXV0aF9rZXkYAiABKAsyHC5zdXBlcnRhZy5ydW50aW1lLnYyLkF1dGhLZXkiHgoOR2V0VXNlclJlcXVlc3QSDAoEbmFtZRgBIAEoCSIxChBMaXN0VXNlcnNSZXF1ZXN0Eg0KBWxpbWl0GAEgASgNEg4KBmN1cnNvchgCIAEoCSJSChFMaXN0VXNlcnNSZXNwb25zZRIoCgV1c2VycxgBIAMoCzIZLnN1cGVydGFnLnJ1bnRpbWUudjIuVXNlchITCgtuZXh0X2N1cnNvchgCIAEoCSIkChRSZXZva2VBdXRoS2V5UmVxdWVzdBIMCgRuYW1lGAEgASgJIiEKEUdldEF1dGhLZXlSZXF1ZXN0EgwKBG5hbWUYASABKAkiNAoTTGlzdEF1dGhLZXlzUmVxdWVzdBINCgVsaW1pdBgBIAEoDRIOCgZjdXJzb3IYAiABKAkiXAoUTGlzdEF1dGhLZXlzUmVzcG9uc2USLwoJYXV0aF9rZXlzGAEgAygLMhwuc3VwZXJ0YWcucnVudGltZS52Mi5BdXRoS2V5EhMKC25leHRfY3Vyc29yGAIgASgJInsKDUVucm9sbFJlcXVlc3QSMAoEcm9sZRgBIAEoDjIiLnN1cGVydGFnLnJ1bnRpbWUudjIuUHJpbmNpcGFsUm9sZRIMCgRuYW1lGAIgASgJEhQKDG9wZXJhdGlvbl9pZBgDIAEoCRIUCgx0b2tlbl9kaWdlc3QYBCABKAwixAIKCkVucm9sbG1lbnQSMAoEcm9sZRgBIAEoDjIiLnN1cGVydGFnLnJ1bnRpbWUudjIuUHJpbmNpcGFsUm9sZRIMCgRuYW1lGAIgASgJEhEKCXByaW5jaXBhbBgDIAEoCRIVCg1hdXRoX2tleV9uYW1lGAQgASgJEhYKDmVucm9sbGVkX2F0X21zGAUgASgDEhwKD2xhc3RfdXNlZF9hdF9tcxgGIAEoA0gAiAEBEhoKDXJldm9rZWRfYXRfbXMYByABKANIAYgBARIbChNjcmVkZW50aWFsX3JldmlzaW9uGAggASgEEhcKD2FsbG93ZWRfdGFnX2lkcxgJIAMoCRIQCghhbGxfdGFncxgKIAEoCBIMCgR1c2VyGAsgASgJQhIKEF9sYXN0X3VzZWRfYXRfbXNCEAoOX3Jldm9rZWRfYXRfbXMiDwoNV2hvQW1JUmVxdWVzdCJkCg5XaG9BbUlSZXNwb25zZRIwCgRyb2xlGAEgASgOMiIuc3VwZXJ0YWcucnVudGltZS52Mi5QcmluY2lwYWxSb2xlEhEKCXByaW5jaXBhbBgCIAEoCRINCgVhZG1pbhgDIAEoCCKVAQoXUm90YXRlQ3JlZGVudGlhbFJlcXVlc3QSMAoEcm9sZRgBIAEoDjIiLnN1cGVydGFnLnJ1bnRpbWUudjIuUHJpbmNpcGFsUm9sZRIMCgRuYW1lGAIgASgJEiQKHGV4cGVjdGVkX2NyZWRlbnRpYWxfcmV2aXNpb24YAyABKAQSFAoMdG9rZW5fZGlnZXN0GAQgASgMIkQKEkNyZWRlbnRpYWxSb3RhdGlvbhIRCglwcmluY2lwYWwYASABKAkSGwoTY3JlZGVudGlhbF9yZXZpc2lvbhgCIAEoBCJWChRHZXRFbnJvbGxtZW50UmVxdWVzdBIwCgRyb2xlGAEgASgOMiIuc3VwZXJ0YWcucnVudGltZS52Mi5QcmluY2lwYWxSb2xlEgwKBG5hbWUYAiABKAkiaQoWTGlzdEVucm9sbG1lbnRzUmVxdWVzdBIwCgRyb2xlGAEgASgOMiIuc3VwZXJ0YWcucnVudGltZS52Mi5QcmluY2lwYWxSb2xlEg0KBWxpbWl0GAIgASgNEg4KBmN1cnNvchgDIAEoCSJkChdMaXN0RW5yb2xsbWVudHNSZXNwb25zZRI0CgtlbnJvbGxtZW50cxgBIAMoCzIfLnN1cGVydGFnLnJ1bnRpbWUudjIuRW5yb2xsbWVudBITCgtuZXh0X2N1cnNvchgCIAEoCSJZChdSZXZva2VFbnJvbGxtZW50UmVxdWVzdBIwCgRyb2xlGAEgASgOMiIuc3VwZXJ0YWcucnVudGltZS52Mi5QcmluY2lwYWxSb2xlEgwKBG5hbWUYAiABKAkiYgoYUmVzb2x2ZUNyZWRlbnRpYWxSZXF1ZXN0EhQKDHRva2VuX2RpZ2VzdBgBIAEoDBIwCgRraW5kGAIgASgOMiIuc3VwZXJ0YWcucnVudGltZS52Mi5QcmluY2lwYWxSb2xlInYKElJlc29sdmVkQ3JlZGVudGlhbBIwCgRyb2xlGAEgASgOMiIuc3VwZXJ0YWcucnVudGltZS52Mi5QcmluY2lwYWxSb2xlEgwKBG5hbWUYAiABKAkSEgoKZ2VuZXJhdGlvbhgDIAEoBBIMCgR1c2VyGAQgASgJIjYKE1NldFRhZ1J1bnNPblJlcXVlc3QSDgoGdGFnX2lkGAEgASgJEg8KB3J1bnNfb24YAiADKAkiLwocRGlhZ25vc2VUYXNrUGxhY2VtZW50UmVxdWVzdBIPCgd0YXNrX2lkGAEgASgJIq4BCg1Ib3N0UGxhY2VtZW50Eg8KB2hvc3RfaWQYASABKAkSLQoFcGhhc2UYAiABKA4yHi5zdXBlcnRhZy5ydW50aW1lLnYyLkhvc3RQaGFzZRIOCgZsYWJlbHMYAyADKAkSFgoObWlzc2luZ19sYWJlbHMYBCADKAkSEAoIZWxpZ2libGUYBSABKAgSEwoLcmVxdWlyZW1lbnQYBiABKAkSDgoGcmVhc29uGAcgASgJIvIBChZUYXNrUGxhY2VtZW50RGlhZ25vc2lzEg8KB3Rhc2tfaWQYASABKAkSDgoGdGFnX2lkGAIgASgJEi0KBXN0YXRlGAMgASgOMh4uc3VwZXJ0YWcucnVudGltZS52Mi5UYXNrU3RhdGUSFwoPcmVxdWlyZWRfbGFiZWxzGAQgAygJEhYKDm1pc3NpbmdfbGFiZWxzGAUgAygJEhMKC3JlcXVpcmVtZW50GAYgASgJEg8KB3N1bW1hcnkYByABKAkSMQoFaG9zdHMYCCADKAsyIi5zdXBlcnRhZy5ydW50aW1lLnYyLkhvc3RQbGFjZW1lbnQyzwEKCVBsYWNlbWVudBJSCgxTZXRUYWdSdW5zT24SKC5zdXBlcnRhZy5ydW50aW1lLnYyLlNldFRhZ1J1bnNPblJlcXVlc3QaGC5zdXBlcnRhZy5ydW50aW1lLnYyLlRhZxJuCgxEaWFnbm9zZVRhc2sSMS5zdXBlcnRhZy5ydW50aW1lLnYyLkRpYWdub3NlVGFza1BsYWNlbWVudFJlcXVlc3QaKy5zdXBlcnRhZy5ydW50aW1lLnYyLlRhc2tQbGFjZW1lbnREaWFnbm9zaXMynQIKCEF1dGhLZXlzElgKDVJldm9rZUF1dGhLZXkSKS5zdXBlcnRhZy5ydW50aW1lLnYyLlJldm9rZUF1dGhLZXlSZXF1ZXN0Ghwuc3VwZXJ0YWcucnVudGltZS52Mi5BdXRoS2V5EmMKDExpc3RBdXRoS2V5cxIoLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdEF1dGhLZXlzUmVxdWVzdBopLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdEF1dGhLZXlzUmVzcG9uc2USUgoKR2V0QXV0aEtleRImLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0QXV0aEtleVJlcXVlc3QaHC5zdXBlcnRhZy5ydW50aW1lLnYyLkF1dGhLZXkyjQIKBVVzZXJzEl0KCkludml0ZVVzZXISJi5zdXBlcnRhZy5ydW50aW1lLnYyLkludml0ZVVzZXJSZXF1ZXN0Gicuc3VwZXJ0YWcucnVudGltZS52Mi5JbnZpdGVVc2VyUmVzcG9uc2USSQoHR2V0VXNlchIjLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0VXNlclJlcXVlc3QaGS5zdXBlcnRhZy5ydW50aW1lLnYyLlVzZXISWgoJTGlzdFVzZXJzEiUuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0VXNlcnNSZXF1ZXN0GiYuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0VXNlcnNSZXNwb25zZTLIBAoLRW5yb2xsbWVudHMSTQoGRW5yb2xsEiIuc3VwZXJ0YWcucnVudGltZS52Mi5FbnJvbGxSZXF1ZXN0Gh8uc3VwZXJ0YWcucnVudGltZS52Mi5FbnJvbGxtZW50ElEKBldob0FtSRIiLnN1cGVydGFnLnJ1bnRpbWUudjIuV2hvQW1JUmVxdWVzdBojLnN1cGVydGFnLnJ1bnRpbWUudjIuV2hvQW1JUmVzcG9uc2USaQoQUm90YXRlQ3JlZGVudGlhbBIsLnN1cGVydGFnLnJ1bnRpbWUudjIuUm90YXRlQ3JlZGVudGlhbFJlcXVlc3QaJy5zdXBlcnRhZy5ydW50aW1lLnYyLkNyZWRlbnRpYWxSb3RhdGlvbhJbCg1HZXRFbnJvbGxtZW50Eikuc3VwZXJ0YWcucnVudGltZS52Mi5HZXRFbnJvbGxtZW50UmVxdWVzdBofLnN1cGVydGFnLnJ1bnRpbWUudjIuRW5yb2xsbWVudBJsCg9MaXN0RW5yb2xsbWVudHMSKy5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RFbnJvbGxtZW50c1JlcXVlc3QaLC5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RFbnJvbGxtZW50c1Jlc3BvbnNlEmEKEFJldm9rZUVucm9sbG1lbnQSLC5zdXBlcnRhZy5ydW50aW1lLnYyLlJldm9rZUVucm9sbG1lbnRSZXF1ZXN0Gh8uc3VwZXJ0YWcucnVudGltZS52Mi5FbnJvbGxtZW50MngKE0NyZWRlbnRpYWxEaXJlY3RvcnkSYQoHUmVzb2x2ZRItLnN1cGVydGFnLnJ1bnRpbWUudjIuUmVzb2x2ZUNyZWRlbnRpYWxSZXF1ZXN0Gicuc3VwZXJ0YWcucnVudGltZS52Mi5SZXNvbHZlZENyZWRlbnRpYWxiBnByb3RvMw", [file_supertag_runtime_v2_runtime]);
+  fileDesc("CiNzdXBlcnRhZy9ydW50aW1lL3YyL3BsYWNlbWVudC5wcm90bxITc3VwZXJ0YWcucnVudGltZS52MiI2ChFSZW1vdmVVc2VyUmVxdWVzdBIMCgRuYW1lGAEgASgJEhMKC3RyYW5zZmVyX3RvGAIgASgJIpkBChJSZW1vdmVVc2VyUmVzcG9uc2USJwoEdXNlchgBIAEoCzIZLnN1cGVydGFnLnJ1bnRpbWUudjIuVXNlchIbChN0cmFuc2ZlcnJlZF90YWdfaWRzGAIgAygJEiEKGXRyYW5zZmVycmVkX29iamVjdGl2ZV9pZHMYAyADKAkSGgoScmV2b2tlZF9wcmluY2lwYWxzGAQgAygJIq4BCgRVc2VyEgwKBG5hbWUYASABKAkSFAoMZGlzcGxheV9uYW1lGAIgASgJEhUKDWNyZWF0ZWRfYXRfbXMYAyABKAMSDAoEcm9sZRgEIAEoCRIXCg9hbGxvd2VkX3RhZ19pZHMYBSADKAkSGgoNcmVtb3ZlZF9hdF9tcxgGIAEoA0gAiAEBEhYKDnRyYW5zZmVycmVkX3RvGAcgASgJQhAKDl9yZW1vdmVkX2F0X21zIp8BChFJbnZpdGVVc2VyUmVxdWVzdBIUCgxvcGVyYXRpb25faWQYASABKAkSDAoEbmFtZRgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkSEgoKa2V5X2RpZ2VzdBgEIAEoDBIVCg1leHBpcmVzX2luX21zGAUgASgEEgwKBHJvbGUYBiABKAkSFwoPYWxsb3dlZF90YWdfaWRzGAcgAygJIm0KEkludml0ZVVzZXJSZXNwb25zZRInCgR1c2VyGAEgASgLMhkuc3VwZXJ0YWcucnVudGltZS52Mi5Vc2VyEi4KCGF1dGhfa2V5GAIgASgLMhwuc3VwZXJ0YWcucnVudGltZS52Mi5BdXRoS2V5Ih4KDkdldFVzZXJSZXF1ZXN0EgwKBG5hbWUYASABKAkiMQoQTGlzdFVzZXJzUmVxdWVzdBINCgVsaW1pdBgBIAEoDRIOCgZjdXJzb3IYAiABKAkiUgoRTGlzdFVzZXJzUmVzcG9uc2USKAoFdXNlcnMYASADKAsyGS5zdXBlcnRhZy5ydW50aW1lLnYyLlVzZXISEwoLbmV4dF9jdXJzb3IYAiABKAkiJAoUUmV2b2tlQXV0aEtleVJlcXVlc3QSDAoEbmFtZRgBIAEoCSIhChFHZXRBdXRoS2V5UmVxdWVzdBIMCgRuYW1lGAEgASgJIjQKE0xpc3RBdXRoS2V5c1JlcXVlc3QSDQoFbGltaXQYASABKA0SDgoGY3Vyc29yGAIgASgJIlwKFExpc3RBdXRoS2V5c1Jlc3BvbnNlEi8KCWF1dGhfa2V5cxgBIAMoCzIcLnN1cGVydGFnLnJ1bnRpbWUudjIuQXV0aEtleRITCgtuZXh0X2N1cnNvchgCIAEoCSJ7Cg1FbnJvbGxSZXF1ZXN0EjAKBHJvbGUYASABKA4yIi5zdXBlcnRhZy5ydW50aW1lLnYyLlByaW5jaXBhbFJvbGUSDAoEbmFtZRgCIAEoCRIUCgxvcGVyYXRpb25faWQYAyABKAkSFAoMdG9rZW5fZGlnZXN0GAQgASgMIsQCCgpFbnJvbGxtZW50EjAKBHJvbGUYASABKA4yIi5zdXBlcnRhZy5ydW50aW1lLnYyLlByaW5jaXBhbFJvbGUSDAoEbmFtZRgCIAEoCRIRCglwcmluY2lwYWwYAyABKAkSFQoNYXV0aF9rZXlfbmFtZRgEIAEoCRIWCg5lbnJvbGxlZF9hdF9tcxgFIAEoAxIcCg9sYXN0X3VzZWRfYXRfbXMYBiABKANIAIgBARIaCg1yZXZva2VkX2F0X21zGAcgASgDSAGIAQESGwoTY3JlZGVudGlhbF9yZXZpc2lvbhgIIAEoBBIXCg9hbGxvd2VkX3RhZ19pZHMYCSADKAkSEAoIYWxsX3RhZ3MYCiABKAgSDAoEdXNlchgLIAEoCUISChBfbGFzdF91c2VkX2F0X21zQhAKDl9yZXZva2VkX2F0X21zIg8KDVdob0FtSVJlcXVlc3QiZAoOV2hvQW1JUmVzcG9uc2USMAoEcm9sZRgBIAEoDjIiLnN1cGVydGFnLnJ1bnRpbWUudjIuUHJpbmNpcGFsUm9sZRIRCglwcmluY2lwYWwYAiABKAkSDQoFYWRtaW4YAyABKAgilQEKF1JvdGF0ZUNyZWRlbnRpYWxSZXF1ZXN0EjAKBHJvbGUYASABKA4yIi5zdXBlcnRhZy5ydW50aW1lLnYyLlByaW5jaXBhbFJvbGUSDAoEbmFtZRgCIAEoCRIkChxleHBlY3RlZF9jcmVkZW50aWFsX3JldmlzaW9uGAMgASgEEhQKDHRva2VuX2RpZ2VzdBgEIAEoDCJEChJDcmVkZW50aWFsUm90YXRpb24SEQoJcHJpbmNpcGFsGAEgASgJEhsKE2NyZWRlbnRpYWxfcmV2aXNpb24YAiABKAQiVgoUR2V0RW5yb2xsbWVudFJlcXVlc3QSMAoEcm9sZRgBIAEoDjIiLnN1cGVydGFnLnJ1bnRpbWUudjIuUHJpbmNpcGFsUm9sZRIMCgRuYW1lGAIgASgJImkKFkxpc3RFbnJvbGxtZW50c1JlcXVlc3QSMAoEcm9sZRgBIAEoDjIiLnN1cGVydGFnLnJ1bnRpbWUudjIuUHJpbmNpcGFsUm9sZRINCgVsaW1pdBgCIAEoDRIOCgZjdXJzb3IYAyABKAkiZAoXTGlzdEVucm9sbG1lbnRzUmVzcG9uc2USNAoLZW5yb2xsbWVudHMYASADKAsyHy5zdXBlcnRhZy5ydW50aW1lLnYyLkVucm9sbG1lbnQSEwoLbmV4dF9jdXJzb3IYAiABKAkiWQoXUmV2b2tlRW5yb2xsbWVudFJlcXVlc3QSMAoEcm9sZRgBIAEoDjIiLnN1cGVydGFnLnJ1bnRpbWUudjIuUHJpbmNpcGFsUm9sZRIMCgRuYW1lGAIgASgJImIKGFJlc29sdmVDcmVkZW50aWFsUmVxdWVzdBIUCgx0b2tlbl9kaWdlc3QYASABKAwSMAoEa2luZBgCIAEoDjIiLnN1cGVydGFnLnJ1bnRpbWUudjIuUHJpbmNpcGFsUm9sZSJ2ChJSZXNvbHZlZENyZWRlbnRpYWwSMAoEcm9sZRgBIAEoDjIiLnN1cGVydGFnLnJ1bnRpbWUudjIuUHJpbmNpcGFsUm9sZRIMCgRuYW1lGAIgASgJEhIKCmdlbmVyYXRpb24YAyABKAQSDAoEdXNlchgEIAEoCSI2ChNTZXRUYWdSdW5zT25SZXF1ZXN0Eg4KBnRhZ19pZBgBIAEoCRIPCgdydW5zX29uGAIgAygJIi8KHERpYWdub3NlVGFza1BsYWNlbWVudFJlcXVlc3QSDwoHdGFza19pZBgBIAEoCSKuAQoNSG9zdFBsYWNlbWVudBIPCgdob3N0X2lkGAEgASgJEi0KBXBoYXNlGAIgASgOMh4uc3VwZXJ0YWcucnVudGltZS52Mi5Ib3N0UGhhc2USDgoGbGFiZWxzGAMgAygJEhYKDm1pc3NpbmdfbGFiZWxzGAQgAygJEhAKCGVsaWdpYmxlGAUgASgIEhMKC3JlcXVpcmVtZW50GAYgASgJEg4KBnJlYXNvbhgHIAEoCSLyAQoWVGFza1BsYWNlbWVudERpYWdub3NpcxIPCgd0YXNrX2lkGAEgASgJEg4KBnRhZ19pZBgCIAEoCRItCgVzdGF0ZRgDIAEoDjIeLnN1cGVydGFnLnJ1bnRpbWUudjIuVGFza1N0YXRlEhcKD3JlcXVpcmVkX2xhYmVscxgEIAMoCRIWCg5taXNzaW5nX2xhYmVscxgFIAMoCRITCgtyZXF1aXJlbWVudBgGIAEoCRIPCgdzdW1tYXJ5GAcgASgJEjEKBWhvc3RzGAggAygLMiIuc3VwZXJ0YWcucnVudGltZS52Mi5Ib3N0UGxhY2VtZW50Ms8BCglQbGFjZW1lbnQSUgoMU2V0VGFnUnVuc09uEiguc3VwZXJ0YWcucnVudGltZS52Mi5TZXRUYWdSdW5zT25SZXF1ZXN0Ghguc3VwZXJ0YWcucnVudGltZS52Mi5UYWcSbgoMRGlhZ25vc2VUYXNrEjEuc3VwZXJ0YWcucnVudGltZS52Mi5EaWFnbm9zZVRhc2tQbGFjZW1lbnRSZXF1ZXN0Gisuc3VwZXJ0YWcucnVudGltZS52Mi5UYXNrUGxhY2VtZW50RGlhZ25vc2lzMp0CCghBdXRoS2V5cxJYCg1SZXZva2VBdXRoS2V5Eikuc3VwZXJ0YWcucnVudGltZS52Mi5SZXZva2VBdXRoS2V5UmVxdWVzdBocLnN1cGVydGFnLnJ1bnRpbWUudjIuQXV0aEtleRJjCgxMaXN0QXV0aEtleXMSKC5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RBdXRoS2V5c1JlcXVlc3QaKS5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RBdXRoS2V5c1Jlc3BvbnNlElIKCkdldEF1dGhLZXkSJi5zdXBlcnRhZy5ydW50aW1lLnYyLkdldEF1dGhLZXlSZXF1ZXN0Ghwuc3VwZXJ0YWcucnVudGltZS52Mi5BdXRoS2V5MuwCCgVVc2VycxJdCgpJbnZpdGVVc2VyEiYuc3VwZXJ0YWcucnVudGltZS52Mi5JbnZpdGVVc2VyUmVxdWVzdBonLnN1cGVydGFnLnJ1bnRpbWUudjIuSW52aXRlVXNlclJlc3BvbnNlEkkKB0dldFVzZXISIy5zdXBlcnRhZy5ydW50aW1lLnYyLkdldFVzZXJSZXF1ZXN0Ghkuc3VwZXJ0YWcucnVudGltZS52Mi5Vc2VyEloKCUxpc3RVc2VycxIlLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdFVzZXJzUmVxdWVzdBomLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdFVzZXJzUmVzcG9uc2USXQoKUmVtb3ZlVXNlchImLnN1cGVydGFnLnJ1bnRpbWUudjIuUmVtb3ZlVXNlclJlcXVlc3QaJy5zdXBlcnRhZy5ydW50aW1lLnYyLlJlbW92ZVVzZXJSZXNwb25zZTLIBAoLRW5yb2xsbWVudHMSTQoGRW5yb2xsEiIuc3VwZXJ0YWcucnVudGltZS52Mi5FbnJvbGxSZXF1ZXN0Gh8uc3VwZXJ0YWcucnVudGltZS52Mi5FbnJvbGxtZW50ElEKBldob0FtSRIiLnN1cGVydGFnLnJ1bnRpbWUudjIuV2hvQW1JUmVxdWVzdBojLnN1cGVydGFnLnJ1bnRpbWUudjIuV2hvQW1JUmVzcG9uc2USaQoQUm90YXRlQ3JlZGVudGlhbBIsLnN1cGVydGFnLnJ1bnRpbWUudjIuUm90YXRlQ3JlZGVudGlhbFJlcXVlc3QaJy5zdXBlcnRhZy5ydW50aW1lLnYyLkNyZWRlbnRpYWxSb3RhdGlvbhJbCg1HZXRFbnJvbGxtZW50Eikuc3VwZXJ0YWcucnVudGltZS52Mi5HZXRFbnJvbGxtZW50UmVxdWVzdBofLnN1cGVydGFnLnJ1bnRpbWUudjIuRW5yb2xsbWVudBJsCg9MaXN0RW5yb2xsbWVudHMSKy5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RFbnJvbGxtZW50c1JlcXVlc3QaLC5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RFbnJvbGxtZW50c1Jlc3BvbnNlEmEKEFJldm9rZUVucm9sbG1lbnQSLC5zdXBlcnRhZy5ydW50aW1lLnYyLlJldm9rZUVucm9sbG1lbnRSZXF1ZXN0Gh8uc3VwZXJ0YWcucnVudGltZS52Mi5FbnJvbGxtZW50MngKE0NyZWRlbnRpYWxEaXJlY3RvcnkSYQoHUmVzb2x2ZRItLnN1cGVydGFnLnJ1bnRpbWUudjIuUmVzb2x2ZUNyZWRlbnRpYWxSZXF1ZXN0Gicuc3VwZXJ0YWcucnVudGltZS52Mi5SZXNvbHZlZENyZWRlbnRpYWxiBnByb3RvMw", [file_supertag_runtime_v2_runtime]);
+
+/**
+ * @generated from message supertag.runtime.v2.RemoveUserRequest
+ */
+export type RemoveUserRequest = Message<"supertag.runtime.v2.RemoveUserRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * The User who takes over the removed User's personal Tags and unfinished Objectives.
+   *
+   * @generated from field: string transfer_to = 2;
+   */
+  transferTo: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.RemoveUserRequest.
+ * Use `create(RemoveUserRequestSchema)` to create a new message.
+ */
+export const RemoveUserRequestSchema: GenMessage<RemoveUserRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_placement, 0);
+
+/**
+ * @generated from message supertag.runtime.v2.RemoveUserResponse
+ */
+export type RemoveUserResponse = Message<"supertag.runtime.v2.RemoveUserResponse"> & {
+  /**
+   * @generated from field: supertag.runtime.v2.User user = 1;
+   */
+  user?: User | undefined;
+
+  /**
+   * @generated from field: repeated string transferred_tag_ids = 2;
+   */
+  transferredTagIds: string[];
+
+  /**
+   * @generated from field: repeated string transferred_objective_ids = 3;
+   */
+  transferredObjectiveIds: string[];
+
+  /**
+   * The enrolled devices and Worker Hosts revoked, as `client:NAME` and `host:NAME`.
+   *
+   * @generated from field: repeated string revoked_principals = 4;
+   */
+  revokedPrincipals: string[];
+};
+
+/**
+ * Describes the message supertag.runtime.v2.RemoveUserResponse.
+ * Use `create(RemoveUserResponseSchema)` to create a new message.
+ */
+export const RemoveUserResponseSchema: GenMessage<RemoveUserResponse> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_placement, 1);
 
 /**
  * @generated from message supertag.runtime.v2.User
@@ -48,6 +106,20 @@ export type User = Message<"supertag.runtime.v2.User"> & {
    * @generated from field: repeated string allowed_tag_ids = 5;
    */
   allowedTagIds: string[];
+
+  /**
+   * When the User was removed; their name is never reused.
+   *
+   * @generated from field: optional int64 removed_at_ms = 6;
+   */
+  removedAtMs?: bigint | undefined;
+
+  /**
+   * The User who took over what a removed User owned.
+   *
+   * @generated from field: string transferred_to = 7;
+   */
+  transferredTo: string;
 };
 
 /**
@@ -55,7 +127,7 @@ export type User = Message<"supertag.runtime.v2.User"> & {
  * Use `create(UserSchema)` to create a new message.
  */
 export const UserSchema: GenMessage<User> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 0);
+  messageDesc(file_supertag_runtime_v2_placement, 2);
 
 /**
  * @generated from message supertag.runtime.v2.InviteUserRequest
@@ -112,7 +184,7 @@ export type InviteUserRequest = Message<"supertag.runtime.v2.InviteUserRequest">
  * Use `create(InviteUserRequestSchema)` to create a new message.
  */
 export const InviteUserRequestSchema: GenMessage<InviteUserRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 1);
+  messageDesc(file_supertag_runtime_v2_placement, 3);
 
 /**
  * @generated from message supertag.runtime.v2.InviteUserResponse
@@ -136,7 +208,7 @@ export type InviteUserResponse = Message<"supertag.runtime.v2.InviteUserResponse
  * Use `create(InviteUserResponseSchema)` to create a new message.
  */
 export const InviteUserResponseSchema: GenMessage<InviteUserResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 2);
+  messageDesc(file_supertag_runtime_v2_placement, 4);
 
 /**
  * @generated from message supertag.runtime.v2.GetUserRequest
@@ -153,7 +225,7 @@ export type GetUserRequest = Message<"supertag.runtime.v2.GetUserRequest"> & {
  * Use `create(GetUserRequestSchema)` to create a new message.
  */
 export const GetUserRequestSchema: GenMessage<GetUserRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 3);
+  messageDesc(file_supertag_runtime_v2_placement, 5);
 
 /**
  * @generated from message supertag.runtime.v2.ListUsersRequest
@@ -179,7 +251,7 @@ export type ListUsersRequest = Message<"supertag.runtime.v2.ListUsersRequest"> &
  * Use `create(ListUsersRequestSchema)` to create a new message.
  */
 export const ListUsersRequestSchema: GenMessage<ListUsersRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 4);
+  messageDesc(file_supertag_runtime_v2_placement, 6);
 
 /**
  * @generated from message supertag.runtime.v2.ListUsersResponse
@@ -201,7 +273,7 @@ export type ListUsersResponse = Message<"supertag.runtime.v2.ListUsersResponse">
  * Use `create(ListUsersResponseSchema)` to create a new message.
  */
 export const ListUsersResponseSchema: GenMessage<ListUsersResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 5);
+  messageDesc(file_supertag_runtime_v2_placement, 7);
 
 /**
  * @generated from message supertag.runtime.v2.RevokeAuthKeyRequest
@@ -218,7 +290,7 @@ export type RevokeAuthKeyRequest = Message<"supertag.runtime.v2.RevokeAuthKeyReq
  * Use `create(RevokeAuthKeyRequestSchema)` to create a new message.
  */
 export const RevokeAuthKeyRequestSchema: GenMessage<RevokeAuthKeyRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 6);
+  messageDesc(file_supertag_runtime_v2_placement, 8);
 
 /**
  * @generated from message supertag.runtime.v2.GetAuthKeyRequest
@@ -235,7 +307,7 @@ export type GetAuthKeyRequest = Message<"supertag.runtime.v2.GetAuthKeyRequest">
  * Use `create(GetAuthKeyRequestSchema)` to create a new message.
  */
 export const GetAuthKeyRequestSchema: GenMessage<GetAuthKeyRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 7);
+  messageDesc(file_supertag_runtime_v2_placement, 9);
 
 /**
  * @generated from message supertag.runtime.v2.ListAuthKeysRequest
@@ -261,7 +333,7 @@ export type ListAuthKeysRequest = Message<"supertag.runtime.v2.ListAuthKeysReque
  * Use `create(ListAuthKeysRequestSchema)` to create a new message.
  */
 export const ListAuthKeysRequestSchema: GenMessage<ListAuthKeysRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 8);
+  messageDesc(file_supertag_runtime_v2_placement, 10);
 
 /**
  * @generated from message supertag.runtime.v2.ListAuthKeysResponse
@@ -283,7 +355,7 @@ export type ListAuthKeysResponse = Message<"supertag.runtime.v2.ListAuthKeysResp
  * Use `create(ListAuthKeysResponseSchema)` to create a new message.
  */
 export const ListAuthKeysResponseSchema: GenMessage<ListAuthKeysResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 9);
+  messageDesc(file_supertag_runtime_v2_placement, 11);
 
 /**
  * @generated from message supertag.runtime.v2.EnrollRequest
@@ -320,7 +392,7 @@ export type EnrollRequest = Message<"supertag.runtime.v2.EnrollRequest"> & {
  * Use `create(EnrollRequestSchema)` to create a new message.
  */
 export const EnrollRequestSchema: GenMessage<EnrollRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 10);
+  messageDesc(file_supertag_runtime_v2_placement, 12);
 
 /**
  * @generated from message supertag.runtime.v2.Enrollment
@@ -404,7 +476,7 @@ export type Enrollment = Message<"supertag.runtime.v2.Enrollment"> & {
  * Use `create(EnrollmentSchema)` to create a new message.
  */
 export const EnrollmentSchema: GenMessage<Enrollment> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 11);
+  messageDesc(file_supertag_runtime_v2_placement, 13);
 
 /**
  * @generated from message supertag.runtime.v2.WhoAmIRequest
@@ -417,7 +489,7 @@ export type WhoAmIRequest = Message<"supertag.runtime.v2.WhoAmIRequest"> & {
  * Use `create(WhoAmIRequestSchema)` to create a new message.
  */
 export const WhoAmIRequestSchema: GenMessage<WhoAmIRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 12);
+  messageDesc(file_supertag_runtime_v2_placement, 14);
 
 /**
  * @generated from message supertag.runtime.v2.WhoAmIResponse
@@ -448,7 +520,7 @@ export type WhoAmIResponse = Message<"supertag.runtime.v2.WhoAmIResponse"> & {
  * Use `create(WhoAmIResponseSchema)` to create a new message.
  */
 export const WhoAmIResponseSchema: GenMessage<WhoAmIResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 13);
+  messageDesc(file_supertag_runtime_v2_placement, 15);
 
 /**
  * @generated from message supertag.runtime.v2.RotateCredentialRequest
@@ -486,7 +558,7 @@ export type RotateCredentialRequest = Message<"supertag.runtime.v2.RotateCredent
  * Use `create(RotateCredentialRequestSchema)` to create a new message.
  */
 export const RotateCredentialRequestSchema: GenMessage<RotateCredentialRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 14);
+  messageDesc(file_supertag_runtime_v2_placement, 16);
 
 /**
  * @generated from message supertag.runtime.v2.CredentialRotation
@@ -508,7 +580,7 @@ export type CredentialRotation = Message<"supertag.runtime.v2.CredentialRotation
  * Use `create(CredentialRotationSchema)` to create a new message.
  */
 export const CredentialRotationSchema: GenMessage<CredentialRotation> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 15);
+  messageDesc(file_supertag_runtime_v2_placement, 17);
 
 /**
  * @generated from message supertag.runtime.v2.GetEnrollmentRequest
@@ -530,7 +602,7 @@ export type GetEnrollmentRequest = Message<"supertag.runtime.v2.GetEnrollmentReq
  * Use `create(GetEnrollmentRequestSchema)` to create a new message.
  */
 export const GetEnrollmentRequestSchema: GenMessage<GetEnrollmentRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 16);
+  messageDesc(file_supertag_runtime_v2_placement, 18);
 
 /**
  * @generated from message supertag.runtime.v2.ListEnrollmentsRequest
@@ -563,7 +635,7 @@ export type ListEnrollmentsRequest = Message<"supertag.runtime.v2.ListEnrollment
  * Use `create(ListEnrollmentsRequestSchema)` to create a new message.
  */
 export const ListEnrollmentsRequestSchema: GenMessage<ListEnrollmentsRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 17);
+  messageDesc(file_supertag_runtime_v2_placement, 19);
 
 /**
  * @generated from message supertag.runtime.v2.ListEnrollmentsResponse
@@ -585,7 +657,7 @@ export type ListEnrollmentsResponse = Message<"supertag.runtime.v2.ListEnrollmen
  * Use `create(ListEnrollmentsResponseSchema)` to create a new message.
  */
 export const ListEnrollmentsResponseSchema: GenMessage<ListEnrollmentsResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 18);
+  messageDesc(file_supertag_runtime_v2_placement, 20);
 
 /**
  * @generated from message supertag.runtime.v2.RevokeEnrollmentRequest
@@ -607,7 +679,7 @@ export type RevokeEnrollmentRequest = Message<"supertag.runtime.v2.RevokeEnrollm
  * Use `create(RevokeEnrollmentRequestSchema)` to create a new message.
  */
 export const RevokeEnrollmentRequestSchema: GenMessage<RevokeEnrollmentRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 19);
+  messageDesc(file_supertag_runtime_v2_placement, 21);
 
 /**
  * @generated from message supertag.runtime.v2.ResolveCredentialRequest
@@ -634,7 +706,7 @@ export type ResolveCredentialRequest = Message<"supertag.runtime.v2.ResolveCrede
  * Use `create(ResolveCredentialRequestSchema)` to create a new message.
  */
 export const ResolveCredentialRequestSchema: GenMessage<ResolveCredentialRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 20);
+  messageDesc(file_supertag_runtime_v2_placement, 22);
 
 /**
  * @generated from message supertag.runtime.v2.ResolvedCredential
@@ -672,7 +744,7 @@ export type ResolvedCredential = Message<"supertag.runtime.v2.ResolvedCredential
  * Use `create(ResolvedCredentialSchema)` to create a new message.
  */
 export const ResolvedCredentialSchema: GenMessage<ResolvedCredential> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 21);
+  messageDesc(file_supertag_runtime_v2_placement, 23);
 
 /**
  * @generated from message supertag.runtime.v2.SetTagRunsOnRequest
@@ -694,7 +766,7 @@ export type SetTagRunsOnRequest = Message<"supertag.runtime.v2.SetTagRunsOnReque
  * Use `create(SetTagRunsOnRequestSchema)` to create a new message.
  */
 export const SetTagRunsOnRequestSchema: GenMessage<SetTagRunsOnRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 22);
+  messageDesc(file_supertag_runtime_v2_placement, 24);
 
 /**
  * @generated from message supertag.runtime.v2.DiagnoseTaskPlacementRequest
@@ -711,7 +783,7 @@ export type DiagnoseTaskPlacementRequest = Message<"supertag.runtime.v2.Diagnose
  * Use `create(DiagnoseTaskPlacementRequestSchema)` to create a new message.
  */
 export const DiagnoseTaskPlacementRequestSchema: GenMessage<DiagnoseTaskPlacementRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 23);
+  messageDesc(file_supertag_runtime_v2_placement, 25);
 
 /**
  * @generated from message supertag.runtime.v2.HostPlacement
@@ -767,7 +839,7 @@ export type HostPlacement = Message<"supertag.runtime.v2.HostPlacement"> & {
  * Use `create(HostPlacementSchema)` to create a new message.
  */
 export const HostPlacementSchema: GenMessage<HostPlacement> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 24);
+  messageDesc(file_supertag_runtime_v2_placement, 26);
 
 /**
  * @generated from message supertag.runtime.v2.TaskPlacementDiagnosis
@@ -833,7 +905,7 @@ export type TaskPlacementDiagnosis = Message<"supertag.runtime.v2.TaskPlacementD
  * Use `create(TaskPlacementDiagnosisSchema)` to create a new message.
  */
 export const TaskPlacementDiagnosisSchema: GenMessage<TaskPlacementDiagnosis> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 25);
+  messageDesc(file_supertag_runtime_v2_placement, 27);
 
 /**
  * Worker Host placement. Labels narrow the hosts bound to a Tag; they never
@@ -929,7 +1001,7 @@ export const Users: GenService<{
     output: typeof UserSchema;
   },
   /**
-   * By name.
+   * By name, removed Users included.
    *
    * @generated from rpc supertag.runtime.v2.Users.ListUsers
    */
@@ -937,6 +1009,18 @@ export const Users: GenService<{
     methodKind: "unary";
     input: typeof ListUsersRequestSchema;
     output: typeof ListUsersResponseSchema;
+  },
+  /**
+   * Revokes every device, Worker Host, and invite key of the User at once, and moves their
+   * personal Tags and unfinished Objectives to `transfer_to`. Refused while the User owns
+   * anything and names no one to take it. Removing a removed User changes nothing.
+   *
+   * @generated from rpc supertag.runtime.v2.Users.RemoveUser
+   */
+  removeUser: {
+    methodKind: "unary";
+    input: typeof RemoveUserRequestSchema;
+    output: typeof RemoveUserResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_supertag_runtime_v2_placement, 2);

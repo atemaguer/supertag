@@ -7,19 +7,43 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class RemoveUserRequest(_message.Message):
+    __slots__ = ("name", "transfer_to")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    TRANSFER_TO_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    transfer_to: str
+    def __init__(self, name: _Optional[str] = ..., transfer_to: _Optional[str] = ...) -> None: ...
+
+class RemoveUserResponse(_message.Message):
+    __slots__ = ("user", "transferred_tag_ids", "transferred_objective_ids", "revoked_principals")
+    USER_FIELD_NUMBER: _ClassVar[int]
+    TRANSFERRED_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
+    TRANSFERRED_OBJECTIVE_IDS_FIELD_NUMBER: _ClassVar[int]
+    REVOKED_PRINCIPALS_FIELD_NUMBER: _ClassVar[int]
+    user: User
+    transferred_tag_ids: _containers.RepeatedScalarFieldContainer[str]
+    transferred_objective_ids: _containers.RepeatedScalarFieldContainer[str]
+    revoked_principals: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, user: _Optional[_Union[User, _Mapping]] = ..., transferred_tag_ids: _Optional[_Iterable[str]] = ..., transferred_objective_ids: _Optional[_Iterable[str]] = ..., revoked_principals: _Optional[_Iterable[str]] = ...) -> None: ...
+
 class User(_message.Message):
-    __slots__ = ("name", "display_name", "created_at_ms", "role", "allowed_tag_ids")
+    __slots__ = ("name", "display_name", "created_at_ms", "role", "allowed_tag_ids", "removed_at_ms", "transferred_to")
     NAME_FIELD_NUMBER: _ClassVar[int]
     DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     ROLE_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
+    REMOVED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    TRANSFERRED_TO_FIELD_NUMBER: _ClassVar[int]
     name: str
     display_name: str
     created_at_ms: int
     role: str
     allowed_tag_ids: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, name: _Optional[str] = ..., display_name: _Optional[str] = ..., created_at_ms: _Optional[int] = ..., role: _Optional[str] = ..., allowed_tag_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+    removed_at_ms: int
+    transferred_to: str
+    def __init__(self, name: _Optional[str] = ..., display_name: _Optional[str] = ..., created_at_ms: _Optional[int] = ..., role: _Optional[str] = ..., allowed_tag_ids: _Optional[_Iterable[str]] = ..., removed_at_ms: _Optional[int] = ..., transferred_to: _Optional[str] = ...) -> None: ...
 
 class InviteUserRequest(_message.Message):
     __slots__ = ("operation_id", "name", "display_name", "key_digest", "expires_in_ms", "role", "allowed_tag_ids")

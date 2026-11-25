@@ -343,6 +343,11 @@ class UsersStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ListUsersRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ListUsersResponse.FromString,
                 _registered_method=True)
+        self.RemoveUser = channel.unary_unary(
+                '/supertag.runtime.v2.Users/RemoveUser',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.RemoveUserRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.RemoveUserResponse.FromString,
+                _registered_method=True)
 
 
 class UsersServicer:
@@ -365,7 +370,16 @@ class UsersServicer:
         raise NotImplementedError('Method not implemented!')
 
     def ListUsers(self, request, context):
-        """By name.
+        """By name, removed Users included.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RemoveUser(self, request, context):
+        """Revokes every device, Worker Host, and invite key of the User at once, and moves their
+        personal Tags and unfinished Objectives to `transfer_to`. Refused while the User owns
+        anything and names no one to take it. Removing a removed User changes nothing.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -388,6 +402,11 @@ def add_UsersServicer_to_server(servicer, server):
                     servicer.ListUsers,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ListUsersRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ListUsersResponse.SerializeToString,
+            ),
+            'RemoveUser': grpc.unary_unary_rpc_method_handler(
+                    servicer.RemoveUser,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.RemoveUserRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.RemoveUserResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -473,6 +492,33 @@ class Users:
             '/supertag.runtime.v2.Users/ListUsers',
             supertag_dot_runtime_dot_v2_dot_placement__pb2.ListUsersRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_placement__pb2.ListUsersResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RemoveUser(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Users/RemoveUser',
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.RemoveUserRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.RemoveUserResponse.FromString,
             options,
             channel_credentials,
             insecure,
