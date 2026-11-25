@@ -435,9 +435,11 @@ impl operator_server::Operator for ControlPlane {
     }
 
     async fn put_tag(&self, request: Request<PutTagRequest>) -> Result<Response<Tag>, Status> {
-        self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
-            self.store.put_tag_spec(request.into_inner()).await?,
+            self.store
+                .put_tag_as(&principal, request.into_inner())
+                .await?,
         ))
     }
 

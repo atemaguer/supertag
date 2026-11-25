@@ -409,16 +409,33 @@ impl Store {
         )
         .await?;
         if role == Role::Host {
+            // A User's Worker Host runs only that User's Tags.
+            let host_tags = match &user {
+                Some(user) => sqlx::query_scalar::<_, String>(
+                    "SELECT tag_id FROM supertag_v2_tags WHERE owner_user=$1 AND retired_at_ms IS NULL ORDER BY tag_id",
+                )
+                .bind(user)
+                .fetch_all(&mut *transaction)
+                .await?,
+                None => tags.clone(),
+            };
             super::hosts::insert_host_in(
                 &mut transaction,
                 &enrolled,
-                all_tags,
-                &tags,
+                all_tags && user.is_none(),
+                &host_tags,
                 row.try_get::<i64, _>("ephemeral")? == 1,
                 &row.try_get::<String, _>("labels")?,
                 now,
             )
             .await?;
+            if user.is_some() {
+                sqlx::query("UPDATE supertag_v2_hosts SET owner_user=$1 WHERE host_id=$2")
+                    .bind(&user)
+                    .bind(&enrolled)
+                    .execute(&mut *transaction)
+                    .await?;
+            }
         }
         sqlx::query("INSERT INTO supertag_v2_auth_key_joins (key_digest,role,name,enrollment_digest,enrolled_at_ms,operation_digest) VALUES ($1,$2,$3,$4,$5,$6)")
             .bind(&key).bind(role.as_str()).bind(&enrolled).bind(&fingerprint).bind(now).bind(&operation)
@@ -725,7 +742,19 @@ pub(crate) async fn client_tags_in(
                 .fetch_optional(&mut **transaction)
                 .await?
                 .ok_or(StoreError::PermissionDenied)?;
-        return Ok(Some(serde_json::from_str(&tags)?));
+        // Their own Tags, and the shared Tags their invitation lists.
+        let mut tags: Vec<String> = serde_json::from_str(&tags)?;
+        tags.extend(
+            sqlx::query_scalar::<_, String>(
+                "SELECT tag_id FROM supertag_v2_tags WHERE owner_user=$1",
+            )
+            .bind(user)
+            .fetch_all(&mut **transaction)
+            .await?,
+        );
+        tags.sort_unstable();
+        tags.dedup();
+        return Ok(Some(tags));
     }
     let Some(id) = principal.strip_prefix("client:") else {
         return Ok(None);

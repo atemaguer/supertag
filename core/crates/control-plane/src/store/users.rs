@@ -5,7 +5,7 @@
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::v2::{
     GetUserRequest, InviteUserRequest, InviteUserResponse, ListUsersRequest, ListUsersResponse,
-    User,
+    PutTagRequest, User,
 };
 
 use super::enrollments::{credential_digest, credential_unused_in, fingerprint, operator};
@@ -131,11 +131,30 @@ impl Store {
                 }
                 for tag in &tags {
                     crate::tags::require_active(&mut tx, tag).await?;
+                    // A User reaches shared Tags; another person's own Tag is theirs alone.
+                    if owner_in(&mut tx, tag).await?.is_some() {
+                        return Err(StoreError::FailedPrecondition(format!(
+                            "Tag {tag} is another User's personal Tag; list only shared Tags"
+                        )));
+                    }
+                }
+                // The User's personal Tag takes their name, and Tag IDs are never reused.
+                let taken: Option<String> =
+                    sqlx::query_scalar("SELECT tag_id FROM supertag_v2_tags WHERE tag_id=$1")
+                        .bind(&input.name)
+                        .fetch_optional(&mut *tx)
+                        .await?;
+                if taken.is_some() {
+                    return Err(StoreError::FailedPrecondition(format!(
+                        "a Tag named {0} already exists, and {0}'s personal Tag takes that name; choose another User name",
+                        input.name
+                    )));
                 }
                 sqlx::query("INSERT INTO supertag_v2_users (name,display_name,role,allowed_tag_ids,created_at_ms,created_by) VALUES ($1,$2,$3,$4,$5,$6)")
                     .bind(&input.name).bind(&display).bind(&input.role)
                     .bind(serde_json::to_string(&tags)?).bind(now).bind(principal)
                     .execute(&mut *tx).await?;
+                personal_tag_in(&mut tx, &input.name, &input.role).await?;
                 user_in(&mut tx, &input.name)
                     .await?
                     .ok_or_else(|| StoreError::Conflict("the User was not recorded".into()))?
@@ -224,6 +243,47 @@ impl Store {
             next_cursor,
         })
     }
+}
+
+/// Creates a new User's personal Tag: named after them, owned by them, with their Role, or the
+/// Control Plane's `personal` Role when the operator defined one. The owner chooses its harness
+/// and Workspace later.
+async fn personal_tag_in(tx: &mut Transaction<'_, Any>, user: &str, role: &str) -> Result<()> {
+    Store::put_tag_in(
+        tx,
+        PutTagRequest {
+            tag_id: user.into(),
+            ..Default::default()
+        },
+    )
+    .await?;
+    sqlx::query("UPDATE supertag_v2_tags SET owner_user=$1 WHERE tag_id=$1")
+        .bind(user)
+        .execute(&mut **tx)
+        .await?;
+    if role.is_empty() {
+        crate::policy::assign_new_tag_role_in(tx, PERSONAL_ROLE, user, false).await?;
+    } else {
+        crate::policy::assign_new_tag_role_in(tx, role, user, true).await?;
+    }
+    Ok(())
+}
+
+/// The Role every personal Tag takes unless its User's invitation names another.
+pub(crate) const PERSONAL_ROLE: &str = "personal";
+
+/// The User who owns a Tag, for a personal Tag.
+pub(crate) async fn owner_in(
+    tx: &mut Transaction<'_, Any>,
+    tag_id: &str,
+) -> Result<Option<String>> {
+    Ok(sqlx::query_scalar::<_, Option<String>>(
+        "SELECT owner_user FROM supertag_v2_tags WHERE tag_id=$1",
+    )
+    .bind(tag_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .flatten())
 }
 
 pub(crate) async fn user_in(tx: &mut Transaction<'_, Any>, name: &str) -> Result<Option<User>> {

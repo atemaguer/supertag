@@ -23,7 +23,7 @@ mod replica_tests;
 #[path = "slack_threads.rs"]
 mod slack_threads;
 mod sqlite_files;
-mod users;
+pub(crate) mod users;
 pub use attempt_credentials::{AttemptAccess, AttemptCall};
 pub(crate) use authority::ClaimScope;
 pub(crate) use authority::lease_is_live;
@@ -31,7 +31,7 @@ pub(crate) use authority::{
     NOT_REDELIVERED_SHOWN_MS, auto_resolve_at, held_for_person_in, not_redelivered_notice,
 };
 pub use enrollments::Role;
-pub(crate) use enrollments::{client_tags_in, enrollee_name};
+pub(crate) use enrollments::{client_tags_in, enrollee_name, operator as enrollments_operator};
 pub(crate) use execution::lane_requirement;
 pub use hosts::HostAuthority;
 pub(crate) use hosts::current_scope_in;
@@ -112,7 +112,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 125;
+        const SCHEMA_VERSION: i64 = 126;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -362,6 +362,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0123_memory_reviews.sql"),
                 include_str!("../migrations/sqlite/0124_tag_session_boundaries.sql"),
                 include_str!("../migrations/sqlite/0125_users.sql"),
+                include_str!("../migrations/sqlite/0126_personal_tags.sql"),
             ]
         } else {
             [
@@ -492,6 +493,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0123_memory_reviews.sql"),
                 include_str!("../migrations/postgresql/0124_tag_session_boundaries.sql"),
                 include_str!("../migrations/postgresql/0125_users.sql"),
+                include_str!("../migrations/postgresql/0126_personal_tags.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -721,7 +723,17 @@ impl Store {
                 .bind(tag_id)
                 .fetch_optional(&mut **transaction)
                 .await?;
-        if let Some(reason) = prior_harness.and_then(|prior| {
+        // A Tag that names no harness and has never run may choose its first one, as a User's
+        // personal Tag does once its owner picks a harness. After that it keeps its harness.
+        let unchosen = prior_harness == Some(HarnessKind::Unspecified as i64)
+            && sqlx::query_scalar::<_, String>(
+                "SELECT task_id FROM supertag_v2_tasks WHERE tag_id=$1 LIMIT 1",
+            )
+            .bind(tag_id)
+            .fetch_optional(&mut **transaction)
+            .await?
+            .is_none();
+        if let Some(reason) = prior_harness.filter(|_| !unchosen).and_then(|prior| {
             supertag_protocol::harness_change_refusal(
                 tag_id,
                 HarnessKind::try_from(prior as i32).unwrap_or_default(),
@@ -748,7 +760,7 @@ impl Store {
         let memory = crate::memories::enabled_in(transaction, tag_id, memory).await?;
         let start_rate = crate::start_rates::requested_in(transaction, tag_id, start_rate).await?;
         let volume = crate::artifact_volumes::tag_volume_in(transaction, tag_id, volume).await?;
-        let row = sqlx::query("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution, name, workspace_mounts, workspace_mcp_servers, workspace_base_ref, lead, max_work_sessions, memory, start_rate_starts, start_rate_per_ms, volume) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules, execution = excluded.execution, name = excluded.name, workspace_mounts=excluded.workspace_mounts, workspace_mcp_servers=excluded.workspace_mcp_servers, workspace_base_ref=excluded.workspace_base_ref, lead=excluded.lead, max_work_sessions=excluded.max_work_sessions, memory=excluded.memory, start_rate_starts=excluded.start_rate_starts, start_rate_per_ms=excluded.start_rate_per_ms, volume=excluded.volume RETURNING revision, memory_reviewed_at_ms")
+        let row = sqlx::query("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution, name, workspace_mounts, workspace_mcp_servers, workspace_base_ref, lead, max_work_sessions, memory, start_rate_starts, start_rate_per_ms, volume) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules, execution = excluded.execution, name = excluded.name, workspace_mounts=excluded.workspace_mounts, workspace_mcp_servers=excluded.workspace_mcp_servers, workspace_base_ref=excluded.workspace_base_ref, lead=excluded.lead, max_work_sessions=excluded.max_work_sessions, memory=excluded.memory, start_rate_starts=excluded.start_rate_starts, start_rate_per_ms=excluded.start_rate_per_ms, volume=excluded.volume RETURNING revision, memory_reviewed_at_ms, owner_user")
             .bind(tag_id).bind(instructions).bind(actions)
             .bind(workspace.as_ref().map(|spec| &spec.workspace_id))
             .bind(workspace.as_ref().map(|spec| &spec.base_commit))
@@ -793,6 +805,9 @@ impl Store {
             native_memory: vec![],
             idle_objectives: vec![],
             volume: volume.unwrap_or_default(),
+            owner: row
+                .try_get::<Option<String>, _>("owner_user")?
+                .unwrap_or_default(),
         })
     }
 

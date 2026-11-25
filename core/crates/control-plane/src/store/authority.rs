@@ -606,7 +606,12 @@ impl ClaimScope {
     }
 
     async fn serves(&self, transaction: &mut Transaction<'_, Any>, tag_id: &str) -> Result<bool> {
-        if self.all_tags == 1 {
+        // A host for every Tag runs shared Tags; a personal Tag runs only where it is bound.
+        if self.all_tags == 1
+            && crate::store::users::owner_in(transaction, tag_id)
+                .await?
+                .is_none()
+        {
             return Ok(true);
         }
         Ok(sqlx::query_scalar::<_, i64>(
@@ -676,7 +681,7 @@ pub(super) async fn claim_candidate(
     loop {
         // A redelivered Task waits out its backoff, and the later Tasks of its Session wait
         // behind it.
-        let candidates = sqlx::query("SELECT pending.task_id, pending.accepted_order FROM supertag_v2_tasks pending WHERE pending.state = $1 AND pending.accepted_order > $2 AND pending.harness_kind IN (0,$8) AND (pending.redeliver_after_ms IS NULL OR pending.redeliver_after_ms <= $9) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks active WHERE active.tag_id = pending.tag_id AND active.session_id = pending.session_id AND (active.state IN ($3,$4,$5) OR active.cleanup_pending = 1 OR (active.state = $1 AND active.redeliver_after_ms > $9 AND active.accepted_order < pending.accepted_order))) AND ($6 = 1 OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=$7 AND scope.tag_id=pending.tag_id)) ORDER BY pending.accepted_order LIMIT 32")
+        let candidates = sqlx::query("SELECT pending.task_id, pending.accepted_order FROM supertag_v2_tasks pending WHERE pending.state = $1 AND pending.accepted_order > $2 AND pending.harness_kind IN (0,$8) AND (pending.redeliver_after_ms IS NULL OR pending.redeliver_after_ms <= $9) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks active WHERE active.tag_id = pending.tag_id AND active.session_id = pending.session_id AND (active.state IN ($3,$4,$5) OR active.cleanup_pending = 1 OR (active.state = $1 AND active.redeliver_after_ms > $9 AND active.accepted_order < pending.accepted_order))) AND (($6 = 1 AND NOT EXISTS (SELECT 1 FROM supertag_v2_tags owned WHERE owned.tag_id=pending.tag_id AND owned.owner_user IS NOT NULL)) OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=$7 AND scope.tag_id=pending.tag_id)) ORDER BY pending.accepted_order LIMIT 32")
             .bind(TaskState::Queued as i64).bind(after).bind(TaskState::Claimed as i64)
             .bind(TaskState::Running as i64).bind(TaskState::Uncertain as i64).bind(scope.all_tags).bind(&scope.host_id).bind(scope.harness as i64).bind(now)
             .fetch_all(&mut **transaction).await?;

@@ -727,7 +727,8 @@ async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Re
         .iter()
         .filter_map(|tag| tag["tag_id"].as_str())
         .collect();
-    assert_eq!(names, ["allowed"]);
+    // Alice's own personal Tag, and the shared Tag her invitation lists.
+    assert_eq!(names, ["alice", "allowed"]);
     for args in [
         &["tag", "put", "allowed", "--instructions", "Mine now"][..],
         &["get", "hosts"][..],

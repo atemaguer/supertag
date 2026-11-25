@@ -1869,6 +1869,8 @@ message Tag {
   repeated NativeMemoryStore native_memory = 7200;
   // Its working Objectives that sit idle, which the caller may see; read with GetTag.
   repeated IdleObjective idle_objectives = 7300;
+  // A personal Tag: the User who owns it. Empty for a shared Tag, which operators direct.
+  string owner = 7400;
 }
 
 // A working Objective whose owner's last turn left nothing running and asked nothing.

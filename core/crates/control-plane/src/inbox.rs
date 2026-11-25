@@ -736,13 +736,18 @@ async fn mcp_logins_in(
     let rows = sqlx::query("SELECT t.*,o.objective_id AS inbox_objective_id FROM supertag_v2_tasks t JOIN supertag_v2_objective_tasks link ON link.task_id=t.task_id JOIN supertag_v2_objectives o ON o.objective_id=link.objective_id WHERE t.state=$1 AND o.status NOT IN ($2,$3) AND ($4='' OR o.objective_id=$4) ORDER BY t.accepted_order LIMIT $5")
         .bind(TaskState::Queued as i64).bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).bind(&cursor.objective_id).bind((SCAN + 1) as i64)
         .fetch_all(&mut **tx).await?;
+    let owned: Vec<String> =
+        sqlx::query_scalar("SELECT tag_id FROM supertag_v2_tags WHERE owner_user IS NOT NULL")
+            .fetch_all(&mut **tx)
+            .await?;
     let mut items = Vec::new();
     for row in rows.iter().take(SCAN) {
         let task = crate::store::task_row(row)?;
         let eligible: Vec<&Host> = hosts
             .iter()
             .filter(|host| {
-                (host.all_tags
+                // A host for every Tag runs shared Tags; a personal Tag runs where it is bound.
+                ((host.all_tags && !owned.contains(&task.tag_id))
                     || bindings
                         .iter()
                         .any(|(id, tag)| id == &host.id && tag == &task.tag_id))

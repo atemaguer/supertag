@@ -989,8 +989,10 @@ mod roles {
             (
                 "client",
                 &alice,
+                // A User's device reaches put-tag, but writes only the User's own Tag: the
+                // escalation checks below refuse it the shared Tag.
                 [
-                    false, false, false, false, true, true, true, false, false, true,
+                    false, false, true, false, true, true, true, false, false, true,
                 ],
             ),
             ("Auth Key", &host_key, [false; 10]),
@@ -1236,8 +1238,8 @@ mod roles {
                 .iter()
                 .map(|tag| tag.tag_id.as_str())
                 .collect::<Vec<_>>()
-                == ["open"],
-            "a client listed Tags its key does not allow"
+                == ["alice", "open"],
+            "a User listed Tags other than their own and the shared ones they may talk to"
         );
         operator
             .clone()
@@ -1563,12 +1565,13 @@ mod roles {
                 "missing audit entry {actor} {action} {target}: {audit:?}"
             );
         }
-        // Calls the authorization layer refuses change nothing and leave no entry.
+        // A User's device may ask to write a Tag, but writing a shared one is refused and
+        // recorded as refused: no client write of a Tag succeeded.
         ensure!(
-            !audit
-                .iter()
-                .any(|entry| entry.actor.starts_with("client:") && entry.action == "tag.put"),
-            "a refused client call was recorded"
+            !audit.iter().any(|entry| entry.actor.starts_with("client:")
+                && entry.action == "tag.put"
+                && entry.outcome == supertag_protocol::v2::AuditOutcome::Succeeded as i32),
+            "a client wrote a shared Tag"
         );
         Ok(())
     }

@@ -12826,8 +12826,10 @@ type Tag struct {
 	NativeMemory []*NativeMemoryStore `protobuf:"bytes,7200,rep,name=native_memory,json=nativeMemory,proto3" json:"native_memory,omitempty"`
 	// Its working Objectives that sit idle, which the caller may see; read with GetTag.
 	IdleObjectives []*IdleObjective `protobuf:"bytes,7300,rep,name=idle_objectives,json=idleObjectives,proto3" json:"idle_objectives,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// A personal Tag: the User who owns it. Empty for a shared Tag, which operators direct.
+	Owner         string `protobuf:"bytes,7400,opt,name=owner,proto3" json:"owner,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Tag) Reset() {
@@ -13012,6 +13014,13 @@ func (x *Tag) GetIdleObjectives() []*IdleObjective {
 		return x.IdleObjectives
 	}
 	return nil
+}
+
+func (x *Tag) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
 }
 
 // A working Objective whose owner's last turn left nothing running and asked nothing.
@@ -28045,7 +28054,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\a_volume\":\n" +
 	"\tStartRate\x12\x16\n" +
 	"\x06starts\x18\x01 \x01(\rR\x06starts\x12\x15\n" +
-	"\x06per_ms\x18\x02 \x01(\x04R\x05perMs\"\xce\b\n" +
+	"\x06per_ms\x18\x02 \x01(\x04R\x05perMs\"\xe5\b\n" +
 	"\x03Tag\x12\x15\n" +
 	"\x06tag_id\x18\x01 \x01(\tR\x05tagId\x12\"\n" +
 	"\finstructions\x18\x02 \x01(\tR\finstructions\x12'\n" +
@@ -28071,7 +28080,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x06volume\x18\xbc7 \x01(\tR\x06volume\x12)\n" +
 	"\x10starts_in_window\x18\xd96 \x01(\rR\x0estartsInWindow\x12L\n" +
 	"\rnative_memory\x18\xa08 \x03(\v2&.supertag.runtime.v2.NativeMemoryStoreR\fnativeMemory\x12L\n" +
-	"\x0fidle_objectives\x18\x849 \x03(\v2\".supertag.runtime.v2.IdleObjectiveR\x0eidleObjectivesB\x10\n" +
+	"\x0fidle_objectives\x18\x849 \x03(\v2\".supertag.runtime.v2.IdleObjectiveR\x0eidleObjectives\x12\x15\n" +
+	"\x05owner\x18\xe89 \x01(\tR\x05ownerB\x10\n" +
 	"\x0e_retired_at_msB\x18\n" +
 	"\x16_memory_reviewed_at_ms\"p\n" +
 	"\rIdleObjective\x12!\n" +

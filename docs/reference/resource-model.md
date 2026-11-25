@@ -47,7 +47,7 @@ and [execution environments](glossary.md#execution-environment).
   assignments, and results persist across model and harness sessions.
 - **Permission Set** — reusable authority to perform surface-backed actions, use harness/runtime tools, or call tools of MCP servers.
   A permission can carry `approvalRequired: true`, and `spec.approvers` lists the operators
-  (`operator:<id>`) and clients (`client:<name>`) that may decide. See [IAM approval](iam.md#approval).
+  (`operator:<id>`) and [Users](#users) (`user:<name>`) that may decide. See [IAM approval](iam.md#approval).
 - **Context Set** — reusable knowledge and [Skills](glossary.md#skill) that may enter a Task.
 - **Role** — passive reusable policy for a responsibility, combining instructions, Context Sets, and Permission Sets.
 - **Volume** — a named storage location, a directory or an S3 bucket prefix: a Workspace Volume
@@ -316,6 +316,26 @@ device acts for the User as `user:NAME`: an approver entry, a conversation, an O
 created, and its Tasks belong to the User, while the audit log records the device that acted.
 Inviting an existing User with only their name issues another key; revoke a key with
 `supertag auth-key revoke NAME-invite-N`, and one device with `supertag client revoke NAME`.
+
+### Personal Tags
+
+Inviting a new User also creates their **personal Tag**: a Tag with the User's name, owned by them
+(`owner: alice` in `supertag get tag alice`). It takes the Role the invitation names, or the
+Control Plane's `personal` Role if you defined one; that Role decides what every personal Tag may
+do. Without either, the Tag may converse and coordinate but not act. A Tag ID is never reused, so
+a User's name must not be taken by a Tag already.
+
+| Who | May |
+| --- | --- |
+| The owner, from any device | Talk to it; set its instructions, harness, model settings, Workspace, and display name with `supertag tag put` |
+| Another User | Nothing: their devices don't see it |
+| An operator | Everything, including its Roles, Permission Sets, placement, and retiring it |
+
+The owner picks the harness once, before the Tag first runs; after that the Tag keeps it, like
+every Tag. A personal Tag runs on the owner's own Worker Hosts, the ones enrolled with their invite
+key, or on a shared Worker Host an operator binds to it by name with `supertag auth-key create
+NAME --role host --tag alice`. A host enrolled with `--all-tags` runs shared Tags only, and a
+User's own host runs only their Tags.
 
 ## Operator Tokens
 

@@ -2267,7 +2267,7 @@ class StartRate(_message.Message):
     def __init__(self, starts: _Optional[int] = ..., per_ms: _Optional[int] = ...) -> None: ...
 
 class Tag(_message.Message):
-    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace", "harness_kind", "approval_rules", "execution", "name", "retired_at_ms", "runs_on", "lead", "max_work_sessions", "open_work_sessions", "memory", "memory_reviewed_at_ms", "attention", "start_rate", "volume", "starts_in_window", "native_memory", "idle_objectives")
+    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace", "harness_kind", "approval_rules", "execution", "name", "retired_at_ms", "runs_on", "lead", "max_work_sessions", "open_work_sessions", "memory", "memory_reviewed_at_ms", "attention", "start_rate", "volume", "starts_in_window", "native_memory", "idle_objectives", "owner")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
@@ -2290,6 +2290,7 @@ class Tag(_message.Message):
     STARTS_IN_WINDOW_FIELD_NUMBER: _ClassVar[int]
     NATIVE_MEMORY_FIELD_NUMBER: _ClassVar[int]
     IDLE_OBJECTIVES_FIELD_NUMBER: _ClassVar[int]
+    OWNER_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     instructions: str
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
@@ -2312,7 +2313,8 @@ class Tag(_message.Message):
     starts_in_window: int
     native_memory: _containers.RepeatedCompositeFieldContainer[NativeMemoryStore]
     idle_objectives: _containers.RepeatedCompositeFieldContainer[IdleObjective]
-    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., retired_at_ms: _Optional[int] = ..., runs_on: _Optional[_Iterable[str]] = ..., lead: _Optional[bool] = ..., max_work_sessions: _Optional[int] = ..., open_work_sessions: _Optional[int] = ..., memory: _Optional[bool] = ..., memory_reviewed_at_ms: _Optional[int] = ..., attention: _Optional[_Union[AttentionSummary, _Mapping]] = ..., start_rate: _Optional[_Union[StartRate, _Mapping]] = ..., volume: _Optional[str] = ..., starts_in_window: _Optional[int] = ..., native_memory: _Optional[_Iterable[_Union[NativeMemoryStore, _Mapping]]] = ..., idle_objectives: _Optional[_Iterable[_Union[IdleObjective, _Mapping]]] = ...) -> None: ...
+    owner: str
+    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., retired_at_ms: _Optional[int] = ..., runs_on: _Optional[_Iterable[str]] = ..., lead: _Optional[bool] = ..., max_work_sessions: _Optional[int] = ..., open_work_sessions: _Optional[int] = ..., memory: _Optional[bool] = ..., memory_reviewed_at_ms: _Optional[int] = ..., attention: _Optional[_Union[AttentionSummary, _Mapping]] = ..., start_rate: _Optional[_Union[StartRate, _Mapping]] = ..., volume: _Optional[str] = ..., starts_in_window: _Optional[int] = ..., native_memory: _Optional[_Iterable[_Union[NativeMemoryStore, _Mapping]]] = ..., idle_objectives: _Optional[_Iterable[_Union[IdleObjective, _Mapping]]] = ..., owner: _Optional[str] = ...) -> None: ...
 
 class IdleObjective(_message.Message):
     __slots__ = ("objective_id", "outcome", "idle_since_ms")

@@ -1370,6 +1370,42 @@ pub(crate) fn assignment_row(row: &AnyRow) -> Result<RoleAssignment> {
         revision: row.try_get::<i64, _>("revision")? as u64,
     })
 }
+/// Assigns an active Role to a new Tag inside a caller's transaction: a personal Tag's Role when
+/// its User is invited. `Ok(false)` when the Role does not exist and `required` is false.
+pub(crate) async fn assign_new_tag_role_in(
+    tx: &mut Transaction<'_, Any>,
+    role_id: &str,
+    tag_id: &str,
+    required: bool,
+) -> Result<bool> {
+    let role = match resource::<Role>(tx, role_id).await {
+        Ok(role) => role,
+        Err(StoreError::NotFound(_)) if !required => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    if role.status != RoleStatus::Active as i32 {
+        if !required {
+            return Ok(false);
+        }
+        return Err(StoreError::FailedPrecondition(format!(
+            "Role {role_id} is not active"
+        )));
+    }
+    save_assignment(
+        tx,
+        &RoleAssignment {
+            assignment_id: Uuid::new_v4().to_string(),
+            role_id: role.role_id,
+            tag_id: tag_id.into(),
+            status: RoleAssignmentStatus::Active as i32,
+            revision: 1,
+        },
+    )
+    .await?;
+    check_tag_execution_in(tx, tag_id).await?;
+    Ok(true)
+}
+
 pub(crate) async fn save_assignment(
     tx: &mut Transaction<'_, Any>,
     a: &RoleAssignment,

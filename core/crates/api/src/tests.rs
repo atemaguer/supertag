@@ -246,7 +246,8 @@ async fn the_authorization_layer_admits_each_role_only_where_the_table_allows() 
     let cases = [
         ("Operator", "PutTag", "operator-test-token", true),
         ("Operator", "PutTag", TOKEN, true),
-        ("Operator", "PutTag", CLIENT, false),
+        // A User's device reaches PutTag; the Control Plane admits only their own Tag.
+        ("Operator", "PutTag", CLIENT, true),
         ("Operator", "PutTag", HOST, false),
         ("Operator", "PutTag", GATEWAY, false),
         (

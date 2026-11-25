@@ -51,6 +51,8 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     // Fleet, configuration, recovery.
     ("Operator", "*", O),
     ("Operator", "GetTag", OC),
+    // A User writes their own personal Tag's instructions, harness, and Workspace.
+    ("Operator", "PutTag", OC),
     ("Operator", "ListTags", OC),
     ("Operator", "GetTask", OC),
     ("Operator", "ListTasks", OC),
@@ -298,7 +300,8 @@ mod tests {
         let roles = |path: &str| allowed_roles(&format!("{PACKAGE}{path}"));
         assert_eq!(roles("OperatorAccess/CreateOperatorToken"), ["admin"]);
         assert_eq!(roles("OperatorAccess/ListAuditEntries"), ["operator"]);
-        assert_eq!(roles("Operator/PutTag"), ["operator"]);
+        // A User writes only their own personal Tag; the Control Plane checks the owner.
+        assert_eq!(roles("Operator/PutTag"), ["operator", "client"]);
         assert_eq!(roles("Operator/SubmitTask"), ["operator"]);
         assert_eq!(roles("Operator/ListHosts"), ["operator"]);
         assert_eq!(roles("Operator/GetTag"), ["operator", "client"]);

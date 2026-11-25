@@ -4,7 +4,7 @@
 
 use sha2::{Digest, Sha256};
 use sqlx::{Connection, Executor};
-use supertag_control_plane::{Store, StoreError};
+use supertag_control_plane::{HostAuthority, Store, StoreError};
 use supertag_protocol::v2::*;
 use uuid::Uuid;
 
@@ -33,9 +33,36 @@ fn enroll(role: PrincipalRole, name: &str, credential: &str) -> EnrollRequest {
     }
 }
 
+/// A Worker Host the Control Plane's configuration seeds for every Tag.
+async fn support_host(store: &Store, id: &str) -> HostAuthority {
+    store
+        .seed_host(id, &digest(&format!("seeded {id}")))
+        .await
+        .unwrap();
+    let record = store.register_host(id, "incarnation").await.unwrap();
+    HostAuthority::new(format!("host:{id}"), record.generation).unwrap()
+}
+
 async fn exercise(url: &str) {
     let store = Store::open(url).await.unwrap();
     store.put_tag("release-bot", "Ship", vec![]).await.unwrap();
+    // What every personal Tag may do is the operator's `personal` Role.
+    store
+        .put_role(
+            OPERATOR,
+            &PutRoleRequest {
+                operation_id: "personal-role".into(),
+                role: Some(Role {
+                    role_id: "personal".into(),
+                    name: "Personal".into(),
+                    purpose: "Work for one person".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
 
     // Only an operator invites, and a name follows the Tag ID rules.
     assert!(matches!(
@@ -205,7 +232,7 @@ async fn exercise(url: &str) {
         .unwrap();
     assert_eq!(resolved.user, "alice");
 
-    // Alice, from any device, reaches only the shared Tags her invitation lists.
+    // Alice, from any device, reaches her own Tag and the shared Tags her invitation lists.
     store.put_tag("private-bot", "Keep", vec![]).await.unwrap();
     let tags = store
         .list_tags("user:alice", &ListTagsRequest::default())
@@ -215,7 +242,199 @@ async fn exercise(url: &str) {
         .into_iter()
         .map(|tag| tag.tag_id)
         .collect::<Vec<_>>();
-    assert_eq!(tags, ["release-bot"]);
+    assert_eq!(tags, ["alice", "release-bot"]);
+
+    // Alice's personal Tag: named after her, owned by her, with the `personal` Role.
+    let personal = store.get_tag("alice").await.unwrap();
+    assert_eq!(personal.owner, "alice");
+    let roles = store
+        .list_role_assignments(
+            OPERATOR,
+            &ListRoleAssignmentsRequest {
+                tag_id: "alice".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        roles
+            .assignments
+            .iter()
+            .map(|assignment| assignment.role_id.as_str())
+            .collect::<Vec<_>>(),
+        ["personal"]
+    );
+    // A personal Tag takes its User's name, so a taken Tag ID refuses the User, and an
+    // invitation names a Role that exists and only shared Tags.
+    assert!(matches!(
+        store
+            .invite_user(OPERATOR, &invite("release-bot", "Bot", "k5"))
+            .await,
+        Err(StoreError::FailedPrecondition(message)) if message.contains("already exists")
+    ));
+    assert!(matches!(
+        store
+            .invite_user(
+                OPERATOR,
+                &InviteUserRequest {
+                    role: "missing".into(),
+                    ..invite("carol", "Carol", "k6")
+                }
+            )
+            .await,
+        Err(StoreError::NotFound(_))
+    ));
+    assert!(matches!(
+        store
+            .invite_user(
+                OPERATOR,
+                &InviteUserRequest {
+                    allowed_tag_ids: vec!["alice".into()],
+                    ..invite("carol", "Carol", "k7")
+                }
+            )
+            .await,
+        Err(StoreError::FailedPrecondition(message)) if message.contains("personal Tag")
+    ));
+    assert!(
+        store.get_tag("carol").await.is_err(),
+        "a refused invitation left a Tag"
+    );
+
+    // The owner configures how her Tag works; the operator grants what it may do.
+    let configured = store
+        .put_tag_as(
+            "user:alice",
+            PutTagRequest {
+                tag_id: "alice".into(),
+                instructions: "Keep my notes short".into(),
+                harness_kind: HarnessKind::Codex.into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(configured.instructions, "Keep my notes short");
+    assert_eq!(configured.owner, "alice");
+    assert!(matches!(
+        store
+            .put_tag_as(
+                "user:alice",
+                PutTagRequest {
+                    tag_id: "alice".into(),
+                    allowed_actions: vec!["commands:execute".into()],
+                    ..Default::default()
+                },
+            )
+            .await,
+        Err(StoreError::PermissionDenied)
+    ));
+    for (who, tag) in [("user:alice", "release-bot"), ("user:bob", "alice")] {
+        assert!(
+            matches!(
+                store
+                    .put_tag_as(
+                        who,
+                        PutTagRequest {
+                            tag_id: tag.into(),
+                            instructions: "Mine now".into(),
+                            ..Default::default()
+                        },
+                    )
+                    .await,
+                Err(StoreError::NotFound(_))
+            ),
+            "{who} wrote {tag}"
+        );
+    }
+
+    // Alice's Worker Host runs only her Tags; a host for every Tag runs shared Tags only; a
+    // shared host an operator binds to alice by name runs hers.
+    let submit = |tag: &'static str, session: &'static str| {
+        let store = store.clone();
+        async move {
+            store
+                .submit_task(
+                    OPERATOR,
+                    &SubmitTaskRequest {
+                        tag_id: tag.into(),
+                        session_id: session.into(),
+                        operation_id: format!("{tag}-{session}"),
+                        prompt: "Work".into(),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap()
+                .task_id
+        }
+    };
+    let host_authority = |id: &'static str| {
+        let store = store.clone();
+        async move {
+            let record = store.register_host(id, "incarnation").await.unwrap();
+            HostAuthority::new(format!("host:{id}"), record.generation).unwrap()
+        }
+    };
+    let claimed = |host: HostAuthority| {
+        let store = store.clone();
+        async move {
+            // Alice chose Codex for her Tag; the shared Tag names no harness.
+            store
+                .claim_task_for_host(&host, &Uuid::new_v4().to_string(), &[], HarnessKind::Codex)
+                .await
+                .unwrap()
+                .map(|assignment| assignment.task.unwrap().tag_id)
+        }
+    };
+    let alices = submit("alice", "first").await;
+    let shared = submit("release-bot", "first").await;
+    let _ = (&alices, &shared);
+    let shared_host = support_host(&store, "shared-box").await;
+    assert_eq!(
+        claimed(shared_host.clone()).await.as_deref(),
+        Some("release-bot")
+    );
+    assert_eq!(
+        claimed(shared_host).await,
+        None,
+        "a host for every Tag ran alice's Tag"
+    );
+    let alice_box = host_authority("alice-box").await;
+    assert_eq!(claimed(alice_box.clone()).await.as_deref(), Some("alice"));
+    submit("release-bot", "second").await;
+    assert_eq!(
+        claimed(alice_box).await,
+        None,
+        "alice's host ran a shared Tag"
+    );
+    store
+        .create_auth_key(
+            OPERATOR,
+            &CreateAuthKeyRequest {
+                name: "bound".into(),
+                role: PrincipalRole::Host.into(),
+                operation_id: "bound".into(),
+                key_digest: digest("bound key"),
+                allowed_tag_ids: vec!["alice".into()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .enroll(
+            &digest("bound key"),
+            &enroll(PrincipalRole::Host, "bound-box", "bound credential"),
+        )
+        .await
+        .unwrap();
+    submit("alice", "second").await;
+    assert_eq!(
+        claimed(host_authority("bound-box").await).await.as_deref(),
+        Some("alice")
+    );
 
     // Reads.
     store

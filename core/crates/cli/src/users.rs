@@ -98,9 +98,11 @@ pub async fn run(connection: Connection, command: UserCommand) -> Result<()> {
                 "invite_key": secret,
                 "invite_key_name": key.name,
                 "expires_at_ms": key.expires_at_ms,
+                "personal_tag": user.name,
                 "next": [
                     "On each of the User's devices: supertag connect --name NAME GATEWAY_URL, then paste the invite key",
-                    "On a machine that runs the User's Tags: supertag host enroll with the same key",
+                    format!("Then choose the personal Tag's harness and Workspace: supertag tag put {} --harness HARNESS --workspace-id WORKSPACE --gateway NAME", user.name),
+                    "On a machine that runs the User's Tag: supertag host enroll with the same key",
                 ],
             })
         }

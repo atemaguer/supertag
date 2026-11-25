@@ -93,6 +93,10 @@ revoke one alone, but acts for Alice: her conversations and work follow her from
 the desktop app. `--tag` names the shared Tags she may talk to. Inviting an existing User with
 only their name issues another key.
 
+The invitation also creates Alice's [personal Tag](../reference/resource-model.md#personal-tags),
+`alice`. She chooses its harness and Workspace; what it may do comes from the `personal` Role you
+define, or the invitation's `--role`.
+
 ## Manage a remote Control Plane
 
 ### Connect the CLI

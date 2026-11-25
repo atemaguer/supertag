@@ -144,10 +144,12 @@ credential is refused on the next call and ends open streams within about a seco
 | Task Attempt | The data calls of the one Task Attempt its credential names, while its lease lives: events, text, questions, usage, milestones, its network log, history and Context Item pins, and the `Attempt…` services. Never a lease operation |
 | Gateway | Connector and reply progress calls for the Surface Accounts that name it. With `--all-tags` on its key, also accounts no Surface Account names and the admin operator's notifications |
 
-A client is a device. It sees only the work it started, never work without an owner, and never
-Worker Host status. Its Inbox lists the questions and limits of its own Objectives, never
-execution recovery or MCP logins, which are Worker Host work. It starts work only through conversations and Objectives. It decides an
-approval only when a Permission Set names it as `client:NAME`. The audit log records every
+A client is a device, and it acts for its User. The User sees only the work they started, on any
+of their devices, never work without an owner, and never Worker Host status. Their Inbox lists the
+questions and limits of their own Objectives, never execution recovery or MCP logins, which are
+Worker Host work. They start work only through conversations and Objectives, and change only
+their own personal Tag's instructions, harness, model settings, Workspace, and display name. They
+decide an approval only when a Permission Set names them as `user:NAME`. The audit log records every
 caller by its full principal, and an enrollment by the Auth Key that admitted it,
 `auth-key:NAME`. Client certificates are an optional network filter in front of all of this.
 

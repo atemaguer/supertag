@@ -1,6 +1,7 @@
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::v2::{
-    ObjectiveStatus, PermissionSet, RetireTagResponse, RoleAssignmentStatus, Tag, TaskState,
+    ObjectiveStatus, PermissionSet, PutTagRequest, RetireTagResponse, RoleAssignmentStatus, Tag,
+    TaskState,
 };
 use tokio_stream::StreamExt;
 
@@ -99,6 +100,9 @@ pub(crate) fn tag_from_row(row: &AnyRow) -> Result<Tag> {
         volume: row
             .try_get::<Option<String>, _>("volume")?
             .unwrap_or_default(),
+        owner: row
+            .try_get::<Option<String>, _>("owner_user")?
+            .unwrap_or_default(),
     })
 }
 
@@ -144,6 +148,74 @@ pub(crate) const READ: &str = "t.*, (SELECT COUNT(*) FROM supertag_v2_work_sessi
     FROM supertag_v2_tags t";
 
 impl Store {
+    /// Writes a Tag for `principal`. An operator writes any Tag. A User writes only their own
+    /// personal Tag, and only how it works: its instructions, harness, model settings,
+    /// Workspace, and display name. What it may do (actions, approval rules, Roles, placement,
+    /// and the rest) keeps its current value, and asking to change it is refused: the operator
+    /// grants, the owner configures.
+    pub async fn put_tag_as(&self, principal: &str, mut input: PutTagRequest) -> Result<Tag> {
+        if principal.starts_with("operator:") {
+            crate::store::enrollments_operator(principal)
+                .map_err(|_| StoreError::PermissionDenied)?;
+            return self.put_tag_spec(input).await;
+        }
+        let user = principal
+            .strip_prefix("user:")
+            .ok_or(StoreError::PermissionDenied)?;
+        name("Tag ID", &input.tag_id)?;
+        let (mut tx, _) = self.write().await?;
+        let current = sqlx::query(&format!("SELECT {READ} WHERE t.tag_id=$1"))
+            .bind(&input.tag_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .as_ref()
+            .map(tag_from_row)
+            .transpose()?
+            .filter(|tag| tag.owner == user)
+            // Someone else's Tag, personal or shared, is not theirs to see.
+            .ok_or_else(|| missing(&input.tag_id))?;
+        let changes = |set: bool, differs: bool| set && differs;
+        if changes(
+            !input.allowed_actions.is_empty(),
+            input.allowed_actions != current.allowed_actions,
+        ) || changes(
+            !input.approval_rules.is_empty(),
+            input.approval_rules != current.approval_rules,
+        ) || input.lead.is_some_and(|lead| lead != current.lead)
+            || input
+                .max_work_sessions
+                .is_some_and(|max| max != current.max_work_sessions)
+            || input.memory.is_some_and(|memory| memory != current.memory)
+            || changes(
+                input.start_rate.is_some(),
+                input.start_rate != current.start_rate,
+            )
+            || input
+                .volume
+                .as_ref()
+                .is_some_and(|volume| volume != &current.volume)
+            || input.execution.as_ref().is_some_and(|execution| {
+                execution.shared_execution_environment_id
+                    != current
+                        .execution
+                        .as_ref()
+                        .and_then(|current| current.shared_execution_environment_id.clone())
+            })
+        {
+            return Err(StoreError::PermissionDenied);
+        }
+        input.allowed_actions = current.allowed_actions;
+        input.approval_rules = current.approval_rules;
+        input.lead = Some(current.lead);
+        input.max_work_sessions = Some(current.max_work_sessions);
+        input.memory = Some(current.memory);
+        input.start_rate = current.start_rate;
+        input.volume = Some(current.volume);
+        let tag = Self::put_tag_in(&mut tx, input).await?;
+        tx.commit().await?;
+        Ok(tag)
+    }
+
     pub async fn get_tag(&self, tag_id: &str) -> Result<Tag> {
         name("Tag ID", tag_id)?;
         let mut tx = self.pool.begin().await?;

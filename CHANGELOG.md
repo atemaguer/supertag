@@ -11,6 +11,13 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- Personal Tags. Inviting a new User creates a Tag with their name that they own: `owner` in
+  `supertag get tag`. It takes the invitation's `--role`, or the Control Plane's `personal` Role.
+  Its owner, from any device, sets its instructions, harness, model settings, Workspace, and
+  display name with `supertag tag put`; what it may do stays an operator's to grant, and other
+  Users never see it. It runs on the owner's own Worker Hosts, or on a shared host an operator
+  binds to it by name; a host for every Tag runs shared Tags only, and a User's host runs only
+  their Tags. A Tag that names no harness and has never run may now choose its first harness.
 - A Tag's inbox can steer its own running work. When another Tag's message changes the plan, the
   inbox turn calls `continue_session` on the running Work Session, and the message reaches the
   running Task Attempt as live input: `steered` on Codex and Claude Code, or `queued` as a
