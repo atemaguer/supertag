@@ -335,8 +335,9 @@ Under it, a Task's commands:
   `~/.claude`, `~/.claude.json`, `~/.config/gh`, `~/.config/opencode`, `~/.supertag`, the
   saved Gateways and deployments of the CLI and desktop app (`~/.config/supertag` and
   `~/.config/ai.supertag.desktop` on Linux, the same names under `~/Library/Application Support`
-  on macOS), `~/Library/Keychains`, and the host's state directory wherever it is. They can read
-  your other files. Codex's commands cannot
+  on macOS), `~/Library/Keychains`, and everything in the host's state directory beside the Task's
+  own checkout, such as the host's credential and other Tasks' checkouts. They can read your other
+  files. Codex's commands cannot
   read these locations either, nor the Task's copy of the Codex sign-in.
 - have no network unless the Task has `web:fetch`, which the lead `init` creates has by default.
   A [network scope](iam.md#network-scopes) limits

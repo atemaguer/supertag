@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import {
   mkdir,
   mkdtemp,
@@ -1905,6 +1906,30 @@ it("confines sandboxed commands to the Task's Workspace, scope, and network", ()
   expect(
     commandSandbox({ ...input, cwd: "/srv/host/w", hostState: "/srv/host" }).filesystem.denyRead,
   ).not.toContain("/srv/host");
+  // Inside the state directory, everything beside the way down to the Workspace is denied.
+  const state = mkdtempSync(join(tmpdir(), "supertag-state-"));
+  const checkout = join(state, "slots/0/checkouts/c");
+  for (const directory of [
+    checkout,
+    join(state, "slots/0/checkouts/other"),
+    join(state, "slots/1"),
+  ])
+    mkdirSync(directory, { recursive: true });
+  writeFileSync(join(state, "enrollment.json"), "secret");
+  try {
+    const denied = commandSandbox({ ...input, cwd: checkout, hostState: state }).filesystem
+      .denyRead;
+    for (const path of [
+      join(state, "enrollment.json"),
+      join(state, "slots/1"),
+      join(state, "slots/0/checkouts/other"),
+    ])
+      expect(denied).toContain(path);
+    for (const path of [state, join(state, "slots/0"), checkout])
+      expect(denied).not.toContain(path);
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
   // Without files:write, commands write only temporary files.
   const readOnly = commandSandbox({ ...input, write: false });
   expect(readOnly.filesystem.allowWrite).toEqual([]);

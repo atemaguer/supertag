@@ -53,17 +53,64 @@ pub(crate) const HOME_SECRETS: [&str; 19] = [
     "Library/Keychains",
 ];
 
-/// The paths of [`HOME_SECRETS`] under `home` and the `extra` paths that exist, other than one
-/// holding the Workspace or inside it: a deny entry for a missing path could stop Codex's
-/// Linux sandbox from starting.
-pub(crate) fn denied_paths(home: &Path, extra: &[&Path], workspace: &Path) -> Vec<PathBuf> {
-    HOME_SECRETS
+/// What a Task's commands may not read: the paths of [`HOME_SECRETS`] under `home` and the
+/// `extra` paths, where they exist. A Task works inside some of them: its checkout and Codex home
+/// sit in the Worker Host's state directory, under `~/.supertag` by default. Codex cannot reopen a
+/// path inside a denied one, so a denied path that holds a `kept` path is replaced by everything
+/// beside the way down to it: the host's credential, the local Control Plane's database, `.env`,
+/// and other Tasks' checkouts. Only existing paths are listed: a deny entry for a missing path
+/// could stop Codex's Linux sandbox from starting.
+pub(crate) fn denied_paths(home: &Path, extra: &[&Path], kept: &[&Path]) -> Vec<PathBuf> {
+    let resolve = |path: &Path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let kept: Vec<PathBuf> = kept.iter().map(|path| resolve(path)).collect();
+    let mut denied = Vec::new();
+    // An `extra` path inside a kept one, such as the sign-in in the Codex home, is still denied.
+    for (path, explicit) in HOME_SECRETS
         .iter()
-        .map(|entry| home.join(entry))
-        .chain(extra.iter().map(|path| path.to_path_buf()))
-        .filter(|path| path.is_absolute() && path.exists())
-        .filter(|path| !workspace.starts_with(path) && !path.starts_with(workspace))
-        .collect()
+        .map(|entry| (home.join(entry), false))
+        .chain(extra.iter().map(|path| (path.to_path_buf(), true)))
+        .filter(|(path, _)| path.is_absolute() && path.exists())
+        .map(|(path, explicit)| (resolve(&path), explicit))
+    {
+        if kept.iter().any(|keep| path.starts_with(keep)) {
+            if explicit && !kept.contains(&path) {
+                denied.push(path);
+            }
+            continue;
+        }
+        if kept.iter().any(|keep| keep.starts_with(&path)) {
+            deny_beside(&path, &kept, &mut denied);
+        } else {
+            denied.push(path);
+        }
+    }
+    let mut unique = Vec::with_capacity(denied.len());
+    for path in denied {
+        if !unique.contains(&path) {
+            unique.push(path);
+        }
+    }
+    unique
+}
+
+/// Deny every entry of `directory` that is neither a `kept` path nor on the way down to one.
+fn deny_beside(directory: &Path, kept: &[PathBuf], denied: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        // An unreadable directory on the way down: deny nothing rather than guess.
+        return;
+    };
+    for entry in entries.flatten() {
+        let child = entry.path();
+        if kept.contains(&child) {
+            continue;
+        }
+        let is_directory = entry.file_type().is_ok_and(|kind| kind.is_dir());
+        if is_directory && kept.iter().any(|keep| keep.starts_with(&child)) {
+            deny_beside(&child, kept, denied);
+        } else {
+            denied.push(child);
+        }
+    }
 }
 
 /// The Attempt's egress proxy, from the Worker Host.
@@ -779,32 +826,68 @@ mod tests {
     /// credential folders and SuperTag's saved Gateways, but never the Workspace or a missing path.
     #[test]
     fn commands_cannot_read_the_hosts_credentials_or_saved_gateways() -> Result<()> {
-        let home = tempfile::tempdir()?;
-        for entry in [".ssh", ".config/supertag", ".supertag"] {
-            std::fs::create_dir_all(home.path().join(entry))?;
+        let root = tempfile::tempdir()?;
+        let home = root.path().canonicalize()?;
+        for entry in [".ssh", ".config/supertag"] {
+            std::fs::create_dir_all(home.join(entry))?;
         }
-        let sign_in = home.path().join("codex-home/auth.json");
-        std::fs::create_dir_all(sign_in.parent().unwrap())?;
-        std::fs::write(&sign_in, "{}")?;
-        let workspace = tempfile::tempdir()?;
-        let denied = denied_paths(home.path(), &[sign_in.as_path()], workspace.path());
-        assert_eq!(
-            denied,
-            vec![
-                home.path().join(".ssh"),
-                home.path().join(".supertag"),
-                home.path().join(".config/supertag"),
-                sign_in.clone(),
-            ]
+        // The default layout: the host's state, with this Task's checkout and Codex home inside it.
+        let state = home.join(".supertag");
+        let slot = state.join("hosts/h/slots/0");
+        let workspace = slot.join("workspaces/w/checkouts/c");
+        let codex_home = slot.join("adapter-attempt-1/codex");
+        for directory in [
+            &workspace,
+            &codex_home,
+            &slot.join("workspaces/w/checkouts/other"),
+            &state.join("hosts/h/slots/1"),
+            &state.join("hosts/other"),
+        ] {
+            std::fs::create_dir_all(directory)?;
+        }
+        let sign_in = codex_home.join("auth.json");
+        for file in [
+            &sign_in,
+            &state.join(".env"),
+            &state.join("runtime.sqlite3"),
+            &state.join("hosts/h/enrollment.json"),
+        ] {
+            std::fs::write(file, "secret")?;
+        }
+        let denied = denied_paths(
+            &home,
+            &[sign_in.as_path(), state.as_path()],
+            &[workspace.as_path(), codex_home.as_path()],
         );
-        // A Workspace inside a denied folder keeps it readable rather than deny itself.
-        let inside = home.path().join(".supertag/checkout");
-        assert!(!denied_paths(home.path(), &[], &inside).contains(&home.path().join(".supertag")));
+        for path in [
+            home.join(".ssh"),
+            home.join(".config/supertag"),
+            state.join(".env"),
+            state.join("runtime.sqlite3"),
+            state.join("hosts/other"),
+            state.join("hosts/h/enrollment.json"),
+            state.join("hosts/h/slots/1"),
+            slot.join("workspaces/w/checkouts/other"),
+            sign_in.clone(),
+        ] {
+            assert!(denied.contains(&path), "{} in {denied:?}", path.display());
+        }
+        // Never the way down to the Task's own files, nor the files themselves.
+        for path in [&state, &slot, &workspace, &codex_home] {
+            assert!(!denied.contains(path), "{}", path.display());
+        }
+        assert_eq!(
+            denied.len(),
+            denied
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+        );
 
         let mut policy = Policy::from_actions(&actions(&["files:read", "commands:execute"]), true)?;
         policy.denied = denied;
-        let entries = filesystem(workspace.path(), &policy)?;
-        for path in [home.path().join(".config/supertag"), sign_in] {
+        let entries = filesystem(&workspace, &policy)?;
+        for path in [state.join("hosts/h/enrollment.json"), sign_in] {
             assert!(
                 entries.contains(&(path.to_str().unwrap().to_owned(), "deny")),
                 "{}",

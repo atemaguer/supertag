@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, readdirSync, realpathSync } from "node:fs";
 import { lstat, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -287,6 +287,22 @@ const HOME_SECRETS = [
   "Library/Keychains",
 ] as const;
 
+/** Every entry of `directory`, and of each directory down to `kept`, that isn't on the way to it. */
+export function besideWay(directory: string, kept: string): string[] {
+  let entries: { name: string; isDirectory(): boolean }[];
+  try {
+    entries = readdirSync(directory, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries.flatMap((entry) => {
+    const child = join(directory, entry.name);
+    if (child === kept) return [];
+    if (entry.isDirectory() && kept.startsWith(`${child}/`)) return besideWay(child, kept);
+    return [child];
+  });
+}
+
 /** What a Task's commands may reach under Claude Code's sandbox. */
 export interface CommandSandboxInput {
   readonly cwd: string;
@@ -329,10 +345,16 @@ export function commandSandbox(input: CommandSandboxInput) {
     ...(scope?.readOnly ?? []).map((entry) => inside(cwd, entry)),
     ...(scope?.hidden ?? []).map((entry) => inside(cwd, entry)),
   ];
+  // The host's state directory, `~/.supertag` by default, holds the Workspace: deny everything
+  // beside the way down to it as well (the host's credential, the local Control Plane's database,
+  // `.env`, other Tasks' checkouts), in case a deny on the directory yields to the Workspace.
+  const holdsWorkspace = (path: string) => cwd.startsWith(`${path}/`);
+  const stateRoots = [join(input.home, ".supertag"), ...(input.hostState ? [input.hostState] : [])];
   const denyRead = [
     ...(scope?.hidden ?? []).map((entry) => inside(cwd, entry)),
     ...HOME_SECRETS.map((entry) => join(input.home, entry)),
-    ...(input.hostState && !cwd.startsWith(`${input.hostState}/`) ? [input.hostState] : []),
+    ...(input.hostState && !holdsWorkspace(input.hostState) ? [input.hostState] : []),
+    ...[...new Set(stateRoots)].filter(holdsWorkspace).flatMap((root) => besideWay(root, cwd)),
   ];
   // Commands may listen on loopback, as Codex's do, so a test suite can start a local server.
   const network: Record<string, unknown> = {

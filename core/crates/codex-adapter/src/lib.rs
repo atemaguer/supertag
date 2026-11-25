@@ -348,7 +348,13 @@ async fn execute(
         let extra: Vec<&std::path::Path> = std::iter::once(sign_in.as_path())
             .chain(host_state.as_deref())
             .collect();
-        policy.denied = config::denied_paths(&config::user_home()?, &extra, &workspace);
+        // The checkout, its read-write copies, and the Codex home stay readable; the sign-in
+        // inside that home does not.
+        let kept: Vec<&std::path::Path> = [workspace.as_path(), authentication.home()]
+            .into_iter()
+            .chain(policy.writable_roots.iter().map(PathBuf::as_path))
+            .collect();
+        policy.denied = config::denied_paths(&config::user_home()?, &extra, &kept);
     }
     let arguments = config::arguments(&workspace, model, effort, &policy)?;
     let thread_parameters = config::thread_parameters(&workspace, &policy, &arguments)?;
