@@ -21,8 +21,20 @@ const PROCESS_ONLY: [&str; 8] = [
     "PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
 ];
 const MAX_VARIABLES: usize = 1024;
-/// The only variables a per-user service unit carries from the shell that installed it.
-pub const UNIT_VARIABLES: [&str; 6] = ["PATH", "HOME", "USER", "LOGNAME", "LANG", "TMPDIR"];
+/// The only variables a per-user service unit carries from the shell that installed it. The TLS
+/// files a Worker Host trusts and presents to a remote Control Plane never come from `env_file`,
+/// so a unit must carry them, or a host under it cannot reach a Control Plane with a private CA.
+pub const UNIT_VARIABLES: [&str; 9] = [
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "LANG",
+    "TMPDIR",
+    "SUPERTAG_SERVER_CA_FILE",
+    "SUPERTAG_CLIENT_CERT_FILE",
+    "SUPERTAG_CLIENT_KEY_FILE",
+];
 
 /// Variables read from `env_file`. The process environment always wins over them.
 #[derive(Clone, Default)]

@@ -1817,6 +1817,18 @@ async fn undrain(directory: &Path, endpoint: &str, operator: &str) -> Result<()>
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_service_unit_carries_the_tls_files_a_remote_host_uses() {
+        // These never come from env_file, so a host under a service unit sees them only when the
+        // unit carries them from the shell that installed it.
+        for name in HOST_TLS_ENVIRONMENT {
+            assert!(
+                crate::local_config::UNIT_VARIABLES.contains(&name),
+                "{name}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn a_service_that_ignores_sigterm_is_killed_and_counts_as_stopped() {
         let mut child = Command::new("/bin/sh")

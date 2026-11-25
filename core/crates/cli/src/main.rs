@@ -527,9 +527,11 @@ enum Command {
         #[arg(long)]
         replace: bool,
         /// PEM file of the certificate authority that signed the Gateway's TLS certificate.
+        /// Default: SUPERTAG_SERVER_CA_FILE.
         #[arg(long)]
         server_ca_file: Option<PathBuf>,
-        /// PEM client certificate for a Gateway that requires mutual TLS.
+        /// PEM client certificate for a Gateway that requires mutual TLS. Default, with the key:
+        /// SUPERTAG_CLIENT_CERT_FILE and SUPERTAG_CLIENT_KEY_FILE.
         #[arg(long, requires = "client_key_file")]
         client_cert_file: Option<PathBuf>,
         /// PEM private key of the client certificate.
@@ -1088,6 +1090,17 @@ async fn run(command: Command) -> Result<()> {
             client_cert_file,
             client_key_file,
         } => {
+            // The same TLS variables every other client command trusts, when no flag names a file.
+            let variable = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
+            let server_ca_file =
+                server_ca_file.or_else(|| variable("SUPERTAG_SERVER_CA_FILE").map(PathBuf::from));
+            let (client_cert_file, client_key_file) = match (client_cert_file, client_key_file) {
+                (None, None) => (
+                    variable("SUPERTAG_CLIENT_CERT_FILE").map(PathBuf::from),
+                    variable("SUPERTAG_CLIENT_KEY_FILE").map(PathBuf::from),
+                ),
+                files => files,
+            };
             connect_control_plane(
                 profiles::NewGateway {
                     name,

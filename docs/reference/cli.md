@@ -2878,9 +2878,9 @@ Options:
       --replace
           Replace a Gateway already saved under this name for the same origin
       --server-ca-file <SERVER_CA_FILE>
-          PEM file of the certificate authority that signed the Gateway's TLS certificate
+          PEM file of the certificate authority that signed the Gateway's TLS certificate. Default: SUPERTAG_SERVER_CA_FILE
       --client-cert-file <CLIENT_CERT_FILE>
-          PEM client certificate for a Gateway that requires mutual TLS
+          PEM client certificate for a Gateway that requires mutual TLS. Default, with the key: SUPERTAG_CLIENT_CERT_FILE and SUPERTAG_CLIENT_KEY_FILE
       --client-key-file <CLIENT_KEY_FILE>
           PEM private key of the client certificate
   -h, --help
