@@ -297,6 +297,8 @@ export interface CommandSandboxInput {
   readonly outside: OutsideDirectories;
   /** The Worker Host user's real home, whose credential locations stay unreadable. */
   readonly home: string;
+  /** The Worker Host's state directory, which holds its credential; unreadable too. */
+  readonly hostState?: string | undefined;
   /** `undefined`: no network; `"open"`: any origin (`web:fetch` without a network scope). */
   readonly network:
     | undefined
@@ -330,6 +332,7 @@ export function commandSandbox(input: CommandSandboxInput) {
   const denyRead = [
     ...(scope?.hidden ?? []).map((entry) => inside(cwd, entry)),
     ...HOME_SECRETS.map((entry) => join(input.home, entry)),
+    ...(input.hostState && !cwd.startsWith(`${input.hostState}/`) ? [input.hostState] : []),
   ];
   // Commands may listen on loopback, as Codex's do, so a test suite can start a local server.
   const network: Record<string, unknown> = {
@@ -797,6 +800,7 @@ export async function runAdapter(
         mounts,
         outside,
         home: userInfo().homedir,
+        hostState: environment["SUPERTAG_HOST_STATE_DIRECTORY"],
         network:
           networkScope && proxy
             ? { scope: networkScope, proxy }

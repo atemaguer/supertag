@@ -1894,8 +1894,17 @@ it("confines sandboxed commands to the Task's Workspace, scope, and network", ()
     "/home/u/.ssh",
     "/home/u/.claude",
     "/home/u/.codex",
+    "/home/u/.config/supertag",
+    "/home/u/Library/Application Support/supertag",
   ])
     expect(sandbox.filesystem.denyRead).toContain(path);
+  // The host's state directory, wherever the host keeps it, unless it holds the Workspace.
+  expect(commandSandbox({ ...input, hostState: "/srv/host" }).filesystem.denyRead).toContain(
+    "/srv/host",
+  );
+  expect(
+    commandSandbox({ ...input, cwd: "/srv/host/w", hostState: "/srv/host" }).filesystem.denyRead,
+  ).not.toContain("/srv/host");
   // Without files:write, commands write only temporary files.
   const readOnly = commandSandbox({ ...input, write: false });
   expect(readOnly.filesystem.allowWrite).toEqual([]);

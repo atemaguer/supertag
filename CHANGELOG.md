@@ -15,7 +15,9 @@ within the pre-1.0 compatibility policy described in
   `~/.aws`, `~/.supertag`, and the rest of the list Claude Code's sandbox denies), the Task's
   copy of the Codex sign-in, or the saved Gateways and deployments of the CLI and desktop app,
   which hold Operator Tokens. Codex's sandbox let them read the whole disk. Sandboxed Claude Code
-  commands can no longer read the saved Gateways and deployments either.
+  commands can no longer read the saved Gateways and deployments either. Neither harness's
+  commands can read the Worker Host's state directory, which holds its credential, when the host
+  keeps it outside `~/.supertag`, such as with `--state-directory`.
 
 ### Fixed
 

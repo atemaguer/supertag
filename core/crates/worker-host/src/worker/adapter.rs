@@ -58,6 +58,9 @@ use tokio::{
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status, transport::Server};
+
+/// The Worker Host's state directory, for the adapter: a Task's commands never read it.
+pub(crate) const HOST_STATE_DIRECTORY: &str = "SUPERTAG_HOST_STATE_DIRECTORY";
 use uuid::Uuid;
 
 use crate::worker::{Settings, WorkerOptions};
@@ -1305,13 +1308,14 @@ async fn supervise(
     if let Some(directory) = native_memory {
         command.env(crate::worker::native_memory::DIRECTORY, directory);
     }
-    command.env(
-        crate::worker::guardian::ADAPTER_SCRATCH_PARENT,
-        options
-            .state_directory
-            .canonicalize()
-            .context("resolve private Worker Host state")?,
-    );
+    let state = options
+        .state_directory
+        .canonicalize()
+        .context("resolve private Worker Host state")?;
+    // The adapter denies the Task's commands this directory, which holds the host's credential,
+    // wherever the host keeps it.
+    command.env(HOST_STATE_DIRECTORY, &state);
+    command.env(crate::worker::guardian::ADAPTER_SCRATCH_PARENT, state);
     let provider_variables =
         crate::provider_environment_for(options.harness, options.provider_model.as_deref())?
             .iter()

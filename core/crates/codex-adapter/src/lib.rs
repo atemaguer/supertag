@@ -340,8 +340,15 @@ async fn execute(
     if !policy.remote {
         // The Task's own CODEX_HOME holds a copy of the sign-in; Codex reads it, its commands never.
         let sign_in = authentication.home().join("auth.json");
-        policy.denied =
-            config::denied_paths(&config::user_home()?, &[sign_in.as_path()], &workspace);
+        // The Worker Host's state directory, wherever it is: its credential and every Tag's files.
+        let host_state = options
+            .environment
+            .get(&OsString::from("SUPERTAG_HOST_STATE_DIRECTORY"))
+            .map(PathBuf::from);
+        let extra: Vec<&std::path::Path> = std::iter::once(sign_in.as_path())
+            .chain(host_state.as_deref())
+            .collect();
+        policy.denied = config::denied_paths(&config::user_home()?, &extra, &workspace);
     }
     let arguments = config::arguments(&workspace, model, effort, &policy)?;
     let thread_parameters = config::thread_parameters(&workspace, &policy, &arguments)?;
