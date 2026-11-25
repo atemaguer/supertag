@@ -14,11 +14,11 @@ team. Self-hosted, on the coding agents you already use.
 
 **Give them jobs, not tasks.**
 
-[Jobs, not tasks](#give-them-jobs-not-tasks) · [Persistent](#persistent) · [Proactive](#proactive) · [Multiplayer](#multiplayer) · [An engineering organization](#an-engineering-organization) · [Run your first Tag](#run-your-first-tag) · [Run it yourself](#run-it-yourself) · [Build your own](#build-your-own) · [Documentation](docs/README.md)
-
 <p>
   <img src="assets/images/supertag-meet-the-tags.png" alt="Meet the Tags — nine SuperTag mascots with round and elongated builds, colorful jackets, hats, and glasses" width="900" height="360">
 </p>
+
+[Jobs, not tasks](#give-them-jobs-not-tasks) · [Persistent](#persistent) · [Proactive](#proactive) · [Multiplayer](#multiplayer) · [An engineering organization](#an-engineering-organization) · [Run your first Tag](#run-your-first-tag) · [Run it yourself](#run-it-yourself) · [Build your own](#build-your-own) · [Documentation](docs/README.md)
 
 </div>
 

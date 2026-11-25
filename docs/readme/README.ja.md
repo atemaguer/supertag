@@ -12,11 +12,11 @@
 
 **タスクではなく、仕事を任せよう。**
 
-[タスクではなく仕事を](#give-them-jobs-not-tasks) · [永続的](#persistent) · [能動的](#proactive) · [マルチプレイヤー](#multiplayer) · [エンジニアリング組織](#an-engineering-organization) · [最初の Tag を動かす](#run-your-first-tag) · [自分で運用する](#run-it-yourself) · [独自に構築する](#build-your-own) · [ドキュメント](../../docs/README.md)
-
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.ja.webp" alt="Tag たちの紹介 — 丸い体型や縦長の体型で、色とりどりのジャケットや帽子、メガネを身につけた 9 体の SuperTag マスコット" width="900" height="360">
 </p>
+
+[タスクではなく仕事を](#give-them-jobs-not-tasks) · [永続的](#persistent) · [能動的](#proactive) · [マルチプレイヤー](#multiplayer) · [エンジニアリング組織](#an-engineering-organization) · [最初の Tag を動かす](#run-your-first-tag) · [自分で運用する](#run-it-yourself) · [独自に構築する](#build-your-own) · [ドキュメント](../../docs/README.md)
 
 </div>
 

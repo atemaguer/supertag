@@ -14,11 +14,11 @@
 
 **작업이 아니라 직무를 맡기세요.**
 
-[작업이 아닌 직무](#give-them-jobs-not-tasks) · [지속성](#persistent) · [능동성](#proactive) · [멀티플레이어](#multiplayer) · [엔지니어링 조직](#an-engineering-organization) · [첫 Tag 실행하기](#run-your-first-tag) · [직접 운영하기](#run-it-yourself) · [직접 만들기](#build-your-own) · [문서](../../docs/README.md)
-
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.ko.webp" alt="Tag들을 소개합니다 — 둥글거나 길쭉한 체형에 알록달록한 재킷, 모자, 안경을 걸친 아홉 SuperTag 마스코트" width="900" height="360">
 </p>
+
+[작업이 아닌 직무](#give-them-jobs-not-tasks) · [지속성](#persistent) · [능동성](#proactive) · [멀티플레이어](#multiplayer) · [엔지니어링 조직](#an-engineering-organization) · [첫 Tag 실행하기](#run-your-first-tag) · [직접 운영하기](#run-it-yourself) · [직접 만들기](#build-your-own) · [문서](../../docs/README.md)
 
 </div>
 

@@ -14,11 +14,11 @@
 
 **Поручайте им работу, а не задачи.**
 
-[Работа, а не задачи](#give-them-jobs-not-tasks) · [Долгоживущие](#persistent) · [Проактивные](#proactive) · [Многопользовательские](#multiplayer) · [Инженерная организация](#an-engineering-organization) · [Запустите первый Tag](#run-your-first-tag) · [Всё на вашей стороне](#run-it-yourself) · [Создайте своё](#build-your-own) · [Документация](../../docs/README.md)
-
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.ru.webp" alt="Знакомьтесь, Tags — девять маскотов SuperTag, круглых и вытянутых, в разноцветных куртках, шляпах и очках" width="900" height="360">
 </p>
+
+[Работа, а не задачи](#give-them-jobs-not-tasks) · [Долгоживущие](#persistent) · [Проактивные](#proactive) · [Многопользовательские](#multiplayer) · [Инженерная организация](#an-engineering-organization) · [Запустите первый Tag](#run-your-first-tag) · [Всё на вашей стороне](#run-it-yourself) · [Создайте своё](#build-your-own) · [Документация](../../docs/README.md)
 
 </div>
 
