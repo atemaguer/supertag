@@ -1,6 +1,6 @@
 # Send messages between Tags
 
-A **Tag** is a persistent AI actor with its own identity, responsibilities, permissions, and work history. Its
+A **Tag** is a persistent, proactive, multiplayer AI actor with its own identity, responsibilities, permissions, and work history. Its
 **Mailbox** is its own inbox: messages other Tags send it arrive there, and the Tag handles them
 in a turn of its own. A **Team** is a flat list of member Tags. See the
 [glossary](../reference/glossary.md) for other terms.

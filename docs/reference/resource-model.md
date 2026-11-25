@@ -41,8 +41,8 @@ and [execution environments](glossary.md#execution-environment).
 
 ## Configuration resources
 
-- **Tag** — a persistent AI actor with a stable identity, responsibilities, permissions, and
-  work history. It holds [Roles](glossary.md#role), a [Mailbox](glossary.md#mailbox), and bindings
+- **Tag** — a persistent, proactive, multiplayer AI actor with its own identity,
+  responsibilities, permissions, and work history. It holds [Roles](glossary.md#role), a [Mailbox](glossary.md#mailbox), and bindings
   to eligible Worker Hosts. You assign work to a Tag by name. Its configuration, open
   assignments, and results persist across model and harness sessions.
 - **Permission Set** — reusable authority to perform surface-backed actions, use harness/runtime tools, or call tools of MCP servers.

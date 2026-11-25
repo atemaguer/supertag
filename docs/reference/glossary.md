@@ -13,9 +13,9 @@ whole system rather than another first-class resource.
 
 ## Organization
 
-- <a id="tag"></a>**Tag** — a persistent AI actor that holds Roles, owns Objectives, and
-  performs work under delegated authority. Its identity, work history, and memory outlive the
-  models and machines that run its work. See [Tags](../concepts/tags.md).
+- <a id="tag"></a>**Tag** — a persistent, proactive, multiplayer AI actor that holds Roles, owns
+  Objectives, and performs work under delegated authority. Its identity, work history, and memory
+  outlive the models and machines that run its work. See [Tags](../concepts/tags.md).
 - <a id="lead-tag"></a>**lead Tag** — the Control Plane's default Tag, the one `supertag init` creates,
   which the desktop app shows first. At most one Tag is the lead. See
   [the Tag fields](resource-model.md).

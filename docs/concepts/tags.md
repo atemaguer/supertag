@@ -1,12 +1,12 @@
 # Tags
 
-> **Tags are the persistent AI actors that make up a SuperTag organization.**
+> **Tags are the persistent, proactive, multiplayer AI actors that make up a SuperTag organization.**
 
-A **Tag** is a persistent AI actor that holds Roles, owns Objectives, and performs work under
-delegated authority. Its identity, work history, and memory outlive the models and machines that
-run its work. For example, a reviewer Tag
-may read a repository and review changes. It keeps that responsibility and its review history when
-its next Task runs on a different model. A Tag keeps the harness it was created with; to use
+A **Tag** is a persistent, proactive, multiplayer AI actor that holds Roles, owns Objectives, and
+performs work under delegated authority. Its identity, work history, and memory outlive the
+models and machines that run its work. For example, a reviewer Tag may read a repository and
+review changes. It keeps that responsibility and its review history when its next Task runs on a
+different model. A Tag keeps the harness it was created with; to use
 another harness, create a new Tag, or have the Tag start a work Session on that harness.
 
 You assign work to a Tag by name. A Tag can talk to people in several conversations and start

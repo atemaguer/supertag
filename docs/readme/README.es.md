@@ -7,13 +7,14 @@
 
 [English](../../README.md) · [中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · Español · [Français](README.fr.md) · [Português](README.pt.md) · [Türkçe](README.tr.md) · [Русский](README.ru.md)
 
-**Actores de IA persistentes, proactivos y multijugador para el trabajo de ingeniería.**
+**Infraestructura abierta para actores de IA persistentes, proactivos y multijugador.**
 
-De código abierto y autoalojado, sobre los agentes de programación que ya usas.
+Ejecuta tus propios Devin Bots, OpenAI dots o Grok Bot, para ingeniería, marketing, ventas o
+cualquier equipo. Autoalojado, sobre los agentes de programación que ya usas.
 
 **Dales un trabajo, no tareas.**
 
-[Un trabajo, no tareas](#give-them-jobs-not-tasks) · [Persistente](#persistent) · [Proactivo](#proactive) · [Multijugador](#multiplayer) · [Qué puede ejecutar un despliegue](#what-a-deployment-can-run) · [Pon en marcha tu primer Tag](#run-your-first-tag) · [Construye el tuyo](#build-your-own) · [Ejecútalo por tu cuenta](#run-it-yourself) · [Documentación](../../docs/README.md)
+[Un trabajo, no tareas](#give-them-jobs-not-tasks) · [Persistente](#persistent) · [Proactivo](#proactive) · [Multijugador](#multiplayer) · [Una organización de ingeniería](#an-engineering-organization) · [Pon en marcha tu primer Tag](#run-your-first-tag) · [Ejecútalo por tu cuenta](#run-it-yourself) · [Construye el tuyo](#build-your-own) · [Documentación](../../docs/README.md)
 
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.es.webp" alt="Conoce a los Tags: nueve mascotas de SuperTag, unas redondas y otras alargadas, con chaquetas de colores, sombreros y gafas" width="900" height="360">
@@ -21,25 +22,34 @@ De código abierto y autoalojado, sobre los agentes de programación que ya usas
 
 </div>
 
-Un **Tag** es un actor de IA persistente con identidad, responsabilidades, permisos e historial de
-trabajo propios. Tú le das un trabajo, y tus agentes de programación, Claude Code, Codex, Cursor u
-OpenCode, lo hacen parte por parte. El Tag es lo que persiste entre una parte y la siguiente:
-mantiene el trabajo en marcha, actúa sin que se lo pidan y colabora con los Tags de tus compañeros.
+SuperTag es infraestructura abierta para agentes de IA siempre activos. SuperTag llama a cada uno
+**Tag**: un actor de IA persistente, proactivo y multijugador, con identidad, responsabilidades,
+permisos e historial de trabajo propios. Mantiene el trabajo en marcha entre sesiones, actúa sin que
+se lo pidan y colabora con tu equipo y con otros Tags. Tú le das un trabajo a un Tag, y Claude Code,
+Codex, Cursor u OpenCode lo hacen parte por parte. El Tag es lo que persiste entre una parte y la
+siguiente.
 
-SuperTag te ofrece dos cosas:
+Lo que puedes ejecutar sobre ella:
 
-- **Compañeros de IA para el trabajo de ingeniería, listos para usar.** Lo que ofrecen Devin Bots,
-  OpenAI dots y Grok Bot: compañeros que siguen disponibles, recuerdan el trabajo anterior, actúan
-  sin que se lo pidan y trabajan junto a tu equipo. Los Tags se ejecutan en tus propios agentes de
-  programación y en tus máquinas, y solo hacen lo que tú permitas.
-- **La base para construir el tuyo.** Las mismas capacidades, como infraestructura que tú ejecutas
-  y controlas, para tu propio producto o para otra función, como marketing o ventas. Consulta [Construye el tuyo](#build-your-own).
+- **Ingeniería, lista para usar.** Un solo comando pone a un Tag a trabajar en tu repositorio, y la
+  misma configuración crece hasta convertirse en toda una organización de ingeniería.
+  [Pon en marcha tu primer Tag](#run-your-first-tag) · [Ejemplo de organización de ingeniería](../../examples/engineering-org/)
+- **Marketing, ventas, soporte o cualquier otra función.** Elige los Roles, las herramientas y los
+  eventos de la función, y la misma infraestructura la hace funcionar.
+  [Construye una organización de marketing](../../docs/guides/build-your-own.md) · [Ejemplo de marketing](../../examples/marketing-org/)
+- **Tu propio producto.** Construye tu propia alternativa a Devin Bots, OpenAI dots o Grok Bot sobre
+  la API de SuperTag. [Construye el tuyo](#build-your-own)
+
+Esta página sigue un ejemplo, la ingeniería, desde la idea hasta una organización en marcha: para
+qué sirve un Tag, qué le da la infraestructura, cómo empezar con uno y cómo funciona. Termina
+explicando cómo construir el tuyo.
 
 <a name="give-them-jobs-not-tasks"></a>
 
 ## Dales un trabajo, no tareas
 
-Esto es lo que SuperTag hace de serie.
+SuperTag existe por una idea: un actor de IA debería tener un trabajo, no limitarse a recibir
+tareas.
 
 Hoy le das una tarea a un agente de programación: un prompt, un diff, una revisión y, después, el
 siguiente prompt. Puede investigar un error, escribir una corrección y ejecutar las pruebas. Pero
@@ -78,8 +88,9 @@ permiso a un Tag constructor para editar el repositorio y dar a un revisor acces
 
 ## Qué necesita un trabajo
 
-Un trabajo dura más que cualquier sesión, incluye cosas que nadie ha pedido todavía e involucra a
-otras personas. Los Tags están hechos para las tres cosas.
+Tener un trabajo le exige tres cosas a lo que sea que ejecute el Tag. Un trabajo dura más que
+cualquier sesión, incluye cosas que nadie ha pedido todavía e involucra a otras personas. Eso es lo
+que aporta la infraestructura de SuperTag, sea cual sea el trabajo.
 
 <a name="persistent"></a>
 
@@ -150,9 +161,9 @@ Codex hacia el mismo Objective.
 
 [Cómo funciona el modo multijugador](../../docs/concepts/multiplayer.md) · [Autoaloja SuperTag](../../docs/guides/self-hosting.md)
 
-<a name="what-a-deployment-can-run"></a>
+<a name="an-engineering-organization"></a>
 
-## Qué puede ejecutar un despliegue
+## Una organización de ingeniería
 
 Junta la persistencia, el trabajo proactivo y la colaboración en equipo, y un solo SuperTag
 autoalojado puede hacer funcionar una organización de ingeniería autónoma, con sus propias
@@ -193,6 +204,9 @@ y por qué, y te da una sola bandeja de entrada para las decisiones que te corre
 <a name="run-your-first-tag"></a>
 
 ## Pon en marcha tu primer Tag
+
+Una organización así empieza con un Tag. La forma más rápida de ver la infraestructura en acción es
+poner uno en marcha en tu propio repositorio, en tu propia máquina.
 
 En un Mac o en Linux, instala Git y [Claude Code](https://code.claude.com/docs/en/setup)
 o [Codex](https://developers.openai.com/codex/cli/), e inicia sesión. Con Claude Code, ejecuta
@@ -245,63 +259,15 @@ incluye su propio `supertag`, configura SuperTag en el primer arranque y habla c
 
 [Opciones de instalación](../../docs/operations/install.md) · [Habla con un Tag](../../docs/guides/talk-to-a-tag.md) · [Pon en marcha tu primer Team](../../docs/guides/first-team.md) · [Dirige SuperTag desde tu agente de programación](../../docs/guides/coding-agent-operator.md)
 
-<a name="build-your-own"></a>
-
-## Construye el tuyo
-
-Nada de esto es exclusivo de la ingeniería. Tags, Roles, Teams, Objectives, permisos, memoria,
-programaciones y aprobaciones sirven para cualquier función de tu organización. Elige los Roles,
-las herramientas y los eventos de la función, y la misma infraestructura la hace funcionar.
-
-Supongamos que quieres llevar el marketing de esta manera:
-
-```text
-you (head of marketing)
- └─ marketing-lead         owns campaign outcomes, reports weekly with the numbers
-     ├─ content             drafts posts, docs pages, and release notes in your voice
-     ├─ product-marketing   turns each release from engineering into launch copy
-     ├─ growth              reads traffic and signup numbers, proposes and tracks experiments
-     ├─ social              drafts launch posts, publishes only when you approve
-     └─ research            watches competitors and customer conversations, briefs the team
-```
-
-- **Un Role para cada función.** Cada uno lleva la voz de la función, sus normas de marca y lo que
-  puede afirmar. No se publica nada ni se gasta dinero sin tu aprobación.
-- **Trabajo que vuelve para que lo revises.** El contenido llega como ramas en el repositorio de tu
-  sitio web o de tu documentación, igual que el código.
-- **Responsabilidades que nunca terminan.** Un informe semanal con las cifras, una vigilancia
-  constante de la competencia y textos de lanzamiento para cada versión.
-- **Eventos de tus propios sistemas.** Las versiones, la analítica y las conversaciones con clientes
-  llegan al Tag adecuado en cuanto ocurren.
-- **Una sola organización para todas las funciones.** Cuando el gestor de versiones de ingeniería
-  publica, avisa directamente a marketing de producto, en el mismo Control Plane.
-
-Los mismos componentes sirven para ventas, atención al cliente, operaciones financieras, selección
-de personal o investigación.
-
-Para ir más allá, pon tu propia interfaz encima. La API gRPC del Control Plane permite que tu
-aplicación cree y dirija Tags, les envíe trabajo y consulte su progreso, y el repositorio incluye
-bindings generados para Go, TypeScript y Python. [Explora la API](../../docs/reference/control-plane-api.md)
-Para ejecutar otro sistema de agentes por debajo, escribe un **adaptador de harness**; los
-adaptadores integrados de Python y TypeScript son ejemplos funcionales. El SDK de TypeScript,
-`supertag-ai` en npm, y el SDK de Python, `supertag` en PyPI, conectan tu aplicación o tu adaptador
-con SuperTag:
-
-```sh
-npm install supertag-ai
-python -m pip install 'supertag==0.3.13'
-```
-
-[Construye tu propia organización: marketing](../../docs/guides/build-your-own.md) · [Escribe un adaptador de harness](../../docs/guides/harness-adapters.md) · [Conecta tu propia superficie de colaboración](../../docs/reference/connector-contract.md) · [Consulta la estabilidad de la API](../../docs/reference/api-stability.md)
-
 <a name="run-it-yourself"></a>
 
 ## Ejecútalo por tu cuenta
 
-SuperTag es de código abierto bajo la licencia Apache 2.0, y cada una de sus partes se ejecuta
-donde tú elijas, tanto si usas los Tags que incluye como si construyes los tuyos. Un trabajo
+`supertag init` acaba de poner en marcha toda la infraestructura en tu máquina. Es de código abierto
+bajo la licencia Apache 2.0, y cada una de sus partes se ejecuta donde tú elijas. Un trabajo
 necesita acceso a tu código, tus servicios y tus cuentas, así que tú decides dónde reside ese
-acceso.
+acceso. Empieza tú solo en una máquina y después comparte un Control Plane con tu equipo; las partes
+son las mismas.
 
 ![Los clientes y las herramientas de colaboración llegan al Control Plane a través del Gateway. El Control Plane almacena los Tags y los permisos en SQLite o PostgreSQL y planifica el trabajo. En cada Worker Host, un Worklet reclama Tasks del Control Plane e inicia un Worker por cada Task Attempt. El portátil ejecuta Codex y el servidor ejecuta Claude Code, cada uno mediante un adaptador de harness.](../../assets/images/supertag-architecture.es.webp)
 
@@ -322,6 +288,35 @@ acceso.
 
 [Autoaloja SuperTag](../../docs/guides/self-hosting.md) · [Conecta un Worker Host](../../docs/guides/workers.md) · [Define permisos y aprobaciones](../../docs/concepts/context-and-permissions.md) · [Mira cómo encajan las piezas](../../docs/concepts/how-it-works.md)
 
+<a name="build-your-own"></a>
+
+## Construye el tuyo
+
+Nada de lo anterior es exclusivo de la ingeniería. El mismo Control Plane y los mismos Worker Hosts,
+y los mismos Tags, Roles, Teams, Objectives, permisos, memoria, programaciones y aprobaciones,
+sirven para cualquier función de tu organización. Elige los Roles, las herramientas y los eventos de
+la función, y la misma infraestructura la hace funcionar: una organización de marketing que
+convierte cada lanzamiento en textos de lanzamiento e informa de las cifras cada semana, o bien
+ventas, atención al cliente, operaciones financieras, selección de personal o investigación.
+[Construye tu propia organización: marketing](../../docs/guides/build-your-own.md) · [Ejemplo de marketing](../../examples/marketing-org/)
+
+SuperTag también es la base para un producto propio, como tu propia alternativa a Devin Bots, OpenAI
+dots o Grok Bot. Pon tu propia interfaz encima: la API gRPC del Control Plane permite que tu
+aplicación cree y dirija Tags, les envíe trabajo y consulte su progreso, y el repositorio incluye
+bindings generados para Go, TypeScript y Python.
+[Explora la API](../../docs/reference/control-plane-api.md)
+Para ejecutar otro sistema de agentes por debajo, escribe un **adaptador de harness**; los
+adaptadores integrados de Python y TypeScript son ejemplos funcionales. El SDK de TypeScript,
+`supertag-ai` en npm, y el SDK de Python, `supertag` en PyPI, conectan tu aplicación o tu adaptador
+con SuperTag:
+
+```sh
+npm install supertag-ai
+python -m pip install 'supertag==0.3.13'
+```
+
+[Escribe un adaptador de harness](../../docs/guides/harness-adapters.md) · [Conecta tu propia superficie de colaboración](../../docs/reference/connector-contract.md) · [Consulta la estabilidad de la API](../../docs/reference/api-stability.md)
+
 ## Compatible con
 
 | | Opciones |
@@ -335,7 +330,8 @@ acceso.
 | Frente a | En qué destacan | Qué les falta | Qué aporta SuperTag |
 | --- | --- | --- | --- |
 | **Compañeros de IA alojados** · [Devin Bots](https://devin.ai/blog/introducing-devin-bots), [OpenAI dots](https://openai.com/index/introducing-dots/), [Grok Bot](https://x.ai/news/introducing-grok-bot) | Un ayudante de IA siempre disponible, que recuerda el trabajo anterior y actúa por iniciativa propia. | Se ejecuta con los modelos y en los equipos en la nube de la empresa, según las reglas de la empresa. | **Ejecútalo por tu cuenta, o construye el tuyo.** Los Tags usan los agentes de programación que ya pagas, se ejecutan en tus propias máquinas y solo pueden hacer lo que tú permitas. O construye tu propia versión sobre la misma infraestructura. |
-| **Agentes autoalojados** · [OpenClaw](https://docs.openclaw.ai/concepts/multi-agent), [Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban) | Ejecutar tus propios agentes de IA, con sus propias herramientas y memoria, para cualquier tipo de tarea. | Son asistentes generalistas. No están pensados para tus agentes de programación, la revisión de código ni la comprobación de que el trabajo de ingeniería está terminado. | **Hecho para el trabajo de ingeniería, y abierto para construir sobre él.** Los Tags se ejecutan con Claude Code, Codex, Cursor u OpenCode. Los cambios de código vuelven como ramas para que los revises, y cada resultado incluye una forma de comprobar que está terminado. |
+| **Agentes autoalojados** · [OpenClaw](https://docs.openclaw.ai/concepts/multi-agent), [Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban) | Ejecutar tus propios agentes de IA, con sus propias herramientas y memoria, para cualquier tipo de tarea. | Son asistentes personales. No están pensados para equipos con roles, resultados compartidos, revisión y aprobaciones. | **Hecho para equipos y organizaciones.** Los Tags tienen Roles, trabajan en Teams, se encargan de resultados que vienen con pruebas y actúan solo dentro de los permisos y las aprobaciones que tú fijes. |
+| **Plataformas de agentes** · [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview), [OpenAI Agents API](https://developers.openai.com/api/docs/guides/agents-api/overview) | Ejecutar como servicio gestionado los agentes que construyes, con sesiones y sandboxes alojados. | Cada una ejecuta los modelos de una sola empresa, con el bucle del agente en los servidores de esa empresa. La identidad, los equipos y las responsabilidades sigues diseñándolos tú. | **Abierto y por encima de cualquier proveedor.** SuperTag se ejecuta en tus máquinas con Claude Code, Codex, Cursor y OpenCode, y te da actores, Roles, Teams y resultados listos para configurar. |
 | **Agentes de programación** · [Claude Code](https://code.claude.com/docs/en/overview), [Codex](https://learn.chatgpt.com/docs/codex/cli), [OpenCode](https://opencode.ai/docs/) | Escribir, corregir y probar código mientras trabajas con ellos. | Cuando cierras el chat, el trabajo se detiene. Tienes que recordar la meta y empezar tú el siguiente paso. | **El trabajo sigue adelante.** Un Tag recuerda la meta y pone él mismo un agente de programación a cargo del siguiente paso. También responde a errores y alertas nuevos sin que se lo pidas. El código lo siguen escribiendo tus agentes de programación. |
 | **Herramientas de agentes en paralelo** · [Paradev (antes Superset)](https://docs.paradev.com/recipes/parallel-workstreams), [Conductor](https://www.conductor.build/docs/concepts/parallel-agents) ([en proceso de cierre](https://www.conductor.build/announcement)) | Ejecutar varios agentes de programación a la vez y mostrarte todos los cambios. | Sigues siendo tú quien decide en qué trabaja cada agente y quien comprueba que los resultados encajan. | **Otro gestiona los agentes.** Dile a un Tag qué quieres que se haga y cómo comprobarlo. Reparte las partes, comprueba que encajan y te envía los resultados. |
 | **Proyectos de agentes** · [Cursor Projects](https://cursor.com/docs/agent/projects), [Claude Code Projects](https://code.claude.com/docs/en/claude-projects), [GitHub Copilot Projects](https://docs.github.com/en/copilot/how-tos/github-copilot-app/working-with-projects) | Varios agentes que trabajan hacia una misma meta durante semanas o meses. En Cursor, los compañeros pueden unirse al mismo proyecto. | Cada proyecto ejecuta los agentes de una sola empresa, casi siempre en la nube de esa empresa. | **Combina agentes de programación y máquinas.** Tu Tag puede ejecutarse con Claude Code en tu portátil mientras el de un compañero se ejecuta con Codex en el suyo, y aun así trabajan juntos. |

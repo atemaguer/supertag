@@ -5,8 +5,8 @@ parallel yourself. SuperTag changes both: you give Tags jobs, not tasks. You tal
 which keeps what it owns from one piece of work to the next, and for bigger work you define the
 outcome once and the Tag delivers it with its Team.
 
-An **Objective** records that outcome and how success will be checked. A **Tag** is a persistent
-AI actor with its own identity, responsibilities, permissions, and work history. A **Session** is one Tag's thread of
+An **Objective** records that outcome and how success will be checked. A **Tag** is a persistent,
+proactive, multiplayer AI actor with its own identity, responsibilities, permissions, and work history. A **Session** is one Tag's thread of
 work and a **Task** is one turn of it; a **Team** is a flat list of member Tags.
 
 For example, ask a Tag to move the product to usage-based billing, with a passing

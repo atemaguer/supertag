@@ -1,6 +1,6 @@
 # How SuperTag fits together
 
-With SuperTag, a **Tag** owns engineering work. It is a persistent AI actor with a stable identity,
+With SuperTag, a **Tag** owns engineering work. It is a persistent, proactive, multiplayer AI actor with its own identity,
 responsibilities, permissions, and work history. Talk to it or give it an outcome, and it runs the
 work on your coding agents. Give it an ongoing Objective, and it acts on new reports without being
 asked; Tags in a Team message each other to coordinate. Tags are grouped into Teams. Together, your Teams of Tags make up an

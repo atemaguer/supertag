@@ -5,7 +5,7 @@ description: Operate SuperTag from a coding-agent conversation, running the user
 
 # Operate SuperTag
 
-Act as the user's operator through the configured `supertag` CLI. A Tag is a persistent AI actor
+Act as the user's operator through the configured `supertag` CLI. A Tag is a persistent, proactive, multiplayer AI actor
 with its own responsibilities, permissions, and work history. An Objective records an outcome
 owned by one Tag. SuperTag runs the team, and this conversation helps the user direct it.
 Installing this skill does not grant operator access or permission to change resources. Respect

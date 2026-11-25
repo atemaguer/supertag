@@ -9,7 +9,7 @@
   desktop app connect to, which also carries collaboration surfaces and
   operator notifications.
 - A **`host` service** runs a **Worklet** that connects this machine as a **Worker Host**, a
-  computer that runs [Tasks](glossary.md#task) for Tags, the persistent AI actors with their own
+  computer that runs [Tasks](glossary.md#task) for Tags, the persistent, proactive, multiplayer AI actors with their own
   identities, responsibilities, permissions, and work histories. A file can have any number.
 
 The file declares how SuperTag runs on this machine, not what your organization contains:

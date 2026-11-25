@@ -6,13 +6,13 @@
 
 [English](../../README.md) · [中文](README.zh-CN.md) · 日本語 · [한국어](README.ko.md) · [Español](README.es.md) · [Français](README.fr.md) · [Português](README.pt.md) · [Türkçe](README.tr.md) · [Русский](README.ru.md)
 
-**エンジニアリングの仕事を担う、永続的・能動的・マルチプレイヤーの AI アクター。**
+**永続的・能動的・マルチプレイヤーの AI アクターのための、オープンなインフラ。**
 
-オープンソースでセルフホスト。いつものコーディングエージェントの上で動きます。
+あなた専用の Devin Bots、OpenAI dots、Grok Bot を、エンジニアリング、マーケティング、営業、どんなチームのためにも動かせます。セルフホストで、いつものコーディングエージェントの上で動きます。
 
 **タスクではなく、仕事を任せよう。**
 
-[タスクではなく仕事を](#give-them-jobs-not-tasks) · [永続的](#persistent) · [能動的](#proactive) · [マルチプレイヤー](#multiplayer) · [1 つのデプロイで動かせるもの](#what-a-deployment-can-run) · [最初の Tag を動かす](#run-your-first-tag) · [独自に構築する](#build-your-own) · [自分で運用する](#run-it-yourself) · [ドキュメント](../../docs/README.md)
+[タスクではなく仕事を](#give-them-jobs-not-tasks) · [永続的](#persistent) · [能動的](#proactive) · [マルチプレイヤー](#multiplayer) · [エンジニアリング組織](#an-engineering-organization) · [最初の Tag を動かす](#run-your-first-tag) · [自分で運用する](#run-it-yourself) · [独自に構築する](#build-your-own) · [ドキュメント](../../docs/README.md)
 
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.ja.webp" alt="Tag たちの紹介 — 丸い体型や縦長の体型で、色とりどりのジャケットや帽子、メガネを身につけた 9 体の SuperTag マスコット" width="900" height="360">
@@ -20,18 +20,21 @@
 
 </div>
 
-**Tag** は、固有のアイデンティティ、責務、権限、作業履歴を持つ永続的な AI アクターです。Tag に仕事を任せると、Claude Code、Codex、Cursor、OpenCode といったコーディングエージェントがその作業を 1 つずつこなします。その合間も存在し続けるのが Tag です。Tag は作業を続け、頼まれなくても自ら動き、チームメイトの Tag とも連携します。
+SuperTag は、常時稼働する AI エージェントのためのオープンなインフラです。SuperTag では、その 1 つひとつを **Tag** と呼びます。Tag は、固有のアイデンティティ、責務、権限、作業履歴を持つ、永続的・能動的・マルチプレイヤーの AI アクターです。セッションをまたいで作業を続け、頼まれなくても自ら動き、あなたのチームやほかの Tag と一緒に働きます。Tag に仕事を任せると、Claude Code、Codex、Cursor、OpenCode がその作業を 1 つずつこなします。その合間も存在し続けるのが Tag です。
 
-SuperTag が提供するものは 2 つあります。
+この上で動かせるものは次のとおりです。
 
-- **すぐに使える、エンジニアリングの仕事のための AI チームメイト。** Devin Bots、OpenAI dots、Grok Bot が提供しているもの、つまりいつでも使えて、過去の作業を覚えており、頼まれなくても動き、チームと一緒に働くチームメイトです。Tag はあなた自身のコーディングエージェントとマシンで動き、あなたが許可したことしか行いません。
-- **独自のものを構築するための基盤。** 同じ機能を、あなたが運用し管理するインフラとして、あなた自身の製品のために、あるいはマーケティングや営業といったほかの部門のために使えます。[独自に構築する](#build-your-own)を参照してください。
+- **すぐに使えるエンジニアリング。** 1 つのコマンドで Tag がリポジトリで働き始め、同じ構成がそのままエンジニアリング組織全体へと育ちます。[最初の Tag を動かす](#run-your-first-tag) · [エンジニアリング組織の例](../../examples/engineering-org/)
+- **マーケティング、営業、サポート、そのほかあらゆる部門。** その部門に合った Role、ツール、イベントを選べば、同じインフラがその部門を動かします。[マーケティング組織を構築する](../../docs/guides/build-your-own.md) · [マーケティングの例](../../examples/marketing-org/)
+- **あなた自身の製品。** SuperTag の API の上に、Devin Bots、OpenAI dots、Grok Bot に代わる独自の製品を構築できます。[独自に構築する](#build-your-own)
+
+このページでは、エンジニアリングを例に、アイデアから実際に動く組織までをたどります。Tag は何のためにあるのか、インフラが Tag に何を与えるのか、まず 1 つの Tag からどう始めるのか、そしてどう運用するのかを順に説明し、最後に独自に構築する方法を紹介します。
 
 <a name="give-them-jobs-not-tasks"></a>
 
 ## タスクではなく、仕事を任せよう
 
-ここで紹介するのは、SuperTag が導入してすぐに行えることです。
+SuperTag は 1 つの考えのためにあります。AI アクターは、タスクを受けるだけでなく、仕事を担うべきだという考えです。
 
 いま、コーディングエージェントに渡しているのはタスクです。プロンプトを書き、差分を受け取り、レビューして、また次のプロンプトを書く。エージェントはバグを調査し、修正を書き、テストを実行できます。しかし、前回何が起きたかを覚えておき、次の失敗に気づき、次に何をするかを決めるのはあなたです。作業が 1 つのタスクに収まらなくなると、あなたがプロジェクトマネージャーになります。作業を分割し、それぞれにコーディングエージェントを立ち上げ、エージェント間でコンテキストを受け渡すことになるのです。
 
@@ -55,7 +58,7 @@ Tag ごとに、それぞれの仕事と権限を与えましょう。たとえ�
 
 ## 仕事に必要なもの
 
-仕事は 1 回のセッションでは終わらず、まだ誰も頼んでいない作業を含み、ほかの人も関わります。Tag は、この 3 つすべてを前提に作られています。
+仕事を担うには、Tag を動かす仕組みに 3 つのことが求められます。仕事は 1 回のセッションでは終わらず、まだ誰も頼んでいない作業を含み、ほかの人も関わります。仕事が何であれ、この 3 つを提供するのが SuperTag のインフラです。
 
 <a name="persistent"></a>
 
@@ -98,9 +101,9 @@ Sentry が新しいエラーを報告すると、`reliability` は 1 つ目の O
 
 [マルチプレイヤーの仕組み](../../docs/concepts/multiplayer.md) · [SuperTag をセルフホストする](../../docs/guides/self-hosting.md)
 
-<a name="what-a-deployment-can-run"></a>
+<a name="an-engineering-organization"></a>
 
-## 1 つのデプロイで動かせるもの
+## エンジニアリング組織
 
 永続性、能動的な作業、チームワークを組み合わせれば、セルフホストした 1 つの SuperTag で自律的なエンジニアリング組織を運営できます。その組織には独自の部門、チーム、責務があり、あなたはそのトップとして指揮をとります。
 
@@ -130,6 +133,8 @@ SuperTag はすべての Tag を動かし続け、各 Role の制限を守らせ
 <a name="run-your-first-tag"></a>
 
 ## 最初の Tag を動かす
+
+そうした組織も、始まりは 1 つの Tag です。インフラが動く様子をいちばん早く確かめるには、あなた自身のマシンで、あなた自身のリポジトリを相手に Tag を 1 つ動かしてみましょう。
 
 Mac または Linux に、Git と [Claude Code](https://code.claude.com/docs/en/setup) または[Codex](https://developers.openai.com/codex/cli/) をインストールし、サインインします。Claude Code の場合は`claude` を実行してログインします。Codex の場合は `codex -c 'cli_auth_credentials_store="file"' login` でサインインしてください。こうするとログイン情報がファイルに保存され、SuperTag の Task から利用できます。macOS で単に `codex login` を実行すると、ログイン情報は Task からは読めないキーチェーンに保存されます。Claude Code には Node.js も必要です。バージョンは[要件とサインイン](../../docs/operations/requirements.md)を参照してください。
 
@@ -164,48 +169,11 @@ supertag objective review OBJECTIVE_ID request-changes --feedback "Also cover th
 
 [インストール方法](../../docs/operations/install.md) · [Tag と会話する](../../docs/guides/talk-to-a-tag.md) · [最初の Team を動かす](../../docs/guides/first-team.md) · [コーディングエージェントから SuperTag を操作する](../../docs/guides/coding-agent-operator.md)
 
-<a name="build-your-own"></a>
-
-## 独自に構築する
-
-これらはどれも、エンジニアリング専用ではありません。Tag、Role、Team、Objective、権限、メモリ、スケジュール、承認は、組織のどの部門にも使えます。その部門に合った Role、ツール、イベントを選べば、同じインフラがその部門を動かします。
-
-たとえば、マーケティングをこの方法で運営したいとします。
-
-```text
-you (head of marketing)
- └─ marketing-lead         owns campaign outcomes, reports weekly with the numbers
-     ├─ content             drafts posts, docs pages, and release notes in your voice
-     ├─ product-marketing   turns each release from engineering into launch copy
-     ├─ growth              reads traffic and signup numbers, proposes and tracks experiments
-     ├─ social              drafts launch posts, publishes only when you approve
-     └─ research            watches competitors and customer conversations, briefs the team
-```
-
-- **部門ごとの Role。** 各 Role は、その部門のトーン、ブランドのルール、主張してよい内容を持ちます。あなたの承認なしには、何も公開されず、お金も使われません。
-- **レビューのために持ち帰られる作業。** コンテンツは、コードと同じように、Web サイトやドキュメントのリポジトリのブランチとして届きます。
-- **終わりのない責務。** 数字をまとめた週次レポート、競合の継続的なウォッチ、リリースごとのローンチ文案。
-- **あなた自身のシステムからのイベント。** リリース、アナリティクス、顧客との会話が、発生したその場で適切な Tag に届きます。
-- **部門をまたぐ 1 つの組織。** エンジニアリングのリリースマネージャーがリリースすると、同じ Control Plane 上で、プロダクトマーケティングに直接知らせます。
-
-同じ構成要素で、営業、カスタマーサポート、財務オペレーション、採用、リサーチも運営できます。
-
-さらに進むなら、その上に独自のインターフェースを載せましょう。Control Plane の gRPC API を使えば、アプリケーションから Tag を作成して指示を出し、作業を送り、進捗を確認できます。生成済みの Go、TypeScript、Python バインディングはリポジトリに含まれています。[API を見る](../../docs/reference/control-plane-api.md)
-
-その下で別のエージェントシステムを動かすには、**harness アダプター**を書きます。組み込みの Python アダプターと TypeScript アダプターが、そのまま動く実例です。TypeScript SDK（npm の `supertag-ai`）と Python SDK（PyPI の `supertag`）は、あなたのアプリケーションやアダプターを SuperTag に接続します。
-
-```sh
-npm install supertag-ai
-python -m pip install 'supertag==0.3.13'
-```
-
-[独自の組織を構築する：マーケティング](../../docs/guides/build-your-own.md) · [harness アダプターを書く](../../docs/guides/harness-adapters.md) · [独自のコラボレーションサーフェスを接続する](../../docs/reference/connector-contract.md) · [API の安定性を確認する](../../docs/reference/api-stability.md)
-
 <a name="run-it-yourself"></a>
 
 ## 自分で運用する
 
-SuperTag は Apache 2.0 ライセンスのオープンソースで、付属の Tag を使う場合も独自に構築する場合も、すべての構成要素を好きな場所で動かせます。仕事にはあなたのコード、サービス、アカウントへのアクセスが必要です。だからこそ、そのアクセスをどこに置くかはあなたが決めます。
+`supertag init` を実行した時点で、インフラ全体がすでにあなたのマシンで動き始めています。SuperTag は Apache 2.0 ライセンスのオープンソースで、すべての構成要素を好きな場所で動かせます。仕事にはあなたのコード、サービス、アカウントへのアクセスが必要です。だからこそ、そのアクセスをどこに置くかはあなたが決めます。まずは 1 台のマシンで 1 人で始め、その後 1 つの Control Plane をチームで共有しましょう。構成要素は同じです。
 
 ![クライアントとコラボレーションツールは Gateway を経由して Control Plane に接続する。Control Plane は Tag と権限を SQLite または PostgreSQL に保存し、作業をスケジュールする。各 Worker Host では、Worklet が Control Plane から Task を取得し、Task Attempt ごとに Worker を起動する。ノート PC では Codex、サーバーでは Claude Code が、それぞれ harness アダプターを介して動く。](../../assets/images/supertag-architecture.ja.webp)
 
@@ -214,6 +182,24 @@ SuperTag は Apache 2.0 ライセンスのオープンソースで、付属の T
 - **あなたが決める制限。** 各 Tag にできるのは権限で許可されたことだけで、どのアクションにあなたの承認を必要とするかも選べます。Codex は自前のサンドボックスでコマンドを実行し、Claude Code、Cursor、OpenCode はローカルのコンテナ内で実行できます。Tag がアクセスできるのは、あなたが許可したネットワークアドレスだけです。Codex 上とコンテナ内では、Sentry のトークンなどの認証情報をホストが許可済みのリクエストに付加するため、Tag のコマンドが認証情報を目にすることはありません。
 
 [SuperTag をセルフホストする](../../docs/guides/self-hosting.md) · [Worker Host を接続する](../../docs/guides/workers.md) · [権限と承認を設定する](../../docs/concepts/context-and-permissions.md) · [全体の仕組みを見る](../../docs/concepts/how-it-works.md)
+
+<a name="build-your-own"></a>
+
+## 独自に構築する
+
+ここまでの内容は、どれもエンジニアリング専用ではありません。同じ Control Plane と Worker Host、そして同じ Tag、Role、Team、Objective、権限、メモリ、スケジュール、承認は、組織のどの部門にも使えます。その部門に合った Role、ツール、イベントを選べば、同じインフラがその部門を動かします。たとえば、リリースのたびにローンチ文案を用意し、毎週数字を報告するマーケティング組織です。営業、カスタマーサポート、財務オペレーション、採用、リサーチも同じように動かせます。
+[独自の組織を構築する：マーケティング](../../docs/guides/build-your-own.md) · [マーケティングの例](../../examples/marketing-org/)
+
+SuperTag は、Devin Bots、OpenAI dots、Grok Bot に代わる独自の製品など、あなた自身の製品の基盤にもなります。その上に独自のインターフェースを載せましょう。Control Plane の gRPC API を使えば、アプリケーションから Tag を作成して指示を出し、作業を送り、進捗を確認できます。生成済みの Go、TypeScript、Python バインディングはリポジトリに含まれています。[API を見る](../../docs/reference/control-plane-api.md)
+
+その下で別のエージェントシステムを動かすには、**harness アダプター**を書きます。組み込みの Python アダプターと TypeScript アダプターが、そのまま動く実例です。TypeScript SDK（npm の `supertag-ai`）と Python SDK（PyPI の `supertag`）は、あなたのアプリケーションやアダプターを SuperTag に接続します。
+
+```sh
+npm install supertag-ai
+python -m pip install 'supertag==0.3.13'
+```
+
+[harness アダプターを書く](../../docs/guides/harness-adapters.md) · [独自のコラボレーションサーフェスを接続する](../../docs/reference/connector-contract.md) · [API の安定性を確認する](../../docs/reference/api-stability.md)
 
 ## 対応環境
 
@@ -228,7 +214,8 @@ SuperTag は Apache 2.0 ライセンスのオープンソースで、付属の T
 | 比較対象 | 得意なこと | 足りないもの | SuperTag が加えるもの |
 | --- | --- | --- | --- |
 | **ホスト型の AI チームメイト** · [Devin Bots](https://devin.ai/blog/introducing-devin-bots)、[OpenAI dots](https://openai.com/index/introducing-dots/)、[Grok Bot](https://x.ai/news/introducing-grok-bot) | いつでも使えて、過去の作業を覚えており、自律的に動く AI アシスタント。 | 提供元のモデルとクラウド上のコンピューターで、提供元のルールに従って動きます。 | **自分で運用できる。独自に構築もできる。** Tag は、すでに契約しているコーディングエージェントを使い、あなた自身のマシンで動き、あなたが許可したことしかできません。同じインフラの上に、独自のバージョンを構築することもできます。 |
-| **セルフホスト型エージェント** · [OpenClaw](https://docs.openclaw.ai/concepts/multi-agent)、[Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban) | 独自のツールとメモリを備えた AI エージェントを自分で運用し、あらゆる種類のタスクをこなすこと。 | 汎用のアシスタントです。あなたのコーディングエージェントやコードレビュー、エンジニアリング作業の完了確認を軸に作られてはいません。 | **エンジニアリングの仕事のために作られ、その上に構築もできる。** Tag は Claude Code、Codex、Cursor、OpenCode の上で動きます。コードの変更はレビュー用のブランチとして届き、成果にはそれぞれ完了を確かめる方法が付いてきます。 |
+| **セルフホスト型エージェント** · [OpenClaw](https://docs.openclaw.ai/concepts/multi-agent)、[Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban) | 独自のツールとメモリを備えた AI エージェントを自分で運用し、あらゆる種類のタスクをこなすこと。 | 個人向けのアシスタントです。役割、共有された成果、レビュー、承認を備えたチームを軸に作られてはいません。 | **チームと組織のために作られている。** Tag は Role を持ち、Team で働き、証拠を伴う成果を担い、あなたが設定した権限と承認の範囲内でのみ動きます。 |
+| **エージェントプラットフォーム** · [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview)、[OpenAI Agents API](https://developers.openai.com/api/docs/guides/agents-api/overview) | 自分で構築したエージェントを、ホスト型のセッションとサンドボックスを備えたマネージドサービスとして動かすこと。 | どれも 1 社のモデルで動き、エージェントループはその会社のサーバー上で実行されます。アイデンティティ、チーム、責務は、やはり自分で設計する必要があります。 | **オープンで、特定のベンダーに縛られない。** SuperTag はあなたのマシン上で、Claude Code、Codex、Cursor、OpenCode をまたいで動き、すぐに設定できるアクター、Role、Team、成果を提供します。 |
 | **コーディングエージェント** · [Claude Code](https://code.claude.com/docs/en/overview)、[Codex](https://learn.chatgpt.com/docs/codex/cli)、[OpenCode](https://opencode.ai/docs/) | 一緒に作業しながら、コードを書き、直し、テストすること。 | チャットを閉じると作業が止まります。目標を覚えておき、次のステップを始めるのはあなたです。 | **作業が止まらない。** Tag は目標を覚えていて、次のステップに自らコーディングエージェントを割り当てます。新しいエラーやアラートにも、頼まれなくても対応します。コードを書くのは、これまでどおりあなたのコーディングエージェントです。 |
 | **並列エージェントツール** · [Paradev（旧 Superset）](https://docs.paradev.com/recipes/parallel-workstreams)、[Conductor](https://www.conductor.build/docs/concepts/parallel-agents)（[提供終了予定](https://www.conductor.build/announcement)） | 複数のコーディングエージェントを同時に動かし、すべての変更を見せること。 | 各エージェントに何をさせるかを決め、結果が噛み合うかを確かめるのは、やはりあなたです。 | **エージェントの管理を任せられる。** やってほしいことと、その確認方法を Tag に伝えるだけです。Tag が作業を割り振り、噛み合うかを確かめ、結果をあなたに届けます。 |
 | **エージェントプロジェクト** · [Cursor Projects](https://cursor.com/docs/agent/projects)、[Claude Code Projects](https://code.claude.com/docs/en/claude-projects)、[GitHub Copilot Projects](https://docs.github.com/en/copilot/how-tos/github-copilot-app/working-with-projects) | 複数のエージェントが、数週間から数か月かけて 1 つの目標に取り組むこと。Cursor では、チームメイトが同じプロジェクトに参加できます。 | 各プロジェクトで動くのは 1 社のエージェントだけで、ほとんどはその会社のクラウド上で実行されます。 | **コーディングエージェントもマシンも自由に組み合わせる。** あなたの Tag はあなたのノート PC の Claude Code で、チームメイトの Tag は相手のノート PC の Codex で動かしても、問題なく連携できます。 |

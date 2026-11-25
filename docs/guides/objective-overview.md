@@ -4,7 +4,7 @@ Use this guide when work appears stuck, results need review, or you want to comp
 with reported usage. The overview reads existing records; it does not start, approve, cancel, or
 retry work.
 
-A **Tag** is a persistent AI actor with its own identity, responsibilities, permissions, and work history. An
+A **Tag** is a persistent, proactive, multiplayer AI actor with its own identity, responsibilities, permissions, and work history. An
 **Objective** is an outcome owned by a Tag. It works in **Sessions**: threads of **Tasks**, one
 Task per turn, and each execution of a Task is a **Task Attempt**. A **Workspace** is a
 named repository the work happens in. A **Worker Host** is a machine or sandbox that runs work.

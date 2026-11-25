@@ -1,8 +1,8 @@
 # SuperTag documentation
 
-SuperTag runs persistent, proactive, multiplayer AI actors for engineering work: you give them
-jobs, not tasks. A **Tag** is a persistent AI actor with a stable identity, responsibilities,
-permissions, and work history. It exists independently of the
+SuperTag is open infrastructure for persistent, proactive, multiplayer AI actors, always-on AI
+agents you give jobs, not tasks. A **Tag** is a persistent, proactive, multiplayer AI actor with its
+own identity, responsibilities, permissions, and work history. It exists independently of the
 model or harness executing its work. Talk to it in your terminal, in Slack, or on a GitHub issue.
 It runs work on your coding agents, asks when a decision is yours, and returns a git branch to
 review. For bigger work, give it an **Objective** with a result to verify, a budget, and a
@@ -10,9 +10,14 @@ deadline. The Tag plans the work and hands pieces to other Tags on its Team. Giv
 responsibility, and it acts on new reports and alerts without being asked. Your teammates direct
 Tags on the same Control Plane, and Tags on different machines and coding agents work together.
 
-Use SuperTag in two ways: out of the box, as AI teammates for engineering work like Devin Bots,
-OpenAI dots, or Grok Bot, on your own coding agents and machines; or as the base for a product or
-tool of your own with the same abilities. See
+Run three kinds of work on it. Engineering works out of the box: one command puts a Tag to work
+in your repository, and the same setup grows into an
+[engineering organization](guides/engineering-organization.md)
+([example](../examples/engineering-org/)). Marketing, sales, support, or any other function runs
+on the same infrastructure once you choose its Roles, tools, and events; see
+[Build your own organization](guides/build-your-own.md) and the
+[marketing example](../examples/marketing-org/). You can also build your own product, such as
+your own alternative to Devin Bots, OpenAI dots, or Grok Bot, on SuperTag's API. See
 [Applications built on SuperTag](concepts/supertag-and-other-agent-systems.md#applications-built-on-supertag).
 
 A **Team** is a flat list of member Tags. Together, your Teams of Tags make up an **autonomous
@@ -70,7 +75,7 @@ Follow this order on your first visit:
 
 Read these in order when you want the complete mental model:
 
-1. A [Tag](concepts/tags.md) is a persistent AI actor that holds Roles, owns Objectives, and
+1. A [Tag](concepts/tags.md) is a persistent, proactive, multiplayer AI actor that holds Roles, owns Objectives, and
    performs work under delegated authority.
 2. A [Role](concepts/roles.md) describes how a Tag works and what it may do.
 3. An [Objective](guides/objectives.md) is a desired outcome with a budget, a deadline, and a

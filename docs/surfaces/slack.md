@@ -1,6 +1,6 @@
 # Connect Slack
 
-Connect a Slack workspace so a **Tag**, a persistent AI actor with its own identity, responsibilities, permissions, and
+Connect a Slack workspace so a **Tag**, a persistent, proactive, multiplayer AI actor with its own identity, responsibilities, permissions, and
 work history, replies when someone mentions it in a channel. The **Gateway**, the SuperTag service
 that carries collaboration surface traffic, receives Slack's events and replies in the thread. By
 default it opens an outbound Socket Mode connection to Slack, so it needs no public URL. Each mention becomes a **Task**, one request accepted for a Tag. See the

@@ -1,6 +1,6 @@
 # Examples
 
-`supertag init` creates one **Tag**, `lead`: a persistent AI actor with its own identity,
+`supertag init` creates one **Tag**, `lead`: a persistent, proactive, multiplayer AI actor with its own identity,
 responsibilities, permissions, and work history. These examples go further. Each one shows a
 part of what makes Tags different, in manifests you can copy, rename, and apply.
 

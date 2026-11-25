@@ -7,7 +7,7 @@ directly, they settle the details between themselves, and you hear about it when
 yours. The Tags can run on different coding agents and machines.
 
 Multiplayer interaction also lets several people direct the same **Tag** and continue its approved
-work across the tools their team uses. A Tag is a persistent AI actor with its own identity, responsibilities,
+work across the tools their team uses. A Tag is a persistent, proactive, multiplayer AI actor with its own identity, responsibilities,
 permissions, and work history. Each conversation is its own Session with its own harness session, and the Tag is
 what persists across them: its configuration, its Sessions, its open assignments, and their results.
 A shared Tag can appear

@@ -1,6 +1,6 @@
 # Worker Hosts, Worklets, Workers, and harnesses
 
-The parts on this page run each **Task**, one turn of work for a **Tag**, a persistent AI actor
+The parts on this page run each **Task**, one turn of work for a **Tag**, a persistent, proactive, multiplayer AI actor
 with its own identity, responsibilities, permissions, and work history. The **Control Plane**, the service that stores the
 organization, decides what work to accept and keeps a lasting record of it. The work itself runs
 in four layers. The [glossary](../reference/glossary.md) lists other terms.

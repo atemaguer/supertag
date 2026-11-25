@@ -72,7 +72,7 @@ it for a Tag whose harness is `openai-agents`. It needs `OPENAI_API_KEY` and the
 ## Call the Gateway
 
 Use `supertag.gateway_client`. The `runtime` extra installs gRPC and protobuf. This example
-lists Tags, the persistent AI actors in your organization.
+lists Tags, the persistent, proactive, multiplayer AI actors in your organization.
 
 ```python
 import os

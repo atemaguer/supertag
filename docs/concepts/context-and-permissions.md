@@ -1,7 +1,7 @@
 # Context Sets and Permission Sets
 
 SuperTag keeps knowledge and authority separate for every **Task**, one assignment accepted for a
-**Tag**, a persistent AI actor with its own identity, responsibilities, permissions, and work history.
+**Tag**, a persistent, proactive, multiplayer AI actor with its own identity, responsibilities, permissions, and work history.
 This is a basic security and governance rule:
 
 > **Context Sets control which reusable knowledge may be added to a Task. Permission Sets control

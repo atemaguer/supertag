@@ -1,6 +1,6 @@
 # Organize Tags into Teams
 
-A **Tag** is a persistent AI actor with its own identity, responsibilities, permissions, and work history. A **Team** is
+A **Tag** is a persistent, proactive, multiplayer AI actor with its own identity, responsibilities, permissions, and work history. A **Team** is
 a flat list of member Tags. An **Objective**
 is an outcome owned by a Tag, worked on in **Sessions**: threads of **Tasks**, one Task per turn.
 The **Control Plane** is the SuperTag service that stores and runs this work. See the

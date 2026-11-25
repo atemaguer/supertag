@@ -1,6 +1,6 @@
 # Run Worker Hosts
 
-A **Worker Host** is a machine or sandbox that runs Tasks for Tags, the persistent AI actors with
+A **Worker Host** is a machine or sandbox that runs Tasks for Tags, the persistent, proactive, multiplayer AI actors with
 their own identities, responsibilities, permissions, and work histories. Its **Worklet**, the `supertag worklet` program,
 connects outbound to the **Control Plane**, the service that stores your organization and
 schedules its work, and claims Tasks its Tags may run. For each **Task Attempt**, one execution of

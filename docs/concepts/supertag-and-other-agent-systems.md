@@ -1,18 +1,19 @@
 # SuperTag and other agent systems
 
-SuperTag runs persistent, proactive, multiplayer AI actors for engineering work. Each actor, a Tag,
-owns outcomes and ongoing responsibilities. Your coding agents do the work; the Tag keeps the
+SuperTag is open infrastructure for persistent, proactive, multiplayer AI actors. Each actor, a
+Tag, owns outcomes and ongoing responsibilities. Your coding agents do the work; the Tag keeps the
 goal, acts on its responsibilities without being asked, and coordinates with your teammates' Tags.
 It runs on the coding agents and machines you choose.
 
-You can use SuperTag in two ways: out of the box, as AI teammates for engineering work, or as the
-infrastructure for building your own persistent actors for other kinds of work. This page compares
-it with systems in both roles.
+Engineering works out of the box. The same infrastructure runs marketing, sales, support, or any
+other function, and it is the base for a product of your own. This page compares SuperTag with
+systems in each of those roles.
 
 If these terms are new, start with [core concepts](README.md).
 
-Security and accountability are part of that design. Each **Tag** is a persistent AI actor with its
-own identity, responsibilities, permissions, and work history. SuperTag gives each Tag a non-human identity in its access
+Security and accountability are part of that design. Each **Tag** is a persistent, proactive,
+multiplayer AI actor with its own identity, responsibilities, permissions, and work history.
+SuperTag gives each Tag a non-human identity in its access
 model. A **Context Set** selects reusable knowledge that may be included, a **Permission Set**
 selects allowed actions, and a **Task** is one turn of work that records the policy that
 applies to it.
@@ -37,8 +38,9 @@ of November 2026. The links point to the projects' own documentation.
 | [OpenAI dots](https://openai.com/index/introducing-dots/) | An always-on agent on OpenAI's models with its own cloud computer. It works toward your goals in the background and hands heavy work to Codex | Also persistent and proactive. Tags run on the coding agents you choose, on your own machines, under rules you set, and you can build your own dots-like assistant on SuperTag |
 | [Grok Bot](https://x.ai/news/introducing-grok-bot) | A team of always-on Bots that share a computer in the cloud, message each other, and can manage one another | A team of agents inside one product. Tags coordinate across different coding agents and machines |
 | [Cursor Projects](https://cursor.com/docs/agent/projects) and [Claude Code Projects](https://code.claude.com/docs/en/claude-projects) | A coordinator agent that plans long-running work and delegates it to agents, mostly in the vendor's cloud. Cursor lets teammates join a Project | Each runs one vendor's agents. Teammates' Tags can run on Claude Code, Codex, Cursor, or OpenCode and still work together |
-| [OpenClaw](https://docs.openclaw.ai/) | A self-hosted personal assistant Gateway with channels, routing, and [multiple isolated agents](https://docs.openclaw.ai/concepts/multi-agent) | A general assistant. Tags are built for engineering work: they run on your coding agents, return branches for review, and check that an outcome is done |
-| [Hermes Agent](https://hermes-agent.nousresearch.com/docs/) | A general autonomous agent with persistent memory, specialist Bots, goals, and [multi-agent Kanban coordination](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban) | A general agent runtime. SuperTag focuses on engineering outcomes, permissions, and work across different coding agents and machines |
+| [OpenClaw](https://docs.openclaw.ai/) | A self-hosted personal assistant Gateway with channels, routing, and [multiple isolated agents](https://docs.openclaw.ai/concepts/multi-agent) | A personal assistant. Tags are built for teams and organizations: they have Roles, work in Teams, own outcomes that come with evidence, and act only within the permissions and approvals you set |
+| [Hermes Agent](https://hermes-agent.nousresearch.com/docs/) | A general autonomous agent with persistent memory, specialist Bots, goals, and [multi-agent Kanban coordination](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban) | A general agent runtime. SuperTag focuses on Teams with Roles, shared outcomes, permissions, and work across different coding agents and machines |
+| [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview) and the [OpenAI Agents API](https://developers.openai.com/api/docs/guides/agents-api/overview) | Agent platforms that run agents you build as a managed service, with hosted sessions and sandboxes | Each runs one company's models, with the agent loop on that company's servers, and leaves identity, teams, and responsibilities to you. SuperTag runs on your machines across Claude Code, Codex, Cursor, and OpenCode, with Tags, Roles, Teams, and outcomes ready to configure |
 | [Codex](https://learn.chatgpt.com/docs/codex/cli), [Claude Code](https://code.claude.com/docs/en/overview), and [OpenCode](https://opencode.ai/docs/) | harnesses that execute agentic work in a local or hosted environment | Execution systems a SuperTag Worker Host can run one accepted Task on |
 | SuperTag | An organizational Control Plane and Worker Hosts | The layer that records who acts, why work exists, how Teams coordinate, and which limits apply |
 
@@ -103,16 +105,20 @@ To build an organization for another function from configuration, follow
 
 ## Choose by the layer you need
 
-- Use a multiplayer assistant when the product is one shared collaborator in an existing channel.
-- Use an agent runtime when the main need is to run one or more general-purpose agents with tools,
-  memory, and local delegation.
-- Use a coding harness when the main need is agentic software work in a repository or sandbox.
-- Use SuperTag when you want persistent, proactive, multiplayer actors for engineering work: Tags
-  that own outcomes and ongoing responsibilities, act on new errors and alerts without being
-  asked, coordinate with your teammates' Tags, and run on the coding agents and machines you
-  choose.
-- Use SuperTag as infrastructure when you want to build your own persistent, proactive,
-  multiplayer assistant or product, on your own coding agents, machines, and rules.
+- Use a hosted AI teammate when you want an always-available helper and accept that it runs on
+  the company's models and cloud computers, by the company's rules.
+- Use a self-hosted personal assistant when the main need is your own general-purpose agents with
+  tools and memory, rather than teams with Roles, shared outcomes, review, and approvals.
+- Use an agent platform when you want to build an agent as a managed service on one company's
+  models, and design identity, teams, and responsibilities yourself.
+- Use a coding agent when the main need is agentic software work while you work with it.
+- Use a parallel agent tool or agent projects when you want several coding agents at once and will
+  decide what each works on, or when one company's agents are enough.
+- Use SuperTag when you want persistent, proactive, multiplayer AI actors that run on your own
+  machines and coding agents: Tags that keep the work going, act without being asked, work in
+  Teams with Roles, and own outcomes within the permissions and approvals you set. Engineering
+  works out of the box. For another function, or for a product of your own, build on the same
+  infrastructure.
 
 Continue to [How SuperTag fits together](how-it-works.md) for the runtime architecture or start with
 [Tags](tags.md), [Roles](roles.md), [Teams](../guides/teams.md), and

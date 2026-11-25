@@ -1,6 +1,6 @@
 # Build your own organization: marketing
 
-None of SuperTag's infrastructure is specific to engineering. **Tags** are persistent AI actors,
+None of SuperTag's infrastructure is specific to engineering. **Tags** are persistent, proactive, multiplayer AI actors,
 each with its own identity, responsibilities, permissions, and work history. **Roles**,
 **Teams**, **Objectives**, permissions, **Memory**, **Schedules**, events, and approvals work the
 same way for any kind of work. You adapt SuperTag to a function by choosing four things:

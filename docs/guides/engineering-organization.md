@@ -1,7 +1,7 @@
 # Set up an autonomous engineering organization
 
 Set up a small engineering organization of AI actors from two files. Each actor is a **Tag**: a
-persistent AI actor with its own identity, responsibilities, permissions, and work history.
+persistent, proactive, multiplayer AI actor with its own identity, responsibilities, permissions, and work history.
 Twelve Tags fill four functions. A lead takes outcomes from you and splits them across a platform
 team and a product team. Shared specialists review and verify their work. A reliability function
 watches production, and a release manager prepares a release every week. You approve what merges

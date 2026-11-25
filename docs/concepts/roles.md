@@ -2,7 +2,7 @@
 
 > **A Role describes how a Tag works and what it may do.**
 
-A **Tag** is a persistent AI actor with its own identity, responsibilities, permissions, and work
+A **Tag** is a persistent, proactive, multiplayer AI actor with its own identity, responsibilities, permissions, and work
 history. A **Role** is a reusable description of how that actor works: its standards, its
 knowledge, and its permissions. Other terms on this page (see the
 [glossary](../reference/glossary.md)): a **Task** is one accepted assignment; a

@@ -7,13 +7,14 @@
 
 [English](../../README.md) · [中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Español](README.es.md) · [Français](README.fr.md) · [Português](README.pt.md) · Türkçe · [Русский](README.ru.md)
 
-**Mühendislik işleri için kalıcı, proaktif, çok kullanıcılı yapay zekâ aktörleri.**
+**Kalıcı, proaktif, çok kullanıcılı yapay zekâ aktörleri için açık altyapı.**
 
-Açık kaynak, kendi altyapınızda, zaten kullandığınız kodlama ajanlarının üzerinde çalışır.
+Kendi Devin Bots, OpenAI dots veya Grok Bot'unuzu mühendislik, pazarlama, satış ya da herhangi bir
+ekip için çalıştırın. Kendi altyapınızda, zaten kullandığınız kodlama ajanlarının üzerinde.
 
 **Onlara görev değil, iş verin.**
 
-[Görev değil, iş](#give-them-jobs-not-tasks) · [Kalıcı](#persistent) · [Proaktif](#proactive) · [Çok kullanıcılı](#multiplayer) · [Bir kurulum neleri çalıştırabilir](#what-a-deployment-can-run) · [İlk Tag'inizi çalıştırın](#run-your-first-tag) · [Kendinizinkini oluşturun](#build-your-own) · [Kendiniz çalıştırın](#run-it-yourself) · [Dokümantasyon](../../docs/README.md)
+[Görev değil, iş](#give-them-jobs-not-tasks) · [Kalıcı](#persistent) · [Proaktif](#proactive) · [Çok kullanıcılı](#multiplayer) · [Bir mühendislik organizasyonu](#an-engineering-organization) · [İlk Tag'inizi çalıştırın](#run-your-first-tag) · [Kendiniz çalıştırın](#run-it-yourself) · [Kendinizinkini oluşturun](#build-your-own) · [Dokümantasyon](../../docs/README.md)
 
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.tr.webp" alt="Tag'lerle tanışın: yuvarlak ve uzun gövdeli, renkli ceketli, şapkalı ve gözlüklü dokuz SuperTag maskotu" width="900" height="360">
@@ -21,26 +22,32 @@ Açık kaynak, kendi altyapınızda, zaten kullandığınız kodlama ajanların�
 
 </div>
 
-Bir **Tag**; kendi kimliği, sorumlulukları, izinleri ve iş geçmişi olan kalıcı bir yapay zekâ
-aktörüdür. Ona bir iş verirsiniz; kodlama ajanlarınız, yani Claude Code, Codex, Cursor veya
-OpenCode, işi parça parça yapar. Parçalar arasında kalıcı olan Tag'dir: işi sürdürür, kimse
-istemeden harekete geçer ve ekip arkadaşlarınızın Tag'leriyle birlikte çalışır.
+SuperTag, her zaman açık yapay zekâ ajanları için açık bir altyapıdır. SuperTag bunların her birine
+**Tag** der: kendi kimliği, sorumlulukları, izinleri ve iş geçmişi olan kalıcı, proaktif, çok
+kullanıcılı bir yapay zekâ aktörü. Tag işi oturumlar arasında sürdürür, kimse istemeden harekete
+geçer, ekibinizle ve diğer Tag'lerle birlikte çalışır. Bir Tag'e bir iş verirsiniz; Claude Code,
+Codex, Cursor veya OpenCode işi parça parça yapar. Parçalar arasında kalıcı olan Tag'dir.
 
-SuperTag size iki şey sunar:
+Üzerinde neler çalıştırabilirsiniz:
 
-- **Mühendislik işi için kutudan çıktığı gibi yapay zekâ ekip arkadaşları.** Devin Bots, OpenAI
-  dots ve Grok Bot'un sunduğu şey: her zaman ulaşılabilen, geçmiş işleri hatırlayan, kimse
-  istemeden harekete geçen ve ekibinizle birlikte çalışan ekip arkadaşları. Tag'ler kendi kodlama
-  ajanlarınızda ve makinelerinizde çalışır, yalnızca izin verdiğinizi yapar.
-- **Kendinizinkini oluşturmak için bir temel.** Aynı yetenekler, kendi ürününüz ya da pazarlama veya
-  satış gibi başka bir işlev için sizin çalıştırıp denetlediğiniz bir altyapı olarak. Bkz.
-  [Kendinizinkini oluşturun](#build-your-own).
+- **Kutudan çıktığı gibi mühendislik.** Tek bir komut bir Tag'i deponuzda işe koyar; aynı kurulum
+  büyüyerek koca bir mühendislik organizasyonuna dönüşür.
+  [İlk Tag'inizi çalıştırın](#run-your-first-tag) · [Mühendislik organizasyonu örneği](../../examples/engineering-org/)
+- **Pazarlama, satış, destek veya başka herhangi bir işlev.** İşlev için Role'leri, araçları ve
+  olayları seçin; aynı altyapı onu çalıştırır.
+  [Bir pazarlama organizasyonu kurun](../../docs/guides/build-your-own.md) · [Pazarlama örneği](../../examples/marketing-org/)
+- **Kendi ürününüz.** SuperTag'in API'si üzerinde Devin Bots, OpenAI dots veya Grok Bot'a kendi
+  alternatifinizi oluşturun. [Kendinizinkini oluşturun](#build-your-own)
+
+Bu sayfa tek bir örneği, mühendisliği, fikirden çalışan bir organizasyona kadar izler: bir Tag'in ne
+işe yaradığını, altyapının ona ne sağladığını, tek bir Tag'le nasıl başlanacağını ve bütünün nasıl
+çalıştığını anlatır. Sonunda da kendinizinkini nasıl oluşturacağınızı gösterir.
 
 <a name="give-them-jobs-not-tasks"></a>
 
 ## Onlara görev değil, iş verin
 
-SuperTag'in kutudan çıktığı gibi yaptığı şey budur.
+SuperTag tek bir fikir için var: bir yapay zekâ aktörü yalnızca görev almamalı, bir işi üstlenmeli.
 
 Bugün bir kodlama ajanına görev veriyorsunuz: bir istem, bir diff, bir inceleme, ardından sıradaki
 istem. Ajan bir hatayı araştırabilir, düzeltmeyi yazabilir, testleri çalıştırabilir. Ama geçen
@@ -78,8 +85,9 @@ verebilirsiniz.
 
 ## Bir iş neye ihtiyaç duyar
 
-Bir iş tek bir oturumdan uzun sürer, henüz kimsenin istemediği işleri de kapsar ve başka insanları
-içerir. Tag'ler bu üçü için tasarlandı.
+Bir işi üstlenmek, Tag'i çalıştıran altyapıdan üç şey ister. Bir iş tek bir oturumdan uzun sürer,
+henüz kimsenin istemediği işleri de kapsar ve başka insanları içerir. İş ne olursa olsun,
+SuperTag'in altyapısı bunları sağlar.
 
 <a name="persistent"></a>
 
@@ -150,9 +158,9 @@ makinesinde Codex ile çalışan bir Tag'le aynı Objective için birlikte çal�
 
 [Çok kullanıcılı çalışma nasıl işler](../../docs/concepts/multiplayer.md) · [SuperTag'i kendi altyapınızda barındırın](../../docs/guides/self-hosting.md)
 
-<a name="what-a-deployment-can-run"></a>
+<a name="an-engineering-organization"></a>
 
-## Bir kurulum neleri çalıştırabilir
+## Bir mühendislik organizasyonu
 
 Kalıcılığı, proaktif çalışmayı ve ekip çalışmasını bir araya getirin; kendi altyapınızda
 barındırdığınız tek bir SuperTag, kendi işlevleri, ekipleri ve sorumlulukları olan özerk bir
@@ -193,6 +201,9 @@ yaptığını kaydeder ve size ait kararlar için tek bir gelen kutusu sunar.
 <a name="run-your-first-tag"></a>
 
 ## İlk Tag'inizi çalıştırın
+
+Böyle bir organizasyon tek bir Tag'le başlar. Altyapının çalıştığını görmenin en hızlı yolu,
+kendi makinenizde, kendi deponuzda bir Tag çalıştırmaktır.
 
 Mac veya Linux'ta Git'i ve [Claude Code](https://code.claude.com/docs/en/setup)
 ya da [Codex](https://developers.openai.com/codex/cli/) kurun ve oturum açın. Claude Code için
@@ -246,61 +257,15 @@ kendi `supertag` kopyasıyla gelir, ilk açılışta SuperTag'i kurar ve aynı T
 
 [Kurulum seçenekleri](../../docs/operations/install.md) · [Bir Tag'le konuşun](../../docs/guides/talk-to-a-tag.md) · [İlk Team'inizi çalıştırın](../../docs/guides/first-team.md) · [SuperTag'i kodlama ajanınızdan yönetin](../../docs/guides/coding-agent-operator.md)
 
-<a name="build-your-own"></a>
-
-## Kendinizinkini oluşturun
-
-Bunların hiçbiri mühendisliğe özgü değildir. Tag'ler, Role'ler, Team'ler, Objective'ler, izinler,
-bellek, zamanlamalar ve onaylar organizasyonunuzdaki her işlev için çalışır. İşlev için Role'leri,
-araçları ve olayları seçin; aynı altyapı onu çalıştırır.
-
-Diyelim ki pazarlamayı bu şekilde yürütmek istiyorsunuz:
-
-```text
-you (head of marketing)
- └─ marketing-lead         owns campaign outcomes, reports weekly with the numbers
-     ├─ content             drafts posts, docs pages, and release notes in your voice
-     ├─ product-marketing   turns each release from engineering into launch copy
-     ├─ growth              reads traffic and signup numbers, proposes and tracks experiments
-     ├─ social              drafts launch posts, publishes only when you approve
-     └─ research            watches competitors and customer conversations, briefs the team
-```
-
-- **Her işlev için bir Role.** Her biri işlevin üslubunu, marka kurallarını ve neyi iddia
-  edebileceğini taşır. Onayınız olmadan hiçbir şey yayımlanmaz ve hiç para harcanmaz.
-- **İncelemeniz için geri getirilen işler.** İçerik, tıpkı kod gibi, web sitenizin veya
-  dokümantasyonunuzun deposuna dal olarak gelir.
-- **Hiç bitmeyen sorumluluklar.** Rakamlarla haftalık bir rapor, rakiplerin sürekli takibi ve her
-  sürüm için lansman metinleri.
-- **Kendi sistemlerinizden gelen olaylar.** Sürümler, analitik verileri ve müşteri görüşmeleri
-  gerçekleştikleri anda doğru Tag'e ulaşır.
-- **İşlevler arasında tek bir organizasyon.** Mühendisliğin sürüm yöneticisi bir sürüm
-  yayımladığında bunu aynı Control Plane üzerinden doğrudan ürün pazarlamasına bildirir.
-
-Aynı yapı taşları satışı, müşteri desteğini, finans operasyonlarını, işe alımı veya araştırmayı
-da çalıştırır.
-
-Daha ileri gitmek için üzerine kendi arayüzünüzü koyun. Control Plane'in gRPC API'si sayesinde
-uygulamanız Tag'ler oluşturup yönlendirebilir, onlara iş gönderebilir ve ilerlemelerini
-izleyebilir; depoda üretilmiş Go, TypeScript ve Python bağlamaları da bulunur. [API'yi keşfedin](../../docs/reference/control-plane-api.md)
-Altta başka bir ajan sistemi çalıştırmak için bir **harness adaptörü** yazın; yerleşik Python ve
-TypeScript adaptörleri çalışan örneklerdir. npm'deki `supertag-ai` adlı TypeScript SDK'sı ve
-PyPI'deki `supertag` adlı Python SDK'sı, uygulamanızı veya adaptörünüzü SuperTag'e bağlar:
-
-```sh
-npm install supertag-ai
-python -m pip install 'supertag==0.3.13'
-```
-
-[Kendi organizasyonunuzu oluşturun: pazarlama](../../docs/guides/build-your-own.md) · [Bir harness adaptörü yazın](../../docs/guides/harness-adapters.md) · [Kendi iş birliği yüzeyinizi bağlayın](../../docs/reference/connector-contract.md) · [API kararlılığını kontrol edin](../../docs/reference/api-stability.md)
-
 <a name="run-it-yourself"></a>
 
 ## Kendiniz çalıştırın
 
-SuperTag, Apache 2.0 lisanslı açık kaynak bir projedir ve ister birlikte gelen Tag'leri kullanın
-ister kendinizinkini oluşturun, her parçası sizin seçtiğiniz yerde çalışır. Bir iş kodunuza, servislerinize ve hesaplarınıza erişim gerektirir; bu erişimin nerede
-duracağına da siz karar verirsiniz.
+`supertag init` az önce tüm altyapıyı makinenizde başlattı. Bu altyapı Apache 2.0 lisanslı açık
+kaynaktır ve her parçası sizin seçtiğiniz yerde çalışır. Bir iş kodunuza, servislerinize ve
+hesaplarınıza erişim gerektirir; bu erişimin nerede duracağına da siz karar verirsiniz. Tek bir
+makinede tek başınıza başlayın, sonra ekibinizle tek bir Control Plane paylaşın; parçalar aynı
+kalır.
 
 ![İstemciler ve iş birliği araçları Control Plane'e Gateway üzerinden ulaşır. Control Plane, Tag'leri ve izinleri SQLite veya PostgreSQL'de saklar ve işi zamanlar. Her Worker Host'ta bir Worklet, Control Plane'den Task'leri üstlenir ve her Task Attempt için bir Worker başlatır. Dizüstü bilgisayar Codex'i, sunucu ise Claude Code'u birer harness adaptörü üzerinden çalıştırır.](../../assets/images/supertag-architecture.tr.webp)
 
@@ -321,6 +286,32 @@ duracağına da siz karar verirsiniz.
 
 [SuperTag'i kendi altyapınızda barındırın](../../docs/guides/self-hosting.md) · [Bir Worker Host bağlayın](../../docs/guides/workers.md) · [İzinleri ve onayları ayarlayın](../../docs/concepts/context-and-permissions.md) · [Parçaların nasıl bir araya geldiğini görün](../../docs/concepts/how-it-works.md)
 
+<a name="build-your-own"></a>
+
+## Kendinizinkini oluşturun
+
+Yukarıdakilerin hiçbiri mühendisliğe özgü değildir. Aynı Control Plane ve Worker Host'lar; aynı
+Tag'ler, Role'ler, Team'ler, Objective'ler, izinler, bellek, zamanlamalar ve onaylar
+organizasyonunuzdaki her işlev için çalışır. İşlev için Role'leri, araçları ve olayları seçin; aynı
+altyapı onu çalıştırır: her sürümü lansman metnine dönüştüren ve her hafta rakamları raporlayan bir
+pazarlama organizasyonu ya da satış, müşteri desteği, finans operasyonları, işe alım veya araştırma.
+[Kendi organizasyonunuzu oluşturun: pazarlama](../../docs/guides/build-your-own.md) · [Pazarlama örneği](../../examples/marketing-org/)
+
+SuperTag, size ait bir ürünün de temelidir; örneğin Devin Bots, OpenAI dots veya Grok Bot'a kendi
+alternatifiniz. Üzerine kendi arayüzünüzü koyun: Control Plane'in gRPC API'si sayesinde
+uygulamanız Tag'ler oluşturup yönlendirebilir, onlara iş gönderebilir ve ilerlemelerini
+izleyebilir; depoda üretilmiş Go, TypeScript ve Python bağlamaları da bulunur. [API'yi keşfedin](../../docs/reference/control-plane-api.md)
+Altta başka bir ajan sistemi çalıştırmak için bir **harness adaptörü** yazın; yerleşik Python ve
+TypeScript adaptörleri çalışan örneklerdir. npm'deki `supertag-ai` adlı TypeScript SDK'sı ve
+PyPI'deki `supertag` adlı Python SDK'sı, uygulamanızı veya adaptörünüzü SuperTag'e bağlar:
+
+```sh
+npm install supertag-ai
+python -m pip install 'supertag==0.3.13'
+```
+
+[Bir harness adaptörü yazın](../../docs/guides/harness-adapters.md) · [Kendi iş birliği yüzeyinizi bağlayın](../../docs/reference/connector-contract.md) · [API kararlılığını kontrol edin](../../docs/reference/api-stability.md)
+
 ## Birlikte çalıştığı araçlar
 
 | | Seçenekler |
@@ -334,7 +325,8 @@ duracağına da siz karar verirsiniz.
 | Karşılaştırılan | Güçlü yanı | Eksik olan | SuperTag ne katar |
 | --- | --- | --- | --- |
 | **Barındırılan yapay zekâ ekip arkadaşları** · [Devin Bots](https://devin.ai/blog/introducing-devin-bots), [OpenAI dots](https://openai.com/index/introducing-dots/), [Grok Bot](https://x.ai/news/introducing-grok-bot) | Her zaman ulaşılabilen, geçmiş işleri hatırlayan ve kendiliğinden harekete geçen bir yapay zekâ yardımcısı. | Şirketin modellerinde ve bulut bilgisayarlarında, şirketin kurallarıyla çalışır. | **Kendiniz çalıştırın ya da kendinizinkini oluşturun.** Tag'ler zaten parasını ödediğiniz kodlama ajanlarını kullanır, kendi makinelerinizde çalışır ve yalnızca izin verdiğinizi yapabilir. İsterseniz aynı altyapı üzerinde kendi sürümünüzü oluşturun. |
-| **Kendi altyapınızda barındırılan ajanlar** · [OpenClaw](https://docs.openclaw.ai/concepts/multi-agent), [Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban) | Kendi araçları ve belleği olan yapay zekâ ajanlarınızı her türlü görev için kendiniz çalıştırmak. | Genel amaçlı asistanlardır. Kodlama ajanlarınızın, kod incelemesinin veya mühendislik işinin bittiğini doğrulamanın etrafında kurulmamışlardır. | **Mühendislik işi için tasarlandı, üzerine geliştirmeye açık.** Tag'ler Claude Code, Codex, Cursor veya OpenCode üzerinde çalışır. Kod değişiklikleri incelemeniz için dal olarak gelir ve her sonucun bittiğini doğrulamanın bir yolu vardır. |
+| **Kendi altyapınızda barındırılan ajanlar** · [OpenClaw](https://docs.openclaw.ai/concepts/multi-agent), [Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban) | Kendi araçları ve belleği olan yapay zekâ ajanlarınızı her türlü görev için kendiniz çalıştırmak. | Kişisel asistanlardır. Rolleri, ortak sonuçları, incelemeleri ve onayları olan ekipler etrafında kurulmamışlardır. | **Ekipler ve organizasyonlar için tasarlandı.** Tag'lerin Role'leri vardır, Team'lerde çalışırlar, kanıtıyla gelen sonuçların sahibidirler ve yalnızca belirlediğiniz izinler ve onaylar çerçevesinde hareket ederler. |
+| **Ajan platformları** · [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview), [OpenAI Agents API](https://developers.openai.com/api/docs/guides/agents-api/overview) | Oluşturduğunuz ajanları, barındırılan oturumlar ve sandbox'larla yönetilen bir hizmet olarak çalıştırmak. | Her biri tek bir şirketin modellerini çalıştırır; ajan döngüsü de o şirketin sunucularındadır. Kimliği, ekipleri ve sorumlulukları yine kendiniz tasarlarsınız. | **Açık ve hiçbir sağlayıcıya bağlı değil.** SuperTag sizin makinelerinizde Claude Code, Codex, Cursor ve OpenCode üzerinde çalışır; size yapılandırmaya hazır aktörler, Role'ler, Team'ler ve sonuçlar sunar. |
 | **Kodlama ajanları** · [Claude Code](https://code.claude.com/docs/en/overview), [Codex](https://learn.chatgpt.com/docs/codex/cli), [OpenCode](https://opencode.ai/docs/) | Siz onlarla çalışırken kod yazmak, düzeltmek ve test etmek. | Sohbeti kapattığınızda iş durur. Hedefi hatırlamak ve sonraki adımı başlatmak size kalır. | **İş devam eder.** Tag hedefi hatırlar ve sonraki adıma bir kodlama ajanını kendisi koyar. Yeni hatalara ve alarmlara da siz istemeden karşılık verir. Kodu yine kodlama ajanlarınız yazar. |
 | **Paralel ajan araçları** · [Paradev (eski adıyla Superset)](https://docs.paradev.com/recipes/parallel-workstreams), [Conductor](https://www.conductor.build/docs/concepts/parallel-agents) ([kapanıyor](https://www.conductor.build/announcement)) | Birkaç kodlama ajanını aynı anda çalıştırmak ve tüm değişiklikleri size göstermek. | Her ajanın ne üzerinde çalışacağına yine siz karar verir, sonuçların birbirine uyduğunu yine siz kontrol edersiniz. | **Ajanları başkası yönetir.** Bir Tag'e ne yapılmasını istediğinizi ve bunun nasıl doğrulanacağını söyleyin. Parçaları dağıtır, birbirine uyduklarını kontrol eder ve sonuçları size gönderir. |
 | **Ajan projeleri** · [Cursor Projects](https://cursor.com/docs/agent/projects), [Claude Code Projects](https://code.claude.com/docs/en/claude-projects), [GitHub Copilot Projects](https://docs.github.com/en/copilot/how-tos/github-copilot-app/working-with-projects) | Birkaç ajanın haftalar veya aylar boyunca tek bir hedef için çalışması. Cursor'da ekip arkadaşları aynı projeye katılabilir. | Her proje tek bir şirketin ajanlarını, çoğunlukla da o şirketin bulutunda çalıştırır. | **Kodlama ajanlarını ve makineleri karıştırın.** Sizin Tag'iniz dizüstü bilgisayarınızda Claude Code ile, ekip arkadaşınızınki kendi bilgisayarında Codex ile çalışabilir ve yine de birlikte çalışırlar. |

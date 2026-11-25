@@ -1,7 +1,7 @@
 # Direct work with the CLI
 
 The `supertag` command sets up this machine, runs SuperTag's services, and directs the work of
-your Tags, the persistent AI actors with their own identities, responsibilities, permissions, and work histories. This page is
+your Tags, the persistent, proactive, multiplayer AI actors with their own identities, responsibilities, permissions, and work histories. This page is
 a tour by task. Every command and flag is listed in the [CLI reference](../reference/cli.md).
 
 Terms used here: the **Control Plane** stores your organization and schedules its work. A

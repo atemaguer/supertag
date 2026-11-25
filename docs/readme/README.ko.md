@@ -7,13 +7,14 @@
 
 [English](../../README.md) · [中文](README.zh-CN.md) · [日本語](README.ja.md) · 한국어 · [Español](README.es.md) · [Français](README.fr.md) · [Português](README.pt.md) · [Türkçe](README.tr.md) · [Русский](README.ru.md)
 
-**엔지니어링 업무를 위한, 지속적이고 능동적인 멀티플레이어 AI 액터.**
+**지속적이고 능동적인 멀티플레이어 AI 액터를 위한 오픈 인프라.**
 
-오픈 소스이며 셀프 호스팅 방식으로, 이미 쓰고 있는 코딩 에이전트 위에서 동작합니다.
+엔지니어링, 마케팅, 영업, 어떤 팀을 위해서든 여러분만의 Devin Bots, OpenAI dots, Grok Bot을 운영하세요. 셀프
+호스팅 방식으로, 이미 쓰고 있는 코딩 에이전트 위에서 동작합니다.
 
 **작업이 아니라 직무를 맡기세요.**
 
-[작업이 아닌 직무](#give-them-jobs-not-tasks) · [지속성](#persistent) · [능동성](#proactive) · [멀티플레이어](#multiplayer) · [배포 하나로 운영할 수 있는 것](#what-a-deployment-can-run) · [첫 Tag 실행하기](#run-your-first-tag) · [직접 만들기](#build-your-own) · [직접 운영하기](#run-it-yourself) · [문서](../../docs/README.md)
+[작업이 아닌 직무](#give-them-jobs-not-tasks) · [지속성](#persistent) · [능동성](#proactive) · [멀티플레이어](#multiplayer) · [엔지니어링 조직](#an-engineering-organization) · [첫 Tag 실행하기](#run-your-first-tag) · [직접 운영하기](#run-it-yourself) · [직접 만들기](#build-your-own) · [문서](../../docs/README.md)
 
 <p>
   <img src="../../assets/images/supertag-meet-the-tags.ko.webp" alt="Tag들을 소개합니다 — 둥글거나 길쭉한 체형에 알록달록한 재킷, 모자, 안경을 걸친 아홉 SuperTag 마스코트" width="900" height="360">
@@ -21,24 +22,32 @@
 
 </div>
 
-**Tag**는 고유한 정체성, 책임, 권한, 작업 이력을 가진 지속적인 AI 액터입니다. Tag에게 직무를 맡기면
-Claude Code, Codex, Cursor, OpenCode 같은 여러분의 코딩 에이전트가 그 일을 한 번에 한 조각씩
-처리합니다. 그 조각들 사이에서 유지되는 것이 Tag입니다. Tag는 일을 이어 가고, 시키지 않아도 움직이며,
-팀 동료의 Tag와 함께 일합니다.
+SuperTag는 상시 가동되는 AI 에이전트를 위한 오픈 인프라입니다. SuperTag는 그 하나하나를 **Tag**라고 부릅니다.
+Tag는 고유한 정체성, 책임, 권한, 작업 이력을 가진, 지속적이고 능동적인 멀티플레이어 AI 액터입니다. 세션과 세션
+사이에도 일을 이어 가고, 시키지 않아도 움직이며, 여러분의 팀 그리고 다른 Tag와 함께 일합니다. Tag에게 직무를
+맡기면 Claude Code, Codex, Cursor, OpenCode가 그 일을 한 번에 한 조각씩 처리합니다. 그 조각들 사이에서
+유지되는 것이 Tag입니다.
 
-SuperTag는 두 가지를 제공합니다.
+그 위에서 운영할 수 있는 것은 다음과 같습니다.
 
-- **바로 쓸 수 있는 엔지니어링 업무용 AI 팀원.** Devin Bots, OpenAI dots, Grok Bot이 제공하는 것, 즉
-  항상 대기하고, 지난 작업을 기억하고, 시키지 않아도 움직이며, 팀과 함께 일하는 팀원입니다. Tag는
-  여러분의 코딩 에이전트와 머신에서 실행되며, 여러분이 허용한 일만 합니다.
-- **직접 만들기 위한 기반.** 같은 능력을 여러분이 운영하고 통제하는 인프라로 제공하므로, 여러분만의
-  제품에, 또는 마케팅이나 영업 같은 다른 부서에 쓸 수 있습니다. [직접 만들기](#build-your-own)를 참고하세요.
+- **바로 쓸 수 있는 엔지니어링.** 명령 하나로 Tag가 여러분의 저장소에서 일을 시작하고, 같은 설정이 엔지니어링
+  조직 전체로 자라납니다.
+  [첫 Tag 실행하기](#run-your-first-tag) · [엔지니어링 조직 예제](../../examples/engineering-org/)
+- **마케팅, 영업, 지원, 그 밖의 모든 부서.** 그 부서에 맞는 Role, 도구, 이벤트를 고르면 같은 인프라가 그 부서를
+  운영합니다.
+  [마케팅 조직 만들기](../../docs/guides/build-your-own.md) · [마케팅 예제](../../examples/marketing-org/)
+- **여러분만의 제품.** SuperTag의 API 위에 Devin Bots, OpenAI dots, Grok Bot을 대신할 여러분만의 제품을
+  만드세요. [직접 만들기](#build-your-own)
+
+이 페이지는 엔지니어링이라는 한 가지 예를 따라, 아이디어에서 실제로 돌아가는 조직까지 살펴봅니다. Tag가 무엇을
+위한 것인지, 인프라가 Tag에 무엇을 주는지, Tag 하나로 어떻게 시작하는지, 그리고 어떻게 운영되는지를 다룬 뒤,
+마지막으로 직접 만드는 방법을 소개합니다.
 
 <a name="give-them-jobs-not-tasks"></a>
 
 ## 작업이 아니라 직무를 맡기세요
 
-이것이 SuperTag가 기본으로 하는 일입니다.
+SuperTag는 하나의 생각을 위해 존재합니다. AI 액터는 작업만 받는 것이 아니라 직무를 맡아야 한다는 생각입니다.
 
 지금은 코딩 에이전트에게 작업을 줍니다. 프롬프트, diff, 리뷰, 그리고 다음 프롬프트로 이어지는 식입니다.
 에이전트는 버그를 조사하고 수정 코드를 작성하고 테스트를 실행할 수 있습니다. 하지만 지난번에 무슨 일이
@@ -73,8 +82,9 @@ Tag마다 고유한 직무와 권한을 주세요. 예를 들어 `lead`에게는
 
 ## 직무에 필요한 것
 
-직무는 세션 하나보다 오래 이어지고, 아직 아무도 요청하지 않은 일까지 포함하며, 다른 사람들과 얽혀 있습니다.
-Tag는 이 세 가지 모두를 위해 만들어졌습니다.
+직무를 맡으려면 Tag를 실행하는 쪽이 세 가지를 갖춰야 합니다. 직무는 세션 하나보다 오래 이어지고, 아직 아무도
+요청하지 않은 일까지 포함하며, 다른 사람들과 얽혀 있습니다. 직무가 무엇이든, 이 세 가지를 SuperTag의 인프라가
+제공합니다.
 
 <a name="persistent"></a>
 
@@ -139,9 +149,9 @@ API로 알림과 보고를 Objective에 전달하거나, Slack, GitHub, Linear�
 
 [멀티플레이어의 동작 방식](../../docs/concepts/multiplayer.md) · [SuperTag 셀프 호스팅하기](../../docs/guides/self-hosting.md)
 
-<a name="what-a-deployment-can-run"></a>
+<a name="an-engineering-organization"></a>
 
-## 배포 하나로 운영할 수 있는 것
+## 엔지니어링 조직
 
 지속성, 능동적인 작업, 팀워크를 한데 모으면, 셀프 호스팅한 SuperTag 하나로 자율적인 엔지니어링 조직을
 운영할 수 있습니다. 이 조직은 자체 부서, 팀, 책임을 갖추고 있으며, 여러분은 그 수장으로서 조직을
@@ -180,6 +190,9 @@ SuperTag는 모든 Tag를 계속 실행하고, 각 Role의 한계를 지키게 �
 <a name="run-your-first-tag"></a>
 
 ## 첫 Tag 실행하기
+
+그런 조직도 Tag 하나에서 시작합니다. 인프라가 동작하는 모습을 가장 빨리 보려면 여러분의 머신에서, 여러분의
+저장소에 Tag 하나를 실행해 보세요.
 
 Mac이나 Linux에 Git과 [Claude Code](https://code.claude.com/docs/en/setup)
 또는 [Codex](https://developers.openai.com/codex/cli/)를 설치하고 로그인하세요. Claude Code는
@@ -231,58 +244,14 @@ supertag objective review OBJECTIVE_ID request-changes --feedback "Also cover th
 
 [설치 옵션](../../docs/operations/install.md) · [Tag와 대화하기](../../docs/guides/talk-to-a-tag.md) · [첫 Team 실행하기](../../docs/guides/first-team.md) · [코딩 에이전트에서 SuperTag 다루기](../../docs/guides/coding-agent-operator.md)
 
-<a name="build-your-own"></a>
-
-## 직접 만들기
-
-이 중 어느 것도 엔지니어링에만 해당하지 않습니다. Tag, Role, Team, Objective, 권한, 메모리, 일정, 승인은
-조직의 어떤 부서에도 쓸 수 있습니다. 그 부서에 맞는 Role, 도구, 이벤트를 고르면 같은 인프라가 그 부서를
-운영합니다.
-
-마케팅을 이런 방식으로 운영하고 싶다고 해 봅시다.
-
-```text
-you (head of marketing)
- └─ marketing-lead         owns campaign outcomes, reports weekly with the numbers
-     ├─ content             drafts posts, docs pages, and release notes in your voice
-     ├─ product-marketing   turns each release from engineering into launch copy
-     ├─ growth              reads traffic and signup numbers, proposes and tracks experiments
-     ├─ social              drafts launch posts, publishes only when you approve
-     └─ research            watches competitors and customer conversations, briefs the team
-```
-
-- **부서마다 Role.** 각 Role에는 그 부서의 어조, 브랜드 규칙, 내세워도 되는 주장이 담깁니다. 여러분의
-  승인 없이는 아무것도 게시되지 않고, 돈도 쓰이지 않습니다.
-- **리뷰를 위해 돌아오는 작업.** 콘텐츠는 코드와 마찬가지로 웹사이트나 문서 저장소의 브랜치로 도착합니다.
-- **끝나지 않는 책임.** 수치를 담은 주간 보고서, 경쟁사에 대한 꾸준한 관찰, 릴리스마다 준비하는 출시 문구.
-- **여러분의 시스템에서 오는 이벤트.** 릴리스, 분석 데이터, 고객 대화가 일어나는 즉시 알맞은 Tag에
-  전달됩니다.
-- **부서를 아우르는 하나의 조직.** 엔지니어링의 릴리스 매니저가 릴리스를 내보내면, 같은 Control Plane
-  위에서 프로덕트 마케팅에 직접 알립니다.
-
-같은 구성 요소로 영업, 고객 지원, 재무 운영, 채용, 리서치도 운영할 수 있습니다.
-
-더 나아가려면 그 위에 여러분만의 인터페이스를 얹으세요. Control Plane의 gRPC API를 쓰면
-애플리케이션에서 Tag를 만들고 지시하고, 일을 보내고, 진행 상황을 살펴볼 수 있으며, 생성된 Go,
-TypeScript, Python 바인딩이 저장소에 포함되어 있습니다. [API 살펴보기](../../docs/reference/control-plane-api.md)
-그 아래에서 다른 에이전트 시스템을 실행하려면 **harness 어댑터**를 작성하세요. 기본 제공되는 Python 및
-TypeScript 어댑터가 실제 동작 예제입니다. TypeScript SDK(npm의 `supertag-ai`)와 Python SDK(PyPI의
-`supertag`)는 여러분의 애플리케이션이나 어댑터를 SuperTag에 연결합니다.
-
-```sh
-npm install supertag-ai
-python -m pip install 'supertag==0.3.13'
-```
-
-[직접 조직 만들기: 마케팅](../../docs/guides/build-your-own.md) · [harness 어댑터 작성하기](../../docs/guides/harness-adapters.md) · [자체 협업 서피스 연결하기](../../docs/reference/connector-contract.md) · [API 안정성 확인하기](../../docs/reference/api-stability.md)
-
 <a name="run-it-yourself"></a>
 
 ## 직접 운영하기
 
-SuperTag는 Apache 2.0 라이선스의 오픈 소스이며, 기본 제공되는 Tag를 쓰든 직접 만들든 모든 구성 요소가
-여러분이 고른 곳에서 실행됩니다. 직무에는 여러분의 코드, 서비스, 계정에 대한 접근 권한이 필요하므로, 그
-권한을 어디에 둘지는 여러분이 결정합니다.
+방금 `supertag init`이 여러분의 머신에서 인프라 전체를 시작했습니다. SuperTag는 Apache 2.0 라이선스의 오픈
+소스이며, 모든 구성 요소가 여러분이 고른 곳에서 실행됩니다. 직무에는 여러분의 코드, 서비스, 계정에 대한 접근
+권한이 필요하므로, 그 권한을 어디에 둘지는 여러분이 결정합니다. 머신 한 대에서 혼자 시작한 다음 Control Plane
+하나를 팀과 공유하세요. 구성 요소는 같습니다.
 
 ![클라이언트와 협업 도구는 Gateway를 거쳐 Control Plane에 연결됩니다. Control Plane은 Tag와 권한을 SQLite 또는 PostgreSQL에 저장하고 작업을 스케줄링합니다. 각 Worker Host에서는 Worklet이 Control Plane에서 Task를 가져와 Task Attempt마다 Worker를 시작합니다. 노트북은 Codex를, 서버는 Claude Code를 각각 harness 어댑터를 통해 실행합니다.](../../assets/images/supertag-architecture.ko.webp)
 
@@ -301,6 +270,31 @@ SuperTag는 Apache 2.0 라이선스의 오픈 소스이며, 기본 제공되는 
 
 [SuperTag 셀프 호스팅하기](../../docs/guides/self-hosting.md) · [Worker Host 연결하기](../../docs/guides/workers.md) · [권한과 승인 설정하기](../../docs/concepts/context-and-permissions.md) · [구성 요소가 맞물리는 방식 보기](../../docs/concepts/how-it-works.md)
 
+<a name="build-your-own"></a>
+
+## 직접 만들기
+
+위의 어느 것도 엔지니어링에만 해당하지 않습니다. 같은 Control Plane과 Worker Host, 그리고 같은 Tag, Role,
+Team, Objective, 권한, 메모리, 일정, 승인은 조직의 어떤 부서에도 쓸 수 있습니다. 그 부서에 맞는 Role, 도구,
+이벤트를 고르면 같은 인프라가 그 부서를 운영합니다. 릴리스마다 출시 문구를 만들고 매주 수치를 보고하는 마케팅
+조직도, 영업, 고객 지원, 재무 운영, 채용, 리서치도 마찬가지입니다.
+[직접 조직 만들기: 마케팅](../../docs/guides/build-your-own.md) · [마케팅 예제](../../examples/marketing-org/)
+
+SuperTag는 Devin Bots, OpenAI dots, Grok Bot을 대신할 제품처럼 여러분만의 제품을 위한 기반이 될 수도 있습니다.
+그 위에 여러분만의 인터페이스를 얹으세요. Control Plane의 gRPC API를 쓰면 애플리케이션에서 Tag를 만들고
+지시하고, 일을 보내고, 진행 상황을 살펴볼 수 있으며, 생성된 Go, TypeScript, Python 바인딩이 저장소에 포함되어
+있습니다. [API 살펴보기](../../docs/reference/control-plane-api.md)
+그 아래에서 다른 에이전트 시스템을 실행하려면 **harness 어댑터**를 작성하세요. 기본 제공되는 Python 및
+TypeScript 어댑터가 실제 동작 예제입니다. TypeScript SDK(npm의 `supertag-ai`)와 Python SDK(PyPI의
+`supertag`)는 여러분의 애플리케이션이나 어댑터를 SuperTag에 연결합니다.
+
+```sh
+npm install supertag-ai
+python -m pip install 'supertag==0.3.13'
+```
+
+[harness 어댑터 작성하기](../../docs/guides/harness-adapters.md) · [자체 협업 서피스 연결하기](../../docs/reference/connector-contract.md) · [API 안정성 확인하기](../../docs/reference/api-stability.md)
+
 ## 함께 쓸 수 있는 도구
 
 | | 선택지 |
@@ -314,7 +308,8 @@ SuperTag는 Apache 2.0 라이선스의 오픈 소스이며, 기본 제공되는 
 | 비교 대상 | 잘하는 것 | 부족한 것 | SuperTag가 더하는 것 |
 | --- | --- | --- | --- |
 | **호스팅형 AI 팀원** · [Devin Bots](https://devin.ai/blog/introducing-devin-bots), [OpenAI dots](https://openai.com/index/introducing-dots/), [Grok Bot](https://x.ai/news/introducing-grok-bot) | 항상 대기하고, 지난 작업을 기억하며, 스스로 움직이는 AI 도우미입니다. | 제공 회사의 모델과 클라우드 컴퓨터에서, 그 회사의 규칙에 따라 실행됩니다. | **직접 운영하거나, 직접 만드세요.** Tag는 이미 비용을 내고 있는 코딩 에이전트를 사용하고, 여러분의 머신에서 실행되며, 여러분이 허용한 일만 할 수 있습니다. 또는 같은 인프라 위에 여러분만의 버전을 만드세요. |
-| **셀프 호스팅 에이전트** · [OpenClaw](https://docs.openclaw.ai/concepts/multi-agent), [Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban) | 자체 도구와 메모리를 갖춘 AI 에이전트를 직접 운영하며, 어떤 종류의 작업에든 쓸 수 있습니다. | 범용 어시스턴트입니다. 여러분의 코딩 에이전트나 코드 리뷰, 엔지니어링 작업의 완료 여부 확인을 중심으로 만들어지지 않았습니다. | **엔지니어링 업무를 위해 만들었고, 그 위에 만들 수도 있습니다.** Tag는 Claude Code, Codex, Cursor, OpenCode에서 실행됩니다. 코드 변경은 리뷰할 수 있는 브랜치로 돌아오고, 성과마다 완료 여부를 확인할 방법이 함께 제공됩니다. |
+| **셀프 호스팅 에이전트** · [OpenClaw](https://docs.openclaw.ai/concepts/multi-agent), [Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban) | 자체 도구와 메모리를 갖춘 AI 에이전트를 직접 운영하며, 어떤 종류의 작업에든 쓸 수 있습니다. | 개인 비서입니다. 역할, 공동의 성과, 리뷰, 승인을 갖춘 팀을 중심으로 만들어지지 않았습니다. | **팀과 조직을 위해 만들었습니다.** Tag는 Role을 갖고, Team에서 일하며, 증거가 뒤따르는 성과를 맡고, 여러분이 정한 권한과 승인 범위 안에서만 움직입니다. |
+| **에이전트 플랫폼** · [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview), [OpenAI Agents API](https://developers.openai.com/api/docs/guides/agents-api/overview) | 직접 만든 에이전트를 호스팅된 세션과 샌드박스를 갖춘 관리형 서비스로 실행합니다. | 플랫폼마다 한 회사의 모델만 실행하고, 에이전트 루프도 그 회사의 서버에서 돕니다. 정체성, 팀, 책임은 여전히 직접 설계해야 합니다. | **개방적이며, 어느 한 벤더에도 묶이지 않습니다.** SuperTag는 여러분의 머신에서 Claude Code, Codex, Cursor, OpenCode를 아우르며 실행되고, 바로 구성할 수 있는 액터, Role, Team, 성과를 제공합니다. |
 | **코딩 에이전트** · [Claude Code](https://code.claude.com/docs/en/overview), [Codex](https://learn.chatgpt.com/docs/codex/cli), [OpenCode](https://opencode.ai/docs/) | 함께 작업하는 동안 코드를 작성하고, 고치고, 테스트합니다. | 채팅을 닫으면 일이 멈춥니다. 목표를 기억하고 다음 단계를 시작하는 것은 여러분 몫입니다. | **일이 계속 이어집니다.** Tag가 목표를 기억하고 다음 단계에 코딩 에이전트를 직접 투입합니다. 새 오류와 알림에도 요청 없이 대응합니다. 코드는 여전히 여러분의 코딩 에이전트가 작성합니다. |
 | **병렬 에이전트 도구** · [Paradev(구 Superset)](https://docs.paradev.com/recipes/parallel-workstreams), [Conductor](https://www.conductor.build/docs/concepts/parallel-agents) ([서비스 종료 예정](https://www.conductor.build/announcement)) | 여러 코딩 에이전트를 동시에 실행하고 모든 변경 사항을 보여 줍니다. | 에이전트마다 무슨 일을 할지 정하고 결과가 서로 맞물리는지 확인하는 것은 여전히 여러분입니다. | **에이전트 관리를 대신 맡습니다.** 원하는 결과와 확인 방법만 Tag에게 알려 주세요. Tag가 일을 나눠 맡기고, 서로 맞는지 확인한 뒤, 결과를 보내 줍니다. |
 | **에이전트 프로젝트** · [Cursor Projects](https://cursor.com/docs/agent/projects), [Claude Code Projects](https://code.claude.com/docs/en/claude-projects), [GitHub Copilot Projects](https://docs.github.com/en/copilot/how-tos/github-copilot-app/working-with-projects) | 여러 에이전트가 몇 주에서 몇 달에 걸쳐 하나의 목표를 향해 일합니다. Cursor에서는 팀원이 같은 프로젝트에 참여할 수 있습니다. | 프로젝트마다 한 회사의 에이전트만, 그것도 대부분 그 회사의 클라우드에서 실행됩니다. | **코딩 에이전트와 머신을 섞어 쓰세요.** 여러분의 Tag는 여러분 노트북의 Claude Code에서, 동료의 Tag는 동료 노트북의 Codex에서 실행되어도 함께 일할 수 있습니다. |

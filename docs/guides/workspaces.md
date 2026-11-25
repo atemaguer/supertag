@@ -1,6 +1,6 @@
 # Work in a repository with Workspaces
 
-Let Tags change a repository without touching your checkout. A **Tag** is a persistent AI actor
+Let Tags change a repository without touching your checkout. A **Tag** is a persistent, proactive, multiplayer AI actor
 with its own identity, responsibilities, permissions, and work history. A **Workspace** is a named repository its Tasks
 work in. Each **Task Attempt**, one execution of a Task, runs in its own checkout pinned to an
 exact commit, on a **Worker Host**, the machine that runs the work. Its changes come back as a

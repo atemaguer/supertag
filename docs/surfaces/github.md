@@ -1,6 +1,6 @@
 # Connect GitHub
 
-Connect GitHub repositories so a **Tag**, a persistent AI actor with its own identity, responsibilities, permissions, and
+Connect GitHub repositories so a **Tag**, a persistent, proactive, multiplayer AI actor with its own identity, responsibilities, permissions, and
 work history, replies when someone mentions it in an issue or pull request. For community or
 self-hosted use, start with a fine-grained token and a repository webhook. Use a GitHub App only
 when you need installation identity and manage its infrastructure.
