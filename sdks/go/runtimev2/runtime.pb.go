@@ -12715,6 +12715,8 @@ type PutTagRequest struct {
 	// How many Work Sessions the Tag may have open at once, across all its conversations and
 	// Objectives; from 1 to 1,024. Omitted keeps the current value; a new Tag gets 8.
 	MaxWorkSessions *uint32 `protobuf:"varint,6700,opt,name=max_work_sessions,json=maxWorkSessions,proto3,oneof" json:"max_work_sessions,omitempty"`
+	// Empty uses the Tag's harness; "any" lets an unnamed Work Session choose on first claim.
+	WorkSessionHarness *string `protobuf:"bytes,6702,opt,name=work_session_harness,json=workSessionHarness,proto3,oneof" json:"work_session_harness,omitempty"`
 	// Whether the Tag keeps memory: its harness's own memory, which the Worker Host keeps, and a
 	// daily review of its work. Omitted keeps the current value; a new Tag keeps memory.
 	Memory *bool `protobuf:"varint,6800,opt,name=memory,proto3,oneof" json:"memory,omitempty"`
@@ -12836,6 +12838,13 @@ func (x *PutTagRequest) GetMaxWorkSessions() uint32 {
 	return 0
 }
 
+func (x *PutTagRequest) GetWorkSessionHarness() string {
+	if x != nil && x.WorkSessionHarness != nil {
+		return *x.WorkSessionHarness
+	}
+	return ""
+}
+
 func (x *PutTagRequest) GetMemory() bool {
 	if x != nil && x.Memory != nil {
 		return *x.Memory
@@ -12934,7 +12943,8 @@ type Tag struct {
 	// How many Work Sessions the Tag may have open at once.
 	MaxWorkSessions uint32 `protobuf:"varint,6700,opt,name=max_work_sessions,json=maxWorkSessions,proto3" json:"max_work_sessions,omitempty"`
 	// How many Work Sessions the Tag has open now, when the Tag is read with GetTag or ListTags.
-	OpenWorkSessions uint32 `protobuf:"varint,6701,opt,name=open_work_sessions,json=openWorkSessions,proto3" json:"open_work_sessions,omitempty"`
+	OpenWorkSessions   uint32 `protobuf:"varint,6701,opt,name=open_work_sessions,json=openWorkSessions,proto3" json:"open_work_sessions,omitempty"`
+	WorkSessionHarness string `protobuf:"bytes,6702,opt,name=work_session_harness,json=workSessionHarness,proto3" json:"work_session_harness,omitempty"`
 	// Whether the Tag keeps memory (see PutTagRequest.memory).
 	Memory bool `protobuf:"varint,6800,opt,name=memory,proto3" json:"memory,omitempty"`
 	// When the Tag last queued a daily review of one of its memory stores.
@@ -13083,6 +13093,13 @@ func (x *Tag) GetOpenWorkSessions() uint32 {
 		return x.OpenWorkSessions
 	}
 	return 0
+}
+
+func (x *Tag) GetWorkSessionHarness() string {
+	if x != nil {
+		return x.WorkSessionHarness
+	}
+	return ""
 }
 
 func (x *Tag) GetMemory() bool {
@@ -28177,7 +28194,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"generation\x18\x02 \x01(\x04R\n" +
 	"generation\x12\x18\n" +
 	"\arevoked\x18\x03 \x01(\bR\arevoked\x12#\n" +
-	"\rdata_endpoint\x18\x04 \x01(\tR\fdataEndpoint\"\x8b\x06\n" +
+	"\rdata_endpoint\x18\x04 \x01(\tR\fdataEndpoint\"\xdc\x06\n" +
 	"\rPutTagRequest\x12\x15\n" +
 	"\x06tag_id\x18\x01 \x01(\tR\x05tagId\x12\"\n" +
 	"\finstructions\x18\x02 \x01(\tR\finstructions\x12'\n" +
@@ -28189,21 +28206,23 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x04name\x18\b \x01(\tH\x00R\x04name\x88\x01\x01\x120\n" +
 	"\x11expected_revision\x18\t \x01(\x04H\x01R\x10expectedRevision\x88\x01\x01\x12\x18\n" +
 	"\x04lead\x18\xc83 \x01(\bH\x02R\x04lead\x88\x01\x01\x120\n" +
-	"\x11max_work_sessions\x18\xac4 \x01(\rH\x03R\x0fmaxWorkSessions\x88\x01\x01\x12\x1c\n" +
-	"\x06memory\x18\x905 \x01(\bH\x04R\x06memory\x88\x01\x01\x12C\n" +
+	"\x11max_work_sessions\x18\xac4 \x01(\rH\x03R\x0fmaxWorkSessions\x88\x01\x01\x126\n" +
+	"\x14work_session_harness\x18\xae4 \x01(\tH\x04R\x12workSessionHarness\x88\x01\x01\x12\x1c\n" +
+	"\x06memory\x18\x905 \x01(\bH\x05R\x06memory\x88\x01\x01\x12C\n" +
 	"\n" +
-	"start_rate\x18\xd86 \x01(\v2\x1e.supertag.runtime.v2.StartRateH\x05R\tstartRate\x88\x01\x01\x12\x1c\n" +
-	"\x06volume\x18\xbc7 \x01(\tH\x06R\x06volume\x88\x01\x01B\a\n" +
+	"start_rate\x18\xd86 \x01(\v2\x1e.supertag.runtime.v2.StartRateH\x06R\tstartRate\x88\x01\x01\x12\x1c\n" +
+	"\x06volume\x18\xbc7 \x01(\tH\aR\x06volume\x88\x01\x01B\a\n" +
 	"\x05_nameB\x14\n" +
 	"\x12_expected_revisionB\a\n" +
 	"\x05_leadB\x14\n" +
-	"\x12_max_work_sessionsB\t\n" +
+	"\x12_max_work_sessionsB\x17\n" +
+	"\x15_work_session_harnessB\t\n" +
 	"\a_memoryB\r\n" +
 	"\v_start_rateB\t\n" +
 	"\a_volume\":\n" +
 	"\tStartRate\x12\x16\n" +
 	"\x06starts\x18\x01 \x01(\rR\x06starts\x12\x15\n" +
-	"\x06per_ms\x18\x02 \x01(\x04R\x05perMs\"\xe5\b\n" +
+	"\x06per_ms\x18\x02 \x01(\x04R\x05perMs\"\x98\t\n" +
 	"\x03Tag\x12\x15\n" +
 	"\x06tag_id\x18\x01 \x01(\tR\x05tagId\x12\"\n" +
 	"\finstructions\x18\x02 \x01(\tR\finstructions\x12'\n" +
@@ -28220,7 +28239,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	" \x03(\tR\x06runsOn\x12\x13\n" +
 	"\x04lead\x18\xc83 \x01(\bR\x04lead\x12+\n" +
 	"\x11max_work_sessions\x18\xac4 \x01(\rR\x0fmaxWorkSessions\x12-\n" +
-	"\x12open_work_sessions\x18\xad4 \x01(\rR\x10openWorkSessions\x12\x17\n" +
+	"\x12open_work_sessions\x18\xad4 \x01(\rR\x10openWorkSessions\x121\n" +
+	"\x14work_session_harness\x18\xae4 \x01(\tR\x12workSessionHarness\x12\x17\n" +
 	"\x06memory\x18\x905 \x01(\bR\x06memory\x127\n" +
 	"\x15memory_reviewed_at_ms\x18\x915 \x01(\x03H\x01R\x12memoryReviewedAtMs\x88\x01\x01\x12D\n" +
 	"\tattention\x18\xf45 \x01(\v2%.supertag.runtime.v2.AttentionSummaryR\tattention\x12>\n" +

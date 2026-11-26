@@ -152,6 +152,7 @@ struct TagSpec {
     lead: Option<bool>,
     /// How many Work Sessions the Tag may have open at once. Omitted keeps the current value.
     max_work_sessions: Option<u32>,
+    work_session_harness: Option<String>,
     /// Whether the Tag keeps memory: notes and a daily review. Omitted keeps the current value.
     memory: Option<bool>,
     /// At most how many Task Attempts start per period. Omitted keeps the current value;

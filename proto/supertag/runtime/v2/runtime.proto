@@ -1840,6 +1840,8 @@ message PutTagRequest {
   // How many Work Sessions the Tag may have open at once, across all its conversations and
   // Objectives; from 1 to 1,024. Omitted keeps the current value; a new Tag gets 8.
   optional uint32 max_work_sessions = 6700;
+  // Empty uses the Tag's harness; "any" lets an unnamed Work Session choose on first claim.
+  optional string work_session_harness = 6702;
   // Whether the Tag keeps memory: its harness's own memory, which the Worker Host keeps, and a
   // daily review of its work. Omitted keeps the current value; a new Tag keeps memory.
   optional bool memory = 6800;
@@ -1882,6 +1884,7 @@ message Tag {
   uint32 max_work_sessions = 6700;
   // How many Work Sessions the Tag has open now, when the Tag is read with GetTag or ListTags.
   uint32 open_work_sessions = 6701;
+  string work_session_harness = 6702;
   // Whether the Tag keeps memory (see PutTagRequest.memory).
   bool memory = 6800;
   // When the Tag last queued a daily review of one of its memory stores.

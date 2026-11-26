@@ -281,6 +281,13 @@ continue one or close one. A work Session in a conversation the turn may not see
 its title. The `start_session` description says how many are open, such as "3 of 8", and so do
 `supertag get session`, `supertag get tag`, and the desktop app's conversation.
 
+A Tag can let its work Sessions use any harness offered by a bound Worker Host. Set
+`spec.workSessionHarness: any` in its manifest, or pass `--work-session-harness any` when
+configuring the Tag with `supertag tag put`. An unnamed work
+Session starts without a harness and takes the claiming host's harness on its first Task Attempt.
+Later turns keep that harness. A harness named when starting a work Session takes precedence.
+The empty setting runs unnamed work Sessions on the Tag's own harness.
+
 Set the limit, from 1 to 1,024, with `supertag tag put TAG --max-work-sessions N`, the
 `maxWorkSessions` field of a Tag manifest, or the New Tag form of the desktop app or the terminal
 UI.

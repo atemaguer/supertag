@@ -114,6 +114,75 @@ async fn submit(store: &Store, tag: &str, session: &str) -> Task {
         .unwrap()
 }
 
+async fn any_harness_contract(url: String) {
+    let store = Store::open(&url)
+        .await
+        .unwrap()
+        .with_execution_clock(|| NOW);
+    let codex = support::register_host(&store, "codex-host").await;
+    let claude = support::register_host(&store, "claude-host").await;
+    report(&store, &codex, &[HarnessKind::Codex]).await;
+    report(&store, &claude, &[HarnessKind::ClaudeCode]).await;
+    put(&store, "lead", &["files:read"], HarnessKind::Codex)
+        .await
+        .unwrap();
+    let mut spec = PutTagRequest {
+        tag_id: "lead".into(),
+        instructions: "Fixture instructions".into(),
+        allowed_actions: vec!["files:read".into()],
+        harness_kind: HarnessKind::Codex as i32,
+        work_session_harness: Some("any".into()),
+        ..Default::default()
+    };
+    let tag = store.put_tag_spec(spec.clone()).await.unwrap();
+    assert_eq!(tag.work_session_harness, "any");
+    spec.work_session_harness = Some("cursor".into());
+    assert!(matches!(
+        store.put_tag_spec(spec).await,
+        Err(StoreError::InvalidArgument(reason)) if reason.contains("empty or 'any'")
+    ));
+    let parent = submit(&store, "lead", "parent").await;
+    let lead = claim(&store, &codex, HarnessKind::Codex).await.unwrap();
+    assert_eq!(lead.task_id, parent.task_id);
+    let started = store
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&codex, &lead),
+            &StartWorkSessionRequest {
+                harness: None,
+                ..start("any", "codex")
+            },
+        )
+        .await
+        .unwrap();
+    let child = store.get_task(&started.latest_task_id).await.unwrap();
+    assert_eq!(child.harness_kind(), HarnessKind::Unspecified);
+    let claimed = claim(&store, &claude, HarnessKind::ClaudeCode)
+        .await
+        .unwrap();
+    assert_eq!(claimed.task_id, child.task_id);
+    let pinned = store.get_task(&child.task_id).await.unwrap();
+    assert_eq!(pinned.harness_kind(), HarnessKind::ClaudeCode);
+    let explicit = store
+        .start_work_session(
+            &supertag_control_plane::AttemptAccess::new(&codex, &lead),
+            &start("explicit", "codex"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .get_task(&explicit.latest_task_id)
+            .await
+            .unwrap()
+            .harness_kind(),
+        HarnessKind::Codex
+    );
+    assert_eq!(
+        store.get_tag("lead").await.unwrap().harness_kind(),
+        HarnessKind::Codex
+    );
+}
+
 async fn contract(url: String) {
     let store = Store::open(&url)
         .await
@@ -340,4 +409,44 @@ async fn postgres_contract() {
         .unwrap();
     admin.close().await.unwrap();
     outcome.expect("PostgreSQL Work Session harness contract failed");
+}
+
+#[test]
+fn sqlite_any_work_session_harness() {
+    on_large_stack(|| async {
+        let directory = tempfile::tempdir().unwrap();
+        any_harness_contract(format!(
+            "sqlite://{}?mode=rwc",
+            directory.path().join("any.db").display()
+        ))
+        .await;
+    });
+}
+
+#[test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+fn postgres_any_work_session_harness() {
+    on_large_stack(|| async {
+        let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE").unwrap();
+        let admin_url = std::fs::read_to_string(path).unwrap();
+        let mut url = url::Url::parse(admin_url.trim()).unwrap();
+        let name = format!("supertag_rust_any_harness_{}", Uuid::new_v4().simple());
+        let mut admin = sqlx::PgConnection::connect(admin_url.trim()).await.unwrap();
+        admin
+            .execute(format!("CREATE DATABASE {name}").as_str())
+            .await
+            .unwrap();
+        url.set_path(&name);
+        let outcome = tokio::task::LocalSet::new()
+            .run_until(async move {
+                tokio::task::spawn_local(any_harness_contract(url.to_string())).await
+            })
+            .await;
+        admin
+            .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
+            .await
+            .unwrap();
+        admin.close().await.unwrap();
+        outcome.expect("PostgreSQL any harness contract failed");
+    });
 }

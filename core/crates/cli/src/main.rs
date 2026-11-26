@@ -2721,6 +2721,7 @@ fn tag_json(tag: &Tag) -> serde_json::Value {
         "name": tag.name,
         "lead": tag.lead,
         "max_work_sessions": tag.max_work_sessions,
+        "work_session_harness": tag.work_session_harness,
         "open_work_sessions": tag.open_work_sessions,
         "memory": tag.memory,
         "memory_reviewed_at_ms": tag.memory_reviewed_at_ms,

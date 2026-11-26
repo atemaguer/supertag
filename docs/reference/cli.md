@@ -3048,6 +3048,8 @@ Options:
           Make this the Control Plane's lead Tag, or with false, stop it being the lead. Omit to keep it as it is. At most one Tag is the lead [possible values: true, false]
       --max-work-sessions <MAX_WORK_SESSIONS>
           How many Work Sessions the Tag may have open at once, across all its conversations, from 1 to 1,024. Omit to keep it as it is; a new Tag gets 8
+      --work-session-harness <WORK_SESSION_HARNESS>
+          Harness for Work Sessions started without one: any, or empty to use the Tag harness [possible values: any, ""]
       --memory [<MEMORY>]
           Keep memory: notes the Tag writes and a daily review of its work. With false, the Tag keeps no notes and does not review. Omit to keep it as it is; a new Tag keeps memory [possible values: true, false]
       --start-rate <START_RATE>

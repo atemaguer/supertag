@@ -239,6 +239,7 @@ async fn put_tag(public: &str, credentials: &Credentials) -> Result<()> {
             expected_revision: None,
             lead: None,
             max_work_sessions: None,
+            work_session_harness: None,
             execution: None,
             approval_rules: vec![],
             tag_id: "builder".into(),

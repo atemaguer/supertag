@@ -86,6 +86,7 @@ pub(crate) fn tag_from_row(row: &AnyRow) -> Result<Tag> {
         runs_on: serde_json::from_str(&row.try_get::<String, _>("runs_on")?)?,
         lead: row.try_get::<i64, _>("lead")? != 0,
         max_work_sessions: row.try_get::<i64, _>("max_work_sessions")? as u32,
+        work_session_harness: row.try_get("work_session_harness")?,
         // Only Tag reads count them.
         open_work_sessions: row
             .try_get::<i64, _>("open_work_sessions")
@@ -186,6 +187,10 @@ impl Store {
             || input
                 .max_work_sessions
                 .is_some_and(|max| max != current.max_work_sessions)
+            || input
+                .work_session_harness
+                .as_ref()
+                .is_some_and(|value| value != &current.work_session_harness)
             || input.memory.is_some_and(|memory| memory != current.memory)
             || changes(
                 input.start_rate.is_some(),
@@ -209,6 +214,7 @@ impl Store {
         input.approval_rules = current.approval_rules;
         input.lead = Some(current.lead);
         input.max_work_sessions = Some(current.max_work_sessions);
+        input.work_session_harness = Some(current.work_session_harness);
         input.memory = Some(current.memory);
         input.start_rate = current.start_rate;
         input.volume = Some(current.volume);

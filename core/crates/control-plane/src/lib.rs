@@ -1193,6 +1193,7 @@ mod tests {
             allowed_actions: vec![],
             lead: None,
             max_work_sessions: None,
+            work_session_harness: None,
             memory: None,
             start_rate: None,
             volume: None,

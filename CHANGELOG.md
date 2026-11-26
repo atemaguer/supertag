@@ -11,6 +11,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- A Tag set with `workSessionHarness: any` (or `supertag tag put NAME --work-session-harness any`)
+  lets a Work Session that names no harness run on whichever harness first claims it, so helper
+  hosts with a different harness can take the Tag's Work Sessions. The Session keeps that harness
+  for its later turns.
 - A Worker Host enrolled with `--work-sessions-of` receives only minted GitHub App tokens for a
   remote Workspace, never a stored HTTPS token or SSH key: a contributor's machine never holds
   your long-lived git credentials.

@@ -497,7 +497,18 @@ impl Store {
         if !may_start_in(&mut tx, &parent).await? {
             return Err(StoreError::PermissionDenied);
         }
-        let harness = work_session_harness(&parent, input.harness.as_deref())?;
+        let mut harness = work_session_harness(&parent, input.harness.as_deref())?;
+        if input.harness.is_none() {
+            let setting: String = sqlx::query_scalar(
+                "SELECT work_session_harness FROM supertag_v2_tags WHERE tag_id=$1",
+            )
+            .bind(&parent.tag_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            if setting == "any" {
+                harness = Some(HarnessKind::Unspecified);
+            }
+        }
         let workspace = parent
             .workspace
             .as_ref()
@@ -547,6 +558,7 @@ impl Store {
             return Err(limit_refusal_in(&mut tx, &parent, open, max).await?);
         }
         if let Some(harness) = harness
+            && harness != HarnessKind::Unspecified
             && !crate::placement::bound_host_runs_in(&mut tx, &parent.tag_id, harness, now).await?
         {
             return Err(StoreError::FailedPrecondition(format!(
@@ -571,7 +583,7 @@ impl Store {
         crate::budget_pool::set_in(&mut tx, &mut child, allocation).await?;
         // Its permissions are checked against the harness's capabilities as for any Task; a
         // Work Session that names a harness is refused now instead of waiting forever.
-        if harness.is_some()
+        if harness.is_some_and(|harness| harness != HarnessKind::Unspecified)
             && let Some((_, reason)) = crate::placement::unsupported_by_harness(&child)
         {
             return Err(StoreError::FailedPrecondition(format!(

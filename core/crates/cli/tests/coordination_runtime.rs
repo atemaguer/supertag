@@ -232,10 +232,10 @@ async fn work_session_limits_show_and_an_operator_closes_one(database: String) -
         "--instructions",
         "Plan and delegate",
         "--max-work-sessions",
-        "65",
+        "1025",
     ]))
     .await?;
-    ensure!(!refused.status.success(), "65 is above the limit");
+    ensure!(!refused.status.success(), "1,025 is above the limit");
     json(cli(&[
         "task",
         "submit",

@@ -96,6 +96,9 @@ pub struct PutArgs {
     /// to 1,024. Omit to keep it as it is; a new Tag gets 8.
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..=1024))]
     max_work_sessions: Option<u32>,
+    /// Harness for Work Sessions started without one: any, or empty to use the Tag harness.
+    #[arg(long, value_parser = ["any", ""])]
+    work_session_harness: Option<String>,
     /// Keep memory: notes the Tag writes and a daily review of its work. With false, the Tag
     /// keeps no notes and does not review. Omit to keep it as it is; a new Tag keeps memory.
     #[arg(long, num_args = 0..=1, default_missing_value = "true")]
@@ -215,6 +218,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                 shared_execution_environment,
                 lead,
                 max_work_sessions,
+                work_session_harness,
                 memory,
                 start_rate,
                 volume,
@@ -265,6 +269,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                         expected_revision: None,
                         lead,
                         max_work_sessions,
+                        work_session_harness,
                         memory,
                         execution: (!models.is_empty()
                             || !efforts.is_empty()
@@ -288,6 +293,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                 "revision": tag.revision,
                 "lead": tag.lead,
                 "max_work_sessions": tag.max_work_sessions,
+                "work_session_harness": tag.work_session_harness,
                 "memory": tag.memory,
                 "start_rate": tag.start_rate.as_ref().map(start_rate_text),
                 "volume": (!tag.volume.is_empty()).then_some(&tag.volume),

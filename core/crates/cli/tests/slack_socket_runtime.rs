@@ -563,6 +563,7 @@ async fn put_builder(credentials: &Credentials, control_plane: &str) -> Result<(
             expected_revision: None,
             lead: None,
             max_work_sessions: None,
+            work_session_harness: None,
             execution: None,
             approval_rules: vec![],
             tag_id: "builder".into(),

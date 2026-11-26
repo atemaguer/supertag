@@ -592,6 +592,7 @@ impl<'a> System<'a> {
                     expected_revision: None,
                     lead: None,
                     max_work_sessions: None,
+                    work_session_harness: None,
                     approval_rules: vec![],
                     harness_kind: 0,
                     workspace: None,

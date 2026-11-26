@@ -1139,6 +1139,7 @@ impl<'a> Catalog<'a> {
             spec.execution.is_some(),
             spec.lead.is_some(),
             spec.max_work_sessions.is_some(),
+            spec.work_session_harness.is_some(),
             spec.memory.is_some(),
             spec.start_rate.is_some(),
             spec.volume.is_some(),
@@ -1168,6 +1169,7 @@ impl<'a> Catalog<'a> {
             expected_revision: Some(prior.as_ref().map_or(0, |tag| tag.revision)),
             lead: spec.lead,
             max_work_sessions: spec.max_work_sessions,
+            work_session_harness: spec.work_session_harness,
             memory: spec.memory,
             start_rate: spec
                 .start_rate
@@ -1440,6 +1442,16 @@ impl<'a> Catalog<'a> {
                 old.map(|v| work_session_limit(v.max_work_sessions)),
                 work_session_limit(value.max_work_sessions.unwrap_or(8)),
             ),
+            field(
+                "spec.workSessionHarness",
+                old.map(|v| v.work_session_harness.as_bytes().to_vec()),
+                value
+                    .work_session_harness
+                    .as_deref()
+                    .unwrap_or_default()
+                    .as_bytes()
+                    .to_vec(),
+            ),
             // Keeping memory is the unset value, which no manager owns.
             field(
                 "spec.memory",
@@ -1479,6 +1491,10 @@ impl<'a> Catalog<'a> {
                 && value
                     .max_work_sessions
                     .is_none_or(|max| max == old.max_work_sessions)
+                && value
+                    .work_session_harness
+                    .as_ref()
+                    .is_none_or(|setting| setting == &old.work_session_harness)
                 && value.memory.is_none_or(|memory| memory == old.memory)
                 && value.start_rate.as_ref().is_none_or(|rate| {
                     Some(rate).filter(|rate| rate.starts > 0) == old.start_rate.as_ref()
