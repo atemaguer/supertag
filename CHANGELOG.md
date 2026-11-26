@@ -9,6 +9,12 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Added
+
+- `supertag auth-key create NAME --role host --work-sessions-of lead` enrolls Worker Hosts that
+  run only the `lead` Tag's Work Sessions, never its conversations, inbox, Objectives, or reports,
+  so other people's machines can help a Tag without running it.
+
 ## [0.3.15] - 2026-11-25
 
 ### Added

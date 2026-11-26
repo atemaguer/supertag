@@ -206,6 +206,8 @@ An Objective's turn starts work with `start_session {title, instruction, harness
 - The work Session always runs on the owner Tag, with the Objective's conversation as its parent
   Session. Another Tag's work is that Tag's to take: [ask the Tag](#asking-the-tag), and its
   inbox turn messages the other Tag.
+- It runs on any Worker Host bound to the Tag, including hosts enrolled with a host Auth Key's
+  `--work-sessions-of TAG`, which run the Tag's work Sessions and nothing else of it.
 - The work Session works in the Workspace of the Task that started it. Edits go to that
   Session's one branch, and each later Task of the Session commits on top of them.
 - `harness` names a built-in harness for the work Session: `codex`, `claude-code`,

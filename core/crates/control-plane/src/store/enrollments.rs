@@ -101,6 +101,9 @@ impl Store {
         if role != Role::Host && (input.ephemeral || !input.labels.is_empty()) {
             return Err(invalid("only host Auth Keys are ephemeral or grant labels"));
         }
+        if role != Role::Host && !input.work_session_tag_ids.is_empty() {
+            return Err(invalid("only host Auth Keys run Tags' Work Sessions"));
+        }
         // A gateway key lists no Tags. Its optional `all_tags` lets the Gateway serve connector
         // accounts no Surface Account names, which admit work on any Tag.
         let tags_apply = role != Role::Gateway;
@@ -127,22 +130,38 @@ impl Store {
                     invalid("Auth Key lifetime is at most one hour, or 90 days for a reusable key")
                 })?,
         };
+        // A host key may run some Tags only for their Work Sessions, alone or beside Tags it
+        // runs in full; every Tag already includes each Tag's Work Sessions.
+        let work_only = !input.work_session_tag_ids.is_empty();
         if tags_apply
-            && (input.allowed_tag_ids.len() > 256
-                || input.all_tags != input.allowed_tag_ids.is_empty())
+            && (input.allowed_tag_ids.len() + input.work_session_tag_ids.len() > 256
+                || (input.all_tags && (work_only || !input.allowed_tag_ids.is_empty()))
+                || (!input.all_tags && !work_only && input.allowed_tag_ids.is_empty()))
         {
-            return Err(invalid("choose all Tags or supply 1–256 allowed Tag IDs"));
+            return Err(invalid(
+                "choose all Tags, or supply 1–256 Tag IDs to run in full or for their Work Sessions",
+            ));
         }
         let mut tags = input.allowed_tag_ids.clone();
-        for tag in &tags {
+        let mut work_tags = input.work_session_tag_ids.clone();
+        for tag in tags.iter().chain(&work_tags) {
             name("Tag ID", tag)?;
         }
         tags.sort_unstable();
         tags.dedup();
+        work_tags.sort_unstable();
+        work_tags.dedup();
+        if let Some(both) = work_tags.iter().find(|tag| tags.contains(tag)) {
+            return Err(invalid(&format!(
+                "Tag {both} is run in full or for its Work Sessions, not both"
+            )));
+        }
         let scope = serde_json::to_string(&tags)?;
+        let work_scope = serde_json::to_string(&work_tags)?;
         let fingerprint = fingerprint(&(
             (role.as_str(), &key, expires_in_ms, &tags, input.all_tags),
             (input.reusable, input.ephemeral, &labels, &input.name),
+            &work_tags,
         ))?;
         let (mut transaction, _) = self.write().await?;
         let prior = sqlx::query(
@@ -172,18 +191,18 @@ impl Store {
             ));
         }
         credential_unused_in(&mut transaction, &key).await?;
-        for tag in &tags {
+        for tag in tags.iter().chain(&work_tags) {
             crate::tags::require_active(&mut transaction, tag).await?;
         }
         let now = self.execution_now_ms();
         let expires_at_ms = now
             .checked_add(expires_in_ms)
             .ok_or_else(|| invalid("Auth Key expiry is out of range"))?;
-        let inserted = sqlx::query("INSERT INTO supertag_v2_auth_keys (key_digest,operator_principal,operation_id,request_digest,allowed_tag_ids,all_tags,expires_at_ms,reusable,ephemeral,labels,name,created_at_ms,role) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT DO NOTHING")
+        let inserted = sqlx::query("INSERT INTO supertag_v2_auth_keys (key_digest,operator_principal,operation_id,request_digest,allowed_tag_ids,all_tags,expires_at_ms,reusable,ephemeral,labels,name,created_at_ms,role,work_session_tag_ids) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT DO NOTHING")
             .bind(&key).bind(principal).bind(&input.operation_id).bind(fingerprint)
             .bind(scope).bind(i64::from(input.all_tags)).bind(expires_at_ms)
             .bind(i64::from(input.reusable)).bind(i64::from(input.ephemeral)).bind(serde_json::to_string(&labels)?)
-            .bind(&input.name).bind(now).bind(role.as_str())
+            .bind(&input.name).bind(now).bind(role.as_str()).bind(work_scope)
             .execute(&mut *transaction).await?;
         if inserted.rows_affected() != 1 {
             return Err(StoreError::Conflict(
@@ -363,7 +382,9 @@ impl Store {
         let all_tags = row.try_get::<i64, _>("all_tags")? == 1;
         let tags: Vec<String> =
             serde_json::from_str(&row.try_get::<String, _>("allowed_tag_ids")?)?;
-        for tag in &tags {
+        let work_tags: Vec<String> =
+            serde_json::from_str(&row.try_get::<String, _>("work_session_tag_ids")?)?;
+        for tag in tags.iter().chain(&work_tags) {
             match crate::tags::require_active(&mut transaction, tag).await {
                 Ok(()) => {}
                 Err(StoreError::NotFound(_) | StoreError::FailedPrecondition(_)) => {
@@ -424,6 +445,7 @@ impl Store {
                 &enrolled,
                 all_tags && user.is_none(),
                 &host_tags,
+                if user.is_none() { &work_tags } else { &[] },
                 row.try_get::<i64, _>("ephemeral")? == 1,
                 &row.try_get::<String, _>("labels")?,
                 now,
@@ -499,7 +521,8 @@ impl Store {
                     "Worker Host is enrolled with different credentials or scope".into(),
                 ));
             }
-            super::hosts::insert_host_in(&mut transaction, id, true, &[], false, "[]", now).await?;
+            super::hosts::insert_host_in(&mut transaction, id, true, &[], &[], false, "[]", now)
+                .await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -846,6 +869,9 @@ pub(super) fn auth_key_row(row: &AnyRow) -> Result<AuthKey> {
         expires_at_ms: row.try_get("expires_at_ms")?,
         allowed_tag_ids: serde_json::from_str(&row.try_get::<String, _>("allowed_tag_ids")?)?,
         all_tags: row.try_get::<i64, _>("all_tags")? == 1,
+        work_session_tag_ids: serde_json::from_str(
+            &row.try_get::<String, _>("work_session_tag_ids")?,
+        )?,
         reusable: row.try_get::<i64, _>("reusable")? == 1,
         ephemeral: row.try_get::<i64, _>("ephemeral")? == 1,
         labels: serde_json::from_str(&row.try_get::<String, _>("labels")?)?,

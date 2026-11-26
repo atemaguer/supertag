@@ -75,6 +75,15 @@ pub enum AuthKeyCommand {
         /// Host keys: a Tag the host may run. Repeat for more Tags.
         #[arg(long, conflicts_with = "all_tags")]
         tag: Vec<String>,
+        /// Host keys: a Tag whose Work Sessions the host runs, and nothing else of that Tag:
+        /// not its conversations, inbox, or Objectives. For a machine that helps a lead Tag
+        /// without running the lead. Repeat for more Tags.
+        #[arg(
+            long = "work-sessions-of",
+            value_name = "TAG",
+            conflicts_with = "all_tags"
+        )]
+        work_sessions_of: Vec<String>,
         /// Every Tag. On a gateway key, it lets the Gateway serve connector accounts that no
         /// Surface Account names, which admit work on any Tag, and deliver the admin operator's
         /// notifications.
@@ -113,6 +122,7 @@ pub async fn run(connection: Connection, command: AuthKeyCommand) -> Result<()> 
             labels,
             expires_in_seconds,
             tag,
+            work_sessions_of,
             all_tags,
         } => {
             anyhow::ensure!(
@@ -120,8 +130,15 @@ pub async fn run(connection: Connection, command: AuthKeyCommand) -> Result<()> 
                 "a gateway Auth Key takes no --tag; only --all-tags"
             );
             anyhow::ensure!(
-                role == KeyRole::Gateway || !tag.is_empty() || all_tags,
-                "choose --tag TAG (repeatable) or --all-tags"
+                role == KeyRole::Host || work_sessions_of.is_empty(),
+                "only a host Auth Key takes --work-sessions-of"
+            );
+            anyhow::ensure!(
+                role == KeyRole::Gateway
+                    || !tag.is_empty()
+                    || !work_sessions_of.is_empty()
+                    || all_tags,
+                "choose --tag TAG or --work-sessions-of TAG (repeatable), or --all-tags"
             );
             anyhow::ensure!(
                 role == KeyRole::Host || (!ephemeral && labels.is_empty()),
@@ -146,6 +163,7 @@ pub async fn run(connection: Connection, command: AuthKeyCommand) -> Result<()> 
                             })
                             .context("invalid Auth Key lifetime")?,
                         allowed_tag_ids: tag,
+                        work_session_tag_ids: work_sessions_of,
                         all_tags,
                     },
                     &token,
@@ -191,6 +209,7 @@ pub fn view(key: &AuthKey) -> Value {
         "labels": key.labels,
         "allowed_tag_ids": key.allowed_tag_ids,
         "all_tags": key.all_tags,
+        "work_session_tag_ids": key.work_session_tag_ids,
         "used": key.used,
         "revoked": key.revoked,
         "created_at_ms": key.created_at_ms,

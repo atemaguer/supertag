@@ -63,7 +63,14 @@ authentication. See [Identity and access](../reference/iam.md).
 An **Auth Key** enrolls Worker Hosts or Gateways, exactly one role, and never changes role. A
 one-time key enrolls one principal and lasts at most an hour; `--reusable` keys last up to 90
 days. `--tag` limits a host to the Tags it may run; `--all-tags` removes the limit. On a host key, `--label` gives every host that joins a placement label that a
-Tag's `runsOn` can select. Revoking an Auth Key stops further enrollment; principals that already
+Tag's `runsOn` can select. `--work-sessions-of TAG` lets a host run only that Tag's
+[Work Sessions](../reference/coordination.md#work-sessions), the parallel helpers a Tag's turn starts, and nothing else
+of the Tag: not its conversations, inbox, Objectives, or reports. Use it for a machine that helps
+a lead Tag without running the lead itself, such as a contributor's computer:
+
+```sh
+supertag auth-key create alice-helps --role host --work-sessions-of lead --gateway team
+``` Revoking an Auth Key stops further enrollment; principals that already
 joined stay enrolled.
 
 ```sh

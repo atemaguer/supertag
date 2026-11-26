@@ -671,6 +671,7 @@ async fn start_host_with(
             key_digest: Sha256::digest(secret.as_bytes()).to_vec(),
             expires_in_ms: 600_000,
             allowed_tag_ids: vec![tag.into()],
+            work_session_tag_ids: vec![],
             all_tags: false,
             reusable: false,
             ephemeral: false,

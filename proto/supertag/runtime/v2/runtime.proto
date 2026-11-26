@@ -1713,6 +1713,11 @@ message CreateAuthKeyRequest {
   // connector accounts no Surface Account names, which admit work on any Tag,
   // and deliver the admin operator's notifications.
   bool all_tags = 6;
+  // Host keys only: Tags whose Work Sessions its hosts run, and nothing else of those Tags:
+  // never their conversations, inbox, Objective Sessions, reports, or Schedule fires. For a
+  // contributed machine that helps a lead Tag without running the lead itself. None of them may
+  // also be in `allowed_tag_ids`.
+  repeated string work_session_tag_ids = 7;
   // A reusable key enrolls any number of principals; a one-time key enrolls one.
   // Each enrollee chooses its own name.
   bool reusable = 1400;
@@ -1735,6 +1740,8 @@ message AuthKey {
   int64 expires_at_ms = 2;
   repeated string allowed_tag_ids = 3;
   bool all_tags = 4;
+  // Host keys only: Tags whose Work Sessions alone its hosts run.
+  repeated string work_session_tag_ids = 5;
   bool reusable = 1400;
   bool ephemeral = 1401;
   repeated string labels = 1402;

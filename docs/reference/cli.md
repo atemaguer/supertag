@@ -2836,6 +2836,9 @@ Options:
       --tag <TAG>
           Host keys: a Tag the host may run. Repeat for more Tags
 
+      --work-sessions-of <TAG>
+          Host keys: a Tag whose Work Sessions the host runs, and nothing else of that Tag: not its conversations, inbox, or Objectives. For a machine that helps a lead Tag without running the lead. Repeat for more Tags
+
       --all-tags
           Every Tag. On a gateway key, it lets the Gateway serve connector accounts that no Surface Account names, which admit work on any Tag, and deliver the admin operator's notifications
 

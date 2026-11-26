@@ -12211,6 +12211,11 @@ type CreateAuthKeyRequest struct {
 	// connector accounts no Surface Account names, which admit work on any Tag,
 	// and deliver the admin operator's notifications.
 	AllTags bool `protobuf:"varint,6,opt,name=all_tags,json=allTags,proto3" json:"all_tags,omitempty"`
+	// Host keys only: Tags whose Work Sessions its hosts run, and nothing else of those Tags:
+	// never their conversations, inbox, Objective Sessions, reports, or Schedule fires. For a
+	// contributed machine that helps a lead Tag without running the lead itself. None of them may
+	// also be in `allowed_tag_ids`.
+	WorkSessionTagIds []string `protobuf:"bytes,7,rep,name=work_session_tag_ids,json=workSessionTagIds,proto3" json:"work_session_tag_ids,omitempty"`
 	// A reusable key enrolls any number of principals; a one-time key enrolls one.
 	// Each enrollee chooses its own name.
 	Reusable bool `protobuf:"varint,1400,opt,name=reusable,proto3" json:"reusable,omitempty"`
@@ -12295,6 +12300,13 @@ func (x *CreateAuthKeyRequest) GetAllTags() bool {
 	return false
 }
 
+func (x *CreateAuthKeyRequest) GetWorkSessionTagIds() []string {
+	if x != nil {
+		return x.WorkSessionTagIds
+	}
+	return nil
+}
+
 func (x *CreateAuthKeyRequest) GetReusable() bool {
 	if x != nil {
 		return x.Reusable
@@ -12335,9 +12347,11 @@ type AuthKey struct {
 	ExpiresAtMs   int64                  `protobuf:"varint,2,opt,name=expires_at_ms,json=expiresAtMs,proto3" json:"expires_at_ms,omitempty"`
 	AllowedTagIds []string               `protobuf:"bytes,3,rep,name=allowed_tag_ids,json=allowedTagIds,proto3" json:"allowed_tag_ids,omitempty"`
 	AllTags       bool                   `protobuf:"varint,4,opt,name=all_tags,json=allTags,proto3" json:"all_tags,omitempty"`
-	Reusable      bool                   `protobuf:"varint,1400,opt,name=reusable,proto3" json:"reusable,omitempty"`
-	Ephemeral     bool                   `protobuf:"varint,1401,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
-	Labels        []string               `protobuf:"bytes,1402,rep,name=labels,proto3" json:"labels,omitempty"`
+	// Host keys only: Tags whose Work Sessions alone its hosts run.
+	WorkSessionTagIds []string `protobuf:"bytes,5,rep,name=work_session_tag_ids,json=workSessionTagIds,proto3" json:"work_session_tag_ids,omitempty"`
+	Reusable          bool     `protobuf:"varint,1400,opt,name=reusable,proto3" json:"reusable,omitempty"`
+	Ephemeral         bool     `protobuf:"varint,1401,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
+	Labels            []string `protobuf:"bytes,1402,rep,name=labels,proto3" json:"labels,omitempty"`
 	// A revoked key enrolls no more hosts; hosts that joined keep their enrollment.
 	Revoked     bool   `protobuf:"varint,1404,opt,name=revoked,proto3" json:"revoked,omitempty"`
 	Name        string `protobuf:"bytes,3300,opt,name=name,proto3" json:"name,omitempty"`
@@ -12401,6 +12415,13 @@ func (x *AuthKey) GetAllTags() bool {
 		return x.AllTags
 	}
 	return false
+}
+
+func (x *AuthKey) GetWorkSessionTagIds() []string {
+	if x != nil {
+		return x.WorkSessionTagIds
+	}
+	return nil
 }
 
 func (x *AuthKey) GetReusable() bool {
@@ -27997,14 +28018,15 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\areceipt\x18\x02 \x01(\x0e2%.supertag.runtime.v2.LiveInputReceiptR\areceipt\"\x7f\n" +
 	"\x12SettleInputRequest\x12\x19\n" +
 	"\binput_id\x18\x02 \x01(\tR\ainputId\x12?\n" +
-	"\areceipt\x18\x03 \x01(\x0e2%.supertag.runtime.v2.LiveInputReceiptR\areceiptJ\x04\b\x01\x10\x02R\aattempt\"\xe8\x02\n" +
+	"\areceipt\x18\x03 \x01(\x0e2%.supertag.runtime.v2.LiveInputReceiptR\areceiptJ\x04\b\x01\x10\x02R\aattempt\"\x99\x03\n" +
 	"\x14CreateAuthKeyRequest\x12!\n" +
 	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12\x1d\n" +
 	"\n" +
 	"key_digest\x18\x03 \x01(\fR\tkeyDigest\x12\"\n" +
 	"\rexpires_in_ms\x18\x04 \x01(\x04R\vexpiresInMs\x12&\n" +
 	"\x0fallowed_tag_ids\x18\x05 \x03(\tR\rallowedTagIds\x12\x19\n" +
-	"\ball_tags\x18\x06 \x01(\bR\aallTags\x12\x1b\n" +
+	"\ball_tags\x18\x06 \x01(\bR\aallTags\x12/\n" +
+	"\x14work_session_tag_ids\x18\a \x03(\tR\x11workSessionTagIds\x12\x1b\n" +
 	"\breusable\x18\xf8\n" +
 	" \x01(\bR\breusable\x12\x1d\n" +
 	"\tephemeral\x18\xf9\n" +
@@ -28012,11 +28034,12 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x06labels\x18\xfa\n" +
 	" \x03(\tR\x06labels\x12\x13\n" +
 	"\x04name\x18\xe4\x19 \x01(\tR\x04name\x127\n" +
-	"\x04role\x18\x84  \x01(\x0e2\".supertag.runtime.v2.PrincipalRoleR\x04roleJ\x04\b\x01\x10\x02\"\x8b\x03\n" +
+	"\x04role\x18\x84  \x01(\x0e2\".supertag.runtime.v2.PrincipalRoleR\x04roleJ\x04\b\x01\x10\x02\"\xbc\x03\n" +
 	"\aAuthKey\x12\"\n" +
 	"\rexpires_at_ms\x18\x02 \x01(\x03R\vexpiresAtMs\x12&\n" +
 	"\x0fallowed_tag_ids\x18\x03 \x03(\tR\rallowedTagIds\x12\x19\n" +
-	"\ball_tags\x18\x04 \x01(\bR\aallTags\x12\x1b\n" +
+	"\ball_tags\x18\x04 \x01(\bR\aallTags\x12/\n" +
+	"\x14work_session_tag_ids\x18\x05 \x03(\tR\x11workSessionTagIds\x12\x1b\n" +
 	"\breusable\x18\xf8\n" +
 	" \x01(\bR\breusable\x12\x1d\n" +
 	"\tephemeral\x18\xf9\n" +

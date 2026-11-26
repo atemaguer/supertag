@@ -618,9 +618,10 @@ impl Store {
             required.push(label);
         }
         let ids: Vec<String> = sqlx::query_scalar(
-            "SELECT host_id FROM supertag_v2_hosts h WHERE revoked_at_ms IS NULL AND ((all_tags=1 AND NOT EXISTS (SELECT 1 FROM supertag_v2_tags owned WHERE owned.tag_id=$1 AND owned.owner_user IS NOT NULL)) OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=h.host_id AND scope.tag_id=$1)) ORDER BY host_id",
+            "SELECT host_id FROM supertag_v2_hosts h WHERE revoked_at_ms IS NULL AND ((all_tags=1 AND NOT EXISTS (SELECT 1 FROM supertag_v2_tags owned WHERE owned.tag_id=$1 AND owned.owner_user IS NOT NULL)) OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=h.host_id AND scope.tag_id=$1 AND (scope.work_sessions_only=0 OR $2 LIKE 'work/%'))) ORDER BY host_id",
         )
         .bind(&task.tag_id)
+        .bind(&task.session_id)
         .fetch_all(&mut *transaction)
         .await?;
         let now = self.execution_now_ms();
@@ -771,10 +772,11 @@ pub(crate) async fn ready_for_in(
     now: i64,
 ) -> Result<bool> {
     let bound: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM supertag_v2_hosts h WHERE h.host_id=$1 AND h.revoked_at_ms IS NULL AND ((h.all_tags=1 AND NOT EXISTS (SELECT 1 FROM supertag_v2_tags owned WHERE owned.tag_id=$2 AND owned.owner_user IS NOT NULL)) OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=h.host_id AND scope.tag_id=$2))",
+        "SELECT COUNT(*) FROM supertag_v2_hosts h WHERE h.host_id=$1 AND h.revoked_at_ms IS NULL AND ((h.all_tags=1 AND NOT EXISTS (SELECT 1 FROM supertag_v2_tags owned WHERE owned.tag_id=$2 AND owned.owner_user IS NOT NULL)) OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=h.host_id AND scope.tag_id=$2 AND (scope.work_sessions_only=0 OR $3 LIKE 'work/%')))",
     )
     .bind(host_id)
     .bind(&task.tag_id)
+    .bind(&task.session_id)
     .fetch_one(&mut **tx)
     .await?;
     if bound == 0 {

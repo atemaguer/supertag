@@ -225,13 +225,16 @@ pub(super) async fn host_exists_in(
     Ok(host_in(transaction, id).await?.is_some())
 }
 
-/// The execution state of a newly enrolled Worker Host: its Tag scope, granted labels, and
-/// whether it is removed once it goes offline.
+/// The execution state of a newly enrolled Worker Host: its Tag scope (Tags it runs in full,
+/// and Tags it runs only the Work Sessions of), granted labels, and whether it is removed once
+/// it goes offline.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn insert_host_in(
     transaction: &mut Transaction<'_, Any>,
     id: &str,
     all_tags: bool,
     tags: &[String],
+    work_session_tags: &[String],
     ephemeral: bool,
     labels: &str,
     now: i64,
@@ -244,12 +247,19 @@ pub(super) async fn insert_host_in(
             "Worker Host ID is already enrolled".into(),
         ));
     }
-    for tag in tags {
-        sqlx::query("INSERT INTO supertag_v2_host_tags (host_id,tag_id) VALUES ($1,$2)")
-            .bind(id)
-            .bind(tag)
-            .execute(&mut **transaction)
-            .await?;
+    for (tag, work_only) in tags
+        .iter()
+        .map(|tag| (tag, 0))
+        .chain(work_session_tags.iter().map(|tag| (tag, 1)))
+    {
+        sqlx::query(
+            "INSERT INTO supertag_v2_host_tags (host_id,tag_id,work_sessions_only) VALUES ($1,$2,$3)",
+        )
+        .bind(id)
+        .bind(tag)
+        .bind(work_only as i64)
+        .execute(&mut **transaction)
+        .await?;
     }
     Ok(())
 }
