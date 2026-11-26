@@ -2840,7 +2840,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "supertag-api"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2873,7 +2873,7 @@ dependencies = [
 
 [[package]]
 name = "supertag-cli"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "anyhow",
  "axum",
@@ -2927,7 +2927,7 @@ dependencies = [
 
 [[package]]
 name = "supertag-codex-adapter"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2950,7 +2950,7 @@ dependencies = [
 
 [[package]]
 name = "supertag-control-plane"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2983,7 +2983,7 @@ dependencies = [
 
 [[package]]
 name = "supertag-credential-vault"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "anyhow",
  "axum",
@@ -2998,7 +2998,7 @@ dependencies = [
 
 [[package]]
 name = "supertag-gateway"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3038,7 +3038,7 @@ dependencies = [
 
 [[package]]
 name = "supertag-git-delivery"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3059,7 +3059,7 @@ dependencies = [
 
 [[package]]
 name = "supertag-github"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3074,7 +3074,7 @@ dependencies = [
 
 [[package]]
 name = "supertag-local-state"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "anyhow",
  "libc",
@@ -3085,7 +3085,7 @@ dependencies = [
 
 [[package]]
 name = "supertag-protocol"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "http 1.5.0",
  "icu_properties",
@@ -3110,7 +3110,7 @@ dependencies = [
 
 [[package]]
 name = "supertag-shared-execution"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "anyhow",
  "clap",
@@ -3135,7 +3135,7 @@ dependencies = [
 
 [[package]]
 name = "supertag-transport"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3158,7 +3158,7 @@ dependencies = [
 
 [[package]]
 name = "supertag-worker-host"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "anyhow",
  "aws-credential-types",
@@ -3202,7 +3202,7 @@ dependencies = [
 
 [[package]]
 name = "supertag-workspaces"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "anyhow",
  "libc",

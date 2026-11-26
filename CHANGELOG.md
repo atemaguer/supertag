@@ -9,6 +9,8 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.3.15] - 2026-11-25
+
 ### Added
 
 - A personal Tag's owner decides its approval requests from any of their devices, beside the
@@ -1936,7 +1938,8 @@ within the pre-1.0 compatibility policy described in
 - Gateway control-plane support and Slack, GitHub, Linear, Microsoft Teams,
   and Lark Surfaces.
 
-[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.14...HEAD
+[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.15...HEAD
+[0.3.15]: https://github.com/atemaguer/supertag/compare/v0.3.14...v0.3.15
 [0.3.14]: https://github.com/atemaguer/supertag/compare/v0.3.13...v0.3.14
 [0.3.13]: https://github.com/atemaguer/supertag/compare/v0.3.12...v0.3.13
 [0.3.12]: https://github.com/atemaguer/supertag/compare/v0.3.11...v0.3.12

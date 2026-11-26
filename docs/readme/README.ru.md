@@ -309,7 +309,7 @@ SDK (`supertag` в PyPI) связывают ваше приложение или
 
 ```sh
 npm install supertag-ai
-python -m pip install 'supertag==0.3.14'
+python -m pip install 'supertag==0.3.15'
 ```
 
 [Напишите harness-адаптер](../../docs/guides/harness-adapters.md) · [Подключите собственную площадку для совместной работы](../../docs/reference/connector-contract.md) · [Проверьте стабильность API](../../docs/reference/api-stability.md)
