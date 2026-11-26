@@ -16,6 +16,12 @@ within the pre-1.0 compatibility policy described in
   `supertag question answer` starts that Session's next turn with the answer. A newer message in
   the Session replaces an unanswered question.
 
+### Changed
+
+- In a conversation, when a Work Session asks a question, the report turn may answer it with
+  `continue_session` from what the person already said in that conversation, instead of always
+  relaying the question to the person. It still asks when it can't answer.
+
 ### Fixed
 
 - When a Worker Host can't reach its Control Plane, for example because its certificate comes from

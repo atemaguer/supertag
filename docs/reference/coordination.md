@@ -221,6 +221,10 @@ An Objective's turn starts work with `start_session {title, instruction, harness
 
 A work Session's result returns to the Objective's conversation as a turn. The owner reads it,
 then either accepts it in its reply or sends fixes with `continue_session {sessionId, message}`.
+In a conversation, a work Session's result returns the same way, and the Tag reports it to the
+person. When the work Session asked a question, the report turn may answer it with
+`continue_session` if what the person already said in that Session answers it; otherwise the Tag
+asks the person.
 The Tag's inbox also lists its running work Sessions with each title, Objective, branch, and
 reported changed paths. An inbox turn can relay relevant messages with `continue_session`.
 The relay identifies its source and grants no authority. A withdrawn offer runs as the queued
@@ -511,7 +515,7 @@ tool the turn does not get; it does not only leave it out of the list.
 | A conversation with a person, or a surface thread | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule` and `cancel_schedule` (with `schedule:create`), and the Session reads |
 | A Tag's inbox | `start_session`, `continue_session`, `send_message` (also to its own Tag's Objectives), `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, the Session reads, and `stay_quiet` |
 | A Tag's [memory review](#memory) | The Session reads and `stay_quiet` |
-| A work Session's report turn | The Session reads |
+| A work Session's report turn | The Session reads, and `continue_session` for the reported work Session when it belongs to an Objective, or, in a conversation, when it asked a question |
 | A work Session's turn | `ask` |
 
 A turn no person is waiting on also gets `stay_quiet`: a Schedule's wake-up, an Objective's

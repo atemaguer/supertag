@@ -96,8 +96,9 @@ pub(super) fn require_unchanged_authority(previous: &Task, next: &Task) -> Resul
     Ok(())
 }
 
-/// Ordinary root turns can continue work. A report can do so only for its owner
-/// Objective, and only while it is the latest report for that child Session.
+/// Ordinary root turns can continue work. A report can do so for its owner Objective, or, in the
+/// conversation that started the work, to answer the question its child asked; in both cases only
+/// while it is the latest report for that child Session.
 pub(crate) async fn may_continue_in(
     tx: &mut Transaction<'_, Any>,
     parent: &Task,
@@ -120,7 +121,27 @@ pub(crate) async fn may_continue_in(
             .bind(&parent.session_id)
             .fetch_one(&mut **tx)
             .await?;
-            Ok(count == 1)
+            if count == 1 {
+                return Ok(true);
+            }
+            // A question can be answered from what the person already said in this Session;
+            // the report prompt asks the person only when it cannot.
+            let asked: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM supertag_v2_work_session_reports r
+                 JOIN supertag_v2_work_sessions w ON w.latest_task_id=r.child_task_id
+                 JOIN supertag_v2_tasks t ON t.task_id=r.child_task_id
+                 JOIN supertag_v2_work_session_questions q ON q.task_id=t.task_id
+                   AND q.attempt_id=t.attempt_id AND q.published_at_ms IS NOT NULL
+                   AND q.answer_task_id IS NULL
+                 WHERE r.report_task_id=$1 AND w.objective_id IS NULL
+                   AND w.parent_tag_id=$2 AND w.parent_session_id=$3",
+            )
+            .bind(&scope.task_id)
+            .bind(&parent.tag_id)
+            .bind(&parent.session_id)
+            .fetch_one(&mut **tx)
+            .await?;
+            Ok(asked == 1)
         }
         _ => Ok(false),
     }

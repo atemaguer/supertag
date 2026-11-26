@@ -395,7 +395,19 @@ async fn question_report_contract(
             .prompt
             .is_empty()
     );
+    assert!(rendered.contains("continue this Work Session with that answer"));
     let report_attempt = start(store, host, &id).await;
+    // The conversation's report turn may answer the question itself from what the person said.
+    assert!(
+        store
+            .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(
+                host,
+                &report_attempt
+            ))
+            .await
+            .unwrap()
+            .may_continue_work_session
+    );
     assert!(matches!(
         store
             .ask_work_session_question(
@@ -447,6 +459,17 @@ async fn question_report_contract(
     store.finish_task(other, &finish(&attempt)).await.unwrap();
     let id = report(pool, &attempt.task_id).await.unwrap();
     let report_attempt = start(store, host, &id).await;
+    // A report without a question still only reports to the person.
+    assert!(
+        !store
+            .attempt_capabilities(&supertag_control_plane::AttemptAccess::new(
+                host,
+                &report_attempt
+            ))
+            .await
+            .unwrap()
+            .may_continue_work_session
+    );
     store
         .finish_task(host, &finish(&report_attempt))
         .await
