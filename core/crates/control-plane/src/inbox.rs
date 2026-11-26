@@ -157,6 +157,7 @@ impl Store {
             memory_trusted,
             may_stay_quiet,
             may_ask_tag,
+            delivery_note: crate::tag_sessions::delivery_note(&task).unwrap_or_default(),
         })
     }
 

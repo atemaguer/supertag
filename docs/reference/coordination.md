@@ -594,8 +594,8 @@ commit on the Session's branch, `supertag/session/HASH`. Commits the harness mad
 are not delivered, so their IDs never exist in the repository. The Tag is told so, and reads its
 delivered work from what SuperTag recorded:
 
-- Each turn with a Workspace learns its Session's branch in its portfolio, with the instruction to
-  name the branch, not a commit ID from its checkout.
+- Each turn with a Workspace, a work Session's included, learns its Session's branch, with the
+  instruction to name that branch, not a commit ID or branch from its checkout.
 - The portfolio of every conversation, Objective, and inbox turn lists the Tag's latest delivered
   work in Sessions the turn may see, newest first and up to five: the Objective or Session, its
   branch, the delivered commit, when it was delivered, and what became of it (the Objective's

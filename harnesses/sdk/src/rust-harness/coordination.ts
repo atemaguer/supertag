@@ -293,9 +293,15 @@ export function memoryContext(
   ].join(" ");
 }
 
+/** The turn's SuperTag context: the Tag portfolio, when it reads the Tag's Sessions, and where
+ * its Workspace changes go, which every turn with a Workspace gets. */
 export function tagPortfolio(run: Pick<HarnessRun, "coordination">): string {
-  const portfolio = run.coordination?.mayReadTagSessions ? run.coordination.tagPortfolio : "";
-  return portfolio ? `SuperTag context:\n${portfolio}` : "";
+  const coordination = run.coordination;
+  const lines = [
+    coordination?.mayReadTagSessions ? coordination.tagPortfolio : "",
+    coordination?.deliveryNote ?? "",
+  ].filter(Boolean);
+  return lines.length > 0 ? `SuperTag context:\n${lines.join("\n")}` : "";
 }
 
 const objectiveStatus: Record<number, string> = {

@@ -5197,7 +5197,8 @@ type AttemptCapabilities struct {
 	// (`may_read_own_session`).
 	MayReadTagSessions bool `protobuf:"varint,9,opt,name=may_read_tag_sessions,json=mayReadTagSessions,proto3" json:"may_read_tag_sessions,omitempty"`
 	// The Tag's open Objectives and how to recall its other Sessions, for the
-	// turn's context. State, not instructions. Empty when `may_read_tag_sessions` is false.
+	// turn's context, with the Tag's delivered work. State, not instructions. Empty when
+	// `may_read_tag_sessions` is false.
 	TagPortfolio string `protobuf:"bytes,11,opt,name=tag_portfolio,json=tagPortfolio,proto3" json:"tag_portfolio,omitempty"`
 	// With `may_ask_objective_question`: the Objective is ongoing, so only an operator ends it
 	// and its owner may report it ready for review or blocked, never completed.
@@ -5227,7 +5228,11 @@ type AttemptCapabilities struct {
 	// answers with SendMessage to the Objective, and the answer is the Objective's next turn. Only
 	// the inbox Session and person conversations reach other Tags, so an Objective's Session has no
 	// `may_send_tag_message`, `may_read_mailbox`, or `may_use_workstream`.
-	MayAskTag     bool `protobuf:"varint,20,opt,name=may_ask_tag,json=mayAskTag,proto3" json:"may_ask_tag,omitempty"`
+	MayAskTag bool `protobuf:"varint,20,opt,name=may_ask_tag,json=mayAskTag,proto3" json:"may_ask_tag,omitempty"`
+	// Where this turn's Workspace changes go: one new commit on its Session's branch, named here
+	// so the turn reports the branch rather than a commit ID from its checkout. Every turn with a
+	// Workspace gets it, a Work Session's included. Empty for a turn with no Workspace.
+	DeliveryNote  string `protobuf:"bytes,21,opt,name=delivery_note,json=deliveryNote,proto3" json:"delivery_note,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5393,6 +5398,13 @@ func (x *AttemptCapabilities) GetMayAskTag() bool {
 		return x.MayAskTag
 	}
 	return false
+}
+
+func (x *AttemptCapabilities) GetDeliveryNote() string {
+	if x != nil {
+		return x.DeliveryNote
+	}
+	return ""
 }
 
 // An operator or client closes a Work Session it may see. `delivery_pulled` records that its
@@ -27425,7 +27437,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x0f_answer_task_id\"Z\n" +
 	"\x12AskQuestionRequest\x12!\n" +
 	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12\x12\n" +
-	"\x04text\x18\x03 \x01(\tR\x04textJ\x04\b\x01\x10\x02R\aattempt\"\xa1\a\n" +
+	"\x04text\x18\x03 \x01(\tR\x04textJ\x04\b\x01\x10\x02R\aattempt\"\xc6\a\n" +
 	"\x13AttemptCapabilities\x12;\n" +
 	"\x1amay_ask_objective_question\x18\x01 \x01(\bR\x17mayAskObjectiveQuestion\x12,\n" +
 	"\x12may_use_workstream\x18\x02 \x01(\bR\x10mayUseWorkstream\x12(\n" +
@@ -27445,7 +27457,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x0ememory_trusted\x18\x11 \x01(\bR\rmemoryTrusted\x12$\n" +
 	"\x0emay_stay_quiet\x18\x12 \x01(\bR\fmayStayQuiet\x12/\n" +
 	"\x14may_read_own_session\x18\x13 \x01(\bR\x11mayReadOwnSession\x12\x1e\n" +
-	"\vmay_ask_tag\x18\x14 \x01(\bR\tmayAskTagJ\x04\b\n" +
+	"\vmay_ask_tag\x18\x14 \x01(\bR\tmayAskTag\x12#\n" +
+	"\rdelivery_note\x18\x15 \x01(\tR\fdeliveryNoteJ\x04\b\n" +
 	"\x10\vR\x14may_create_objective\"j\n" +
 	"\x17CloseWorkSessionRequest\x12&\n" +
 	"\x0fwork_session_id\x18\x01 \x01(\tR\rworkSessionId\x12'\n" +

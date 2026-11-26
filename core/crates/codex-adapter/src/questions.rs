@@ -282,14 +282,20 @@ impl Bridge {
         self.capabilities.memory_trusted
     }
 
-    pub(crate) fn portfolio(&self) -> &str {
-        if self.tools.tag_sessions == crate::tag_sessions::Reads::All
+    /// With it, where this turn's Workspace changes go, which every turn with a Workspace gets.
+    pub(crate) fn portfolio(&self) -> String {
+        let portfolio = if self.tools.tag_sessions == crate::tag_sessions::Reads::All
             && self.capabilities.may_read_tag_sessions
         {
-            &self.capabilities.tag_portfolio
+            self.capabilities.tag_portfolio.as_str()
         } else {
             ""
-        }
+        };
+        [portfolio, self.capabilities.delivery_note.as_str()]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n")
     }
     pub(crate) fn set_secrets(&mut self, secrets: &[String]) {
         self.secrets = secrets.to_vec();

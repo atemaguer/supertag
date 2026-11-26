@@ -111,12 +111,13 @@ async fn deliver(
         .unwrap();
 }
 
+/// The SuperTag context a turn's harness shows: the portfolio, then where its changes go.
 async fn portfolio(store: &Store, host: &HostAuthority, attempt: &InspectAttemptRequest) -> String {
-    store
+    let caps = store
         .attempt_capabilities(&AttemptAccess::new(host, attempt))
         .await
-        .unwrap()
-        .tag_portfolio
+        .unwrap();
+    format!("{}\n{}", caps.tag_portfolio, caps.delivery_note)
 }
 
 async fn contract(url: &str) {
@@ -156,7 +157,7 @@ async fn contract(url: &str) {
     assert!(
         told.contains(&format!(
             "as one new commit on this Session's branch, {objective_branch}"
-        )) && told.contains("name the branch, not a commit ID"),
+        )) && told.contains("name this branch, not a commit ID"),
         "{told}"
     );
     assert!(!told.contains("Delivered work:"), "{told}");
@@ -302,6 +303,44 @@ async fn contract(url: &str) {
     let after = start(&store, &host, &next.task_id).await;
     let listed = portfolio(&store, &host, &after).await;
     assert!(!listed.contains("- Session chat"), "{listed}");
+
+    // A Work Session reads no portfolio, but it is still told its own branch, so it reports where
+    // its work went rather than the branch its checkout shows.
+    let work = store
+        .start_work_session(
+            &AttemptAccess::new(&host, &after),
+            &StartWorkSessionRequest {
+                operation_id: "work".into(),
+                title: "Prove the lemma".into(),
+                instruction: "Prove the lemma".into(),
+                harness: None,
+            },
+        )
+        .await
+        .unwrap();
+    deliver(
+        &store,
+        &host,
+        &after,
+        BASE,
+        "Started",
+        ObjectiveSignal::Progress,
+    )
+    .await;
+    let child = start(&store, &host, &work.latest_task_id).await;
+    let caps = store
+        .attempt_capabilities(&AttemptAccess::new(&host, &child))
+        .await
+        .unwrap();
+    assert!(caps.tag_portfolio.is_empty(), "{}", caps.tag_portfolio);
+    assert!(
+        caps.delivery_note.contains(&format!(
+            "this Session's branch, {}",
+            session_branch("owner", &work.work_session_id)
+        )),
+        "{}",
+        caps.delivery_note
+    );
     store.close().await;
 }
 

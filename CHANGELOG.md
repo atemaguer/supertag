@@ -61,6 +61,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- A work Session is told the branch its changes are delivered to, `supertag/session/HASH`, as
+  conversations and Objectives already were, so it reports that branch instead of the branch its
+  checkout shows, such as `main`.
 - `supertag init` and `supertag sign-in opencode` check OpenCode Zen's free models, such as
   `opencode/deepseek-v4.1-flash-free`, in a few seconds. The check turn denied every OpenCode
   tool, Zen's free tier refused a request without them, and OpenCode retried until the check gave

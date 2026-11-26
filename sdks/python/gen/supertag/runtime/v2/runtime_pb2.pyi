@@ -1024,7 +1024,7 @@ class AskQuestionRequest(_message.Message):
     def __init__(self, operation_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
 
 class AttemptCapabilities(_message.Message):
-    __slots__ = ("may_ask_objective_question", "may_use_workstream", "may_read_mailbox", "may_send_tag_message", "may_start_work_session", "may_continue_work_session", "may_ask_work_session_question", "may_request_commit_review", "may_read_tag_sessions", "tag_portfolio", "objective_ongoing", "may_schedule", "time_zone", "open_work_sessions", "max_work_sessions", "memory_trusted", "may_stay_quiet", "may_read_own_session", "may_ask_tag")
+    __slots__ = ("may_ask_objective_question", "may_use_workstream", "may_read_mailbox", "may_send_tag_message", "may_start_work_session", "may_continue_work_session", "may_ask_work_session_question", "may_request_commit_review", "may_read_tag_sessions", "tag_portfolio", "objective_ongoing", "may_schedule", "time_zone", "open_work_sessions", "max_work_sessions", "memory_trusted", "may_stay_quiet", "may_read_own_session", "may_ask_tag", "delivery_note")
     MAY_ASK_OBJECTIVE_QUESTION_FIELD_NUMBER: _ClassVar[int]
     MAY_USE_WORKSTREAM_FIELD_NUMBER: _ClassVar[int]
     MAY_READ_MAILBOX_FIELD_NUMBER: _ClassVar[int]
@@ -1044,6 +1044,7 @@ class AttemptCapabilities(_message.Message):
     MAY_STAY_QUIET_FIELD_NUMBER: _ClassVar[int]
     MAY_READ_OWN_SESSION_FIELD_NUMBER: _ClassVar[int]
     MAY_ASK_TAG_FIELD_NUMBER: _ClassVar[int]
+    DELIVERY_NOTE_FIELD_NUMBER: _ClassVar[int]
     may_ask_objective_question: bool
     may_use_workstream: bool
     may_read_mailbox: bool
@@ -1063,7 +1064,8 @@ class AttemptCapabilities(_message.Message):
     may_stay_quiet: bool
     may_read_own_session: bool
     may_ask_tag: bool
-    def __init__(self, may_ask_objective_question: _Optional[bool] = ..., may_use_workstream: _Optional[bool] = ..., may_read_mailbox: _Optional[bool] = ..., may_send_tag_message: _Optional[bool] = ..., may_start_work_session: _Optional[bool] = ..., may_continue_work_session: _Optional[bool] = ..., may_ask_work_session_question: _Optional[bool] = ..., may_request_commit_review: _Optional[bool] = ..., may_read_tag_sessions: _Optional[bool] = ..., tag_portfolio: _Optional[str] = ..., objective_ongoing: _Optional[bool] = ..., may_schedule: _Optional[bool] = ..., time_zone: _Optional[str] = ..., open_work_sessions: _Optional[int] = ..., max_work_sessions: _Optional[int] = ..., memory_trusted: _Optional[bool] = ..., may_stay_quiet: _Optional[bool] = ..., may_read_own_session: _Optional[bool] = ..., may_ask_tag: _Optional[bool] = ...) -> None: ...
+    delivery_note: str
+    def __init__(self, may_ask_objective_question: _Optional[bool] = ..., may_use_workstream: _Optional[bool] = ..., may_read_mailbox: _Optional[bool] = ..., may_send_tag_message: _Optional[bool] = ..., may_start_work_session: _Optional[bool] = ..., may_continue_work_session: _Optional[bool] = ..., may_ask_work_session_question: _Optional[bool] = ..., may_request_commit_review: _Optional[bool] = ..., may_read_tag_sessions: _Optional[bool] = ..., tag_portfolio: _Optional[str] = ..., objective_ongoing: _Optional[bool] = ..., may_schedule: _Optional[bool] = ..., time_zone: _Optional[str] = ..., open_work_sessions: _Optional[int] = ..., max_work_sessions: _Optional[int] = ..., memory_trusted: _Optional[bool] = ..., may_stay_quiet: _Optional[bool] = ..., may_read_own_session: _Optional[bool] = ..., may_ask_tag: _Optional[bool] = ..., delivery_note: _Optional[str] = ...) -> None: ...
 
 class CloseWorkSessionRequest(_message.Message):
     __slots__ = ("work_session_id", "delivery_pulled")

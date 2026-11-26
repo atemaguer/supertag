@@ -78,7 +78,8 @@ read the Tag's other Sessions and Objectives or create an Objective a person ask
 The run's capabilities say which of these the Task may use. When the Task reads the Tag's
 Sessions, its capabilities also carry `tag_portfolio`, the Tag's open Objectives and
 [delivered work](../reference/coordination.md#delivered-work), which an adapter adds to the turn's
-context. With `may_start_work_session`, `open_work_sessions` and `max_work_sessions` say how many work
+context. Every Task with a Workspace also carries `delivery_note`, which names the Session's branch
+its changes go to; add it to the context too. With `may_start_work_session`, `open_work_sessions` and `max_work_sessions` say how many work
 Sessions the Tag has open of its limit; show them in the `start_session` description. An
 Objective's turn has `may_ask_tag` instead of `may_send_tag_message`, `may_read_mailbox`, and
 `may_use_workstream`: offer an `ask_tag` tool that calls `HarnessMailbox.AskTag`. An inbox turn's

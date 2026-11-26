@@ -704,12 +704,13 @@ async fn delivered_work_in(
     Ok(Some(lines.join("\n")))
 }
 
-/// What this turn's Workspace changes become, for a turn that has a Workspace.
-fn delivery_note(viewer: &Viewer) -> Option<String> {
-    viewer.task.workspace.as_ref()?;
+/// What this turn's Workspace changes become, for a turn that has a Workspace: every turn gets
+/// it, a Work Session's included, so it names its branch rather than a commit from its checkout.
+pub(crate) fn delivery_note(task: &Task) -> Option<String> {
+    task.workspace.as_ref()?;
     Some(format!(
-        "When this turn changes the Workspace, SuperTag delivers the changes after the turn as one new commit on this Session's branch, {}. That commit replaces any commits you make in your checkout, so their IDs will not exist in the repository: in reports and replies, name the branch, not a commit ID from your checkout.",
-        supertag_protocol::session_branch(viewer.tag(), viewer.session())
+        "When this turn changes the Workspace, SuperTag delivers the changes after the turn as one new commit on this Session's branch, {}. That commit replaces any commits you make in your checkout, so their IDs will not exist in the repository, and the branch your checkout shows is not where your work goes: in reports and replies, name this branch, not a commit ID or branch from your checkout.",
+        supertag_protocol::session_branch(&task.tag_id, &task.session_id)
     ))
 }
 
@@ -741,11 +742,7 @@ pub(crate) async fn portfolio_in(tx: &mut Transaction<'_, Any>, viewer: &Viewer)
     }
     let footer = footer.join("\n");
     // Delivered work has its own bound, so it never crowds out the open Objectives.
-    let delivered: Vec<String> = delivered_work_in(tx, viewer)
-        .await?
-        .into_iter()
-        .chain(delivery_note(viewer))
-        .collect();
+    let delivered: Vec<String> = delivered_work_in(tx, viewer).await?.into_iter().collect();
     if objectives.is_empty() {
         return Ok(std::iter::once(format!(
             "Tag portfolio: this Tag owns no open Objectives you can see.\n{footer}"

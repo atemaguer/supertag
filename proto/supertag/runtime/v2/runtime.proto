@@ -509,7 +509,8 @@ message AttemptCapabilities {
   reserved 10;
   reserved "may_create_objective";
   // The Tag's open Objectives and how to recall its other Sessions, for the
-  // turn's context. State, not instructions. Empty when `may_read_tag_sessions` is false.
+  // turn's context, with the Tag's delivered work. State, not instructions. Empty when
+  // `may_read_tag_sessions` is false.
   string tag_portfolio = 11;
   // With `may_ask_objective_question`: the Objective is ongoing, so only an operator ends it
   // and its owner may report it ready for review or blocked, never completed.
@@ -540,6 +541,10 @@ message AttemptCapabilities {
   // the inbox Session and person conversations reach other Tags, so an Objective's Session has no
   // `may_send_tag_message`, `may_read_mailbox`, or `may_use_workstream`.
   bool may_ask_tag = 20;
+  // Where this turn's Workspace changes go: one new commit on its Session's branch, named here
+  // so the turn reports the branch rather than a commit ID from its checkout. Every turn with a
+  // Workspace gets it, a Work Session's included. Empty for a turn with no Workspace.
+  string delivery_note = 21;
 }
 
 // Operators see the work started in Sessions they can access.
