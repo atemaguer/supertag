@@ -1,7 +1,10 @@
 //! Registering this Worker Host's incarnation with the Control Plane, and the clients the
 //! Worklet and its Workers call once it is registered.
 
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::{BTreeMap, HashSet},
+    path::Path,
+};
 
 use anyhow::{Result, ensure};
 use supertag_protocol::{
@@ -43,6 +46,7 @@ pub(crate) async fn register(
     token: &str,
     shutdown: &CancellationToken,
 ) -> Result<Option<(HostRecord, u32)>> {
+    let mut logged_failures = HashSet::new();
     loop {
         if shutdown.is_cancelled() {
             return Ok(None);
@@ -56,7 +60,12 @@ pub(crate) async fn register(
         .await
         {
             Ok(version) => version,
-            Err(NegotiationError::Unavailable(_)) => {
+            Err(NegotiationError::Unavailable(status)) => {
+                log_failure(
+                    &mut logged_failures,
+                    &control_plane.url(),
+                    &status_cause(&status),
+                );
                 wait_for_work(shutdown).await;
                 continue;
             }
@@ -81,10 +90,57 @@ pub(crate) async fn register(
                 );
                 break Ok(Some((host, protocol)));
             }
-            Err(error) if retryable(&error) => wait_for_work(shutdown).await,
+            Err(error) if retryable(&error) => {
+                log_failure(
+                    &mut logged_failures,
+                    &control_plane.url(),
+                    &cause_chain(&error),
+                );
+                wait_for_work(shutdown).await;
+            }
             Err(error) => return Err(error.into()),
         }
     }
+}
+
+fn cause_chain(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    text
+}
+
+/// A status's message and, when the message leaves it out, its innermost transport cause,
+/// such as "tcp connect error: Connection refused".
+fn status_cause(status: &tonic::Status) -> String {
+    let mut text = status.message().to_owned();
+    let mut source = std::error::Error::source(status);
+    let mut root = None;
+    while let Some(cause) = source {
+        root = Some(cause.to_string());
+        source = cause.source();
+    }
+    if let Some(root) = root.filter(|root| !text.contains(root.as_str())) {
+        text.push_str(": ");
+        text.push_str(&root);
+    }
+    text
+}
+
+fn log_failure(previous: &mut HashSet<String>, url: &str, cause: &str) {
+    if !previous.insert(cause.to_owned()) {
+        return;
+    }
+    let hint = if cause.contains("certificate") || cause.contains("UnknownIssuer") {
+        "; export SUPERTAG_SERVER_CA_FILE with the issuing CA and run supertag up again"
+    } else {
+        ""
+    };
+    supertag_protocol::terminal_text::warn(&format!("Error: Control Plane {url}: {cause}{hint}"));
 }
 
 /// Where this Worklet's Workers send their Task Attempts' data calls: the data endpoint the
@@ -199,6 +255,14 @@ pub(crate) fn attempt_clients(channel: &Channel, headers: &HostHeaders) -> Attem
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connection_failure_includes_nested_certificate_cause() {
+        let error = anyhow::anyhow!("invalid peer certificate: UnknownIssuer")
+            .context("TLS handshake failed");
+        let cause = cause_chain(error.as_ref());
+        assert!(cause.contains("TLS handshake failed: invalid peer certificate: UnknownIssuer"));
+    }
 
     #[test]
     fn workers_send_data_calls_to_the_endpoint_registration_named() {

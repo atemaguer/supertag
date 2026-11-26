@@ -16,6 +16,12 @@ within the pre-1.0 compatibility policy described in
   `supertag question answer` starts that Session's next turn with the answer. A newer message in
   the Session replaces an unanswered question.
 
+### Fixed
+
+- When a Worker Host can't reach its Control Plane, for example because its certificate comes from
+  a CA the machine doesn't trust, the Worklet logs the URL and the cause once, and
+  `supertag up` names it instead of only saying the Worklet did not become ready.
+
 ## [0.3.16] - 2026-11-26
 
 ### Added

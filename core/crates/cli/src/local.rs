@@ -649,6 +649,8 @@ async fn start_child(
     service: &str,
     startup_timeout: Duration,
 ) -> Result<String> {
+    let log = lifecycle::log_path(&logs.state, service);
+    let logged_before = fs::metadata(&log).map_or(0, |metadata| metadata.len());
     let mut process = command.spawn().with_context(|| format!("start {name}"))?;
     capture_log(&mut process, logs, service)?;
     let lifeline = process
@@ -667,12 +669,19 @@ async fn start_child(
         .context("child readiness pipe missing")?;
     let mut stdout = BufReader::new(stdout);
     let mut line = String::new();
-    time::timeout(
+    let read = time::timeout(
         startup_timeout,
         (&mut stdout).take(256).read_line(&mut line),
     )
-    .await
-    .with_context(|| format!("{name} did not become ready"))??;
+    .await;
+    if read.is_err() {
+        time::sleep(Duration::from_millis(200)).await;
+        let reason = last_error_since(&log, logged_before)
+            .map(|reason| format!(": {reason}"))
+            .unwrap_or_default();
+        bail!("{name} did not become ready{reason}");
+    }
+    read??;
     if !line.ends_with('\n') {
         // Say why when it exited, such as a database a newer release migrated.
         let exited = time::timeout(Duration::from_secs(5), child.wait())
@@ -1885,6 +1894,38 @@ mod tests {
         assert_eq!(
             last_error(&log).as_deref(),
             Some("packaged Node bridge interpreter is unavailable on PATH")
+        );
+    }
+    #[tokio::test]
+    async fn a_worklet_timeout_names_the_error_logged_since_start() {
+        let directory = tempfile::tempdir().unwrap();
+        let logs = Logs::new(directory.path()).unwrap();
+        let log = lifecycle::log_path(&logs.state, "laptop");
+        fs::create_dir_all(log.parent().unwrap()).unwrap();
+        fs::write(&log, "Error: old failure\n").unwrap();
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg("echo 'Error: invalid peer certificate: UnknownIssuer' >&2; sleep 2");
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let error = start_child(
+            &mut None,
+            &mut command,
+            "Worklet laptop",
+            &logs,
+            "laptop",
+            Duration::from_millis(100),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error.to_string().contains(
+                "Worklet laptop did not become ready: invalid peer certificate: UnknownIssuer"
+            ),
+            "{error}"
         );
     }
     #[test]

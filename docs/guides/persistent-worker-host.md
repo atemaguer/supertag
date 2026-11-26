@@ -128,8 +128,9 @@ too: each runs its own host service from its own state directory, under its own 
 
 ## If something goes wrong
 
-- **`supertag up` reports an unknown issuer.** Export `SUPERTAG_SERVER_CA_FILE` and run
-  `supertag up` again, so the service gets it.
+- **`supertag up` reports an unknown issuer.** The Worklet logs the Control Plane URL and the
+  certificate error in `logs/hosts/NAME.log`, and `supertag up` repeats it. Export
+  `SUPERTAG_SERVER_CA_FILE` with the issuing CA and run `supertag up` again, so the service gets it.
 - **The host is gone after a reboot.** Run `loginctl enable-linger $USER`.
 - **Tasks wait.** Run `supertag placement explain TASK_ID --gateway team` on your own machine.
 
