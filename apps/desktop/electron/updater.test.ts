@@ -180,7 +180,13 @@ it("shows Squirrel.Mac refusing an update as the install's error", async () => {
   await updater.check(false);
   // What an unsigned build gets from Squirrel.Mac while it stages the download.
   emit("error", new Error("Could not get code signature for running application"));
-  expect(published.at(-1)).toEqual({ state: "error", stage: "install", version: "0.3.6" });
+  expect(published.at(-1)).toEqual({
+    state: "error",
+    stage: "install",
+    version: "0.3.6",
+    cause: "signature",
+    message: "Could not get code signature for running application",
+  });
   expect(log).toHaveBeenCalledWith("The update failed (preparing):", expect.any(Error));
   expect(h.noteInstall).not.toHaveBeenCalled();
   // The banner's "Download from GitHub" now opens the release page.
@@ -201,7 +207,12 @@ it("shows Squirrel.Mac refusing an update as the install's error", async () => {
   // A failure after "Restart to update", or quitAndInstall throwing at once, is the same error.
   await updater.install();
   emit("error", new Error("ShipIt could not be started"));
-  expect(updater.status).toEqual({ state: "error", stage: "install", version: "0.3.6" });
+  expect(updater.status).toEqual({
+    state: "error",
+    stage: "install",
+    version: "0.3.6",
+    message: "ShipIt could not be started",
+  });
 
   const throwing = fakeEngine(async (emit) => emit("update-downloaded", { version: "0.3.6" }));
   throwing.engine.quitAndInstall.mockImplementation(() => {
@@ -212,7 +223,12 @@ it("shows Squirrel.Mac refusing an update as the install's error", async () => {
   await second.check(false);
   throwing.emit("staged");
   await second.install();
-  expect(second.status).toEqual({ state: "error", stage: "install", version: "0.3.6" });
+  expect(second.status).toEqual({
+    state: "error",
+    stage: "install",
+    version: "0.3.6",
+    message: "no feed",
+  });
 });
 
 it("says a menu check found nothing newer, and stays quiet otherwise", async () => {

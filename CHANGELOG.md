@@ -23,6 +23,15 @@ within the pre-1.0 compatibility policy described in
   run only the `lead` Tag's Work Sessions, never its conversations, inbox, Objectives, or reports,
   so other people's machines can help a Tag without running it.
 
+### Fixed
+
+- The desktop app says why an update didn't install and what to do. A copy running from its
+  disk image or the Downloads folder is told to move to the Applications folder; a copy that
+  isn't the signed release, or whose folder can't be changed, is told to replace itself from
+  GitHub; any other failure shows what macOS said. The notice said only "didn't install".
+- The desktop app's update button fits the narrow sidebar. It was drawn as a tall pill half
+  outside it.
+
 ## [0.3.15] - 2026-11-25
 
 ### Added

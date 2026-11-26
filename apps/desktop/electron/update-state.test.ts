@@ -6,6 +6,7 @@ import {
   releasePage,
   type UpdateEvent,
   type UpdateStatus,
+  updateFailure,
 } from "./update-state";
 
 const run = (start: UpdateStatus, ...events: UpdateEvent[]) =>
@@ -188,4 +189,41 @@ it("orders versions as semantic versioning does", () => {
 it("links a release's page, or the latest one", () => {
   expect(releasePage("0.3.6")).toBe("https://github.com/atemaguer/supertag/releases/tag/v0.3.6");
   expect(releasePage()).toBe("https://github.com/atemaguer/supertag/releases/latest");
+});
+
+it("says why macOS refused an update, for the window to show", () => {
+  const readOnly = new Error(
+    "Cannot update while running on a read-only volume. The application is on a read-only volume. Please move the application and try again.",
+  );
+  expect(updateFailure(readOnly).cause).toBe("read-only");
+  expect(
+    updateFailure(
+      new Error(
+        "Code signature at URL file:///Users/a/Library/Caches/ai.supertag.desktop.ShipIt/update.9R/SuperTag.app/ did not pass validation: code failed to satisfy specified code requirement(s)",
+      ),
+    ).cause,
+  ).toBe("signature");
+  expect(updateFailure(new Error("EACCES: permission denied, rename")).cause).toBe("permission");
+  // Anything else keeps its first line, shortened, and names no cause.
+  expect(updateFailure(new Error("\n  The network connection was lost.\n  at Foo"))).toEqual({
+    message: "The network connection was lost.",
+  });
+  expect(updateFailure(new Error("x".repeat(400))).message).toHaveLength(240);
+  expect(updateFailure(undefined)).toEqual({});
+  expect(updateFailure(new Error(""))).toEqual({});
+
+  // A failed install carries it; a failed download or check does not.
+  const failed: UpdateEvent = { kind: "failed", ...updateFailure(readOnly) };
+  expect(run({ state: "preparing", version: "0.3.15" }, failed)).toEqual({
+    state: "error",
+    stage: "install",
+    version: "0.3.15",
+    cause: "read-only",
+    message: readOnly.message,
+  });
+  expect(run({ state: "downloading", version: "0.3.15", percent: 3 }, failed)).toEqual({
+    state: "error",
+    stage: "download",
+    version: "0.3.15",
+  });
 });

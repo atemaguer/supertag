@@ -1,6 +1,6 @@
 import { ArrowDownToLine, CircleAlert, RotateCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { statusVersion, type UpdateStatus } from "../../electron/update-state";
+import { statusVersion, type UpdateFailure, type UpdateStatus } from "../../electron/update-state";
 import { desktop } from "../desktop";
 import { Button } from "./ui/button";
 
@@ -43,12 +43,35 @@ export type UpdateButtonView =
   | { kind: "install" | "download"; label: string; busy?: boolean }
   | { kind: "progress"; label: string; percent?: number };
 
+/**
+ * Why `version` didn't install and what to do: the fix for a cause the app knows, else what the
+ * updater said. The full error is in the app's log.
+ */
+export function installFailure(
+  version: string,
+  cause: UpdateFailure | undefined,
+  message: string | undefined,
+): string {
+  switch (cause) {
+    case "read-only":
+      return `SuperTag can't update itself where it runs from now, such as its disk image or the Downloads folder. Quit it, move SuperTag to the Applications folder, and open it from there. Or download ${version} from GitHub.`;
+    case "signature":
+      return `macOS refused SuperTag ${version}: this copy of SuperTag isn't the signed release it updates. Download ${version} from GitHub and replace this copy.`;
+    case "permission":
+      return `SuperTag ${version} couldn't replace this copy: its folder can't be changed from your account. Download ${version} from GitHub and replace this copy.`;
+    default:
+      return message === undefined
+        ? `SuperTag ${version} didn't install. Download it from GitHub instead.`
+        : `SuperTag ${version} didn't install: ${message.replace(/[.\s]+$/u, "")}. Download it from GitHub instead.`;
+  }
+}
+
 /** What the window shows for an update status: a banner, the sidebar's button, both, or neither. */
 export function updateView(status: UpdateStatus): {
   banner?: UpdateBannerView;
   button?: UpdateButtonView;
 } {
-  const stage = status.state === "error" ? status.stage : "";
+  const stage = status.state === "error" ? `${status.stage}:${status.cause ?? ""}` : "";
   const key = `${status.state}:${stage}:${statusVersion(status) ?? ""}`;
   switch (status.state) {
     case "downloading":
@@ -104,7 +127,7 @@ export function updateView(status: UpdateStatus): {
             key,
             tone: "error",
             title: "Couldn't install the update",
-            detail: `SuperTag ${status.version} didn't install. Download it from GitHub instead.`,
+            detail: installFailure(status.version, status.cause, status.message),
             action: "Download from GitHub",
           },
           button: { kind: "download", label: `Download ${status.version}` },

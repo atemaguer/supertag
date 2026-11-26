@@ -4,7 +4,14 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { UpdateStatus } from "../../electron/update-state";
-import { UpdateBanner, UpdateButton, type UpdateSource, updateView, useUpdates } from "./update";
+import {
+  installFailure,
+  UpdateBanner,
+  UpdateButton,
+  type UpdateSource,
+  updateView,
+  useUpdates,
+} from "./update";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -190,4 +197,23 @@ it("shows only an icon in the rail, named for screen readers", async () => {
   const button = shown.button();
   expect(button?.textContent).toBe("");
   expect(button?.getAttribute("aria-label")).toBe("Update to 0.3.6");
+});
+
+it("says why an update didn't install and what to do about it", () => {
+  const banner = (status: UpdateStatus) => updateView(status).banner;
+  const failed = { state: "error", stage: "install", version: "0.3.15" } as const;
+  expect(banner(failed)?.detail).toBe(
+    "SuperTag 0.3.15 didn't install. Download it from GitHub instead.",
+  );
+  expect(banner({ ...failed, cause: "read-only", message: "Cannot update" })?.detail).toContain(
+    "move SuperTag to the Applications folder",
+  );
+  expect(banner({ ...failed, cause: "signature" })?.detail).toContain("isn't the signed release");
+  expect(banner({ ...failed, cause: "permission" })?.detail).toContain("can't be changed");
+  // An unknown failure shows what the updater said, once, with one full stop.
+  expect(installFailure("0.3.15", undefined, "The disk is full.")).toBe(
+    "SuperTag 0.3.15 didn't install: The disk is full. Download it from GitHub instead.",
+  );
+  // A new cause is a new banner: "Later" on the old one doesn't hide it.
+  expect(banner(failed)?.key).not.toBe(banner({ ...failed, cause: "read-only" })?.key);
 });

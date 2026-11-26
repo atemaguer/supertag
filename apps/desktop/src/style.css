@@ -2775,8 +2775,12 @@ button.sidebar-update:not(:disabled):hover {
   flex: 1 0 100%;
   margin-bottom: var(--space-1);
 }
+/* The rail's foot is a column: the row's full-width basis would be a full-height one here, a
+   tall pill pushed out of the rail. */
 .shell[data-sidebar="rail"] .sidebar-foot .sidebar-update {
   order: 1;
+  flex: none;
+  margin-bottom: 0;
 }
 .composer-reply .icon-button {
   flex: none;

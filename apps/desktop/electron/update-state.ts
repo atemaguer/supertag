@@ -34,8 +34,46 @@ export type UpdateStatus =
   | { state: "installing"; version: string }
   /** Linux: `version` is published; the user downloads it from its release page. */
   | { state: "available"; version: string }
-  /** A check from the menu, a download, or an install failed; `version` when it was known. */
-  | { state: "error"; stage: "check" | "download" | "install"; version?: string };
+  /**
+   * A check from the menu, a download, or an install failed; `version` when it was known. A
+   * failed install says why when macOS did: `cause` when it is one the window can explain, and
+   * `message`, the updater's own first line, otherwise.
+   */
+  | {
+      state: "error";
+      stage: "check" | "download" | "install";
+      version?: string;
+      cause?: UpdateFailure;
+      message?: string;
+    };
+
+/**
+ * Why macOS refused to install an update, when the app can say what to do about it: the app runs
+ * from a place that can't be written, such as its disk image or a quarantined copy macOS runs
+ * from a read-only path; this copy isn't the signed release the update belongs to; or the app's
+ * folder can't be written by this user.
+ */
+export type UpdateFailure = "read-only" | "signature" | "permission";
+
+/** What an updater's error says went wrong, and its first line for the window to show. */
+export function updateFailure(error: unknown): { cause?: UpdateFailure; message?: string } {
+  const text =
+    error instanceof Error ? error.message : typeof error === "string" ? error : undefined;
+  const line = text
+    ?.split("\n")
+    .map((part) => part.trim())
+    .find((part) => part !== "");
+  if (line === undefined) return {};
+  const message = line.length > 240 ? `${line.slice(0, 239)}…` : line;
+  const cause: UpdateFailure | undefined = /read-only volume|AppTranslocation/iu.test(text ?? "")
+    ? "read-only"
+    : /code signature|code requirement/iu.test(text ?? "")
+      ? "signature"
+      : /permission denied|not permitted|EACCES|EPERM/iu.test(text ?? "")
+        ? "permission"
+        : undefined;
+  return cause === undefined ? { message } : { cause, message };
+}
 
 /** What the main process hears while it checks, downloads, or fails. */
 export type UpdateEvent =
@@ -50,8 +88,8 @@ export type UpdateEvent =
   | { kind: "staged"; version: string }
   /** The user restarted to update. */
   | { kind: "installing" }
-  /** Whatever failed; the main process logs why. */
-  | { kind: "failed" };
+  /** Whatever failed; the main process logs why, and an install's error says why here. */
+  | { kind: "failed"; cause?: UpdateFailure; message?: string };
 
 /** The version an update status is about, if any. */
 export function statusVersion(status: UpdateStatus): string | undefined {
@@ -106,7 +144,13 @@ export function nextUpdateStatus(status: UpdateStatus, event: UpdateEvent): Upda
         return { state: "error", stage: "download", version: status.version };
       }
       if (status.state === "preparing" || status.state === "installing") {
-        return { state: "error", stage: "install", version: status.version };
+        return {
+          state: "error",
+          stage: "install",
+          version: status.version,
+          ...(event.cause === undefined ? {} : { cause: event.cause }),
+          ...(event.message === undefined ? {} : { message: event.message }),
+        };
       }
       if (status.state === "checking") {
         return status.manual ? { state: "error", stage: "check" } : { state: "idle" };

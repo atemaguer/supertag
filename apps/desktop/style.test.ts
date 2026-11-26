@@ -47,3 +47,11 @@ it("styles every class a component names", () => {
   }
   expect(unstyled).toEqual([]);
 });
+
+it("keeps the update button its own size in the rail, whose foot is a column", () => {
+  const rail = /\.shell\[data-sidebar="rail"\] \.sidebar-foot \.sidebar-update \{([^}]*)\}/u.exec(
+    css,
+  )?.[1];
+  expect(rail).toContain("flex: none");
+  expect(rail).toContain("margin-bottom: 0");
+});

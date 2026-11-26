@@ -27,6 +27,7 @@ import {
   statusVersion,
   type UpdateEvent,
   type UpdateStatus,
+  updateFailure,
   validVersion,
 } from "./update-state";
 
@@ -197,7 +198,7 @@ export class Updater {
     // stages the update or after "Restart to update"; they make the install's error state.
     engine.on("error", (error) => {
       this.host.log(`The update failed (${this.current.state}):`, error);
-      this.apply({ kind: "failed" });
+      this.apply({ kind: "failed", ...updateFailure(error) });
     });
     this.engine = engine;
     return engine;
@@ -277,7 +278,7 @@ export class Updater {
         this.mac().quitAndInstall();
       } catch (error) {
         this.host.log("Could not install the update:", error);
-        this.apply({ kind: "failed" });
+        this.apply({ kind: "failed", ...updateFailure(error) });
       }
       return;
     }
