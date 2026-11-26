@@ -313,7 +313,7 @@ con SuperTag:
 
 ```sh
 npm install supertag-ai
-python -m pip install 'supertag==0.3.15'
+python -m pip install 'supertag==0.3.16'
 ```
 
 [Escribe un adaptador de harness](../../docs/guides/harness-adapters.md) · [Conecta tu propia superficie de colaboración](../../docs/reference/connector-contract.md) · [Consulta la estabilidad de la API](../../docs/reference/api-stability.md)

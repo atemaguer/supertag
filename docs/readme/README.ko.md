@@ -291,7 +291,7 @@ TypeScript 어댑터가 실제 동작 예제입니다. TypeScript SDK(npm의 `su
 
 ```sh
 npm install supertag-ai
-python -m pip install 'supertag==0.3.15'
+python -m pip install 'supertag==0.3.16'
 ```
 
 [harness 어댑터 작성하기](../../docs/guides/harness-adapters.md) · [자체 협업 서피스 연결하기](../../docs/reference/connector-contract.md) · [API 안정성 확인하기](../../docs/reference/api-stability.md)

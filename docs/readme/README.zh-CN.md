@@ -197,7 +197,7 @@ SuperTag 也可以作为你自己产品的基础，比如你自己的 Devin Bots
 
 ```sh
 npm install supertag-ai
-python -m pip install 'supertag==0.3.15'
+python -m pip install 'supertag==0.3.16'
 ```
 
 [编写 harness 适配器](../../docs/guides/harness-adapters.md) · [接入你自己的协作界面](../../docs/reference/connector-contract.md) · [查看 API 稳定性](../../docs/reference/api-stability.md)

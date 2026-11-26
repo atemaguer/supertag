@@ -50,7 +50,7 @@ To choose the locations or a version, set these before `sh`:
 
 | Variable | Default |
 | --- | --- |
-| `SUPERTAG_VERSION` | The release the script came from. Set a version, such as `0.3.15`, to install that release |
+| `SUPERTAG_VERSION` | The release the script came from. Set a version, such as `0.3.16`, to install that release |
 | `SUPERTAG_INSTALL_ROOT` | `$XDG_DATA_HOME/supertag` when `XDG_DATA_HOME` is set, otherwise `~/.local/share/supertag` |
 | `SUPERTAG_BIN_DIR` | `$XDG_BIN_HOME` when it is set, otherwise `~/.local/bin` |
 
@@ -196,7 +196,7 @@ The Python SDK is `supertag` on PyPI, in Python 3.10 or newer. Install the versi
 your CLI:
 
 ```sh
-python -m pip install 'supertag==0.3.15'
+python -m pip install 'supertag==0.3.16'
 ```
 
 Each SDK connects to SuperTag and lets a custom harness adapter talk to the [Worker](../reference/glossary.md#worker) that started it;
@@ -210,9 +210,9 @@ Update the CLI with `supertag update`. It installs the latest published release 
 installer script does, from the same `SHA256SUMS`, archive, and layout:
 
 ```text
-Downloading SuperTag 0.3.15 for darwin-arm64 from https://github.com/atemaguer/supertag/releases/latest/download...
-Updated SuperTag: 0.3.7 → 0.3.15 at /Users/you/.local/bin/supertag.
-Restarting the local services on SuperTag 0.3.15.
+Downloading SuperTag 0.3.16 for darwin-arm64 from https://github.com/atemaguer/supertag/releases/latest/download...
+Updated SuperTag: 0.3.7 → 0.3.16 at /Users/you/.local/bin/supertag.
+Restarting the local services on SuperTag 0.3.16.
 ```
 
 It checks the archive against `SHA256SUMS` and checks that the release's `supertag` and
@@ -245,7 +245,7 @@ with the new one:
 ```text
 SuperTag 0.3.0 runs in /Users/you/.supertag, a different build than this CLI, so it restarts with this one.
 Stopped SuperTag 0.3.0 services (protocol 2) without draining through the Control Plane, because this CLI speaks protocol 5. Their Worker Hosts stopped gracefully; Task Attempts they were running follow the recovery rules.
-Restarted SuperTag: 0.3.2 (protocol 6) → 0.3.15 (protocol 7).
+Restarted SuperTag: 0.3.2 (protocol 6) → 0.3.16 (protocol 7).
 Started SuperTag in the background (process 4242).
 Migrated the database schema from version 82 to 83.
 ```
