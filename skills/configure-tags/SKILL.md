@@ -49,7 +49,7 @@ run Tasks only in sandboxes without network, where a Tag with an unscoped `web:f
 and stays off for Cursor, which has no tool for reading web pages.
 
 A Tag may have 8 [work Sessions](../../docs/reference/coordination.md#open-work-sessions) open at
-once by default. Raise or lower it, from 1 to 64, with `tag put TAG --max-work-sessions N` or a
+once by default. Raise or lower it, from 1 to 1,024, with `tag put TAG --max-work-sessions N` or a
 manifest's `spec.maxWorkSessions`.
 
 ## Grant authority and knowledge

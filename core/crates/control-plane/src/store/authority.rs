@@ -664,7 +664,6 @@ impl ClaimScope {
             && supports_execution_limits(self.harness, task)
             && supports_runtime_actions(self.harness, task)
             && crate::context::task_supported(task, self.contracts())
-            && crate::work_sessions::can_claim_in(transaction, task).await?
             && crate::inputs::can_claim_in(transaction, task, accepted_order).await?
             && crate::objectives::objective_task_can_start_in(transaction, task, now).await?
             && crate::start_rates::can_start_in(transaction, task, now).await?;

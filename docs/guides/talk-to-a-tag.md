@@ -294,8 +294,8 @@ lists them, and `supertag describe session ID` shows one with its latest Task an
   `supertag/session/0f3c2a9e…`. Your checkout stays on its branch. The report names the branch,
   and a continued work Session commits on top of it, on the same branch. See
   [where a work Session's edits go](../concepts/tasks.md#where-a-work-sessions-edits-go).
-- **At most four work Sessions run at once per conversation.** Later ones wait their turn. One
-  message starts at most four, and a conversation holds at most eight unfinished. A message whose
+- **Worker Host capacity controls how many work Sessions run at once per conversation.** One
+  message starts at most 16, and a conversation holds at most the Tag's `maxWorkSessions` unfinished work Sessions. A message whose
   limits allow no parallel agents (`maxNativeAgents: 0`) starts none.
 - **A message and its work Sessions share one budget.** When the message has token or cost limits,
   each work Session it starts or continues may spend what the message and its work Sessions

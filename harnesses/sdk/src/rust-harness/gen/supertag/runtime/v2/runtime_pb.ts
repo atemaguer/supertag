@@ -4975,7 +4975,7 @@ export type PutTagRequest = Message<"supertag.runtime.v2.PutTagRequest"> & {
 
   /**
    * How many Work Sessions the Tag may have open at once, across all its conversations and
-   * Objectives; from 1 to 64. Omitted keeps the current value; a new Tag gets 8.
+   * Objectives; from 1 to 1,024. Omitted keeps the current value; a new Tag gets 8.
    *
    * @generated from field: optional uint32 max_work_sessions = 6700;
    */

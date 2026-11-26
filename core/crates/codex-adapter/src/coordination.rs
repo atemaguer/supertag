@@ -537,7 +537,7 @@ pub(crate) fn tool_specs(inventory: Inventory, reach: Reach) -> Vec<Value> {
     if inventory >= Inventory::WorkSessions {
         tools.push(json!({
             "type":"function", "name":"start_session",
-            "description":"Start a Work Session on this Tag with a short title and self-contained instruction. After it is accepted, acknowledge the work and finish this turn. The Work Session works in this Task's Workspace and reports to this conversation. Omit harness to keep codex; name another only when the work needs it. A Work Session keeps its harness, and you talk to it only through its report and continue_session.",
+            "description":"Start a Work Session on this Tag with a short title and self-contained instruction. After it is accepted, acknowledge the work and finish this turn. The Work Session works in this Task's Workspace and reports to this conversation. Omit harness to keep codex; name another only when the work needs it. A Work Session keeps its harness, and you talk to it only through its report and continue_session. A Task may start or continue up to 16 Work Sessions, and the Tag may have up to its configured maxWorkSessions open.",
             "inputSchema":{"type":"object","properties":{
                 "title":{"type":"string","minLength":1,"maxLength":120},
                 "instruction":{"type":"string","minLength":1,"maxLength":8000},

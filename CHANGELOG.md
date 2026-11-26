@@ -11,6 +11,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- A Tag may keep up to 1,024 Work Sessions open (`maxWorkSessions`, up from 64), and one turn may
+  start 16 (up from 4). The fixed limits of four running and eight unfinished Work Sessions per
+  conversation are gone: the Worker Hosts' `concurrency` bounds what runs at once.
 - `supertag auth-key create NAME --role host --work-sessions-of lead` enrolls Worker Hosts that
   run only the `lead` Tag's Work Sessions, never its conversations, inbox, Objectives, or reports,
   so other people's machines can help a Tag without running it.

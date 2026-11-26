@@ -20,12 +20,10 @@ use crate::{
 
 pub(crate) const CHILD: i64 = 1;
 pub(crate) const REPORT: i64 = 2;
-const MAX_PER_TURN: i64 = 4;
-const MAX_OPEN: i64 = 8;
+const MAX_PER_TURN: i64 = 16;
 /// A Tag's open Work Sessions by default, and the most it may set.
 pub(crate) const DEFAULT_MAX_WORK_SESSIONS: u32 = 8;
-const MAX_WORK_SESSIONS: u32 = 64;
-const MAX_RUNNING: i64 = 4;
+const MAX_WORK_SESSIONS: u32 = 1_024;
 const SESSION_PREFIX: &str = "work/";
 
 pub(crate) fn reserved_session(session_id: &str) -> bool {
@@ -88,29 +86,6 @@ pub(crate) async fn task_kind_in(
     task_id: &str,
 ) -> Result<Option<i64>> {
     Ok(task_scope_in(tx, task_id).await?.map(|scope| scope.kind))
-}
-
-/// Include leased claims and unsettled execution when reserving the parent Session's capacity.
-pub(crate) async fn can_claim_in(tx: &mut Transaction<'_, Any>, task: &Task) -> Result<bool> {
-    if !reserved_session(&task.session_id) {
-        return Ok(true);
-    }
-    let running: Option<i64> = sqlx::query_scalar(
-        "SELECT (SELECT COUNT(*)
-                 FROM supertag_v2_work_sessions other
-                 JOIN supertag_v2_tasks active ON active.task_id=other.latest_task_id
-                 WHERE other.parent_tag_id=pending.parent_tag_id
-                   AND other.parent_session_id=pending.parent_session_id
-                   AND active.task_id<>$1 AND (active.state IN ($2,$3,$4) OR active.cleanup_pending=1))
-         FROM supertag_v2_work_sessions pending WHERE pending.latest_task_id=$1",
-    )
-    .bind(&task.task_id)
-    .bind(TaskState::Claimed as i64)
-    .bind(TaskState::Running as i64)
-    .bind(TaskState::Uncertain as i64)
-    .fetch_optional(&mut **tx)
-    .await?;
-    Ok(running.is_some_and(|count| count < MAX_RUNNING))
 }
 
 /// A Work Session's next Task: its parent Task's accepted policy, in the Work Session. A Work
@@ -190,7 +165,7 @@ pub(crate) async fn max_work_sessions_in(
 ) -> Result<u32> {
     if let Some(value) = requested {
         if !(1..=MAX_WORK_SESSIONS).contains(&value) {
-            return Err(invalid("max_work_sessions must be from 1 to 64"));
+            return Err(invalid("max_work_sessions must be from 1 to 1024"));
         }
         return Ok(value);
     }
@@ -383,7 +358,7 @@ async fn limit_refusal_in(
                         AND q.published_at_ms IS NOT NULL AND q.answer_task_id IS NULL) THEN 1 ELSE 0 END AS asking
          FROM supertag_v2_work_sessions ws JOIN supertag_v2_tasks t ON t.task_id=ws.latest_task_id
          WHERE ws.parent_tag_id=$1 AND ws.closed_at_ms IS NULL
-         ORDER BY ws.created_order LIMIT 64",
+         ORDER BY ws.created_order LIMIT 1024",
     )
     .bind(&parent.tag_id)
     .fetch_all(&mut **tx)

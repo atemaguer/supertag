@@ -129,7 +129,7 @@ export function NewTagForm({
     }
     const max = Number(sessions);
     if (!Number.isInteger(max) || max < 1 || max > 64) {
-      setProblem("A Tag may have 1 to 64 Work Sessions open at once.");
+      setProblem("A Tag may have 1 to 1,024 Work Sessions open at once.");
       setField(3);
       return;
     }

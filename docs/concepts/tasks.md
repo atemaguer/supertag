@@ -122,10 +122,10 @@ first Task runs an instruction the Tag wrote, under the permissions and Context 
 that started it, never more. It has its own native harness session, so its tool output stays out
 of the conversation, and it inherits the conversation's audience. It
 [sees only its own work](#what-a-work-session-sees). A work Session can't start more work
-Sessions or create an Objective. At most four run at once beneath one Session;
-later ones wait. One Task starts or continues at most four, or its `maxNativeAgents`
+Sessions or create an Objective. Worker Host capacity controls how many run at once beneath one
+Session. One Task starts or continues at most 16, or its `maxNativeAgents`
 when lower, and in a conversation they [share its budget](#how-work-sessions-share-a-budget). A
-Session holds at most eight unfinished work Sessions.
+Session holds at most the Tag's `maxWorkSessions` unfinished work Sessions.
 
 A work Session runs the Tag's harness unless `start_session` names another, such as
 `claude-code` for a Tag that runs on Codex. It keeps that harness for its whole life, and it and

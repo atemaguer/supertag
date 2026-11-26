@@ -77,32 +77,6 @@ async fn claim_start(store: &Store, host: &HostAuthority, expected: &str) -> Ins
     start(store, host, &attempt).await;
     attempt
 }
-async fn no_child_capacity(store: &Store, host: &HostAuthority) {
-    // Report turns remain runnable in the parent Session while child capacity is
-    // full. Drain only those, and assert that no queued child obtains a lease.
-    for _ in 0..8 {
-        let Some(assignment) = store
-            .claim_task(host, &Uuid::new_v4().to_string())
-            .await
-            .unwrap()
-        else {
-            return;
-        };
-        let task = assignment.task.unwrap();
-        assert!(
-            !task.session_id.starts_with("work/"),
-            "child exceeded shared capacity"
-        );
-        let attempt = InspectAttemptRequest {
-            task_id: task.task_id,
-            attempt_id: assignment.attempt_id,
-            lease_token: assignment.lease_token,
-        };
-        start(store, host, &attempt).await;
-        store.finish_task(host, &outcome(&attempt)).await.unwrap();
-    }
-    panic!("unexpected unbounded report work");
-}
 async fn contract(url: String) {
     let clock = Arc::new(AtomicI64::new(NOW));
     let now = clock.clone();
@@ -120,6 +94,15 @@ async fn contract(url: String) {
     }
     store
         .put_tag("sender", "Send fixture mail", vec!["mailbox:send".into()])
+        .await
+        .unwrap();
+    store
+        .put_tag_spec(PutTagRequest {
+            tag_id: "owner".into(),
+            instructions: "Fixture identity".into(),
+            max_work_sessions: Some(32),
+            ..Default::default()
+        })
         .await
         .unwrap();
     // No operator-controlled Session ID can masquerade as an internal child.
@@ -291,7 +274,7 @@ async fn contract(url: String) {
             .await,
         Err(StoreError::Conflict(_))
     ));
-    for index in 1..4 {
+    for index in 1..16 {
         children.push(
             store
                 .start_work_session(
@@ -305,12 +288,12 @@ async fn contract(url: String) {
     let per_turn = store
         .start_work_session(
             &supertag_control_plane::AttemptAccess::new(&host, &first_attempt),
-            &request("fifth"),
+            &request("seventeenth"),
         )
         .await
         .unwrap_err();
     assert!(matches!(per_turn, StoreError::FailedPrecondition(_)));
-    assert!(per_turn.to_string().contains("four"));
+    assert!(per_turn.to_string().contains("16"));
     // A replay does not consume another slot after reaching the bound.
     assert_eq!(
         store
@@ -323,110 +306,22 @@ async fn contract(url: String) {
             .work_session_id,
         children[0].work_session_id
     );
-    let mut claimed = vec![];
-    for child in &children {
-        let (task, attempt) = claim(&store, &other).await;
-        assert_eq!(task.task_id, child.latest_task_id);
-        assert_eq!(task.state(), TaskState::Claimed);
-        claimed.push(attempt);
-    }
-    let second = submit(&store, "owner", "parent").await;
-    assert!(
-        store
-            .claim_task(&host, "owner-still-running")
-            .await
-            .unwrap()
-            .is_none()
-    );
     store
         .finish_task(&host, &outcome(&first_attempt))
         .await
         .unwrap();
-    let second_attempt = claim_start(&store, &host, &second.task_id).await;
-    for index in 4..8 {
-        children.push(
-            store
-                .start_work_session(
-                    &supertag_control_plane::AttemptAccess::new(&host, &second_attempt),
-                    &request(&format!("child-{index}")),
-                )
-                .await
-                .unwrap(),
-        );
+    let mut running = vec![];
+    for child in children.iter().take(5) {
+        let attempt = claim_start(&store, &other, &child.latest_task_id).await;
+        running.push(attempt);
     }
-    store
-        .finish_task(&host, &outcome(&second_attempt))
-        .await
-        .unwrap();
-    let third = submit(&store, "owner", "parent").await;
-    let third_attempt = claim_start(&store, &host, &third.task_id).await;
-    let parent_limit = store
-        .start_work_session(
-            &supertag_control_plane::AttemptAccess::new(&host, &third_attempt),
-            &request("ninth-open"),
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(parent_limit, StoreError::FailedPrecondition(_)));
-    assert!(parent_limit.to_string().contains("eight"));
-    store
-        .finish_task(&host, &outcome(&third_attempt))
-        .await
-        .unwrap();
-    no_child_capacity(&store, &host).await; // Four claimed reservations hold capacity.
-    for attempt in &claimed {
-        start(&store, &other, attempt).await;
-    }
-    assert!(matches!(
-        store
-            .start_work_session(
-                &supertag_control_plane::AttemptAccess::new(&other, &claimed[0]),
-                &request("nested-child")
-            )
-            .await,
-        Err(StoreError::PermissionDenied)
-    ));
-    no_child_capacity(&store, &host).await; // Four running native Attempts hold it.
-    store.cancel_task(&claimed[0].task_id).await.unwrap();
-    no_child_capacity(&store, &host).await; // Cancelled, cleanup outstanding still counts.
-    clock.fetch_add(31_000, Ordering::SeqCst);
-    store.sweep_expired_attempts().await.unwrap();
-    for attempt in &claimed[1..] {
+    assert_eq!(running.len(), 5);
+    for attempt in &running {
         assert_eq!(
             store.get_task(&attempt.task_id).await.unwrap().state(),
-            TaskState::Uncertain
+            TaskState::Running
         );
     }
-    no_child_capacity(&store, &host).await; // Uncertain + cancelled cleanup cannot be replaced.
-    store
-        .finish_task(&other, &outcome(&claimed[0]))
-        .await
-        .unwrap();
-    let (task, new_claim) = claim(&store, &host).await;
-    assert_eq!(task.task_id, children[4].latest_task_id);
-    assert_eq!(task.state(), TaskState::Claimed);
-    no_child_capacity(&store, &other).await; // One new claim plus three Uncertain is still four.
-    store
-        .resolve_attempt(
-            OPERATOR,
-            &ResolveAttemptRequest {
-                task_id: claimed[1].task_id.clone(),
-                attempt_id: claimed[1].attempt_id.clone(),
-                operation_id: "release-uncertain".into(),
-                decision: AttemptDecision::Failed as i32,
-                evidence: "Audited fixture cleanup".into(),
-                confirmed_stopped: true,
-            },
-        )
-        .await
-        .unwrap();
-    let (task, _) = claim(&store, &other).await;
-    assert_eq!(task.task_id, children[5].latest_task_id);
-    no_child_capacity(&store, &other).await;
-    assert_eq!(
-        store.get_task(&new_claim.task_id).await.unwrap().state(),
-        TaskState::Claimed
-    );
     store.close().await;
 }
 #[tokio::test]

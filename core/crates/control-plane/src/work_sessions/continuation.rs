@@ -138,30 +138,9 @@ pub(super) async fn budget_in(tx: &mut Transaction<'_, Any>, parent: &Task) -> R
         .unwrap_or(MAX_PER_TURN as u64)
         .min(MAX_PER_TURN as u64);
     if count as u64 >= per_turn {
-        return Err(StoreError::FailedPrecondition(if per_turn == 4 {
-            "this Task already started four Work Session Tasks".into()
-        } else {
-            format!("this Task permits at most {per_turn} Work Session Tasks")
-        }));
-    }
-    let open: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM supertag_v2_work_sessions s
-         JOIN supertag_v2_tasks t ON t.task_id=s.latest_task_id
-         WHERE s.parent_tag_id=$1 AND s.parent_session_id=$2
-           AND (t.state IN ($3,$4,$5,$6) OR t.cleanup_pending=1)",
-    )
-    .bind(&parent.tag_id)
-    .bind(&parent.session_id)
-    .bind(TaskState::Queued as i64)
-    .bind(TaskState::Claimed as i64)
-    .bind(TaskState::Running as i64)
-    .bind(TaskState::Uncertain as i64)
-    .fetch_one(&mut **tx)
-    .await?;
-    if open >= MAX_OPEN {
-        return Err(StoreError::FailedPrecondition(
-            "this Session already has eight unfinished Work Sessions".into(),
-        ));
+        return Err(StoreError::FailedPrecondition(format!(
+            "this Task permits at most {per_turn} Work Session Tasks"
+        )));
     }
     Ok(())
 }

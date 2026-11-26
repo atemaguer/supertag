@@ -26,7 +26,7 @@ pub(crate) async fn continue_in(
     }
     let open:i64=sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_work_sessions w JOIN supertag_v2_tasks t ON t.task_id=w.latest_task_id WHERE w.parent_tag_id=$1 AND w.parent_session_id=$2 AND (t.state IN (1,2,6,7) OR t.cleanup_pending=1)")
   .bind(&starter.tag_id).bind(&starter.session_id).fetch_one(&mut **tx).await?;
-    if open >= MAX_OPEN {
+    if open >= max_work_sessions_in(tx, &starter.tag_id, None).await? as i64 {
         return Ok(());
     }
     let current = Box::pin(current_work_policy_in(

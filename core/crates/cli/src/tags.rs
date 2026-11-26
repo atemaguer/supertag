@@ -93,8 +93,8 @@ pub struct PutArgs {
     #[arg(long, num_args = 0..=1, default_missing_value = "true")]
     lead: Option<bool>,
     /// How many Work Sessions the Tag may have open at once, across all its conversations, from 1
-    /// to 64. Omit to keep it as it is; a new Tag gets 8.
-    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=64))]
+    /// to 1,024. Omit to keep it as it is; a new Tag gets 8.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=1024))]
     max_work_sessions: Option<u32>,
     /// Keep memory: notes the Tag writes and a daily review of its work. With false, the Tag
     /// keeps no notes and does not review. Omit to keep it as it is; a new Tag keeps memory.

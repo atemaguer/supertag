@@ -868,7 +868,7 @@ export function registerCoordinationTools(
     server.registerTool(
       "start_session",
       {
-        description: `Start a separate Work Session on this Tag for one piece of the current Task. Its result comes back to this Session. Provide a short title and an instruction; it works in this Task's Workspace. Omit harness to keep ${current ?? "this Tag's harness"}; name another only when the work needs it. A Work Session keeps its harness, and you talk to it only through its report and continue_session.${capacity}`,
+        description: `Start a separate Work Session on this Tag for one piece of the current Task. Its result comes back to this Session. Provide a short title and an instruction; it works in this Task's Workspace. Omit harness to keep ${current ?? "this Tag's harness"}; name another only when the work needs it. A Work Session keeps its harness, and you talk to it only through its report and continue_session. A Task may start or continue up to 16 Work Sessions.${capacity}`,
         inputSchema: schemas.start_session,
         _meta: meta,
       },

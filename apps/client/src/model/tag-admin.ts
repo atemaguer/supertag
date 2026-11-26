@@ -29,7 +29,7 @@ export interface NewTag {
   /** Where a Workspace just added starts; otherwise the branch its other Tags follow. */
   workspaceRef?: string;
   workspaceCommit?: string;
-  /** How many Work Sessions it may have open at once, 1 to 64. */
+  /** How many Work Sessions it may have open at once, 1 to 1,024. */
   maxWorkSessions?: number;
   /** Whether it may read web pages and its commands reach the network (`web:fetch`); default on. */
   webAccess?: boolean;

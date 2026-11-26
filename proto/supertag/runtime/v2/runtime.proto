@@ -1821,7 +1821,7 @@ message PutTagRequest {
   // Tag is not the lead.
   optional bool lead = 6600;
   // How many Work Sessions the Tag may have open at once, across all its conversations and
-  // Objectives; from 1 to 64. Omitted keeps the current value; a new Tag gets 8.
+  // Objectives; from 1 to 1,024. Omitted keeps the current value; a new Tag gets 8.
   optional uint32 max_work_sessions = 6700;
   // Whether the Tag keeps memory: its harness's own memory, which the Worker Host keeps, and a
   // daily review of its work. Omitted keeps the current value; a new Tag keeps memory.

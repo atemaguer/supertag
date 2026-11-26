@@ -12621,7 +12621,7 @@ type PutTagRequest struct {
 	// Tag is not the lead.
 	Lead *bool `protobuf:"varint,6600,opt,name=lead,proto3,oneof" json:"lead,omitempty"`
 	// How many Work Sessions the Tag may have open at once, across all its conversations and
-	// Objectives; from 1 to 64. Omitted keeps the current value; a new Tag gets 8.
+	// Objectives; from 1 to 1,024. Omitted keeps the current value; a new Tag gets 8.
 	MaxWorkSessions *uint32 `protobuf:"varint,6700,opt,name=max_work_sessions,json=maxWorkSessions,proto3,oneof" json:"max_work_sessions,omitempty"`
 	// Whether the Tag keeps memory: its harness's own memory, which the Worker Host keeps, and a
 	// daily review of its work. Omitted keeps the current value; a new Tag keeps memory.

@@ -94,17 +94,24 @@ async fn contract(url: String) {
         .with_execution_clock(|| NOW);
     let host = support::register_host(&store, "worker").await;
 
-    // The setting: 8 by default, 1 to 64, kept when omitted.
+    // The setting: 8 by default, 1 to 1,024, kept when omitted.
     assert_eq!(
         put(&store, "lead", None).await.unwrap().max_work_sessions,
         8
     );
-    for invalid in [0, 65] {
+    for invalid in [0, 1_025] {
         assert!(matches!(
             put(&store, "lead", Some(invalid)).await,
             Err(StoreError::InvalidArgument(_))
         ));
     }
+    assert_eq!(
+        put(&store, "lead", Some(1_024))
+            .await
+            .unwrap()
+            .max_work_sessions,
+        1_024
+    );
     assert_eq!(
         put(&store, "lead", Some(2))
             .await

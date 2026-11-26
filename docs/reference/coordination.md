@@ -217,7 +217,7 @@ An Objective's turn starts work with `start_session {title, instruction, harness
   is unknown, when no Worker Host bound to the Tag runs that harness, or when that harness can't
   enforce the work Session's permissions or limits. A work Session on another harness uses that
   host's default model.
-- At most four work Sessions run at once per Session; later ones wait.
+- Worker Host capacity controls how many work Sessions run at once per Session.
 
 A work Session's result returns to the Objective's conversation as a turn. The owner reads it,
 then either accepts it in its reply or sends fixes with `continue_session {sessionId, message}`.
@@ -281,7 +281,7 @@ continue one or close one. A work Session in a conversation the turn may not see
 its title. The `start_session` description says how many are open, such as "3 of 8", and so do
 `supertag get session`, `supertag get tag`, and the desktop app's conversation.
 
-Set the limit, from 1 to 64, with `supertag tag put TAG --max-work-sessions N`, the
+Set the limit, from 1 to 1,024, with `supertag tag put TAG --max-work-sessions N`, the
 `maxWorkSessions` field of a Tag manifest, or the New Tag form of the desktop app or the terminal
 UI.
 
