@@ -11,6 +11,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- `supertag get host NAME` shows the host's `contribution`: how many Workspace deliveries it made,
+  how many were in Work Sessions, how many SuperTag landed, and when it last delivered.
 - A Tag may keep up to 1,024 Work Sessions open (`maxWorkSessions`, up from 64), and one turn may
   start 16 (up from 4). The fixed limits of four running and eight unfinished Work Sessions per
   conversation are gone: the Worker Hosts' `concurrency` bounds what runs at once.

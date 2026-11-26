@@ -1074,6 +1074,20 @@ message WorkerHostStatus {
   // lapsed. Each keeps a slot until it is resolved. At most 20 are listed, oldest first.
   repeated HostUncertainAttempt uncertain_attempts = 5400;
   uint32 total_uncertain_attempts = 5401;
+  // What this host's Task Attempts delivered, for crediting the people whose machines did the
+  // work. Set by GetHost only; ListHosts leaves it empty.
+  HostContribution contribution = 5500;
+}
+
+message HostContribution {
+  // Workspace deliveries this host made: one per finished Task Attempt with a Workspace.
+  uint64 deliveries = 1;
+  // Of those, deliveries in Work Sessions.
+  uint64 work_session_deliveries = 2;
+  // Deliveries whose Task's landing SuperTag completed, such as a merge or a pull request.
+  uint64 landed = 3;
+  // When its latest delivery was committed, in milliseconds since the epoch.
+  optional int64 last_delivered_at_ms = 4;
 }
 
 message HostUncertainAttempt {

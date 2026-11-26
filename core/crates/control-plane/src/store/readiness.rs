@@ -183,7 +183,8 @@ impl Store {
     pub async fn get_host(&self, id: &str) -> Result<WorkerHostStatus> {
         name("Worker Host ID", id)?;
         let mut transaction = self.pool.begin().await?;
-        let view = status_in(&mut transaction, id, self.execution_now_ms()).await?;
+        let mut view = status_in(&mut transaction, id, self.execution_now_ms()).await?;
+        view.contribution = Some(contribution_in(&mut transaction, id).await?);
         transaction.commit().await?;
         Ok(view)
     }
@@ -520,4 +521,30 @@ fn harness_capacities(input: &ReportHostRequest) -> Result<Option<Vec<u8>>> {
         ));
     }
     Ok(Some(HostHarnessCapacities { harnesses }.encode_to_vec()))
+}
+
+/// What `host_id`'s Task Attempts delivered: every committed Workspace delivery it holds, those in
+/// Work Sessions, and those whose Task's landing completed.
+async fn contribution_in(
+    transaction: &mut Transaction<'_, Any>,
+    host_id: &str,
+) -> Result<HostContribution> {
+    let row = sqlx::query(
+        "SELECT COUNT(*) AS deliveries,
+                COALESCE(SUM(CASE WHEN t.session_id LIKE 'work/%' THEN 1 ELSE 0 END),0) AS work_session_deliveries,
+                COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM supertag_v2_workspace_landings l WHERE l.task_id=d.task_id AND l.state=$2) THEN 1 ELSE 0 END),0) AS landed,
+                MAX(d.committed_at_ms) AS last_delivered_at_ms
+         FROM supertag_v2_workspace_deliveries d JOIN supertag_v2_tasks t ON t.task_id=d.task_id
+         WHERE d.holder_host_id=$1 AND d.committed_at_ms IS NOT NULL",
+    )
+    .bind(host_id)
+    .bind(WorkspaceLandingState::Landed as i64)
+    .fetch_one(&mut **transaction)
+    .await?;
+    Ok(HostContribution {
+        deliveries: row.try_get::<i64, _>("deliveries")? as u64,
+        work_session_deliveries: row.try_get::<i64, _>("work_session_deliveries")? as u64,
+        landed: row.try_get::<i64, _>("landed")? as u64,
+        last_delivered_at_ms: row.try_get("last_delivered_at_ms")?,
+    })
 }

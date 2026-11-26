@@ -70,7 +70,10 @@ a lead Tag without running the lead itself, such as a contributor's computer:
 
 ```sh
 supertag auth-key create alice-helps --role host --work-sessions-of lead --gateway team
-``` Revoking an Auth Key stops further enrollment; principals that already
+```
+
+`supertag get host NAME` credits each host with what it did: its `contribution` counts its
+Workspace deliveries, those in Work Sessions, and those SuperTag landed. Revoking an Auth Key stops further enrollment; principals that already
 joined stay enrolled.
 
 ```sh

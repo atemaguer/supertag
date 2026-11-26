@@ -341,6 +341,25 @@ async fn contract(url: &str) {
         "{}",
         caps.delivery_note
     );
+    // The host's record credits what it delivered, the Work Session's delivery among them.
+    deliver(
+        &store,
+        &host,
+        &child,
+        HEAD,
+        "Proved it",
+        ObjectiveSignal::Progress,
+    )
+    .await;
+    let contribution = store
+        .get_host("delivered-host")
+        .await
+        .unwrap()
+        .contribution
+        .expect("GetHost reports the contribution");
+    assert_eq!(contribution.work_session_deliveries, 1, "{contribution:?}");
+    assert!(contribution.deliveries > 1 && contribution.last_delivered_at_ms.is_some());
+    assert_eq!(contribution.landed, 0);
     store.close().await;
 }
 

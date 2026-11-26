@@ -217,5 +217,12 @@ pub(crate) fn status_json(host: WorkerHostStatus) -> Value {
         "ephemeral": host.ephemeral,
         "removed_at_ms": host.removed_at_ms,
         "credential_revision": host.credential_revision,
+        // `get host NAME` only: what the host delivered, for crediting whose machine did the work.
+        "contribution": host.contribution.map(|contribution| json!({
+            "deliveries": contribution.deliveries,
+            "work_session_deliveries": contribution.work_session_deliveries,
+            "landed": contribution.landed,
+            "last_delivered_at_ms": contribution.last_delivered_at_ms,
+        })),
     })
 }
