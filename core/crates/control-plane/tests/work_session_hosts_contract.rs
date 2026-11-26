@@ -155,6 +155,12 @@ async fn contract(url: &str) {
     assert!(claim(&store, &helper).await.is_none());
     let turn = claim(&store, &lead).await.expect("the lead's host runs it");
     assert_eq!(turn.task_id, chat.task_id);
+    assert!(
+        !store
+            .minted_credentials_only(&lead, &turn.task_id)
+            .await
+            .unwrap()
+    );
 
     // The Work Session it starts is: the helper claims it, and the lead's host need not.
     let work = store
@@ -171,6 +177,18 @@ async fn contract(url: &str) {
         .unwrap();
     let helping = claim(&store, &helper).await.expect("the helper runs it");
     assert_eq!(helping.task_id, work.latest_task_id);
+    assert!(
+        store
+            .minted_credentials_only(&helper, &helping.task_id)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !store
+            .minted_credentials_only(&lead, &helping.task_id)
+            .await
+            .unwrap()
+    );
     store
         .finish_task(
             &helper,

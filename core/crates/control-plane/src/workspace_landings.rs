@@ -539,6 +539,20 @@ async fn claim_response_in(
         }
         _ => None,
     };
+    let minted_credentials_only = match claimer {
+        LandingClaimer::Host(host) => {
+            let task_id = &value.task_id;
+            let tag_id: String =
+                sqlx::query_scalar("SELECT tag_id FROM supertag_v2_tasks WHERE task_id=$1")
+                    .bind(task_id)
+                    .fetch_one(&mut **tx)
+                    .await?;
+            let work_only: Option<i64> = sqlx::query_scalar("SELECT scope.work_sessions_only FROM supertag_v2_host_tags scope JOIN supertag_v2_hosts host ON host.host_id=scope.host_id WHERE scope.host_id=$1 AND scope.tag_id=$2 AND host.all_tags=0")
+                .bind(host.id()).bind(tag_id).fetch_optional(&mut **tx).await?;
+            work_only == Some(1)
+        }
+        LandingClaimer::Delivery(_) => false,
+    };
     Ok(ClaimWorkspaceLandingResponse {
         landing: Some(value),
         lease_token: token,
@@ -546,6 +560,7 @@ async fn claim_response_in(
         holder,
         credential,
         workspace,
+        minted_credentials_only,
     })
 }
 

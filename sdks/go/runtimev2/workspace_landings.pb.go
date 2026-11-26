@@ -1263,9 +1263,12 @@ type ClaimWorkspaceLandingResponse struct {
 	Credential string `protobuf:"bytes,5,opt,name=credential,proto3" json:"credential,omitempty"`
 	// A Worker Host's claims and renewals only: the remote Workspace as the landing's Task
 	// recorded it, whose push credential `WorkspaceGitAccess.Mint` grants for the lease.
-	Workspace     *Workspace `protobuf:"bytes,6,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Workspace *Workspace `protobuf:"bytes,6,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// The calling Worker Host runs this Task's Tag only for its Work Sessions: it may receive a
+	// minted Workspace credential, such as a GitHub App token, never a stored token or SSH key.
+	MintedCredentialsOnly bool `protobuf:"varint,7,opt,name=minted_credentials_only,json=mintedCredentialsOnly,proto3" json:"minted_credentials_only,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *ClaimWorkspaceLandingResponse) Reset() {
@@ -1338,6 +1341,13 @@ func (x *ClaimWorkspaceLandingResponse) GetWorkspace() *Workspace {
 		return x.Workspace
 	}
 	return nil
+}
+
+func (x *ClaimWorkspaceLandingResponse) GetMintedCredentialsOnly() bool {
+	if x != nil {
+		return x.MintedCredentialsOnly
+	}
+	return false
 }
 
 type RecordWorkspaceLandingRequest struct {
@@ -1551,7 +1561,7 @@ const file_supertag_runtime_v2_workspace_landings_proto_rawDesc = "" +
 	"\n" +
 	"landing_id\x18\x01 \x01(\tR\tlandingId\x12\x1f\n" +
 	"\vlease_token\x18\x02 \x01(\tR\n" +
-	"leaseToken\"\xba\x02\n" +
+	"leaseToken\"\xf2\x02\n" +
 	"\x1dClaimWorkspaceLandingResponse\x12?\n" +
 	"\alanding\x18\x01 \x01(\v2%.supertag.runtime.v2.WorkspaceLandingR\alanding\x12\x1f\n" +
 	"\vlease_token\x18\x02 \x01(\tR\n" +
@@ -1562,7 +1572,8 @@ const file_supertag_runtime_v2_workspace_landings_proto_rawDesc = "" +
 	"\n" +
 	"credential\x18\x05 \x01(\tR\n" +
 	"credential\x12<\n" +
-	"\tworkspace\x18\x06 \x01(\v2\x1e.supertag.runtime.v2.WorkspaceR\tworkspace\"\xba\x03\n" +
+	"\tworkspace\x18\x06 \x01(\v2\x1e.supertag.runtime.v2.WorkspaceR\tworkspace\x126\n" +
+	"\x17minted_credentials_only\x18\a \x01(\bR\x15mintedCredentialsOnly\"\xba\x03\n" +
 	"\x1dRecordWorkspaceLandingRequest\x12@\n" +
 	"\x05lease\x18\x01 \x01(\v2*.supertag.runtime.v2.WorkspaceLandingLeaseR\x05lease\x12!\n" +
 	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12@\n" +

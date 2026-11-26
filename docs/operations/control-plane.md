@@ -66,7 +66,9 @@ days. `--tag` limits a host to the Tags it may run; `--all-tags` removes the lim
 Tag's `runsOn` can select. `--work-sessions-of TAG` lets a host run only that Tag's
 [Work Sessions](../reference/coordination.md#work-sessions), the parallel helpers a Tag's turn starts, and nothing else
 of the Tag: not its conversations, inbox, Objectives, or reports. Use it for a machine that helps
-a lead Tag without running the lead itself, such as a contributor's computer:
+a lead Tag without running the lead itself, such as a contributor's computer. Such hosts receive
+only short-lived GitHub App tokens to read and push a remote Workspace, never a stored token or SSH
+key, so use a GitHub App Workspace Credential for any remote Workspace they run:
 
 ```sh
 supertag auth-key create alice-helps --role host --work-sessions-of lead --gateway team

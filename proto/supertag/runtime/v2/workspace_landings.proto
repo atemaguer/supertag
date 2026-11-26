@@ -179,6 +179,9 @@ message ClaimWorkspaceLandingResponse {
   // A Worker Host's claims and renewals only: the remote Workspace as the landing's Task
   // recorded it, whose push credential `WorkspaceGitAccess.Mint` grants for the lease.
   Workspace workspace = 6;
+  // The calling Worker Host runs this Task's Tag only for its Work Sessions: it may receive a
+  // minted Workspace credential, such as a GitHub App token, never a stored token or SSH key.
+  bool minted_credentials_only = 7;
 }
 message RecordWorkspaceLandingRequest {
   WorkspaceLandingLease lease = 1;

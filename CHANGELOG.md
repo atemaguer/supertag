@@ -11,6 +11,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- A Worker Host enrolled with `--work-sessions-of` receives only minted GitHub App tokens for a
+  remote Workspace, never a stored HTTPS token or SSH key: a contributor's machine never holds
+  your long-lived git credentials.
 - `supertag get host NAME` shows the host's `contribution`: how many Workspace deliveries it made,
   how many were in Work Sessions, how many SuperTag landed, and when it last delivered.
 - A Tag may keep up to 1,024 Work Sessions open (`maxWorkSessions`, up from 64), and one turn may

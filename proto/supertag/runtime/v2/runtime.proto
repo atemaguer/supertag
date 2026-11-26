@@ -1200,6 +1200,9 @@ message HeldWorkspaceDelivery {
   // The delivering Task's remote Workspace, absent for a local Workspace, and its Session branch.
   Workspace workspace = 3;
   string session_branch = 4;
+  // The calling Worker Host runs this Task's Tag only for its Work Sessions: it may receive a
+  // minted Workspace credential, such as a GitHub App token, never a stored token or SSH key.
+  bool minted_credentials_only = 5;
 }
 
 // An adapter connects only to its supervising Worker Host. The launch pipe
@@ -3113,6 +3116,9 @@ message WorkspaceSourceBundle {
   BlobReference bundle = 2;
   // The commit the bundle holds: the Workspace's pinned commit, or the Task's merge commit.
   string commit = 3;
+  // The calling Worker Host runs this Task's Tag only for its Work Sessions: it may receive a
+  // minted Workspace credential, such as a GitHub App token, never a stored token or SSH key.
+  bool minted_credentials_only = 4;
 }
 
 message DownloadWorkspaceSourceRequest {

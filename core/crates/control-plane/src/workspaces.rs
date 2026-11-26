@@ -595,9 +595,18 @@ impl workspace_directory_server::WorkspaceDirectory for ControlPlane {
         request: Request<GetReviewArtifactRequest>,
     ) -> std::result::Result<Response<HeldWorkspaceDelivery>, Status> {
         let host = self.host_authority(&request)?;
-        let delivery = self
+        let input = request.into_inner();
+        let delivery = self.store.get_review_artifact(&host, &input).await?;
+        let minted_credentials_only = self
             .store
-            .get_review_artifact(&host, &request.into_inner())
+            .minted_credentials_only(
+                &host,
+                &input
+                    .attempt
+                    .as_ref()
+                    .ok_or_else(|| Status::invalid_argument("Attempt is required"))?
+                    .task_id,
+            )
             .await?;
         let holder = self.store.workspace_delivery_holder(&delivery).await?;
         let (workspace, session_branch) = self.store.delivery_source(&holder).await?;
@@ -606,6 +615,7 @@ impl workspace_directory_server::WorkspaceDirectory for ControlPlane {
             holder: Some(holder),
             workspace,
             session_branch,
+            minted_credentials_only,
         }))
     }
 

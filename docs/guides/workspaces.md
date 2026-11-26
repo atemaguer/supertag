@@ -206,7 +206,9 @@ key is handed over as it is. A credential helper runs only on the Control Plane'
 Workspace whose read credential is a helper can't run Tasks. A `file://` remote is a path on the
 Control Plane's machine, so only hosts that share that filesystem can read it. The Worklet that
 ran each Task pushes the Session's changes back the same way, with the push credential, granted
-only while it holds the landing.
+only while it holds the landing. Hosts enrolled with `--work-sessions-of` receive only minted
+GitHub App tokens, never a stored HTTPS token or SSH key, so use a GitHub App Workspace Credential
+for remote Workspaces those hosts run.
 
 1. Store a **Workspace Credential**: what git delivery presents to the server. Run this on the
    machine that runs the Control Plane, because the secret stays in that machine's credential vault

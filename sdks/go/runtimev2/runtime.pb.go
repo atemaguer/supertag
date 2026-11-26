@@ -8554,8 +8554,11 @@ type HeldWorkspaceDelivery struct {
 	// The delivering Task's remote Workspace, absent for a local Workspace, and its Session branch.
 	Workspace     *Workspace `protobuf:"bytes,3,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	SessionBranch string     `protobuf:"bytes,4,opt,name=session_branch,json=sessionBranch,proto3" json:"session_branch,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// The calling Worker Host runs this Task's Tag only for its Work Sessions: it may receive a
+	// minted Workspace credential, such as a GitHub App token, never a stored token or SSH key.
+	MintedCredentialsOnly bool `protobuf:"varint,5,opt,name=minted_credentials_only,json=mintedCredentialsOnly,proto3" json:"minted_credentials_only,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *HeldWorkspaceDelivery) Reset() {
@@ -8614,6 +8617,13 @@ func (x *HeldWorkspaceDelivery) GetSessionBranch() string {
 		return x.SessionBranch
 	}
 	return ""
+}
+
+func (x *HeldWorkspaceDelivery) GetMintedCredentialsOnly() bool {
+	if x != nil {
+		return x.MintedCredentialsOnly
+	}
+	return false
 }
 
 type HarnessWorkspaceRequest struct {
@@ -21714,9 +21724,12 @@ type WorkspaceSourceBundle struct {
 	Workspace *Workspace             `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	Bundle    *BlobReference         `protobuf:"bytes,2,opt,name=bundle,proto3" json:"bundle,omitempty"`
 	// The commit the bundle holds: the Workspace's pinned commit, or the Task's merge commit.
-	Commit        string `protobuf:"bytes,3,opt,name=commit,proto3" json:"commit,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Commit string `protobuf:"bytes,3,opt,name=commit,proto3" json:"commit,omitempty"`
+	// The calling Worker Host runs this Task's Tag only for its Work Sessions: it may receive a
+	// minted Workspace credential, such as a GitHub App token, never a stored token or SSH key.
+	MintedCredentialsOnly bool `protobuf:"varint,4,opt,name=minted_credentials_only,json=mintedCredentialsOnly,proto3" json:"minted_credentials_only,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *WorkspaceSourceBundle) Reset() {
@@ -21768,6 +21781,13 @@ func (x *WorkspaceSourceBundle) GetCommit() string {
 		return x.Commit
 	}
 	return ""
+}
+
+func (x *WorkspaceSourceBundle) GetMintedCredentialsOnly() bool {
+	if x != nil {
+		return x.MintedCredentialsOnly
+	}
+	return false
 }
 
 type DownloadWorkspaceSourceRequest struct {
@@ -27848,12 +27868,13 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"BlobHolder\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1d\n" +
 	"\n" +
-	"attempt_id\x18\x02 \x01(\tR\tattemptId\"\x82\x02\n" +
+	"attempt_id\x18\x02 \x01(\tR\tattemptId\"\xba\x02\n" +
 	"\x15HeldWorkspaceDelivery\x12K\n" +
 	"\bdelivery\x18\x01 \x01(\v2/.supertag.runtime.v2.WorkspaceDeliveryReferenceR\bdelivery\x127\n" +
 	"\x06holder\x18\x02 \x01(\v2\x1f.supertag.runtime.v2.BlobHolderR\x06holder\x12<\n" +
 	"\tworkspace\x18\x03 \x01(\v2\x1e.supertag.runtime.v2.WorkspaceR\tworkspace\x12%\n" +
-	"\x0esession_branch\x18\x04 \x01(\tR\rsessionBranch\"\xc8\x03\n" +
+	"\x0esession_branch\x18\x04 \x01(\tR\rsessionBranch\x126\n" +
+	"\x17minted_credentials_only\x18\x05 \x01(\bR\x15mintedCredentialsOnly\"\xc8\x03\n" +
 	"\x17HarnessWorkspaceRequest\x128\n" +
 	"\x04read\x18\x01 \x01(\v2\".supertag.runtime.v2.WorkspaceReadH\x00R\x04read\x12;\n" +
 	"\x05write\x18\x02 \x01(\v2#.supertag.runtime.v2.WorkspaceWriteH\x00R\x05write\x128\n" +
@@ -28918,11 +28939,12 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x1bAttemptWorkspaceMountWrites\x12\x1d\n" +
 	"\n" +
 	"attempt_id\x18\x01 \x01(\tR\tattemptId\x12@\n" +
-	"\x06writes\x18\x02 \x03(\v2(.supertag.runtime.v2.WorkspaceMountWriteR\x06writes\"\xa9\x01\n" +
+	"\x06writes\x18\x02 \x03(\v2(.supertag.runtime.v2.WorkspaceMountWriteR\x06writes\"\xe1\x01\n" +
 	"\x15WorkspaceSourceBundle\x12<\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1e.supertag.runtime.v2.WorkspaceR\tworkspace\x12:\n" +
 	"\x06bundle\x18\x02 \x01(\v2\".supertag.runtime.v2.BlobReferenceR\x06bundle\x12\x16\n" +
-	"\x06commit\x18\x03 \x01(\tR\x06commit\"|\n" +
+	"\x06commit\x18\x03 \x01(\tR\x06commit\x126\n" +
+	"\x17minted_credentials_only\x18\x04 \x01(\bR\x15mintedCredentialsOnly\"|\n" +
 	"\x1eDownloadWorkspaceSourceRequest\x12D\n" +
 	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12\x14\n" +
 	"\x05merge\x18\x02 \x01(\bR\x05merge\"\x82\x01\n" +

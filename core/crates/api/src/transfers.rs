@@ -101,6 +101,19 @@ impl ApiTransfers {
             .map(Response::into_inner)
     }
 
+    fn enforce_minted_only(
+        minted_credentials_only: bool,
+        credential: &Option<workspace_git_grant::Credential>,
+        expires_at_ms: i64,
+    ) -> Result<(), Status> {
+        if minted_credentials_only && credential.is_some() && expires_at_ms == 0 {
+            return Err(Status::failed_precondition(
+                "work-only Worker Hosts require a GitHub App Workspace Credential; use a GitHub App Workspace Credential for Workspaces they run",
+            ));
+        }
+        Ok(())
+    }
+
     fn git(&self) -> Result<&Arc<dyn WorkspaceGit>, Status> {
         self.git.as_ref().ok_or_else(|| {
             Status::failed_precondition("git delivery does not run on this Control Plane")
@@ -303,6 +316,7 @@ impl workspace_git_access_server::WorkspaceGitAccess for ApiTransfers {
                 "Workspace source cannot be read from a Worker Host: {error:#}"
             ))
         })?;
+        Self::enforce_minted_only(source.minted_credentials_only, &credential, expires_at_ms)?;
         Ok(Response::new(WorkspaceGitGrant {
             workspace: Some(workspace),
             commit: source.commit,
@@ -345,6 +359,7 @@ impl ApiTransfers {
                 "the reviewed Workspace cannot be read from a Worker Host: {error:#}"
             ))
         })?;
+        Self::enforce_minted_only(held.minted_credentials_only, &credential, expires_at_ms)?;
         Ok(Response::new(WorkspaceGitGrant {
             workspace: Some(workspace),
             commit: delivery.head_commit,
@@ -412,6 +427,7 @@ impl ApiTransfers {
                         "the Workspace's remote cannot be pushed from a Worker Host: {error:#}"
                     ))
                 })?;
+        Self::enforce_minted_only(renewed.minted_credentials_only, &credential, expires_at_ms)?;
         Ok(Response::new(WorkspaceGitGrant {
             workspace: Some(workspace),
             commit,

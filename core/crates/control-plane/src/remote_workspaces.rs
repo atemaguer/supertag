@@ -406,10 +406,12 @@ impl Store {
         } else {
             remote.commit.clone()
         };
+        tx.commit().await?;
         Ok(WorkspaceSourceBundle {
             workspace: Some(remote),
             bundle: None,
             commit,
+            minted_credentials_only: self.minted_credentials_only(host, &attempt.task_id).await?,
         })
     }
 }

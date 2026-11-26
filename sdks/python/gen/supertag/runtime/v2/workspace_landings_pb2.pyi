@@ -232,20 +232,22 @@ class WorkspaceLandingLease(_message.Message):
     def __init__(self, landing_id: _Optional[str] = ..., lease_token: _Optional[str] = ...) -> None: ...
 
 class ClaimWorkspaceLandingResponse(_message.Message):
-    __slots__ = ("landing", "lease_token", "valid_for_ms", "holder", "credential", "workspace")
+    __slots__ = ("landing", "lease_token", "valid_for_ms", "holder", "credential", "workspace", "minted_credentials_only")
     LANDING_FIELD_NUMBER: _ClassVar[int]
     LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
     VALID_FOR_MS_FIELD_NUMBER: _ClassVar[int]
     HOLDER_FIELD_NUMBER: _ClassVar[int]
     CREDENTIAL_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_FIELD_NUMBER: _ClassVar[int]
+    MINTED_CREDENTIALS_ONLY_FIELD_NUMBER: _ClassVar[int]
     landing: WorkspaceLanding
     lease_token: str
     valid_for_ms: int
     holder: _runtime_pb2.BlobHolder
     credential: str
     workspace: _workspaces_pb2.Workspace
-    def __init__(self, landing: _Optional[_Union[WorkspaceLanding, _Mapping]] = ..., lease_token: _Optional[str] = ..., valid_for_ms: _Optional[int] = ..., holder: _Optional[_Union[_runtime_pb2.BlobHolder, _Mapping]] = ..., credential: _Optional[str] = ..., workspace: _Optional[_Union[_workspaces_pb2.Workspace, _Mapping]] = ...) -> None: ...
+    minted_credentials_only: bool
+    def __init__(self, landing: _Optional[_Union[WorkspaceLanding, _Mapping]] = ..., lease_token: _Optional[str] = ..., valid_for_ms: _Optional[int] = ..., holder: _Optional[_Union[_runtime_pb2.BlobHolder, _Mapping]] = ..., credential: _Optional[str] = ..., workspace: _Optional[_Union[_workspaces_pb2.Workspace, _Mapping]] = ..., minted_credentials_only: _Optional[bool] = ...) -> None: ...
 
 class RecordWorkspaceLandingRequest(_message.Message):
     __slots__ = ("lease", "operation_id", "state", "reason", "landed_commit", "target_commit", "conflicts", "retry_after_ms", "pull_request")

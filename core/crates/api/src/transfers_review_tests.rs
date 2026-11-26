@@ -23,6 +23,8 @@ struct Directory {
     reads: Arc<AtomicUsize>,
     /// The reviewed delivery's remote Workspace; None for a local one.
     workspace: Option<Workspace>,
+    minted_credentials_only: bool,
+    expires_at_ms: i64,
 }
 
 const HOST_TOKEN: &str = "stcr_7777777777777777777777777777777777777777777777777777777777777777";
@@ -93,6 +95,7 @@ impl WorkspaceDirectory for Directory {
                 String::new()
             },
             workspace: self.workspace.clone(),
+            minted_credentials_only: self.minted_credentials_only,
         }))
     }
     async fn get_continuation(
@@ -148,7 +151,9 @@ fn request(review_id: &str, token: &str, generation: u64) -> Request<GetReviewAr
     request
 }
 
-struct Git;
+struct Git {
+    expires_at_ms: i64,
+}
 
 #[tonic::async_trait]
 impl WorkspaceGit for Git {
@@ -164,7 +169,7 @@ impl WorkspaceGit for Git {
                 username: "x-access-token".into(),
                 token: "read-token".into(),
             })),
-            42,
+            self.expires_at_ms,
         ))
     }
 
@@ -188,6 +193,7 @@ impl WorkspaceGit for Git {
 
 async fn api(
     channel: ProtocolChannel,
+    expires_at_ms: i64,
 ) -> anyhow::Result<(
     ServerTask,
     TransfersClient<tonic::transport::Channel>,
@@ -201,7 +207,7 @@ async fn api(
     )?;
     let incoming = TcpIncoming::bind("127.0.0.1:0".parse()?)?;
     let address = incoming.local_addr()?;
-    let transfers = ApiTransfers::new(api).with_workspace_git(Arc::new(Git));
+    let transfers = ApiTransfers::new(api).with_workspace_git(Arc::new(Git { expires_at_ms }));
     let server = tokio::spawn(
         Server::builder()
             .add_service(transfers.workspace_git_access_service())
@@ -278,6 +284,8 @@ async fn review_delivery_names_its_source_and_grants_only_a_read_of_its_session_
     let state = Directory {
         reference: reference(),
         reads: Arc::default(),
+        minted_credentials_only: false,
+        expires_at_ms: 42,
         workspace: Some(Workspace {
             workspace_id: "project".into(),
             remote: "https://example.com/project.git".into(),
@@ -285,7 +293,7 @@ async fn review_delivery_names_its_source_and_grants_only_a_read_of_its_session_
         }),
     };
     let (_private, channel) = private(&state).await?;
-    let (_server, mut transfers, mut git) = api(channel).await?;
+    let (_server, mut transfers, mut git) = api(channel, state.expires_at_ms).await?;
 
     let held = transfers
         .get_review_delivery(request("review", HOST_TOKEN, 7))
@@ -338,9 +346,11 @@ async fn a_local_review_delivery_grants_no_git_read() -> anyhow::Result<()> {
         reference: reference(),
         reads: Arc::default(),
         workspace: None,
+        minted_credentials_only: false,
+        expires_at_ms: 42,
     };
     let (_private, channel) = private(&state).await?;
-    let (_server, mut transfers, mut git) = api(channel).await?;
+    let (_server, mut transfers, mut git) = api(channel, state.expires_at_ms).await?;
     let held = transfers
         .get_review_delivery(request("review", HOST_TOKEN, 7))
         .await?
@@ -349,5 +359,38 @@ async fn a_local_review_delivery_grants_no_git_read() -> anyhow::Result<()> {
     assert_eq!(held.holder.unwrap().host_id, "producer-host");
     let error = git.mint(mint("review", HOST_TOKEN, 7)).await.unwrap_err();
     assert_eq!(error.code(), Code::FailedPrecondition, "{error:?}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn work_only_review_grants_require_expiring_credentials() -> anyhow::Result<()> {
+    for (work_only, expires_at_ms, allowed) in [
+        (true, 0, false),
+        (false, 0, true),
+        (true, 42, true),
+        (false, 42, true),
+    ] {
+        let state = Directory {
+            reference: reference(),
+            reads: Arc::default(),
+            workspace: Some(Workspace {
+                workspace_id: "project".into(),
+                remote: "https://example.com/project.git".into(),
+                ..Default::default()
+            }),
+            minted_credentials_only: work_only,
+            expires_at_ms,
+        };
+        let (_private, channel) = private(&state).await?;
+        let (_server, _, mut git) = api(channel, expires_at_ms).await?;
+        let result = git.mint(mint("review", HOST_TOKEN, 7)).await;
+        if allowed {
+            assert_eq!(result?.into_inner().expires_at_ms, expires_at_ms);
+        } else {
+            let error = result.unwrap_err();
+            assert_eq!(error.code(), Code::FailedPrecondition);
+            assert!(error.message().contains("GitHub App Workspace Credential"));
+        }
+    }
     Ok(())
 }

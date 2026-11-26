@@ -44,6 +44,24 @@ impl HostAuthority {
 }
 
 impl Store {
+    /// A work-only binding may receive minted Workspace credentials for this Task.
+    pub async fn minted_credentials_only(
+        &self,
+        host: &HostAuthority,
+        task_id: &str,
+    ) -> Result<bool> {
+        let value: Option<i64> = sqlx::query_scalar(
+            "SELECT scope.work_sessions_only FROM supertag_v2_tasks task JOIN supertag_v2_host_tags scope ON scope.tag_id=task.tag_id AND scope.host_id=$1 JOIN supertag_v2_hosts host ON host.host_id=scope.host_id WHERE task.task_id=$2 AND host.all_tags=0",
+        )
+        .bind(host.id())
+        .bind(task_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(value == Some(1))
+    }
+}
+
+impl Store {
     /// Records `host:ID` with every Tag and a credential from startup configuration, as the
     /// Control Plane does for SUPERTAG_BOOTSTRAP_HOST_TOKEN.
     pub async fn seed_host(&self, id: &str, token_digest: &[u8]) -> Result<HostRecord> {

@@ -1616,16 +1616,18 @@ class BlobHolder(_message.Message):
     def __init__(self, host_id: _Optional[str] = ..., attempt_id: _Optional[str] = ...) -> None: ...
 
 class HeldWorkspaceDelivery(_message.Message):
-    __slots__ = ("delivery", "holder", "workspace", "session_branch")
+    __slots__ = ("delivery", "holder", "workspace", "session_branch", "minted_credentials_only")
     DELIVERY_FIELD_NUMBER: _ClassVar[int]
     HOLDER_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     SESSION_BRANCH_FIELD_NUMBER: _ClassVar[int]
+    MINTED_CREDENTIALS_ONLY_FIELD_NUMBER: _ClassVar[int]
     delivery: WorkspaceDeliveryReference
     holder: BlobHolder
     workspace: _workspaces_pb2.Workspace
     session_branch: str
-    def __init__(self, delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., holder: _Optional[_Union[BlobHolder, _Mapping]] = ..., workspace: _Optional[_Union[_workspaces_pb2.Workspace, _Mapping]] = ..., session_branch: _Optional[str] = ...) -> None: ...
+    minted_credentials_only: bool
+    def __init__(self, delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., holder: _Optional[_Union[BlobHolder, _Mapping]] = ..., workspace: _Optional[_Union[_workspaces_pb2.Workspace, _Mapping]] = ..., session_branch: _Optional[str] = ..., minted_credentials_only: _Optional[bool] = ...) -> None: ...
 
 class HarnessWorkspaceRequest(_message.Message):
     __slots__ = ("read", "write", "edit", "glob", "grep", "list", "command")
@@ -3773,14 +3775,16 @@ class AttemptWorkspaceMountWrites(_message.Message):
     def __init__(self, attempt_id: _Optional[str] = ..., writes: _Optional[_Iterable[_Union[WorkspaceMountWrite, _Mapping]]] = ...) -> None: ...
 
 class WorkspaceSourceBundle(_message.Message):
-    __slots__ = ("workspace", "bundle", "commit")
+    __slots__ = ("workspace", "bundle", "commit", "minted_credentials_only")
     WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     BUNDLE_FIELD_NUMBER: _ClassVar[int]
     COMMIT_FIELD_NUMBER: _ClassVar[int]
+    MINTED_CREDENTIALS_ONLY_FIELD_NUMBER: _ClassVar[int]
     workspace: _workspaces_pb2.Workspace
     bundle: BlobReference
     commit: str
-    def __init__(self, workspace: _Optional[_Union[_workspaces_pb2.Workspace, _Mapping]] = ..., bundle: _Optional[_Union[BlobReference, _Mapping]] = ..., commit: _Optional[str] = ...) -> None: ...
+    minted_credentials_only: bool
+    def __init__(self, workspace: _Optional[_Union[_workspaces_pb2.Workspace, _Mapping]] = ..., bundle: _Optional[_Union[BlobReference, _Mapping]] = ..., commit: _Optional[str] = ..., minted_credentials_only: _Optional[bool] = ...) -> None: ...
 
 class DownloadWorkspaceSourceRequest(_message.Message):
     __slots__ = ("attempt", "merge")
