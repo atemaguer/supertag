@@ -4878,6 +4878,7 @@ type InboxQuestion struct {
 	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
 	AskedAtMs     int64                  `protobuf:"varint,2,opt,name=asked_at_ms,json=askedAtMs,proto3" json:"asked_at_ms,omitempty"`
 	Truncated     bool                   `protobuf:"varint,3,opt,name=truncated,proto3" json:"truncated,omitempty"`
+	RecipientUser string                 `protobuf:"bytes,4,opt,name=recipient_user,json=recipientUser,proto3" json:"recipient_user,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4931,6 +4932,13 @@ func (x *InboxQuestion) GetTruncated() bool {
 		return x.Truncated
 	}
 	return false
+}
+
+func (x *InboxQuestion) GetRecipientUser() string {
+	if x != nil {
+		return x.RecipientUser
+	}
+	return ""
 }
 
 type GetQuestionRequest struct {
@@ -5182,14 +5190,15 @@ func (x *AskQuestionRequest) GetText() string {
 }
 
 type AttemptCapabilities struct {
-	state                     protoimpl.MessageState `protogen:"open.v1"`
-	MayAskObjectiveQuestion   bool                   `protobuf:"varint,1,opt,name=may_ask_objective_question,json=mayAskObjectiveQuestion,proto3" json:"may_ask_objective_question,omitempty"`
-	MayUseWorkstream          bool                   `protobuf:"varint,2,opt,name=may_use_workstream,json=mayUseWorkstream,proto3" json:"may_use_workstream,omitempty"`
-	MayReadMailbox            bool                   `protobuf:"varint,3,opt,name=may_read_mailbox,json=mayReadMailbox,proto3" json:"may_read_mailbox,omitempty"`
-	MaySendTagMessage         bool                   `protobuf:"varint,4,opt,name=may_send_tag_message,json=maySendTagMessage,proto3" json:"may_send_tag_message,omitempty"`
-	MayStartWorkSession       bool                   `protobuf:"varint,5,opt,name=may_start_work_session,json=mayStartWorkSession,proto3" json:"may_start_work_session,omitempty"`
-	MayContinueWorkSession    bool                   `protobuf:"varint,6,opt,name=may_continue_work_session,json=mayContinueWorkSession,proto3" json:"may_continue_work_session,omitempty"`
-	MayAskWorkSessionQuestion bool                   `protobuf:"varint,7,opt,name=may_ask_work_session_question,json=mayAskWorkSessionQuestion,proto3" json:"may_ask_work_session_question,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Existing ask tool: an Objective question or a personal Tag question to its owner.
+	MayAskObjectiveQuestion   bool `protobuf:"varint,1,opt,name=may_ask_objective_question,json=mayAskObjectiveQuestion,proto3" json:"may_ask_objective_question,omitempty"`
+	MayUseWorkstream          bool `protobuf:"varint,2,opt,name=may_use_workstream,json=mayUseWorkstream,proto3" json:"may_use_workstream,omitempty"`
+	MayReadMailbox            bool `protobuf:"varint,3,opt,name=may_read_mailbox,json=mayReadMailbox,proto3" json:"may_read_mailbox,omitempty"`
+	MaySendTagMessage         bool `protobuf:"varint,4,opt,name=may_send_tag_message,json=maySendTagMessage,proto3" json:"may_send_tag_message,omitempty"`
+	MayStartWorkSession       bool `protobuf:"varint,5,opt,name=may_start_work_session,json=mayStartWorkSession,proto3" json:"may_start_work_session,omitempty"`
+	MayContinueWorkSession    bool `protobuf:"varint,6,opt,name=may_continue_work_session,json=mayContinueWorkSession,proto3" json:"may_continue_work_session,omitempty"`
+	MayAskWorkSessionQuestion bool `protobuf:"varint,7,opt,name=may_ask_work_session_question,json=mayAskWorkSessionQuestion,proto3" json:"may_ask_work_session_question,omitempty"`
 	// An Objective owner report may request review of its own child delivery.
 	MayRequestCommitReview bool `protobuf:"varint,8,opt,name=may_request_commit_review,json=mayRequestCommitReview,proto3" json:"may_request_commit_review,omitempty"`
 	// A root turn reads the Tag's other Sessions and its Objectives
@@ -27553,11 +27562,12 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\bresource\x18\x06 \x01(\tR\bresource\"n\n" +
 	"\x17RequestApprovalResponse\x129\n" +
 	"\bapproval\x18\x01 \x01(\v2\x1d.supertag.runtime.v2.ApprovalR\bapproval\x12\x18\n" +
-	"\agranted\x18\x02 \x01(\bR\agranted\"a\n" +
+	"\agranted\x18\x02 \x01(\bR\agranted\"\x88\x01\n" +
 	"\rInboxQuestion\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x1e\n" +
 	"\vasked_at_ms\x18\x02 \x01(\x03R\taskedAtMs\x12\x1c\n" +
-	"\ttruncated\x18\x03 \x01(\bR\ttruncated\"-\n" +
+	"\ttruncated\x18\x03 \x01(\bR\ttruncated\x12%\n" +
+	"\x0erecipient_user\x18\x04 \x01(\tR\rrecipientUser\"-\n" +
 	"\x12GetQuestionRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\"g\n" +
 	"\x15AnswerQuestionRequest\x12\x17\n" +

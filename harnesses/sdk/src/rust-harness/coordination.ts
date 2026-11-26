@@ -746,14 +746,14 @@ export function registerCoordinationTools(
   const asksChild = run.coordination?.mayAskWorkSessionQuestion === true;
   if (asksChild || (run.coordination?.mayAskObjectiveQuestion ?? run.mayAskObjectiveQuestion)) {
     const askSchema = asksChild ? childQuestionSchema : schemas.ask;
-    const subject = asksChild ? "Work Session" : "Objective";
+    const subject = asksChild ? "Work Session question" : "question";
     tools.push("ask");
     server.registerTool(
       "ask",
       {
         description: asksChild
           ? "Record one question for the parent Session. Finish this turn so the parent can receive it and relay an answer."
-          : "Record one question for the Objective's operator. After it is recorded, finish this turn. The answer can arrive in a later turn.",
+          : "Record one question for the Objective's creator or this personal Tag's owner. After it is recorded, finish this turn. The answer can arrive in a later turn.",
         inputSchema: askSchema,
         _meta: meta,
       },
@@ -767,7 +767,7 @@ export function registerCoordinationTools(
           if (report) return response("This turn already reported the Objective's status.", true);
           const safe = trim(safeText(text));
           if (!askSchema.safeParse({ text: safe }).success)
-            return response(`Provide a valid ${subject} question.`, true);
+            return response(`Provide a valid ${subject}.`, true);
           try {
             // One question is allowed per Attempt. The receipt also binds the text.
             const stored = asksChild
@@ -792,24 +792,21 @@ export function registerCoordinationTools(
             if (
               stored.taskId === scope.taskId &&
               stored.attemptId === scope.attemptId &&
-              ("workSessionId" in stored
-                ? workSessionId.test(stored.workSessionId) && stored.workSessionId === parentSession
-                : stored.objectiveId) &&
+              (!("workSessionId" in stored) ||
+                (workSessionId.test(stored.workSessionId) &&
+                  stored.workSessionId === parentSession)) &&
               stored.text === safe
             ) {
               asked = true;
-              return response(`${subject} question recorded.`);
+              return response(asksChild ? "Work Session question recorded." : "Question recorded.");
             }
           } catch (error) {
             if (ConnectError.from(error).code === Code.AlreadyExists) {
               asked = true;
-              return response(
-                `This Attempt already recorded a different ${subject} question.`,
-                true,
-              );
+              return response(`This Attempt already recorded a different ${subject}.`, true);
             }
           }
-          return response(`The ${subject} question could not be confirmed.`, true);
+          return response(`The ${subject} could not be confirmed.`, true);
         }),
     );
   }

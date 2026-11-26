@@ -1272,10 +1272,15 @@ the kinds with more pending items than the page holds. `supertag watch inbox-ite
 waiting first, then new ones. It rereads the inbox every two seconds, and an item that leaves the
 inbox and returns prints again.
 
+A personal Tag is a Tag owned by one User. Its inbox Session or a conversation with someone else
+may call `ask` to reach its owner. The question appears in the owner's Inbox. The owner or an
+operator answers with `supertag question answer TASK_ID "answer"`. A newer Task in the same
+Session closes the unanswered question.
+
 | Kind | Appears when |
 | --- | --- |
 | `approval` | An approval request waits for a decision |
-| `question` | An Objective's latest turn called `ask` and waits on the answer |
+| `question` | An Objective or personal Tag called `ask` and waits on the answer |
 | `budget` | The Objective's budget pool is used up |
 | `limit` | A budget warning, budget exhaustion, deadline warning or deadline passage |
 | `task-attention` | A Task needs a person: an [uncertain Task Attempt](scheduling-and-recovery.md#uncertain-task-attempts) of any Task, a conversation turn included, or for a week, a Task that was interrupted and not [redelivered](scheduling-and-recovery.md#redelivery) |

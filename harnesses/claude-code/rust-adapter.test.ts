@@ -1320,7 +1320,7 @@ it("registers only the admitted Objective question in the real SDK and retries i
       () => run.completions[0]?.result,
     ),
   ).toBe(true);
-  expect(run.completions[0]?.result).toContain("Objective question recorded");
+  expect(run.completions[0]?.result).toContain("Question recorded");
   expect(run.questions.map(({ text }) => text)).toEqual([
     "Confirm the target branch. [REDACTED]",
     "Confirm the target branch. [REDACTED]",

@@ -48,6 +48,11 @@ A Tag that needs a decision asks and ends its turn. `supertag get inbox-item` li
 question; answer it with `supertag question answer TASK_ID TEXT`. The answer becomes the owner's next
 turn. You can also reply in the Objective's home thread.
 
+A personal Tag, a Tag owned by one User, can also ask its owner from its inbox Session or a
+conversation with someone else. Its question appears in the owner's Inbox with no Objective ID.
+The owner or an operator can answer with the same command. A newer Task in that Session closes
+an unanswered question.
+
 Make any resource change before answering. For example, if the repair needs more budget, run
 `supertag objective set-limits service-operations --budget-minor 1500`, then answer “Raised the
 budget to 1500. Go ahead with the repair.” The answer is recorded as yours.

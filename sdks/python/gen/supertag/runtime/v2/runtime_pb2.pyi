@@ -972,14 +972,16 @@ class RequestApprovalResponse(_message.Message):
     def __init__(self, approval: _Optional[_Union[Approval, _Mapping]] = ..., granted: _Optional[bool] = ...) -> None: ...
 
 class InboxQuestion(_message.Message):
-    __slots__ = ("text", "asked_at_ms", "truncated")
+    __slots__ = ("text", "asked_at_ms", "truncated", "recipient_user")
     TEXT_FIELD_NUMBER: _ClassVar[int]
     ASKED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     TRUNCATED_FIELD_NUMBER: _ClassVar[int]
+    RECIPIENT_USER_FIELD_NUMBER: _ClassVar[int]
     text: str
     asked_at_ms: int
     truncated: bool
-    def __init__(self, text: _Optional[str] = ..., asked_at_ms: _Optional[int] = ..., truncated: _Optional[bool] = ...) -> None: ...
+    recipient_user: str
+    def __init__(self, text: _Optional[str] = ..., asked_at_ms: _Optional[int] = ..., truncated: _Optional[bool] = ..., recipient_user: _Optional[str] = ...) -> None: ...
 
 class GetQuestionRequest(_message.Message):
     __slots__ = ("task_id",)

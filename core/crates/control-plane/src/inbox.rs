@@ -1,4 +1,4 @@
-//! The operator Inbox is a bounded read model over durable questions, Objective
+//! The Inbox is a bounded read model over durable questions, Objective
 //! limits, and uncertain execution. Decisions always revalidate their source.
 use crate::AttemptAccess;
 use serde::{Deserialize, Serialize};
@@ -58,7 +58,6 @@ impl Store {
             ));
         }
         let objective = question_objective_in(&mut tx, &row, &attempt.task_id).await?;
-        let may_ask_objective_question = objective.is_some();
         let objective_ongoing = match &objective {
             Some(id) => {
                 sqlx::query_scalar::<_, i64>(
@@ -87,6 +86,10 @@ impl Store {
                 .await?
                 .is_some();
         let reaches_tags = is_root && !objective_session;
+        let may_ask_objective_question = objective.is_some()
+            || personal_question_recipient_in(&mut tx, &task)
+                .await?
+                .is_some();
         let may_ask_tag = crate::mailbox::objective_asks::asking_objective_in(&mut tx, &task, kind)
             .await?
             .is_some();
@@ -205,16 +208,19 @@ impl Store {
                 "asking requires a live running Attempt".into(),
             ));
         }
-        let objective_id = question_objective_in(&mut tx, &row, &attempt.task_id)
-            .await?
-            .ok_or_else(|| {
-                StoreError::FailedPrecondition(
-                    "asking requires work by the owner of an open Objective".into(),
-                )
-            })?;
+        let objective_id = question_objective_in(&mut tx, &row, &attempt.task_id).await?;
+        let task = crate::store::task_row(&row)?;
+        let recipient_user = if objective_id.is_none() {
+            personal_question_recipient_in(&mut tx, &task).await?
+        } else {
+            None
+        };
+        if objective_id.is_none() && recipient_user.is_none() {
+            return Err(StoreError::FailedPrecondition("asking requires an open Objective or a personal Tag root turn outside its owner's conversation".into()));
+        }
         crate::mcp_effects::require_no_pending_approval_in(&mut tx, &attempt.attempt_id).await?;
-        sqlx::query("INSERT INTO supertag_v2_objective_questions (attempt_id,task_id,objective_id,operation_id,text,asked_at_ms) VALUES ($1,$2,$3,$4,$5,$6)")
-            .bind(&attempt.attempt_id).bind(&attempt.task_id).bind(objective_id).bind(&input.operation_id).bind(text).bind(now).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO supertag_v2_objective_questions (attempt_id,task_id,objective_id,recipient_user,operation_id,text,asked_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7)")
+            .bind(&attempt.attempt_id).bind(&attempt.task_id).bind(objective_id).bind(recipient_user).bind(&input.operation_id).bind(text).bind(now).execute(&mut *tx).await?;
         let question = question_in(&mut tx, &attempt.task_id, false).await?;
         tx.commit().await?;
         Ok(question)
@@ -225,9 +231,7 @@ impl Store {
         name("question Task ID", task_id)?;
         let mut tx = self.pool.begin().await?;
         let question = question_in(&mut tx, task_id, true).await?;
-        ensure_objective_access_in(&mut tx, principal, &question.objective_id)
-            .await
-            .map_err(|_| StoreError::NotFound("question was not found".into()))?;
+        question_access_in(&mut tx, principal, &question).await?;
         tx.commit().await?;
         Ok(question)
     }
@@ -253,22 +257,22 @@ impl Store {
             return Ok(task);
         }
         let question = question_in(&mut tx, &input.task_id, true).await?;
-        ensure_objective_access_in(&mut tx, principal, &question.objective_id)
-            .await
-            .map_err(|_| StoreError::NotFound("question was not found".into()))?;
+        question_access_in(&mut tx, principal, &question).await?;
         if !task_waits_in(&mut tx, &input.task_id).await? {
             return Err(StoreError::FailedPrecondition(
                 "question no longer waits for an answer".into(),
             ));
         }
         let source = task_in(&mut tx, &input.task_id).await?;
-        objective_admission_in(
-            &mut tx,
-            &source.tag_id,
-            &source.session_id,
-            self.execution_now_ms(),
-        )
-        .await?;
+        if !question.objective_id.is_empty() {
+            objective_admission_in(
+                &mut tx,
+                &source.tag_id,
+                &source.session_id,
+                self.execution_now_ms(),
+            )
+            .await?;
+        }
         // Recheck under the same write lock after admission. Administrative limit
         // notices do not replace a question; newer work still supersedes it.
         if !task_waits_in(&mut tx, &input.task_id).await? {
@@ -277,7 +281,9 @@ impl Store {
             ));
         }
         let task = insert_task(&mut tx, order, &source.tag_id, &source.session_id, text).await?;
-        objective_link_task_in(&mut tx, &task).await?;
+        if !question.objective_id.is_empty() {
+            objective_link_task_in(&mut tx, &task).await?;
+        }
         sqlx::query("UPDATE supertag_v2_objective_questions SET answer_task_id=$1 WHERE attempt_id=$2 AND answer_task_id IS NULL").bind(&task.task_id).bind(&question.attempt_id).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO supertag_v2_question_answers (principal,operation_id,request_digest,question_attempt_id,answer_task_id) VALUES ($1,$2,$3,$4,$5)")
             .bind(principal).bind(&input.operation_id).bind(digest).bind(&question.attempt_id).bind(&task.task_id).execute(&mut *tx).await?;
@@ -334,7 +340,7 @@ pub(crate) async fn inbox_page_in(
     }
     let kind = InboxItemKind::try_from(input.kind).map_err(|_| invalid("unknown Inbox kind"))?;
     let scope = format!("{:x}", Sha256::digest(principal.as_bytes()));
-    // A User sees the items of the Objectives they created. Execution recovery and MCP
+    // A User sees their Objectives and personal Tag questions. Execution recovery and MCP
     // logins are Worker Host work, which only operators see and act on.
     let creator = if crate::store::person(principal) {
         principal
@@ -374,8 +380,8 @@ pub(crate) async fn inbox_page_in(
     let mut items = vec![];
     let mut truncated = vec![];
     if wants(&cursor, InboxItemKind::Question) {
-        let rows = sqlx::query("SELECT q.*,o.owner_tag_id FROM supertag_v2_objective_questions q JOIN supertag_v2_tasks t ON t.task_id=q.task_id AND t.attempt_id=q.attempt_id JOIN supertag_v2_objectives o ON o.objective_id=q.objective_id WHERE q.published_at_ms IS NOT NULL AND q.published_at_ms<=$1 AND q.published_order<=$2 AND q.answer_task_id IS NULL AND t.state=$3 AND o.status NOT IN ($4,$5) AND t.tag_id=o.owner_tag_id AND t.session_id=o.session_id AND ($6='' OR q.objective_id=$6) AND ($8='' OR o.created_by=$8) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice')) ORDER BY q.published_at_ms,q.task_id LIMIT $7")
-            .bind(cursor.as_of_ms).bind(cursor.upper_order).bind(TaskState::Succeeded as i64).bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).bind(&cursor.objective_id).bind((SCAN + 1) as i64).bind(creator).fetch_all(&mut **tx).await?;
+        let rows = sqlx::query("SELECT q.* FROM supertag_v2_objective_questions q JOIN supertag_v2_tasks t ON t.task_id=q.task_id AND t.attempt_id=q.attempt_id LEFT JOIN supertag_v2_objectives o ON o.objective_id=q.objective_id WHERE q.published_at_ms IS NOT NULL AND q.published_at_ms<=$1 AND q.published_order<=$2 AND q.answer_task_id IS NULL AND t.state=$3 AND ( (q.objective_id IS NOT NULL AND o.status NOT IN ($4,$5) AND t.tag_id=o.owner_tag_id AND t.session_id=o.session_id AND ($6='' OR q.objective_id=$6) AND ($8='' OR o.created_by=$8) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice'))) OR (q.recipient_user IS NOT NULL AND $6='' AND (substr(CAST($9 AS TEXT),1,9)='operator:' OR $9='user:'||q.recipient_user) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order)) ) ORDER BY q.published_at_ms,q.task_id LIMIT $7")
+            .bind(cursor.as_of_ms).bind(cursor.upper_order).bind(TaskState::Succeeded as i64).bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).bind(&cursor.objective_id).bind((SCAN + 1) as i64).bind(creator).bind(principal).fetch_all(&mut **tx).await?;
         if rows.len() > SCAN {
             truncated.push(InboxItemKind::Question as i32);
         }
@@ -387,16 +393,24 @@ pub(crate) async fn inbox_page_in(
                 key: key.clone(),
                 occurrence: format!("{key}:{}", question.attempt_id),
                 kind: InboxItemKind::Question as i32,
-                objective_id: question.objective_id,
+                objective_id: question.objective_id.clone(),
                 task_id: question.task_id,
                 attempt_id: Some(question.attempt_id),
                 operator_eligible: true,
                 actionable_since_ms: question.published_at_ms.unwrap_or(question.asked_at_ms),
-                reason: "The Objective owner finished a turn and waits for your answer.".into(),
+                reason: if question.objective_id.is_empty() {
+                    "Your Tag finished a turn and waits for your answer."
+                } else {
+                    "The Objective owner finished a turn and waits for your answer."
+                }
+                .into(),
                 question: Some(InboxQuestion {
                     truncated: preview.len() < question.text.len(),
                     text: preview,
                     asked_at_ms: question.asked_at_ms,
+                    recipient_user: row
+                        .try_get::<Option<String>, _>("recipient_user")?
+                        .unwrap_or_default(),
                 }),
                 approval: None,
                 notification: None,
@@ -901,6 +915,67 @@ fn mcp_login_command(server: &str) -> String {
     format!("supertag mcp login {server}")
 }
 
+async fn personal_question_recipient_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &Task,
+) -> Result<Option<String>> {
+    if crate::work_sessions::reserved_session(&task.session_id)
+        || crate::memories::review_session(&task.session_id)
+        || crate::work_sessions::task_scope_in(tx, &task.task_id)
+            .await?
+            .is_some()
+        || crate::mailbox::objective_asks::objective_session_in(tx, &task.tag_id, &task.session_id)
+            .await?
+            .is_some()
+        || !(task.session_id == format!("inbox:{}", task.tag_id)
+            || crate::conversations::private_session(&task.session_id))
+    {
+        return Ok(None);
+    }
+    let owner: Option<String> =
+        sqlx::query_scalar("SELECT owner_user FROM supertag_v2_tags WHERE tag_id=$1")
+            .bind(&task.tag_id)
+            .fetch_optional(&mut **tx)
+            .await?
+            .flatten();
+    let Some(owner) = owner else {
+        return Ok(None);
+    };
+    if crate::conversations::private_session(&task.session_id) {
+        match crate::tag_sessions::audience_in(tx, &task.tag_id, &task.session_id).await? {
+            crate::tag_sessions::Audience::Private(Some(requester))
+                if requester != format!("user:{owner}") => {}
+            _ => return Ok(None),
+        }
+    }
+    Ok(Some(owner))
+}
+
+async fn question_access_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    question: &ObjectiveQuestion,
+) -> Result<()> {
+    if !question.objective_id.is_empty() {
+        return ensure_objective_access_in(tx, principal, &question.objective_id)
+            .await
+            .map_err(|_| StoreError::NotFound("question was not found".into()));
+    }
+    let owner: Option<String> = sqlx::query_scalar(
+        "SELECT recipient_user FROM supertag_v2_objective_questions WHERE attempt_id=$1",
+    )
+    .bind(&question.attempt_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if owner.is_some_and(|owner| {
+        principal == format!("user:{owner}") || principal.starts_with("operator:")
+    }) {
+        Ok(())
+    } else {
+        Err(StoreError::NotFound("question was not found".into()))
+    }
+}
+
 async fn question_objective_in(
     tx: &mut Transaction<'_, Any>,
     task: &AnyRow,
@@ -935,7 +1010,9 @@ fn question_row(row: &AnyRow) -> Result<ObjectiveQuestion> {
     Ok(ObjectiveQuestion {
         task_id: row.try_get("task_id")?,
         attempt_id: row.try_get("attempt_id")?,
-        objective_id: row.try_get("objective_id")?,
+        objective_id: row
+            .try_get::<Option<String>, _>("objective_id")?
+            .unwrap_or_default(),
         text: row.try_get("text")?,
         asked_at_ms: row.try_get("asked_at_ms")?,
         published_at_ms: row.try_get("published_at_ms")?,
@@ -951,7 +1028,7 @@ async fn question_in(
     question_row(&row)
 }
 pub(crate) async fn task_waits_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> Result<bool> {
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_objective_questions q JOIN supertag_v2_tasks t ON t.task_id=q.task_id AND t.attempt_id=q.attempt_id JOIN supertag_v2_objectives o ON o.objective_id=q.objective_id WHERE q.task_id=$1 AND q.published_at_ms IS NOT NULL AND q.answer_task_id IS NULL AND t.state=$2 AND o.status NOT IN ($3,$4) AND t.tag_id=o.owner_tag_id AND t.session_id=o.session_id AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice'))")
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_objective_questions q JOIN supertag_v2_tasks t ON t.task_id=q.task_id AND t.attempt_id=q.attempt_id LEFT JOIN supertag_v2_objectives o ON o.objective_id=q.objective_id WHERE q.task_id=$1 AND q.published_at_ms IS NOT NULL AND q.answer_task_id IS NULL AND t.state=$2 AND ((q.objective_id IS NOT NULL AND o.status NOT IN ($3,$4) AND t.tag_id=o.owner_tag_id AND t.session_id=o.session_id AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice'))) OR (q.recipient_user IS NOT NULL AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order)))")
         .bind(task_id).bind(TaskState::Succeeded as i64).bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).fetch_one(&mut **tx).await?;
     Ok(count != 0)
 }

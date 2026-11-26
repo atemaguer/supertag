@@ -1,5 +1,6 @@
 mod support;
 
+use sha2::{Digest, Sha256};
 use sqlx::{Connection, Executor};
 use std::sync::{
     Arc,
@@ -658,7 +659,238 @@ async fn contract(url: &str) {
     }
     cancel(&store, "deadline").await;
     assert!(list(&store, "deadline").await.items.is_empty());
+    personal_question_contract(&store, url, &host).await;
     store.close().await;
+}
+
+async fn personal_question_contract(store: &Store, url: &str, host: &HostAuthority) {
+    for user in ["alice", "bob"] {
+        store
+            .invite_user(
+                OPERATOR,
+                &InviteUserRequest {
+                    name: user.into(),
+                    display_name: user.into(),
+                    operation_id: format!("invite-{user}"),
+                    key_digest: Sha256::digest(format!("key-{user}")).to_vec(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let mut db = sqlx::AnyConnection::connect(url).await.unwrap();
+    db.execute(
+        "INSERT INTO supertag_v2_host_tags (host_id,tag_id) VALUES ('question-host','alice')",
+    )
+    .await
+    .unwrap();
+    let source = store
+        .submit_task(
+            OPERATOR,
+            &SubmitTaskRequest {
+                tag_id: "alice".into(),
+                session_id: "temporary".into(),
+                operation_id: "personal-source".into(),
+                prompt: "A message from another Tag".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    sqlx::query("UPDATE supertag_v2_tasks SET session_id='inbox:alice' WHERE task_id=$1")
+        .bind(&source.task_id)
+        .execute(&mut db)
+        .await
+        .unwrap();
+    let attempt = claim(store, host, &source.task_id).await;
+    start(store, host, &attempt).await;
+    let access = supertag_control_plane::AttemptAccess::new(host, &attempt);
+    assert!(
+        store
+            .attempt_capabilities(&access)
+            .await
+            .unwrap()
+            .may_ask_objective_question
+    );
+    let question = store
+        .ask_question(&access, &ask("Which release?"))
+        .await
+        .unwrap();
+    assert!(question.objective_id.is_empty());
+    finish(store, host, &attempt).await;
+    let page = |user| async move {
+        store
+            .list_inbox_items(user, &ListInboxItemsRequest::default())
+            .await
+            .unwrap()
+    };
+    let alice = page("user:alice").await;
+    assert!(alice.items.iter().any(|item| {
+        item.task_id == source.task_id
+            && item
+                .question
+                .as_ref()
+                .is_some_and(|q| q.recipient_user == "alice")
+    }));
+    assert!(
+        !page("user:bob")
+            .await
+            .items
+            .iter()
+            .any(|item| item.task_id == source.task_id)
+    );
+    let next = store
+        .answer_question(
+            "user:alice",
+            &AnswerQuestionRequest {
+                task_id: source.task_id.clone(),
+                operation_id: "answer-personal".into(),
+                text: "Ship the next release".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(next.session_id, "inbox:alice");
+    assert_eq!(next.prompt, "Ship the next release");
+    assert!(
+        page("user:alice")
+            .await
+            .items
+            .iter()
+            .all(|item| item.task_id != source.task_id)
+    );
+    let answer_attempt = claim(store, host, &next.task_id).await;
+    start(store, host, &answer_attempt).await;
+    assert_eq!(
+        store.get_task(&next.task_id).await.unwrap().state(),
+        TaskState::Running
+    );
+    let access = supertag_control_plane::AttemptAccess::new(host, &answer_attempt);
+    store
+        .ask_question(&access, &ask("One more decision?"))
+        .await
+        .unwrap();
+    finish(store, host, &answer_attempt).await;
+    assert!(
+        page("user:alice")
+            .await
+            .items
+            .iter()
+            .any(|item| item.task_id == next.task_id)
+    );
+    let newer = store
+        .submit_task(
+            OPERATOR,
+            &SubmitTaskRequest {
+                tag_id: "alice".into(),
+                session_id: "temporary".into(),
+                operation_id: "personal-newer".into(),
+                prompt: "A newer message".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    sqlx::query("UPDATE supertag_v2_tasks SET session_id='inbox:alice' WHERE task_id=$1")
+        .bind(&newer.task_id)
+        .execute(&mut db)
+        .await
+        .unwrap();
+    assert!(
+        page("user:alice")
+            .await
+            .items
+            .iter()
+            .all(|item| item.task_id != next.task_id)
+    );
+    assert!(matches!(
+        store
+            .answer_question(
+                "user:alice",
+                &AnswerQuestionRequest {
+                    task_id: next.task_id,
+                    operation_id: "stale-answer".into(),
+                    text: "Too late".into(),
+                }
+            )
+            .await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+    let newer_attempt = claim(store, host, &newer.task_id).await;
+    start(store, host, &newer_attempt).await;
+    finish(store, host, &newer_attempt).await;
+    let own = store
+        .send_message(
+            OPERATOR,
+            &SendMessageRequest {
+                tag_id: "alice".into(),
+                operation_id: "owner-conversation".into(),
+                text: "Owner's own message".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .task
+        .unwrap();
+    sqlx::query(
+        "UPDATE supertag_v2_conversation_sessions SET principal='user:alice' WHERE session_id=$1",
+    )
+    .bind(&own.session_id)
+    .execute(&mut db)
+    .await
+    .unwrap();
+    let own_attempt = claim(store, host, &own.task_id).await;
+    start(store, host, &own_attempt).await;
+    let own_access = supertag_control_plane::AttemptAccess::new(host, &own_attempt);
+    assert!(
+        !store
+            .attempt_capabilities(&own_access)
+            .await
+            .unwrap()
+            .may_ask_objective_question
+    );
+    assert!(matches!(
+        store
+            .ask_question(&own_access, &ask("Wrong recipient"))
+            .await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+    finish(store, host, &own_attempt).await;
+    let child = store
+        .submit_task(
+            OPERATOR,
+            &SubmitTaskRequest {
+                tag_id: "alice".into(),
+                session_id: "temporary".into(),
+                operation_id: "child-no-ask".into(),
+                prompt: "Child work".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    sqlx::query("UPDATE supertag_v2_tasks SET session_id='work/child' WHERE task_id=$1")
+        .bind(&child.task_id)
+        .execute(&mut db)
+        .await
+        .unwrap();
+    let child_attempt = claim(store, host, &child.task_id).await;
+    start(store, host, &child_attempt).await;
+    let child_access = supertag_control_plane::AttemptAccess::new(host, &child_attempt);
+    assert!(
+        !store
+            .attempt_capabilities(&child_access)
+            .await
+            .unwrap()
+            .may_ask_objective_question
+    );
+    assert!(matches!(
+        store.ask_question(&child_access, &ask("Wrong scope")).await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+    finish(store, host, &child_attempt).await;
 }
 #[tokio::test]
 async fn sqlite_inbox_contract() {

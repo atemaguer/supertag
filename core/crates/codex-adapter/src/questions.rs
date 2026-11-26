@@ -648,12 +648,11 @@ impl Bridge {
                     ensure!(
                         question.task_id == self.task_id
                             && question.attempt_id == self.attempt_id
-                            && question.text == text
-                            && !question.objective_id.is_empty(),
-                        "Objective question receipt has mismatched identity"
+                            && question.text == text,
+                        "question receipt has mismatched identity"
                     );
                     result = Some(
-                        json!({"success":true,"contentItems":[{"type":"inputText","text":"Your question was recorded. End this turn with a short reply and make no further tool calls. The operator's answer arrives in this Session's next Task."}]}),
+                        json!({"success":true,"contentItems":[{"type":"inputText","text":"Your question was recorded. End this turn with a short reply and make no further tool calls. The answer arrives in this Session's next Task."}]}),
                     );
                     break;
                 }
@@ -693,7 +692,7 @@ pub(crate) fn tool_specs(inventory: Inventory, reach: Reach) -> Value {
         )
     } else {
         (
-            "Ask the operator one question needed to continue this Objective. After this returns, end your turn with a short reply and make no further tool calls. The answer arrives in this Session's next Task.",
+            "Ask the Objective's creator or this personal Tag's owner one question. After this returns, end your turn with a short reply and make no further tool calls. The answer arrives in this Session's next Task.",
             16000,
         )
     };

@@ -391,7 +391,7 @@ async function objectiveQuestion(allowed) {
   const second = (await ask(valid)).result;
   if (
     first?.isError ||
-    first?.content?.[0]?.text !== "Objective question recorded." ||
+    first?.content?.[0]?.text !== "Question recorded." ||
     JSON.stringify(first) !== JSON.stringify(second)
   )
     throw new Error("An exact Objective question replay did not return the same acknowledgment");
@@ -581,10 +581,7 @@ async function approvalAndQuestion(order) {
   const ask = () => coordinationCall("ask", { text: "Which branch should I use?" });
   const post = () => coordinationCall("post", { text: "Pending post" });
   if (order === "ask-first") {
-    if (
-      (await ask())?.content?.[0]?.text !== "Objective question recorded." ||
-      !(await post())?.isError
-    )
+    if ((await ask())?.content?.[0]?.text !== "Question recorded." || !(await post())?.isError)
       throw new Error("A Workstream approval was possible after asking an Objective question");
   } else {
     const first = await post();

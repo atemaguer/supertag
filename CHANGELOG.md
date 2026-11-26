@@ -9,6 +9,13 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Added
+
+- A personal Tag can ask its owner a question with `ask` from its inbox Session or a conversation
+  with someone else. The question waits in the owner's Inbox, which no other User sees, and
+  `supertag question answer` starts that Session's next turn with the answer. A newer message in
+  the Session replaces an unanswered question.
+
 ## [0.3.16] - 2026-11-26
 
 ### Added

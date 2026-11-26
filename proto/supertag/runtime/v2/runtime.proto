@@ -463,6 +463,7 @@ message InboxQuestion {
   string text = 1;
   int64 asked_at_ms = 2;
   bool truncated = 3;
+  string recipient_user = 4;
 }
 
 message GetQuestionRequest { string task_id = 1; }
@@ -491,6 +492,7 @@ message AskQuestionRequest {
 }
 
 message AttemptCapabilities {
+  // Existing ask tool: an Objective question or a personal Tag question to its owner.
   bool may_ask_objective_question = 1;
   bool may_use_workstream = 2;
   bool may_read_mailbox = 3;
