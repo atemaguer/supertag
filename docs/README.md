@@ -53,7 +53,7 @@ Follow this order on your first visit:
 | Run SuperTag from your coding agent | [Run SuperTag from your coding agent](guides/coding-agent-operator.md) |
 | Run and inspect work from the terminal | [CLI operator walkthrough](operations/cli.md) |
 | Understand the main ideas | [Core concepts](concepts/README.md) |
-| See how SuperTag models an organization, and the theory behind it | [The organizational model](concepts/organization.md) |
+| See SuperTag's structure in management terms: roles, accountability, authority | [The organizational model](concepts/organization.md) |
 | Choose how to direct your Tags | [The interaction model](concepts/interaction-model.md) |
 | Ask a Tag a question from your terminal | [Talk to a Tag from your terminal](guides/talk-to-a-tag.md) |
 | Give several Tags a shared outcome | [Define and complete an Objective](guides/objectives.md) |

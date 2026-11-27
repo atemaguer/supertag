@@ -14,7 +14,7 @@ until the outcome is met or it needs a person's decision. Together, your Teams o
 Tags make up an **autonomous organization**: Teams may pursue different outcomes, called
 Objectives, but share one Control Plane (the service that stores and coordinates them), one set of
 rules, and one record of the work. This page calls it the organization.
-[The organizational model](organization.md) relates this structure to organization theory.
+[The organizational model](organization.md) describes this structure in management terms.
 
 The Tags SuperTag comes with are built for engineering work. The concepts below are general: the
 same actors, permissions, and coordination are the base for building your own assistants and
