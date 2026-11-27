@@ -183,7 +183,7 @@ you
 
 SuperTag는 모든 Tag를 계속 실행하고, 각 Role의 한계를 지키게 하며, 누가 무엇을 왜 했는지 기록하고,
 여러분이 내려야 할 결정을 하나의 받은편지함에 모아 줍니다.
-[자율 엔지니어링 조직 구성하기](../../docs/guides/engineering-organization.md)
+[자율 엔지니어링 조직 구성하기](../../docs/guides/engineering-organization.md) · [경영 용어로 보는 조직 모델](../../docs/concepts/organization.md)
 
 <a name="get-started"></a>
 

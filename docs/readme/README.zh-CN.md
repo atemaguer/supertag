@@ -127,7 +127,7 @@ you
 - **由你决定哪些环节需要人参与**：合并、发布、预算，以及你选定的任何操作，都需要经过批准。其余的一切，由这个组织自行处理。
 
 SuperTag 让每个 Tag 持续运行，执行每个 Role 的限制，记录谁做了什么、为什么做，并给你一个收件箱，集中处理该由你做的决定。
-[搭建一个自主的工程组织](../../docs/guides/engineering-organization.md)
+[搭建一个自主的工程组织](../../docs/guides/engineering-organization.md) · [用管理术语理解组织模型](../../docs/concepts/organization.md)
 
 <a name="get-started"></a>
 

@@ -126,7 +126,7 @@ you
 - **人が関わる場面はあなたが決める。** マージ、リリース、予算、そしてあなたが選んだあらゆるアクションに承認を求められます。それ以外は組織が処理します。
 
 SuperTag はすべての Tag を動かし続け、各 Role の制限を守らせ、だれが何をなぜ行ったかを記録し、あなたが下すべき判断を 1 つの受信箱にまとめます。
-[自律的なエンジニアリング組織を立ち上げる](../../docs/guides/engineering-organization.md)
+[自律的なエンジニアリング組織を立ち上げる](../../docs/guides/engineering-organization.md) · [マネジメントの言葉で読む組織モデル](../../docs/concepts/organization.md)
 
 <a name="get-started"></a>
 

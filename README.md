@@ -180,7 +180,7 @@ you
 
 SuperTag keeps every Tag running, enforces each Role's limits, records who did what and why, and
 gives you one inbox for the decisions that are yours.
-[Set up an autonomous engineering organization](docs/guides/engineering-organization.md)
+[Set up an autonomous engineering organization](docs/guides/engineering-organization.md) · [The organizational model, in management terms](docs/concepts/organization.md)
 
 <a name="get-started"></a>
 

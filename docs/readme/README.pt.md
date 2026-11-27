@@ -198,7 +198,7 @@ you
 
 O SuperTag mantém cada Tag rodando, aplica os limites de cada Role, registra quem fez o quê e por
 quê, e dá a você uma única caixa de entrada para as decisões que são suas.
-[Monte uma organização de engenharia autônoma](../../docs/guides/engineering-organization.md)
+[Monte uma organização de engenharia autônoma](../../docs/guides/engineering-organization.md) · [O modelo organizacional, em termos de gestão](../../docs/concepts/organization.md)
 
 <a name="get-started"></a>
 

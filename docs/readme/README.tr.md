@@ -194,7 +194,7 @@ you
 
 SuperTag her Tag'i çalışır durumda tutar, her Role'ün sınırlarını uygular, kimin neyi neden
 yaptığını kaydeder ve size ait kararlar için tek bir gelen kutusu sunar.
-[Özerk bir mühendislik organizasyonu kurun](../../docs/guides/engineering-organization.md)
+[Özerk bir mühendislik organizasyonu kurun](../../docs/guides/engineering-organization.md) · [Yönetim terimleriyle organizasyon modeli](../../docs/concepts/organization.md)
 
 <a name="get-started"></a>
 

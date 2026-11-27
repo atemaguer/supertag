@@ -200,7 +200,7 @@ you
 SuperTag maintient chaque Tag en marche, fait respecter les limites de chaque Role, consigne qui a
 fait quoi et pourquoi, et vous donne une seule boîte de réception pour les décisions qui vous
 reviennent.
-[Mettre en place une organisation d'ingénierie autonome](../../docs/guides/engineering-organization.md)
+[Mettre en place une organisation d'ingénierie autonome](../../docs/guides/engineering-organization.md) · [Le modèle d'organisation, en termes de management](../../docs/concepts/organization.md)
 
 <a name="get-started"></a>
 
