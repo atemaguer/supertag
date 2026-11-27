@@ -24,10 +24,8 @@ Organization: one set of policies, one record of the work
        Role: job description and standards
        Permission Set: delegated authority
        Mailbox: inbox for requests from other Tags
-       Objectives it owns -> work Sessions -> Tasks
+       Objectives: the goals it owns
 ```
-
-The **Control Plane** is the service that holds the organization: its Tags, policies, and records.
 
 ## A translation table
 
@@ -36,7 +34,7 @@ The **Control Plane** is the service that holds the organization: its Tags, poli
 | Team member | Tag |
 | Job description and professional standards | Role |
 | Delegated authority and access rights | Permission Set |
-| Playbooks, procedures, training material | Context Sets and the Skills they select |
+| Playbooks, procedures, training material | Skills |
 | Goal with success measures, budget, and deadline | Objective |
 | Standing duty, such as on-call or triage | An ongoing Objective |
 | The one accountable owner | The Tag that owns the Objective |
@@ -44,13 +42,9 @@ The **Control Plane** is the service that holds the organization: its Tags, poli
 | Team status channel | Workstream |
 | A direct request to a colleague | A message to that Tag's Mailbox |
 | Escalation to a manager | A question or approval request to a person |
-| Audit trail | The record of every Task |
+| Audit trail | The record of every piece of work |
 | Leadership and administrators | Operators |
 | Staff members | Users |
-| Workstations and equipment | Worker Hosts, the machines that run the work |
-
-A **Session** is one thread of a Tag's work, such as a conversation or a piece of a project. A
-**Task** is one turn of it.
 
 ## Job design: the position outlives the hire
 
@@ -76,13 +70,13 @@ the outcome, how you will judge it, the constraints, a budget, a deadline, and t
 keep for yourself.
 
 Each Objective has exactly one accountable owner. The owner plans the work, runs pieces of it in
-parallel work Sessions, asks other Tags for what it needs, reviews what comes back, and answers
+parallel, asks other Tags for what it needs, reviews what comes back, and answers
 for the result. Accountability stays with the owner even when others do the work:
 
 | Involvement | Who |
 | --- | --- |
 | Accountable | The Tag that owns the Objective |
-| Responsible | The owner's work Sessions, and the Tags it asks for help |
+| Responsible | The owner, and the Tags it asks for help |
 | Consulted | Team members it messages, and the people it asks |
 | Informed | Everyone who reads the Team's Workstream |
 
@@ -100,7 +94,7 @@ arrangement. People sit above all of it: operators set policy, and every Objecti
 person who directs it.
 
 Span of control works differently too. A Tag can run many pieces of work at once, so what limits
-it is machine capacity and your budget, not hours in the day.
+it is your budget and available capacity, not hours in the day.
 
 ## Communication norms
 
@@ -131,9 +125,9 @@ The controls match what you would expect from a well-run organization.
   until a named approver decides.
 - **Separation of duties.** Give building and reviewing to different Tags with different Roles
   and Permission Sets, and keep final approval with people.
-- **Audit trail.** Every Task records what the Tag was given, what it was allowed, and what it did.
+- **Audit trail.** Every piece of work records what the Tag was given, what it was allowed, and what it did.
 
-See [Context Sets and Permission Sets](context-and-permissions.md) for how authority is granted.
+See [knowledge and authority](context-and-permissions.md) for how you grant them.
 
 ## Institutional knowledge
 
@@ -141,7 +135,7 @@ A Tag knows what the organization has written down. There is no hallway conversa
 unwritten norm. That makes knowledge management part of running the organization:
 
 - Standards belong in Roles.
-- Procedures belong in Skills, reusable instruction packages that Context Sets select.
+- Procedures belong in Skills, reusable packages of instructions.
 - Team context belongs in the Workstream.
 - Each Tag's history stays with it, so past work informs later work.
 
@@ -154,7 +148,7 @@ reference material are in place.
   authority, set budgets, and decide approvals and questions.
 - **Users** are staff admitted to the organization. Each has a personal Tag named after them.
   A User decides how their Tag works; what it may do remains an operator's decision. Other Users
-  cannot see it, and it runs on its owner's own machines.
+  cannot see it.
 
 Conversations follow the confidentiality you would expect. A direct conversation with a Tag is
 private to that person. Work in shared places, such as channels and issues, is visible to others.
@@ -164,7 +158,7 @@ private to that person. Work in shared places, such as channels and issues, is v
 
 | With people | With Tags |
 | --- | --- |
-| Headcount limits capacity | Machine capacity and budget limit it; one Tag runs many pieces of work at once |
+| Headcount limits capacity | Budget limits it; one Tag runs many pieces of work at once |
 | Hiring and onboarding take months | A new Tag needs a Role, authority, and reference material |
 | Motivation, incentives, and morale shape performance | Clear goals, good instructions, and the right authority shape it |
 | Much coordination is informal | All coordination runs through recorded channels |
